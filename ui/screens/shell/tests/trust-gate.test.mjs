@@ -5,7 +5,7 @@ import { load, React, renderToStaticMarkup } from "./helpers.mjs";
 const { createTrustGate } = await load("trust-gate.ts");
 const { UntrustedCoreNotice } = await load("Panels.tsx");
 
-const st = (o = {}) => ({ url: "http://127.0.0.1:4000", state: "ready", trust: "adopted_unverified", restarts: 0, pid: 7, ...o });
+const st = (o = {}) => ({ url: "http://127.0.0.1:4000", state: "ready", trust: "adopted_unverified", mode: "local", restarts: 0, pid: 7, ...o });
 
 test("spawned core is trusted; adopted/pending need an explicit confirmation bound to this instance", () => {
   let s = st({ trust: "spawned" });
@@ -34,4 +34,11 @@ test("the confirmation modal names the URL and the risk", () => {
   assert.match(html, /127\.0\.0\.1:4000/);
   assert.match(html, /password/);
   assert.match(html, /alertdialog/);
+});
+
+test("a pinned remote core is trusted without asking again", () => {
+  const s = st({ url: "http://127.0.0.1:3459/tok", state: "remote", trust: "remote_pinned", mode: "remote", pid: null });
+  const g = createTrustGate({ getStatus: () => s, isHost: () => true });
+  assert.equal(g.allowed(), true);
+  assert.deepEqual(g.view(), { allowed: true, needsConfirm: false, url: "http://127.0.0.1:3459/tok" });
 });

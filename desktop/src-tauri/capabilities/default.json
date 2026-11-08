@@ -153,6 +153,7 @@
     "allow-get-prefs",
     "allow-set-prefs",
     "allow-remote-ssh-test",
+    "allow-app-restart",
     "allow-remote-deploy-plan",
     "allow-remote-deploy-bootstrap",
     "allow-remote-deploy-run",

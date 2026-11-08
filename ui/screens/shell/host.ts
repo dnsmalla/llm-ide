@@ -8,13 +8,15 @@
 //  - Other slices import `host` (and `invokeHost` for commands of their own) from here instead
 //    of importing `@tauri-apps/api` themselves, so tests can swap one bridge.
 
-export type CoreState = "starting" | "ready" | "restarting" | "failed" | "stopped";
-export type CoreTrust = "pending" | "spawned" | "adopted_unverified";
+export type CoreState = "starting" | "ready" | "restarting" | "failed" | "stopped" | "remote";
+export type CoreTrust = "pending" | "spawned" | "adopted_unverified" | "remote_pinned";
 export type ClaudeState = "unknown" | "found" | "missing";
 
 /** Mirrors the Rust `CoreStatus` (desktop/src-tauri/src/core_host.rs). Additive fields default when absent. */
 export interface CoreStatus {
   url: string;
+  /** `local` or `remote`; absent on older hosts reads as local. */
+  mode: "local" | "remote";
   adopted: boolean;
   pid: number | null;
   ms_to_healthy: number | null;
@@ -135,7 +137,7 @@ export async function invokeHost<T>(command: string, args?: Record<string, unkno
   return bridge.invoke<T>(command, args);
 }
 
-const STATES: readonly CoreState[] = ["starting", "ready", "restarting", "failed", "stopped"];
+const STATES: readonly CoreState[] = ["starting", "ready", "restarting", "failed", "stopped", "remote"];
 const asStr = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const asNum = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -154,10 +156,11 @@ function normalizeForeign(raw: unknown): ForeignCore | null {
 export function normalizeCoreStatus(raw: unknown): CoreStatus {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const state = STATES.includes(r.state as CoreState) ? (r.state as CoreState) : "failed";
-  const trust: CoreTrust = r.trust === "spawned" || r.trust === "adopted_unverified" ? r.trust : "pending";
+  const trust: CoreTrust = r.trust === "spawned" || r.trust === "adopted_unverified" || r.trust === "remote_pinned" ? r.trust : "pending";
   const claude: ClaudeState = r.claude === "found" || r.claude === "missing" ? r.claude : "unknown";
   return {
     url: asStr(r.url) ?? "",
+    mode: r.mode === "remote" ? "remote" : "local",
     adopted: r.adopted === true,
     pid: asNum(r.pid),
     ms_to_healthy: asNum(r.ms_to_healthy),

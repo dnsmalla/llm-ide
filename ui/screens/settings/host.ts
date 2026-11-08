@@ -11,7 +11,7 @@ import type { UpdateStatusView } from "./updates-model.ts";
 export type ThemeChoice = "dark" | "light" | "midnight";
 
 /** How the shell came to talk to its core. */
-export type CoreTrust = "spawned" | "adopted-unverified";
+export type CoreTrust = "spawned" | "adopted-unverified" | "remote-pinned";
 
 /** Server & Backend's editable backend settings (source-checkout mode). */
 export interface BackendConfig {

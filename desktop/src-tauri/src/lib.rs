@@ -438,6 +438,7 @@ macro_rules! product_handlers {
                 prefs::get_prefs,
                 prefs::set_prefs,
                 remote::remote_ssh_test,
+                app_restart,
                 remote_deploy::remote_deploy_plan,
                 remote_deploy::remote_deploy_bootstrap,
                 remote_deploy::remote_deploy_run,
@@ -496,6 +497,9 @@ macro_rules! app_handler {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// The native "cannot start" dialog for an unavailable explicit data root (R-021 #5). Uses `rfd` (already a
 /// dependency); the decision and the text are tested, the GUI itself is not.
+#[tauri::command]
+fn app_restart(app: tauri::AppHandle) { app.restart(); }
+
 fn show_data_root_error(message: &str) {
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
@@ -589,6 +593,7 @@ pub fn run() {
             }
             // Host prefs are read once, before the core is spawned: they decide its environment.
             prefs::init(fsutil::desktop_data_dir().ok().and_then(|d| fsutil::private_dir(&d).ok()));
+            setup_host.set_mode(prefs::launch().remote_server.mode);
             graph_gen::start_auto(app.handle().clone());
             if let Ok(res) = app.path().resource_dir() {
                 core_host::set_resource_dir(res);

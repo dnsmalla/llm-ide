@@ -41,8 +41,8 @@ export function createTrustGate(o: TrustGateOptions): TrustGate {
   const compute = (): TrustView => {
     if (!o.isHost()) return { allowed: true, needsConfirm: false, url: null };
     const s = o.getStatus();
-    if (!s || s.state !== "ready" || !s.url) return { allowed: false, needsConfirm: false, url: s?.url || null };
-    if (s.trust === "spawned") return { allowed: true, needsConfirm: false, url: s.url };
+    if (!s || (s.state !== "ready" && !(s.mode === "remote" && s.state === "remote")) || !s.url) return { allowed: false, needsConfirm: false, url: s?.url || null };
+    if (s.trust === "spawned" || s.trust === "remote_pinned") return { allowed: true, needsConfirm: false, url: s.url };
     if (confirmed === keyOf(s)) return { allowed: true, needsConfirm: false, url: s.url };
     return { allowed: false, needsConfirm: true, url: s.url };
   };
@@ -57,7 +57,7 @@ export function createTrustGate(o: TrustGateOptions): TrustGate {
     view,
     confirm() {
       const s = o.getStatus();
-      if (!o.isHost() || !s || s.state !== "ready" || s.trust === "spawned") return;
+      if (!o.isHost() || !s || s.state !== "ready" || s.trust === "spawned" || s.trust === "remote_pinned") return;
       confirmed = keyOf(s);
       fire();
     },

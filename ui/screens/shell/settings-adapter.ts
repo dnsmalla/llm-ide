@@ -56,6 +56,7 @@ export function settingsClientFrom(core: Pick<CoreClient, "requestRaw">): Settin
 const mustDecode = (v: UpdateStatusView | null): UpdateStatusView => { if (!v) throw new Error("bad update status from host"); return v; };
 
 export function trustOf(status: CoreStatus | null): CoreTrust {
+  if (status?.trust === "remote_pinned") return "remote-pinned";
   return status?.trust === "spawned" ? "spawned" : "adopted-unverified";
 }
 

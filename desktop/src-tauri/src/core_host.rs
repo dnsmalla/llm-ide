@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::foreign_core::{self, ForeignCore};
+use crate::prefs::ServerMode;
 use crate::fsutil;
 use crate::proc_tree::ManagedChild;
 
@@ -171,6 +172,8 @@ pub enum Phase {
     Failed,
     /// Stopped by the user from Settings; Start resumes it.
     Stopped,
+    /// Remote mode: this app talks to a pinned hub through the loopback proxy; no local child exists.
+    Remote,
 }
 
 /// What the claude probe found (state: `unknown` before the first probe, then `found`/`missing`).
@@ -190,6 +193,8 @@ impl ClaudeInfo {
 #[derive(Serialize, Clone, Debug)]
 pub struct CoreStatus {
     pub url: String,
+    /// `local` or `remote` (the host's server mode).
+    pub mode: &'static str,
     pub adopted: bool,
     pub pid: Option<u32>,
     pub ms_to_healthy: Option<u64>,
@@ -258,6 +263,8 @@ struct Inner {
     launcher: Launcher,
     claude_probe: ClaudeProbe,
     claude_in_flight: AtomicBool,
+    /// 0 = local, 1 = remote. Set by `lib.rs` after `prefs::init`, before the first start.
+    mode: std::sync::atomic::AtomicU8,
 }
 
 struct Status {
@@ -339,6 +346,7 @@ impl CoreHost {
                 launcher,
                 claude_probe,
                 claude_in_flight: AtomicBool::new(false),
+                mode: std::sync::atomic::AtomicU8::new(0),
             }),
         }
     }
@@ -347,7 +355,16 @@ impl CoreHost {
     /// `Ready`, the trust is `spawned` (never an adopted or still-pending core), and `/health` still
     /// echoes this launch's nonce. Callers that hand a credential to the core re-ask at every use, so a
     /// restart on another port (or a squatter) is never sent a stale URL's token.
+    pub fn set_mode(&self, mode: ServerMode) {
+        self.inner.mode.store(if mode == ServerMode::Remote { 1 } else { 0 }, Ordering::SeqCst);
+    }
+
+    pub fn mode(&self) -> ServerMode {
+        if self.inner.mode.load(Ordering::SeqCst) == 1 { ServerMode::Remote } else { ServerMode::Local }
+    }
+
     pub fn verified_url(&self) -> Option<String> {
+        if self.mode() == ServerMode::Remote { return None; }
         let (url, nonce) = {
             let s = lock(&self.inner.status);
             if s.state != Phase::Ready || s.trust != "spawned" {
@@ -366,6 +383,7 @@ impl CoreHost {
         let s = lock(&self.inner.status);
         CoreStatus {
             url: s.url.clone(),
+            mode: if self.mode() == ServerMode::Remote { "remote" } else { "local" },
             adopted: s.adopted,
             pid: s.pid,
             ms_to_healthy: s.ms_to_healthy,
@@ -509,6 +527,13 @@ impl CoreHost {
     fn run_startup(&self) {
         let started = Instant::now();
         let t = &self.inner.tuning;
+        if self.mode() == ServerMode::Remote {
+            let mut s = lock(&self.inner.status);
+            s.state = Phase::Remote;
+            s.url = "http://127.0.0.1:3459".into();
+            s.trust = "remote_pinned";
+            return;
+        }
 
         let live_healthy = matches!(probe(t.live_port, PROBE_TIMEOUT), Probe::Healthy { .. });
         if t.adopt && live_healthy {
@@ -2015,6 +2040,29 @@ process.on('SIGTERM', () => process.exit(0));
         all.push(leader);
         assert!(all_dead(&all), "survivors after quit: {all:?}");
         f.host.shutdown(); // idempotent
+    }
+
+    #[test]
+    fn remote_mode_does_not_spawn_a_local_core() {
+        let launches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let n = launches.clone();
+        let host = CoreHost::with(
+            tuning_fast(vec![free_ports(1)[0]]),
+            Arc::new(move |_| { n.fetch_add(1, Ordering::SeqCst); Err("must not spawn".into()) }),
+            Arc::new(|_| ClaudeInfo::unknown()),
+        );
+        host.set_mode(ServerMode::Remote);
+        host.start_in_background(Some(std::env::temp_dir()));
+        for _ in 0..100 {
+            if host.status().state == Phase::Remote { break; }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(launches.load(Ordering::SeqCst), 0);
+        let s = host.status();
+        assert_eq!(s.mode, "remote");
+        assert_eq!(s.state, Phase::Remote);
+        assert!(host.verified_url().is_none(), "a remote core is never a locally verified spawn");
+        host.shutdown();
     }
 
     #[cfg(unix)]
