@@ -334,7 +334,7 @@ test('register cap: 200 projects per user, a re-registration does not count, the
     const db = kb.getDb();
     const insert = db.prepare('INSERT INTO doc_project_roots (user_id, project_id, root) VALUES (?, ?, ?)');
     for (let i = 0; i < 199; i++) insert.run(u, `filler-${i}`, `/nonexistent/${i}`);
-    const id = await registered(u, root, 'real-200');
+    await registered(u, root, 'real-200');
     const over = await call(u, 'POST', '/kb/projects/register', { id: 'real-201', root: makeProject() });
     assert.equal(over.statusCode, 409);
     assert.equal(over.json().error.code, 'TOO_MANY_PROJECTS');
