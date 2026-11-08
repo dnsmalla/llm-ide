@@ -1069,8 +1069,10 @@ export function deleteUserCascade(userId) {
       // migration 0066 — push targets (FOREIGN KEY to host_api_devices): deleted first, so the row is
       // gone even when the FK cascade is not enforcing
       'host_api_push',
-      // migration 0061 — Host API paired devices (hashed tokens) and the phone chat id
+      // migration 0061 — Host API paired devices (hashed tokens) and the pre-0074 phone chat id
       'host_api_devices', 'host_api_quick_chat',
+      // migration 0074 — the per-project Host API chat pointer (project_id '' = legacy/global)
+      'host_api_project_chat',
       // migration 0062 — host_api_identity is install-level (one row, no user_id), so it is NOT in this per-user list
       // migration 0063 — desktop schedules for bus kinds (standing approvals)
       'bus_schedules',

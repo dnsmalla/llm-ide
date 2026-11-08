@@ -125,3 +125,19 @@ test('beforeSeq pages older history without re-reading the newest; hasMore says 
   // another user's session is not visible
   assert.equal(db.getChatSession(other.id, s.id, { beforeSeq: 5 }), null);
 });
+
+test('API 128: listing filters one project, and a scoped Host API list without a project is the legacy/global NULL set', () => {
+  reset();
+  const u = provision('projects@example.test');
+  const legacy = db.createChatSession(u.id, { title: 'Legacy', mode: 'agent' });
+  const alpha = db.createChatSession(u.id, { title: 'Alpha chat', mode: 'agent', projectId: 'p-alpha' });
+  const beta = db.createChatSession(u.id, { title: 'Beta chat', mode: 'agent', projectId: 'p-beta' });
+
+  assert.deepEqual(db.listChatSessions(u.id, { projectId: 'p-alpha' }).map((s) => s.id), [alpha.id]);
+  assert.deepEqual(db.listChatSessions(u.id, { projectId: 'p-beta' }).map((s) => s.id), [beta.id]);
+  assert.deepEqual(db.listChatSessions(u.id, { scopedProject: true }).map((s) => s.id), [legacy.id]);
+  // The HTTP route's existing call names no project and stays the whole list, unchanged.
+  assert.deepEqual(db.listChatSessions(u.id).map((s) => s.id).sort(), [legacy.id, alpha.id, beta.id].sort());
+  assert.equal(db.getChatSession(u.id, alpha.id).projectId, 'p-alpha');
+  assert.equal(db.getChatSession(u.id, legacy.id).projectId, null);
+});

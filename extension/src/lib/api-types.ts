@@ -2841,12 +2841,16 @@ export type GetKbChatSessionsRequest = {
     limit?: string;
     /** Skip this many rows (newest first, ties by id): page through every chat with limit. */
     offset?: string;
+    /** Only chats of this project (API 128). Omitted: every chat, exactly as before. */
+    projectId?: string;
   };
 };
 
 export type GetKbChatSessionsResponse200 = {
   sessions: ChatSession[];
 };
+
+export type GetKbChatSessionsResponse400 = CommonError;
 
 /** Request parts for `POST /kb/chat/sessions` (schema/http/agent.schema.json). */
 export type PostKbChatSessionsRequest = {
@@ -9133,6 +9137,7 @@ export interface ApiEndpoints {
     request: GetKbChatSessionsRequest;
     responses: {
       200: GetKbChatSessionsResponse200;
+      400: GetKbChatSessionsResponse400;
     };
   };
   "POST /kb/chat/sessions": {

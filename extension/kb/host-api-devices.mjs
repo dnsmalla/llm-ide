@@ -66,13 +66,19 @@ export function listDevices(userId) {
     .all(userId).map((r) => ({ deviceId: r.device_id, name: r.name, pairedAt: r.paired_at, lastSeenAt: r.last_seen_at }));
 }
 
-export function getQuickChatId(userId) {
+// One current Host API chat per (user, project). No project means the legacy/global chat, stored under
+// project_id '' (migration 0074); `host_api_quick_chat` is the pre-0074 pointer and is only read by the
+// migration that copies it.
+export function getQuickChatId(userId, projectId = null) {
   requireUser(userId);
-  return getDb().prepare('SELECT chat_session_id FROM host_api_quick_chat WHERE user_id = ?').get(userId)?.chat_session_id ?? null;
+  return getDb().prepare('SELECT chat_session_id FROM host_api_project_chat WHERE user_id = ? AND project_id = ?')
+    .get(userId, projectId || '')?.chat_session_id ?? null;
 }
 
-export function setQuickChatId(userId, chatSessionId) {
+export function setQuickChatId(userId, chatSessionId, projectId = null) {
   requireUser(userId);
-  getDb().prepare('INSERT INTO host_api_quick_chat (user_id, chat_session_id) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET chat_session_id = excluded.chat_session_id')
-    .run(userId, String(chatSessionId));
+  getDb().prepare(`
+    INSERT INTO host_api_project_chat (user_id, project_id, chat_session_id) VALUES (?, ?, ?)
+    ON CONFLICT(user_id, project_id) DO UPDATE SET chat_session_id = excluded.chat_session_id
+  `).run(userId, projectId || '', String(chatSessionId));
 }

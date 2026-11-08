@@ -13,6 +13,7 @@ import { pushTargetOf } from './push-target.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES, MAX_LIFETIME_MS } from '../../kb/host-api-devices.mjs';
 import { getDb } from '../../kb/db.mjs';
+import { config } from '../../core/config.mjs';
 import { getMember, classRefusal } from '../../kb/members.mjs';
 import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
 import { projectsListResult, projectFrameAuthority } from './projects.mjs';
@@ -89,15 +90,18 @@ function defaultDeps() {
     cancel: async (userId, chatSessionId) => (await agentV2()).cancelChatTurn(userId, chatSessionId),
     clear: async (userId, chatSessionId) => (await agentV2()).clearChatSessionState(userId, chatSessionId),
     decide: async (args) => (await import('../../llm_agent/sdk/decisions.mjs')).answerDecision(args),
-    history: async (userId, limit) => {
-      const id = getQuickChatId(userId);
+    // The current Host API chat of ONE project (null = the legacy/global chat).
+    history: async (userId, projectId, limit) => {
+      const id = getQuickChatId(userId, projectId);
       if (!id) return [];
       return (await chatSessions()).getChatSession(userId, id, { messageLimit: limit })?.messages ?? [];
     },
     append: async (userId, chatSessionId, line) => (await chatSessions()).appendChatMessage(userId, chatSessionId, line),
     // In-process, user-scoped stores (never HTTP). The session's userId is the only user a read ever names.
+    // A Host API list is project-scoped: with a projectId it is that project; without one it is the
+    // legacy/global (NULL) chats only, so a project's chats never leak into another project's list.
     read: {
-      sessions: async (userId, { limit, offset }) => (await chatSessions()).listChatSessions(userId, { limit, offset }),
+      sessions: async (userId, { limit, offset, projectId }) => (await chatSessions()).listChatSessions(userId, { limit, offset, projectId, scopedProject: true }),
       history: async (userId, sessionId, { limit, beforeSeq }) => (await chatSessions()).getChatSession(userId, sessionId, { messageLimit: limit, beforeSeq }),
       usage: async (userId) => {
         const [{ usageSummary }, { getDb }] = await Promise.all([import('../../kb/usage.mjs'), import('../../kb/db.mjs')]);
@@ -114,10 +118,12 @@ function defaultDeps() {
     quickChat: {
       get: getQuickChatId,
       set: setQuickChatId,
-      create: async (userId) => (await chatSessions()).createChatSession(userId, { title: 'Phone chat', surface: 'any', mode: 'agent' }).id,
+      create: async (userId, projectId) => (await chatSessions()).createChatSession(userId, { title: 'Phone chat', surface: 'any', mode: 'agent', projectId }).id,
     },
     devices: { issueDeviceToken, authenticateDeviceToken, revokeDevice },
     pins: { consumePin },
+    // A hub has no global chat: every project-scoped Host API command must name a project.
+    projectRequired: () => config.hub,
     now: () => Date.now(),
     log: () => {},
     audit: () => {}, // (event, { peer, userId, deviceId, clientName, detail, dedupeKey }); server.mjs passes routes/host-api/audit.mjs
@@ -149,7 +155,7 @@ export function createGateway(overrides) {
   // A closed session's in-flight commands stay as zombies (nothing sent) until their turn settles, so a cancel
   // requested before the turn held the engine lock can be re-issued when its init arrives.
   const owned = new Map();
-  const creatingQuickChat = new Map(); // userId -> Promise<chatSessionId>
+  const creatingQuickChat = new Map(); // `${userId}:${projectId}` -> Promise<chatSessionId>
   // Separate buckets: a wrong PIN must not delay a token reconnect from the same peer, nor the reverse.
   const pairThrottle = new PairingThrottle();
   const tokenThrottle = new PairingThrottle();
@@ -328,15 +334,18 @@ export function createGateway(overrides) {
     }
   }
 
-  function quickChatFor(userId) {
-    const existing = deps.quickChat.get(userId);
+  function quickChatFor(userId, projectId) {
+    const existing = deps.quickChat.get(userId, projectId);
     if (existing) return existing;
-    // Two sessions of one user sending at once must not create two phone chats.
-    let p = creatingQuickChat.get(userId);
+    // Two sessions of one user sending to the same project must not create two phone chats. The key is
+    // per (user, project), so a turn in project A never waits on project B's creation.
+    const key = `${userId}:${projectId || ''}`;
+    let p = creatingQuickChat.get(key);
     if (!p) {
-      p = Promise.resolve(deps.quickChat.create(userId)).then((id) => { deps.quickChat.set(userId, id); return id; })
-        .finally(() => creatingQuickChat.delete(userId));
-      creatingQuickChat.set(userId, p);
+      p = Promise.resolve(deps.quickChat.create(userId, projectId))
+        .then((id) => { deps.quickChat.set(userId, id, projectId); return id; })
+        .finally(() => creatingQuickChat.delete(key));
+      creatingQuickChat.set(key, p);
     }
     return p;
   }
@@ -352,8 +361,8 @@ export function createGateway(overrides) {
     return true;
   }
 
-  async function lines(userId, limit) {
-    return messagesOf(await deps.history(userId, limit), limit);
+  async function lines(userId, limit, projectId = null) {
+    return messagesOf(await deps.history(userId, projectId, limit), limit);
   }
 
   // The SDK may be logged out or slow to answer: compose then offers the desktop default only, never an error.
@@ -470,6 +479,7 @@ export function createGateway(overrides) {
         // frame. An unassigned caller is a viewer (Ask only); a project demotion applies immediately.
         const project = projectFrameAuthority(getDb(), u, r.command, r.payload, {
           usedUsd: (projectId) => usedUsdMonthForProject(getDb(), u, projectId),
+          requireProject: deps.projectRequired?.() === true,
         });
         if (!project.ok) {
           deps.log(`Host API v1 connection ${entry.num} refused ${r.command} (project ${project.reason})`);
@@ -477,14 +487,18 @@ export function createGateway(overrides) {
             peer: entry.peer, userId: u, deviceId: d, detail: project.reason,
             dedupeKey: `${d}:project:${project.reason}`,
           });
+          // A Host API error frame has no HTTP status: `denied` is its 403 class, and the literal
+          // PROJECT_* name in the message is what web/iOS already map to the picker's reason.
           return fail(
             s, r.id,
             project.reason === 'not_found' ? 'not_found' : 'denied',
             project.reason === 'not_found'
               ? 'That project is not registered on this computer.'
-              : project.reason === 'usd_cap'
-                ? 'Monthly USD cap reached.'
-                : 'Your project role no longer allows this.',
+              : project.reason === 'required'
+                ? 'PROJECT_REQUIRED: Choose a project first.'
+                : project.reason === 'usd_cap'
+                  ? 'Monthly USD cap reached.'
+                  : 'Your project role no longer allows this.',
           );
         }
       }
@@ -574,7 +588,7 @@ export function createGateway(overrides) {
       }
       case 'chat.snapshot': {
         const limit = p.limit ?? HOST_API_LIMITS.defaultListItems;
-        return respond(s, id, command, { messages: await lines(userId, limit) });
+        return respond(s, id, command, { messages: await lines(userId, limit, p.projectId ?? null) });
       }
       case 'chat.send': {
         // Text only (fixtures/security/compose.json imagesAllowed:false): the engine would read `[binary:` framing as an image.
@@ -593,7 +607,7 @@ export function createGateway(overrides) {
           audit('compose_send', { peer: entry.peer, userId, deviceId, detail: `mode=${p.mode ?? 'auto'} model=${p.model ?? 'default'} files=${p.attachments?.length ?? 0}`,
             dedupeKey: `${deviceId}:${p.mode ?? 'auto'}:${p.model ?? ''}` });
         }
-        const chatSessionId = await quickChatFor(userId);
+        const chatSessionId = await quickChatFor(userId, p.projectId ?? null);
         if (sessions.get(s) !== entry) return;
         return startTurn(s, entry, id, p, chatSessionId);
       }
@@ -611,7 +625,7 @@ export function createGateway(overrides) {
         if (!deps.chatClearEnabled()) return fail(s, id, 'denied', 'Clearing the phone chat is turned off on this computer.');
         // A turn accepted here may not hold the engine's lock yet (mode classification runs first).
         if ([...owned.values()].some((o) => o.userId === userId)) return fail(s, id, 'busy', 'A chat turn is running — try again when it ends.', { retryable: true });
-        const chatSessionId = deps.quickChat.get(userId);
+        const chatSessionId = deps.quickChat.get(userId, p.projectId ?? null);
         if (!chatSessionId) return respond(s, id, command, { cleared: true });
         const out = await deps.clear(userId, chatSessionId);
         if (!out?.cleared) return fail(s, id, 'busy', 'A chat turn is running — try again when it ends.', { retryable: true });
@@ -626,8 +640,9 @@ export function createGateway(overrides) {
         if (readRefused(s, entry, id)) return;
         const limit = p.limit ?? READ_LIMITS.sessionsDefault;
         const offset = p.offset ?? 0;
-        const rows = await deps.read.sessions(userId, { limit: limit + 1, offset });
-        return respond(s, id, command, sessionsOf(rows, limit, offset, deps.quickChat.get(userId)));
+        const projectId = p.projectId ?? null;
+        const rows = await deps.read.sessions(userId, { limit: limit + 1, offset, projectId });
+        return respond(s, id, command, sessionsOf(rows, limit, offset, deps.quickChat.get(userId, projectId)));
       }
       case 'chat.history': {
         if (readRefused(s, entry, id)) return;
@@ -635,6 +650,15 @@ export function createGateway(overrides) {
         const session = await deps.read.history(userId, p.sessionId, { limit, beforeSeq: p.beforeSeq });
         // Another user's id reads as unknown: the store query is WHERE user_id = ? AND id = ?.
         if (!session) return fail(s, id, 'not_found', 'That chat is not on this computer.');
+        // A session named across project boundaries is refused, never opened. `denied` is the error
+        // frame's 403 class; the PROJECT_MISMATCH literal is what the web/iOS pickers already read.
+        if ((session.projectId ?? null) !== (p.projectId ?? null)) {
+          audit('project_denied', {
+            peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: 'mismatch',
+            dedupeKey: `${entry.state.deviceId}:history:mismatch`,
+          });
+          return fail(s, id, 'denied', 'PROJECT_MISMATCH: That chat belongs to another project.');
+        }
         return respond(s, id, command, historyOf(session, limit));
       }
       case 'usage.get': {
@@ -645,9 +669,10 @@ export function createGateway(overrides) {
         const wait = rate.turn(entry.state.deviceId, deps.now()); // a write: the turn bucket, not the read one
         if (wait != null) return rateRefused(s, entry, id, wait);
         if ([...owned.values()].some((o) => o.userId === userId)) return fail(s, id, 'busy', 'A chat turn is running — try again when it ends.', { retryable: true });
-        await creatingQuickChat.get(userId); // a first phone chat being created right now is replaced, not raced
-        const sessionId = await deps.quickChat.create(userId);
-        deps.quickChat.set(userId, sessionId);
+        const projectId = p.projectId ?? null;
+        await creatingQuickChat.get(`${userId}:${projectId || ''}`); // a first chat being created right now is replaced, not raced
+        const sessionId = await deps.quickChat.create(userId, projectId);
+        deps.quickChat.set(userId, sessionId, projectId);
         audit('chat_new', { peer: entry.peer, userId, deviceId: entry.state.deviceId });
         return respond(s, id, command, { sessionId });
       }

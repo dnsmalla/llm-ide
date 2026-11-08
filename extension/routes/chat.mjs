@@ -12,6 +12,9 @@ import {
   deleteChatMessage,
 } from '../kb/chat-sessions.mjs';
 
+// The same project-id grammar the Host API and project routes use.
+const CHAT_PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+
 export async function handleChatRoutes(req, res, ctx) {
   const { userId, url } = ctx;
   if (!url.startsWith('/kb/chat')) return false;
@@ -19,11 +22,18 @@ export async function handleChatRoutes(req, res, ctx) {
   const path = url.split('?')[0];
   const u = new URL(url, 'http://127.0.0.1');
 
-  // GET /kb/chat/sessions
+  // GET /kb/chat/sessions — projectId (API 128) narrows to one project; absent keeps the old
+  // whole-list behavior, so the extension's existing call is unchanged.
   if (req.method === 'GET' && path === '/kb/chat/sessions') {
+    const projectId = u.searchParams.get('projectId');
+    if (projectId !== null && !CHAT_PROJECT_ID_RE.test(projectId)) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'projectId is invalid' } });
+      return true;
+    }
     const sessions = listChatSessions(userId, {
       surface: u.searchParams.get('surface') || undefined,
       mode: u.searchParams.get('mode') || undefined,
+      projectId: projectId || undefined,
       limit: u.searchParams.has('limit') ? Number(u.searchParams.get('limit')) : undefined,
       offset: u.searchParams.has('offset') ? Number(u.searchParams.get('offset')) : undefined,
     });
@@ -34,11 +44,16 @@ export async function handleChatRoutes(req, res, ctx) {
   // POST /kb/chat/sessions
   if (req.method === 'POST' && path === '/kb/chat/sessions') {
     const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+    const projectId = body.projectId ?? body.project_id ?? null;
+    if (projectId !== null && (typeof projectId !== 'string' || !CHAT_PROJECT_ID_RE.test(projectId))) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'projectId is invalid' } });
+      return true;
+    }
     const session = createChatSession(userId, {
       title: body.title,
       surface: body.surface,
       mode: body.mode,
-      projectId: body.projectId ?? body.project_id ?? null,
+      projectId,
     });
     sendJSON(res, 201, { session });
     return true;

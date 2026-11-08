@@ -34,12 +34,12 @@ export type HostApiCommandName = keyof typeof HOST_API_COMMANDS;
 export interface HostApiCommandMap {
   "approvals.answer": { request: { answers: Record<string, string>; commandId: string; projectId?: string; requestId: string }; result: { accepted: boolean } };
   "chat.cancel": { request: { projectId?: string }; result: { cancelled: boolean } };
-  "chat.history": { request: { beforeSeq?: number; limit?: number; sessionId: string }; result: { messages: Array<{ content: string; role: "user" | "assistant"; seq: number }>; nextBeforeSeq?: number } };
+  "chat.history": { request: { beforeSeq?: number; limit?: number; projectId?: string; sessionId: string }; result: { messages: Array<{ content: string; role: "user" | "assistant"; seq: number }>; nextBeforeSeq?: number } };
   "chat.history.clear": { request: { projectId?: string }; result: { cleared: boolean } };
   "chat.new": { request: { projectId?: string }; result: { sessionId: string } };
   "chat.options": { request: { projectId?: string }; result: { models: Array<{ label?: string; model: string }>; modes: Array<"auto" | "ask" | "plan" | "assist_plan" | "review" | "document"> } };
   "chat.send": { request: { attachments?: Array<{ name: string; text: string }>; mode?: "auto" | "ask" | "plan" | "assist_plan" | "review" | "document"; model?: string; projectId?: string; text: string }; result: { accepted: boolean; requestId?: string } };
-  "chat.sessions": { request: { limit?: number; offset?: number }; result: { nextOffset?: number; sessions: Array<{ id: string; phoneChat?: boolean; title: string; updatedAt: number }> } };
+  "chat.sessions": { request: { limit?: number; offset?: number; projectId?: string }; result: { nextOffset?: number; sessions: Array<{ id: string; phoneChat?: boolean; title: string; updatedAt: number }> } };
   "chat.snapshot": { request: { limit?: number; projectId?: string }; result: { messages: Array<{ content: string; role: "user" | "assistant" }> } };
   "host.auth.pair": { request: { pin: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push">; token: string } };
   "host.auth.revoke": { request: { token: string }; result: { revoked: boolean } };

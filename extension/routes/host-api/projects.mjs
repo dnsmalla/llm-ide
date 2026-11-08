@@ -13,6 +13,8 @@ export const PROJECT_FRAME_CLASS = Object.freeze({
   'chat.send': 'model.ask',
   'chat.new': 'self.write',
   'chat.snapshot': 'self.read',
+  'chat.sessions': 'self.read',
+  'chat.history': 'self.read',
   'chat.cancel': 'self.write',
   'chat.history.clear': 'self.write',
   'chat.options': 'self.read',
@@ -30,12 +32,16 @@ export function projectsListResult(db, userId) {
  * reader so a project cap is checked against that project's month, not the whole install.
  *
  * Returns `{ ok: true, projectId, scoped, grant }` (scoped false when the frame has no project id),
- * or `{ ok: false, reason, projectId }` with reason `not_found`, `role_denied`, `max_mode_*` or
- * `usd_cap`.
+ * or `{ ok: false, reason, projectId }` with reason `required`, `not_found`, `role_denied`,
+ * `max_mode_*` or `usd_cap`. `requireProject` is the hub rule: a project-scoped command must name a
+ * project (a hub has no global chat).
  */
-export function projectFrameAuthority(db, userId, command, payload, { usedUsd = null } = {}) {
+export function projectFrameAuthority(db, userId, command, payload, { usedUsd = null, requireProject = false } = {}) {
   const projectId = payload && typeof payload.projectId === 'string' ? payload.projectId : null;
-  if (!projectId) return { ok: true, projectId: null, scoped: false, grant: null };
+  if (!projectId) {
+    if (requireProject && PROJECT_FRAME_CLASS[command]) return { ok: false, reason: 'required', projectId: null };
+    return { ok: true, projectId: null, scoped: false, grant: null };
+  }
   if (!getProject(db, projectId)) {
     return { ok: false, reason: 'not_found', projectId };
   }

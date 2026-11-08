@@ -44,7 +44,13 @@ export function createChatSession(userId, { title, surface = 'any', mode = 'ask'
   return { id, title: normTitle(title), surface, mode, projectId: projectId || null, createdAt: ts, updatedAt: ts };
 }
 
-export function listChatSessions(userId, { surface, mode, limit, offset } = {}) {
+/**
+ * List a user's chats, newest first. `projectId` narrows to one project; `scopedProject: true` with no
+ * `projectId` narrows to the LEGACY/GLOBAL chats (project_id IS NULL), which is what a Host API client
+ * that sends no project sees. Without either the list is unchanged (every chat), so the extension's
+ * existing `/kb/chat/sessions` call is untouched.
+ */
+export function listChatSessions(userId, { surface, mode, projectId, scopedProject = false, limit, offset } = {}) {
   requireUser(userId);
   const cap = Math.min(
     Math.max(Number.isFinite(limit) ? Number(limit) : DEFAULT_LIST_LIMIT, 1),
@@ -64,6 +70,12 @@ export function listChatSessions(userId, { surface, mode, limit, offset } = {}) 
   if (mode && MODES.has(mode)) {
     sql += ' AND mode = ?';
     params.push(mode);
+  }
+  if (typeof projectId === 'string' && projectId) {
+    sql += ' AND project_id = ?';
+    params.push(projectId);
+  } else if (scopedProject) {
+    sql += ' AND project_id IS NULL';
   }
   sql += ' ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?';
   params.push(cap, Number.isInteger(offset) && offset > 0 ? offset : 0);

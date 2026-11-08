@@ -1,0 +1,12 @@
+{
+  "endpoint": "GET /kb/chat/sessions",
+  "status": 200,
+  "request": {
+    "query": {
+      "projectId": "p-alpha"
+    }
+  },
+  "response": {
+    "sessions": []
+  }
+}

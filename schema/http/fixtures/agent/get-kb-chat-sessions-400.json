@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/chat/sessions",
+  "status": 400,
+  "request": {
+    "query": {
+      "projectId": "bad/id"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "projectId is invalid"
+    }
+  }
+}

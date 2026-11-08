@@ -8,11 +8,11 @@ const flush = () => new Promise((r) => setImmediate(r));
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
-function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null, pinUser = () => 'u1', member = () => ({ teamRole: 'owner', maxMode: 'execute' }) } = {}) {
+function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null, pinUser = () => 'u1', member = () => ({ teamRole: 'owner', maxMode: 'execute' }), projectRequired = false } = {}) {
   const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, readCalls: [], pending: [], audits: [], modelCalls: 0, member };
   const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
-  let quick = null;
+  const quick = new Map(); // projectId || '' -> current phone chat
   let made = 0;
   t.tokens = tokens;
   t.devices = {
@@ -28,11 +28,16 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : []), ...(t.read ? ['read'] : []), ...(t.compose ? ['compose'] : [])],
     // ADR 0021 authority; the default is the install owner, so the full served list is paired.
     member: (userId) => t.member(userId),
+    projectRequired: () => projectRequired,
     log: () => {},
     chatClearEnabled: () => chatClear,
     pins: { consumePin: (pin) => (pin === '123456' ? pinUser() : null) },
     devices: t.devices,
-    quickChat: { get: () => quick, set: (_u, id) => { quick = id; }, create: () => `chat-${++made}` },
+    quickChat: {
+      get: (_u, pid) => quick.get(pid || '') ?? null,
+      set: (_u, id, pid) => { quick.set(pid || '', id); },
+      create: () => `chat-${++made}`,
+    },
     models: async () => { t.modelCalls += 1; if (models instanceof Error) throw models; return models ?? [{ id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5' }]; },
     audit: (event, fields) => t.audits.push([event, fields]),
     history: history ?? (async () => [{ role: 'user', content: 'hi' }, { role: 'tool', content: 'x' }, { role: 'assistant', content: 'yo' }]),
@@ -501,7 +506,7 @@ test('reads: served and granted at pairing — sessions, history and usage answe
   assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals', 'read']);
   await t.g.receive(s, req('c-1', 'chat.sessions', { limit: 1 }));
   assert.deepEqual(t.last().result, { sessions: [{ id: 'chat-1', title: 'Phone chat', updatedAt: 1000 }], nextOffset: 1 });
-  assert.deepEqual(t.readCalls.at(-1), ['sessions', 'u1', { limit: 2, offset: 0 }]);
+  assert.deepEqual(t.readCalls.at(-1), ['sessions', 'u1', { limit: 2, offset: 0, projectId: null }]);
   await t.g.receive(s, req('c-2', 'chat.history', { sessionId: 'chat-2' }));
   assert.deepEqual(t.last().result.messages.map((m) => m.seq), [1, 2]);
   assert.deepEqual(t.readCalls.at(-1), ['history', 'u1', 'chat-2', { limit: 100, beforeSeq: undefined }]);

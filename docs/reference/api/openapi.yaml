@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 127
+  x-api-version: 128
 servers:
   - url: "https://{host}"
     variables:
@@ -7756,6 +7756,12 @@ paths:
           description: "Skip this many rows (newest first, ties by id): page through every chat with limit."
           schema:
             type: "string"
+        - name: "projectId"
+          in: "query"
+          required: false
+          description: "Only chats of this project (API 128). Omitted: every chat, exactly as before."
+          schema:
+            type: "string"
       responses:
         "200":
           description: "Sessions, newest first"
@@ -7770,6 +7776,12 @@ paths:
                     type: "array"
                     items:
                       "$ref": "#/components/schemas/ChatSession"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
     post:
       summary: "Create a chat session"
       tags:

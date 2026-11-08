@@ -42,11 +42,13 @@ public struct HostApiChatCancelResult: Codable, Equatable, Sendable {
 public struct HostApiChatHistoryRequest: Codable, Equatable, Sendable {
     public var beforeSeq: Int?
     public var limit: Int?
+    public var projectId: String?
     public var sessionId: String
 
-    public init(beforeSeq: Int? = nil, limit: Int? = nil, sessionId: String) {
+    public init(beforeSeq: Int? = nil, limit: Int? = nil, projectId: String? = nil, sessionId: String) {
         self.beforeSeq = beforeSeq
         self.limit = limit
+        self.projectId = projectId
         self.sessionId = sessionId
     }
 }
@@ -172,10 +174,12 @@ public struct HostApiChatSendResult: Codable, Equatable, Sendable {
 public struct HostApiChatSessionsRequest: Codable, Equatable, Sendable {
     public var limit: Int?
     public var offset: Int?
+    public var projectId: String?
 
-    public init(limit: Int? = nil, offset: Int? = nil) {
+    public init(limit: Int? = nil, offset: Int? = nil, projectId: String? = nil) {
         self.limit = limit
         self.offset = offset
+        self.projectId = projectId
     }
 }
 

@@ -107,3 +107,15 @@ test('a command that cannot carry a project id is not project-scoped', () => {
   assert.equal(out.ok, true);
   assert.equal(out.scoped, false);
 });
+
+test('hub rule: a project-scoped frame without projectId is required; sessions/history are project-scoped reads', () => {
+  const noProject = projectFrameAuthority(getDb(), engineer, 'chat.sessions', {}, { requireProject: true });
+  assert.equal(noProject.ok, false);
+  assert.equal(noProject.reason, 'required');
+  // A command that cannot carry a project is not affected by the hub rule.
+  assert.equal(projectFrameAuthority(getDb(), engineer, 'host.ping', {}, { requireProject: true }).ok, true);
+  // The project-scoped read commands check the project grant like any other project frame.
+  assert.equal(projectFrameAuthority(getDb(), engineer, 'chat.sessions', { projectId: 'p-host' }).ok, true);
+  assert.equal(projectFrameAuthority(getDb(), outsider, 'chat.sessions', { projectId: 'p-host' }).ok, true);
+  assert.equal(projectFrameAuthority(getDb(), outsider, 'chat.history', { projectId: 'p-host' }).ok, true);
+});
