@@ -117,3 +117,65 @@ test("a finished reply refreshes the usage strip", async () => {
   assert.deepEqual(link.calls, [{ command: "usage.get", payload: {} }]);
   assert.equal(r.getState().usage[0].provider, "anthropic");
 });
+
+test("API 128: sessions and history name the selected project; switching projects shows only the new project", async () => {
+  let selected = "p-1";
+  const link = fakeLink({
+    "chat.sessions": (p) => ({ sessions: [{ id: p.projectId === "p-2" ? "b" : "a", title: "t", updatedAt: 1 }] }),
+    "chat.history": (p) => ({ messages: [{ seq: 1, role: "user", content: p.projectId === "p-2" ? "beta" : "alpha" }] }),
+    "usage.get": { providers: [] },
+  });
+  const r = createReadController(link, { projectId: () => selected });
+  await r.refresh();
+  assert.deepEqual(r.getState().sessions.map((s) => s.id), ["a"]);
+  assert.deepEqual(link.calls.find((c) => c.command === "chat.sessions").payload, { limit: 50, projectId: "p-1" });
+
+  await r.open("a", "A");
+  assert.deepEqual(link.calls.at(-1).payload, { sessionId: "a", limit: 100, projectId: "p-1" });
+
+  selected = "p-2";
+  await r.projectChanged();
+  assert.deepEqual(r.getState().sessions.map((s) => s.id), ["b"], "the other project's chat is gone");
+  assert.equal(r.getState().open, null, "the open chat belonged to the old project");
+  const lastSessions = [...link.calls].reverse().find((c) => c.command === "chat.sessions");
+  assert.deepEqual(lastSessions.payload, { limit: 50, projectId: "p-2" });
+  assert.deepEqual(link.calls.filter((c) => c.command === "chat.sessions").map((c) => c.payload.projectId), ["p-1", "p-2"]);
+});
+
+test("API 128: a history reply from the project the user left is dropped, error included", async () => {
+  let release;
+  const slow = new Promise((res) => { release = res; });
+  const denied = Object.assign(new Error("PROJECT_MISMATCH: That chat belongs to another project."), { code: "denied" });
+  const link = fakeLink({ "chat.history": () => slow });
+  const r = createReadController(link, { projectId: () => "p-1" });
+  const first = r.open("a", "A");
+  await r.projectChanged();
+  release({ messages: [{ seq: 1, role: "user", content: "stale" }] });
+  await first;
+  assert.equal(r.getState().open, null);
+  assert.equal(r.getState().error, null, "the old project's reply and error are both dropped");
+
+  const mismatch = createReadController(fakeLink({ "chat.history": denied }), { projectId: () => "p-2" });
+  await mismatch.open("a", "A");
+  assert.match(mismatch.getState().error, /PROJECT_MISMATCH/);
+  assert.equal(mismatch.getState().open, null);
+});
+
+test("API 128: a sessions reply from the previous project never lands after a switch", async () => {
+  let release;
+  const first = new Promise((res) => { release = res; });
+  let calls = 0;
+  let selected = "p-1";
+  const link = fakeLink({
+    "chat.sessions": () => (++calls === 1 ? first : { sessions: [{ id: "b", title: "B", updatedAt: 1 }] }),
+    "usage.get": { providers: [] },
+  });
+  const r = createReadController(link, { projectId: () => selected });
+  const old = r.refresh();
+  selected = "p-2";
+  const changed = r.projectChanged();
+  await tick();
+  release({ sessions: [{ id: "a", title: "A", updatedAt: 1 }] });
+  await Promise.all([old, changed]);
+  assert.deepEqual(r.getState().sessions.map((s) => s.id), ["b"]);
+});

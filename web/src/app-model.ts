@@ -48,14 +48,18 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
     const connection = new HostConnection({ url, clientName: "LLM-IDE Web", clientVersion: __APP_VERSION__, tokens, ...d.connection });
     let controller: ChatController | null = null;
     let compose: ComposeController | null = null;
+    let read: ReadController | null = null;
     const projects = createProjectsController(connection, {
       storage: projectStoreFor(url),
-      onSelectionChange: () => { void controller?.resync(); void compose?.load(); },
+      // A project switch rewires every scoped view: the chat, the compose options and the read-only
+      // history (which clears the previous project's list before loading the new one).
+      onSelectionChange: () => { void controller?.resync(); void compose?.load(); void read?.projectChanged(); },
     });
     const onProjectRefused = (e: unknown) => { projects.noteRefusal(e); };
     controller = createChatController(connection, { projectId: () => projects.getSelectedId(), onProjectRefused });
     compose = createComposeController(connection, { projectId: () => projects.getSelectedId(), onProjectRefused });
-    return { url, tokens, connection, projects, controller, read: createReadController(connection), compose };
+    read = createReadController(connection, { projectId: () => projects.getSelectedId() });
+    return { url, tokens, connection, projects, controller, read, compose };
   };
   const shut = (s: Session) => { s.projects.dispose(); s.controller.dispose(); s.read.dispose(); s.compose.dispose(); s.connection.close(); };
   const adopt = (s: Session | null, notice: string | null = null) => {
