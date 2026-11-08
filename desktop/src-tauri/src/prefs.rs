@@ -94,6 +94,11 @@ impl RemoteServerPrefs {
         self.user = cap(self.user, 64);
         self.key_path = cap(self.key_path, 4096);
         self.label = cap(self.label, 80);
+        self.hub_url = cap(self.hub_url, 300);
+        self.tls_pin = cap(self.tls_pin, 80);
+        // Hand-edited prefs or a webview call must not downgrade the hub to plaintext.
+        if crate::remote_tls::split_hub(&self.hub_url).is_err() { self.hub_url.clear(); }
+        if !crate::remote_tls::valid_pin(&self.tls_pin) { self.tls_pin.clear(); }
         if self.port == 0 {
             self.port = 22;
         }

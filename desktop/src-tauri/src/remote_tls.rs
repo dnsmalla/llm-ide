@@ -154,7 +154,7 @@ pub fn pinned_agent(pin: &str) -> Result<ureq::Agent, FsError> {
         .build())
 }
 
-fn split_hub(hub: &str) -> Result<(String, u16), FsError> {
+pub(crate) fn split_hub(hub: &str) -> Result<(String, u16), FsError> {
     let rest = hub.strip_prefix("https://").ok_or_else(|| herr("invalid_hub", "the hub URL must start with https://"))?;
     if rest.contains('/') || rest.contains('@') || rest.contains('?') || rest.contains('#') || rest.contains(['\r', '\n', ' ']) {
         return Err(herr("invalid_hub", "the hub URL must be https://host[:port] with no path"));

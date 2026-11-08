@@ -27,18 +27,20 @@ const stage = join(tmpdir(), `llmide-hub-stage-${process.pid}`);
 rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 try {
-  execFileSync(process.execPath, [join(HERE, 'stage-core.mjs'), '--target', 'linux-x64', '--out', stage], { cwd: REPO, stdio: 'inherit' });
+  const core = join(stage, 'core');
+  mkdirSync(core, { recursive: true });
+  execFileSync(process.execPath, [join(HERE, 'stage-core.mjs'), '--target', 'linux-x64', '--out', core], { cwd: REPO, stdio: 'inherit' });
   // The hub's on-demand backup service runs this script from the staged extension.
   for (const f of ['backup.mjs', 'restore-backup.mjs']) {
     const src = join(REPO, 'extension', 'scripts', f);
     if (existsSync(src)) {
-      const dst = join(stage, 'root', 'extension', 'scripts');
+      const dst = join(stage, 'core', 'root', 'extension', 'scripts');
       mkdirSync(dst, { recursive: true });
       cpSync(src, join(dst, f));
     }
   }
   // Optional PWA served at /app/ by the hub's nginx.
-  if (existsSync(join(REPO, 'web', 'dist'))) cpSync(join(REPO, 'web', 'dist'), join(stage, 'root', 'web'), { recursive: true });
+  if (existsSync(join(REPO, 'web', 'dist'))) cpSync(join(REPO, 'web', 'dist'), join(stage, 'core', 'root', 'web'), { recursive: true });
   writeFileSync(join(stage, 'VERSION'), `${version}\n`);
   const tar = join(out, `llmide-core-${version}-linux-x64.tar.gz`);
   mkdirSync(out, { recursive: true });

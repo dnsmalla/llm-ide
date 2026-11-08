@@ -12,22 +12,23 @@ umask 077
 stage="$1"
 
 die() { echo "llmide-deploy: $stage: $*" >&2; exit 1; }
+replace_line() {
+  # replace_line FILE KEY VALUE: portable (no sed -i differences), keeps 0600 root ownership.
+  f=$1; k=$2; v=$3; t=$(mktemp)
+  sed "s|^${k}=.*|${k}=${v}|" "$f" > "$t"
+  chown root:root "$t"; chmod 0600 "$t"; mv "$t" "$f"
+}
 say() { echo "llmide-deploy: $stage: $*" >&2; }
 
 CONF=/etc/llmide/core.env
-STAGING_FILE=/etc/llmide/staging
 UNIT=/etc/systemd/system/llmide-core.service
 BACKUP_UNIT=/etc/systemd/system/llmide-backup.service
 SITE=/etc/nginx/sites-enabled/llm-ide-hub
 
 staging() {
-  [ -r "$STAGING_FILE" ] || die "staging path is not set (run base first)"
-  STAGING=$(cat "$STAGING_FILE")
-  case "$STAGING" in
-    /?*) ;;
-    *) die "staging path is not absolute" ;;
-  esac
-  [ -d "$STAGING" ] || die "staging directory is missing"
+  # Root-owned, fixed path: the SSH user cannot swap files under it.
+  STAGING=/var/lib/llmide-deploy/staging
+  install -d -m 0700 -o root -g root /var/lib/llmide-deploy "$STAGING"
 }
 
 conf() {
@@ -50,31 +51,78 @@ case "$stage" in
     echo "ok"
     ;;
 
-  base)
-    staging_path=$(cat)
-    case "$staging_path" in
-      /?*) ;;
-      *) die "the staging path must be absolute" ;;
+  upload)
+    staging
+    IFS= read -r name || exit 2
+    case "$name" in
+      bundle.tar.gz|bundle.sha256|VERSION|llm-ide-hub.nginx|setup.html) ;;
+      *) die "that file is not uploadable" ;;
     esac
-    case "$staging_path" in *'
-'*) die "the staging path must be one line" ;; esac
-    printf '%s\n' "$staging_path" > "$STAGING_FILE"
-    chmod 0600 "$STAGING_FILE"; chown root:root "$STAGING_FILE"
+    cat > "$STAGING/$name"
+    chmod 0600 "$STAGING/$name"; chown root:root "$STAGING/$name"
+    say "ok"
+    ;;
+
+  base)
+    staging
+    install -d -m 0700 -o root -g root /etc/llmide
+    install -d -m 0755 -o root -g root /etc/systemd/system /etc/logrotate.d
     if ! id llmide >/dev/null 2>&1; then
       useradd --system --home /var/lib/llmide --shell /usr/sbin/nologin llmide
     fi
     install -d -m 0755 -o root -g root /opt/llmide /opt/llmide/releases
-    install -d -m 0700 -o llmide -g llmide /var/lib/llmide /var/lib/llmide/backups /srv/llmide/projects
-    install -d -m 0700 -o root -g root /etc/llmide
+    install -d -m 0700 -o llmide -g llmide /var/lib/llmide /var/lib/llmide/backups
+    install -d -m 0755 -o root -g root /srv/llmide
+    install -d -m 0700 -o llmide -g llmide /srv/llmide/projects
     install -d -m 0755 -o root -g root /var/www/llmide-web
-    [ -f "$STAGING/llmide-core.service" ] || die "the unit file is missing from the staging directory"
-    install -m 0644 -o root -g root "$STAGING/llmide-core.service" "$UNIT"
-    if [ -f "$STAGING/llmide-backup.service" ]; then
-      install -m 0644 -o root -g root "$STAGING/llmide-backup.service" "$BACKUP_UNIT"
-    fi
-    if [ -f "$STAGING/logrotate" ]; then
-      install -m 0644 -o root -g root "$STAGING/logrotate" /etc/logrotate.d/llmide
-    fi
+    # The unit and logrotate are embedded in this root-owned helper, never read from user-writable staging.
+    cat > "$UNIT" <<'LLMIDE_UNIT'
+[Unit]
+Description=LLM-IDE hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=llmide
+Group=llmide
+WorkingDirectory=/opt/llmide/current/core/root/extension
+EnvironmentFile=/etc/llmide/core.env
+EnvironmentFile=-/etc/llmide/bootstrap.env
+ExecStart=/opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/server.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/llmide /srv/llmide/projects
+LimitNOFILE=65536
+LLMIDE_UNIT
+    chmod 0644 "$UNIT"; chown root:root "$UNIT"
+    cat > "$BACKUP_UNIT" <<'LLMIDE_BACKUP'
+[Unit]
+Description=LLM-IDE hub on-demand backup
+
+[Service]
+Type=oneshot
+User=llmide
+Group=llmide
+EnvironmentFile=/etc/llmide/core.env
+ExecStart=/opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs
+LLMIDE_BACKUP
+    chmod 0644 "$BACKUP_UNIT"; chown root:root "$BACKUP_UNIT"
+    cat > /etc/logrotate.d/llmide <<'LLMIDE_LOG'
+/var/lib/llmide/*.log {
+  weekly
+  rotate 4
+  notifempty
+  compress
+  missingok
+  copytruncate
+}
+LLMIDE_LOG
+    chmod 0644 /etc/logrotate.d/llmide; chown root:root /etc/logrotate.d/llmide
     systemctl daemon-reload
     say "ok"
     ;;
@@ -91,6 +139,17 @@ case "$stage" in
       rm -f "$tmp"; die "the env contains a forbidden loader variable"
     fi
     if grep -Eq '\r' "$tmp"; then rm -f "$tmp"; die "the env contains a carriage return"; fi
+    # Re-deploy must never rotate the JWT/vault keys: keep the existing values and back up the old env.
+    if [ -f "$CONF" ]; then
+      for key in LLMIDE_JWT_SECRET LLMIDE_VAULT_KEY; do
+        old=$(sed -n "s/^${key}=//p" "$CONF" | head -1)
+        case "$old" in
+          ''|*[!A-Fa-f0-9]*) ;;
+          *) replace_line "$tmp" "$key" "$old" ;;
+        esac
+      done
+      cp -p "$CONF" "$CONF.prev"
+    fi
     chown root:root "$tmp"; chmod 0600 "$tmp"
     mv "$tmp" "$CONF"
     if systemctl is-active --quiet llmide-core 2>/dev/null; then systemctl restart llmide-core; fi
@@ -108,7 +167,7 @@ case "$stage" in
     install -d -m 0755 -o root -g root "$work"
     tar -xzf "$STAGING/bundle.tar.gz" -C "$work" --no-same-owner --no-same-permissions
     [ -x "$work/core/node/node" ] || die "the bundle has no node binary"
-    node_version=$("$work/core/node/node" --version 2>/dev/null || true)
+    node_version=$(runuser -u llmide -- "$work/core/node/node" --version 2>/dev/null || true)
     case "$node_version" in v22.*) ;; *) die "the bundled node is not 22 ($node_version)" ;; esac
     install -d -m 0755 -o root -g root "/opt/llmide/releases/$VERSION"
     # Replace a same-version directory atomically enough for a single-host deploy.
@@ -134,14 +193,26 @@ case "$stage" in
     if [ ! -f "$cert" ]; then
       die "no certificate at $cert; run: certbot certonly --webroot -w /var/www/llmide-web -d $DOMAIN --key-type ecdsa --reuse-key"
     fi
-    if [ ! -f "$STAGING/host-api-fingerprint" ]; then
-      openssl x509 -in "$cert" -pubkey -noout \
-        | openssl pkey -pubin -outform der \
-        | openssl dgst -sha256 -binary \
-        | basenc --base64url | tr -d '=' > "$STAGING/host-api-fingerprint" || true
-    fi
-    printf 'sha256:%s\n' "$(cat "$STAGING/host-api-fingerprint")" > /etc/llmide/host-api-fingerprint
+    fp=$(openssl x509 -in "$cert" -pubkey -noout \
+      | openssl pkey -pubin -outform der \
+      | openssl dgst -sha256 -binary \
+      | basenc --base64url | tr -d '=')
+    printf 'sha256:%s\n' "$fp" > /etc/llmide/host-api-fingerprint
     chmod 0644 /etc/llmide/host-api-fingerprint; chown root:root /etc/llmide/host-api-fingerprint
+    # Renewal hook: recompute the pin from the live cert so a renewed (reused-key) cert does not leave a stale file.
+    install -d -m 0755 -o root -g root /etc/letsencrypt/renewal-hooks/deploy
+    cat > /etc/letsencrypt/renewal-hooks/deploy/llmide-pin <<HOOK
+#!/bin/sh
+set -eu
+cert=/etc/letsencrypt/live/$DOMAIN/fullchain.pem
+[ -r "\$cert" ] || exit 0
+fp=\$(openssl x509 -in "\$cert" -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | basenc --base64url | tr -d '=')
+printf 'sha256:%s\\n' "\$fp" > /etc/llmide/host-api-fingerprint
+chmod 0644 /etc/llmide/host-api-fingerprint
+systemctl reload nginx 2>/dev/null || true
+HOOK
+    chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/llmide-pin
+    chown root:root /etc/letsencrypt/renewal-hooks/deploy/llmide-pin
     [ -f "$STAGING/setup.html" ] && install -m 0644 -o root -g root "$STAGING/setup.html" /var/www/llmide-web/setup.html || true
     backup=""
     if [ -f "$SITE" ]; then backup="$SITE.bak.$$"; cp -p "$SITE" "$backup"; fi
@@ -171,7 +242,7 @@ case "$stage" in
     esac
     printf 'LLMIDE_BOOTSTRAP_TOKEN=%s\n' "$token" > /etc/llmide/bootstrap.env
     chmod 0600 /etc/llmide/bootstrap.env; chown root:root /etc/llmide/bootstrap.env
-    sed -i 's/^LLMIDE_DISABLE_REGISTRATION=.*/LLMIDE_DISABLE_REGISTRATION=0/' "$CONF"
+    replace_line "$CONF" LLMIDE_DISABLE_REGISTRATION 0
     systemctl restart llmide-core
     printf 'LLMIDE_SETUP_URL=https://%s/setup#t=%s\n' "$DOMAIN" "$token"
     say "ok"
@@ -180,14 +251,13 @@ case "$stage" in
   lock-registration)
     conf
     rm -f /etc/llmide/bootstrap.env
-    sed -i 's/^LLMIDE_DISABLE_REGISTRATION=.*/LLMIDE_DISABLE_REGISTRATION=1/' "$CONF"
+    replace_line "$CONF" LLMIDE_DISABLE_REGISTRATION 1
     systemctl restart llmide-core
     say "ok"
     ;;
 
   backup)
-    [ -x /opt/llmide/current/core/node/node ] || die "no current release"
-    runuser -u llmide -- /opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs
+    systemctl start llmide-backup.service
     say "ok"
     ;;
 
@@ -195,8 +265,8 @@ case "$stage" in
     was_active=0
     systemctl is-active --quiet llmide-core 2>/dev/null && was_active=1 || true
     [ "$was_active" -eq 1 ] && systemctl stop llmide-core || true
-    if [ -x /opt/llmide/current/core/node/node ]; then
-      runuser -u llmide -- /opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs || true
+    if [ -f /var/lib/llmide/data.db ]; then
+      systemctl start llmide-backup.service || { [ "$was_active" -eq 1 ] && systemctl start llmide-core || true; die "the pre-deploy backup failed"; }
     fi
     [ "$was_active" -eq 1 ] && systemctl start llmide-core || true
     say "ok"
@@ -215,7 +285,9 @@ case "$stage" in
     [ -f "$STAGING/VERSION" ] || die "VERSION is missing"
     new=$(tr -cd '0-9.' < "$STAGING/VERSION" | head -c 40)
     case "$new" in *.*.*) ;; *) die "the new version is not x.y.z" ;; esac
-    sed -i "s/^LLMIDE_HUB_VERSION=.*/LLMIDE_HUB_VERSION=$new/" "$CONF"
+    current=$(cat /opt/llmide/current/VERSION 2>/dev/null || true)
+    [ "$new" = "$current" ] && die "the hub already runs $new"
+    replace_line "$CONF" LLMIDE_HUB_VERSION "$new"
     "$0" bundle
     "$0" start
     say "ok ($new)"
@@ -229,6 +301,8 @@ case "$stage" in
     nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
     conf 2>/dev/null && printf 'certificate kept: certbot delete --cert-name %s\n' "$DOMAIN" >&2 || true
     # Data is kept by default: /var/lib/llmide and /srv/llmide/projects stay for a manual restore.
+    rm -f /etc/sudoers.d/llmide-deploy
+    rm -f /usr/local/sbin/llmide-deploy
     say "ok (data kept)"
     ;;
 
@@ -237,7 +311,9 @@ case "$stage" in
     rm -f "$UNIT" "$BACKUP_UNIT" "$SITE"
     systemctl daemon-reload 2>/dev/null || true
     nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
-    rm -rf /var/lib/llmide /var/lib/llmide-deploy /srv/llmide/projects /opt/llmide
+    rm -rf /var/lib/llmide /var/lib/llmide-deploy /srv/llmide/projects /opt/llmide /etc/llmide
+    rm -f /etc/sudoers.d/llmide-deploy
+    rm -f /usr/local/sbin/llmide-deploy
     say "ok (data deleted)"
     ;;
 

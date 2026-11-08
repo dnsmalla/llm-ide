@@ -24,7 +24,7 @@ use crate::remote::{prepare, ssh_args_with, PreparedTarget, RawOutput, SshTarget
 /// The complete helper stage list. The sudoers file is generated from this list, one exact command
 /// per stage; there is no wildcard and no free-form argument.
 pub const STAGES: &[&str] = &[
-    "check", "predeploy-backup", "base", "env", "bundle", "nginx", "start",
+    "check", "upload", "predeploy-backup", "base", "env", "bundle", "nginx", "start",
     "open-registration", "lock-registration", "backup", "rollback", "update", "uninstall", "uninstall-purge",
 ];
 
@@ -134,10 +134,20 @@ pub struct DeployReport {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Health {
-    pub ok: bool,
+    pub status: String,
     pub db_ok: bool,
     pub hub: bool,
     pub api_version: u32,
+}
+
+pub fn parse_health(text: &str) -> Option<Health> {
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    Some(Health {
+        status: v.get("status")?.as_str()?.to_string(),
+        db_ok: v.get("checks")?.get("db")?.as_bool()?,
+        hub: v.get("hub").and_then(|x| x.as_bool()).unwrap_or(false),
+        api_version: v.get("apiVersion")?.as_u64()? as u32,
+    })
 }
 
 pub trait HealthProbe: Send + Sync {
@@ -151,13 +161,7 @@ impl HealthProbe for SystemHealth {
         let res = ureq::get(url).timeout(std::time::Duration::from_secs(10)).call()
             .map_err(|e| herr("health_unreachable", format!("the hub did not answer /health: {e}")))?;
         let text = res.into_string().map_err(|e| herr("health_unreadable", format!("invalid /health body: {e}")))?;
-        let body: serde_json::Value = serde_json::from_str(&text).map_err(|e| herr("health_unreadable", format!("invalid /health JSON: {e}")))?;
-        Ok(Health {
-            ok: body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
-            db_ok: body.get("dbOk").and_then(|v| v.as_bool()).unwrap_or(false),
-            hub: body.get("hub").and_then(|v| v.as_bool()).unwrap_or(false),
-            api_version: body.get("apiVersion").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-        })
+        parse_health(&text).ok_or_else(|| herr("health_unreadable", "invalid /health JSON"))
     }
 }
 
@@ -205,7 +209,6 @@ pub fn plan_warnings(p: &Preflight) -> Vec<String> {
 pub fn stages() -> Vec<DeployStage> {
     let rows = [
         ("predeploy-backup", "Back up the existing hub database", true, "Stops the old service, VACUUM INTO a pre-deploy snapshot, starts it again. Skipped on a fresh server."),
-        ("base", "Create the service user and directories", true, "useradd llmide; /opt/llmide, /var/lib/llmide, /srv/llmide/projects, /etc/llmide; unit and logrotate."),
         ("env", "Write the secret env file over stdin", true, "0600 root:root; JWT and vault secrets generated locally; never in argv or a log."),
         ("bundle", "Upload and switch the Linux core release", true, "Verifies SHA-256, unpacks, requires Node 22, updates current/previous symlinks, keeps three releases."),
         ("nginx", "Install the TLS vhost and certificate pin", true, "nginx -t before reload; restores the previous site on failure; publishes the front SPKI."),
@@ -273,7 +276,7 @@ pub fn generate_secrets() -> Result<DeploySecrets, FsError> {
 
 pub fn env_bytes(s: &DeploySecrets, domain: &str, version: &str) -> Vec<u8> {
     format!(
-        "NODE_ENV=production\nPATH=/usr/local/bin:/usr/bin:/bin\nLLMIDE_HOST=127.0.0.1\nLLMIDE_PORT=3457\nLLMIDE_HUB=1\nLLMIDE_TLS_TERMINATED=1\nLLMIDE_HUB_DOMAIN={domain}\nLLMIDE_HUB_VERSION={version}\nLLMIDE_DATA_DIR=/var/lib/llmide\nLLMIDE_DB_PATH=/var/lib/llmide/data.db\nLLMIDE_PROJECTS_ROOT=/srv/llmide/projects\nLLMIDE_BACKUP_DIR=/var/lib/llmide/backups\nLLMIDE_BACKUP_KEEP=7\nLLMIDE_DISABLE_REGISTRATION=1\nLLMIDE_TRUST_PROXY=1\nLLMIDE_LOG_JSON=1\nLLMIDE_LOG_LEVEL=info\nLLMIDE_MAX_TURNS=8\nLLMIDE_HOST_API_HUB=1\nLLMIDE_HOST_API_WEB_ORIGINS=https://{domain}\nLLMIDE_HOST_API_FINGERPRINT_FILE=/etc/llmide/host-api-fingerprint\nLLMIDE_JWT_SECRET={}\nLLMIDE_VAULT_KEY={}\n",
+        "NODE_ENV=production\nPATH=/usr/local/bin:/usr/bin:/bin\nLLMIDE_HOST=127.0.0.1\nLLMIDE_PORT=3457\nLLMIDE_HUB=1\nLLMIDE_TLS_TERMINATED=1\nLLMIDE_HUB_DOMAIN={domain}\nLLMIDE_HUB_VERSION={version}\nLLMIDE_DATA_DIR=/var/lib/llmide\nLLMIDE_DB_PATH=/var/lib/llmide/data.db\nLLMIDE_PROJECTS_ROOT=/srv/llmide/projects\nLLMIDE_BACKUP_DIR=/var/lib/llmide/backups\nLLMIDE_BACKUP_KEEP=7\nLLMIDE_DISABLE_REGISTRATION=1\nLLMIDE_TRUST_PROXY=1\nLLMIDE_LOG_JSON=1\nLLMIDE_LOG_LEVEL=info\nLLMIDE_MAX_TURNS=8\nLLMIDE_HOST_API_HUB=1\nLLMIDE_HOST_API_WEB_ORIGINS=https://{domain}\nLLMIDE_HOST_API_FINGERPRINT_FILE=/etc/llmide/host-api-fingerprint\nLLMIDE_HUB_PUBLIC_URL=wss://{domain}/host-api/v1\nLLMIDE_JWT_SECRET={}\nLLMIDE_VAULT_KEY={}\n",
         s.jwt, s.vault
     ).into_bytes()
 }
@@ -283,10 +286,28 @@ const ENV_KEYS: &[&str] = &[
     "LLMIDE_HUB_DOMAIN", "LLMIDE_HUB_VERSION", "LLMIDE_DATA_DIR", "LLMIDE_DB_PATH", "LLMIDE_PROJECTS_ROOT",
     "LLMIDE_BACKUP_DIR", "LLMIDE_BACKUP_KEEP", "LLMIDE_DISABLE_REGISTRATION", "LLMIDE_TRUST_PROXY",
     "LLMIDE_LOG_JSON", "LLMIDE_LOG_LEVEL", "LLMIDE_MAX_TURNS", "LLMIDE_HOST_API_HUB",
-    "LLMIDE_HOST_API_WEB_ORIGINS", "LLMIDE_HOST_API_FINGERPRINT_FILE", "LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY",
+    "LLMIDE_HOST_API_WEB_ORIGINS", "LLMIDE_HOST_API_FINGERPRINT_FILE", "LLMIDE_HUB_PUBLIC_URL",
+    "LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY",
 ];
 
 /// Root-side shape check mirrored in the helper: only known keys, no loader/option injection, no CR.
+/// Keeps the existing JWT/vault values on a re-deploy; a new install uses the generated pair.
+pub fn preserve_env_secrets(new_env: &str, old_env: &str) -> String {
+    let get = |text: &str, key: &str| text.lines().find_map(|l| l.strip_prefix(&format!("{key}="))).map(str::to_string)
+        .filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_hexdigit()));
+    let mut out = String::new();
+    for line in new_env.lines() {
+        let mut written = line.to_string();
+        for key in ["LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY"] {
+            if line.starts_with(&format!("{key}=")) {
+                if let Some(old) = get(old_env, key) { written = format!("{key}={old}"); }
+            }
+        }
+        out.push_str(&written); out.push('\n');
+    }
+    out
+}
+
 pub fn validate_env_text(text: &str) -> Result<(), FsError> {
     for line in text.lines() {
         let Some((key, value)) = line.split_once('=') else { return Err(herr("env_invalid", "the env contains a line without '='")) };
@@ -305,7 +326,7 @@ arch=$(uname -m 2>/dev/null | tr -cd 'A-Za-z0-9_-')
 systemd=false; command -v systemctl >/dev/null 2>&1 && systemd=true
 nginx=false; command -v nginx >/dev/null 2>&1 && nginx=true
 certbot=false; command -v certbot >/dev/null 2>&1 && certbot=true
-sudo_ok=false; sudo -n true >/dev/null 2>&1 && sudo_ok=true
+sudo_ok=false; sudo -n /usr/local/sbin/llmide-deploy check >/dev/null 2>&1 && sudo_ok=true; sudo -n true >/dev/null 2>&1 && sudo_ok=true
 disk=$(df -Pk /var 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024}')
 claude=false; command -v claude >/dev/null 2>&1 && claude=true
 existing=$(cat /opt/llmide/current/VERSION 2>/dev/null | tr -cd 'A-Za-z0-9._-' | cut -c1-40)
@@ -326,7 +347,7 @@ pub fn staging_for(user: &str) -> String {
     if user == "root" { "/root/.llmide-deploy".to_string() } else { format!("/home/{user}/.llmide-deploy") }
 }
 
-fn upload<R: DeployRunner>(runner: &R, target: &PreparedTarget, name: &str, bytes: &[u8]) -> Result<(), FsError> {
+fn upload_home<R: DeployRunner>(runner: &R, target: &PreparedTarget, name: &str, bytes: &[u8]) -> Result<(), FsError> {
     let dir = staging_for(&target.user);
     let cmd = format!("mkdir -p \"{dir}\" && cat > \"{dir}/{name}\"");
     let out = runner.run(target, &cmd, Some(bytes))?;
@@ -334,13 +355,26 @@ fn upload<R: DeployRunner>(runner: &R, target: &PreparedTarget, name: &str, byte
     Ok(())
 }
 
+/// Upload into the root-owned staging directory through the helper's `upload` stage (name line + bytes).
+fn upload_staging<R: DeployRunner>(runner: &R, target: &PreparedTarget, name: &str, bytes: &[u8]) -> Result<(), FsError> {
+    let mut payload = Vec::with_capacity(name.len() + 1 + bytes.len());
+    payload.extend_from_slice(name.as_bytes()); payload.push(b'\n'); payload.extend_from_slice(bytes);
+    let out = runner.run(target, &stage_command("upload").unwrap(), Some(&payload))?;
+    if out.code != Some(0) { return Err(herr("upload_failed", format!("could not upload {name}"))); }
+    Ok(())
+}
+
 pub fn bootstrap_with<R: DeployRunner>(runner: &R, target: &PreparedTarget) -> Result<Bootstrap, FsError> {
-    upload(runner, target, "llmide-deploy", HELPER.as_bytes())?;
-    upload(runner, target, "sudoers", sudoers_text(&target.user).as_bytes())?;
-    upload(runner, target, "llmide-core.service", UNIT.as_bytes())?;
-    upload(runner, target, "llmide-backup.service", BACKUP_UNIT.as_bytes())?;
-    upload(runner, target, "logrotate", LOGROTATE.as_bytes())?;
     let dir = staging_for(&target.user);
+    if let Ok(o) = runner.run(target, "sudo -n /usr/local/sbin/llmide-deploy check", None) {
+        if o.code == Some(0) {
+            let base = runner.run(target, "sudo -n /usr/local/sbin/llmide-deploy base", None)?;
+            if base.code != Some(0) { return Err(herr("bootstrap_failed", "the deploy helper could not create the service user")); }
+            return Ok(Bootstrap { installed: true, command: String::new(), staging: dir });
+        }
+    }
+    upload_home(runner, target, "llmide-deploy", HELPER.as_bytes())?;
+    upload_home(runner, target, "sudoers", sudoers_text(&target.user).as_bytes())?;
     let install = format!("chmod 0700 \"{dir}/llmide-deploy\" && sudo -n install -m 0755 -o root -g root \"{dir}/llmide-deploy\" /usr/local/sbin/llmide-deploy && sudo -n install -m 0440 -o root -g root \"{dir}/sudoers\" /etc/sudoers.d/llmide-deploy");
     let out = runner.run(target, &install, None)?;
     if out.code != Some(0) {
@@ -384,6 +418,22 @@ pub fn confirm_plan(id: &str, confirmation: &str, now: u64) -> Result<DeployPlan
 /// Runs the confirmed stages through `open-registration`, with a health gate after `start`.
 /// It deliberately stops before `lock-registration`: the owner must create the account, then the
 /// UI calls `lock_registration`. Any failure runs the helper's `rollback` stage and reports it.
+#[cfg(test)]
+const HEALTH_ATTEMPTS: usize = 2;
+#[cfg(not(test))]
+const HEALTH_ATTEMPTS: usize = 30;
+
+fn wait_healthy<H: HealthProbe>(health: &H, url: &str) -> bool {
+    for i in 0..HEALTH_ATTEMPTS {
+        if health.check(url).map(|h| h.db_ok && h.hub && h.api_version >= 128).unwrap_or(false) { return true; }
+        if i + 1 < HEALTH_ATTEMPTS {
+            #[cfg(not(test))]
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    }
+    false
+}
+
 pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
     runner: &R, health: &H, target: &PreparedTarget, plan: &DeployPlan, secrets: &DeploySecrets, bundle: &[u8],
 ) -> Result<DeployReport, FsError> {
@@ -409,32 +459,24 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
             }
             "bundle" => {
                 let sha = hex(&Sha256::digest(bundle));
-                let up = format!("mkdir -p \"{staging}\" && cat > \"{staging}/bundle.tar.gz\"");
-                match runner.run(target, &up, Some(bundle)) {
-                    Ok(o) if o.code == Some(0) => {
+                match upload_staging(runner, target, "bundle.tar.gz", bundle) {
+                    Ok(()) => {
                         let list = format!("{sha}  bundle.tar.gz\n");
-                        let up2 = format!("cat > \"{staging}/bundle.sha256\"");
-                        match runner.run(target, &up2, Some(list.as_bytes())) {
-                            Ok(o2) if o2.code == Some(0) => runner.run(target, &cmd, None),
-                            Ok(_) => Err(herr("upload_failed", "could not write the bundle checksum")),
+                        match upload_staging(runner, target, "bundle.sha256", list.as_bytes()) {
+                            Ok(()) => runner.run(target, &cmd, None),
                             Err(e) => Err(e),
                         }
                     }
-                    Ok(_) => Err(herr("upload_failed", "could not upload the hub bundle")),
                     Err(e) => Err(e),
                 }
             }
             "nginx" => {
                 let vhost = VHOST_TEMPLATE.replace("__DOMAIN__", &plan.domain);
-                let up = format!("mkdir -p \"{staging}\" && cat > \"{staging}/llm-ide-hub.nginx\"");
-                let up2 = format!("cat > \"{staging}/setup.html\"");
-                match runner.run(target, &up, Some(vhost.as_bytes())) {
-                    Ok(o) if o.code == Some(0) => match runner.run(target, &up2, Some(SETUP_HTML.as_bytes())) {
-                        Ok(o2) if o2.code == Some(0) => runner.run(target, &cmd, None),
-                        Ok(_) => Err(herr("upload_failed", "could not upload the setup page")),
+                match upload_staging(runner, target, "llm-ide-hub.nginx", vhost.as_bytes()) {
+                    Ok(()) => match upload_staging(runner, target, "setup.html", SETUP_HTML.as_bytes()) {
+                        Ok(()) => runner.run(target, &cmd, None),
                         Err(e) => Err(e),
                     },
-                    Ok(_) => Err(herr("upload_failed", "could not upload the nginx vhost")),
                     Err(e) => Err(e),
                 }
             }
@@ -454,7 +496,7 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
                 match runner.run(target, &cmd, None) {
                     Ok(o) if o.code == Some(0) => {
                         let url = format!("https://{}/health", plan.domain);
-                        let healthy = health.check(&url).map(|h| h.ok && h.db_ok && h.hub && h.api_version >= 128).unwrap_or(false);
+                        let healthy = wait_healthy(health, &url);
                         if healthy { Ok(o) } else { Err(herr("health_timeout", "the hub did not become healthy within the check window")) }
                     }
                     other => other,
@@ -584,20 +626,25 @@ pub async fn remote_update(target: SshTarget, version: String, confirmation: Str
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         if confirmation != target.host { return Err(herr("confirmation_mismatch", "type the hostname exactly to update")); }
+        let pre = SystemDeploy.run(&prepared, &stage_command("predeploy-backup").unwrap(), None)?;
+        if pre.code != Some(0) { return Err(herr("backup_failed", "the pre-update backup failed; nothing was changed")); }
         let Some(bundle) = bundle_path(&version) else { return Err(herr("bundle_missing", "the staged hub bundle is missing; run node desktop/scripts/stage-hub-core.mjs")); };
         let bytes = std::fs::read(&bundle).map_err(|e| herr("bundle_missing", format!("cannot read the bundle: {e}")))?;
         if bytes.len() > 256 * 1024 * 1024 { return Err(herr("bundle_too_large", "the hub bundle is larger than 256 MB")); }
         let staging = staging_for(&target.user);
         let sha = hex(&Sha256::digest(&bytes));
-        let up = format!("mkdir -p \"{staging}\" && cat > \"{staging}/bundle.tar.gz\"");
-        let o = SystemDeploy.run(&prepared, &up, Some(&bytes))?;
-        if o.code != Some(0) { return Err(herr("upload_failed", "could not upload the update bundle")); }
-        let o = SystemDeploy.run(&prepared, &format!("cat > \"{staging}/bundle.sha256\""), Some(format!("{sha}  bundle.tar.gz\n").as_bytes()))?;
-        if o.code != Some(0) { return Err(herr("upload_failed", "could not write the update checksum")); }
-        let o = SystemDeploy.run(&prepared, &format!("cat > \"{staging}/VERSION\""), Some(format!("{version}\n").as_bytes()))?;
-        if o.code != Some(0) { return Err(herr("upload_failed", "could not write the update version")); }
+        upload_staging(&SystemDeploy, &prepared, "bundle.tar.gz", &bytes)?;
+        upload_staging(&SystemDeploy, &prepared, "bundle.sha256", format!("{sha}  bundle.tar.gz\n").as_bytes())?;
+        upload_staging(&SystemDeploy, &prepared, "VERSION", format!("{version}\n").as_bytes())?;
         let o = SystemDeploy.run(&prepared, &stage_command("update").unwrap(), None)?;
-        if o.code != Some(0) { return Err(herr("update_failed", "the hub update did not finish; the previous release is still current")); }
+        if o.code != Some(0) {
+            let _ = SystemDeploy.run(&prepared, &stage_command("rollback").unwrap(), None);
+            return Err(herr("update_failed", "the hub update failed; the previous release was restored when available"));
+        }
+        if !wait_healthy(&SystemHealth, &format!("https://{}/health", target.host)) {
+            let _ = SystemDeploy.run(&prepared, &stage_command("rollback").unwrap(), None);
+            return Err(herr("update_unhealthy", "the updated hub did not become healthy; the previous release was restored"));
+        }
         Ok(())
     }).await.map_err(|e| herr("internal", format!("the update did not finish: {e}")))?
 }
@@ -696,7 +743,7 @@ mod tests {
     }
     impl HealthProbe for Fake {
         fn check(&self, _url: &str) -> Result<Health, FsError> {
-            self.health.first().cloned().unwrap_or(Ok(Health { ok: true, db_ok: true, hub: true, api_version: 129 })).map_err(|m| herr("health_unreachable", m))
+            self.health.first().cloned().unwrap_or(Ok(Health { status: "ok".into(), db_ok: true, hub: true, api_version: 129 })).map_err(|m| herr("health_unreachable", m))
         }
     }
     fn target() -> PreparedTarget { PreparedTarget { host: "hub.example.com".into(), port: 22, user: "deploy".into(), key_path: "/k".into() } }
@@ -728,8 +775,20 @@ mod tests {
         let env = String::from_utf8(env_bytes(&s, "hub.example.com", "1.2.3")).unwrap();
         assert!(env.contains("LLMIDE_VAULT_KEY=bbbb"));
         assert!(env.contains("LLMIDE_HUB_DOMAIN=hub.example.com"));
+        assert!(env.contains("LLMIDE_HUB_PUBLIC_URL=wss://hub.example.com/host-api/v1"));
+        validate_env_text(&env).unwrap();
         assert!(env.contains("LLMIDE_BACKUP_KEEP=7"));
         for stage in STAGES { let cmd = stage_command(stage).unwrap(); assert!(!cmd.contains(&s.jwt)); }
+    }
+
+    #[test]
+    fn a_redeploy_keeps_the_existing_secret_pair() {
+        let new = "NODE_ENV=production\nLLMIDE_JWT_SECRET=newjwt\nLLMIDE_VAULT_KEY=newvault\n";
+        let old = "LLMIDE_JWT_SECRET=aaaa\nLLMIDE_VAULT_KEY=bbbb\n";
+        let merged = preserve_env_secrets(new, old);
+        assert!(merged.contains("LLMIDE_JWT_SECRET=aaaa"));
+        assert!(merged.contains("LLMIDE_VAULT_KEY=bbbb"));
+        assert!(!merged.contains("newjwt"));
     }
 
     #[test]
@@ -738,6 +797,18 @@ mod tests {
         for bad in ["NODE_OPTIONS=--require /tmp/x", "LD_PRELOAD=/tmp/x.so", "BASH_ENV=/tmp/x", "EVIL=1", "no_equals"] {
             assert!(validate_env_text(&format!("NODE_ENV=production\n{bad}\n")).is_err(), "{bad:?} must be refused");
         }
+    }
+
+    #[test]
+    fn health_parses_the_real_payload_shape() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../../schema/http/fixtures/health-auth/get-health-200.json")).unwrap();
+        let body = serde_json::to_string(&fixture["response"]).unwrap();
+        let h = parse_health(&body).unwrap();
+        assert_eq!(h.status, "degraded");
+        assert!(h.db_ok, "checks.db is the DB truth, not status/degraded");
+        assert!(!h.hub);
+        assert_eq!(h.api_version, fixture["response"]["apiVersion"].as_u64().unwrap() as u32);
+        assert!(parse_health("{\"ok\":true}").is_none(), "the old fake shape must not pass");
     }
 
     #[test]
@@ -794,7 +865,7 @@ mod tests {
         assert!(b.installed);
         let calls = fake.calls();
         assert!(calls.iter().any(|(c, _)| c.contains("llmide-deploy")));
-        assert!(calls.iter().any(|(c, s)| c.contains("sudo -n /usr/local/sbin/llmide-deploy base") && s.is_some()));
+        assert!(calls.iter().any(|(c, s)| c.contains("sudo -n /usr/local/sbin/llmide-deploy base")));
         assert!(calls.iter().all(|(c, _)| !c.contains("LLMIDE_VAULT_KEY")));
     }
 
