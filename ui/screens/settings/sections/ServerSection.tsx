@@ -17,7 +17,7 @@ import RemoteServerCard from "./RemoteServerCard.tsx";
  * (the Mac's live log viewer). Start, Stop and Kill & Restart are offered when the host can run them; the app owns the core.
  */
 export default function ServerSection() {
-  const { client, host } = useEnv();
+  const { client, host, serverMode } = useEnv();
   const [info, setInfo] = useState<DiagnosticsInfo | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -115,7 +115,7 @@ export default function ServerSection() {
 
       <div className="st-note">
         <span className="st-label">Managed backend</span>
-        {host.getBackendConfig && host.setBackendConfig ? <BackendForm host={host} onSaved={load} /> : null}
+        {serverMode !== "remote" && host.getBackendConfig && host.setBackendConfig ? <BackendForm host={host} onSaved={load} /> : null}
         {info?.coreUrl ? (
           <div className="st-row">
             <span className="st-hint">Server URL</span>
@@ -146,7 +146,7 @@ export default function ServerSection() {
 
       <RemoteServerCard />
 
-      <LegacyImportCard host={host} />
+      {serverMode !== "remote" ? <LegacyImportCard host={host} /> : null}
 
       {host.coreLog ? (
         <div className="st-stack">
