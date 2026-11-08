@@ -82,7 +82,8 @@
             "type": "string",
             "enum": [
               "mac",
-              "desktop"
+              "desktop",
+              "hub"
             ]
           },
           "apiVersion": {

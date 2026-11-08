@@ -31,10 +31,14 @@ struct PairingInfoTests {
         #expect(PairingInfo(from: qr("192.168.1.1%25evil.com")) == nil)
     }
 
-    @Test("a public address or DNS name is refused")
-    func publicHost() {
-        #expect(PairingInfo(from: qr("8.8.8.8")) == nil)
-        #expect(PairingInfo(from: qr("example.com")) == nil)
+    @Test("a public hub name is accepted only when the QR carries its certificate pin")
+    func publicHost() throws {
+        let p = try #require(PairingInfo(from: qr("hub.example.com")))
+        #expect(p.ip == "hub.example.com")
+        #expect(p.hostApiOffer.fingerprint == Self.fp)
+        #expect(PairingInfo(from: qr("8.8.8.8")) == nil, "a public IP literal is never a hub name")
+        #expect(PairingInfo(from: "llmide://pair?ip=hub.example.com&pin=123456&h1port=443&api=1") == nil,
+                "without h1fp the public name is refused")
     }
 
     @Test("only real fc00::/7 and fe80::/10 addresses count as private IPv6")

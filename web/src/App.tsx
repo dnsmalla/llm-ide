@@ -11,6 +11,7 @@ import { WebChat } from "./screens/WebChat.tsx";
 import { ComposeBar } from "./screens/ComposeBar.tsx";
 import { ReadPanel } from "./screens/ReadPanel.tsx";
 import { SyncLinkEntry, SyncTier } from "./screens/SyncTier.tsx";
+import { hubCopy, isHubHello, syncEntryVisible } from "./hub-copy.ts";
 import { createPushController } from "./push/controller.ts";
 import { PushToggle } from "./screens/PushToggle.tsx";
 
@@ -73,19 +74,20 @@ function AppMain({ model: given, sync: givenSync, sources: givenSources }: { mod
   const sy = useSyncExternalStore(sync.subscribe, sync.getState, sync.getState);
   const so = useSyncExternalStore(sources.subscribe, sources.getState, sources.getState);
   const conn = useConnection(s.session);
+  const hub = isHubHello(s.session?.connection.hello);
   useEffect(() => { model.start(); return model.dispose; }, [model]);
-  useEffect(() => { void sync.start(); return sync.dispose; }, [sync]);
+  useEffect(() => { if (!hub) void sync.start(); return sync.dispose; }, [sync, hub]);
   useEffect(() => { void sources.start(); return sources.dispose; }, [sources]);
   const live = conn?.kind === "ready";
-  useEffect(() => { if (live) sync.pause(); else sync.resume(); }, [live, sync]);
+  useEffect(() => { if (hub) return; if (live) sync.pause(); else sync.resume(); }, [live, sync, hub]);
   // While the first connection attempt is still running the host is not "down" yet: no sync-tier flash before chat.
   const hostDown = (!s.session && !s.busy) || conn?.kind === "reconnecting" || conn?.kind === "failed";
   const openSources = () => setShowSources(true);
   if (showSources) return <SourcesScreen state={so} sources={sources} onBack={() => setShowSources(false)} />;
-  if (sy.phase === "pairing" || (sy.phase !== "none" && hostDown)) return <SyncTier state={sy} sync={sync} hostPaired={s.session !== null} onSources={openSources} />;
+  if (!hub && (sy.phase === "pairing" || (sy.phase !== "none" && hostDown))) return <SyncTier state={sy} sync={sync} hostPaired={s.session !== null} onSources={openSources} />;
   if (s.session && conn) return <Chat session={s.session} conn={conn} onForget={model.forget} />;
   return <PairingScreen initialUrl={model.initialUrl} busy={s.busy} error={s.error} revokedNotice={s.notice} onSubmit={(u, p) => void model.attempt(u, p)}
-    footer={<><SyncLinkEntry onLink={sync.acceptLink} error={sy.phase === "none" ? sy.error : null} /><SourcesEntry onOpen={openSources} /></>} />;
+    footer={<>{syncEntryVisible(s.session?.connection.hello) ? <SyncLinkEntry onLink={sync.acceptLink} error={sy.phase === "none" ? sy.error : null} /> : <p className="hub-note">{hubCopy(s.session?.connection.hello)}</p>}<SourcesEntry onOpen={openSources} /></>} />;
 }
 
 // ---- Legal pages (Apple review + support) -------------------------------------------------------

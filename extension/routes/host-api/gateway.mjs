@@ -515,7 +515,7 @@ export function createGateway(overrides) {
         entry.state.greeted(p.clientName);
         const fingerprint = deps.certificateFingerprint();
         return respond(s, id, command, {
-          hostName: clamp(deps.hostName() || 'Computer', 120), hostKind: 'desktop', apiVersion: 1, apiVersions: [1],
+          hostName: clamp(deps.hostName() || 'Computer', 120), hostKind: config.hub ? 'hub' : 'desktop', apiVersion: 1, apiVersions: [1],
           capabilities: deps.capabilities(), protocolVersion: 1, requiresAuth: true,
           ...(fingerprint ? { certificateFingerprint: fingerprint } : {}),
         });

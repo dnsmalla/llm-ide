@@ -24,7 +24,7 @@ public struct PairingInfo {
               let pin = items.first(where: { $0.name == "pin" })?.value,
               let offer = HostApiPairingOffer(port: items.first(where: { $0.name == "h1port" })?.value,
                                               fingerprint: items.first(where: { $0.name == "h1fp" })?.value),
-              let canonicalHost = Self.canonicalPrivateHost(host), Self.isWellFormedPin(pin)
+              let canonicalHost = Self.canonicalHost(host, allowPublicWithPin: offer.fingerprint), Self.isWellFormedPin(pin)
         else { return nil }
         // Store the VALIDATED string, not the raw one: validating `bare` while
         // persisting `host` is a parser differential — `192.168.1.1%25evil.com`
@@ -48,6 +48,26 @@ public struct PairingInfo {
     /// (`/`, `?`, `@`, …) that would rewrite the endpoint URL's path or query.
     public static func isPrivateHost(_ host: String) -> Bool {
         canonicalPrivateHost(host) != nil
+    }
+
+    /// A scanned QR may name a public hub only when it also carries a certificate pin (`h1fp`): the
+    /// optical channel is then the trust anchor, exactly as it is for a private host. A typed PIN never
+    /// arrives here (its screen keeps the old pin), so a public name cannot be adopted without a QR.
+    static func canonicalHost(_ host: String, allowPublicWithPin pin: String?) -> String? {
+        if let privateHost = canonicalPrivateHost(host) { return privateHost }
+        guard let pin, HostApiPinning.isValidFingerprint(pin) else { return nil }
+        guard !host.isEmpty, host.count <= 253, !host.contains("%"), !host.contains(":"),
+              !host.contains("/"), !host.contains("?"), !host.contains("@"), !host.contains("#"),
+              !host.hasPrefix("-"), !host.hasSuffix("."), !host.hasSuffix("-") else { return nil }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2 else { return nil }
+        // A public IP literal is never a hub name; only DNS labels are accepted here.
+        if labels.count == 4 && labels.allSatisfy({ Int($0) != nil }) { return nil }
+        guard labels.allSatisfy({ label in
+            !label.isEmpty && label.count <= 63 && !label.hasPrefix("-") && !label.hasSuffix("-")
+                && label.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
+        }) else { return nil }
+        return host.lowercased()
     }
 
     /// The accepted host, exactly as it should be stored and dialled, or nil
