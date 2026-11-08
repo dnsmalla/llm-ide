@@ -485,6 +485,17 @@ macro_rules! app_handler {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// The native "cannot start" dialog for an unavailable explicit data root (R-021 #5). Uses `rfd` (already a
+/// dependency); the decision and the text are tested, the GUI itself is not.
+fn show_data_root_error(message: &str) {
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("LLM-IDE cannot start")
+        .set_description(message)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
+
 pub fn run() {
     let host = CoreHost::new();
     let setup_host = host.clone();
@@ -550,7 +561,9 @@ pub fn run() {
                     // A configured data root on a drive that is gone is a startup error, not a fresh install on
                     // another disk. Failing here (instead of skipping the lock silently) keeps the message visible.
                     if let Err(e) = fsutil::data_root_available(&dir) {
+                        // A GUI launch has no visible stderr: show the reason in a native dialog, then stop.
                         eprintln!("{e}");
+                        show_data_root_error(&e);
                         return Err(e.into());
                     }
                     let dir = fsutil::private_dir(&dir)?;
