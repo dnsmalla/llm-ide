@@ -15,6 +15,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const kb = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const dev = await import('../kb/host-api-devices.mjs');
+const chats = await import('../kb/chat-sessions.mjs');
 const pins = await import('../routes/host-api/pin.mjs');
 const { PairingThrottle, peerKey } = await import('../routes/host-api/throttle.mjs');
 
@@ -69,12 +70,24 @@ test('a new device is never evicted, even with an older clock', () => {
   assert.deepEqual(round.scopes, ['host', 'chat', 'approvals']);
 });
 
-test('the quick chat id is per user', () => {
+test('the quick chat id is per user and per project, and must name that project\'s live session', () => {
   const u = user();
   assert.equal(dev.getQuickChatId(u), null);
-  dev.setQuickChatId(u, 'chat-1');
-  assert.equal(dev.getQuickChatId(u), 'chat-1');
-  assert.equal(dev.getQuickChatId(user()), null);
+  const global = chats.createChatSession(u, { title: 'Phone chat', surface: 'any', mode: 'agent' });
+  dev.setQuickChatId(u, global.id);
+  assert.equal(dev.getQuickChatId(u), global.id);
+  assert.equal(dev.getQuickChatId(user()), null, 'another user has no pointer');
+
+  const alpha = chats.createChatSession(u, { title: 'Alpha', surface: 'any', mode: 'agent', projectId: 'p-alpha' });
+  dev.setQuickChatId(u, alpha.id, 'p-alpha');
+  assert.equal(dev.getQuickChatId(u, 'p-alpha'), alpha.id);
+  assert.equal(dev.getQuickChatId(u, 'p-beta'), null);
+  // A pointer naming another project's session is refused, not returned.
+  dev.setQuickChatId(u, alpha.id, 'p-beta');
+  assert.equal(dev.getQuickChatId(u, 'p-beta'), null);
+  // A deleted session makes its pointer stale.
+  chats.deleteChatSession(u, global.id);
+  assert.equal(dev.getQuickChatId(u), null);
 });
 
 test('a PIN is six digits, one-use, per user and expires', () => {
