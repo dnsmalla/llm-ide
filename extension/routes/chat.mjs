@@ -200,9 +200,9 @@ export async function handleChatRoutes(req, res, ctx) {
   // dead turn replaces its partial with the full answer, so the partial must not reappear on a reload.
   // Ownership is the session's (WHERE user_id = ? AND id = ?); only a row whose meta says it was interrupted
   // can be dropped (409 MESSAGE_NOT_INTERRUPTED otherwise) and a repeat DELETE is a 200 with deleted:false.
-  const one = /^messages\/(\d{1,15})$/.exec(sub);
+  const one = /^messages\/([^/]+)$/.exec(sub);
   if (req.method === 'DELETE' && one) {
-    const seq = Number(one[1]);
+    const seq = /^\d{1,15}$/.test(one[1]) ? Number(one[1]) : NaN;
     if (!Number.isSafeInteger(seq) || seq < 1) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'seq must be an integer >= 1' } });
       return true;

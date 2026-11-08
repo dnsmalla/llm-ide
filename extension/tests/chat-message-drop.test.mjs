@@ -107,6 +107,9 @@ test('a missing session is 404; no JWT is 401; a bad seq is 400', async () => {
   const zero = await srv.call('DELETE', `/kb/chat/sessions/${id}/messages/0`);
   assert.equal(zero.status, 400, zero.text);
   assert.equal(zero.body.error.code, 'VALIDATION_FAILED');
+  const word = await srv.call('DELETE', `/kb/chat/sessions/${id}/messages/abc`);
+  assert.equal(word.status, 400, word.text, 'a non-integer seq is a validation error, not an unknown route');
+  assert.equal(word.body.error.code, 'VALIDATION_FAILED');
 });
 
 test('the store helper refuses a non-integer seq (the route validates first)', () => {
