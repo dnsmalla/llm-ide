@@ -11,7 +11,7 @@ import { sessionsOf, historyOf, usageOf, READ_LIMITS } from './reads.mjs';
 import { attachmentsToFiles, isBinaryAttachment, optionsOf, offersModel } from './compose.mjs';
 import { pushTargetOf } from './push-target.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
-import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES } from '../../kb/host-api-devices.mjs';
+import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES, MAX_LIFETIME_MS } from '../../kb/host-api-devices.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getMember, classRefusal } from '../../kb/members.mjs';
 import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
@@ -437,6 +437,14 @@ export function createGateway(overrides) {
     }
     const served = deps.capabilities();
     if (entry.state.deviceId) {
+      // R-023 #7: the lifetime is checked on EVERY frame, not only at auth: an open WSS session must not outlive
+      // its device's 90 days (the lost-phone case).
+      if (typeof entry.state.pairedAt === 'number' && deps.now() - entry.state.pairedAt > MAX_LIFETIME_MS) {
+        const { userId: u, deviceId: d } = entry.state;
+        audit('token_failed', { peer: entry.peer, userId: u, deviceId: d, detail: 'expired', dedupeKey: `${d}:expired` });
+        fail(s, r.id, 'auth_failed', 'This device is past its 90 days — pair again with a new PIN.');
+        return disconnectDevice(u, d);
+      }
       const capability = HOST_API_COMMANDS[r.command]?.capability;
       if (capability && served.includes(capability) && !entry.grants?.has(capability)) {
         deps.log(`Host API v1 connection ${entry.num} refused ${capability} (not granted)`);
@@ -518,6 +526,7 @@ export function createGateway(overrides) {
         const scopes = [...new Set(['host', ...served2])];
         const { deviceId, token } = deps.devices.issueDeviceToken(pinUser, entry.state.phase.clientName, deps.now(), scopes);
         entry.state.authenticated(pinUser, deviceId);
+        entry.state.pairedAt = deps.now();
         clearTimeout(entry.timer);
         audit('pair_ok', { peer: entry.peer, userId: pinUser, deviceId, clientName: entry.state.phase.clientName });
         return respond(s, id, command, { token, capabilities: grant(entry, scopes) });
@@ -533,6 +542,7 @@ export function createGateway(overrides) {
         tokenThrottle.success(entry.peer);
         if (userSessionCount(auth.userId) >= MAX_SESSIONS_PER_USER) return refuseUserCap(s, entry, id, auth.userId, 'token_failed');
         entry.state.authenticated(auth.userId, auth.deviceId);
+        entry.state.pairedAt = auth.pairedAt;
         clearTimeout(entry.timer);
         // Re-auth recomputes from the stored scopes ∩ the member filter, so a demoted member loses chat
         // on the next connect (ADR 0021).

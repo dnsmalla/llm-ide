@@ -33,7 +33,7 @@ import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils
 import { beginLoopRun } from '../core/agent-busy.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { isPluginUpdating } from '../plugins/claude-update.mjs';
-import { authorizeAction, enforceRouteAuthority, projectScopeRefusal } from '../server/route-authority.mjs';
+import { authorizeAction, enforceRouteAuthority, hubFolderRefusal, projectScopeRefusal } from '../server/route-authority.mjs';
 import { projectIdForFolder } from '../kb/projects.mjs';
 
 const MAX_SKILL_IDS = 5;
@@ -144,6 +144,9 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     sendJSON(res, 403, { error: { code: 'PROJECT_MISMATCH', message: 'That project does not own this folder' } });
     return true;
   }
+  // R-023 #1: on a hub this run edits a folder that must belong to a project (and it always edits a folder).
+  const hubRefusal = hubFolderRefusal(folder, folderProjectId);
+  if (hubRefusal) { sendJSON(res, hubRefusal.status, { error: { code: hubRefusal.code, message: hubRefusal.message } }); return true; }
   const projectId = folderProjectId || namedProjectId;
   const scopeRefusal = projectScopeRefusal(getDb(), userId, projectId);
   if (scopeRefusal) { sendJSON(res, scopeRefusal.status, { error: { code: scopeRefusal.code, message: scopeRefusal.message } }); return true; }

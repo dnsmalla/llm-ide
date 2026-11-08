@@ -265,30 +265,6 @@ export function rebuildNoteIndexSearch(db = getDb()) {
 }
 
 /**
- * The same rebuild in 500-row transactions with a yield between them, so a large library does not block every
- * other reader/writer for the whole rebuild (C4). The synchronous version stays for small/manual rebuilds.
- */
-export async function rebuildNoteIndexSearchBatched(db = getDb(), { batchSize = 500, yieldTo = setImmediate } = {}) {
-  db.prepare("DELETE FROM search WHERE kind = 'note'").run();
-  db.prepare('DELETE FROM note_index_search').run();
-  const rows = db.prepare('SELECT id, user_id, title, body_text FROM note_index').all();
-  const ins = db.prepare(`INSERT INTO search (meeting_id, entity_id, kind, title, body, user_id)
-    VALUES (char(1) || 'note:' || CAST(? AS INTEGER), NULL, 'note', ?, ?, ?)`);
-  const map = db.prepare('INSERT INTO note_index_search (note_id, search_rowid) VALUES (?, ?)');
-  const insertBatch = db.transaction((batch) => {
-    for (const r of batch) {
-      const rowid = Number(ins.run(r.id, r.title, r.body_text, r.user_id).lastInsertRowid);
-      map.run(r.id, rowid);
-    }
-  });
-  for (let i = 0; i < rows.length; i += batchSize) {
-    insertBatch(rows.slice(i, i + batchSize));
-    await new Promise((resolve) => yieldTo(resolve));
-  }
-  return rows.length;
-}
-
-/**
  * Index health for one user (optionally one project): the note count, how many
  * of them have a map entry, and how many of those map entries point at the
  * note's own FTS row. consistent is true only when all three agree, so a stale

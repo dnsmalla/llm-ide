@@ -179,6 +179,19 @@ export function projectIdForFolder(db, folder) {
   return best?.id ?? null;
 }
 
+/** The longest registered root that CONTAINS `rootKey` (not equal, excluding `excludeId`), or null. */
+function enclosingProject(db, rootKey, excludeId) {
+  const sep = path.sep;
+  let best = null;
+  for (const row of db.prepare('SELECT id, root FROM projects WHERE root IS NOT NULL AND id <> ?').all(excludeId)) {
+    const r = canonicalRoot(row.root);
+    if (!r) continue;
+    const prefix = r.endsWith(sep) ? r : r + sep;
+    if (rootKey.startsWith(prefix) && (best === null || r.length > best.root.length)) best = { id: row.id, root: r };
+  }
+  return best;
+}
+
 /** The registered project whose canonical root is this folder, or null. Lets a turn inherit the project
  *  from the desktop's workspaceRoot without a client change. Compared canonically, not as a raw string. */
 export function projectIdForRoot(db, root) {
@@ -235,6 +248,15 @@ export function registerProject(db, actorId, { id, root = null, name = null } = 
       const clash = db.prepare('SELECT id, root FROM projects WHERE root IS NOT NULL AND id <> ?').all(id)
         .find((r) => canonicalRoot(r.root) === canonical || canonicalRoot(r.root) === canonicalRoot(canonical));
       if (clash) throw err('PROJECT_EXISTS', 'This folder is already registered to another project; open that project', 409);
+      // R-023 #2: a sub-folder of an existing project is that project's work. Registering it as a new project would
+      // win the longest-root lookup and escape the enclosing project's role; only its admin/owner may split it off.
+      const enclosing = enclosingProject(db, canonical, id);
+      if (enclosing) {
+        const grant = effectiveProjectGrant(db, actorId, enclosing.id);
+        if (!canManageProjectGrant(grant)) {
+          throw err('PROJECT_NESTED', `This folder is inside project ${enclosing.id}; ask its admin`, 403);
+        }
+      }
     }
     if (existing) {
       const grant = effectiveProjectGrant(db, actorId, id);

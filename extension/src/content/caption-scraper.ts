@@ -393,7 +393,20 @@ const CC_ENABLERS: Record<PlatformId, () => boolean> = {
 // and surface a visible banner so the user knows to reload the tab.
 
 let contextInvalidated = false;
-let panelClosedBannerShown = false;
+let panelBanner: HTMLDivElement | null = null;
+
+/** The one in-page banner for a closed panel; reused (never stacked) and removed on the next successful send. */
+function showPanelClosedBanner(): void {
+  if (panelBanner && panelBanner.isConnected) return;
+  const el = showBanner('LLM-IDE panel is closed; captions are not being saved', '#b26a00');
+  if (!el) return;
+  el.dataset.llmidePanelClosed = '1';
+  panelBanner = el;
+}
+
+function clearPanelClosedBanner(): void {
+  if (panelBanner) { panelBanner.remove(); panelBanner = null; }
+}
 
 /** An in-page banner (the only feedback a caption-only tab can show). */
 function showBanner(text: string, background: string): HTMLDivElement | null {
@@ -457,20 +470,8 @@ function handleSendError(e: Error): void {
     return;
   }
 
-  // No receiver: the side panel is closed. Captions are intentionally not buffered (content and API key stay out
-  // of page storage), so say so once instead of failing silently (C7).
-  if (
-    (msg.includes('Could not establish connection') || msg.includes('receiving end does not exist')) &&
-    !panelClosedBannerShown
-  ) {
-    panelClosedBannerShown = true;
-    showBanner('LLM-IDE panel is closed; captions are not being saved', '#b26a00');
-    setTimeout(() => {
-      panelClosedBannerShown = false;
-    }, 60_000);
-    return;
-  }
-  // Transient errors — retry silently; debug channel only when LLMIDE_DEBUG=1.
+  // "Could not establish connection" / "receiving end does not exist" are TRANSIENT (a waking service worker):
+  // retry silently. A closed panel is reported by the worker as `{ ok: false, reason: 'no_panel' }` (R-023 #9).
   debug('[caption-scraper] send failed (will retry):', msg);
 }
 
@@ -484,7 +485,12 @@ function sendUpdate(speaker: string, text: string, sessionId: string): void {
     timestamp: Date.now(),
     sessionId,
   };
-  chrome.runtime.sendMessage(msg).catch((e: Error) => handleSendError(e));
+  chrome.runtime.sendMessage(msg)
+    .then((resp: { ok?: boolean; reason?: string } | undefined) => {
+      if (resp?.ok === false && resp.reason === 'no_panel') showPanelClosedBanner();
+      else clearPanelClosedBanner();
+    })
+    .catch((e: Error) => handleSendError(e));
 }
 
 function scrape(): void {

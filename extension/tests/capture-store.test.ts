@@ -14,6 +14,7 @@ import {
   listDrafts,
   deleteDraft,
   expectedOf,
+  finalizeBodies,
   toCaptions,
   importLegacyTranscript,
   importLegacyTranscripts,
@@ -202,15 +203,14 @@ test('Scenario A: the server ends up with a SHORT copy (lost pushes): not releas
   assert.ok(stored('a1'));
 });
 
-test('Scenario B: more than 2000 lines is never sent as complete and never released', async () => {
+test('a >2,000-line capture is sent whole (in parts) and waits for the ack', async () => {
   const srv = new FakeServer();
   const r = await stopCapture(fx.area, srv.api, draft('b1', 2100), NOW);
-  assert.equal(r.send, 'too-large');
-  assert.deepEqual(srv.calls.filter((c) => c.startsWith('finalize')), ['finalize:b1:plain']);
-  srv.ack('b1'); // the Mac acked the truncated streamed copy
-  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 });
-  assert.equal(rep[0].outcome, 'too-large');
-  assert.ok(stored('b1'));
+  assert.equal(r.send, 'sent');
+  assert.deepEqual(srv.calls.filter((c) => c.startsWith('finalize')), ['finalize:b1:payload'], 'one call carries the whole payload; the API splits it');
+  assert.equal(srv.lastPayload?.captions.length, 2100);
+  assert.equal(await getDraftStage(fx.area, 'b1'), 'awaiting-ack');
+  assert.ok(stored('b1'), 'kept until the ack');
 });
 
 test('Scenario C: a server that merges repeated lines (old behaviour) holds a short copy: kept', async () => {
@@ -650,12 +650,14 @@ test('legacy: unreachable deletes nothing and stops the batch; flag off deletes 
   assert.deepEqual(legacyIds(), ['a', 'b']);
 });
 
-test('legacy: over 2000 lines is skipped and never sent', async () => {
+test('legacy: over 2000 lines is imported through the multi-part path', async () => {
   const srv = new FakeServer();
   const t = legacy('big', 2100);
   seedLegacy([t]);
-  assert.equal((await importLegacyTranscript(fx.area, srv.api, t, lopts)).outcome, 'skipped-large');
-  assert.deepEqual(srv.calls, []);
+  const out = await importLegacyTranscript(fx.area, srv.api, t, lopts);
+  assert.notEqual(out.outcome, 'skipped-large');
+  assert.ok(srv.calls.some((c) => c.startsWith('finalize:') && c.endsWith(':payload')));
+  assert.equal(srv.lastPayload?.captions.length, 2100);
 });
 
 test('legacy: capture id is content-addressed (an ack for other content with the same id is not trusted)', async () => {
@@ -711,4 +713,23 @@ test('a finalized capture from before migration 0051 (no caption hash) cannot be
   const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 });
   assert.equal(rep[0].outcome, 'resent');
   assert.ok(stored('z9'));
+});
+
+// ─── R-023 #8: the multi-part finalize actually runs ─────────────────────────
+test('a 4,500-line capture is not too large; it is sent whole and split into part/of bodies', async () => {
+  const srv = new FakeServer();
+  const big = draft('big', 4500);
+  const exp = await expectedOf(big, NOW);
+  assert.equal(exp.tooLarge, false, 'the assembled limit is 50,000 lines, not one request');
+  assert.equal(exp.payload.captions.length, 4500);
+  const bodies = finalizeBodies(exp.payload);
+  assert.equal(bodies.length, 3);
+  assert.deepEqual(bodies.map((b) => b.part), [1, 2, 3]);
+  assert.deepEqual(bodies.map((b) => b.of), [3, 3, 3]);
+  assert.equal(bodies.flatMap((b) => b.captions).length, 4500);
+
+  const r = await stopCapture(fx.area, srv.api, big, NOW);
+  assert.equal(r.send, 'sent');
+  assert.equal(srv.lastPayload?.captions.length, 4500, 'the caller sends the full payload (the API splits it)');
+  assert.equal(await getDraftStage(fx.area, 'big'), 'awaiting-ack');
 });

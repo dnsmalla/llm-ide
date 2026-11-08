@@ -41,9 +41,17 @@ async function runBoxSync(userId, now = Date.now(), index = indexBoxFolder) {
   if (last > 0 && now - last < BOX_SCHEDULED_MIN_INTERVAL_MS) {
     throw Object.assign(new Error('the Box folder was indexed recently'), { code: 'BOX_TOO_SOON' });
   }
-  const result = await index(userId, creds);
-  setSecret(getDb(), userId, 'box.lastIndexedAt', String(now));
-  return result;
+  // Claim the slot BEFORE the walk so a second run (a standing schedule and a manual one) sees it and skips;
+  // put the previous value back if this walk fails, so a failure does not block the next attempt for 6 hours.
+  const db = getDb();
+  const prev = getSecret(db, userId, 'box.lastIndexedAt') || '';
+  setSecret(db, userId, 'box.lastIndexedAt', String(now));
+  try {
+    return await index(userId, creds);
+  } catch (e) {
+    setSecret(db, userId, 'box.lastIndexedAt', prev);
+    throw e;
+  }
 }
 
 export async function runSourcesUpdate({ userId, args = {}, signal, now = Date.now(), indexBox = indexBoxFolder }) {
@@ -73,9 +81,13 @@ export async function runSourcesUpdate({ userId, args = {}, signal, now = Date.n
   }
   const synced = results.filter((r) => r.status === 'ok').length;
   const bad = results.find((r) => r.status !== 'skipped');
-  // Nothing failed and something was deliberately skipped (the Box interval, an unsupported id) is a success.
-  if (results.length && !synced && bad) {
-    throw Object.assign(new Error('sources.update failed'), { code: bad.status === 'refused' ? 'not_found' : 'engine_failed', results });
+  // Nothing failed and something was deliberately skipped (the Box interval, an id with no handler) is a success —
+  // but a command made only of unsupported ids is still a bad request, as it was before Box was schedulable.
+  if (results.length && !synced) {
+    if (!bad && results.every((r) => r.code === 'unsupported')) {
+      throw Object.assign(new Error('sources.update failed'), { code: 'invalid_args', results });
+    }
+    if (bad) throw Object.assign(new Error('sources.update failed'), { code: bad.status === 'refused' ? 'not_found' : 'engine_failed', results });
   }
   return { synced, refused: results.filter((r) => r.status === 'refused').length, skipped: results.filter((r) => r.status === 'skipped').length, results, text: `Synced ${synced} of ${results.length} sources.` };
 }

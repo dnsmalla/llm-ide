@@ -72,7 +72,7 @@ import { turnCompositionRecent } from '../kb/turn-composition.mjs';
 import { installProjectSkills, isInstallableExclude } from '../kb/install-project-skills.mjs';
 import { listDisabledItems } from '../llm-sources/state.mjs';
 import { BUILTIN_ID } from '../llm-sources/registry.mjs';
-import { authorizeAction, enforceRouteAuthority, projectScopeRefusal } from '../server/route-authority.mjs';
+import { authorizeAction, enforceRouteAuthority, hubFolderRefusal, projectScopeRefusal } from '../server/route-authority.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
 // the stream route itself.
@@ -506,6 +506,9 @@ export async function handleKB(req, res) {
         sendJSON(res, 403, { error: { code: 'PROJECT_MISMATCH', message: 'That project does not own this folder' } });
         return true;
       }
+      // R-023 #1: on a hub install-skills always acts on a folder, and that folder must belong to a project.
+      const hubRefusal = hubFolderRefusal(folderPath, folder);
+      if (hubRefusal) { sendJSON(res, hubRefusal.status, { error: { code: hubRefusal.code, message: hubRefusal.message } }); return true; }
       const projectId = folder || named;
       const scope = projectScopeRefusal(kb.getDb(), userId, projectId);
       if (scope) { sendJSON(res, scope.status, { error: { code: scope.code, message: scope.message } }); return true; }

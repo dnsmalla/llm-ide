@@ -50,7 +50,7 @@ export function authenticateDeviceToken(token, now = Date.now()) {
     return null;
   }
   db.prepare('UPDATE host_api_devices SET last_seen_at = ? WHERE user_id = ? AND device_id = ?').run(now, row.user_id, row.device_id);
-  return { userId: row.user_id, deviceId: row.device_id, scopes: parseScopes(row.scopes) };
+  return { userId: row.user_id, deviceId: row.device_id, pairedAt: row.paired_at, scopes: parseScopes(row.scopes) };
 }
 
 export function revokeDevice(userId, deviceId) {

@@ -1,8 +1,8 @@
 // Browser wiring for capture-store.ts: the real chrome.storage area and the
 // /kb/live/* API over authFetch. Kept apart so capture-store stays testable.
 import { authFetch, getServerUrl } from './config';
-import { setDraftLock, splitFinalizeParts } from './capture-store';
-import type { FinalizeResult, LiveApi, LiveState, StatusResult, StorageArea } from './capture-store';
+import { setDraftLock, finalizeBodies } from './capture-store';
+import type { FinalizePayload, FinalizeResult, LiveApi, LiveState, StatusResult, StorageArea } from './capture-store';
 
 const STATES: readonly string[] = ['live', 'finalized', 'acked', 'expired', 'unknown'];
 
@@ -56,13 +56,11 @@ export const httpLiveApi: LiveApi = {
   async finalize(id, payload): Promise<FinalizeResult> {
     try {
       const base = await getServerUrl();
-      // C7: the server holds 2,000 captions / 4 MB per request, so a bigger transcript is sent as numbered
+      // C7/R-023 #8: the server holds 2,000 captions per request, so a bigger transcript is sent as numbered
       // parts and assembled there (part/of). Single small captures keep the one POST.
-      const parts = splitFinalizeParts(payload?.captions ?? []);
+      const bodies = finalizeBodies(payload ?? { captions: [], meetingTitle: '' });
       let d: { ackRequired?: boolean; captionCount?: number; captionHash?: string; durable?: boolean } | null = null;
-      for (let i = 0; i < Math.max(parts.length, 1); i += 1) {
-        const body =
-          parts.length <= 1 ? (payload ?? {}) : { ...payload, captions: parts[i], part: i + 1, of: parts.length };
+      for (const body of bodies) {
         const r = await authFetch(`${base}/kb/live/${enc(id)}/finalize`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

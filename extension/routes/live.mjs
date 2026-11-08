@@ -27,26 +27,40 @@ import { tryConsume } from '../server/rate-limit.mjs';
 const sseStreams = new Map(); // userId -> count
 const MAX_SSE_PER_USER = 4;
 
-// C7: a large finalize is sent as numbered parts (2,000 lines / 3 MB each), assembled here before the one
-// finalize. In memory with a short TTL: a lost part is resent from the panel's draft, never half-kept.
-const pendingFinalize = new Map(); // `${userId}\0${sessionId}` -> { of, parts[], at }
+// C7/R-023 #3: a large finalize is sent as numbered parts (2,000 lines / 3 MB each), assembled here before the one
+// finalize. In memory with a short TTL: a lost part is resent from the panel's draft, never half-kept. `of` is
+// bounded (a client-chosen 1e9 used to allocate an 8 GB array and kill the process) and each user may hold only a
+// few pending captures.
+const FINALIZE_PART_LINES = 2000;
+const MAX_ASSEMBLED_LINES = 50_000;
+export const MAX_FINALIZE_PARTS = Math.ceil(MAX_ASSEMBLED_LINES / FINALIZE_PART_LINES); // 25
+export const MAX_PENDING_FINALIZE_PER_USER = 4;
+const pendingFinalize = new Map(); // `${userId}\0${sessionId}` -> { of, parts: Map<number, captions[]>, at }
 const FINALIZE_PART_TTL_MS = 10 * 60_000;
 function takeFinalizeParts(userId, sessionId, body) {
   const part = Number(body.part);
   const of = Number(body.of);
   if (!Number.isInteger(of) || of < 2 || !Number.isInteger(part) || part < 1 || part > of) return { error: 'part/of are invalid' };
+  if (of > MAX_FINALIZE_PARTS) return { error: `of must be at most ${MAX_FINALIZE_PARTS}` };
   if (!Array.isArray(body.captions)) return { error: 'captions must be an array' };
   const now = Date.now();
   for (const [k, v] of pendingFinalize) if (now - v.at > FINALIZE_PART_TTL_MS) pendingFinalize.delete(k);
   const key = `${userId}\0${sessionId}`;
   let entry = pendingFinalize.get(key);
-  if (!entry || entry.of !== of) entry = { of, parts: new Array(of).fill(null), at: now };
+  if (!entry || entry.of !== of) {
+    if (!entry && [...pendingFinalize.keys()].filter((k) => k.startsWith(`${userId}\0`)).length >= MAX_PENDING_FINALIZE_PER_USER) {
+      return { tooMany: true };
+    }
+    entry = { of, parts: new Map(), at: now };
+  }
   entry.at = now;
-  entry.parts[part - 1] = body.captions;
+  entry.parts.set(part, body.captions);
   pendingFinalize.set(key, entry);
-  if (entry.parts.some((p) => p === null)) return { pending: true, part, of };
+  if (entry.parts.size < of) return { pending: true, part, of };
+  const captions = [];
+  for (let i = 1; i <= of; i += 1) captions.push(...(entry.parts.get(i) ?? []));
   pendingFinalize.delete(key);
-  return { captions: entry.parts.flat() };
+  return { captions };
 }
 
 export async function handleLiveRoutes(req, res, ctx) {
@@ -148,6 +162,10 @@ export async function handleLiveRoutes(req, res, ctx) {
       const partResult = takeFinalizeParts(userId, sessionId, body);
       if (partResult.error) {
         sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: partResult.error } });
+        return true;
+      }
+      if (partResult.tooMany) {
+        sendJSON(res, 429, { error: { code: 'TOO_MANY_CAPTURES', message: 'Too many finalize requests are in flight' } });
         return true;
       }
       if (partResult.pending) {

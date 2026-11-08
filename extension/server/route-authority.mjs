@@ -49,6 +49,18 @@ export const PROJECT_WORK_ROUTES = Object.freeze([
   'POST /kb/issues/create', 'POST /kb/issues/comment', 'POST /kb/issues/close',
 ]);
 
+/** The refusal for a hub request that acts on a folder (Loop, codegen, install-skills), or null off a hub. */
+export function hubFolderRefusal(folderPath, folderProjectId) {
+  if (!config.hub) return null;
+  if (typeof folderPath !== 'string' || folderPath.length === 0) {
+    return { status: 400, code: 'PROJECT_REQUIRED', message: 'A project folder is required on this hub' };
+  }
+  if (!folderProjectId) {
+    return { status: 403, code: 'PROJECT_DENIED', message: 'This folder is not in a project on this hub' };
+  }
+  return null;
+}
+
 /** The refusal for a hub request that must name a known project, or null. A non-hub install is never refused. */
 export function projectScopeRefusal(db, userId, projectId) {
   if (!config.hub) return null;

@@ -129,7 +129,11 @@ test('granted but no longer served: capability_unavailable, and the push drops i
 test('store: scopes round-trip through the column; NULL scopes read as the legacy set', () => {
   const u = users.registerUser(kb.getDb(), { email: `scopes-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 'h' }).id;
   const a = dev.issueDeviceToken(u, 'web', Date.now(), ['host', 'chat']);
-  assert.deepEqual(dev.authenticateDeviceToken(a.token), { userId: u, deviceId: a.deviceId, scopes: ['host', 'chat'] });
+  const auth = dev.authenticateDeviceToken(a.token);
+  assert.equal(auth.userId, u);
+  assert.equal(auth.deviceId, a.deviceId);
+  assert.ok(Number.isFinite(auth.pairedAt));
+  assert.deepEqual(auth.scopes, ['host', 'chat']);
   const b = dev.issueDeviceToken(u, 'old');
   assert.equal(kb.getDb().prepare('SELECT scopes FROM host_api_devices WHERE device_id = ?').get(b.deviceId).scopes, null);
   assert.deepEqual(dev.authenticateDeviceToken(b.token).scopes, ['host', 'chat', 'approvals']);

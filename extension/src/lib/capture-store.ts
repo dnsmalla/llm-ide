@@ -110,7 +110,8 @@ export function splitFinalizeParts(captions: readonly unknown[]): unknown[][] {
   let cur: unknown[] = [];
   let bytes = 0;
   for (const c of captions) {
-    const size = JSON.stringify(c)?.length ?? 0;
+    // R-023 minor: the server's limit is UTF-8 bytes; .length would count CJK as 1 unit per character.
+    const size = new TextEncoder().encode(JSON.stringify(c) ?? '').length;
     if (cur.length > 0 && (cur.length >= FINALIZE_PART_LINES || bytes + size > FINALIZE_PART_BYTES)) {
       parts.push(cur);
       cur = [];
@@ -132,8 +133,10 @@ export const DRAFT_STALE_MS = 2 * 60 * 1000;
 export const MAX_RETAINED = 50;
 /** A 'released' marker is only a guard against a late write; drop it after a week. */
 export const RELEASED_MARKER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-/** The server's per-capture line limit. */
+/** The server's per-request line limit (a bigger capture is sent in parts). */
 export const SERVER_MAX_CAPTIONS = 2000;
+/** The assembled limit the multi-part finalize allows (R-023 #8: the old 2,000-line `tooLarge` made that path dead). */
+export const MAX_FINALIZE_LINES = 50_000;
 /** The server's finalize body limit is 4 MB; stay well under it. */
 export const MAX_BODY_BYTES = 3 * 1024 * 1024;
 /** An automatic re-send of the same draft is attempted at most this often. */
@@ -255,8 +258,15 @@ export async function expectedOf(c: CaptureLike, now = Date.now()): Promise<Expe
     payload,
     lines,
     captionHash: await captionHash(captions),
-    tooLarge: lines > SERVER_MAX_CAPTIONS || bytes > MAX_BODY_BYTES,
+    tooLarge: lines > MAX_FINALIZE_LINES, // parts handle the per-request bytes
   };
+}
+
+/** The finalize bodies: one when the capture fits one request, else `part`/`of` bodies (R-023 #8). */
+export function finalizeBodies(payload: FinalizePayload): Array<FinalizePayload & { part?: number; of?: number }> {
+  const parts = splitFinalizeParts(payload.captions ?? []);
+  if (parts.length <= 1) return [payload];
+  return parts.map((captions, i) => ({ ...payload, captions: captions as FinalizePayload["captions"], part: i + 1, of: parts.length }));
 }
 
 /** The server's copy equals what we would send (lines, hash, language, start). */

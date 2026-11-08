@@ -207,6 +207,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true; // keep channel open for async sendResponse
   }
 
+  // R-023 #9: a caption frame is answered by the side panel, not by the worker. If no side panel exists the
+  // content script must be told (the old blanket ok hid a closed panel and a transient worker wake looked like one).
+  if (type === MsgType.CAPTION_FINAL) {
+    (async () => {
+      try {
+        const contexts = chrome.runtime.getContexts
+          ? await chrome.runtime.getContexts({ contextTypes: ['SIDE_PANEL' as chrome.runtime.ContextType] })
+          : [];
+        sendResponse(contexts.length > 0 ? { ok: true } : { ok: false, reason: 'no_panel' });
+      } catch {
+        sendResponse({ ok: true }); // unknown: never cry wolf
+      }
+    })();
+    return true;
+  }
+
   sendResponse({ ok: true });
   return false;
 });

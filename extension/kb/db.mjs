@@ -702,10 +702,12 @@ export function findContext(userId, query, limit = 5, { kinds = null } = {}) {
   };
 
   const filter = searchFilterSql(built);
-  const binds = filter.params;
+  // R-023 minor: the same per-user window as search(); hydration already dropped other tenants, but the ranking
+  // window must not be filled by them.
+  const binds = [...filter.params, String(userId)];
   const RANKED_SQL_BY_KIND = `
       SELECT meeting_id, entity_id, kind, title, body, ${filter.rank} AS rank
-      FROM search WHERE ${filter.where} AND kind = ?
+      FROM search WHERE ${filter.where} AND user_id = ? AND kind = ?
       ORDER BY rank LIMIT ?
     `;
 

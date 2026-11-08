@@ -16,7 +16,7 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
   let made = 0;
   t.tokens = tokens;
   t.devices = {
-    issueDeviceToken(userId, _name, _now, scopes) { n += 1; const deviceId = `h1-dev${n}`; const token = `tok-${deviceId}-0123456789`; tokens.set(token, { userId, deviceId, scopes }); return { deviceId, token }; },
+    issueDeviceToken(userId, _name, now = Date.now(), scopes) { n += 1; const deviceId = `h1-dev${n}`; const token = `tok-${deviceId}-0123456789`; tokens.set(token, { userId, deviceId, scopes, pairedAt: now }); return { deviceId, token }; },
     authenticateDeviceToken: (token) => tokens.get(token) ?? null,
     revokeDevice(userId, deviceId) { for (const [k, v] of tokens) if (v.userId === userId && v.deviceId === deviceId) tokens.delete(k); return true; },
   };
@@ -735,4 +735,22 @@ test('a viewer paired on a phone may Ask', async () => {
   await t.paired(s);
   await t.g.receive(s, req('c-send', 'chat.send', { text: 'what changed today?' }));
   assert.equal(t.turns.length, 1, 'the turn starts; runV2Turn forces it to ask');
+});
+
+test('R-023 #7: a session open across the 90-day boundary is refused on the next frame', async () => {
+  const t = harness();
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  const { token } = t.last().result;
+  const s2 = { n: 2 };
+  t.g.opened(s2, '127.0.0.1');
+  await t.g.receive(s2, req('c-h', 'host.hello', HELLO));
+  // The token was issued on day 89 and the session stays open across day 90 (the fake authenticator accepts it;
+  // the real store would delete it at auth — the point is the per-frame check on an already-open session).
+  t.tokens.get(token).pairedAt = Date.now() - 91 * 24 * 3600 * 1000;
+  await t.g.receive(s2, req('c-t', 'host.auth.token', { token }));
+  assert.equal(t.last().type, 'response');
+  await t.g.receive(s2, req('c-p', 'host.ping'));
+  assert.equal(t.lastError(), 'auth_failed');
+  assert.ok(t.closed.includes(s2), 'the expired session is closed');
 });

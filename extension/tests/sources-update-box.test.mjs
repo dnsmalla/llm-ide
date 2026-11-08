@@ -73,3 +73,24 @@ test('a scheduled Box run indexes once and then skips until the interval elapses
   assert.equal(later.synced, 1);
   assert.equal(calls.length, 2);
 });
+
+test('only unsupported ids is still invalid_args; overlapping runs do not double-walk', async () => {
+  const u = user();
+  await assert.rejects(
+    runSourcesUpdate({ userId: u, args: { sourceIds: ['slack:x'] } }),
+    (e) => e.code === 'invalid_args',
+  );
+  storeCreds(u);
+  const calls = [];
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const slow = async () => { calls.push(1); await gate; return { indexed: 1 }; };
+  const t0 = 2_000_000_000_000;
+  const first = runSourcesUpdate({ userId: u, args: { sourceIds: ['box:default'] }, now: t0, indexBox: slow });
+  const second = await runSourcesUpdate({ userId: u, args: { sourceIds: ['box:default'] }, now: t0 + 1000, indexBox: slow });
+  assert.equal(second.results[0].status, 'skipped', 'the in-flight claim makes the second run skip');
+  release();
+  const done = await first;
+  assert.equal(done.synced, 1);
+  assert.equal(calls.length, 1, 'one walk');
+});

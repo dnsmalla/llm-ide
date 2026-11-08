@@ -429,3 +429,29 @@ test('#2 install-skills denies a team engineer who is only a project viewer', ()
   assert.equal(authorizeAction(db(), eng, 'model.read', { projectId: 'p-inst' }).ok, false, 'project viewer cannot read');
   assert.equal(authorizeAction(db(), eng, 'install', { projectId: 'p-inst' }).ok, false, 'nor install');
 });
+
+// ── R-023 #1/#2 ───────────────────────────────────────────────────────────
+test('#2 a sub-folder of a project can only be split off by that project\'s admin/owner', () => {
+  const owner = user('nest-owner@example.com', 'owner', 'execute', 0);
+  const bAdmin = user('nest-badmin@example.com', 'member', 'execute', 0);
+  const eng = user('nest-eng@example.com', 'member', 'execute', 0);
+  registerProject(db(), owner, { id: 'p-b', root: '/r/b' });
+  addProjectMemberByEmail(db(), owner, 'p-b', { email: 'nest-badmin@example.com', role: 'admin', maxMode: 'execute' });
+  // The engineer is an implicit viewer on B: splitting B/src off as a new project is refused.
+  assert.throws(
+    () => registerProject(db(), eng, { id: 'p-eng-split', root: '/r/b/src' }),
+    (e) => e.code === 'PROJECT_NESTED' && e.status === 403,
+  );
+  // B's admin may split it off (they already control that folder).
+  const split = registerProject(db(), bAdmin, { id: 'p-split', root: '/r/b/src' });
+  assert.equal(split.created, true);
+  // A root that CONTAINS a project is harmless and allowed.
+  const outer = registerProject(db(), eng, { id: 'p-outer', root: '/r' });
+  assert.equal(outer.created, true);
+});
+
+test('#1 hubFolderRefusal is a no-op off a hub', async () => {
+  const { hubFolderRefusal } = await import('../server/route-authority.mjs');
+  assert.equal(hubFolderRefusal(undefined, null), null);
+  assert.equal(hubFolderRefusal('/r/x', 'p-x'), null);
+});

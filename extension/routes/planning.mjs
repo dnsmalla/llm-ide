@@ -19,7 +19,7 @@ import { dispatchPlan } from '../agents/dispatcher.mjs';
 import { nudgeOutcomePoller } from '../agents/outcome-watcher.mjs';
 import { generateCodeForTask } from '../agents/codegen.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
-import { authorizeAction, projectScopeRefusal } from '../server/route-authority.mjs';
+import { authorizeAction, hubFolderRefusal, projectScopeRefusal } from '../server/route-authority.mjs';
 import { projectIdForFolder } from '../kb/projects.mjs';
 
 // Config keys that name WHERE a dispatch lands (github repo; backlog space +
@@ -341,6 +341,9 @@ export async function handlePlanningRoutes(req, res, ctx) {
       sendJSON(res, 403, { error: { code: 'PROJECT_MISMATCH', message: 'That project does not own this folder' } });
       return true;
     }
+    // R-023 #1: on a hub the repo folder must belong to a project.
+    const hubRefusal = hubFolderRefusal(folderPath, folder);
+    if (hubRefusal) { sendJSON(res, hubRefusal.status, { error: { code: hubRefusal.code, message: hubRefusal.message } }); return true; }
     const projectId = folder || named;
     const scope = projectScopeRefusal(kb.getDb(), userId, projectId);
     if (scope) { sendJSON(res, scope.status, { error: { code: scope.code, message: scope.message } }); return true; }

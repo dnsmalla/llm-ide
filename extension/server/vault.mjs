@@ -225,7 +225,7 @@ const ICAL_SOURCE_KEY_RE = /^ical\.src\.[a-f0-9]{12}\.url$/;
 // Server-internal keys: readable/writable through setSecret/getSecret, but never
 // settable by a client or listed to one (the IMAP host binding would otherwise
 // be defeatable by POSTing a host of the attacker's choosing).
-const INTERNAL_KEYS = new Set(['email.imapPasswordHost', 'box.lastIndexedAt', 'sync.rootKey', 'sync.signingKey', 'sync.megaEmail', 'sync.megaPassword', 'sync.sshKey', 'sync.prevRootKey', 'sync.boxClientSecret', 'sync.boxRefreshToken', 'push.vapidKey', 'push.apnsKey', 'push.apnsKeyId', 'push.apnsTeamId']);
+const INTERNAL_KEYS = new Set(['email.imapPasswordHost', 'box.lastIndexedAt', 'box.clientId', 'box.subjectType', 'box.subjectId', 'box.folderId', 'sync.rootKey', 'sync.signingKey', 'sync.megaEmail', 'sync.megaPassword', 'sync.sshKey', 'sync.prevRootKey', 'sync.boxClientSecret', 'sync.boxRefreshToken', 'push.vapidKey', 'push.apnsKey', 'push.apnsKeyId', 'push.apnsTeamId']);
 
 /**
  * Keys a user may set through the generic `POST /auth/me/secrets`: the fixed

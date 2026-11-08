@@ -108,7 +108,7 @@ export function useTranscript() {
   const isRecordingRef = useRef(false);
   const pendingResultsRef = useRef<Map<number, PendingResult[]>>(new Map());
   const resultCounterRef = useRef(0);
-  const captureModeRef = useRef<CaptureMode>('mic');
+  const captureModeRef = useRef<CaptureMode>('captions');
   const restartTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   // Tracks the 0s/1s/3s START retry timers so they can be cancelled in stopRecording.
   const startRetryTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);

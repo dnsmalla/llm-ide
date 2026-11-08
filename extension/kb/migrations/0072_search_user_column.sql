@@ -14,11 +14,11 @@ CREATE TEMP TABLE search_copy AS
       WHEN 'action'   THEN (SELECT e.user_id FROM entities e WHERE e.id = s.entity_id)
       WHEN 'decision' THEN (SELECT e.user_id FROM entities e WHERE e.id = s.entity_id)
       WHEN 'blocker'  THEN (SELECT e.user_id FROM entities e WHERE e.id = s.entity_id)
-      WHEN 'plan'     THEN (SELECT p.user_id FROM plans p WHERE p.id = s.meeting_id)
+      WHEN 'plan'     THEN (SELECT p.user_id FROM plans p WHERE p.id = s.entity_id)
       WHEN 'task'     THEN (SELECT p.user_id FROM plans p WHERE p.id = s.meeting_id)
-      WHEN 'outcome'  THEN (SELECT o.user_id FROM outcomes o WHERE CAST(o.id AS TEXT) = s.entity_id)
-      WHEN 'note'     THEN (SELECT n.user_id FROM note_index n WHERE char(1) || 'note:' || CAST(n.id AS INTEGER) = s.meeting_id)
-      ELSE (SELECT src.user_id FROM sources src WHERE CAST(src.id AS TEXT) = s.entity_id AND src.kind = s.kind)
+      WHEN 'outcome'  THEN (SELECT o.user_id FROM outcomes o WHERE o.id = CAST(s.entity_id AS INTEGER))
+      WHEN 'note'     THEN (SELECT n.user_id FROM note_index n WHERE n.id = CAST(substr(s.meeting_id, 7) AS INTEGER))
+      ELSE (SELECT src.user_id FROM sources src WHERE src.id = CAST(s.entity_id AS INTEGER) AND src.kind = s.kind)
     END AS user_id
   FROM search s;
 
@@ -43,7 +43,7 @@ DROP TABLE search_copy;
 DELETE FROM note_index_search;
 INSERT INTO note_index_search (note_id, search_rowid)
 SELECT n.id, s.rowid FROM note_index n
-  JOIN search s ON s.kind = 'note' AND s.meeting_id = char(1) || 'note:' || CAST(n.id AS INTEGER);
+  JOIN search s ON s.kind = 'note' AND n.id = CAST(substr(s.meeting_id, 7) AS INTEGER);
 
 DELETE FROM search_source_rowid;
 INSERT INTO search_source_rowid (source_id, search_rowid)
