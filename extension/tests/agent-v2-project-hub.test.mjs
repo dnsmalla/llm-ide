@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -62,10 +63,10 @@ const run = async (body) => {
   return res;
 };
 
-test('a hub turn without a projectId is refused PROJECT_REQUIRED before any engine work', async () => {
+test('a hub turn in an unregistered folder without a projectId is refused PROJECT_DENIED', async () => {
   const res = await run({});
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.json().error.code, 'PROJECT_REQUIRED');
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.json().error.code, 'PROJECT_DENIED');
   assert.equal(turns, 0);
 });
 
@@ -81,4 +82,14 @@ test('a hub turn with a known projectId runs', async () => {
   assert.equal(res.statusCode, 200);
   assert.ok(res.sseEvents().some((e) => e.type === 'result'));
   assert.equal(turns, 1);
+});
+
+test('R-021 #1: a projectId that does not own the turn folder is PROJECT_MISMATCH', async () => {
+  const otherRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-other-'));
+  registerProject(db, 'hub-u1', { id: 'p-other', root: otherRoot, name: 'Other' });
+  const before = turns;
+  const res = await run({ projectId: 'p-hub', agentContext: { chatSessionId: 'chat-mismatch', workspaceRoot: otherRoot } });
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.json().error.code, 'PROJECT_MISMATCH');
+  assert.equal(turns, before, 'the mismatch never reached the engine');
 });

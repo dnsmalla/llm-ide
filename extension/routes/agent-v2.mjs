@@ -573,10 +573,15 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   const requestedProjectId = typeof body.projectId === 'string' && body.projectId
     ? body.projectId
     : (typeof agentContext?.projectId === 'string' && agentContext.projectId ? agentContext.projectId : '');
-  const turnProjectId = requestedProjectId || projectIdForRoot(getDb(), agentContext?.workspaceRoot) || null;
-  // R-020 Q1 (decision): on a hub every project-scoped turn names a known project; there is no team-role fallback.
+  // R-021 #1: the FOLDER decides. A request that names a project and runs in another registered project's folder
+  // is refused rather than trusted; a hub turn in an unregistered folder has no project at all.
+  const folderProjectId = projectIdForRoot(getDb(), agentContext?.workspaceRoot);
+  if (requestedProjectId && folderProjectId && requestedProjectId !== folderProjectId) {
+    return io.refuse({ code: 'PROJECT_MISMATCH', status: 403, message: 'That project does not own this folder' });
+  }
+  const turnProjectId = folderProjectId || requestedProjectId || null;
   if (config.hub) {
-    if (!turnProjectId) return io.refuse({ code: 'PROJECT_REQUIRED', status: 400, message: 'A project is required on this hub' });
+    if (!turnProjectId) return io.refuse({ code: 'PROJECT_DENIED', status: 403, message: 'This folder is not in a project on this hub' });
     if (!getProject(getDb(), turnProjectId)) return io.refuse({ code: 'PROJECT_DENIED', status: 403, message: 'That project is not available' });
   }
   if (turnProjectId) body.projectId = turnProjectId;

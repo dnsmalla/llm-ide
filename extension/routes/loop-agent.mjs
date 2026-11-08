@@ -34,6 +34,7 @@ import { beginLoopRun } from '../core/agent-busy.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { isPluginUpdating } from '../plugins/claude-update.mjs';
 import { authorizeAction, enforceRouteAuthority, projectScopeRefusal } from '../server/route-authority.mjs';
+import { projectIdForRoot } from '../kb/projects.mjs';
 
 const MAX_SKILL_IDS = 5;
 // "custom:" + a 100-char id (server/tier-routing.mjs's provider shape) fits.
@@ -134,9 +135,15 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   const provider = body.provider ? body.provider.trim() || undefined : undefined;
   const meteredProvider = provider || AGENT_SDK_PROVIDER;
 
-  // R-020 Q1: a hub Loop run must name a known project (a body id is invisible to the route policy), and the
-  // project grant may only narrow the team grant. Non-hub installs keep the team fallback.
-  const projectId = typeof body.projectId === 'string' && body.projectId ? body.projectId : null;
+  // R-021 #1: the Loop root decides the project. A body projectId that names another project is a mismatch, and a
+  // hub run in an unregistered folder is refused. R-020 Q1: the project grant may only narrow the team grant.
+  const namedProjectId = typeof body.projectId === 'string' && body.projectId ? body.projectId : null;
+  const folderProjectId = projectIdForRoot(getDb(), body.repoRoot);
+  if (namedProjectId && folderProjectId && namedProjectId !== folderProjectId) {
+    sendJSON(res, 403, { error: { code: 'PROJECT_MISMATCH', message: 'That project does not own this folder' } });
+    return true;
+  }
+  const projectId = folderProjectId || namedProjectId;
   const scopeRefusal = projectScopeRefusal(getDb(), userId, projectId);
   if (scopeRefusal) { sendJSON(res, scopeRefusal.status, { error: { code: scopeRefusal.code, message: scopeRefusal.message } }); return true; }
   // ADR 0021 + R-014#1: a Loop run edits files on the operator's model login.
