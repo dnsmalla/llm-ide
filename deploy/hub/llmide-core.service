@@ -30,3 +30,6 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=yes
 LockPersonality=yes
 SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

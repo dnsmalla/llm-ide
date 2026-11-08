@@ -98,6 +98,20 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/llmide /srv/llmide/projects
 LimitNOFILE=65536
+UMask=0077
+CapabilityBoundingSet=
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
 LLMIDE_UNIT
     chmod 0644 "$UNIT"; chown root:root "$UNIT"
     cat > "$BACKUP_UNIT" <<'LLMIDE_BACKUP'
@@ -132,7 +146,7 @@ LLMIDE_LOG
     tmp=$(mktemp /etc/llmide/.core.env.XXXXXX)
     cat > "$tmp"
     # Root-side validation: only KEY=value lines, only the template's keys, no loader/option injection.
-    while IFS= read -r line; do
+    while IFS= read -r line || [ -n "$line" ]; do
       key=${line%%=*}
       case "$key" in
         NODE_ENV|PATH|LLMIDE_HOST|LLMIDE_PORT|LLMIDE_HUB|LLMIDE_TLS_TERMINATED|LLMIDE_HUB_DOMAIN|LLMIDE_HUB_VERSION|LLMIDE_DATA_DIR|LLMIDE_DB_PATH|LLMIDE_PROJECTS_ROOT|LLMIDE_BACKUP_DIR|LLMIDE_BACKUP_KEEP|LLMIDE_DISABLE_REGISTRATION|LLMIDE_TRUST_PROXY|LLMIDE_LOG_JSON|LLMIDE_LOG_LEVEL|LLMIDE_MAX_TURNS|LLMIDE_HOST_API_HUB|LLMIDE_HOST_API_WEB_ORIGINS|LLMIDE_HOST_API_FINGERPRINT_FILE|LLMIDE_HUB_PUBLIC_URL|LLMIDE_JWT_SECRET|LLMIDE_VAULT_KEY) ;;
@@ -142,7 +156,10 @@ LLMIDE_LOG
     if grep -Eq '^(NODE_OPTIONS|LD_[A-Z0-9_]*|BASH_ENV|ENV)=' "$tmp"; then
       rm -f "$tmp"; die "the env contains a forbidden loader variable"
     fi
-    if grep -Eq '\r' "$tmp"; then rm -f "$tmp"; die "the env contains a carriage return"; fi
+    # POSIX-portable CR check: GNU grep treats '\r' as a literal 'r', so byte-count with tr.
+    if [ "$(tr -d '\r' < "$tmp" | wc -c)" -ne "$(wc -c < "$tmp")" ]; then
+      rm -f "$tmp"; die "the env contains a carriage return"
+    fi
     # Re-deploy must never rotate the JWT/vault keys: keep the existing values and back up the old env.
     if [ -f "$CONF" ]; then
       for key in LLMIDE_JWT_SECRET LLMIDE_VAULT_KEY; do
@@ -170,6 +187,9 @@ LLMIDE_LOG
     rm -rf "$work"
     install -d -m 0755 -o root -g root "$work"
     tar -xzf "$STAGING/bundle.tar.gz" -C "$work" --no-same-owner --no-same-permissions
+    # --no-same-permissions applies this root shell's umask 077, which strips the group/other
+    # execute bit from the staged node. Normalize before running it as the unprivileged user.
+    chmod -R u=rwX,go=rX "$work"
     [ -x "$work/core/node/node" ] || die "the bundle has no node binary"
     node_version=$(runuser -u llmide -- "$work/core/node/node" --version 2>/dev/null || true)
     case "$node_version" in v22.*) ;; *) die "the bundled node is not 22 ($node_version)" ;; esac
@@ -228,8 +248,14 @@ HOOK
     sed "s/__DOMAIN__/$DOMAIN/g" "$STAGING/llm-ide-hub.nginx" > "$SITE"
     chmod 0644 "$SITE"; chown root:root "$SITE"
     if ! nginx -t; then
-      if [ -n "$backup" ]; then cp -p "$backup" "$SITE"; rm -f "$backup"; fi
-      die "nginx rejected the vhost; the previous site was restored"
+      if [ -n "$backup" ]; then
+        cp -p "$backup" "$SITE"; rm -f "$backup"
+        die "nginx rejected the vhost; the previous site was restored"
+      fi
+      # First install: there is no previous site, so leaving the rejected file would break
+      # every later nginx -t (and certbot renewals). Remove it instead.
+      rm -f "$SITE"
+      die "nginx rejected the vhost; the new site was removed"
     fi
     systemctl reload nginx
     [ -n "$backup" ] && rm -f "$backup" || true
@@ -238,7 +264,7 @@ HOOK
 
   start)
     [ -x /opt/llmide/current/core/node/node ] || die "no current release"
-    systemctl enable llmide-core >/dev/null 2>&1 || true
+    systemctl enable llmide-core >/dev/null || die "could not enable llmide-core"
     systemctl restart llmide-core
     say "ok"
     ;;
@@ -308,7 +334,12 @@ HOOK
     systemctl daemon-reload 2>/dev/null || true
     rm -f "$SITE"
     nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
-    conf 2>/dev/null && printf 'certificate kept: certbot delete --cert-name %s\n' "$DOMAIN" >&2 || true
+    # conf() dies when core.env is absent/invalid; run it in a subshell so uninstall still
+    # removes the helper and its NOPASSWD grant on a partially-installed host.
+    domain=$( ( conf && printf '%s\n' "$DOMAIN" ) 2>/dev/null || true )
+    if [ -n "$domain" ]; then
+      printf 'certificate kept: certbot delete --cert-name %s\n' "$domain" >&2
+    fi
     # Data is kept by default: /var/lib/llmide and /srv/llmide/projects stay for a manual restore.
     rm -f /etc/sudoers.d/llmide-deploy
     rm -f /usr/local/sbin/llmide-deploy

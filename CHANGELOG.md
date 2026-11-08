@@ -139,6 +139,14 @@ Maintenance rules: [docs/how-to/maintain-the-changelog.md](docs/how-to/maintain-
 
 ### Fixed
 
+- **Remote hub deploy helper, container pass (2026-11-08).** A privileged Ubuntu 24.04 run found and
+  fixed the blockers this path had only been tested against with fakes: the `env` stage rejected every
+  real env on GNU grep (`\r` read as a literal `r`) and skipped a final line without a newline; the
+  `bundle` stage extracted the staged node 0700 via `umask 077` and then could not run it as `llmide`;
+  the helper wrote a stale, unhardened unit and `start` swallowed the failed `enable` (the unit had no
+  `[Install]`); `uninstall` exited inside `conf()` when `core.env` was missing, leaving the root helper
+  and its NOPASSWD grant behind; and a rejected first vhost stayed in `sites-enabled`, breaking later
+  `nginx -t` runs. Regression coverage is `desktop/scripts/helper-temp-root.test.mjs`.
 - **System review 2026-10-24 fixes.** Box re-index swaps rows in one transaction and pages the ingest
   (a large folder no longer leaves the index empty); saved bash prefix rules never skip the prompt for
   commands that name a sensitive path; the Loop agent-run rate limit can't be skipped with a query
