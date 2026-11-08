@@ -547,15 +547,19 @@ pub fn run() {
             // keychain secrets and the DB. (Benches opt out and run on a temp setup.)
             if autobench_env().is_none() {
                 if let Ok(dir) = fsutil::desktop_data_dir() {
-                    let dir = fsutil::private_dir(&dir)?;
-                    match fsutil::acquire_instance_lock(&dir) {
-                        Ok(lock) => {
-                            let _ = INSTANCE_LOCK.set(lock);
-                        }
-                        Err(e) => {
-                            eprintln!("{e}; exiting");
-                            return Err(e.into());
-                        }
+                    // A data folder whose parent is gone is reported when the core starts (the message names the
+                    // path); the app window still opens so the user can change the location in Settings.
+                    match fsutil::private_dir(&dir) {
+                        Ok(dir) => match fsutil::acquire_instance_lock(&dir) {
+                            Ok(lock) => {
+                                let _ = INSTANCE_LOCK.set(lock);
+                            }
+                            Err(e) => {
+                                eprintln!("{e}; exiting");
+                                return Err(e.into());
+                            }
+                        },
+                        Err(e) => eprintln!("{e}"),
                     }
                 }
             }
