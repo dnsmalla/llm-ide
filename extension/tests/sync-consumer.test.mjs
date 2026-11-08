@@ -97,6 +97,14 @@ test('age by the desktop clock: too old or too far ahead is expired, not run', a
   assert.equal(t.calls.length, 0);
 });
 
+test('a request six days old is still answered: the queue lives as long as the outbox', async () => {
+  const t = setup();
+  const SIX_DAYS_MS = 6 * 86_400_000;
+  const id = await t.send({}, { issuedAt: NOW - SIX_DAYS_MS });
+  assert.deepEqual(await drainOnce({ userId: t.u, store: t.store, now: NOW, deps: t.deps() }), { ran: 1, refused: 0, replied: 1 });
+  assert.equal((await t.reply(id)).ok, true);
+});
+
 test('an approval request is never answered remotely: cancel and reply needs_approval', async () => {
   const t = setup();
   const id = await t.send({});

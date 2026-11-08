@@ -11,7 +11,11 @@ import { getQuickChatId, setQuickChatId } from '../../kb/host-api-devices.mjs';
 import { ensureSyncKeys, previousRoot } from './keys.mjs';
 import { folderPresent } from './registry.mjs';
 
-export const LIMITS = Object.freeze({ maxFileBytes: 65536, maxText: 4000, maxAgeMs: 86_400_000, maxSkewMs: 600_000, perDrain: 5, perDay: 50, turnMs: 600_000, outboxDays: 7 });
+// One lifetime for a queued prompt and for its reply: a request is accepted for as long as the desktop keeps
+// replies (7 days), so a prompt queued while the desktop was away is still answered (F10).
+const OUTBOX_DAYS = 7;
+
+export const LIMITS = Object.freeze({ maxFileBytes: 65536, maxText: 4000, maxAgeMs: OUTBOX_DAYS * 86_400_000, maxSkewMs: 600_000, perDrain: 5, perDay: 50, turnMs: 600_000, outboxDays: OUTBOX_DAYS });
 const NAME_RE = /^([0-9]{13})-([A-Za-z0-9_-]{22})\.bin$/;
 const ID_RE = /^[A-Za-z0-9_-]{22}$/;
 const REQUEST_KEYS = ['class', 'requestId', 'text', 'v'];

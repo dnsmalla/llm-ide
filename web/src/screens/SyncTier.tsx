@@ -6,6 +6,7 @@ import { Markdown } from "@llmide/screens/chat/MarkdownView.tsx";
 import { ReadPanel } from "./ReadPanel.tsx";
 import { snapshotReadState } from "../read/snapshot.ts";
 import { MAX_TEXT } from "../sync/device.ts";
+import { KINDS } from "../sync/kinds.ts";
 import type { SyncController, SyncState } from "../sync/controller.ts";
 
 type Actions = Pick<SyncController, "pair" | "cancelPairing" | "unlock" | "send" | "refresh" | "lock" | "forget">;
@@ -16,7 +17,7 @@ const when = (ms: number) => new Date(ms).toLocaleString();
 const openLink = (href: string) => { if (/^https?:\/\//.test(href)) window.open(href, "_blank", "noopener,noreferrer"); };
 const STEP: Record<string, string> = { login: "Signing in to MEGA…", claiming: "Sending this browser's keys to the desktop…" };
 export const REPLY_TEXT: Record<string, string> = {
-  expired: "The desktop saw it too late (over 24 hours, or this device's clock is wrong).",
+  expired: "The desktop saw it too late (over 7 days, or this device's clock is wrong).",
   quota: "Too many queued prompts today. Try again tomorrow.",
   needs_approval: "The desktop needed an approval it cannot take from here. Ask again with the desktop on.",
   turn_failed: "The desktop could not finish this prompt.",
@@ -190,6 +191,9 @@ function ReadyView({ state, sync }: { state: SyncState; sync: Actions }) {
       {!state.online && <StatusBanner severity="info" message="You are offline. Showing what was loaded in this session." />}
       {state.notice && <StatusBanner severity="info" message={state.notice} />}
       {state.error && <StatusBanner severity="error" message={state.error} />}
+      {!!snap && KINDS.some((k) => snap.kinds[k]?.truncated) && (
+        <StatusBanner severity="info" message="Only the most recent items are on this device." />
+      )}
       <div className="sync-grid">
         <section className="sync-panel sync-panel-main" aria-label="Desktop snapshot">
           <ReadPanel capabilities={READ} state={read} onOpen={(id) => setOpenId(id)} onOlder={() => {}} onClose={() => setOpenId(null)} onMore={() => {}} />

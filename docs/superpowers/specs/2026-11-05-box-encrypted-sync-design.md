@@ -280,8 +280,9 @@ The PIN for Host API v1 is untouched. One QR serves both: the Host API fields (`
 1. Closed-schema validation first: size, then the envelope signature by the **registered** device
    signing key, `from` = that device, `to` = syncId, epoch = current, class in the allow-list. An
    unknown field is a refusal.
-2. The age comes from the desktop clock: `issuedAt` no older than 24 hours and no more than 10 minutes
-   ahead. A wrong-clock device is told (`expired`), not trusted.
+2. The age comes from the desktop clock: `issuedAt` no older than 7 days (the same lifetime as the reply
+   outbox, `LIMITS.maxAgeMs`) and no more than 10 minutes ahead. A wrong-clock device is told (`expired`),
+   not trusted.
 3. At-most-once: the `(device, requestId)` row is recorded **before** the turn, and the inbox file is
    deleted after the record. A crash after the record answers `turn_failed` and never runs the turn
    twice.

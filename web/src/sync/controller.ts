@@ -19,7 +19,9 @@ export const ACK_WAIT_MS = 150_000;
 export const WRAP_WAIT_MS = 300_000;
 export const MAX_PENDING = 5;
 export const MAX_ANSWERED = 50;
-export const PENDING_DROP_MS = 8 * 86_400_000;
+// A queued prompt the desktop still has not answered after its own acceptance window (7 days,
+// `LIMITS.maxAgeMs` in extension/routes/sync/consumer.mjs) can never run: show it as expired.
+export const PENDING_EXPIRY_MS = 7 * 86_400_000;
 
 export type SyncPhase = "none" | "pairing" | "locked" | "ready" | "removed";
 export type PairStep = "login" | "claiming" | "sas" | null;
@@ -238,7 +240,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
         try {
           const r = await readReply(s, dev, p.requestId, d.now());
           if (r) { texts.delete(p.requestId); answered.push({ ...p, text, ok: r.ok, reply: r.ok ? r.text : null, code: r.ok ? null : r.code }); }
-          else if (d.now() - p.issuedAt > PENDING_DROP_MS) {
+          else if (d.now() - p.issuedAt > PENDING_EXPIRY_MS) {
             dev.pending = dev.pending.filter((x) => x.requestId !== p.requestId);
             answered.push({ ...p, text, ok: false, reply: null, code: "expired" });
           }
