@@ -394,3 +394,18 @@ test('#4 a second project id cannot claim an already registered root', () => {
   );
   assert.equal(projectIdForRoot(db(), '/r/shared/victim'), 'p-victim', 'the original project still resolves');
 });
+
+// ── R-021 #6 ──────────────────────────────────────────────────────────────
+test('#6 adding an existing project member is refused, never a silent defaults overwrite', () => {
+  const owner = user('add-owner@example.com', 'owner', 'execute', 0);
+  const eng = user('add-eng@example.com', 'member', 'execute', 0);
+  registerProject(db(), owner, { id: 'p-add', root: '/r/add' });
+  addProjectMemberByEmail(db(), owner, 'p-add', { email: 'add-eng@example.com', role: 'admin', maxMode: 'execute', usdCapMonth: 5 });
+  assert.throws(
+    () => addProjectMemberByEmail(db(), owner, 'p-add', { email: 'add-eng@example.com' }),
+    (e) => e.code === 'ALREADY_MEMBER' && e.status === 409,
+  );
+  const row = getProjectMember(db(), eng, 'p-add');
+  assert.equal(row.role, 'admin', 'the existing grant is untouched');
+  assert.equal(row.usdCapMonth, 5);
+});

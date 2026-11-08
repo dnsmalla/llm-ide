@@ -413,6 +413,11 @@ export function addProjectMemberByEmail(db, actorId, projectId, { email, role = 
   }
   const user = db.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE').get(clean);
   if (!user) throw err('NOT_FOUND', 'Member not found', 404);
+  // R-021 #6: adding is not an overwrite — an existing row is edited through PATCH, so a default form cannot
+  // silently reset a member's role/mode/cap.
+  if (getProjectMember(db, user.id, projectId)) {
+    throw err('ALREADY_MEMBER', 'This member already has a project role; edit it instead', 409);
+  }
   return setProjectMember(db, actorId, projectId, user.id, { role, maxMode, usdCapMonth });
 }
 
