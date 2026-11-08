@@ -169,6 +169,7 @@ test('update installs the NEW version beside the running release and rollback re
     h.run('env', ENV1); // 1.2.3
     fakeBundle(h);
     h.run('bundle');
+    assert.ok(!existsSync(join(h.root, 'var/lib/llmide-deploy/staging/VERSION')), '$STAGING/VERSION is consumed');
     assert.ok(existsSync(join(h.root, 'opt/llmide/releases/1.2.3')));
     fakeBundle(h, '1.2.4', 'web 1.2.4');
     h.run('upload', 'VERSION\n1.2.4\n');

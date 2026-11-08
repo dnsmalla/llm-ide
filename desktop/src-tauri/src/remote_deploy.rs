@@ -458,10 +458,12 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
                         let list = format!("{sha}  bundle.tar.gz\n");
                         match upload_staging(runner, target, "bundle.sha256", list.as_bytes()) {
                             Ok(()) => match upload_staging(runner, target, "VERSION", format!("{}\n", plan.version).as_bytes()) {
-                                Ok(()) => match runner.run(target, &cmd, None) {
-                                    Ok(o) if o.code == Some(0) => { switched = o.stdout.contains("LLMIDE_BUNDLE_SWITCHED="); Ok(o) }
-                                    other => other,
-                                },
+                                Ok(()) => runner.run(target, &cmd, None).map(|o| {
+                                    // The marker is printed immediately after the symlink switch; a later
+                                    // web-copy/prune failure exits non-zero but must still be rolled back.
+                                    if o.stdout.contains("LLMIDE_BUNDLE_SWITCHED=") { switched = true; }
+                                    o
+                                }),
                                 Err(e) => Err(e),
                             },
                             Err(e) => Err(e),
@@ -876,6 +878,33 @@ mod tests {
         assert!(!fake.calls().iter().any(|(c, _)| c.contains("llmide-deploy bundle")));
         assert!(fake.calls().iter().any(|(c, _)| c.contains("llmide-deploy nginx")));
         assert!(fake.calls().iter().any(|(c, _)| c.contains("llmide-deploy start")));
+        let _ = std::fs::remove_file(bundle);
+    }
+
+    struct BundlePostSwitchFail { calls: StdMutex<Vec<String>> }
+    impl DeployRunner for BundlePostSwitchFail {
+        fn run(&self, _t: &PreparedTarget, command: &str, _stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
+            self.calls.lock().unwrap().push(command.to_string());
+            if command.contains("llmide-deploy check") { return Ok(RawOutput { code: Some(0), stdout: "version=1.2.2\nhelper=1\n".into(), stderr: String::new() }); }
+            if command.contains("llmide-deploy bundle") {
+                return Ok(RawOutput { code: Some(1), stdout: "LLMIDE_BUNDLE_SWITCHED=1.2.3\nllmide-deploy: bundle: web copy failed\n".into(), stderr: String::new() });
+            }
+            Ok(RawOutput { code: Some(0), stdout: "ok\n".into(), stderr: String::new() })
+        }
+    }
+
+    #[test]
+    fn a_bundle_failure_after_its_switch_marker_still_rolls_back() {
+        let fake = BundlePostSwitchFail { calls: StdMutex::new(Vec::new()) };
+        let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
+        let bundle = std::env::temp_dir().join(format!("llmide-post-{}.tar.gz", random_hex(4)));
+        std::fs::write(&bundle, b"x").unwrap();
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true);
+        let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
+        let report = deploy_run(&fake, &FakeHealth, &target(), &plan, &secrets, b"x").unwrap();
+        assert_eq!(report.failed_stage.as_deref(), Some("bundle"));
+        assert!(report.rolled_back, "a post-switch failure must roll back");
+        assert!(fake.calls.lock().unwrap().iter().any(|c| c.contains("llmide-deploy rollback")));
         let _ = std::fs::remove_file(bundle);
     }
 
