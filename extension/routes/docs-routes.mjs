@@ -8,7 +8,7 @@
 // id is simply unknown. Folder names in the path are checked by
 // kb/doc-project-files.mjs (assertFolderName) before any disk access.
 //
-//   POST   /kb/projects/register                 { id, root }
+//   POST   /kb/projects/register                 { id, root, name? } (also the canonical registry row)
 //   GET    /kb/docs/templates?project=<id>       { templates, count }
 //   GET    /kb/docs/commands?project=<id>        { commands, count }
 //   PUT    /kb/docs/templates/:folder?project=   { name, sections?, surface?, rawContent?, rewrite?, createOnly? } -> { template }
@@ -28,6 +28,8 @@ import {
 } from '../kb/doc-project-files.mjs';
 import { SURFACES } from '../kb/doc-templates.mjs';
 import { PROJECT_ID_RE, registerProjectRoot, resolveProjectRoot } from '../kb/project-roots.mjs';
+import { getDb } from '../kb/db.mjs';
+import { canManageProject, getProject, registerProject } from '../kb/projects.mjs';
 
 const REGISTER = '/kb/projects/register';
 const DOCS = '/kb/docs/';
@@ -115,8 +117,17 @@ export async function handleDocsRoutes(req, res, ctx) {
     if (req.method !== 'POST') return false;
     try {
       const body = await objectBody(req);
-      if (!body) return invalid(res, 'body must be a JSON object { id, root }');
-      sendJSON(res, 200, registerProjectRoot(userId, { id: body.id, root: body.root }));
+      if (!body) return invalid(res, 'body must be a JSON object { id, root, name? }');
+      const stored = registerProjectRoot(userId, { id: body.id, root: body.root });
+      // ADR 0022: the per-user Doc Gen map stays as it was; the canonical registry row is team-wide.
+      // A viewer opening an existing project may register their own folder mapping but never rewrite
+      // the project's root/name; a new project's registrar becomes its project owner.
+      const db = getDb();
+      let canonical = getProject(db, stored.id);
+      if (!canonical || canManageProject(db, userId, stored.id)) {
+        canonical = registerProject(db, userId, { id: stored.id, root: stored.root, name: body.name }).project;
+      }
+      sendJSON(res, 200, { id: stored.id, root: stored.root, name: canonical?.name ?? null });
     } catch (err) {
       fail(res, err);
     }

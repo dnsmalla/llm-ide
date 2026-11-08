@@ -35,6 +35,8 @@ import {
   deleteAgentSession,
 } from '../kb/agent-sessions.mjs';
 import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens, usedUsdMonth, usdCapForModel, estimateTurnCostUsd } from '../kb/usage.mjs';
+import { usedUsdMonthForProject } from '../kb/project-usage.mjs';
+import { effectiveProjectGrant, getProjectMember, projectIdForRoot } from '../kb/projects.mjs';
 import { randomUUID } from 'node:crypto';
 import { hostApprovalEnabled, verifyRequestApproval, bypassForbiddenOrigin, bypassGrants, CHAT_ID_RE, bypassPurpose } from '../core/host-approval.mjs';
 import { recordAudit } from '../server/audit.mjs';
@@ -564,9 +566,23 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   // that asked for read-only must not get the full agentic mode because the
   // classifier had a bad day.
   const member = getMember(getDb(), userId);
+  // ADR 0022: a turn that names a project (or runs in a registered project folder) is clamped by the
+  // PROJECT grant — the project role, the tighter run mode, the tighter cap. A team owner/admin
+  // overrides every project; a team viewer stays a viewer. A frame with no project keeps today's team
+  // clamp, so an existing client is unchanged.
+  const requestedProjectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : (typeof agentContext?.projectId === 'string' && agentContext.projectId ? agentContext.projectId : '');
+  const turnProjectId = requestedProjectId || projectIdForRoot(getDb(), agentContext?.workspaceRoot) || null;
+  if (turnProjectId) body.projectId = turnProjectId;
+  const projectGrant = turnProjectId ? effectiveProjectGrant(getDb(), userId, turnProjectId) : null;
+  const projectMember = turnProjectId ? getProjectMember(getDb(), userId, turnProjectId) : null;
+  const authority = projectGrant
+    ? { teamRole: projectGrant.role, maxMode: projectGrant.maxMode, usdCapMonth: projectGrant.usdCapMonth }
+    : member;
   const readOnly = requestedMode === AUTO_READ_ONLY;
   let mode;
-  if (member?.teamRole === 'viewer') {
+  if (authority?.teamRole === 'viewer') {
     mode = 'ask';
   } else if ((requestedMode === 'auto' || readOnly) && isAutoContinueTurn(message, userId, chatSessionId)) {
     // An auto-continue round of a task run: execute, without a classifier call.
@@ -601,7 +617,7 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   // after `mode` is final and before the lock, for the HTTP stream and startHostTurn alike (a phone
   // turn runs through this same function). No members row = an unregistered caller: execute, as today.
   // No members row fails closed: read-only, like the Host API gateway (a registration always writes one).
-  const maxMode = member?.maxMode ?? 'read_only';
+  const maxMode = authority?.maxMode ?? 'read_only';
   if (maxMode === 'none') {
     // The reason only — never the message, the chat id or any prompt text.
     recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'max_mode_none' } });
@@ -617,6 +633,15 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
     recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'usd_cap' } });
     return io.refuse({ code: 'USD_CAP', status: 429, message: 'Monthly USD cap reached' });
   }
+  // A project cap sums that project's month only, and applies when it is the tighter cap (or the
+  // global one is absent). A project admin with no project row has no project cap.
+  const projectCap = Number(projectMember?.usdCapMonth ?? 0);
+  const globalCap = Number(member?.usdCapMonth ?? 0);
+  if (turnProjectId && projectCap > 0 && (globalCap === 0 || projectCap <= globalCap)
+      && usedUsdMonthForProject(getDb(), userId, turnProjectId) >= projectCap) {
+    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'usd_cap' } });
+    return io.refuse({ code: 'USD_CAP', status: 429, message: 'Monthly USD cap reached' });
+  }
   if (maxMode === 'read_only' && !restrictsTools(mode)) {
     mode = clampToReadOnly(mode);
     body.permissionMode = null;
@@ -624,7 +649,7 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   }
   // User decision 2026-11-08 (plan H1.2): everyone but owners, admins and engineers may only Ask —
   // a read-only question with no edit or command tools — whatever mode or permission they asked for.
-  if (member?.teamRole === 'viewer') {
+  if (authority?.teamRole === 'viewer') {
     mode = 'ask';
     body.permissionMode = null;
     bypassGrants.revoke(userId, chatSessionId);
@@ -686,6 +711,8 @@ const PROVIDER_ERROR_CODES = new Set(['PROVIDER_NOT_AGENT_CAPABLE', 'PROVIDER_UN
 // The rest of the turn, once this chat session's lock is held — split out so
 // the lock's try/finally above stays a thin wrapper around it.
 async function runV2Stream(io, userId, chatSessionId, agentContext, mode, requestedModel, requestedProvider, message, body, deps, turnStartedAt = Date.now()) {
+  // A project-scoped turn's ledger rows carry the project id, so a project cap sums only that project.
+  const ledgerProjectId = typeof body.projectId === 'string' && body.projectId ? body.projectId : null;
   const db = getDb();
   // Session router (K1 P6b), authoritative pass with the chat's lock held and BEFORE the SSE headers:
   // fail closed (503 ROUTE_UNAVAILABLE), the cap (402 SESSION_TOKEN_LIMIT), a pending switch, the pick.
@@ -871,7 +898,7 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
     ledgerCostUsd = costForLedger;
     if (adapterTurn) return;
     for (const row of ledgerRowsForTurn(meteredModel, { ...usage, costUsd: costForLedger })) {
-      recordUsage(db, { userId, provider, requestId: turnId, ...row });
+      recordUsage(db, { userId, provider, requestId: turnId, projectId: ledgerProjectId, ...row });
     }
   };
 
@@ -1236,10 +1263,14 @@ export const HOST_TURN_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_pla
  * refusal the route answers with 409/503/402 (TURN_IN_PROGRESS, SDK_UPDATING, PLUGIN_UPDATING, SESSION_TOKEN_LIMIT,
  * ROUTE_UNAVAILABLE) rejects with an Error carrying that `code`.
  */
-export async function startHostTurn({ userId, chatSessionId, message, files = [], mode = 'auto', model = null, onEvent, deps = {} }) {
+export async function startHostTurn({ userId, chatSessionId, message, files = [], mode = 'auto', model = null, projectId = null, onEvent, deps = {} }) {
   const agentContext = { chatSessionId, workspaceRoot: extensionChatWorkspace(), surface: 'host-api' };
   const hostMode = mode !== 'auto' && HOST_TURN_MODES.includes(mode) ? clampToReadOnly(mode) : AUTO_READ_ONLY;
-  const body = { message, mode: hostMode, agentContext, attachments: files, ...(typeof model === 'string' && model ? { model } : {}) };
+  const body = {
+    message, mode: hostMode, agentContext, attachments: files,
+    ...(typeof model === 'string' && model ? { model } : {}),
+    ...(typeof projectId === 'string' && projectId ? { projectId } : {}),
+  };
   // A non-Bypass turn ends the chat's Bypass grant, as gateBypassRequest does on HTTP.
   if (hostApprovalEnabled()) bypassGrants.revoke(userId, chatSessionId);
   await runV2Turn({ userId, chatSessionId, agentContext, message, body, deps: { ...DEFAULT_DEPS, ...deps }, turnStartedAt: Date.now() }, {

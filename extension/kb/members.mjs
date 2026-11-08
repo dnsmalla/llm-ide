@@ -330,6 +330,9 @@ export const CLASS_GRANTS = Object.freeze({
   // Engineers install too (user decision 2026-11-08); only team management stays admin.
   install: Object.freeze({ role: 'member', mode: 'execute', cap: false }),
   admin: Object.freeze({ role: 'admin', mode: 'none', cap: false }),
+  // Project membership management (ADR 0022): a project admin/owner, or a global team admin/owner.
+  // Deliberately NOT the team `admin` class — a project admin never manages the team.
+  'project.admin': Object.freeze({ role: 'admin', mode: 'none', cap: false }),
   host: Object.freeze({ role: 'viewer', mode: 'none', cap: false }),
 });
 

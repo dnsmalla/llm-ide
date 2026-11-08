@@ -393,6 +393,9 @@ export function recordUsage(db, {
   // The turn's USD cost when the engine reports it (migration 0069). Null = unknown; the monthly
   // member cap sums this column, so an unknown cost under-counts rather than guessing.
   costUsd = null,
+  // The project a project-scoped turn was clamped to (migration 0070). Null = no project in scope;
+  // such rows never count against a project cap.
+  projectId = null,
 } = {}) {
   addToTurnTotals({ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens });
   if (!userId || !provider || !model) return null;
@@ -414,19 +417,21 @@ export function recordUsage(db, {
       turns: turns == null ? null : tokenCountOrNull(turns),
       stop_reason: clampStr(stopReason, 40),
       cost_usd: costOrNull(costUsd),
+      project_id: clampStr(projectId, 128),
     };
     // `ts` comes back from the insert itself, so the mirror carries the exact
     // timestamp the ledger stored.
     const info = db.prepare(
       `INSERT INTO usage_ledger
          (user_id, provider, model, source, endpoint, input_tokens, output_tokens,
-          cache_read_tokens, cache_creation_tokens, runs, request_id, turns, stop_reason, cost_usd)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          cache_read_tokens, cache_creation_tokens, runs, request_id, turns, stop_reason, cost_usd,
+          project_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING id, ts`
     ).get(
       v.user_id, v.provider, v.model, v.source, v.endpoint,
       v.input_tokens, v.output_tokens, v.cache_read_tokens, v.cache_creation_tokens,
-      v.runs, v.request_id, v.turns, v.stop_reason, v.cost_usd,
+      v.runs, v.request_id, v.turns, v.stop_reason, v.cost_usd, v.project_id,
     );
     const ledgerId = Number(info.id);
     // Shadow (Stage 2a): best-effort, synchronous, and isolated. The mirror

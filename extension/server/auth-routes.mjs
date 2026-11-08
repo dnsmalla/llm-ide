@@ -30,6 +30,7 @@ import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { assertDeletable, consumeInvite, getMember, peekInvite, permittedClasses } from '../kb/members.mjs';
 import { persistTeamYaml } from '../kb/team-yaml.mjs';
+import { listProjectsForUser } from '../kb/projects.mjs';
 import { enforceRouteAuthority } from './route-authority.mjs';
 
 // Errors surfaced by the MCP OAuth flow can carry the authorization server's
@@ -669,6 +670,8 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     send(res, 200, {
       ...me,
       member: m ? { teamRole: m.teamRole, maxMode: m.maxMode, usdCapMonth: m.usdCapMonth, permissions: permittedClasses(m) } : null,
+      // ADR 0022: per-project roles, so a client can gate the project UI without a second call.
+      projects: listProjectsForUser(db, req.user.id),
     });
     return;
   }

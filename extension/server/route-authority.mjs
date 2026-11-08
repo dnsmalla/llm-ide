@@ -20,6 +20,8 @@
 // docs/explanation/invariants.md; this module is the one table for the rest.
 
 import { usedUsdMonth } from '../kb/usage.mjs';
+import { usedUsdMonthForProject } from '../kb/project-usage.mjs';
+import { effectiveProjectGrant, getProjectMember, projectGrantAsMember } from '../kb/projects.mjs';
 import { recordAudit } from './audit.mjs';
 import { sendJSON } from '../core/utils.mjs';
 import { getMember, classRefusal, CLASS_GRANTS } from '../kb/members.mjs';
@@ -42,16 +44,55 @@ function refuse(db, userId, reason, cls) {
 }
 
 /**
- * The one audited check (plan H1.2). Reads the caller's members row now, so a grant change applies on
- * the next request or tick. Used by the route policy, the Host API gateway and the background jobs.
+ * The project id a request names: `?project=` / `?projectId=` (the docs and index routes) or
+ * `/projects/:id/...`. A body-carried id cannot be seen here; the turn/handler checks that one itself.
  */
-export function authorizeAction(db, userId, cls, { req = null } = {}) {
+export function projectIdForRequest(method, url) {
+  const raw = String(url || '');
+  const path = raw.split('?')[0];
+  if (raw.includes('?')) {
+    try {
+      const q = new URL(raw, 'http://127.0.0.1').searchParams;
+      const id = q.get('project') ?? q.get('projectId');
+      if (id) return id;
+    } catch { /* a malformed URL has no project id */ }
+  }
+  const m = /^\/projects\/([A-Za-z0-9_-]{1,128})(?:\/|$)/.exec(path);
+  return m ? m[1] : null;
+}
+
+/**
+ * The one audited check (plan H1.2). Reads the caller's members row now, so a grant change applies on
+ * the next request or tick. When the request names a project, the effective PROJECT grant is used
+ * instead (ADR 0022): the project role, the tighter run mode and the matching monthly spend. A project
+ * id in a body is checked by the handler that reads the body. Used by the route policy, the Host API
+ * gateway and the background jobs.
+ */
+export function authorizeAction(db, userId, cls, { req = null, projectId = null } = {}) {
   if (!userId) return refuse(db, null, 'role_denied', cls);
   const member = getMember(db, userId);
-  const reason = classRefusal(member, cls, () => usedUsdMonth(db, userId));
+  const pid = projectId ?? projectIdForRequest(req?.method, req?.url);
+  let scopeMember = member;
+  let grant = null;
+  let usedUsd = () => usedUsdMonth(db, userId);
+  if (pid) {
+    grant = effectiveProjectGrant(db, userId, pid);
+    scopeMember = projectGrantAsMember(grant);
+    const projectMember = getProjectMember(db, userId, pid);
+    const globalCap = Number(member?.usdCapMonth ?? 0);
+    const projectCap = Number(projectMember?.usdCapMonth ?? 0);
+    if (projectCap > 0 && (globalCap === 0 || projectCap <= globalCap)) {
+      usedUsd = () => usedUsdMonthForProject(db, userId, pid);
+    }
+  }
+  const reason = classRefusal(scopeMember, cls, usedUsd);
   if (reason) return refuse(db, userId, reason, cls);
-  if (req) req.member = member;
-  return { ok: true, member };
+  if (req) {
+    req.member = member;
+    if (grant) req.projectGrant = grant;
+    if (pid) req.projectId = pid;
+  }
+  return { ok: true, member: scopeMember, projectGrant: grant, projectId: pid };
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -86,6 +127,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/auth/reset-request',
   ]),
   ...rules('self.read', 'GET', [
+    '/projects',
     '/agent/v2/session/route',
     '/agent/v2/session/route/history',
     '/agent/v2/turns',
@@ -458,6 +500,18 @@ export const ROUTE_POLICY = Object.freeze([
   ...rules('host', 'PUT', [
     '/bus/kinds/:kind',
     '/host-api/push/apns',
+  ]),
+  ...rules('project.admin', 'GET', [
+    '/projects/:id/members',
+  ]),
+  ...rules('project.admin', 'POST', [
+    '/projects/:id/members',
+  ]),
+  ...rules('project.admin', 'PATCH', [
+    '/projects/:id/members/:userId',
+  ]),
+  ...rules('project.admin', 'DELETE', [
+    '/projects/:id/members/:userId',
   ]),
   ...rules('host', 'DELETE', [
     '/bus/schedules/:id',

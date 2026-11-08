@@ -22,6 +22,7 @@ import { enforceRouteAuthority } from './server/route-authority.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { handleTeamRoute, isTeamRoute } from './routes/team-routes.mjs';
+import { handleProjectRoute, isProjectRoute } from './routes/project-routes.mjs';
 import { applyTeamYamlAtBoot } from './server/team-boot.mjs';
 import { handleBusRoute, isBusRoute, closeBusStreams } from './routes/bus/bus-routes.mjs';
 import { handleHostApiRoute, isHostApiRoute } from './routes/host-api/http-routes.mjs';
@@ -325,6 +326,19 @@ const HOST = config.host;
 //   v106 — additive (no new route). (1) Issue schedule overlay: GitLab repo keys may nest groups (group/sub/project, 2 to 20 segments, 255 characters; GitHub stays owner/name). (2) PUT /kb/docs/templates/:folder and /kb/docs/commands/:folder accept createOnly: true, which answers 409 TEMPLATE_EXISTS or COMMAND_EXISTS for an existing folder (any case, or an oversize template) and writes nothing; creation is an exclusive mkdir. (3) GitHub import (POST /kb/connect-github-issues): a run that stopped early (cap, budget or secondary limit) upserts and deletes nothing; a secondary limit (429, or 403 with Retry-After) stops the run and answers retryAfter (seconds, or null). (4) GET /kb/agent-sdk answers busy {chatTurns, loopRuns, total} (counts only). Spec docs/spec/api-server.md section 7k.
 //   v107 — Host API v1 desktop pairing, additive (contract schema/http/host-api.schema.json, schema/host-api/v1/README.md): POST /host-api/pin → { pin (6 digits), expiresAt (ms), port (the v1 listener's bound port) } (one-use, 10 minutes, one live PIN per user; 503 HOST_API_UNAVAILABLE while the listener is not up), GET /host-api/devices → { devices:[{ deviceId, name, pairedAt, lastSeenAt }] } (never a token), DELETE /host-api/devices/:id → { revoked } (also drops the device's live sessions; another user's id answers revoked:false). Every route needs the JWT and the bus host proof (x-llmide-host-nonce) or answers 403 HOST_PROOF_REQUIRED, then 404 HOST_API_DISABLED unless LLMIDE_HOST_API_DEV=1 (never in production). All three ride the 'kbWrite' rate bucket.
 //   v108 — Host API v1 pinned TLS, additive: POST /host-api/pin also returns fingerprint (string "sha256:<base64url SHA-256 of the certificate SPKI>" when the v1 listener runs TLS, LLMIDE_HOST_API_TLS=1; null for the plaintext dev listener). The /host-api/* routes are enabled whenever a v1 listener mode is on (TLS or dev), else 404 HOST_API_DISABLED.
+//   v126 — Team Hub H1.3, per-project roles (ADR 0022; contract schema/http/projects.schema.json;
+//          migration 0070 projects + project_members + usage_ledger.project_id), additive:
+//          GET /projects → { projects:[{ id, name, role, maxMode, usdCapMonth, permissions }] } (the caller's
+//          effective role; an unassigned team member is a viewer, a global owner/admin overrides);
+//          GET /projects/:id/members → { project:{ id, name }, members:[{ userId, email, displayName, status,
+//          role, maxMode, usdCapMonth, updatedAt }] } and POST /projects/:id/members { email, role?, maxMode?,
+//          usdCapMonth? } (add an existing team member) and PATCH /projects/:id/members/:userId { role?,
+//          maxMode?, usdCapMonth? } and DELETE /projects/:id/members/:userId → { removed } — project admin
+//          (or a global team admin/owner), audited, written through to team.yaml. GET /auth/me gains
+//          `projects` with the same rows. POST /kb/projects/register also creates/updates the canonical
+//          registry row (a new project's creator becomes its owner) and accepts an optional `name`.
+//          A project-scoped route (`?project=`/`?projectId=` or /projects/:id) and a chat turn that names a
+//          project use the project role, run mode and cap; a project row never lifts a team viewer (H1.2).
 //   v125 — additive, no new route (REQ-014): a disabled account is refused on its next request with
 //          401 { error: { code: 'ACCOUNT_DISABLED' } } even while its access token is still valid (auth.mjs),
 //          and a turn that waits 30 s for a free in-flight slot answers 429 { error: { code: 'BUSY' } } before
@@ -367,7 +381,7 @@ const HOST = config.host;
 const isSyncRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/sync' || p.startsWith('/kb/sync/'); };
 const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/self-heal' || p.startsWith('/kb/self-heal/'); };
 
-const SERVER_API_VERSION = 125;
+const SERVER_API_VERSION = 126;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -380,6 +394,9 @@ const ALL_ENDPOINTS = [
   '/kb/docs/commands/:folder',
   '/kb/docs/seed',
   '/kb/projects/register',
+  '/projects',
+  '/projects/:id/members',
+  '/projects/:id/members/:userId',
   '/chat',
   '/code-assist',
   '/code-assist/decision',
@@ -634,12 +651,13 @@ function rateLimitProfile(url, method) {
     if (path === '/agent/v2/turns' || path === '/agent/v2/turns/stream' || path === '/kb/index/search' || path === '/kb/providers/custom') return 'kbWrite';
     if (path.startsWith('/bus/')) return 'kbWrite';
     if (path.startsWith('/host-api/')) return 'kbWrite';
+    if (path.startsWith('/projects/')) return 'kbWrite';
     return null;
   }
   // Mutating PUT/DELETE writes need the same throttle as their POST siblings —
   // without this they'd fall through the POST-only short-circuit below and run
   // unlimited. (Strip any query string / path params first.)
-  if (method === 'PUT' || method === 'DELETE') {
+  if (method === 'PUT' || method === 'DELETE' || method === 'PATCH') {
     const path = url.split('?')[0];
     if (path === '/kb/usage/limits')           return 'kbWrite';
     if (path === '/kb/agent-history/settings') return 'kbWrite';
@@ -652,6 +670,7 @@ function rateLimitProfile(url, method) {
     if (path.startsWith('/kb/index/notes/')) return 'kbWrite';
     if (path.startsWith('/kb/self-heal/')) return 'kbWrite';
     if (path.startsWith('/host-api/')) return 'kbWrite';
+    if (path.startsWith('/projects/')) return 'kbWrite';
     return null;
   }
   if (method !== 'POST') return null;
@@ -664,6 +683,7 @@ function rateLimitProfile(url, method) {
   if (url === '/generate-docx')          return 'llmFast';
   if (url === '/generate-doc')           return 'llmFast';          // LLM export twin of /generate-docx
   if (url === '/kb/docs/seed' || url === '/kb/projects/register') return 'kbWrite';
+  if (url.startsWith('/projects')) return 'kbWrite';
   // The removed classic /code-assist answers 410: a cheap llmFast request, never an agent turn.
   if (url === '/code-assist')            return 'llmFast';
   // Chat agent turns get their own bucket — see `agentTurn` in
@@ -896,6 +916,20 @@ const server = http.createServer(async (req, res) => {
   // Command bus (/bus/*): per user, after authenticate and the rate limiter. A kill switch (LLMIDE_BUS=off) answers 503.
   if (isBusRoute(req.url || '')) {
     await handleBusRoute(req, res, { bus });
+    return;
+  }
+
+  // Project-scoped team roles (/projects, /projects/:id/members): always on; the route policy above
+  // checks the project grant, and the handler re-checks it (ADR 0022).
+  if (isProjectRoute(req.url || '')) {
+    try {
+      await handleProjectRoute(req, res, {
+        db: getDb({ logger }),
+        logger: reqLog,
+        requestId,
+        dir: config.dataDir ?? path.dirname(config.dbPath),
+      });
+    } catch (err) { sendError(res, err, { logger: reqLog }); }
     return;
   }
 
