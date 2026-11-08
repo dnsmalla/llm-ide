@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 124` (`server.mjs:359`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–392`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 125` (`server.mjs:362`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–392`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -128,6 +128,8 @@ Source: `extension/server/jwt.mjs`.
 **Access-token epoch (bulk revocation):** Immediately after the JTI check, `auth.mjs:61` rejects any token whose `claims.iat < tokensValidAfter(userId)` (`extension/kb/user.mjs:168`, reading `users.tokens_valid_after`). This is a per-user cutoff that invalidates *every* outstanding access token at once without enumerating their JTIs — used for "log out everywhere". The epoch is bumped to the current second by `logoutAll` (`users.mjs:229`) and by consuming a password-reset token (`users.mjs:368`). The comparison is strict `<`, so a token minted in the same wall-clock second as the bump survives (a ≤1 s window); switch to `<=` if absolute revocation is required. The column was added by migration `0016_token_epoch.sql`.
 
 `verifyAccessToken()` returns `{ userId, role, jti, iat, exp }` (`jwt.mjs:105`); `iat` is load-bearing — the epoch check above depends on it. The server attaches `{ id, role, jti, tokenExp }` to `req.user` (`auth.mjs:64`).
+
+**Disabled account:** after the epoch check, `authenticate()` reads `users.status` (one primary-key read) and answers `401 { error: { code: 'ACCOUNT_DISABLED', message } }` when it is not `active` (API 125). Disabling an account therefore takes effect on the next request, not when its access token expires (up to 900 s later); `/auth/refresh` already refused a disabled account. The JWT carries no `status` claim, so the check is never satisfiable from the token alone.
 
 ### Refresh token format and storage
 
@@ -439,6 +441,10 @@ table in ADR 0021): `public`, `self.read`, `self.write`, `model.ask`, `model.rea
 - **Refusals:** `403 { error: { code: 'ROLE_DENIED', message } }` (role or `max_mode`) and `429 { error: { code:
   'USD_CAP', message } }`; exactly one `team.deny` audit row with `{ reason }` only. A disabled feature keeps its
   own `404 feature_disabled`.
+- **Turn concurrency (API 125):** at most `LLMIDE_MAX_TURNS` (`config.maxConcurrentTurns`, default 8, clamped
+  1-64) chat turns run at once, process-wide, HTTP and Host API alike; the per-chat 409 `TURN_IN_PROGRESS` is
+  unchanged. A turn that waits 30 s for a slot answers `429 { error: { code: 'BUSY', message } }` before the engine
+  starts, so it writes no usage row.
 - **Roles (user decision 2026-11-08):** owners, admins and engineers (role `member`) do all work; `install` is
   member + execute; `admin` is team management only. A viewer may only Ask: `model.ask` on `/agent/v2/stream`,
   `/agent/v2/decision` and `/kb/agent/ask`, and `runV2Turn` forces the turn to the read-only `ask` mode with no

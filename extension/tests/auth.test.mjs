@@ -207,6 +207,23 @@ test('authenticate rejects malformed Bearer header', () => {
   assert.throws(() => authenticate(req));
 });
 
+test('authenticate refuses a disabled account on its still-valid access token', async () => {
+  const { getDb } = await import('../kb/db.mjs');
+  const db = getDb();
+  db.prepare(
+    "INSERT OR IGNORE INTO users (id, email, display_name, password_hash, role) VALUES ('u-section-4', 's4@example.com', 'N', 'x', 'user')",
+  ).run();
+  const token = signAccessToken({ userId: 'u-section-4', role: 'user' });
+  const auth = () => {
+    const req = fakeReq({ authorization: `Bearer ${token}` });
+    authenticate(req);
+    return req;
+  };
+  assert.equal(auth().user.id, 'u-section-4', 'an active account works');
+  db.prepare("UPDATE users SET status = 'disabled' WHERE id = 'u-section-4'").run();
+  assert.throws(auth, (e) => e.status === 401 && e.code === 'ACCOUNT_DISABLED');
+});
+
 // ── requireRole (ADR 0021) ──────────────────────────────────────────────────
 // The role gate reads `members` on every call, never the JWT `role` claim.
 

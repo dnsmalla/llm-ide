@@ -323,6 +323,10 @@ const HOST = config.host;
 //   v106 — additive (no new route). (1) Issue schedule overlay: GitLab repo keys may nest groups (group/sub/project, 2 to 20 segments, 255 characters; GitHub stays owner/name). (2) PUT /kb/docs/templates/:folder and /kb/docs/commands/:folder accept createOnly: true, which answers 409 TEMPLATE_EXISTS or COMMAND_EXISTS for an existing folder (any case, or an oversize template) and writes nothing; creation is an exclusive mkdir. (3) GitHub import (POST /kb/connect-github-issues): a run that stopped early (cap, budget or secondary limit) upserts and deletes nothing; a secondary limit (429, or 403 with Retry-After) stops the run and answers retryAfter (seconds, or null). (4) GET /kb/agent-sdk answers busy {chatTurns, loopRuns, total} (counts only). Spec docs/spec/api-server.md section 7k.
 //   v107 — Host API v1 desktop pairing, additive (contract schema/http/host-api.schema.json, schema/host-api/v1/README.md): POST /host-api/pin → { pin (6 digits), expiresAt (ms), port (the v1 listener's bound port) } (one-use, 10 minutes, one live PIN per user; 503 HOST_API_UNAVAILABLE while the listener is not up), GET /host-api/devices → { devices:[{ deviceId, name, pairedAt, lastSeenAt }] } (never a token), DELETE /host-api/devices/:id → { revoked } (also drops the device's live sessions; another user's id answers revoked:false). Every route needs the JWT and the bus host proof (x-llmide-host-nonce) or answers 403 HOST_PROOF_REQUIRED, then 404 HOST_API_DISABLED unless LLMIDE_HOST_API_DEV=1 (never in production). All three ride the 'kbWrite' rate bucket.
 //   v108 — Host API v1 pinned TLS, additive: POST /host-api/pin also returns fingerprint (string "sha256:<base64url SHA-256 of the certificate SPKI>" when the v1 listener runs TLS, LLMIDE_HOST_API_TLS=1; null for the plaintext dev listener). The /host-api/* routes are enabled whenever a v1 listener mode is on (TLS or dev), else 404 HOST_API_DISABLED.
+//   v125 — additive, no new route (REQ-014): a disabled account is refused on its next request with
+//          401 { error: { code: 'ACCOUNT_DISABLED' } } even while its access token is still valid (auth.mjs),
+//          and a turn that waits 30 s for a free in-flight slot answers 429 { error: { code: 'BUSY' } } before
+//          the engine starts (LLMIDE_MAX_TURNS, routes/agent-v2.mjs).
 //   v124 — Team Hub H1.2 (plan 2026-11-08), additive: GET /auth/me member.permissions (the action
 //          classes the caller may use). Every route now has an action class; an authenticated request
 //          no rule declares answers 404 NOT_FOUND. Refusals stay 403 ROLE_DENIED / 429 USD_CAP.
@@ -359,7 +363,7 @@ const HOST = config.host;
 const isSyncRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/sync' || p.startsWith('/kb/sync/'); };
 const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; return p === '/kb/self-heal' || p.startsWith('/kb/self-heal/'); };
 
-const SERVER_API_VERSION = 124;
+const SERVER_API_VERSION = 125;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

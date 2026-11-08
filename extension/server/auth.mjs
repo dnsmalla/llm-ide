@@ -24,7 +24,7 @@
 
 import { errAuth, errForbidden } from '../core/errors.mjs';
 import { extractBearer, verifyAccessToken } from './jwt.mjs';
-import { isJtiRevoked, tokensValidAfter } from '../kb/db.mjs';
+import { isJtiRevoked, tokensValidAfter, getDb, lazyPrepare } from '../kb/db.mjs';
 import { getMember, atLeast } from '../kb/members.mjs';
 
 const PUBLIC_PATHS = new Set([
@@ -76,6 +76,14 @@ export function authenticate(req) {
   // token minted in the same second as the cutoff is still honoured.)
   if (typeof claims.iat === 'number' && claims.iat < tokensValidAfter(claims.userId)) {
     throw errAuth('Session has been revoked — please sign in again');
+  }
+  // A disabled account stops on its next request, not when its access token expires (LLMIDE_ACCESS_TTL_SEC,
+  // 15 min). Refresh already refuses (server/users.mjs); a still-valid access token must not outlive the
+  // disable. One primary-key read, never a JWT claim: `status` is not in the token.
+  if (lazyPrepare(getDb(), 'SELECT status FROM users WHERE id = ?').get(String(claims.userId))?.status !== 'active') {
+    const e = errAuth('This account is disabled');
+    e.code = 'ACCOUNT_DISABLED';
+    throw e;
   }
   req.user = { id: claims.userId, role: claims.role, jti: claims.jti, tokenExp: claims.exp };
   return true;
