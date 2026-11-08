@@ -7,7 +7,9 @@
 import fs from 'fs';
 import path from 'path';
 
-export const BACKUP_FILE_RE = /^data-\d+\.db$/;
+// A backup is a PAIR: data-<unix>.db and data-<unix>.agent.db. Old backups
+// (before agent.db was included) have only the first file; both shapes match.
+export const BACKUP_FILE_RE = /^data-(\d+)(\.agent)?\.db$/;
 export const DEFAULT_BACKUP_KEEP = 2;
 
 /**
@@ -21,24 +23,34 @@ export function pruneBackups(dir, keep = DEFAULT_BACKUP_KEEP, { allowed = false,
   const result = { kept: [], deleted: [], failed: [], skipped: null };
   if (!allowed) return { ...result, skipped: reason };
   if (!fs.existsSync(dir)) return result;
-  const candidates = [];
+  // Group by the unix stamp so a data.db and its agent.db are kept or deleted
+  // together. A directory with an orphaned second file is still one group.
+  const groups = new Map();
   const foreign = [];
   for (const name of fs.readdirSync(dir)) {
     const full = path.join(dir, name);
     const st = fs.statSync(full);
     if (!st.isFile()) continue;
-    if (!BACKUP_FILE_RE.test(name)) { foreign.push(name); continue; }
-    candidates.push({ name, full, mtimeMs: st.mtimeMs });
+    const m = name.match(BACKUP_FILE_RE);
+    if (!m) { foreign.push(name); continue; }
+    const stamp = m[1];
+    const g = groups.get(stamp) ?? { stamp, files: [], mtimeMs: 0 };
+    g.files.push({ name, full });
+    g.mtimeMs = Math.max(g.mtimeMs, st.mtimeMs);
+    groups.set(stamp, g);
   }
   if (foreign.length) return { ...result, skipped: `directory holds other files (${foreign.join(', ')}); not pruned` };
-  candidates.sort((a, b) => (b.mtimeMs - a.mtimeMs) || (a.name < b.name ? 1 : -1));
-  result.kept = candidates.slice(0, limit).map((c) => c.name);
-  for (const old of candidates.slice(limit)) {
-    try {
-      fs.unlinkSync(old.full);
-      result.deleted.push(old.name);
-    } catch (err) {
-      result.failed.push({ name: old.name, error: err.message });
+  const ordered = [...groups.values()].sort((a, b) => (b.mtimeMs - a.mtimeMs) || (Number(b.stamp) - Number(a.stamp)));
+  const kept = ordered.slice(0, limit);
+  result.kept = kept.flatMap((g) => g.files.map((f) => f.name)).sort();
+  for (const old of ordered.slice(limit)) {
+    for (const f of old.files) {
+      try {
+        fs.unlinkSync(f.full);
+        result.deleted.push(f.name);
+      } catch (err) {
+        result.failed.push({ name: f.name, error: err.message });
+      }
     }
   }
   return result;

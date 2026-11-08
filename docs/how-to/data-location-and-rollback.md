@@ -127,8 +127,10 @@ data dir's writes never reach it. Each boot checks for this: `/health` reports
 ## Backups and retention
 
 The server backs up the live DB every 24 hours (`LLMIDE_BACKUP_INTERVAL_HOURS`),
-and on `POST /admin/backup`. It keeps the **newest 2** backups
-(`LLMIDE_BACKUP_KEEP`, default 2, minimum 1) and deletes older ones.
+and on `POST /admin/backup`. A backup is a **pair**: `data-<unix>.db` and
+`data-<unix>.agent.db` (the agent-run history). It keeps the **newest 2 pairs**
+(`LLMIDE_BACKUP_KEEP`, default 2, minimum 1) and deletes older pairs together.
+`npm run backup` also writes the sibling `.agent.db` when it exists.
 
 Retention runs only where the server owns the directory:
 
@@ -165,7 +167,10 @@ healthy boot they are deleted. So:
   Then start with `LLMIDE_USE_REPO_KB=1`. Anything written to the data dir during
   that boot is not in these files; copy `<dir>/data.db` out first if you need it.
 - **After the `.pre-move` files are gone**, there is no automatic way back. Restore
-  a backup: stop every server, then
+  a backup with the verified command
+  [`npm run restore`](maintain-and-restore-database.md#restore-a-backup-verify-then-replace)
+  (it verifies the pair, snapshots the live files and rolls back on failure), or
+  by hand: stop every server, then
 
   ```sh
   cd "<dir>"
@@ -191,6 +196,10 @@ healthy boot they are deleted. So:
   agent-sdk cap, forks, the tripwire, a deferred SIGTERM, interrupted runs, and two
   concurrent runs in child processes. Temp dirs only.
 - `extension/tests/backup-retention.test.mjs`: keep-2, matching files only, the
-  prune policy, the foreign-file refusal, minimum 1.
+  prune policy, the foreign-file refusal, minimum 1, and pairs kept/pruned together.
+- `extension/tests/maintenance.test.mjs`: bounded FTS merge/optimize and
+  incremental vacuum, idempotency, the non-INCREMENTAL report.
+- `extension/tests/restore-backup.test.mjs`: verified pair restore, corrupt
+  backup refusal, pair-wide rollback, dry run.
 - `extension/tests/dev-secrets.test.mjs`: fallback to the legacy file, and refusal
   to regenerate over an unreadable one.

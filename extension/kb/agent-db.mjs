@@ -495,3 +495,15 @@ export function agentStoreStatus() {
 export function agentDbFile() {
   return state.file ?? config.agentDbPath;
 }
+
+/**
+ * Self-consistent hot backup of agent.db (VACUUM INTO, a bound parameter).
+ * Callers must have checked that the file exists; opening a missing store would
+ * create one. The server's backups write data.db and agent.db as a pair
+ * (kb/backup-databases.mjs), and retention keeps/prunes them together.
+ */
+export function backupAgentTo(targetPath) {
+  const db = getAgentDb();
+  if (!db) throw new Error('agent.db is unavailable');
+  db.prepare('VACUUM INTO ?').run(String(targetPath));
+}

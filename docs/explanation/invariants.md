@@ -413,6 +413,31 @@ Run through this against a real meeting before merging:
 - **DO NOT** prune backups outside the data dir's `backups/`, and never in the repo-kb layout (`config.backupPrune`).
 - **Known limit:** Node has no `F_FULLFSYNC`; on macOS the fsync is a plain fsync, so the `.pre-move` copies are the protection against power loss.
 
+## Database backups, maintenance and restore (`extension/kb/backup-databases.mjs`, `extension/kb/maintenance.mjs`, `extension/kb/restore-backup.mjs`)
+
+The server's backup is a PAIR — `data.db` plus `agent.db` — and maintenance /
+restore are explicit, bounded operations. Guide:
+[maintain-and-restore-database.md](../how-to/maintain-and-restore-database.md).
+
+### ✅ MUST preserve
+
+- **Every backup path writes both files.** `/admin/backup`, the 24-hour auto backup and `npm run backup` all snapshot `data.db` and, when it exists, `agent.db` beside it (`data-<stamp>.db` + `data-<stamp>.agent.db`). The reports carry both paths and byte counts.
+- **Retention counts pairs.** `kb/backup-retention.mjs` matches `data-<unix>(.agent)?.db`, groups by the unix stamp, keeps the newest `LLMIDE_BACKUP_KEEP` groups and deletes both files of an older group together. A directory with any other file is still not pruned.
+- **Maintenance is an explicit point, never a request/startup hook.** `POST /admin/maintenance` (admin, in-process) or `npm run maintain` (offline CLI) only. Each pass is bounded by pages and wall-clock time, yields between batches, and stops between batches while a chat/Loop/meeting run is in flight.
+- **FTS work is bounded.** `'merge'` in page slices; a full FTS5 `'optimize'` only when the database is small (`optimizeMaxPages`), never on a large index. The pass never runs a full `VACUUM`.
+- **Incremental vacuum only in INCREMENTAL mode.** `PRAGMA incremental_vacuum(N)` is sliced and only when `PRAGMA auto_vacuum = 2`; otherwise the report says `vacuum.skipped: "not-incremental"` and the docs give the one-time offline step. New databases are created with `auto_vacuum = INCREMENTAL`.
+- **Restore verifies before it replaces.** Both backups pass `integrity_check` + `quick_check`, have tables and (data.db) an applied `schema_migrations` version before any live file moves. The live DBs must be quiescent (`BEGIN IMMEDIATE`; a running core is `live-in-use`).
+- **Restore is pair-wide and reversible.** Live files are snapshotted to `*.pre-restore-<stamp>.db`, both backups are staged and verified again, old files move to `*.restore-replaced-<stamp>` (not deleted), the staged files are renamed in and verified. Any failure removes the new files and moves both old halves back; a failed restore keeps the replaced copies rather than deleting the only remaining copy.
+
+### ❌ DO NOT do these
+
+- **Do NOT back up only `data.db`** — a restore that brings back the main DB with a newer `agent.db` (or none) is inconsistent.
+- **Do NOT prune one half of a backup pair**, or count a pair as two retention slots.
+- **Do NOT run maintenance from a request path, a boot hook or a timer**, and do not replace the bounded FTS merge with an unbounded `'optimize'` or a full `VACUUM`.
+- **Do NOT run `PRAGMA incremental_vacuum` on a non-INCREMENTAL database and call it freed space**; report the truth and leave the one-time VACUUM to the operator.
+- **Do NOT restore without verifying both backups first, without a pre-restore snapshot, or while the server/core holds the file open.**
+- **DO NOT** open a second Node process that writes a live DB; the offline CLI probes the write lock and refuses.
+
 ## Legacy Mac app data import (`extension/kb/legacy-import.mjs`, `desktop/src-tauri/src/legacy_import.rs`)
 
 The retired Mac app's `~/Library/Application Support/llm-ide/system` is imported into the desktop's

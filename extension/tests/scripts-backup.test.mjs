@@ -72,3 +72,22 @@ test('backup script overwrites an existing output file when --force is passed', 
     cleanupFixture(dir);
   }
 });
+test('backup script includes the sibling agent.db as a pair', async () => {
+  const { dir, dbPath } = makeDbFixture();
+  try {
+    const agentDb = path.join(dir, 'agent.db');
+    const a = new Database(agentDb);
+    a.exec("CREATE TABLE agent_runs (id INTEGER PRIMARY KEY, outcome TEXT); INSERT INTO agent_runs (outcome) VALUES ('ok');");
+    a.close();
+    const outPath = path.join(dir, 'backup.db');
+    const result = await runBackup({ dbPath, outPath });
+    assert.equal(result.agentPath, path.join(dir, 'backup.agent.db'));
+    assert.ok(result.agentBytes > 0);
+    assert.match(result.agentSha256, /^[a-f0-9]{64}$/);
+    const copy = new Database(result.agentPath, { readonly: true, fileMustExist: true });
+    assert.equal(copy.prepare('SELECT COUNT(*) AS n FROM agent_runs').get().n, 1);
+    copy.close();
+  } finally {
+    cleanupFixture(dir);
+  }
+});

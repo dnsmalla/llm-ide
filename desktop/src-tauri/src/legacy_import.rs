@@ -367,6 +367,7 @@ mod tests {
         move |k: &str| map.get(k).cloned()
     }
 
+    #[cfg(unix)]
     #[test]
     fn legacy_dir_is_macos_only_and_honours_an_absolute_override() {
         assert_eq!(
@@ -382,6 +383,7 @@ mod tests {
         assert!(legacy_dir_for(Os::Mac, &env(&[("LLMIDE_LEGACY_DATA_DIR", "relative/path")])).is_err());
     }
 
+    #[cfg(unix)]
     #[test]
     fn target_is_the_core_folder_of_the_desktop_data_dir() {
         assert_eq!(
@@ -392,6 +394,29 @@ mod tests {
             target_core_dir(Os::Mac, &env(&[("LLMIDE_DESKTOP_DATA_DIR", "/tmp/desk")])).unwrap(),
             PathBuf::from("/tmp/desk/core")
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_dir_is_macos_only_on_windows_and_honours_an_absolute_override() {
+        // The old Mac app folder only exists on macOS; a Windows host with HOME
+        // still gets None, and the explicit override is the only source.
+        assert_eq!(legacy_dir_for(Os::Windows, &env(&[("HOME", "C:\\Users\\a")])).unwrap(), None);
+        assert_eq!(legacy_dir_for(Os::Linux, &env(&[("HOME", "C:\\Users\\a")])).unwrap(), None);
+        assert_eq!(
+            legacy_dir_for(Os::Linux, &env(&[("LLMIDE_LEGACY_DATA_DIR", "C:\\old\\system")])).unwrap().unwrap(),
+            PathBuf::from("C:\\old\\system")
+        );
+        assert!(legacy_dir_for(Os::Linux, &env(&[("LLMIDE_LEGACY_DATA_DIR", "relative\\path")])).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn target_is_the_core_folder_on_windows() {
+        let p = target_core_dir(Os::Windows, &env(&[("LOCALAPPDATA", "C:\\Users\\a\\AppData\\Local")])).unwrap();
+        assert_eq!(p, PathBuf::from("C:\\Users\\a\\AppData\\Local\\llm-ide-desktop\\core"));
+        let over = target_core_dir(Os::Windows, &env(&[("LLMIDE_DESKTOP_DATA_DIR", "C:\\desk")])).unwrap();
+        assert_eq!(over, PathBuf::from("C:\\desk\\core"));
     }
 
     #[test]

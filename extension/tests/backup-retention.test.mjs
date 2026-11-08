@@ -43,6 +43,23 @@ test('subdirectories named like backups are never deleted or counted', () => {
   assert.ok(fs.existsSync(path.join(dir, 'data-9999999999.db', 'inside.txt')));
 });
 
+test('a data.db and its agent.db are kept or pruned together', () => {
+  const base = Date.now() - 10_000;
+  for (let i = 1; i <= 3; i += 1) {
+    const data = path.join(dir, `data-${1700000100 + i}.db`);
+    const agent = path.join(dir, `data-${1700000100 + i}.agent.db`);
+    fs.writeFileSync(data, `data ${i}`);
+    fs.writeFileSync(agent, `agent ${i}`);
+    const t = new Date(base + i * 1000);
+    fs.utimesSync(data, t, t);
+    fs.utimesSync(agent, new Date(base + i * 1000 + 10), new Date(base + i * 1000 + 10));
+  }
+  const r = pruneBackups(dir, 1, ON);
+  assert.deepEqual(r.kept.sort(), ['data-1700000103.agent.db', 'data-1700000103.db']);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['data-1700000103.agent.db', 'data-1700000103.db']);
+  assert.equal(r.deleted.length, 4);
+});
+
 test('keep is never below one', () => {
   seedBackups();
   assert.equal(pruneBackups(dir, 0, ON).kept.length, 1);

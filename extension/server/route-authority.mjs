@@ -415,6 +415,7 @@ export const ROUTE_POLICY = Object.freeze([
   ]),
   ...rules('admin', 'POST', [
     '/admin/backup',
+    '/admin/maintenance',
     '/admin/invites',
   ]),
   ...rules('admin', 'PATCH', [

@@ -29,7 +29,10 @@ import { purgeOldAuditRows } from './server/audit.mjs';
 import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLimit } from './core/errors.mjs';
 import { tryConsume, saveBuckets, loadBuckets } from './server/rate-limit.mjs';
 import { recordHttpRequest, recordRateLimitDeny, setKbGauge, renderPrometheus } from './server/metrics.mjs';
-import { getDb, closeDb, statsAdmin, purgeExpiredJti, backupTo, pruneMissingCodeRepos } from './kb/db.mjs';
+import { getDb, closeDb, statsAdmin, purgeExpiredJti, pruneMissingCodeRepos } from './kb/db.mjs';
+import { backupDatabasesTo } from './kb/backup-databases.mjs';
+import { runMaintenance } from './kb/maintenance.mjs';
+import { agentRunsInFlight } from './kb/agent-runs.mjs';
 import { openAgentStoreAtBoot, startAgentStoreJobs, stopAgentStoreJobs } from './kb/agent-jobs.mjs';
 import { closeAgentDb } from './kb/agent-db.mjs';
 import { stopAllAgents } from './agents/meeting-agent.mjs';
@@ -1076,16 +1079,49 @@ const server = http.createServer(async (req, res) => {
       const stamp = Math.floor(Date.now() / 1000);
       const filename = `data-${stamp}.db`;
       const target = path.join(targetDir, filename);
-      backupTo(target);
-      const stat = fs.statSync(target);
-      reqLog.info('db_backup_created', { path: target, bytes: stat.size });
+      const made = backupDatabasesTo(target);
+      reqLog.info('db_backup_created', { path: made.path, bytes: made.bytes, agentPath: made.agentPath, agentBytes: made.agentBytes });
       const pruned = pruneBackups(targetDir, config.backupKeep, { allowed: config.backupPrune.prune, reason: config.backupPrune.reason });
       for (const file of pruned.deleted) reqLog.info('db_backup_pruned', { file });
       if (pruned.skipped) reqLog.warn('db_backup_prune_skipped', { reason: pruned.skipped });
-      sendJSON(res, 200, { ok: true, path: target, bytes: stat.size });
+      sendJSON(res, 200, { ok: true, path: made.path, bytes: made.bytes, agentPath: made.agentPath, agentBytes: made.agentBytes });
     } catch (err) {
       reqLog.error('db_backup_failed', { error: err.message });
       sendError(res, errInternal(`backup failed: ${err.message}`), { logger: reqLog });
+    }
+    return;
+  }
+
+  // Admin-only, EXPLICIT database maintenance: bounded FTS5 segment merging and
+  // incremental vacuum (kb/maintenance.mjs). Never on a request path of its own,
+  // never a full VACUUM; each statement is small and the pass yields between
+  // them. `?pages=` and `?ms=` only lower the built-in caps.
+  if (req.method === 'POST' && (req.url === '/admin/maintenance' || req.url?.startsWith('/admin/maintenance?'))) {
+    try { requireRole(getDb(), req, 'admin'); } catch (err) { sendError(res, err, { logger: reqLog }); return; }
+    try {
+      const u = new URL(req.url, 'http://127.0.0.1');
+      const bounded = (key, def, min, max) => {
+        const n = Number(u.searchParams.get(key));
+        return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.floor(n))) : def;
+      };
+      const report = await runMaintenance({
+        maxPages: bounded('pages', 4000, 1, 50000),
+        mergePages: bounded('mergePages', 500, 1, 5000),
+        vacuumPages: bounded('vacuumPages', 500, 1, 5000),
+        maxMs: bounded('ms', 5000, 1, 60000),
+        // A chat/Loop/meeting run that is still in flight: finish this batch and
+        // stop, like the agent-history compact guard.
+        inFlight: () => agentRunsInFlight() > 0,
+      });
+      reqLog.info('db_maintenance', {
+        ok: report.ok, ftsSegmentsBefore: report.fts.segmentsBefore, ftsSegmentsAfter: report.fts.segmentsAfter,
+        ftsPages: report.fts.pagesMerged, vacuumPages: report.vacuum.pagesFreed, vacuumSkipped: report.vacuum.skipped,
+        durationMs: report.durationMs,
+      });
+      sendJSON(res, 200, report);
+    } catch (err) {
+      reqLog.error('db_maintenance_failed', { error: err.message });
+      sendError(res, errInternal(`maintenance failed: ${err.message}`), { logger: reqLog });
     }
     return;
   }
@@ -1441,9 +1477,8 @@ function runAutoBackup() {
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp  = Math.floor(Date.now() / 1000);
     const target = path.join(backupDir, `data-${stamp}.db`);
-    backupTo(target);
-    const stat = fs.statSync(target);
-    logger.info('auto_backup_created', { path: target, bytes: stat.size });
+    const made = backupDatabasesTo(target);
+    logger.info('auto_backup_created', { path: made.path, bytes: made.bytes, agentPath: made.agentPath, agentBytes: made.agentBytes });
 
     const pruned = pruneBackups(backupDir, config.backupKeep, { allowed: config.backupPrune.prune, reason: config.backupPrune.reason });
     for (const file of pruned.deleted) logger.info('auto_backup_pruned', { file });

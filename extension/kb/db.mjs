@@ -3,6 +3,7 @@
 // keeps the server.mjs HTTP layer dependency-free of Promise plumbing.
 
 import crypto from 'crypto';
+import fs from 'fs';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -72,7 +73,13 @@ let _logger = null;
 export function getDb({ logger } = {}) {
   if (logger) _logger = logger;
   if (_db) return _db;
+  // auto_vacuum only takes effect on an empty file; set it before the schema is
+  // created so a NEW install can reclaim free pages incrementally (maintenance).
+  // Existing databases keep their mode: switching needs a full VACUUM, which is
+  // never done behind the user's back.
+  const isNew = !fs.existsSync(DB_PATH) || fs.statSync(DB_PATH).size === 0;
   _db = new Database(DB_PATH);
+  if (isNew) _db.pragma('auto_vacuum = INCREMENTAL');
   for (const p of PRAGMAS) _db.pragma(p.replace(/^PRAGMA\s+/i, ''));
   applyMigrations(_db, { logger });
   return _db;

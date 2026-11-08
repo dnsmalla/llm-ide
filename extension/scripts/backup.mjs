@@ -15,10 +15,17 @@ function defaultBackupPath(dbPath) {
   return `${dbPath}.bak-${isoStamp()}.db`;
 }
 
+function agentOutPath(outPath) {
+  const p = String(outPath);
+  return p.endsWith('.db') ? `${p.slice(0, -3)}.agent.db` : `${p}.agent.db`;
+}
+
 function parseArgs(argv) {
   const args = Array.from(argv);
   let dbPath = config.dbPath;
   let outPath = null;
+  let agentDbPath = null;
+  let includeAgent = true;
   let force = false;
 
   for (let i = 0; i < args.length; i += 1) {
@@ -29,6 +36,11 @@ function parseArgs(argv) {
     } else if (arg === '--out') {
       outPath = args[i + 1];
       i += 1;
+    } else if (arg === '--agent-db') {
+      agentDbPath = args[i + 1];
+      i += 1;
+    } else if (arg === '--no-agent') {
+      includeAgent = false;
     } else if (arg === '--force') {
       force = true;
     } else if (arg === '--help' || arg === '-h') {
@@ -40,10 +52,17 @@ function parseArgs(argv) {
 
   if (!dbPath) throw new Error('--db requires a value');
   if (args.includes('--out') && !outPath) throw new Error('--out requires a value');
+  if (args.includes('--agent-db') && !agentDbPath) throw new Error('--agent-db requires a value');
 
   return {
     dbPath,
     outPath: outPath || defaultBackupPath(dbPath),
+    // The server's companion file beside data.db. An explicit --db (a fixture,
+    // a mounted copy) gets the sibling in its own directory, never the live one.
+    agentDbPath: agentDbPath ?? (path.resolve(dbPath) === path.resolve(config.dbPath)
+      ? config.agentDbPath
+      : path.join(path.dirname(path.resolve(dbPath)), 'agent.db')),
+    includeAgent,
     force,
   };
 }
@@ -59,17 +78,31 @@ async function sha256File(filePath) {
   return hash.digest('hex');
 }
 
-export async function runBackup({ dbPath = config.dbPath, outPath = defaultBackupPath(dbPath), force = false } = {}) {
+export async function runBackup({
+  dbPath = config.dbPath, outPath = defaultBackupPath(dbPath), agentDbPath = null,
+  includeAgent = true, force = false,
+} = {}) {
   const resolvedDb = path.resolve(dbPath);
   const resolvedOut = path.resolve(outPath);
+  // An explicit --db (a fixture, a mounted copy) gets the sibling agent.db in
+  // its own directory; only the configured live DB uses config.agentDbPath.
+  const resolvedAgent = agentDbPath
+    ? path.resolve(agentDbPath)
+    : (resolvedDb === path.resolve(config.dbPath)
+      ? path.resolve(config.agentDbPath)
+      : path.join(path.dirname(resolvedDb), 'agent.db'));
+  const agentEnabled = includeAgent && Boolean(resolvedAgent) && existsSync(resolvedAgent);
+  const resolvedAgentOut = agentEnabled ? agentOutPath(resolvedOut) : null;
 
-  if (existsSync(resolvedOut) && !force) {
-    const err = new Error(`Refusing to overwrite existing backup: ${resolvedOut}`);
-    err.code = 'BACKUP_EXISTS';
-    throw err;
-  }
-  if (existsSync(resolvedOut) && force) {
-    await rm(resolvedOut, { force: true });
+  for (const out of [resolvedOut, resolvedAgentOut].filter(Boolean)) {
+    if (existsSync(out) && !force) {
+      const err = new Error(`Refusing to overwrite existing backup: ${out}`);
+      err.code = 'BACKUP_EXISTS';
+      throw err;
+    }
+    if (existsSync(out) && force) {
+      await rm(out, { force: true });
+    }
   }
 
   await mkdir(path.dirname(resolvedOut), { recursive: true });
@@ -79,6 +112,19 @@ export async function runBackup({ dbPath = config.dbPath, outPath = defaultBacku
     await db.backup(resolvedOut);
   } finally {
     db.close();
+  }
+  let agentBytes = null;
+  let agentSha256 = null;
+  if (agentEnabled) {
+    const adb = new Database(resolvedAgent, { fileMustExist: true });
+    try {
+      await adb.backup(resolvedAgentOut);
+    } finally {
+      adb.close();
+    }
+    try { await chmod(resolvedAgentOut, 0o600); } catch { /* non-POSIX FS */ }
+    agentBytes = (await stat(resolvedAgentOut)).size;
+    agentSha256 = await sha256File(resolvedAgentOut);
   }
 
   // The backup is a verbatim copy of the DB — it contains bcrypt password
@@ -101,15 +147,19 @@ export async function runBackup({ dbPath = config.dbPath, outPath = defaultBacku
     outPath: resolvedOut,
     bytes: info.size,
     sha256,
+    agentPath: agentEnabled ? resolvedAgentOut : null,
+    agentBytes,
+    agentSha256,
   };
 }
 
 function printHelp() {
   process.stdout.write(
-    'Usage: node scripts/backup.mjs [--db <path>] [--out <path>] [--force]\n'
+    'Usage: node scripts/backup.mjs [--db <path>] [--out <path>] [--agent-db <path>] [--no-agent] [--force]\n'
     + 'Defaults:\n'
     + `  --db  ${config.dbPath}\n`
-    + '  --out <db>.bak-<iso-timestamp>.db\n',
+    + '  --out <db>.bak-<iso-timestamp>.db\n'
+    + '  --agent-db <dir of --db>/agent.db (written as <out>.agent.db when it exists)\n',
   );
 }
 

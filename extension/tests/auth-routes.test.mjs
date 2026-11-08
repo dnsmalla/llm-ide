@@ -1950,6 +1950,15 @@ test('server.mjs admin routes refuse a member (403 ROLE_DENIED) and let the owne
     const allowed = await json('POST', '/admin/backup', undefined, owner.token);
     assert.equal(allowed.status, 200, log());
 
+    const maintDenied = await json('POST', '/admin/maintenance', undefined, member.token);
+    assert.equal(maintDenied.status, 403);
+    assert.equal((await maintDenied.json()).error.code, 'ROLE_DENIED');
+    const maintAllowed = await json('POST', '/admin/maintenance?pages=1&ms=1000', undefined, owner.token);
+    assert.equal(maintAllowed.status, 200, log());
+    const maintReport = await maintAllowed.json();
+    assert.equal(maintReport.bounded, true);
+    assert.ok(maintReport.fts);
+
     const scrape = await json('GET', '/metrics', undefined, member.token);
     assert.equal(scrape.status, 403, 'a member cannot scrape /metrics');
   });

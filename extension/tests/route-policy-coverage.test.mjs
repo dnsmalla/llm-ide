@@ -21,6 +21,7 @@ const rosterPaths = [...new Set([...rosters.endpoints, ...rosters.publicAuth].ma
 const NON_ROSTER = new Map([
   ['/metrics', 'admin-only Prometheus text, deliberately not advertised by /health'],
   ['/admin/backup', 'admin-only, not advertised'],
+  ['/admin/maintenance', 'admin-only, explicit maintenance, not advertised'],
   ['/admin/users/:userId', 'admin-only delete, not advertised (R-010#2)'],
   ['/kb/agent/diagnose', 'meeting-agent diagnostics read, not advertised'],
 ]);
