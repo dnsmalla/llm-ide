@@ -267,9 +267,24 @@ mod tests {
         let port = l.local_addr().unwrap().port();
         let h = std::thread::spawn(move || {
             if let Ok((mut s, _)) = l.accept() {
-                let mut buf = vec![0u8; 4096];
-                let n = s.read(&mut buf).unwrap_or(0);
-                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 1024];
+                loop {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 { break; }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..pos]).to_string();
+                        let len = head.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
+                        while buf.len() < pos + 4 + len {
+                            let m = s.read(&mut chunk).unwrap_or(0);
+                            if m == 0 { break; }
+                            buf.extend_from_slice(&chunk[..m]);
+                        }
+                        break;
+                    }
+                }
+                let req = String::from_utf8_lossy(&buf).to_string();
                 let body = req.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("").to_string();
                 let out = format!("{{\"body\":\"{body}\"}}");
                 let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}", out.len(), out);

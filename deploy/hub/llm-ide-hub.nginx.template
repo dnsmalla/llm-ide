@@ -47,6 +47,8 @@ server {
         access_log off;
         add_header Cache-Control "no-store" always;
         add_header Referrer-Policy no-referrer always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options nosniff always;
     }
     location /app/ {
         alias /var/www/llmide-web/;

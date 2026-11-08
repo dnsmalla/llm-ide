@@ -132,9 +132,13 @@ LLMIDE_LOG
     tmp=$(mktemp /etc/llmide/.core.env.XXXXXX)
     cat > "$tmp"
     # Root-side validation: only KEY=value lines, only the template's keys, no loader/option injection.
-    if grep -Ev '^(NODE_ENV|PATH|LLMIDE_[A-Z0-9_]+)=' "$tmp" | grep -q .; then
-      rm -f "$tmp"; die "the env contains a line outside the allowed key set"
-    fi
+    while IFS= read -r line; do
+      key=${line%%=*}
+      case "$key" in
+        NODE_ENV|PATH|LLMIDE_HOST|LLMIDE_PORT|LLMIDE_HUB|LLMIDE_TLS_TERMINATED|LLMIDE_HUB_DOMAIN|LLMIDE_HUB_VERSION|LLMIDE_DATA_DIR|LLMIDE_DB_PATH|LLMIDE_PROJECTS_ROOT|LLMIDE_BACKUP_DIR|LLMIDE_BACKUP_KEEP|LLMIDE_DISABLE_REGISTRATION|LLMIDE_TRUST_PROXY|LLMIDE_LOG_JSON|LLMIDE_LOG_LEVEL|LLMIDE_MAX_TURNS|LLMIDE_HOST_API_HUB|LLMIDE_HOST_API_WEB_ORIGINS|LLMIDE_HOST_API_FINGERPRINT_FILE|LLMIDE_HUB_PUBLIC_URL|LLMIDE_JWT_SECRET|LLMIDE_VAULT_KEY) ;;
+        *) rm -f "$tmp"; die "the env key $key is outside the allowed set" ;;
+      esac
+    done < "$tmp"
     if grep -Eq '^(NODE_OPTIONS|LD_[A-Z0-9_]*|BASH_ENV|ENV)=' "$tmp"; then
       rm -f "$tmp"; die "the env contains a forbidden loader variable"
     fi
@@ -180,6 +184,11 @@ LLMIDE_LOG
       esac
     fi
     ln -sfn "/opt/llmide/releases/$VERSION" /opt/llmide/current
+    if [ -d "$work/core/root/web" ]; then
+      install -d -m 0755 -o root -g root /var/www/llmide-web
+      cp -a "$work/core/root/web/." /var/www/llmide-web/
+      chown -R root:root /var/www/llmide-web
+    fi
     # Keep current, previous and one older release.
     ls -1dt /opt/llmide/releases/* 2>/dev/null | sed -n '4,$p' | xargs -r rm -rf
     say "ok ($VERSION)"

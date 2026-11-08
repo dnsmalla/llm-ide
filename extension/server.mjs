@@ -1788,7 +1788,7 @@ server.listen(PORT, HOST, () => {
         const gateway = await ensureHostApiGateway();
         // De-duplicated per peer for 60 s and capped per event type, so a refused flood cannot grow audit_log.
         const onRefused = listenerRefusalAuditor(audit);
-        const listener = await startHostApiListener({ gateway, tls, hub: config.hostApiHub, log, onRefused });
+        const listener = await startHostApiListener({ gateway, tls, hub: config.hostApiHub, candidates: config.hostApiHub ? 1 : 10, log, onRefused });
         hostApi = { gateway, listener, fingerprint };
         logger.info(tls ? `Host API v1 (TLS, all interfaces) on 0.0.0.0:${listener.port}, ${fingerprint}`
           : `Host API v1 (development, loopback only) on 127.0.0.1:${listener.port}`);
