@@ -32,7 +32,10 @@ export function decodeOptions(r: unknown): { modes: ComposeMode[]; models: Compo
 }
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message.slice(0, 500) : "Something went wrong.");
 
-export function createComposeController(link: HostLink) {
+export function createComposeController(link: HostLink, { projectId, onProjectRefused }: {
+  projectId?: () => string | null;
+  onProjectRefused?: (e: unknown) => void;
+} = {}) {
   let state = initialComposeState;
   const subs = new Set<() => void>();
   const set = (p: Partial<ComposeState>) => { state = { ...state, ...p }; for (const fn of subs) fn(); };
@@ -42,13 +45,15 @@ export function createComposeController(link: HostLink) {
   const load = async () => {
     const mine = ++seq;
     if (!can()) return set({ modes: [], models: [], mode: "auto", model: null });
+    const project = projectId?.() ?? null;
     try {
-      const r = decodeOptions(await link.send("chat.options", {}).done);
+      const r = decodeOptions(await link.send("chat.options", project ? { projectId: project } : {}).done);
       if (mine !== seq) return;
       set({ modes: r.modes, models: r.models, error: null, mode: r.modes.includes(state.mode) ? state.mode : "auto", model: state.model && r.models.some((m) => m.model === state.model) ? state.model : null });
     } catch (e) {
       if (mine !== seq) return;
       set({ modes: [], models: [], mode: "auto", model: null, error: messageOf(e) });
+      onProjectRefused?.(e);
     }
   };
   const offs = [link.onResync(() => { void load(); }), link.onEvent((e) => { if (e.command === "host.capabilities") void load(); })];

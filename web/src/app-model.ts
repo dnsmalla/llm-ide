@@ -1,13 +1,17 @@
 // The App's session lifecycle without React: auto-connect, pairing, adopting a session, and tearing it down when the
 // host revokes this browser. App.tsx renders it; tests drive it with a fake socket.
 import { HostApiError, HostConnection, type HostConnectionOptions, type TokenStore } from "./host-api/connection.ts";
-import { lastHostUrl, tokenStoreFor } from "./host-api/storage.ts";
+import { lastHostUrl, projectStoreFor, tokenStoreFor } from "./host-api/storage.ts";
 import { createChatController, type ChatController } from "./chat/controller.ts";
 import { createComposeController, type ComposeController } from "./chat/compose.ts";
+import { createProjectsController, type ProjectsController } from "./projects/controller.ts";
 
 import { createReadController, type ReadController } from "./read/controller.ts";
 
-export interface Session { url: string; tokens: TokenStore; connection: HostConnection; controller: ChatController; read: ReadController; compose: ComposeController }
+export interface Session {
+  url: string; tokens: TokenStore; connection: HostConnection; projects: ProjectsController;
+  controller: ChatController; read: ReadController; compose: ComposeController;
+}
 export interface AppState { session: Session | null; busy: boolean; error: string | null; notice: string | null }
 
 export const REVOKED = "The desktop removed or expired this browser's access. Pair again with a new PIN from the desktop app's Settings.";
@@ -42,9 +46,18 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
   const open = (url: string): Session => {
     const tokens = d.tokensFor(url);
     const connection = new HostConnection({ url, clientName: "LLM-IDE Web", clientVersion: __APP_VERSION__, tokens, ...d.connection });
-    return { url, tokens, connection, controller: createChatController(connection), read: createReadController(connection), compose: createComposeController(connection) };
+    let controller: ChatController | null = null;
+    let compose: ComposeController | null = null;
+    const projects = createProjectsController(connection, {
+      storage: projectStoreFor(url),
+      onSelectionChange: () => { void controller?.resync(); void compose?.load(); },
+    });
+    const onProjectRefused = (e: unknown) => { projects.noteRefusal(e); };
+    controller = createChatController(connection, { projectId: () => projects.getSelectedId(), onProjectRefused });
+    compose = createComposeController(connection, { projectId: () => projects.getSelectedId(), onProjectRefused });
+    return { url, tokens, connection, projects, controller, read: createReadController(connection), compose };
   };
-  const shut = (s: Session) => { s.controller.dispose(); s.read.dispose(); s.compose.dispose(); s.connection.close(); };
+  const shut = (s: Session) => { s.projects.dispose(); s.controller.dispose(); s.read.dispose(); s.compose.dispose(); s.connection.close(); };
   const adopt = (s: Session | null, notice: string | null = null) => {
     offState?.(); offState = null;
     if (live && live !== s) shut(live);

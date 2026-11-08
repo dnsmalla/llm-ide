@@ -6,8 +6,10 @@ let UI;
 before(async () => { UI = await loadUi(); });
 const noop = () => {};
 const caps = (...c) => new Set(["host", ...c]);
+const project = { id: "p-1", name: "Alpha", role: "member", maxMode: "execute", usdCapMonth: 0, permissions: ["self.read"] };
+const projects = { projects: [project], selectedId: "p-1", loading: false, loaded: true, error: null, refusal: null };
 const chatProps = (state, extra = {}) => ({ hostName: "Desk", connection: { kind: "ready" }, capabilities: caps("chat", "approvals"), state,
-  onSend: noop, onStop: noop, onClear: noop, onForget: noop, onAnswer: noop, onDecline: noop, onTool: noop, ...extra });
+  projects, onSelectProject: noop, onSend: noop, onStop: noop, onClear: noop, onForget: noop, onAnswer: noop, onDecline: noop, onTool: noop, ...extra });
 const ev = (command, payload, replyTo = "c-1") => ({ type: "event", event: { command, payload, rev: 1, replyTo } });
 
 test("pairing: labelled address and PIN inputs, the origin hint, no stored PIN", () => {

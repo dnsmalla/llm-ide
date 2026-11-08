@@ -108,4 +108,7 @@ projects:
 (`chat.send`, `chat.new`, `chat.snapshot`, `chat.history.clear`, `chat.cancel`, `chat.options`,
 `approvals.answer`, `toolApprovals.answer`) may carry `projectId`; the host re-checks the fresh
 project grant on every frame. An unassigned device is a viewer on that project (Ask only). A frame
-without `projectId` keeps the v1 team behavior, so existing pairings keep working.
+without `projectId` keeps the v1 team behavior, so existing pairings keep working. The web app calls
+`projects.list` on connect, shows each project with your role, remembers the picker choice in browser
+storage, and sends `projectId` on every project-scoped frame (`chat.history` is session-scoped and has
+no project field).

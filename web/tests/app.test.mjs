@@ -11,17 +11,18 @@ const RESULTS = {
   "host.auth.token": { capabilities: CAPS },
   "host.auth.revoke": { revoked: true },
   "chat.snapshot": { messages: [] },
+  "projects.list": { projects: [] },
 };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 // A fake desktop: `up` false refuses the socket before it opens; `script` overrides replies per command.
 function desk({ token = null, up = true, script = {} } = {}) {
-  const d = { stored: token, up, script, sockets: [], timers: [], sent: [], confirms: [] };
+  const d = { stored: token, up, script, sockets: [], timers: [], sent: [], frames: [], confirms: [] };
   const tokens = { get: () => d.stored, set: (t) => { d.stored = t; } };
   const createSocket = () => {
     const s = { readyState: 0, onopen: null, onmessage: null, onclose: null, onerror: null,
       send(text) {
-        const f = JSON.parse(text); d.sent.push(f.command);
+        const f = JSON.parse(text); d.sent.push(f.command); d.frames.push(f);
         const out = d.script[f.command]?.(f) ?? { result: RESULTS[f.command] };
         const frame = out.error ? { type: "error", error: out.error } : { type: "response", command: f.command, result: out.result };
         queueMicrotask(() => s.onmessage?.({ data: JSON.stringify({ apiVersion: 1, id: "h", replyTo: f.id, ts: 1, rev: 1, ...frame }) }));
@@ -142,4 +143,32 @@ test("sources: Pairing and the sync tier both offer documents and code", () => {
   assert.match(html(h(UI.App, { model: m, sync: fakeSync("none") })), /Open documents and code/);
   const down = desk({ up: false }).model();
   assert.match(html(h(UI.App, { model: down, sync: fakeSync("locked") })), />Documents and code<\/button>/);
+});
+
+test("projects: on load it asks projects.list, shows the first project and scopes the chat snapshot", async () => {
+  const d = desk({ token: "k".repeat(40) });
+  d.script["projects.list"] = () => ({ result: { projects: [
+    { id: "p-1", name: "Alpha", role: "member", maxMode: "execute", usdCapMonth: 0, permissions: ["self.read"] },
+    { id: "p-2", name: "Beta", role: "owner", maxMode: "execute", usdCapMonth: 0, permissions: [] },
+  ] } });
+  const m = d.model();
+  m.start();
+  await tick(); await tick(); await tick();
+  assert.ok(d.sent.includes("projects.list"), JSON.stringify(d.sent));
+  const out = html(h(UI.App, { model: m, sync: fakeSync("locked") }));
+  assert.match(out, /Project/);
+  assert.match(out, /Alpha/);
+  assert.match(out, /member/);
+  const snaps = d.frames.filter((f) => f.command === "chat.snapshot");
+  assert.ok(snaps.some((f) => f.payload.projectId === "p-1"), JSON.stringify(snaps));
+  m.dispose();
+});
+
+test("projects: no projects shows the empty state and keeps the chat usable", async () => {
+  const d = desk({ token: "k".repeat(40), script: { "projects.list": () => ({ result: { projects: [] } }) } });
+  const m = d.model();
+  m.start();
+  await tick(); await tick(); await tick();
+  assert.match(html(h(UI.App, { model: m, sync: fakeSync("locked") })), /No projects are available to this account\./);
+  m.dispose();
 });

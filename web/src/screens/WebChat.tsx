@@ -9,7 +9,9 @@ import type { ConnectionState } from "../host-api/connection.ts";
 import type { HostApiCapability } from "../host-api/types.generated.ts";
 import type { ChatState, WebMessage } from "../chat/store.ts";
 import { MAX_SEND_CHARS } from "../chat/controller.ts";
+import type { ProjectsState } from "../projects/controller.ts";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
+import { ProjectPicker } from "./ProjectPicker.tsx";
 
 export interface WebChatProps {
   /** Turn options rendered above the composer (ComposeBar); absent = none. */
@@ -20,6 +22,8 @@ export interface WebChatProps {
   connection: ConnectionState;
   capabilities: ReadonlySet<HostApiCapability>;
   state: ChatState;
+  projects: ProjectsState;
+  onSelectProject: (id: string) => void;
   onSend: (text: string) => void;
   onStop: () => void;
   onClear: () => void;
@@ -89,6 +93,7 @@ export function WebChat(p: WebChatProps) {
           <span className="web-mark web-chat-mark" aria-hidden="true" />
           <div><span className="web-chat-eyebrow">Connected desktop</span><h1>{p.hostName}</h1></div>
         </div>
+        <ProjectPicker state={p.projects} disabled={state.turn !== null} onSelect={p.onSelectProject} />
         <div className="web-chat-actions">
           {p.onNewChat && (<button type="button" className="web-chat-action" onClick={p.onNewChat} disabled={disabledReason !== null || state.turn !== null} title={disabledReason ?? (state.turn ? "Wait for the reply to finish" : "Start a new phone chat; this one stays in the chat list")}>New chat</button>)}
           <Chip label={chipLabel(p.connection)} />

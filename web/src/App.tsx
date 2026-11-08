@@ -22,10 +22,11 @@ function useConnection(session: Session | null): ConnectionState | null {
 }
 
 function Chat({ session, conn, onForget }: { session: Session; conn: ConnectionState; onForget: () => void }) {
-  const { connection: c, controller, read, compose } = session;
+  const { connection: c, controller, read, compose, projects } = session;
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const readState = useSyncExternalStore(read.subscribe, read.getState, read.getState);
   const cs = useSyncExternalStore(compose.subscribe, compose.getState, compose.getState);
+  const projectState = useSyncExternalStore(projects.subscribe, projects.getState, projects.getState);
   const [push] = useState(() => createPushController(c));
   const ps = useSyncExternalStore(push.subscribe, push.getState, push.getState);
   useEffect(() => { void push.refresh(); return c.onResync(() => void push.refresh()); }, [push, c]);
@@ -43,6 +44,7 @@ function Chat({ session, conn, onForget }: { session: Session; conn: ConnectionS
         onOlder={() => void read.older()} onClose={read.close} onMore={() => void read.moreSessions()} />
       {!readState.open && (
         <WebChat hostName={c.hello?.hostName ?? "Host"} connection={conn} capabilities={capabilities} state={state}
+          projects={projectState} onSelectProject={(id) => { projects.select(id); }}
           onSend={send} onStop={() => void controller.cancel()} onClear={() => void controller.clearHistory()}
           onForget={onForget} onAnswer={(r, a) => void controller.answerQuestion(r, a)} onDecline={(r) => void controller.declineQuestion(r)}
           onTool={(r, d) => void controller.answerTool(r, d)} onNewChat={canCompose ? newChat : undefined}

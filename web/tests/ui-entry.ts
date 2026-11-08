@@ -11,3 +11,5 @@ export { snapshotReadState } from "../src/read/snapshot.ts";
 export { SourcesScreen, SourcesEntry, REASON } from "../src/screens/SourcesScreen.tsx";
 export { ComposeBar } from "../src/screens/ComposeBar.tsx";
 export { initialComposeState } from "../src/chat/compose.ts";
+export { ProjectPicker } from "../src/screens/ProjectPicker.tsx";
+export { createProjectsController, initialProjectsState, projectRefusal } from "../src/projects/controller.ts";

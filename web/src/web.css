@@ -297,6 +297,15 @@ body {
 .web-chat-eyebrow { display: block; color: #7f98ad; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 2px; }
 .web-chat-identity h1 { margin: 0; font-size: 18px; letter-spacing: -.025em; color: #f2f8ff; }
 .web-chat-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.web-project-picker { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0; }
+.web-project-picker label { color: #7f98ad; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.web-project-picker select { max-width: 230px; height: 30px; padding: 0 8px; border: 1px solid #2c4357; border-radius: 8px; background: #0e1a24; color: #dcebf8; font: inherit; font-size: 11px; }
+.web-project-picker select:disabled { opacity: .55; cursor: default; }
+.web-project-role { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border: 1px solid #2b4358; border-radius: 999px; color: #9fd0f3; font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.web-project-role[data-role="owner"], .web-project-role[data-role="admin"] { color: #ffd08a; border-color: #5c4826; }
+.web-project-role[data-role="viewer"] { color: #93a9bd; }
+.web-project-empty, .web-project-loading { color: #93a9bd; font-size: 11px; }
+.web-project-error { flex-basis: 100%; margin: 0; color: #ffb4bd; font-size: 11px; }
 .web-chat-action { height: 30px; padding: 0 10px; border: 1px solid #2c4357; border-radius: 8px; background: #0e1a24; color: #b9cadb; font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
 .web-chat-action:hover:not(:disabled) { border-color: #4d7899; color: #fff; }
 .web-chat-action:disabled { opacity: .45; cursor: default; }
