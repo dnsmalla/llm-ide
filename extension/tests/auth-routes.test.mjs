@@ -217,14 +217,21 @@ test('POST /auth/register rejects invalid JSON body with 400', async () => {
   assert.equal(res.json().error.code, 'VALIDATION_FAILED');
 });
 
-test('POST /auth/login is throttled per email even when every request uses a new IP', async () => {
-  const email = uniqueEmail();
-  const { tryConsume } = await import('../server/rate-limit.mjs');
-  // Fill only the per-email bucket directly; every request below still uses a fresh IP.
-  for (let i = 0; i < 10; i++) tryConsume('authPublic', `login:email:${email}`);
+test('failed logins are throttled per email without locking out a correct password forever', async () => {
+  const { email } = await registerAndLogin();
+  for (let i = 1; i <= 10; i++) {
+    const r = await callAuth({ method: 'POST', url: '/auth/login', ip: `10.9.0.${i}`, body: { email, password: 'wrong-password' } });
+    assert.equal(r.statusCode, 401, `attempt ${i}: ${r._body}`);
+  }
   const blocked = await callAuth({ method: 'POST', url: '/auth/login', ip: '10.9.1.1', body: { email, password: PASSWORD } });
-  assert.equal(blocked.statusCode, 429, blocked._body);
+  assert.equal(blocked.statusCode, 429, 'a correct password is refused while the failed-login bucket is empty');
   assert.equal(blocked.json().error.code, 'RATE_LIMITED');
+  const realNow = Date.now;
+  try {
+    Date.now = () => realNow() + 31_000;
+    const after = await callAuth({ method: 'POST', url: '/auth/login', ip: '10.9.1.2', body: { email, password: PASSWORD } });
+    assert.equal(after.statusCode, 200, 'one refill lets the correct password through');
+  } finally { Date.now = realNow; }
 });
 
 test('POST /auth/login returns a session; wrong password → 401', async () => {

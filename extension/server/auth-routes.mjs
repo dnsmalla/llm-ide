@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { config } from '../core/config.mjs';
 import { errAuth, errInternal, errNotFound, errValidation } from '../core/errors.mjs';
-import { tryConsume } from './rate-limit.mjs';
+import { tryConsume, tryPeek } from './rate-limit.mjs';
 import {
   changePassword, findUserById, login, logout, logoutAll, refreshSession, registerUser,
   createPasswordResetToken, consumePasswordResetToken,
@@ -200,13 +200,14 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
-    // R-026 #7: key a second bucket by normalized email, so rotating source IPs cannot spray one account.
+    // R-026 #7 / R-032 X1: a failed-login bucket keyed by normalized email, charged only on a
+    // FAILED password. Rotating IPs cannot hold a correct login out; a spray is limited to ~3k/day.
     const emailKey = typeof body.email === 'string' ? body.email.trim().toLowerCase().slice(0, 254) : '';
     if (emailKey) {
-      const e = tryConsume('authPublic', `login:email:${emailKey}`);
-      if (!e.ok) {
-        res.setHeader('Retry-After', String(e.retryAfterSec));
-        send(res, 429, { error: { code: 'RATE_LIMITED', message: 'Too many requests' } });
+      const peek = tryPeek('authEmailFail', emailKey);
+      if (!peek.ok) {
+        res.setHeader('Retry-After', String(peek.retryAfterSec));
+        send(res, 429, { error: { code: 'RATE_LIMITED', message: 'Too many failed sign-in attempts' } });
         return;
       }
     }
@@ -215,6 +216,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       safeAudit(db, { userId: session.user.id, requestId, ip, userAgent: ua, action: 'auth.login', outcome: 'success' });
       send(res, 200, session);
     } catch (err) {
+      if (emailKey) tryConsume('authEmailFail', emailKey);
       safeAudit(db, { userId: null, requestId, ip, userAgent: ua, action: 'auth.login', outcome: 'failure', detail: { error: err.code || err.message } });
       send(res, err.status || 401, { error: { code: err.code || 'AUTH_REQUIRED', message: err.message } });
     }

@@ -156,10 +156,23 @@ export function tryConsume(profileName, scope = 'global', tokens = 1) {
   return { ok: false, retryAfterSec };
 }
 
+/** Non-consuming check (does not take a token). */
+export function tryPeek(profileName, scope = 'global') {
+  const profile = PROFILES[profileName] || PROFILES.unknownFallback;
+  const b = getBucket(`${profileName}::${scope}`, profile.capacity, profile.refillRate);
+  if (b.tokens >= 1) return { ok: true };
+  return { ok: false, retryAfterSec: Math.ceil((1 - b.tokens) / b.refillRate) };
+}
+
 // Shared bucket for login + refresh — keyed by remote IP.
 // 10-burst then 1/sec to absorb a password-manager fill without
 // blocking the UI, but still stop credential-stuffing loops.
 PROFILES.authPublic = { capacity: 10, refillRate: 1 };
+
+// Failed-login bucket, keyed by normalized email. Charged ONLY on a failed password, so a
+// correct login is not held at zero by someone else's spray; 10 burst, then one guess per 30 s
+// (~3k/day). The per-IP authPublic bucket still applies on top.
+PROFILES.authEmailFail = { capacity: 10, refillRate: 1 / 30 };
 
 // Tighter dedicated bucket for account registration.
 // 3 burst (covers a mistype/retry flow) then 1 per 60 s per IP.
