@@ -23,6 +23,32 @@ export interface BackendConfig {
   autoStart: boolean;
 }
 
+/** Settings → Server & Backend → Remote server. Phase 1 stores the choice; deploy lands in phase 2. */
+export type ServerMode = "local" | "remote";
+
+/** Non-secret remote connection settings. `keyPath` names the user's key file; its contents are never stored. */
+export interface RemoteServerConfig {
+  mode: ServerMode;
+  host: string;
+  port: number;
+  user: string;
+  keyPath: string;
+  label: string;
+}
+
+/** What the host's `remote_ssh_test` reports after a successful connection. */
+export interface RemoteSshResult {
+  host: string;
+  port: number;
+  user: string;
+  hostKeyType: string;
+  fingerprint: string;
+  uname: string;
+  node: boolean;
+  nodePath: string | null;
+  nodeVersion: string | null;
+}
+
 export interface DiagnosticsInfo {
   appVersion: string;
   coreTrust: CoreTrust;
@@ -206,6 +232,11 @@ export interface SettingsHost {
   pickNode?(): Promise<string | null>;
   pickBackendDir?(): Promise<string | null>;
   detectBackend?(): Promise<{ node: string; dir: string }>;
+  /** Remote server choice and non-secret SSH fields (host prefs; the key PATH only, never key contents). */
+  getRemoteServer?(): Promise<RemoteServerConfig>;
+  setRemoteServer?(config: RemoteServerConfig): Promise<RemoteServerConfig>;
+  /** Host command `remote_ssh_test`: starts system ssh with a fixed argv and returns the fingerprint/uname/node. */
+  testRemoteSsh?(config: RemoteServerConfig): Promise<RemoteSshResult>;
   /** Stop/start the app-managed core from Settings (and the core-down panel for Start). */
   coreStop?(): Promise<void>;
   coreStart?(): Promise<void>;

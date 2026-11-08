@@ -29,6 +29,19 @@ export function decodeNotifyPrefs(raw: unknown): NotifyPrefs {
   const r = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   return { approvals: r.approvals !== false, tasks: r.tasks !== false, sync: r.sync !== false, updates: r.updates !== false, core: r.core !== false };
 }
+/** Settings → Server & Backend → Remote server (desktop prefs::RemoteServerPrefs). */
+export type ServerModeValue = "local" | "remote";
+export interface RemoteServerPrefs {
+  mode: ServerModeValue;
+  host: string;
+  port: number;
+  user: string;
+  /** The private key PATH only. Its contents are never stored. */
+  keyPath: string;
+  label: string;
+}
+export const DEFAULT_REMOTE_SERVER: RemoteServerPrefs = Object.freeze({ mode: "local", host: "", port: 22, user: "", keyPath: "", label: "" });
+
 export interface HostPrefs {
   ltaMode: LtaModeValue;
   router: boolean;
@@ -50,6 +63,8 @@ export interface HostPrefs {
   backendPort: number;
   /** Start the core when the app launches. */
   backendAutoStart: boolean;
+  /** Remote server choice and non-secret SSH fields; phase 1 stores them but does not act on them yet. */
+  remoteServer: RemoteServerPrefs;
   /** Host API v1 capabilities passed to the spawned core (exact `1`); all apply at the next core start. */
   hostApiTls: boolean;
   hostApiRead: boolean;
@@ -79,8 +94,7 @@ export type HostPrefsPatch = Partial<HostPrefs>;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Defensive decode of the Loop defaults; absent/bad values fall back to the shipped defaults. */
-export function decodeLoopDefaults(raw: unknown): LoopDefaults {
-  if (!isObj(raw)) return { ...DEFAULT_LOOP_DEFAULTS };
+export function decodeLoopDefaults(raw: unknown): LoopDefaults {  if (!isObj(raw)) return { ...DEFAULT_LOOP_DEFAULTS };
   const n = (v: unknown, fallback: number, max: number) => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : fallback);
   const policy = raw.protectedPathPolicy;
   return {
@@ -91,6 +105,20 @@ export function decodeLoopDefaults(raw: unknown): LoopDefaults {
     pauseTimeoutMinutes: n(raw.pauseTimeoutMinutes, DEFAULT_LOOP_DEFAULTS.pauseTimeoutMinutes, 240),
     protectedPathPolicy: policy === "stop" || policy === "warn" || policy === "off" ? policy : "revert",
     writeSummaryNote: raw.writeSummaryNote === true,
+  };
+}
+
+/** Defensive decode of the remote block; an older prefs file (or a bad value) reads as Local desktop. */
+export function decodeRemoteServer(raw: unknown): RemoteServerPrefs {
+  if (!isObj(raw)) return { ...DEFAULT_REMOTE_SERVER };
+  const text = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
+  return {
+    mode: raw.mode === "remote" ? "remote" : "local",
+    host: text(raw.host, 253),
+    port: typeof raw.port === "number" && Number.isInteger(raw.port) && raw.port >= 1 && raw.port <= 65535 ? raw.port : 22,
+    user: text(raw.user, 64),
+    keyPath: text(raw.keyPath, 4096),
+    label: text(raw.label, 80),
   };
 }
 
@@ -115,7 +143,8 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
     : 0;
   const updateChecks = raw.updateChecks !== false;
   const continueSummary = raw.continueSummary === true;
-  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, continueSummary, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart,
+  const remoteServer = decodeRemoteServer(raw.remoteServer);
+  return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, continueSummary, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, remoteServer,
     hostApiTls: raw.hostApiTls === true, hostApiRead: raw.hostApiRead === true, hostApiCompose: raw.hostApiCompose === true, hostApiPush: raw.hostApiPush === true, hostApiToolApprovals: raw.hostApiToolApprovals === true,
     loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
 }

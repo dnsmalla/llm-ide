@@ -10,6 +10,7 @@ import { serverRows } from "../notices.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { Button, ErrorText } from "../ui.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
+import RemoteServerCard from "./RemoteServerCard.tsx";
 
 /**
  * The Mac's "Server & Backend" group: the core's status, version, identity and log file, plus the log itself
@@ -142,6 +143,8 @@ export default function ServerSection() {
         ) : null}
         {notice ? <p className="st-ok" role="status">{notice}</p> : null}
       </div>
+
+      <RemoteServerCard />
 
       <LegacyImportCard host={host} />
 

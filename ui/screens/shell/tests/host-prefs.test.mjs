@@ -22,7 +22,8 @@ before(async () => {
 });
 
 const LOOP = { maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
-const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
+const REMOTE = { mode: "local", host: "", port: 22, user: "", keyPath: "", label: "" };
+const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, remoteServer: REMOTE, hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
 function env(over = {}) {
@@ -92,6 +93,27 @@ test("archiving mode and router/cap round-trip through get_prefs/set_prefs with 
 test("a garbled host answer is an error, not invented values", async () => {
   const { host } = env({ invoke: async (cmd) => (cmd === "get_prefs" ? { stored: { nope: 1 } } : undefined) });
   await assert.rejects(() => host.getLtaMode(), /cannot read/);
+});
+
+test("remote server mode round-trips through prefs and tests through the host command", async () => {
+  const next = { mode: "remote", host: "example.com", port: 2222, user: "deploy", keyPath: "/home/deploy/.ssh/id_ed25519", label: "prod" };
+  const { host, calls, state } = env({
+    invoke: async (cmd, args) => {
+      if (cmd !== "remote_ssh_test") return undefined;
+      return { host: args.target.host, port: args.target.port, user: args.target.user, hostKeyType: "ssh-ed25519",
+        fingerprint: "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff", uname: "Linux 6.8.0 x86_64", node: true,
+        nodePath: "/usr/bin/node", nodeVersion: "v22.11.0" };
+    },
+  });
+  assert.deepEqual(await host.getRemoteServer(), REMOTE, "an older prefs file reads as Local desktop");
+  assert.deepEqual(await host.setRemoteServer(next), next);
+  assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { remoteServer: next } }]);
+  assert.deepEqual(state.stored.remoteServer, next);
+  const result = await host.testRemoteSsh(next);
+  assert.deepEqual(calls.at(-1), ["remote_ssh_test", { target: { host: "example.com", port: 2222, user: "deploy", keyPath: "/home/deploy/.ssh/id_ed25519" } }],
+    "only the non-secret target fields reach the host command; the key contents never do");
+  assert.equal(result.node, true);
+  assert.equal(result.uname, "Linux 6.8.0 x86_64");
 });
 
 test("pickFolder: dialog -> opaque token -> single redeem; cancel is null; a relative path is refused", async () => {

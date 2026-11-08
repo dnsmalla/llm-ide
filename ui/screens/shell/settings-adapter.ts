@@ -10,12 +10,13 @@
 import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings/core-api";
 import { decodeComponentStatus, decodeCoreLog, decodeRtkStatus } from "../settings/components-model";
 import { decodeMemory, decodePaths } from "../settings/project-model";
+import { decodeRemoteServerConfig, decodeRemoteSshResult } from "../settings/remote-model";
 import { decodeLegacyImportReport, decodeLegacyImportStatus } from "../settings/legacy-import-model";
 import { decodeTrayStatus } from "../settings/misc-model";
 import { decodeDiff, decodePrepared, decodeVerified } from "../settings/self-heal-model";
 import { AGENT_TIMEOUT_MS } from "../settings/self-heal-run";
 import { flushSelfHealNow } from "./self-heal";
-import type { CoreTrust, DiagnosticsInfo, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
+import type { CoreTrust, DiagnosticsInfo, RemoteServerConfig, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
 import { decodeUpdateStatus, type UpdateStatusView } from "../settings/updates-model";
 import { CoreError, type CoreClient } from "./core";
 import { decodePickedChoice, decodePickedFolder, decodePrefsView, type HostPrefsPatch, type HostPrefsView } from "./host-prefs";
@@ -121,6 +122,25 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           const v = await writePrefs(next);
           const p = v.stored;
           return { source: p.backendSource, node: p.backendNode, dir: p.backendDir, port: p.backendPort, autoStart: p.backendAutoStart };
+        },
+        async getRemoteServer() {
+          const stored = (await readPrefs()).stored.remoteServer;
+          const config = decodeRemoteServerConfig(stored);
+          if (!config) throw new Error("the desktop host returned remote settings this app cannot read");
+          return config;
+        },
+        async setRemoteServer(config: RemoteServerConfig) {
+          // Only the non-secret fields are sent: mode, host, port, user, key PATH and label. Key contents never leave disk.
+          const v = await writePrefs({ remoteServer: config });
+          const saved = decodeRemoteServerConfig(v.stored.remoteServer);
+          if (!saved) throw new Error("the desktop host returned remote settings this app cannot read");
+          return saved;
+        },
+        async testRemoteSsh(config: RemoteServerConfig) {
+          const target = { host: config.host.trim(), port: config.port, user: config.user.trim(), keyPath: config.keyPath.trim() };
+          const result = decodeRemoteSshResult(await d.invoke<unknown>("remote_ssh_test", { target }));
+          if (!result) throw new Error("the desktop host returned an SSH result this app cannot read");
+          return result;
         },
         async pickNode() {
           const r = await d.invoke<unknown>("backend_pick_node");
