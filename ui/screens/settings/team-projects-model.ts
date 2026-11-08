@@ -2,7 +2,7 @@
 // project list and per-project membership routes (GET /projects, /projects/:id/members). Pure: no React,
 // no DOM. The selected project's effective role — not the global team role — decides what the UI shows;
 // the core re-checks every call.
-import { ApiError } from "./core-api.ts";
+import { ApiError, call, type CoreClient } from "./core-api.ts";
 import {
   MAX_MODES, MAX_USD_CAP_MONTH, ROLE_RANK, TEAM_ROLES, canManageTeam, isMaxMode, isTeamRole,
   roleAtLeast, type MaxMode, type TeamMember, type TeamRole,
@@ -242,3 +242,41 @@ export function teamPanelVisible(teamRole: TeamRole | null, projectRole: TeamRol
 }
 
 export { MAX_MODES, MAX_USD_CAP_MONTH };
+export { decodeTeamIdentity } from "./team-model.ts";
+
+// ---- the routes (call() throws ApiError; a non-2xx is never data here) -------------------------------
+
+export const listProjects = async (client: CoreClient): Promise<ProjectSummary[]> =>
+  decodeProjects(await call(client, "GET", "/projects"));
+
+export const listProjectMemberRows = async (
+  client: CoreClient,
+  projectId: string,
+): Promise<{ project: { id: string; name: string }; members: ProjectMember[] }> =>
+  decodeProjectMembers(await call(client, "GET", `/projects/${encodeURIComponent(projectId)}/members`));
+
+export const addProjectMember = async (
+  client: CoreClient,
+  projectId: string,
+  body: AddProjectMemberBody,
+): Promise<ProjectMember> =>
+  decodeProjectMemberResponse(await call(client, "POST", `/projects/${encodeURIComponent(projectId)}/members`, body));
+
+export const patchProjectMember = async (
+  client: CoreClient,
+  projectId: string,
+  userId: string,
+  patch: ProjectMemberPatch,
+): Promise<ProjectMember> =>
+  decodeProjectMemberResponse(await call(
+    client, "PATCH", `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`, patch,
+  ));
+
+export const removeProjectMember = async (
+  client: CoreClient,
+  projectId: string,
+  userId: string,
+): Promise<boolean> =>
+  decodeProjectRemoved(await call(
+    client, "DELETE", `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+  ));

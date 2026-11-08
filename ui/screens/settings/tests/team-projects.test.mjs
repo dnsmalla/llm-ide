@@ -43,9 +43,12 @@ before(async () => {
     entryPoints: {
       model: join(SETTINGS, "team-projects-model.ts"),
       view: join(SETTINGS, "sections/team-projects-view.tsx"),
+      section: join(SETTINGS, "sections/TeamProjectsSection.tsx"),
+      context: join(SETTINGS, "context.tsx"),
     },
     outdir,
     bundle: true,
+    splitting: true,
     format: "esm",
     platform: "node",
     packages: "external",
@@ -59,7 +62,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["model", "view"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
+  for (const k of ["model", "view", "section", "context"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
 });
 
 test("decoders accept the API 126 project and member shapes, and reject a bad role/cap", () => {
@@ -214,4 +217,16 @@ test("the add form explains a bad email and disables its button", () => {
   assert.match(out, /aria-label="Add a project member"/);
   assert.match(out, /role="alert"[^>]*>Enter one email address/);
   assert.ok(buttonTag(out, "Add to project").includes("disabled"));
+});
+
+test("container: no fake rows before /auth/me and /projects answer", () => {
+  let requested = 0;
+  const env = {
+    client: { async request() { requested++; return { status: 200, body: {} }; } },
+    host: { diagnostics: async () => ({}), copyText: async () => {} },
+  };
+  const out = html(h(m.context.SettingsEnvProvider, { env }, h(m.section.default)));
+  assert.match(out, /Checking your projects…/);
+  assert.ok(!/eng@example\.com|owner@example\.com/.test(out), "no fake rows");
+  assert.equal(requested, 0, "the first paint makes no request");
 });

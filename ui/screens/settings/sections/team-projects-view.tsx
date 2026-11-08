@@ -83,7 +83,7 @@ export function ProjectMemberRowView({
 }
 
 export function ProjectMemberEditorView({
-  member, actorRole, selfId, draft, onChange, onSave, onCancel, busy,
+  member, actorRole, selfId, draft, onChange, onSave, onCancel, onRemove, busy,
 }: {
   member: ProjectMember;
   actorRole: TeamRole;
@@ -92,6 +92,7 @@ export function ProjectMemberEditorView({
   onChange: (draft: ProjectMemberDraft) => void;
   onSave: () => void;
   onCancel: () => void;
+  onRemove?: () => void;
   busy: boolean;
 }) {
   const problem = projectMemberDraftProblem(member, draft, actorRole, selfId);
@@ -153,6 +154,7 @@ export function ProjectMemberEditorView({
         <div className="st-row">
           <Button tone="primary" disabled={!canSave} onClick={onSave}>Save changes</Button>
           <Button onClick={onCancel} disabled={busy}>Cancel</Button>
+          {onRemove ? <Button onClick={onRemove} disabled={busy}>Remove from project</Button> : null}
         </div>
       </form>
     </li>
