@@ -8,6 +8,7 @@
 // long exclusive lock, and a single clean file (no -wal/-shm to copy).
 
 import fs from 'fs';
+import path from 'node:path';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { backupTo } from './db.mjs';
@@ -46,29 +47,74 @@ export function backupDatabasesTo(targetPath, { agentDbPath = agentDbFile(), inc
  * blocks the server's event loop. Resolves with the same shape as `backupDatabasesTo`; rejects when the worker
  * fails, so a caller never treats a missing snapshot as success. The child gets a minimal env: no secrets.
  */
+/** Where a snapshot is written before it is complete: retention and the off-host script only see final names. */
+export const INFLIGHT_DIR = '.inflight';
+/** A worker that hangs (a stuck disk, WAL recovery) is killed rather than holding the route open forever. */
+export const BACKUP_WORKER_TIMEOUT_MS = 10 * 60_000;
+const inflight = new Set();
+
+/** Kill every running backup worker (shutdown). Their in-flight staging files are removed by the exit handler. */
+export function killBackupWorkers() {
+  for (const child of inflight) { try { child.kill('SIGKILL'); } catch { /* gone */ } }
+}
+
 export function backupDatabasesInWorker(targetPath, { agentDbPath = agentDbFile(), dataDbPath = config.dbPath, includeAgent = true } = {}) {
   const agentTarget = agentBackupPath(targetPath);
-  const args = [dataDbPath, targetPath, includeAgent ? agentDbPath : '', includeAgent ? agentTarget : ''];
+  const dir = path.dirname(targetPath);
+  const stagingDir = path.join(dir, INFLIGHT_DIR);
+  const stagedData = path.join(stagingDir, path.basename(targetPath));
+  const stagedAgent = path.join(stagingDir, path.basename(agentTarget));
+  const args = [dataDbPath, stagedData, includeAgent ? agentDbPath : '', includeAgent ? stagedAgent : ''];
   return new Promise((resolve, reject) => {
+    const cleanupStaging = () => {
+      // A killed VACUUM INTO can leave SQLite sidecars beside the partial file.
+      for (const base of [stagedData, stagedAgent]) {
+        for (const suffix of ['', '-journal', '-wal', '-shm']) {
+          try { fs.rmSync(`${base}${suffix}`, { force: true }); } catch { /* best effort */ }
+        }
+      }
+    };
+    try { fs.mkdirSync(stagingDir, { recursive: true }); } catch (err) { reject(err); return; }
     const child = fork(WORKER, args, {
       execArgv: [], stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
       env: { NODE_ENV: process.env.NODE_ENV ?? 'production' },
     });
+    inflight.add(child);
     let stderr = '';
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      inflight.delete(child);
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, BACKUP_WORKER_TIMEOUT_MS);
+    timer.unref?.();
     child.stderr?.on('data', (d) => { stderr += d; });
-    child.once('error', reject);
+    child.once('error', (err) => { cleanupStaging(); finish(reject, err); });
     child.once('exit', (code) => {
       if (code !== 0) {
-        reject(new Error(`backup worker failed (${code ?? 'signal'}): ${stderr.trim().slice(-500)}`));
+        // A crash, a stop, or the timeout: never leave a partial snapshot behind for retention to keep.
+        cleanupStaging();
+        finish(reject, new Error(`backup worker failed (${code ?? 'signal'}): ${stderr.trim().slice(-500)}`));
         return;
       }
       try {
-        const agentPath = includeAgent && fs.existsSync(agentTarget) ? agentTarget : null;
+        // agent first, data last: a final data-<stamp>.db always has its pair.
+        const agentPath = includeAgent && fs.existsSync(stagedAgent) ? agentTarget : null;
+        if (agentPath) fs.renameSync(stagedAgent, agentTarget);
+        fs.renameSync(stagedData, targetPath);
         resolve({
           path: targetPath, bytes: fs.statSync(targetPath).size,
           agentPath, agentBytes: agentPath ? fs.statSync(agentPath).size : null,
         });
-      } catch (err) { reject(err); }
+        finish(() => {});
+      } catch (err) {
+        cleanupStaging();
+        try { fs.rmSync(agentTarget, { force: true }); } catch { /* best effort */ }
+        finish(reject, err);
+      }
     });
   });
 }

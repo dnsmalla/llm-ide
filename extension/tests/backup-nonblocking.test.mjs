@@ -120,3 +120,37 @@ test('a 50 MB backup while /health still answers in under 200 ms', async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a killed backup leaves no snapshot, no staging file, and the old backup survives retention', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-backup-kill-'));
+  const dataDb = path.join(dir, 'data.db');
+  const seed = new Database(dataDb);
+  seed.exec('CREATE TABLE big (x BLOB);');
+  const insert = seed.prepare('INSERT INTO big (x) VALUES (zeroblob(1000000))');
+  seed.transaction(() => { for (let i = 0; i < 50; i += 1) insert.run(); })();
+  seed.close();
+  const backups = path.join(dir, 'backups');
+  fs.mkdirSync(backups, { recursive: true });
+  const old = path.join(backups, 'data-1.db');
+  fs.writeFileSync(old, 'older backup');
+  fs.utimesSync(old, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+
+  const { backupDatabasesInWorker, killBackupWorkers, INFLIGHT_DIR } = await import('../kb/backup-databases.mjs');
+  const run = backupDatabasesInWorker(path.join(backups, 'data-2.db'), { dataDbPath: dataDb, agentDbPath: path.join(dir, 'none.db'), includeAgent: false });
+  // Wait until the VACUUM has begun creating the staging file, then stop it mid-copy.
+  const staged = path.join(backups, INFLIGHT_DIR, 'data-2.db');
+  const deadline = Date.now() + 5000;
+  while (!fs.existsSync(staged) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 1));
+  assert.ok(fs.existsSync(staged), 'the worker started writing into .inflight');
+  killBackupWorkers();
+  await assert.rejects(run);
+  assert.deepEqual(fs.readdirSync(backups).filter((f) => /^data-\d+\.db$/.test(f)), ['data-1.db'], 'no partial snapshot appeared');
+  const inflight = fs.existsSync(path.join(backups, INFLIGHT_DIR)) ? fs.readdirSync(path.join(backups, INFLIGHT_DIR)) : [];
+  assert.deepEqual(inflight, [], 'the staging file was removed');
+
+  const { pruneBackups } = await import('../kb/backup-retention.mjs');
+  const pruned = pruneBackups(backups, 1, { allowed: true });
+  assert.deepEqual(pruned.kept, ['data-1.db'], 'the last good backup survives');
+  assert.deepEqual(pruned.deleted, []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

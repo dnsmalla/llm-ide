@@ -33,7 +33,7 @@ import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLi
 import { tryConsume, saveBuckets, loadBuckets } from './server/rate-limit.mjs';
 import { recordHttpRequest, recordRateLimitDeny, setKbGauge, renderPrometheus } from './server/metrics.mjs';
 import { getDb, closeDb, statsAdmin, purgeExpiredJti, pruneMissingCodeRepos } from './kb/db.mjs';
-import { backupDatabasesInWorker } from './kb/backup-databases.mjs';
+import { backupDatabasesInWorker, killBackupWorkers } from './kb/backup-databases.mjs';
 import { runMaintenance } from './kb/maintenance.mjs';
 import { agentRunsInFlight } from './kb/agent-runs.mjs';
 import { openAgentStoreAtBoot, startAgentStoreJobs, stopAgentStoreJobs } from './kb/agent-jobs.mjs';
@@ -1394,6 +1394,8 @@ function shutdown(signal) {
   flushWarmCliPool('shutdown');
   if (authGcTimer)  { clearInterval(authGcTimer);  authGcTimer  = null; }
   if (backupTimer)  { clearInterval(backupTimer);  backupTimer  = null; }
+  // A copy still running is killed; its staging file is removed and never becomes a "backup".
+  killBackupWorkers();
   stopBackgroundOutcomePoller();
   const syncStopped = syncScheduler ? syncScheduler.stop().catch(() => {}) : Promise.resolve();
   if (hostApi) { try { hostApi.gateway.closeAll(); void hostApi.listener?.close(); } catch { /* best-effort */ } }
