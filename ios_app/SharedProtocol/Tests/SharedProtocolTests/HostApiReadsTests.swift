@@ -66,8 +66,8 @@ final class FakeReadHost: HostConnection {
     }
     func close() {}
     func answer<R: Encodable>(_ i: Int, _ result: R) { waiting[i].resume(returning: try! JSONEncoder().encode(result)) }
-    func fail(_ i: Int, _ message: String) {
-        waiting[i].resume(throwing: HostApiRejection(replyTo: nil, code: "not_found", message: message))
+    func fail(_ i: Int, _ message: String, code: String = "not_found") {
+        waiting[i].resume(throwing: HostApiRejection(replyTo: nil, code: code, message: message))
     }
     func waitForCalls(_ n: Int) async { for _ in 0..<1000 where calls.count < n { await Task.yield() } }
     func payload<P: Decodable>(_ i: Int, as: P.Type) -> P { try! JSONDecoder().decode(P.self, from: calls[i].payload) }
@@ -77,7 +77,9 @@ final class FakeReadHost: HostConnection {
 @Suite("HostApiReadController")
 struct HostApiReadControllerTests {
     let host = FakeReadHost()
-    func controller() -> HostApiReadController { HostApiReadController(host: { [host] in host }) }
+    func controller(project: @escaping () -> String? = { nil }) -> HostApiReadController {
+        HostApiReadController(host: { [host] in host }, projectId: project)
+    }
     func sessions(_ r: Range<Int>) -> [HostApiChatSessionsResultSessionsItem] {
         r.map { .init(id: "s\($0)", title: "Chat \($0)", updatedAt: $0) }
     }
@@ -217,5 +219,45 @@ struct HostApiReadControllerTests {
         host.answer(1, HostApiChatSessionsResult(sessions: sessions(90..<99)))  // the stale one lands last
         await hung.value
         #expect(c.state.sessions.count == 60, "a reply from before reset never writes")
+    }
+
+    @Test("API 128: refresh and history name the selected project; a project change clears and reloads")
+    func projectScope() async {
+        var selected: String? = "p-1"
+        let c = controller(project: { selected })
+        let t = Task { await c.refresh() }
+        await host.waitForCalls(1)
+        #expect(host.payload(0, as: HostApiChatSessionsRequest.self) == .init(limit: 50, offset: nil, projectId: "p-1"))
+        host.answer(0, HostApiChatSessionsResult(sessions: sessions(0..<1)))
+        await t.value
+
+        let o = Task { await c.open(id: "s0", title: "Alpha") }
+        await host.waitForCalls(2)
+        #expect(host.payload(1, as: HostApiChatHistoryRequest.self) ==
+                .init(beforeSeq: nil, limit: 100, projectId: "p-1", sessionId: "s0"))
+        host.answer(1, HostApiChatHistoryResult(messages: lines(1...1)))
+        await o.value
+        #expect(c.state.open?.id == "s0")
+
+        selected = "p-2"
+        let changed = Task { await c.projectChanged() }
+        await host.waitForCalls(3)
+        #expect(c.state.open == nil && c.state.sessions.isEmpty, "the old project's rows are gone at once")
+        #expect(host.payload(2, as: HostApiChatSessionsRequest.self) == .init(limit: 50, offset: nil, projectId: "p-2"))
+        host.answer(2, HostApiChatSessionsResult(sessions: sessions(10..<11)))
+        await changed.value
+        #expect(c.state.sessions.map(\.id) == ["s10"], "only the newly selected project's chat is shown")
+        #expect(c.state.open == nil)
+    }
+
+    @Test("API 128: a project-mismatch history refusal is shown and opens nothing")
+    func projectMismatch() async {
+        let c = controller(project: { "p-2" })
+        let o = Task { await c.open(id: "s0", title: "Alpha") }
+        await host.waitForCalls(1)
+        host.fail(0, "PROJECT_MISMATCH: That chat belongs to another project.", code: "denied")
+        await o.value
+        #expect(c.state.open == nil)
+        #expect(c.state.error?.contains("PROJECT_MISMATCH") == true)
     }
 }

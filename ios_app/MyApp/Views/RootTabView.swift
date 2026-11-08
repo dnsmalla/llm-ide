@@ -47,6 +47,11 @@ struct RootTabView: View {
             if !connection.servesV1Read { usageStore.resetForNewDevice() }
             refreshHostData()
         }
+        // The project picker changed: History shows that project's chats only (API 128).
+        .onChange(of: projectsStore.state.selectedId) { _ in
+            guard connection.servesV1Read else { return }
+            Task { await connection.reads.projectChanged() }
+        }
         // `read` gone and no sync: the History tab is gone, so never leave the user on it.
         .onChange(of: connection.servesV1Read) { on in
             if !on, syncStore.phase == .off, selection == .history { selection = .chat }

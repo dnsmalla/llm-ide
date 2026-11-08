@@ -67,13 +67,30 @@ public final class HostApiReadController {
     private var ticket = 0      // the open chat's request generation: a reply for an older open() is dropped
     private var generation = 0  // bumped by reset(): every reply from before a disconnect is dropped
     private var moreBusy = false
+    /// The project every read names (API 128); nil keeps the legacy/global (no-project) list.
+    private let projectId: () -> String?
 
-    public init(host: @escaping () -> HostConnection?) { self.host = host }
+    public init(host: @escaping () -> HostConnection?, projectId: @escaping () -> String? = { nil }) {
+        self.host = host
+        self.projectId = projectId
+    }
 
     public func refresh() async {
-        await run(.chatSessions, HostApiChatSessionsRequest(limit: Self.sessionsPage), as: HostApiChatSessionsResult.self) { s, r in
+        await run(.chatSessions,
+                  HostApiChatSessionsRequest(limit: Self.sessionsPage, projectId: projectId()),
+                  as: HostApiChatSessionsResult.self) { s, r in
             s.sessions = r.sessions; s.nextOffset = r.nextOffset
         }
+    }
+
+    /// The picker selected another project: the old rows and open chat disappear before the new page lands,
+    /// and any reply still in flight for the previous project is dropped.
+    public func projectChanged() async {
+        generation += 1
+        ticket += 1
+        moreBusy = false
+        state = HostApiReadState()
+        await refresh()
     }
 
     public func moreSessions() async {
@@ -83,7 +100,7 @@ public final class HostApiReadController {
         // unblock (or block) "more" after a reconnect.
         let gen = generation
         defer { if gen == generation { moreBusy = false } }
-        await run(.chatSessions, HostApiChatSessionsRequest(limit: Self.sessionsPage, offset: offset),
+        await run(.chatSessions, HostApiChatSessionsRequest(limit: Self.sessionsPage, offset: offset, projectId: projectId()),
                   as: HostApiChatSessionsResult.self) { s, r in
             let seen = Set(s.sessions.map(\.id))
             s.sessions = Array((s.sessions + r.sessions.filter { !seen.contains($0.id) }).prefix(Self.maxSessions))
@@ -95,7 +112,7 @@ public final class HostApiReadController {
     public func open(id: String, title: String) async {
         ticket += 1
         let mine = ticket
-        await run(.chatHistory, HostApiChatHistoryRequest(limit: Self.historyPage, sessionId: id),
+        await run(.chatHistory, HostApiChatHistoryRequest(limit: Self.historyPage, projectId: projectId(), sessionId: id),
                   as: HostApiChatHistoryResult.self, current: { [weak self] in self?.ticket == mine }) { s, r in
             s.open = HostApiOpenChat(id: id, title: title, messages: r.messages, nextBeforeSeq: r.nextBeforeSeq)
         }
@@ -104,7 +121,7 @@ public final class HostApiReadController {
     public func older() async {
         guard let o = state.open, let beforeSeq = o.nextBeforeSeq else { return }
         let mine = ticket
-        await run(.chatHistory, HostApiChatHistoryRequest(beforeSeq: beforeSeq, limit: Self.historyPage, sessionId: o.id),
+        await run(.chatHistory, HostApiChatHistoryRequest(beforeSeq: beforeSeq, limit: Self.historyPage, projectId: projectId(), sessionId: o.id),
                   as: HostApiChatHistoryResult.self, current: { [weak self] in self?.ticket == mine }) { s, r in
             guard s.open?.id == o.id else { return }
             s.open = HostApiOpenChat(id: o.id, title: o.title,

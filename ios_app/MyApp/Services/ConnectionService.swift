@@ -104,7 +104,9 @@ final class ConnectionService: ObservableObject {
     /// Host API v1 `read` (chat list + one chat, read-only).
     @Published private(set) var readState = HostApiReadState()
     private(set) lazy var reads: HostApiReadController = {
-        let r = HostApiReadController(host: { [weak self] in self?.v1Client })
+        // The History tab follows the Chat tab's project (API 128): the same selectedId the picker persists.
+        let r = HostApiReadController(host: { [weak self] in self?.v1Client },
+                                      projectId: { [weak self] in self?.projectsStore?.selectedId })
         r.onChange = { [weak self] in self?.readState = $0 }
         return r
     }()

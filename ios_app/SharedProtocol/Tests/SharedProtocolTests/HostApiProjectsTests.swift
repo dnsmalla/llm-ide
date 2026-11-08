@@ -178,6 +178,8 @@ struct HostApiProjectFrameTests {
     func projectScopedFrames() throws {
         let scoped: [[String: Any]] = [
             try object(HostApiChatSnapshotRequest(limit: 50, projectId: "p-2")),
+            try object(HostApiChatSessionsRequest(limit: 50, projectId: "p-2")),
+            try object(HostApiChatHistoryRequest(limit: 100, projectId: "p-2", sessionId: "s")),
             try object(HostApiChatHistoryClearRequest(projectId: "p-2")),
             try object(HostApiChatCancelRequest(projectId: "p-2")),
             try object(HostApiApprovalsAnswerRequest(answers: [:], commandId: "c", projectId: "p-2", requestId: "r")),
@@ -185,8 +187,8 @@ struct HostApiProjectFrameTests {
         ]
         for json in scoped { #expect(json["projectId"] as? String == "p-2") }
 
-        // chat.history is session-scoped in v1 and has no project field; the phone sends its project on
-        // chat.snapshot instead (checked above).
-        #expect(try object(HostApiChatHistoryRequest(sessionId: "s")).isEmpty == false)
+        // Without a project the frames stay exactly the v1 team shapes (the optional is omitted, not null).
+        #expect(try object(HostApiChatSessionsRequest(limit: 50))["projectId"] == nil)
+        #expect(try object(HostApiChatHistoryRequest(sessionId: "s"))["projectId"] == nil)
     }
 }
