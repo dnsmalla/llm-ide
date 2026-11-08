@@ -262,7 +262,10 @@ export async function serverChecks(row) {
       for (const r of owned) disabledRoutes.set(r, key);
     }
     const advertised = health.endpoints ?? [];
-    const expectAdvertised = routes.filter((r) => !disabledRoutes.has(r));
+    // Self-Heal routes are advertised only when LLMIDE_SELF_HEAL=1 (debug desktop). The matrix
+    // rows do not enable it, so they are not missing endpoints.
+    const selfHealOn = row.env?.LLMIDE_SELF_HEAL === '1';
+    const expectAdvertised = routes.filter((r) => !disabledRoutes.has(r) && (selfHealOn || !r.startsWith('/kb/self-heal/')));
     if (JSON.stringify(advertised) !== JSON.stringify(expectAdvertised)) {
       const extra = advertised.filter((r) => disabledRoutes.has(r));
       const missing = expectAdvertised.filter((r) => !advertised.includes(r));
