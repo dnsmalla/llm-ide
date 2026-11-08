@@ -1,5 +1,9 @@
 # `llm-ide.com` VPS deployment
 
+For the always-online hub mode (remote server), see [run-a-hub](../../docs/how-to/run-a-hub.md). The
+`llmide-core` unit below is the historical loopback service; the hub deploy installs its own
+`/opt/llmide` release behind nginx.
+
 This is the layout running on `root@72.62.76.92` (Ubuntu 24.04). It is additive: the existing
 `sites-enabled/*` apps and PM2 services are untouched.
 
