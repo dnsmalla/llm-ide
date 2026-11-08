@@ -97,7 +97,7 @@ printf '%s\\n' "$*" >> '${systemctlLog}'`);
   };
 }
 
-function fakeBundle(h) {
+function fakeBundle(h, version = '1.2.3', webBody = 'hub') {
   const core = join(h.stage, 'fake/core/node');
   mkdirSync(core, { recursive: true });
   const node = join(core, 'node');
@@ -105,8 +105,8 @@ function fakeBundle(h) {
   chmodSync(node, 0o755);
   const web = join(h.stage, 'fake/core/root/web');
   mkdirSync(web, { recursive: true });
-  writeFileSync(join(web, 'index.html'), '<!doctype html>hub');
-  writeFileSync(join(h.stage, 'fake/VERSION'), '1.2.3\n');
+  writeFileSync(join(web, 'index.html'), `<!doctype html>${webBody}`);
+  writeFileSync(join(h.stage, 'fake/VERSION'), `${version}\n`);
   const tar = join(h.stage, 'bundle.tar.gz');
   execFileSync('tar', ['-czf', tar, '-C', join(h.stage, 'fake'), 'core', 'VERSION']);
   const sha = execFileSync('sha256sum', [tar], { encoding: 'utf8' }).split(/\s+/)[0];
@@ -170,14 +170,19 @@ test('update installs the NEW version beside the running release and rollback re
     fakeBundle(h);
     h.run('bundle');
     assert.ok(existsSync(join(h.root, 'opt/llmide/releases/1.2.3')));
+    fakeBundle(h, '1.2.4', 'web 1.2.4');
     h.run('upload', 'VERSION\n1.2.4\n');
     h.run('update');
+    assert.match(readFileSync(h.envPath, 'utf8'), /LLMIDE_HUB_VERSION=1\.2\.4/);
+    assert.match(readFileSync(join(h.root, 'var/www/llmide-web/index.html'), 'utf8'), /web 1\.2\.4/);
     assert.ok(existsSync(join(h.root, 'opt/llmide/releases/1.2.3')), 'the running release is never deleted');
     assert.ok(existsSync(join(h.root, 'opt/llmide/releases/1.2.4')));
     assert.match(execFileSync('readlink', [join(h.root, 'opt/llmide/current')], { encoding: 'utf8' }).trim(), /releases\/1\.2\.4$/);
     assert.match(execFileSync('readlink', [join(h.root, 'opt/llmide/previous')], { encoding: 'utf8' }).trim(), /releases\/1\.2\.3$/);
     h.run('rollback');
     assert.match(execFileSync('readlink', [join(h.root, 'opt/llmide/current')], { encoding: 'utf8' }).trim(), /releases\/1\.2\.3$/);
+    assert.match(readFileSync(h.envPath, 'utf8'), /LLMIDE_HUB_VERSION=1\.2\.3/);
+    assert.match(readFileSync(join(h.root, 'var/www/llmide-web/index.html'), 'utf8'), /hub/);
   } finally { h.cleanup(); }
 });
 

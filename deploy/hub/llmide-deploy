@@ -326,9 +326,23 @@ HOOK
 
   rollback)
     if [ ! -L /opt/llmide/previous ]; then die "no previous release to roll back to"; fi
-    ln -sfn "$(readlink /opt/llmide/previous)" /opt/llmide/current
+    target=$(readlink -f /opt/llmide/previous) || die "the previous release is missing"
+    [ -d "$target" ] || die "the previous release is missing"
+    old=$(readlink -f /opt/llmide/current) || old=""
+    ver=$(tr -cd '0-9.' < "$target/VERSION" 2>/dev/null | head -c 40)
+    case "$ver" in *.*.*) ;; *) die "the previous release has no x.y.z VERSION" ;; esac
+    # The web assets and the reported env version are part of the release: restore both
+    # before switching, so the API and the PWA never disagree after a rollback.
+    if [ -d "$target/core/root/web" ]; then
+      install -d -m 0755 -o root -g root /var/www/llmide-web
+      cp -a "$target/core/root/web/." /var/www/llmide-web/
+      chown -R root:root /var/www/llmide-web
+    fi
+    replace_line "$CONF" LLMIDE_HUB_VERSION "$ver"
+    if [ -n "$old" ] && [ "$old" != "$target" ]; then ln -sfn "$old" /opt/llmide/previous; fi
+    ln -sfn "$target" /opt/llmide/current
     systemctl restart llmide-core
-    say "ok"
+    say "ok ($ver)"
     ;;
 
   update)
