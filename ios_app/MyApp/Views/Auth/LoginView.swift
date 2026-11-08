@@ -37,7 +37,28 @@ struct ConnectView: View {
                     .font(DesignSystem.Typography.captionFont)
                     .foregroundColor(DesignSystem.Colors.textSecondary)
                     .multilineTextAlignment(.center)
-                if let err = errorMessage {
+                if connection.requiresRepair {
+                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                        Label("Pairing expired or removed", systemImage: "person.badge.key")
+                            .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
+                            .foregroundColor(DesignSystem.Colors.textPrimary)
+                        Text(HostApiNegotiation.rePairMessage)
+                            .font(DesignSystem.Typography.footnoteFont)
+                            .foregroundColor(DesignSystem.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: DesignSystem.Spacing.sm) {
+                            Button("Scan pairing QR") { showScanner = true }
+                                .buttonStyle(.borderedProminent)
+                            Button("Enter PIN") { withAnimation { showManual = true } }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(DesignSystem.Spacing.md)
+                    .background(DesignSystem.Colors.primary.opacity(0.08))
+                    .cornerRadius(DesignSystem.Layout.cornerRadiusM)
+                }
+                if let err = errorMessage, !connection.requiresRepair {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(DesignSystem.Colors.danger)

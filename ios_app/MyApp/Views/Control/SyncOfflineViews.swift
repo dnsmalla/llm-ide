@@ -12,6 +12,7 @@ struct SyncOfflineSections: View {
             Section {
                 Text(freshness(snap)).font(.footnote).foregroundColor(.secondary)
                 if syncStore.phase == .removed { Text("This iPhone was removed from sync.").foregroundColor(.red) }
+                if let e = syncStore.lastError { Text(e).font(.footnote).foregroundColor(DesignSystem.Colors.textSecondary) }
             }
             if !snap.chats.isEmpty {
                 Section("Chats") { ForEach(snap.chats) { c in NavigationLink(c.title) { SyncChatView(chat: c) } } }

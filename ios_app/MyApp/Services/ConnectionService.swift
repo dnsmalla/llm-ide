@@ -86,6 +86,9 @@ final class ConnectionService: ObservableObject {
         }
     }
     @Published var errorMessage: String?
+    /// The saved device token expired (90-day limit) or the host revoked it. The pairing screen shows a direct
+    /// re-pair path; cleared once a new pairing reaches `ready`.
+    @Published private(set) var requiresRepair = false
     /// What the paired host serves (`host.hello` / `host.auth.*` / `host.capabilities`), or nil before the
     /// first connect of this pairing.
     @Published private(set) var hostCapabilities: Set<String>?
@@ -161,6 +164,15 @@ final class ConnectionService: ObservableObject {
         reconnectTask?.cancel()
         reconnectTask = nil
         invalidateSocket()
+        if !pin.isEmpty { requiresRepair = false }
+        // C5: a token past 90 days would be refused by the host anyway; surface the re-pair path without a dial.
+        if connectionStore?.hostApiTokenExpired == true {
+            connectionStore?.clearCredentials()
+            requiresRepair = true
+            errorMessage = HostApiNegotiation.rePairMessage
+            connectionStatus = .disconnected
+            return
+        }
         // The endpoint exists only after a QR scan stored the host's pin (or a DEBUG dev URL).
         guard let endpoint = connectionStore?.hostApiEndpoint else {
             errorMessage = "Scan the pairing QR code in the desktop's Settings → Mobile Control. This iPhone learns the desktop's security identity from the QR only."
@@ -191,6 +203,7 @@ final class ConnectionService: ObservableObject {
                 self.v1Client = client
                 self.hostCapabilities = client.capabilities
                 self.errorMessage = nil
+                self.requiresRepair = false
                 self.reconnectAttempt = 0
                 self.connectionStore?.updateDeviceName(hello.hostName)
                 if let newToken {
@@ -216,7 +229,11 @@ final class ConnectionService: ObservableObject {
     /// non-retryable `auth_failed` (the device is not paired) clears the credentials and returns to pairing;
     /// any other refusal keeps the pairing and stops, showing the host's message.
     private func handleRefusal(_ r: HostApiRejection) {
-        errorMessage = r.message.isEmpty ? "The desktop refused the connection." : r.message
+        // A token-auth refusal is the 90-day/revoke case; a wrong PIN is also non-retryable `auth_failed`, but
+        // there is no old session to repair, so it must not claim the pairing expired.
+        let wasTokenAuth = !(connectionStore?.hostApiToken.isEmpty ?? true)
+        let expiredSession = wasTokenAuth && HostApiNegotiation.isExpiredSession(r)
+        errorMessage = !r.message.isEmpty ? r.message : expiredSession ? HostApiNegotiation.rePairMessage : "The desktop refused the connection."
         if r.retryable {
             reconnectAttempt = max(reconnectAttempt, 1)
             invalidateSocket()
@@ -227,6 +244,7 @@ final class ConnectionService: ObservableObject {
         guard HostApiNegotiation.clearsCredentials(r) else { return closeConnection() }
         directPIN = nil
         connectionStore?.clearCredentials()
+        requiresRepair = expiredSession
         disconnect(clearDirect: true)
     }
 

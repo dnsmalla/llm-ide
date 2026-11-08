@@ -22,12 +22,22 @@ final class ConnectionStore: ObservableObject {
     /// its TLS port (UserDefaults). Empty/0 until a QR pairing.
     private(set) var hostApiPin: String
     private(set) var hostApiPort: Int
+    /// When this phone received its Host API token (ms), for the C5 90-day client check. 0 = unknown (a pairing
+    /// from before the field existed); the host still enforces the lifetime, so old pairings keep working.
+    private(set) var hostApiPairedAt: Int
     /// Friendly host name from `host.hello` (e.g. "Dinesh's MacBook").
     @Published private(set) var deviceName: String = ""
 
     /// Either credential lets the phone connect: a token after pairing, or a
     /// PIN the user just entered and has not yet exchanged.
     var hasDevice: Bool { !deviceIP.isEmpty && (!hostApiToken.isEmpty || !devicePIN.isEmpty) }
+
+    /// C5: the saved token is past the shared 90-day device lifetime, so the phone can show the re-pair path
+    /// before dialling. Unknown pairing time (0) is left to the host, which checks `paired_at` on every frame.
+    var hostApiTokenExpired: Bool {
+        !hostApiToken.isEmpty && hostApiPairedAt > 0
+            && SyncPolicy.deviceTokenState(pairedAt: hostApiPairedAt, nowMs: Int(Date().timeIntervalSince1970 * 1000)) == .expired
+    }
 
     /// Title for the paired home screen — prefers the host name over raw IP.
     var displayName: String { deviceName.isEmpty ? deviceIP : deviceName }
@@ -44,6 +54,7 @@ final class ConnectionStore: ObservableObject {
         hostApiToken = CredentialKeychain.load(account: .hostApiToken) ?? ""
         hostApiPin = CredentialKeychain.load(account: .hostApiPin) ?? ""
         hostApiPort = defaults.integer(forKey: "agent_h1port")
+        hostApiPairedAt = defaults.integer(forKey: "agent_h1paired_at")
     }
 
     /// A fresh PIN means a fresh pairing: any token from a previous pairing is
@@ -81,6 +92,9 @@ final class ConnectionStore: ObservableObject {
         hostApiToken = token
         devicePIN = ""
         CredentialKeychain.delete(account: .pin)
+        // A token is issued at pairing, so this is the pairing time the host records in `paired_at`.
+        hostApiPairedAt = Int(Date().timeIntervalSince1970 * 1000)
+        defaults.set(hostApiPairedAt, forKey: "agent_h1paired_at")
         return true
     }
 
@@ -98,6 +112,8 @@ final class ConnectionStore: ObservableObject {
 
     private func clearToken() {
         hostApiToken = ""
+        hostApiPairedAt = 0
+        defaults.removeObject(forKey: "agent_h1paired_at")
         CredentialKeychain.delete(account: .hostApiToken)
     }
 
@@ -122,10 +138,12 @@ final class ConnectionStore: ObservableObject {
         hostApiToken = ""
         hostApiPin = ""
         hostApiPort = 0
+        hostApiPairedAt = 0
         deviceName  = ""
         defaults.removeObject(forKey: "agent_ip")
         defaults.removeObject(forKey: "agent_device_name")
         defaults.removeObject(forKey: "agent_h1port")
+        defaults.removeObject(forKey: "agent_h1paired_at")
         CredentialKeychain.delete(account: .hostApiPin)
         CredentialKeychain.delete(account: .pin)
         CredentialKeychain.delete(account: .hostApiToken)

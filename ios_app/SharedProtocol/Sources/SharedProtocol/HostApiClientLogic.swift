@@ -74,8 +74,16 @@ public struct HostApiNegotiation: Sendable, Equatable {
 /// What a failed v1 attempt may do to the phone's pairing. A transient outage or a non-auth refusal must
 /// never unpair it (Task 5 review I1, I2).
 public extension HostApiNegotiation {
-    /// Only the host saying the device is not paired (non-retryable `auth_failed`) clears the credentials.
-    static func clearsCredentials(_ r: HostApiRejection) -> Bool { r.code == "auth_failed" && !r.retryable }
+    /// A non-retryable `auth_failed` is an expired or revoked device session: the 90-day limit, a revoke on the
+    /// desktop, or a wiped registry. It is the only refusal that clears the phone's saved credentials.
+    static func isExpiredSession(_ r: HostApiRejection) -> Bool { r.code == "auth_failed" && !r.retryable }
+
+    /// Only the host saying the device is not paired clears the credentials.
+    static func clearsCredentials(_ r: HostApiRejection) -> Bool { isExpiredSession(r) }
+
+    /// Shown when the saved device token is past its lifetime or the host no longer knows it. Re-pairing is the
+    /// only path, so the pairing screen offers it directly instead of a generic connection error.
+    static let rePairMessage = "This iPhone's pairing has expired or was removed. Pair again with the desktop's QR or a new PIN."
 }
 
 /// Where to reach a Host API v1 listener. Spec "Security": `wss://` to any host (pinned, `HostApiPinning`),

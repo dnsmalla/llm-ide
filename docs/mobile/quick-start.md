@@ -43,6 +43,11 @@ read-only OAuth scopes; that path never touches the desktop.
 **Revoke** a phone from the same card (Paired devices → Revoke…). Its token is refused from then on; the
 phone gets `auth_failed` and returns to the pairing screen.
 
+**Device lifetime.** The token lasts at most **90 days from pairing**, even if the phone is used every day
+(exactly 90 days is still valid). On expiry the host deletes the token and answers `auth_failed`; the phone
+clears its saved credentials and offers "Pair again" with a new QR or PIN. The phone also checks its locally
+recorded pairing time, so an expired token does not dial first. This is separate from the 30-day idle rule.
+
 **Typed PIN.** "Enter a PIN manually" on the pairing screen re-pairs a desktop this iPhone already scanned:
 it keeps that host's stored fingerprint. With no stored fingerprint for that address, the phone asks for the
 QR, because it pins only from a QR scan.
@@ -94,6 +99,16 @@ pin).
 ### "This computer's security identity changed — pair again."
 
 The desktop has a new certificate. Scan its pairing QR again.
+
+### "Pairing expired or removed"
+
+The token reached its 90-day limit, or the desktop revoked this phone / wiped its device registry. Pair again
+with the desktop's QR or a new PIN; the old token cannot be renewed.
+
+### "The desktop hasn't updated sync for over a week"
+
+The offline-sync manifest is past `validUntil` + 7 days, so its keys may have rotated and the snapshot is not
+trusted. Open the desktop app with sync on so it publishes a fresh manifest, then pull to refresh on the phone.
 
 ### Live, but no History tab
 

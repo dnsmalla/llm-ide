@@ -192,6 +192,11 @@ public final class SyncDevice {
         guard let m = try? JSONDecoder().decode(SyncManifest.self, from: plain), m.v == 1, m.manifestSeq == env.seq, m.epoch == env.epoch
         else { throw SyncCryptoError("bad_manifest") }
         guard m.manifestSeq >= state.manifestSeq else { throw SyncCryptoError("rollback") }
+        // C5: the desktop may have been off past the grace window; its keys may have rotated, so refuse before any
+        // blob is fetched or trusted. The same rule is vector-pinned for Node and Swift (`devicePolicy`).
+        guard SyncPolicy.manifestState(validUntil: m.validUntil, nowMs: nowMs) != .staleManifest else {
+            throw SyncCryptoError("stale_manifest")
+        }
         var snap = SyncSnapshot(manifest: m)
         for (kind, e) in m.kinds.sorted(by: { $0.key < $1.key }) {
             guard Self.kinds.contains(kind), Self.isBlobName(e.file) else { throw SyncCryptoError("bad_manifest") }

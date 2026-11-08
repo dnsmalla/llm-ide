@@ -102,6 +102,10 @@ public enum SyncFreshness: Equatable, Sendable {
     case current(lastUpdatedMs: Int)
     case withheld(lastUpdatedMs: Int)
     public init(_ m: SyncManifest, nowMs: Int) {
-        self = nowMs > m.validUntil ? .withheld(lastUpdatedMs: m.generatedAt) : .current(lastUpdatedMs: m.generatedAt)
+        // The same policy the device enforces: stale manifests never reach a snapshot, so only current/withheld
+        // are visible here. A `stale_manifest` throws in `SyncDevice.readSnapshot`.
+        self = SyncPolicy.manifestState(validUntil: m.validUntil, nowMs: nowMs) == .fresh
+            ? .current(lastUpdatedMs: m.generatedAt)
+            : .withheld(lastUpdatedMs: m.generatedAt)
     }
 }

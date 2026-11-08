@@ -76,6 +76,18 @@ struct SyncDeviceTests {
         }
     }
 
+    @Test("C5: a manifest more than 7 days past validUntil is stale_manifest; the grace boundary still reads")
+    func staleManifest() async throws {
+        let (device, desk, store, c) = try await Self.enrolled()
+        let generatedAt = 1_762_300_000_000
+        try desk.publish(store, c, now: generatedAt, validFor: 2_700_000)
+        let boundary = generatedAt + 2_700_000 + SyncPolicy.staleManifestAfterMs
+        #expect(try await device.readSnapshot(store, nowMs: boundary) != nil, "exactly 7 days past validUntil is still readable")
+        await #expect(throws: SyncCryptoError("stale_manifest")) {
+            _ = try await device.readSnapshot(store, nowMs: boundary + 1)
+        }
+    }
+
     @Test("a blob deleted between manifest and fetch: one manifest refetch, then 'updating'")
     func blobGone() async throws {
         let (device, _, store, _) = try await Self.enrolled()

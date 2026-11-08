@@ -69,6 +69,18 @@ struct HostApiClientLogicTests {
         #expect(r.code == "host_unreachable"); #expect(r.retryable)
     }
 
+    @Test("C5: a non-retryable auth_failed is an expired/revoked session; only that clears the pairing")
+    func expiredSession() {
+        let expired = HostApiRejection(replyTo: nil, code: "auth_failed",
+                                       message: "This device is past its 90 days — pair again with a new PIN.")
+        #expect(HostApiNegotiation.isExpiredSession(expired))
+        #expect(HostApiNegotiation.clearsCredentials(expired))
+        #expect(!HostApiNegotiation.isExpiredSession(busy), "a retryable refusal keeps the pairing")
+        #expect(!HostApiNegotiation.isExpiredSession(HostApiRejection(replyTo: nil, code: "auth_failed", message: "slow down", retryable: true)))
+        #expect(!HostApiNegotiation.isExpiredSession(HostApiRejection(replyTo: nil, code: "denied", message: "no")))
+        #expect(HostApiNegotiation.rePairMessage.contains("Pair again"))
+    }
+
     @Test("negotiation: out-of-order inputs are ignored")
     func ignored() {
         var n = HostApiNegotiation()

@@ -414,6 +414,7 @@ final class SyncStore: ObservableObject {
         if error is URLError { return "No connection to the sync storage." }
         switch (error as? SyncCryptoError)?.code {
         case "removed": return "This iPhone was removed from sync. Set it up again from the desktop."
+        case "stale_manifest": return "The desktop hasn't updated sync for over a week. Open the desktop app to refresh, then pull to refresh here."
         case "updating": return "The desktop is updating the snapshot. Pull to refresh in a moment."
         case "too_long": return "That prompt is too long."
         case "empty": return "Type a prompt first."
