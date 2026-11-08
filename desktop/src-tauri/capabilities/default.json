@@ -152,6 +152,7 @@
     "allow-host-platform",
     "allow-get-prefs",
     "allow-set-prefs",
+    "allow-remote-ssh-test",
     "allow-chat-bind-session",
     "allow-chat-unbind-session",
     "allow-chat-list",

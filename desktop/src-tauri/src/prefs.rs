@@ -53,6 +53,50 @@ pub enum Theme {
     Midnight,
 }
 
+/// Settings > Server & Backend > Remote server: where the backend runs. Phase 1 stores the choice and the
+/// connection fields and offers an SSH test; it does not deploy or move the core yet.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerMode {
+    #[default]
+    Local,
+    Remote,
+}
+
+/// Non-secret remote connection settings. The private key PATH is stored; the key's contents never are.
+/// Strings are trimmed/capped on the way in, and the SSH test re-validates the shapes before spawning ssh.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct RemoteServerPrefs {
+    pub mode: ServerMode,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub key_path: String,
+    pub label: String,
+}
+
+impl Default for RemoteServerPrefs {
+    fn default() -> Self {
+        Self { mode: ServerMode::Local, host: String::new(), port: 22, user: String::new(), key_path: String::new(), label: String::new() }
+    }
+}
+
+impl RemoteServerPrefs {
+    /// Keeps a hand-edited or hostile prefs.json bounded. The host command still validates the exact shapes.
+    pub fn normalized(mut self) -> Self {
+        let cap = |s: String, max: usize| s.trim().chars().take(max).collect();
+        self.host = cap(self.host, 253);
+        self.user = cap(self.user, 64);
+        self.key_path = cap(self.key_path, 4096);
+        self.label = cap(self.label, 80);
+        if self.port == 0 {
+            self.port = 22;
+        }
+        self
+    }
+}
+
 /// App-wide Loop defaults for loops added to a project the first time. Stored with the other host prefs; read by
 /// the Loop screen when it re-adds a missing default loop.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -146,6 +190,9 @@ pub struct Prefs {
     pub backend_port: u16,
     /// Start the core when the app starts (false leaves it stopped until Start).
     pub backend_auto_start: bool,
+    /// Where the backend runs (Local desktop vs a remote SSH host). Phase 1 stores the choice and offers a
+    /// connection test; the core still runs locally until phase 2 adds deploy.
+    pub remote_server: RemoteServerPrefs,
     // ---- Host API v1 (Settings > Phone and browser) ----
     /// Serve the pairing listener (pinned TLS, all interfaces) from the spawned core: `LLMIDE_HOST_API_TLS=1`.
     /// All five apply at the NEXT core start, like every other backend pref; a packaged app used to pass none of
@@ -170,6 +217,7 @@ impl Default for Prefs {
         Self {
             lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, continue_summary: false, terminal: true, theme: Theme::Dark,
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
+            remote_server: RemoteServerPrefs::default(),
             host_api_tls: false, host_api_read: false, host_api_compose: false, host_api_push: false, host_api_tool_approvals: false,
             loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0, update_checks: true, notifications: NotifyPrefs::default(),
         }
@@ -193,6 +241,8 @@ pub struct PrefsPatch {
     pub backend_source: Option<bool>,
     pub backend_port: Option<u16>,
     pub backend_auto_start: Option<bool>,
+    /// Whole non-secret remote connection block (mode, host, port, user, key path, label).
+    pub remote_server: Option<RemoteServerPrefs>,
     pub host_api_tls: Option<bool>,
     pub host_api_read: Option<bool>,
     pub host_api_compose: Option<bool>,
@@ -231,6 +281,7 @@ impl Prefs {
         if let Some(v) = p.backend_source { n.backend_source = v; }
         if let Some(v) = p.backend_port { n.backend_port = v; }
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
+        if let Some(v) = &p.remote_server { n.remote_server = v.clone().normalized(); }
         if let Some(v) = p.host_api_tls { n.host_api_tls = v; }
         if let Some(v) = p.host_api_read { n.host_api_read = v; }
         if let Some(v) = p.host_api_compose { n.host_api_compose = v; }
@@ -285,6 +336,7 @@ pub fn parse(text: &str) -> Prefs {
             // Empty stays "inherit every feature"; a non-empty list is the explicit profile.
             features: if p.features.is_empty() { None } else { Some(p.features.clone()) },
             backend_source: Some(p.backend_source), backend_port: Some(p.backend_port), backend_auto_start: Some(p.backend_auto_start),
+            remote_server: Some(p.remote_server.clone()),
             host_api_tls: Some(p.host_api_tls), host_api_read: Some(p.host_api_read), host_api_compose: Some(p.host_api_compose),
             host_api_push: Some(p.host_api_push), host_api_tool_approvals: Some(p.host_api_tool_approvals),
             loop_defaults: Some(p.loop_defaults.clone()), graph_auto_update_minutes: Some(p.graph_auto_update_minutes),
@@ -408,8 +460,8 @@ pub struct PrefsView {
 
 fn view(stored: Prefs, persisted: bool) -> PrefsView {
     let launch = launch();
-    // The theme applies at once; only the others need a restart.
-    let restart_needed = Prefs { theme: launch.theme, loop_defaults: launch.loop_defaults.clone(), graph_auto_update_minutes: launch.graph_auto_update_minutes, update_checks: launch.update_checks, notifications: launch.notifications, ..stored.clone() } != launch;
+    // The theme (and the stored remote choice, which phase 1 does not act on) applies at once; only the others need a restart.
+    let restart_needed = Prefs { theme: launch.theme, loop_defaults: launch.loop_defaults.clone(), graph_auto_update_minutes: launch.graph_auto_update_minutes, update_checks: launch.update_checks, notifications: launch.notifications, remote_server: launch.remote_server.clone(), ..stored.clone() } != launch;
     PrefsView { stored, launch, restart_needed, persisted }
 }
 
@@ -515,6 +567,41 @@ mod tests {
         // An older prefs file reads all five as off.
         let old: Prefs = serde_json::from_str(r#"{"ltaMode":"off","router":false,"cap":false,"compress":false,"learn":false,"terminal":true,"theme":"dark"}"#).unwrap();
         assert!(!old.host_api_tls && !old.host_api_read && !old.host_api_compose && !old.host_api_push && !old.host_api_tool_approvals);
+    }
+
+    #[test]
+    fn remote_server_prefs_round_trip_normalize_and_never_require_a_restart() {
+        let d = Prefs::default();
+        assert_eq!(d.remote_server.mode, ServerMode::Local);
+        assert_eq!(d.remote_server.port, 22);
+        let patched = d.patched(&PrefsPatch {
+            remote_server: Some(RemoteServerPrefs {
+                mode: ServerMode::Remote,
+                host: "  example.com  ".into(),
+                port: 0,
+                user: " alice ".into(),
+                key_path: " /home/alice/.ssh/id_ed25519 ".into(),
+                label: " prod ".into(),
+            }),
+            ..Default::default()
+        });
+        assert_eq!(patched.remote_server.mode, ServerMode::Remote);
+        assert_eq!(patched.remote_server.host, "example.com");
+        assert_eq!(patched.remote_server.user, "alice");
+        assert_eq!(patched.remote_server.key_path, "/home/alice/.ssh/id_ed25519");
+        assert_eq!(patched.remote_server.label, "prod");
+        assert_eq!(patched.remote_server.port, 22, "a zero port falls back to 22");
+        assert!(!view(patched.clone(), true).restart_needed, "phase 1 stores the choice but does not act on it");
+        let back = parse(&serde_json::to_string(&patched).unwrap());
+        assert_eq!(back.remote_server, patched.remote_server);
+        assert_eq!(parse(r#"{"ltaMode":"off"}"#).remote_server, RemoteServerPrefs::default(), "an older file is local");
+    }
+
+    #[test]
+    fn the_remote_block_has_no_field_for_key_contents() {
+        assert!(serde_json::from_str::<PrefsPatch>(r#"{"remoteServer":{"host":"x","keyContents":"secret"}}"#).is_err());
+        assert!(serde_json::from_str::<PrefsPatch>(r#"{"remoteServer":{"mode":"remote","keyPath":"/tmp/key"}}"#).is_ok());
+        assert!(serde_json::from_str::<PrefsPatch>(r#"{"remoteServer":{"mode":"elsewhere"}}"#).is_err());
     }
 
     #[test]

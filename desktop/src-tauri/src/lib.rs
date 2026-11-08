@@ -49,6 +49,7 @@ mod graph_gen;
 mod prefs;
 mod project_search;
 mod pty;
+mod remote;
 mod rtk;
 mod secrets;
 mod self_heal;
@@ -435,6 +436,7 @@ macro_rules! product_handlers {
                 host_platform,
                 prefs::get_prefs,
                 prefs::set_prefs,
+                remote::remote_ssh_test,
                 updater::update_status,
                 updater::update_check,
                 updater::update_install,

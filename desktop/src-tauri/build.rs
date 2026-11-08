@@ -161,6 +161,7 @@ const COMMANDS: &[&str] = &[
     "host_platform",
     "get_prefs",
     "set_prefs",
+    "remote_ssh_test",
     "update_status", "update_check", "update_install",
     "open_external_url",
     "reveal_in_os",
