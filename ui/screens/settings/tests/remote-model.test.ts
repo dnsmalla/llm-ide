@@ -15,7 +15,7 @@ import {
 import type { RemoteServerConfig, RemoteSshResult } from "../host.ts";
 
 const local = (over: Partial<RemoteServerConfig> = {}): RemoteServerConfig => ({
-  mode: "local", host: "server.example.com", port: 22, user: "deploy", keyPath: "/home/deploy/.ssh/id_ed25519", label: "prod", ...over,
+  mode: "local", host: "server.example.com", port: 22, user: "deploy", keyPath: "/home/deploy/.ssh/id_ed25519", label: "prod", hubUrl: "", tlsPin: "", ...over,
 });
 const remote = (over: Partial<RemoteServerConfig> = {}): RemoteServerConfig => local({ mode: "remote", ...over });
 

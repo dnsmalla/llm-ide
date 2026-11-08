@@ -162,6 +162,8 @@
     "allow-remote-session-store",
     "allow-remote-session-load",
     "allow-remote-session-clear",
+    "allow-remote-tls-probe",
+    "allow-remote-tls-pin",
     "allow-chat-bind-session",
     "allow-chat-unbind-session",
     "allow-chat-list",

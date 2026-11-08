@@ -161,6 +161,13 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         },
         async remoteDeployLock(target) { await d.invoke("remote_deploy_lock", { target }); },
         async remoteDeployRollback(target) { await d.invoke("remote_deploy_rollback", { target }); },
+        async remoteTlsProbe(hubUrl) {
+          const r = await d.invoke<{ fingerprint?: unknown }>("remote_tls_probe", { hubUrl });
+          if (!r || typeof r.fingerprint !== "string" || !/^sha256:[A-Za-z0-9_-]{43}$/.test(r.fingerprint)) throw new Error("the desktop host returned an invalid TLS fingerprint");
+          return { fingerprint: r.fingerprint };
+        },
+        async remoteTlsPin(hubUrl, fingerprint) { await d.invoke("remote_tls_pin", { hubUrl, fingerprint }); },
+        async restartApp() { await d.invoke("app_restart"); },
         async pickNode() {
           const r = await d.invoke<unknown>("backend_pick_node");
           return typeof r === "string" && r.length > 0 ? r : null;

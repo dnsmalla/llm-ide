@@ -30,6 +30,7 @@ use serde::Serialize;
 
 use crate::foreign_core::{self, ForeignCore};
 use crate::prefs::ServerMode;
+use crate::remote_proxy::ProxyHandle;
 use crate::fsutil;
 use crate::proc_tree::ManagedChild;
 
@@ -265,6 +266,8 @@ struct Inner {
     claude_in_flight: AtomicBool,
     /// 0 = local, 1 = remote. Set by `lib.rs` after `prefs::init`, before the first start.
     mode: std::sync::atomic::AtomicU8,
+    /// The loopback pinned proxy while remote mode is running.
+    remote_proxy: Mutex<Option<ProxyHandle>>,
 }
 
 struct Status {
@@ -347,6 +350,7 @@ impl CoreHost {
                 claude_probe,
                 claude_in_flight: AtomicBool::new(false),
                 mode: std::sync::atomic::AtomicU8::new(0),
+                remote_proxy: Mutex::new(None),
             }),
         }
     }
@@ -414,6 +418,7 @@ impl CoreHost {
     /// Stop the child tree we spawned (never an adopted server). Idempotent, blocks up
     /// to the term grace. A pending restart is cancelled.
     pub fn shutdown(&self) {
+        if let Some(p) = lock(&self.inner.remote_proxy).take() { p.stop(); }
         lock(&self.inner.status).closing = true;
         // Take the child out first so the supervisor is never blocked behind the grace wait.
         let child = lock(&self.inner.child).take();
@@ -492,6 +497,13 @@ impl CoreHost {
 
     /// Start the core again after a user Stop (or a failed start). Idempotent while starting/running.
     pub fn start(&self) -> Result<(), String> {
+        if self.mode() == ServerMode::Remote {
+            let s = lock(&self.inner.status);
+            if matches!(s.state, Phase::Starting | Phase::Remote) { return Ok(()); }
+            drop(s);
+            self.start_in_background(lock(&self.inner.data_dir).clone());
+            return Ok(());
+        }
         let data = lock(&self.inner.data_dir).clone().ok_or_else(|| "the app data folder is not available".to_string())?;
         {
             let s = lock(&self.inner.status);
@@ -528,10 +540,28 @@ impl CoreHost {
         let started = Instant::now();
         let t = &self.inner.tuning;
         if self.mode() == ServerMode::Remote {
+            let cfg = crate::prefs::launch().remote_server;
+            let result = if cfg.hub_url.trim().is_empty() || cfg.tls_pin.trim().is_empty() {
+                Err(crate::fs_ops::FsError { code: "REMOTE_NOT_CONFIGURED", message: "probe and trust the hub certificate before switching to remote mode".into() })
+            } else {
+                crate::remote_proxy::start(&cfg.hub_url, &cfg.tls_pin)
+            };
             let mut s = lock(&self.inner.status);
-            s.state = Phase::Remote;
-            s.url = "http://127.0.0.1:3459".into();
-            s.trust = "remote_pinned";
+            match result {
+                Ok(handle) => {
+                    s.state = Phase::Remote;
+                    s.url = handle.url.clone();
+                    s.trust = "remote_pinned";
+                    s.error = None;
+                    *lock(&self.inner.remote_proxy) = Some(handle);
+                }
+                Err(e) => {
+                    s.state = Phase::Failed;
+                    s.trust = "remote_pinned";
+                    s.error = Some(e.message);
+                    s.error_code = Some("REMOTE_UNAVAILABLE");
+                }
+            }
             return;
         }
 
@@ -2060,7 +2090,8 @@ process.on('SIGTERM', () => process.exit(0));
         assert_eq!(launches.load(Ordering::SeqCst), 0);
         let s = host.status();
         assert_eq!(s.mode, "remote");
-        assert_eq!(s.state, Phase::Remote);
+        assert!(matches!(s.state, Phase::Remote | Phase::Failed), "remote mode never becomes a local child: {s:?}");
+        if s.state == Phase::Failed { assert_eq!(s.error_code, Some("REMOTE_UNAVAILABLE")); }
         assert!(host.verified_url().is_none(), "a remote core is never a locally verified spawn");
         host.shutdown();
     }

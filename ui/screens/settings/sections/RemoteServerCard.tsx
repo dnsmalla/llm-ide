@@ -3,14 +3,14 @@
 // The choice and the non-secret SSH fields are stored as desktop prefs (prefs.json, 0600); "Test SSH" calls the
 // host command `remote_ssh_test`, which runs system ssh with a fixed argv. The private key's CONTENTS are never
 // read by the webview and never stored; only the path the user typed is kept. No password support in phase 1.
-import { useEffect, useMemo, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import { useEnv, useModel, useStore } from "../context.tsx";
 import { ErrorText, Field } from "../ui.tsx";
 import { LOCAL_COPY, REMOTE_TEXT, RemoteServerModel, type RemoteServerIo, type RemoteServerState } from "../remote-model.ts";
 import RemoteDeployCard from "./RemoteDeployCard.tsx";
 
 function RemoteFields({ m, s }: { m: RemoteServerModel; s: RemoteServerState }): ReactNode {
-  const set = (field: "host" | "port" | "user" | "keyPath" | "label") => (e: ChangeEvent<HTMLInputElement>) => m.setField(field, e.currentTarget.value);
+  const set = (field: "host" | "port" | "user" | "keyPath" | "label" | "hubUrl") => (e: ChangeEvent<HTMLInputElement>) => m.setField(field, e.currentTarget.value);
   return (
     <div className="st-stack">
       <Field label="Host or IP">
@@ -28,6 +28,10 @@ function RemoteFields({ m, s }: { m: RemoteServerModel; s: RemoteServerState }):
       <Field label="Private key path" hint={REMOTE_TEXT.keyOnly}>
         <input className="st-input" value={s.keyPath} onChange={set("keyPath")} placeholder="/Users/you/.ssh/id_ed25519" autoComplete="off" spellCheck={false} />
         <ErrorText text={s.fieldErrors.keyPath ?? null} />
+      </Field>
+      <Field label="Hub URL" hint="The https:// address of the hub; probe its certificate before switching modes.">
+        <input className="st-input" value={s.hubUrl} onChange={set("hubUrl")} placeholder="https://hub.example.com" autoComplete="off" spellCheck={false} />
+        <ErrorText text={s.fieldErrors.hubUrl ?? null} />
       </Field>
       <Field label="Label (optional)" hint="A name for this server, e.g. production or staging.">
         <input className="st-input" value={s.label} onChange={set("label")} placeholder="production" autoComplete="off" spellCheck={false} />
@@ -70,6 +74,18 @@ export default function RemoteServerCard(): ReactNode {
   }), [host]);
   const m = useModel(() => new RemoteServerModel(io));
   const s = useStore(m);
+  const [tls, setTls] = useState<{ fingerprint: string; error: string | null; busy: boolean }>({ fingerprint: "", error: null, busy: false });
+  const probe = async () => {
+    if (!host.remoteTlsProbe) return;
+    setTls({ fingerprint: "", error: null, busy: true });
+    try { const r = await host.remoteTlsProbe(s.hubUrl.trim()); setTls({ fingerprint: r.fingerprint, error: null, busy: false }); }
+    catch (e) { setTls({ fingerprint: "", error: e instanceof Error ? e.message : "The TLS probe failed.", busy: false }); }
+  };
+  const trust = async () => {
+    if (!host.remoteTlsPin || !tls.fingerprint) return;
+    try { await host.remoteTlsPin(s.hubUrl.trim(), tls.fingerprint); await m.load(); setTls({ fingerprint: "", error: null, busy: false }); }
+    catch (e) { setTls({ fingerprint: tls.fingerprint, error: e instanceof Error ? e.message : "The pin could not be saved.", busy: false }); }
+  };
   // Load once per mount. A focus refresh would discard fields the user is still editing.
   useEffect(() => {
     if (available) void m.load();
@@ -105,7 +121,23 @@ export default function RemoteServerCard(): ReactNode {
             <span className="st-hint">The first connection learns the host key and shows its fingerprint.</span>
           </div>
           <TestResult s={s} />
+          <div className="st-note">
+            <span className="st-label">Hub certificate</span>
+            <p className="st-hint">{s.tlsPin ? `Pinned: ${s.tlsPin}` : "Not pinned yet. Probe the hub, compare the fingerprint, then trust it."}</p>
+            <div className="st-row">
+              <button type="button" className="st-btn" disabled={tls.busy || !s.hubUrl.trim()} onClick={() => void probe()}>{tls.busy ? "Probing…" : "Probe TLS"}</button>
+              {tls.fingerprint ? <button type="button" className="st-btn" data-tone="primary" onClick={() => void trust()}>Trust this certificate</button> : null}
+            </div>
+            {tls.fingerprint ? <p className="st-pre" style={{ userSelect: "text", wordBreak: "break-all" }}>{tls.fingerprint}</p> : null}
+            <ErrorText text={tls.error} />
+          </div>
           <RemoteDeployCard config={m.config()} />
+          <div className="st-row">
+            <button type="button" className="st-btn" data-tone="primary" disabled={s.saving || s.testing} onClick={() => void m.save().then(() => host.restartApp?.())}>
+              Save and restart in {s.mode === "remote" ? "remote" : "local"} mode
+            </button>
+            <span className="st-hint">Mode changes apply on the next app start.</span>
+          </div>
         </>
       )}
 

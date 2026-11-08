@@ -39,8 +39,10 @@ export interface RemoteServerPrefs {
   /** The private key PATH only. Its contents are never stored. */
   keyPath: string;
   label: string;
+  hubUrl: string;
+  tlsPin: string;
 }
-export const DEFAULT_REMOTE_SERVER: RemoteServerPrefs = Object.freeze({ mode: "local", host: "", port: 22, user: "", keyPath: "", label: "" });
+export const DEFAULT_REMOTE_SERVER: RemoteServerPrefs = Object.freeze({ mode: "local", host: "", port: 22, user: "", keyPath: "", label: "", hubUrl: "", tlsPin: "" });
 
 export interface HostPrefs {
   ltaMode: LtaModeValue;
@@ -119,6 +121,8 @@ export function decodeRemoteServer(raw: unknown): RemoteServerPrefs {
     user: text(raw.user, 64),
     keyPath: text(raw.keyPath, 4096),
     label: text(raw.label, 80),
+    hubUrl: text(raw.hubUrl, 300),
+    tlsPin: text(raw.tlsPin, 80),
   };
 }
 

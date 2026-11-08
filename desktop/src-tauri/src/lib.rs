@@ -52,6 +52,8 @@ mod pty;
 mod remote;
 mod remote_deploy;
 mod remote_session;
+mod remote_tls;
+mod remote_proxy;
 mod rtk;
 mod secrets;
 mod self_heal;
@@ -448,6 +450,8 @@ macro_rules! product_handlers {
                 remote_session::remote_session_store,
                 remote_session::remote_session_load,
                 remote_session::remote_session_clear,
+                remote_tls::remote_tls_probe,
+                remote_tls::remote_tls_pin,
                 updater::update_status,
                 updater::update_check,
                 updater::update_install,

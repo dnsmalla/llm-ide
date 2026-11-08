@@ -22,7 +22,7 @@ before(async () => {
 });
 
 const LOOP = { maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
-const REMOTE = { mode: "local", host: "", port: 22, user: "", keyPath: "", label: "" };
+const REMOTE = { mode: "local", host: "", port: 22, user: "", keyPath: "", label: "", hubUrl: "", tlsPin: "" };
 const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, remoteServer: REMOTE, hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
@@ -96,7 +96,7 @@ test("a garbled host answer is an error, not invented values", async () => {
 });
 
 test("remote server mode round-trips through prefs and tests through the host command", async () => {
-  const next = { mode: "remote", host: "example.com", port: 2222, user: "deploy", keyPath: "/home/deploy/.ssh/id_ed25519", label: "prod" };
+  const next = { mode: "remote", host: "example.com", port: 2222, user: "deploy", keyPath: "/home/deploy/.ssh/id_ed25519", label: "prod", hubUrl: "https://hub.example.com", tlsPin: "" };
   const { host, calls, state } = env({
     invoke: async (cmd, args) => {
       if (cmd !== "remote_ssh_test") return undefined;

@@ -171,6 +171,8 @@ const COMMANDS: &[&str] = &[
     "remote_session_store",
     "remote_session_load",
     "remote_session_clear",
+    "remote_tls_probe",
+    "remote_tls_pin",
     "update_status", "update_check", "update_install",
     "open_external_url",
     "reveal_in_os",

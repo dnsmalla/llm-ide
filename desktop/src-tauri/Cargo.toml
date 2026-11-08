@@ -40,6 +40,11 @@ notify = "=8.2.1"
 ignore = "=0.4.25"
 trash = "=5.2.9"
 sha2 = "=0.10.9"
+# Remote hub: pinned TLS for the loopback proxy (same rustls already in the lock via ureq).
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = "=1.15.1"
+webpki-roots = "=1.0.11"
+base64 = "=0.22.1"
 # Host-run link opening (S-E/S-G): strict URL parsing; already in the lock via tauri (MIT OR Apache-2.0).
 url = "=2.5.8"
 # Project search (S-H): linear-time matcher (MIT OR Apache-2.0); already in the lock via ignore.

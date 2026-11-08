@@ -34,6 +34,9 @@ export interface RemoteServerConfig {
   user: string;
   keyPath: string;
   label: string;
+  /** `https://<hub>` and its leaf SPKI pin; empty until probed and confirmed. */
+  hubUrl: string;
+  tlsPin: string;
 }
 
 /** What the host's `remote_ssh_test` reports after a successful connection. */
@@ -247,6 +250,12 @@ export interface SettingsHost {
   remoteDeployLock?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
   /** Phase 2: restore the previous release. */
   remoteDeployRollback?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
+  /** Probe the hub's leaf SPKI (normal chain validation) and return the fingerprint to show. */
+  remoteTlsProbe?(hubUrl: string): Promise<{ fingerprint: string }>;
+  /** Store hub URL + confirmed leaf SPKI pin (only after the user trusts it). */
+  remoteTlsPin?(hubUrl: string, fingerprint: string): Promise<void>;
+  /** Restart the app so a saved mode change takes effect. */
+  restartApp?(): Promise<void>;
   /** Stop/start the app-managed core from Settings (and the core-down panel for Start). */
   coreStop?(): Promise<void>;
   coreStart?(): Promise<void>;

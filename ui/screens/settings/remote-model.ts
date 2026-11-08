@@ -20,7 +20,7 @@ export const REMOTE_TEXT = {
   noKey: "No private key file was found at that path.",
 } as const;
 
-export type RemoteField = "host" | "port" | "user" | "keyPath" | "label";
+export type RemoteField = "host" | "port" | "user" | "keyPath" | "label" | "hubUrl";
 export type RemoteFieldErrors = Partial<Record<RemoteField, string>>;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -92,7 +92,7 @@ export function decodeRemoteServerConfig(raw: unknown): RemoteServerConfig | nul
   const mode: ServerMode = raw.mode === "remote" ? "remote" : raw.mode === "local" ? "local" : "local";
   const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
   const port = typeof raw.port === "number" && Number.isInteger(raw.port) && raw.port >= 1 && raw.port <= 65535 ? raw.port : 22;
-  return { mode, host: str(raw.host, 253), port, user: str(raw.user, 64), keyPath: str(raw.keyPath, 4096), label: str(raw.label, 80) };
+  return { mode, host: str(raw.host, 253), port, user: str(raw.user, 64), keyPath: str(raw.keyPath, 4096), label: str(raw.label, 80), hubUrl: str(raw.hubUrl, 300), tlsPin: str(raw.tlsPin, 80) };
 }
 
 /** Defensive decode of `remote_ssh_test`; null means the host answered something this version cannot read. */
@@ -151,6 +151,8 @@ export interface RemoteServerState {
   user: string;
   keyPath: string;
   label: string;
+  hubUrl: string;
+  tlsPin: string;
   loaded: boolean;
   loadFailed: boolean;
   saving: boolean;
@@ -168,6 +170,8 @@ export const REMOTE_SERVER_INITIAL: RemoteServerState = {
   user: "",
   keyPath: "",
   label: "",
+  hubUrl: "",
+  tlsPin: "",
   loaded: false,
   loadFailed: false,
   saving: false,
@@ -209,6 +213,7 @@ export class RemoteServerModel extends Store<RemoteServerState> {
     else if (field === "port") patch.port = value;
     else if (field === "user") patch.user = value;
     else if (field === "keyPath") patch.keyPath = value;
+    else if (field === "hubUrl") patch.hubUrl = value;
     else patch.label = value;
     this.set(patch);
   }
@@ -223,6 +228,8 @@ export class RemoteServerModel extends Store<RemoteServerState> {
       user: s.user.trim(),
       keyPath: s.keyPath.trim(),
       label: s.label.trim(),
+      hubUrl: s.hubUrl.trim(),
+      tlsPin: s.tlsPin.trim(),
     };
   }
 
@@ -285,6 +292,8 @@ export class RemoteServerModel extends Store<RemoteServerState> {
       user: config.user,
       keyPath: config.keyPath,
       label: config.label,
+      hubUrl: config.hubUrl,
+      tlsPin: config.tlsPin,
       result: null,
       saved: false,
       fieldErrors: {},

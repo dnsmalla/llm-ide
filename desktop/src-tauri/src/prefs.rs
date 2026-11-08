@@ -74,11 +74,15 @@ pub struct RemoteServerPrefs {
     pub user: String,
     pub key_path: String,
     pub label: String,
+    /// `https://<host>[:port]` of the hub; set by the deploy or typed by the user.
+    pub hub_url: String,
+    /// Leaf SPKI pin (`sha256:` + 43 base64url). Empty until the user confirms the probe.
+    pub tls_pin: String,
 }
 
 impl Default for RemoteServerPrefs {
     fn default() -> Self {
-        Self { mode: ServerMode::Local, host: String::new(), port: 22, user: String::new(), key_path: String::new(), label: String::new() }
+        Self { mode: ServerMode::Local, host: String::new(), port: 22, user: String::new(), key_path: String::new(), label: String::new(), hub_url: String::new(), tls_pin: String::new() }
     }
 }
 
@@ -582,6 +586,8 @@ mod tests {
                 user: " alice ".into(),
                 key_path: " /home/alice/.ssh/id_ed25519 ".into(),
                 label: " prod ".into(),
+                hub_url: " https://hub.example.com ".into(),
+                tls_pin: "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
             }),
             ..Default::default()
         });

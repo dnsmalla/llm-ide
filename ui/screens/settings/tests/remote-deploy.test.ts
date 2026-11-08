@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RemoteDeployModel, decodeDeployPlan, decodeDeployReport, canDeploy, type DeployIo } from "../remote-deploy-model.ts";
 
-const config = { mode: "remote" as const, host: "hub.example.com", port: 22, user: "deploy", keyPath: "/k", label: "prod" };
+const config = { mode: "remote" as const, host: "hub.example.com", port: 22, user: "deploy", keyPath: "/k", label: "prod", hubUrl: "https://hub.example.com", tlsPin: "" };
 const plan = {
   id: "p1", version: "0.0.0", domain: "hub.example.com", arch: "x86_64",
   stages: [{ id: "base", title: "Base", mutating: true, detail: "dirs" }],
