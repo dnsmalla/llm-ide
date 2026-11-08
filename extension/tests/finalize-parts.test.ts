@@ -12,7 +12,7 @@ process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const kb = await import('../kb/db.mjs');
-const { handleLiveRoutes } = await import('../routes/live.mjs');
+const { handleLiveRoutes, takeFinalizeParts, pendingFinalizeBytes } = await import('../routes/live.mjs');
 const { splitFinalizeParts, FINALIZE_PART_LINES } = await import('../src/lib/capture-store.ts');
 
 after(() => {
@@ -118,4 +118,25 @@ test('C7 defaults: capture mode starts at captions, and a closed panel warns on 
   assert.match(scraper, /LLM-IDE panel is closed; captions are not being saved/);
   const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
   assert.ok(manifest.permissions.includes('unlimitedStorage'));
+});
+
+test('stored part sizes enforce the per-user byte cap without re-stringifying', () => {
+  const uid = `bytes-${Date.now()}`;
+  const huge = [{ text: 'x'.repeat(33 * 1024 * 1024) }];
+  const r = takeFinalizeParts(uid, 's-huge', { part: 1, of: 2, captions: huge });
+  assert.equal(r.tooLarge, true, 'one part over 32 MB is refused');
+  assert.equal(pendingFinalizeBytes(uid), 0, 'the refused part is not stored');
+
+  const many = `many-${Date.now()}`;
+  const one = [{ text: 'line' }];
+  for (let p = 1; p <= 3; p++) {
+    for (let n = 1; n <= 24; n++) {
+      const out = takeFinalizeParts(many, `s-${p}`, { part: n, of: 25, captions: one });
+      assert.equal(out.pending, true);
+    }
+  }
+  // 3 sessions x 24 parts are pending; sizes are stored, so this call is O(parts), not O(bytes).
+  assert.ok(pendingFinalizeBytes(many) > 0);
+  const again = takeFinalizeParts(many, 's-1', { part: 1, of: 25, captions: one });
+  assert.equal(again.pending, true, 'a re-sent part replaces its stored size, not adds one');
 });

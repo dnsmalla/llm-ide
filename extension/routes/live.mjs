@@ -40,14 +40,18 @@ const pendingFinalize = new Map(); // `${userId}\0${sessionId}` -> { of, parts: 
 const FINALIZE_PART_TTL_MS = 10 * 60_000;
 function userPendingBytes(userId) {
   let n = 0;
-  for (const [k, v] of pendingFinalize) if (k.startsWith(`${userId}\0`)) for (const captions of v.parts.values()) n += finalizeBytes(captions);
+  for (const [k, v] of pendingFinalize) if (k.startsWith(`${userId}\0`)) for (const size of v.sizes.values()) n += size;
   return n;
 }
 function totalPendingBytes() {
   let n = 0;
-  for (const v of pendingFinalize.values()) for (const captions of v.parts.values()) n += finalizeBytes(captions);
+  for (const v of pendingFinalize.values()) for (const size of v.sizes.values()) n += size;
   return n;
 }
+export function pendingFinalizeBytes(userId) {
+  return userId === undefined ? totalPendingBytes() : userPendingBytes(userId);
+}
+
 export function takeFinalizeParts(userId, sessionId, body) {
   const part = Number(body.part);
   const of = Number(body.of);
@@ -68,10 +72,10 @@ export function takeFinalizeParts(userId, sessionId, body) {
     if (!entry && [...pendingFinalize.keys()].filter((k) => k.startsWith(`${userId}\0`)).length >= MAX_PENDING_FINALIZE_PER_USER) {
       return { tooMany: true };
     }
-    entry = { of, parts: new Map(), at: now };
+    entry = { of, parts: new Map(), sizes: new Map(), at: now };
   }
   const addBytes = finalizeBytes(body.captions);
-  const oldBytes = entry.parts.has(part) ? finalizeBytes(entry.parts.get(part)) : 0;
+  const oldBytes = entry.sizes.get(part) || 0;
   const userBytes = userPendingBytes(userId) - oldBytes;
   const totalBytes = totalPendingBytes() - oldBytes;
   const refusal = byteCapRefusal(userBytes, addBytes, MAX_PENDING_FINALIZE_BYTES_PER_USER, MAX_PENDING_FINALIZE_BYTES_TOTAL)
@@ -79,6 +83,7 @@ export function takeFinalizeParts(userId, sessionId, body) {
   if (refusal) return { tooLarge: true, scope: refusal };
   entry.at = now;
   entry.parts.set(part, body.captions);
+  entry.sizes.set(part, addBytes);
   pendingFinalize.set(key, entry);
   if (entry.parts.size < of) return { pending: true, part, of };
   const captions = [];
