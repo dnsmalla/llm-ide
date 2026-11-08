@@ -897,6 +897,8 @@ export type Health = {
   status: "ok" | "degraded";
   /** SERVER_API_VERSION */
   apiVersion: number;
+  /** true when this core is a hub (LLMIDE_HUB=1); additive */
+  hub?: boolean;
   /** current migration number */
   schemaVersion: number;
   uptimeSec: number;
