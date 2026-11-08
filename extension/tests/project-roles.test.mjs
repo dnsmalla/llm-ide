@@ -126,6 +126,45 @@ test('permissions: project.admin for a project admin/owner, never the team admin
   assert.ok(teamAdmin.includes('project.admin'));
 });
 
+
+test('the full project role matrix: classes per role and run mode', () => {
+  const memberGrant = (role, maxMode) => computeProjectGrant(
+    { teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 },
+    { role, maxMode, usdCapMonth: 0 },
+  );
+  const classes = (g) => new Set(projectPermissions(g));
+  const has = (set, ...names) => names.every((n) => set.has(n));
+  const not = (set, ...names) => names.every((n) => !set.has(n));
+
+  const implicit = classes(computeProjectGrant({ teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 }, null));
+  assert.ok(has(implicit, 'self.read', 'self.write', 'model.ask'));
+  assert.ok(not(implicit, 'model.read', 'model.exec', 'fs.read', 'install', 'project.admin', 'admin'));
+
+  const memberRead = classes(memberGrant('member', 'read_only'));
+  assert.ok(has(memberRead, 'model.ask', 'model.read', 'fs.read', 'external.read'));
+  assert.ok(not(memberRead, 'model.exec', 'fs.write', 'external.write', 'install', 'project.admin', 'admin'));
+
+  const memberExec = classes(memberGrant('member', 'execute'));
+  assert.ok(has(memberExec, 'model.ask', 'model.read', 'model.exec', 'fs.read', 'fs.write',
+    'external.read', 'external.write', 'install'));
+  assert.ok(not(memberExec, 'project.admin', 'admin'));
+
+  const adminRead = classes(memberGrant('admin', 'read_only'));
+  assert.ok(has(adminRead, 'project.admin', 'model.read', 'fs.read'));
+  assert.ok(not(adminRead, 'model.exec', 'fs.write', 'install', 'admin'));
+
+  const adminExec = classes(memberGrant('admin', 'execute'));
+  assert.ok(has(adminExec, 'project.admin', 'model.exec', 'fs.write', 'install'));
+  assert.ok(not(adminExec, 'admin'));
+
+  const ownerExec = classes(memberGrant('owner', 'execute'));
+  assert.ok(has(ownerExec, 'project.admin', 'model.exec', 'install'));
+  assert.ok(not(ownerExec, 'admin'));
+
+  const globalAdmin = classes(computeProjectGrant({ teamRole: 'admin', maxMode: 'execute', usdCapMonth: 0 }, null));
+  assert.ok(has(globalAdmin, 'admin', 'project.admin', 'install', 'model.exec'));
+});
+
 // ── registration ──────────────────────────────────────────────────────────
 
 test('registering a new project creates the registry row and makes the creator its owner', () => {
