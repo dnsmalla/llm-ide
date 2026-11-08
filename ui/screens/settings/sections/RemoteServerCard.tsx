@@ -7,6 +7,7 @@ import { useEffect, useMemo, type ChangeEvent, type ReactNode } from "react";
 import { useEnv, useModel, useStore } from "../context.tsx";
 import { ErrorText, Field } from "../ui.tsx";
 import { LOCAL_COPY, REMOTE_TEXT, RemoteServerModel, type RemoteServerIo, type RemoteServerState } from "../remote-model.ts";
+import RemoteDeployCard from "./RemoteDeployCard.tsx";
 
 function RemoteFields({ m, s }: { m: RemoteServerModel; s: RemoteServerState }): ReactNode {
   const set = (field: "host" | "port" | "user" | "keyPath" | "label") => (e: ChangeEvent<HTMLInputElement>) => m.setField(field, e.currentTarget.value);
@@ -104,6 +105,7 @@ export default function RemoteServerCard(): ReactNode {
             <span className="st-hint">The first connection learns the host key and shows its fingerprint.</span>
           </div>
           <TestResult s={s} />
+          <RemoteDeployCard config={m.config()} />
         </>
       )}
 

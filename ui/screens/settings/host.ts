@@ -237,6 +237,16 @@ export interface SettingsHost {
   setRemoteServer?(config: RemoteServerConfig): Promise<RemoteServerConfig>;
   /** Host command `remote_ssh_test`: starts system ssh with a fixed argv and returns the fingerprint/uname/node. */
   testRemoteSsh?(config: RemoteServerConfig): Promise<RemoteSshResult>;
+  /** Phase 2: read-only SSH preflight; the host returns a plan with blockers, warnings and a typed confirmation. */
+  remoteDeployPlan?(target: { host: string; port: number; user: string; keyPath: string }, domain: string): Promise<unknown>;
+  /** Phase 2: upload the fixed helper and install its exact sudoers line. */
+  remoteDeployBootstrap?(target: { host: string; port: number; user: string; keyPath: string }): Promise<unknown>;
+  /** Phase 2: the confirmed deploy (stops before registration is locked). */
+  remoteDeployRun?(target: { host: string; port: number; user: string; keyPath: string }, planId: string, confirmation: string): Promise<unknown>;
+  /** Phase 2: close registration after the owner exists. */
+  remoteDeployLock?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
+  /** Phase 2: restore the previous release. */
+  remoteDeployRollback?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
   /** Stop/start the app-managed core from Settings (and the core-down panel for Start). */
   coreStop?(): Promise<void>;
   coreStart?(): Promise<void>;

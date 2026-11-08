@@ -11,6 +11,7 @@ import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings
 import { decodeComponentStatus, decodeCoreLog, decodeRtkStatus } from "../settings/components-model";
 import { decodeMemory, decodePaths } from "../settings/project-model";
 import { decodeRemoteServerConfig, decodeRemoteSshResult } from "../settings/remote-model";
+import { decodeBootstrap, decodeDeployPlan, decodeDeployReport } from "../settings/remote-deploy-model";
 import { decodeLegacyImportReport, decodeLegacyImportStatus } from "../settings/legacy-import-model";
 import { decodeTrayStatus } from "../settings/misc-model";
 import { decodeDiff, decodePrepared, decodeVerified } from "../settings/self-heal-model";
@@ -142,6 +143,23 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           if (!result) throw new Error("the desktop host returned an SSH result this app cannot read");
           return result;
         },
+        async remoteDeployPlan(target, domain) {
+          const plan = decodeDeployPlan(await d.invoke<unknown>("remote_deploy_plan", { target, domain }));
+          if (!plan) throw new Error("the desktop host returned a deploy plan this app cannot read");
+          return plan;
+        },
+        async remoteDeployBootstrap(target) {
+          const b = decodeBootstrap(await d.invoke<unknown>("remote_deploy_bootstrap", { target }));
+          if (!b) throw new Error("the desktop host returned a bootstrap result this app cannot read");
+          return b;
+        },
+        async remoteDeployRun(target, planId, confirmation) {
+          const r = decodeDeployReport(await d.invoke<unknown>("remote_deploy_run", { target, planId, confirmation }));
+          if (!r) throw new Error("the desktop host returned a deploy report this app cannot read");
+          return r;
+        },
+        async remoteDeployLock(target) { await d.invoke("remote_deploy_lock", { target }); },
+        async remoteDeployRollback(target) { await d.invoke("remote_deploy_rollback", { target }); },
         async pickNode() {
           const r = await d.invoke<unknown>("backend_pick_node");
           return typeof r === "string" && r.length > 0 ? r : null;
