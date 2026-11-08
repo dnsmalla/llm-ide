@@ -231,6 +231,9 @@ pub struct Launch {
     pub cmd: Command,
     /// Literal secret values to scrub from the failure log.
     pub secrets: Vec<String>,
+    /// One JSON line for the child's stdin (`jwtSecret`, `vaultKey`, `hostApprovalKey`). Never an env var: a
+    /// same-user process can read the environment of any process it owns. `None` for the test launchers.
+    pub stdin_secrets: Option<String>,
 }
 
 pub struct LaunchCtx<'a> {
@@ -842,8 +845,20 @@ impl CoreHost {
         let launch = (self.inner.launcher)(&LaunchCtx { port, nonce, data_dir })?;
         lock(&self.inner.literals).extend(launch.secrets);
         let mut cmd = launch.cmd;
-        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let secrets_line = launch.stdin_secrets;
+        // A piped stdin is only for the secrets handoff; dropping our end after the write closes it (the core reads
+        // to EOF). No secrets line → the historical null stdin.
+        cmd.stdin(if secrets_line.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = ManagedChild::spawn(&mut cmd).map_err(|e| format!("cannot spawn the core: {e}"))?;
+        if let Some(line) = secrets_line {
+            if let Some(mut stdin) = child.child_mut().stdin.take() {
+                use std::io::Write;
+                if let Err(e) = stdin.write_all(format!("{line}\n").as_bytes()) {
+                    eprintln!("core: could not hand over its secrets on stdin: {e}");
+                }
+                // `stdin` drops here: the core sees EOF and finishes reading.
+            }
+        }
 
         if let Some(out) = child.child_mut().stdout.take() {
             drain(out, Arc::clone(&self.inner.log), false);
@@ -1196,6 +1211,13 @@ pub(crate) fn runtime_for(p: &crate::prefs::Prefs) -> Result<Runtime, String> {
     Ok(Runtime { mode: "source", node, root })
 }
 
+/// Put the three secrets in ONE JSON line for the child's stdin and mark the handoff. They are never set in the
+/// child's environment: a same-user process can read another process's environment (`ps eww`, /proc/<pid>/environ).
+fn wire_secrets(cmd: &mut Command, jwt: &str, vault: &str, approval: &str) -> String {
+    cmd.env("LLMIDE_SECRETS_STDIN", "1");
+    serde_json::json!({ "jwtSecret": jwt, "vaultKey": vault, "hostApprovalKey": approval }).to_string()
+}
+
 /// The spawn used in production: the bundled (or repo) node running `server.mjs` with a
 /// scrubbed environment, the two secrets, and the data dir. Fails closed without secrets.
 fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
@@ -1217,11 +1239,9 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
         .env("LLMIDE_PORT", ctx.port.to_string())
         .env("LLMIDE_CORE_NONCE", ctx.nonce)
         // Spawned core only (this is the spawn path): lets the packaged webview call it. Exact origins.
-        .env("LLMIDE_CORS_ORIGINS", crate::core_env::spawned_core_cors_origins())
-        .env("LLMIDE_JWT_SECRET", &secrets.jwt_secret)
-        .env("LLMIDE_VAULT_KEY", &secrets.vault_key)
-        // Host-signed approvals (see host_approval.rs): the spawned core may verify them; never an adopted one.
-        .env("LLMIDE_HOST_APPROVAL_KEY", &approval_key);
+        .env("LLMIDE_CORS_ORIGINS", crate::core_env::spawned_core_cors_origins());
+    // Secrets go on the child's stdin, not its environment; the core reads them before config (core/secrets-stdin.mjs).
+    let stdin_secrets = wire_secrets(&mut cmd, &secrets.jwt_secret, &secrets.vault_key, &approval_key);
     for (k, v) in SPAWNED_CORE_FLAGS {
         cmd.env(k, v);
     }
@@ -1244,7 +1264,7 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
             cmd.env(key, v);
         }
     }
-    Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone(), approval_key] })
+    Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone(), approval_key], stdin_secrets: Some(stdin_secrets) })
 }
 
 /// True when the spawned core gets `LLMIDE_HOST_API_DEV=1`: a debug build whose own env has exactly `1`.
@@ -1777,7 +1797,7 @@ process.on('SIGTERM', () => process.exit(0));
                     .env("FAKE_DIR", &fdir)
                     .env("FAKE_MODE", &mode)
                     .env("PATH", std::env::var_os("PATH").unwrap_or_default());
-                Ok(Launch { cmd, secrets: vec![] })
+                Ok(Launch { cmd, secrets: vec![], stdin_secrets: None })
             });
             let probe: ClaudeProbe = Arc::new(|_| ClaudeInfo {
                 state: "missing",
@@ -2200,5 +2220,33 @@ process.on('SIGTERM', () => process.exit(0));
         assert!(!migrate_addons_from(&core, &support).unwrap(), "second run is a no-op");
         assert!(support.join("llm-ide/plugins/p1/a.txt").exists(), "the old folder is untouched");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn secrets_go_to_stdin_and_never_into_the_environment() {
+        let mut cmd = Command::new(if cfg!(windows) { "cmd" } else { "true" });
+        let line = wire_secrets(&mut cmd, "jwt-secret-value-0123456789abcdef", "vault-key-value-0123456789abcdef", "approval-key-value-0123456789abcdef");
+        let names: Vec<String> = cmd.get_envs().map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+        assert!(names.iter().any(|n| n == "LLMIDE_SECRETS_STDIN"), "the core is told to read stdin");
+        for k in ["LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY", "LLMIDE_HOST_APPROVAL_KEY"] {
+            assert!(!names.iter().any(|n| n == k), "{k} must not be in the child environment");
+        }
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["jwtSecret"], "jwt-secret-value-0123456789abcdef");
+        assert_eq!(v["vaultKey"], "vault-key-value-0123456789abcdef");
+        assert_eq!(v["hostApprovalKey"], "approval-key-value-0123456789abcdef");
+    }
+
+    /// A fake child (`cat`) proves the line is readable from stdin and closed by the writer.
+    #[cfg(unix)]
+    #[test]
+    fn a_fake_child_reads_the_secrets_line_from_its_stdin() {
+        use std::io::Write;
+        let mut cmd = Command::new("/bin/cat");
+        let line = wire_secrets(&mut cmd, "jwt-secret-value-0123456789abcdef", "vault-key-value-0123456789abcdef", "approval-key-value-0123456789abcdef");
+        let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(format!("{line}\n").as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), line, "the child read exactly the JSON line");
     }
 }

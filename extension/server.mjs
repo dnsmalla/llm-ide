@@ -1,5 +1,7 @@
 // Alias legacy MEETNOTES_* env vars to LLMIDE_* before any config is read.
 import './core/env-compat.mjs';
+// The desktop hands the spawned core its secrets on stdin; this must run before config.mjs reads them.
+import './core/secrets-stdin.mjs';
 // Must precede every import that reads config/logger/DB (see the module).
 import { dataDirMigration } from './kb/data-dir-boot.mjs';
 import { completeGraceAfterHealthyBoot } from './kb/data-dir-migration.mjs';
