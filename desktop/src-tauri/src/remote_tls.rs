@@ -207,10 +207,8 @@ pub fn remote_tls_pin(hub_url: String, fingerprint: String) -> Result<(), FsErro
     let matches = last_probe().lock().unwrap_or_else(|e| e.into_inner()).as_ref()
         .is_some_and(|(h, f)| h == hub_url.trim() && f == &fingerprint);
     if !matches { return Err(herr("probe_required", "probe the hub certificate before trusting it")); }
-    let mut block = crate::prefs::stored().remote_server;
-    block.hub_url = if port == 443 { format!("https://{host}") } else { format!("https://{host}:{port}") };
-    block.tls_pin = fingerprint;
-    let view = crate::prefs::set_prefs(crate::prefs::PrefsPatch { remote_server: Some(block), ..Default::default() })?;
+    let hub_url = if port == 443 { format!("https://{host}") } else { format!("https://{host}:{port}") };
+    let view = crate::prefs::set_remote_pin(hub_url, fingerprint)?;
     if !view.persisted { return Err(herr("prefs_unavailable", "the pin could not be saved (no data folder)")); }
     Ok(())
 }

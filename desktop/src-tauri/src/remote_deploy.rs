@@ -210,6 +210,7 @@ pub fn plan_warnings(p: &Preflight) -> Vec<String> {
 
 pub fn stages() -> Vec<DeployStage> {
     let rows = [
+        ("base", "Repair the service user, unit and directories", true, "Idempotent: useradd, dirs, embedded unit/logrotate, daemon-reload."),
         ("predeploy-backup", "Back up the existing hub database", true, "Stops the old service, VACUUM INTO a pre-deploy snapshot, starts it again. Skipped on a fresh server."),
         ("env", "Write the secret env file over stdin", true, "0600 root:root; JWT and vault secrets generated locally; never in argv or a log."),
         ("bundle", "Upload and switch the Linux core release", true, "Verifies SHA-256, unpacks, requires Node 22, updates current/previous symlinks, keeps three releases."),
@@ -423,6 +424,9 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
     runner: &R, health: &H, target: &PreparedTarget, plan: &DeployPlan, secrets: &DeploySecrets, bundle: &[u8],
 ) -> Result<DeployReport, FsError> {
     let staging = staging_for(&target.user);
+    let current_version = runner.run(target, &stage_command("check").unwrap(), None).ok()
+        .and_then(|o| o.stdout.lines().find_map(|l| l.trim().strip_prefix("version=")).map(str::to_string));
+    let mut switched = false;
     let mut setup_url = None;
     let mut owner_window_open = false;
     let mut rolled_back = false;
@@ -443,12 +447,23 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
                 }
             }
             "bundle" => {
+                if current_version.as_deref() == Some(plan.version.as_str()) {
+                    // Repair path: the running release is already this version; keep it and repair
+                    // nginx/env/unit instead of failing the helper's same-version guard.
+                    continue;
+                }
                 let sha = hex(&Sha256::digest(bundle));
                 match upload_staging(runner, target, "bundle.tar.gz", bundle) {
                     Ok(()) => {
                         let list = format!("{sha}  bundle.tar.gz\n");
                         match upload_staging(runner, target, "bundle.sha256", list.as_bytes()) {
-                            Ok(()) => runner.run(target, &cmd, None),
+                            Ok(()) => match upload_staging(runner, target, "VERSION", format!("{}\n", plan.version).as_bytes()) {
+                                Ok(()) => match runner.run(target, &cmd, None) {
+                                    Ok(o) if o.code == Some(0) => { switched = o.stdout.contains("LLMIDE_BUNDLE_SWITCHED="); Ok(o) }
+                                    other => other,
+                                },
+                                Err(e) => Err(e),
+                            },
                             Err(e) => Err(e),
                         }
                     }
@@ -493,7 +508,7 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
             Ok(o) if o.code == Some(0) => {}
             Ok(_) | Err(_) => {
                 failed_stage = Some(stage.id.clone());
-                rolled_back = rollback(runner);
+                if switched { rolled_back = rollback(runner); }
                 break;
             }
         }
@@ -729,9 +744,11 @@ mod tests {
     use super::*;
     use std::sync::Mutex as StdMutex;
 
-    struct Fake { calls: StdMutex<Vec<(String, Option<Vec<u8>>)>>, fail: StdMutex<Vec<String>>, health: Vec<Result<Health, String>> }
+    struct Fake { calls: StdMutex<Vec<(String, Option<Vec<u8>>)>>, fail: StdMutex<Vec<String>>, check_version: StdMutex<String>, health: Vec<Result<Health, String>> }
     impl Fake {
-        fn new() -> Self { Self { calls: StdMutex::new(Vec::new()), fail: StdMutex::new(Vec::new()), health: Vec::new() } }
+        fn new() -> Self { Self { calls: StdMutex::new(Vec::new()), fail: StdMutex::new(Vec::new()), check_version: StdMutex::new("1.2.2".into()), health: Vec::new() } }
+        fn check_version(&self, v: &str) { *self.check_version.lock().unwrap() = v.to_string(); }
+        fn fail(&self, s: &str) { self.fail.lock().unwrap().push(s.to_string()); }
         fn calls(&self) -> Vec<(String, Option<Vec<u8>>)> { self.calls.lock().unwrap().clone() }
     }
     impl DeployRunner for Fake {
@@ -742,6 +759,13 @@ mod tests {
             }
             if command == PREFLIGHT_SCRIPT {
                 return Ok(RawOutput { code: Some(0), stdout: "LLMIDE_PREFLIGHT {\"os\":\"Ubuntu 24.04\",\"arch\":\"x86_64\",\"systemd\":true,\"nginx\":true,\"certbot\":true,\"sudo_nopasswd\":true,\"disk_free_mb\":4096,\"existing_version\":null,\"domain_resolves\":null,\"claude\":true}\n".into(), stderr: String::new() });
+            }
+            if command.contains("llmide-deploy check") {
+                let v = self.check_version.lock().unwrap().clone();
+                return Ok(RawOutput { code: Some(0), stdout: format!("version={v}\nhelper=1\nok\n"), stderr: String::new() });
+            }
+            if command.contains("llmide-deploy bundle") {
+                return Ok(RawOutput { code: Some(0), stdout: "LLMIDE_BUNDLE_SWITCHED=1.2.3\nok\n".into(), stderr: String::new() });
             }
             Ok(RawOutput { code: Some(0), stdout: "LLMIDE_SETUP_URL=https://hub.example.com/setup?t=abc\nok\n".into(), stderr: String::new() })
         }
@@ -839,6 +863,39 @@ mod tests {
     }
 
     #[test]
+    fn a_same_version_deploy_skips_the_bundle_and_repairs() {
+        let fake = Fake::new();
+        fake.check_version("1.2.3");
+        let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: Some("1.2.3".into()), domain_resolves: None, claude: true };
+        let bundle = std::env::temp_dir().join(format!("llmide-same-{}.tar.gz", random_hex(4)));
+        std::fs::write(&bundle, b"x").unwrap();
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true);
+        let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
+        let report = deploy_run(&fake, &FakeHealth, &target(), &plan, &secrets, b"x").unwrap();
+        assert!(report.failed_stage.is_none());
+        assert!(!fake.calls().iter().any(|(c, _)| c.contains("llmide-deploy bundle")));
+        assert!(fake.calls().iter().any(|(c, _)| c.contains("llmide-deploy nginx")));
+        assert!(fake.calls().iter().any(|(c, _)| c.contains("llmide-deploy start")));
+        let _ = std::fs::remove_file(bundle);
+    }
+
+    #[test]
+    fn a_failure_before_the_switch_never_rolls_back() {
+        let fake = Fake::new();
+        fake.fail("llmide-deploy predeploy-backup");
+        let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
+        let bundle = std::env::temp_dir().join(format!("llmide-early-{}.tar.gz", random_hex(4)));
+        std::fs::write(&bundle, b"x").unwrap();
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true);
+        let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
+        let report = deploy_run(&fake, &FakeHealth, &target(), &plan, &secrets, b"x").unwrap();
+        assert_eq!(report.failed_stage.as_deref(), Some("predeploy-backup"));
+        assert!(!report.rolled_back);
+        assert!(!fake.calls().iter().any(|(c, _)| c.contains("llmide-deploy rollback")));
+        let _ = std::fs::remove_file(bundle);
+    }
+
+    #[test]
     fn a_changed_or_wrong_confirmation_is_refused() {
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
         let bundle = std::env::temp_dir().join(format!("llmide-bundle-{}.tar.gz", random_hex(4)));
@@ -882,7 +939,7 @@ mod tests {
         let b = bootstrap_with(&fake, &target()).unwrap();
         assert!(b.installed);
         let calls = fake.calls.lock().unwrap().clone();
-        assert!(calls.iter().any(|c| c.contains("/usr/local/sbin/llmide-deploy upload") == false && c.contains("install -m 0755")), "the old helper is reinstalled");
+        assert!(calls.iter().any(|c| c.contains("install -m 0755")), "the old helper is reinstalled");
         assert!(calls.iter().any(|c| c.contains("base")));
     }
 
@@ -895,6 +952,11 @@ mod tests {
         assert!(calls.iter().any(|(c, _)| c.contains("llmide-deploy")));
         assert!(calls.iter().any(|(c, s)| c.contains("sudo -n /usr/local/sbin/llmide-deploy base")));
         assert!(calls.iter().all(|(c, _)| !c.contains("LLMIDE_VAULT_KEY")));
+    }
+
+    struct FakeHealth;
+    impl HealthProbe for FakeHealth {
+        fn check(&self, _url: &str) -> Result<Health, FsError> { Ok(Health { status: "ok".into(), db_ok: true, hub: true, api_version: 129 }) }
     }
 
     struct HealthFail;

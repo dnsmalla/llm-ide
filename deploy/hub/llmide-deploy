@@ -48,6 +48,7 @@ case "$stage" in
   check)
     [ -r "$CONF" ] || { echo "llmide-deploy: check: no env file yet" >&2; }
     systemctl is-active --quiet llmide-core 2>/dev/null && echo "service=active" || echo "service=inactive"
+    printf 'version=%s\n' "$(cat /opt/llmide/current/VERSION 2>/dev/null || true)"
     echo "helper=1"
     echo "ok"
     ;;
@@ -185,6 +186,7 @@ LLMIDE_LOG
     if [ -f "$STAGING/VERSION" ]; then
       bundle_version=$(tr -cd '0-9.' < "$STAGING/VERSION" | head -c 40)
       case "$bundle_version" in *.*.*) ;; *) die "the staged VERSION is not x.y.z" ;; esac
+      rm -f "$STAGING/VERSION"
     fi
     [ -f "$STAGING/bundle.tar.gz" ] || die "bundle.tar.gz is missing"
     [ -f "$STAGING/bundle.sha256" ] || die "bundle.sha256 is missing"

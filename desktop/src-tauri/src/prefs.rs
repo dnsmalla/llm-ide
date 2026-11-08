@@ -290,7 +290,14 @@ impl Prefs {
         if let Some(v) = p.backend_source { n.backend_source = v; }
         if let Some(v) = p.backend_port { n.backend_port = v; }
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
-        if let Some(v) = &p.remote_server { n.remote_server = v.clone().normalized(); }
+        if let Some(v) = &p.remote_server {
+            // A webview may choose mode/host/user, but the hub URL and pin are written only by the
+            // host's probe/trust path (`set_remote_pin`); keep whatever this host already verified.
+            let mut block = v.clone().normalized();
+            block.hub_url = n.remote_server.hub_url.clone();
+            block.tls_pin = n.remote_server.tls_pin.clone();
+            n.remote_server = block;
+        }
         if let Some(v) = p.host_api_tls { n.host_api_tls = v; }
         if let Some(v) = p.host_api_read { n.host_api_read = v; }
         if let Some(v) = p.host_api_compose { n.host_api_compose = v; }
@@ -502,6 +509,21 @@ fn apply(patch: PrefsPatch) -> Result<PrefsView, FsError> {
     Ok(view(next, persisted))
 }
 
+/// Host-side writer for the verified hub URL + pin only (never callable from the webview).
+pub fn set_remote_pin(hub_url: String, tls_pin: String) -> Result<PrefsView, FsError> {
+    let mut g = state();
+    let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
+    let mut next = st.stored.clone();
+    next.remote_server.hub_url = hub_url.trim().to_string();
+    next.remote_server.tls_pin = tls_pin.trim().to_string();
+    let next = next;
+    if let Some(dir) = &st.dir { save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?; }
+    st.stored = next.clone();
+    let persisted = st.dir.is_some();
+    drop(g);
+    Ok(view(next, persisted))
+}
+
 /// Host-side writer for the native pickers only: a picked checkout turns source mode on and stores the path.
 /// Takes effect at the next app start, like every other backend path (see `launch()`).
 pub(crate) fn set_backend_paths(node: Option<String>, folder: Option<String>) -> Result<PrefsView, FsError> {
@@ -606,6 +628,23 @@ mod tests {
         let back = parse(&serde_json::to_string(&patched).unwrap());
         assert_eq!(back.remote_server, patched.remote_server);
         assert_eq!(parse(r#"{"ltaMode":"off"}"#).remote_server, RemoteServerPrefs::default(), "an older file is local");
+    }
+
+    #[test]
+    fn a_webview_patch_cannot_inject_a_hub_url_or_pin() {
+        let mut base = Prefs::default();
+        base.remote_server.hub_url = "https://hub.example.com".into();
+        base.remote_server.tls_pin = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into();
+        let patched = base.patched(&PrefsPatch {
+            remote_server: Some(RemoteServerPrefs {
+                mode: ServerMode::Remote, host: "evil.example.com".into(), port: 22, user: "u".into(), key_path: "/k".into(), label: String::new(),
+                hub_url: "http://evil.example.com".into(),
+                tls_pin: "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".into(),
+            }),
+            ..Default::default()
+        });
+        assert_eq!(patched.remote_server.hub_url, "https://hub.example.com");
+        assert_eq!(patched.remote_server.tls_pin, "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     }
 
     #[test]

@@ -181,6 +181,12 @@ test('update installs the NEW version beside the running release and rollback re
     assert.match(execFileSync('readlink', [join(h.root, 'opt/llmide/previous')], { encoding: 'utf8' }).trim(), /releases\/1\.2\.3$/);
     h.run('rollback');
     assert.match(execFileSync('readlink', [join(h.root, 'opt/llmide/current')], { encoding: 'utf8' }).trim(), /releases\/1\.2\.3$/);
+    // V2: the next deploy uploads its own VERSION; no stale update version is reused.
+    fakeBundle(h, '1.2.5', 'hub 1.2.5');
+    h.run('upload', 'VERSION\n1.2.5\n');
+    h.run('bundle');
+    assert.ok(existsSync(join(h.root, 'opt/llmide/releases/1.2.5')));
+    assert.match(execFileSync('readlink', [join(h.root, 'opt/llmide/current')], { encoding: 'utf8' }).trim(), /releases\/1\.2\.5$/);
     assert.match(readFileSync(h.envPath, 'utf8'), /LLMIDE_HUB_VERSION=1\.2\.3/);
     assert.match(readFileSync(join(h.root, 'var/www/llmide-web/index.html'), 'utf8'), /hub/);
   } finally { h.cleanup(); }
