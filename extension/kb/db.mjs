@@ -327,6 +327,10 @@ export function search(userId, { q, kind, limit = 20, projectId, codeRoot, maxCa
     where += ` AND ${CODE_ROOT_FILTER}`;
     params.push(userId, `${root.replace(/[\\%_]/g, (c) => `\\${c}`)}/%`);
   }
+  // C4: the ranking window is per user, not per table. Before 0072 other members' rows could fill the LIMIT
+  // and this caller's older hit was never hydrated. A row with no resolved owner is never returned.
+  where += ' AND user_id = ?';
+  params.push(String(userId));
   // bm25() ranks more relevant rows first; lower is better.
   const sql = `
     SELECT meeting_id, entity_id, kind, title, body, ${filter.rank} AS rank
@@ -996,6 +1000,9 @@ export function deleteUserCascade(userId) {
     // delete leaves no per-user row behind.
     counts.note_index = del('DELETE FROM note_index WHERE user_id = ?');
     counts.note_index_pass = del('DELETE FROM note_index_pass WHERE user_id = ?');
+    // migration 0072 — FTS rows carry the owner now. Most go with their base row's trigger; this also removes
+    // an orphaned row (e.g. an entity inserted against another user's meeting) when an account is deleted.
+    counts.search = del('DELETE FROM search WHERE user_id = ?');
     counts.pending_session_purges = del('DELETE FROM pending_session_purges WHERE owner_user_id = ?');
     counts.live_acks = del('DELETE FROM live_acks WHERE owner_user_id = ?');
     // The durable copies of unacked extension captures hold transcripts: they go too.
