@@ -47,6 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { ROLE_ORDER, MAX_MODES, MAX_USD_CAP_MONTH, getMember, ownerCount } from './members.mjs';
+import { PROJECT_ID_RE, listProjectAssignmentRows } from './projects.mjs';
 
 export const TEAM_YAML_FILENAME = 'team.yaml';
 
@@ -82,19 +83,36 @@ const invalid = (message, line = null, reason = 'invalid') =>
 
 // ── parser ────────────────────────────────────────────────────────────────
 
+const PROJECTS_KEY = 'projects';
+
 /**
- * Parse and validate the team.yaml text. Returns `[{ email, teamRole,
- * maxMode, usdCapMonth }]` sorted as written. Throws `TeamYamlError`
- * (`code: 'TEAM_YAML_INVALID'`) on anything outside the strict subset.
+ * Parse and validate the whole team.yaml file.
+ *
+ * `members:` is required and keeps its H1.1 meaning. `projects:` is optional:
+ * a project id maps to the explicit assignments for that project, and an
+ * account without a row is the implicit viewer on that project. The section is
+ * authoritative when it is present; a legacy file without it leaves the
+ * project rows alone until the first write-through writes the section.
+ *
+ * Returns `{ members, projects }`; `projects` is null when the section is
+ * absent, otherwise an array of `{ projectId, members }` (possibly empty).
+ * Throws `TeamYamlError` (`code: 'TEAM_YAML_INVALID'`) on anything outside the
+ * strict subset.
  */
-export function parseTeamYaml(text) {
+export function parseTeamYamlFile(text) {
   if (typeof text !== 'string') throw invalid('team.yaml must be text', null, 'not_text');
   const source = text.replace(/^\uFEFF/, '');
   const lines = source.split(/\r?\n/);
   const assignments = [];
   const byEmail = new Map();
-  let seenTop = false;
+  const projectBlocks = [];
+  const byProject = new Map();
+  let section = null;
+  let seenMembers = false;
+  let seenProjects = false;
   let current = null;
+  let currentProject = null;
+  let currentProjectMember = null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const lineNo = index + 1;
@@ -109,64 +127,94 @@ export function parseTeamYaml(text) {
     const content = line.slice(indent).trimEnd();
 
     if (depth === 0) {
-      if (content !== `${TOP_KEY}:`) {
-        const key = content.split(':')[0];
-        throw invalid(`unknown top-level key "${key}" (only "${TOP_KEY}")`, lineNo);
+      if (content === `${TOP_KEY}:`) {
+        if (seenMembers) throw invalid(`duplicate "${TOP_KEY}:"`, lineNo);
+        seenMembers = true;
+        section = 'members';
+        current = null;
+        continue;
       }
-      if (seenTop) throw invalid(`duplicate "${TOP_KEY}:"`, lineNo);
-      seenTop = true;
-      current = null;
+      if (content === `${PROJECTS_KEY}:`) {
+        if (seenProjects) throw invalid(`duplicate "${PROJECTS_KEY}:"`, lineNo);
+        seenProjects = true;
+        section = 'projects';
+        currentProject = null;
+        currentProjectMember = null;
+        continue;
+      }
+      const key = content.split(':')[0];
+      throw invalid(`unknown top-level key "${key}" (only "${TOP_KEY}" and "${PROJECTS_KEY}")`, lineNo);
+    }
+
+    if (section === null) throw invalid(`expected "${TOP_KEY}:" at the top level`, lineNo);
+
+    if (section === 'members') {
+      if (depth === 1) {
+        const match = /^(.+):$/.exec(content);
+        if (!match) throw invalid('expected "<email>:" with no value', lineNo);
+        const email = parseScalar(match[1].trim(), lineNo).trim().toLowerCase();
+        if (email.length > MAX_EMAIL || !EMAIL_RE.test(email)) {
+          throw invalid(`invalid email "${email}"`, lineNo);
+        }
+        if (byEmail.has(email)) throw invalid(`duplicate email "${email}"`, lineNo);
+        current = { email, teamRole: null, maxMode: null, usdCapMonth: null, line: lineNo };
+        assignments.push(current);
+        byEmail.set(email, current);
+        continue;
+      }
+
+      if (depth === 2) {
+        if (!current) throw invalid('a grant line must follow an email', lineNo);
+        applyGrantLine(current, content, lineNo);
+        continue;
+      }
+
+      throw invalid('unexpected indentation', lineNo);
+    }
+
+    // section === 'projects'
+    if (depth === 1) {
+      const match = /^(.+):$/.exec(content);
+      if (!match) throw invalid('expected "<project id>:" with no value', lineNo);
+      const projectId = parseScalar(match[1].trim(), lineNo).trim();
+      if (!PROJECT_ID_RE.test(projectId)) throw invalid(`invalid project id "${projectId}"`, lineNo);
+      if (byProject.has(projectId)) throw invalid(`duplicate project "${projectId}"`, lineNo);
+      currentProject = { projectId, members: [], byEmail: new Map(), line: lineNo };
+      currentProjectMember = null;
+      projectBlocks.push(currentProject);
+      byProject.set(projectId, currentProject);
       continue;
     }
 
-    if (!seenTop) throw invalid(`expected "${TOP_KEY}:" at the top level`, lineNo);
-
-    if (depth === 1) {
+    if (depth === 2) {
+      if (!currentProject) throw invalid('a member must follow a project id', lineNo);
       const match = /^(.+):$/.exec(content);
       if (!match) throw invalid('expected "<email>:" with no value', lineNo);
       const email = parseScalar(match[1].trim(), lineNo).trim().toLowerCase();
       if (email.length > MAX_EMAIL || !EMAIL_RE.test(email)) {
         throw invalid(`invalid email "${email}"`, lineNo);
       }
-      if (byEmail.has(email)) throw invalid(`duplicate email "${email}"`, lineNo);
-      current = { email, teamRole: null, maxMode: null, usdCapMonth: null, line: lineNo };
-      assignments.push(current);
-      byEmail.set(email, current);
+      if (currentProject.byEmail.has(email)) {
+        throw invalid(`duplicate email "${email}" in project "${currentProject.projectId}"`, lineNo);
+      }
+      currentProjectMember = {
+        email, role: null, maxMode: null, usdCapMonth: null, line: lineNo,
+      };
+      currentProject.members.push(currentProjectMember);
+      currentProject.byEmail.set(email, currentProjectMember);
       continue;
     }
 
-    if (depth === 2) {
-      if (!current) throw invalid('a grant line must follow an email', lineNo);
-      const match = /^([a-z_]+):\s*(.*)$/.exec(content);
-      if (!match) throw invalid('expected "<key>: <value>"', lineNo);
-      const key = match[1];
-      if (!ENTRY_KEYS.has(key)) throw invalid(`unknown grant key "${key}"`, lineNo);
-      const value = parseScalar(match[2].trim(), lineNo);
-      if (key === 'role') {
-        if (current.teamRole !== null) throw invalid('duplicate "role"', lineNo);
-        if (!ROLES.has(value)) throw invalid(`unknown role "${value}"`, lineNo);
-        current.teamRole = value;
-      } else if (key === 'max_mode') {
-        if (current.maxMode !== null) throw invalid('duplicate "max_mode"', lineNo);
-        if (!MODES.has(value)) throw invalid(`unknown max_mode "${value}"`, lineNo);
-        current.maxMode = value;
-      } else {
-        if (current.usdCapMonth !== null) throw invalid('duplicate "usd_cap_month"', lineNo);
-        if (!CAP_RE.test(value)) throw invalid('usd_cap_month must be a non-negative number', lineNo);
-        const cap = Number(value);
-        if (!Number.isFinite(cap) || cap < 0 || cap > MAX_USD_CAP_MONTH) {
-          throw invalid(`usd_cap_month must be between 0 and ${MAX_USD_CAP_MONTH}`, lineNo);
-        }
-        current.usdCapMonth = cap;
-      }
+    if (depth === 3) {
+      if (!currentProjectMember) throw invalid('a grant line must follow an email', lineNo);
+      applyGrantLine(currentProjectMember, content, lineNo, 'role');
       continue;
     }
 
     throw invalid('unexpected indentation', lineNo);
   }
 
-  if (!seenTop) throw invalid(`missing "${TOP_KEY}:"`, null, 'missing_members');
-  if (assignments.length === 0) return [];
+  if (!seenMembers) throw invalid(`missing "${TOP_KEY}:"`, null, 'missing_members');
   for (const assignment of assignments) {
     if (assignment.teamRole === null || assignment.maxMode === null || assignment.usdCapMonth === null) {
       throw invalid(
@@ -176,7 +224,62 @@ export function parseTeamYaml(text) {
       );
     }
   }
-  return assignments.map(({ line: _line, ...assignment }) => assignment);
+  for (const block of projectBlocks) {
+    for (const member of block.members) {
+      if (member.role === null || member.maxMode === null || member.usdCapMonth === null) {
+        throw invalid(
+          `project "${block.projectId}" entry "${member.email}" needs role, max_mode and usd_cap_month`,
+          member.line,
+          'missing_grant',
+        );
+      }
+    }
+  }
+
+  const members = assignments.map(({ line: _line, ...assignment }) => assignment);
+  const projects = seenProjects
+    ? projectBlocks.map((block) => ({
+      projectId: block.projectId,
+      members: block.members.map(({ line: _line, ...member }) => member),
+    }))
+    : null;
+  return { members, projects };
+}
+
+/** Apply one `role` / `max_mode` / `usd_cap_month` line to a member-shaped object. */
+function applyGrantLine(target, content, lineNo) {
+  const match = /^([a-z_]+):\s*(.*)$/.exec(content);
+  if (!match) throw invalid('expected "<key>: <value>"', lineNo);
+  const key = match[1];
+  if (!ENTRY_KEYS.has(key)) throw invalid(`unknown grant key "${key}"`, lineNo);
+  const value = parseScalar(match[2].trim(), lineNo);
+  if (key === 'role') {
+    const roleKey = Object.prototype.hasOwnProperty.call(target, 'teamRole') ? 'teamRole' : 'role';
+    if (target[roleKey] !== null) throw invalid('duplicate "role"', lineNo);
+    if (!ROLES.has(value)) throw invalid(`unknown role "${value}"`, lineNo);
+    target[roleKey] = value;
+  } else if (key === 'max_mode') {
+    if (target.maxMode !== null) throw invalid('duplicate "max_mode"', lineNo);
+    if (!MODES.has(value)) throw invalid(`unknown max_mode "${value}"`, lineNo);
+    target.maxMode = value;
+  } else {
+    if (target.usdCapMonth !== null) throw invalid('duplicate "usd_cap_month"', lineNo);
+    if (!CAP_RE.test(value)) throw invalid('usd_cap_month must be a non-negative number', lineNo);
+    const cap = Number(value);
+    if (!Number.isFinite(cap) || cap < 0 || cap > MAX_USD_CAP_MONTH) {
+      throw invalid(`usd_cap_month must be between 0 and ${MAX_USD_CAP_MONTH}`, lineNo);
+    }
+    target.usdCapMonth = cap;
+  }
+}
+
+/**
+ * Parse and validate the team-level `members:` assignments (the H1.1 shape).
+ * Kept for callers/tests that only need the accounts; `parseTeamYamlFile`
+ * additionally returns the project section.
+ */
+export function parseTeamYaml(text) {
+  return parseTeamYamlFile(text).members;
 }
 
 /**
@@ -256,7 +359,12 @@ const HEADER = [
   '#                 usd_cap_month (0 = no cap, maximum 100000).',
   '# Emails are matched case-insensitively.',
   '#',
-  '# PATCH /admin/members and an invited registration rewrite this file after their DB transaction,',
+  '# Optional per-project assignments (ADR 0021 H1.3): a project id, then one email per explicit',
+  '# project role. NO ROW IS A VIEWER on that project. A file with no projects: section leaves the',
+  '# project rows alone (legacy file); once the section is present it is authoritative. A global team',
+  '# owner/admin overrides every project; a global viewer is never raised by a project row.',
+  '#',
+  '# PATCH /admin/members, the project membership routes and an invited registration rewrite this file',
   '# so a grant made in the app survives the next core restart. An account listed here wins over the',
   '# row at the next boot. Entries for emails with no account are preserved.',
 ];
@@ -270,7 +378,7 @@ const HEADER_SET = new Set(HEADER);
  * write-through). They are kept above `members:`; comments trailing an entry
  * are not preserved (the serializer writes canonical entries).
  */
-export function serializeTeamYaml(assignments, { comments = [] } = {}) {
+export function serializeTeamYaml(assignments, { comments = [], projects = null } = {}) {
   if (!Array.isArray(assignments)) throw invalid('assignments must be an array');
   const clean = assignments.map(validateAssignment);
   clean.sort((a, b) => {
@@ -278,6 +386,7 @@ export function serializeTeamYaml(assignments, { comments = [] } = {}) {
     if (role !== 0) return role;
     return a.email < b.email ? -1 : a.email > b.email ? 1 : 0;
   });
+  const projectBlocks = projects == null ? null : validateProjects(projects);
   const lines = [...HEADER];
   const seen = new Set();
   for (const comment of comments) {
@@ -293,7 +402,53 @@ export function serializeTeamYaml(assignments, { comments = [] } = {}) {
     lines.push(`    max_mode: ${assignment.maxMode}`);
     lines.push(`    usd_cap_month: ${formatCap(assignment.usdCapMonth)}`);
   }
+  if (projectBlocks !== null) {
+    lines.push(`${PROJECTS_KEY}:`);
+    for (const block of projectBlocks) {
+      lines.push(`  ${block.projectId}:`);
+      for (const member of block.members) {
+        lines.push(`    ${member.email}:`);
+        lines.push(`      role: ${member.role}`);
+        lines.push(`      max_mode: ${member.maxMode}`);
+        lines.push(`      usd_cap_month: ${formatCap(member.usdCapMonth)}`);
+      }
+    }
+  }
   return `${lines.join('\n')}\n`;
+}
+
+/** Validate + canonicalize the optional `projects:` section. */
+function validateProjects(projects) {
+  if (!Array.isArray(projects)) throw invalid('projects must be an array');
+  const seen = new Set();
+  const out = projects.map((block) => {
+    if (!block || typeof block !== 'object') throw invalid('project block must be an object');
+    const projectId = String(block.projectId ?? '').trim();
+    if (!PROJECT_ID_RE.test(projectId)) throw invalid(`invalid project id "${projectId}"`);
+    if (seen.has(projectId)) throw invalid(`duplicate project "${projectId}"`);
+    seen.add(projectId);
+    if (!Array.isArray(block.members)) throw invalid(`project "${projectId}" members must be an array`);
+    const members = block.members.map((member) => validateProjectAssignment(member, projectId));
+    members.sort((a, b) => (a.email < b.email ? -1 : a.email > b.email ? 1 : 0));
+    return { projectId, members };
+  });
+  out.sort((a, b) => (a.projectId < b.projectId ? -1 : a.projectId > b.projectId ? 1 : 0));
+  return out;
+}
+
+function validateProjectAssignment(assignment, projectId) {
+  if (!assignment || typeof assignment !== 'object') {
+    throw invalid(`project "${projectId}" assignment must be an object`);
+  }
+  const email = String(assignment.email ?? '').trim().toLowerCase();
+  if (email.length > MAX_EMAIL || !EMAIL_RE.test(email)) throw invalid(`invalid email "${email}"`);
+  if (!ROLES.has(assignment.role)) throw invalid(`unknown role "${assignment.role}"`);
+  if (!MODES.has(assignment.maxMode)) throw invalid(`unknown max_mode "${assignment.maxMode}"`);
+  const cap = Number(assignment.usdCapMonth);
+  if (!Number.isFinite(cap) || cap < 0 || cap > MAX_USD_CAP_MONTH) {
+    throw invalid(`usd_cap_month must be between 0 and ${MAX_USD_CAP_MONTH}`);
+  }
+  return { email, role: assignment.role, maxMode: assignment.maxMode, usdCapMonth: cap };
 }
 
 function validateAssignment(assignment) {
@@ -318,6 +473,21 @@ const formatCap = (cap) => String(Number(cap));
  * without a `members` row gets the least-privilege default. This is what the
  * first boot writes, so an existing solo owner stays owner.
  */
+export function listTeamProjectAssignments(db) {
+  const byProject = new Map();
+  for (const row of listProjectAssignmentRows(db)) {
+    let block = byProject.get(row.projectId);
+    if (!block) {
+      block = { projectId: row.projectId, members: [] };
+      byProject.set(row.projectId, block);
+    }
+    block.members.push({
+      email: row.email, role: row.role, maxMode: row.maxMode, usdCapMonth: row.usdCapMonth,
+    });
+  }
+  return [...byProject.values()].sort((a, b) => (a.projectId < b.projectId ? -1 : a.projectId > b.projectId ? 1 : 0));
+}
+
 export function listTeamAssignments(db) {
   const rows = db.prepare(`
     SELECT u.id, u.email, m.team_role, m.max_mode, m.usd_cap_month
@@ -356,6 +526,7 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
   let created = false;
   let source = 'file';
   let assignments;
+  let projectAssignments;
 
   if (!fs.existsSync(file)) {
     const current = listTeamAssignments(db);
@@ -366,11 +537,12 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
       if (logger) logger.info('team_yaml_deferred', { path: file, reason: 'no_real_users' });
       return {
         path: file, created: false, source: 'deferred', deferred: true,
-        assignments: 0, users: 0, changes: [], unknownEmails: [],
+        assignments: 0, projects: 0, users: 0, changes: [], projectChanges: [], unknownEmails: [],
       };
     }
     assignments = current.map(({ userId: _userId, ...assignment }) => assignment);
-    const text = serializeTeamYaml(assignments);
+    projectAssignments = listTeamProjectAssignments(db);
+    const text = serializeTeamYaml(assignments, { projects: projectAssignments });
     try {
       writeFileAtomic(file, text);
     } catch (err) {
@@ -388,7 +560,9 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
       throw invalid(`cannot read ${file}: ${err.message}`, null, 'unreadable');
     }
     try {
-      assignments = parseTeamYaml(text);
+      const parsed = parseTeamYamlFile(text);
+      assignments = parsed.members;
+      projectAssignments = parsed.projects;
     } catch (err) {
       if (err instanceof TeamYamlError) {
         report(audit, {
@@ -419,6 +593,8 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
   }
 
   const changes = [];
+  const projectChanges = [];
+  const emailByUserId = new Map(userRows.map((row) => [row.id, String(row.email).trim().toLowerCase()]));
   const apply = db.transaction(() => {
     for (const row of userRows) {
       const email = String(row.email).trim().toLowerCase();
@@ -456,6 +632,14 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
         resource: row.id,
         detail: { email, from, to: change.to },
       });
+    }
+
+    // Project assignments (H1.3) are applied only when the file has a `projects:` section. A legacy
+    // team-level file keeps the project rows exactly as the API left them.
+    if (projectAssignments !== null) {
+      projectChanges.push(...applyProjectAssignments(db, projectAssignments, {
+        usersByEmail, emailByUserId, audit, logger,
+      }));
     }
 
     // Fail closed (R-012#2): the file path bypasses the API's LAST_OWNER guard, and the API is the only
@@ -510,10 +694,112 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
     source,
     deferred: false,
     assignments: assignments.length,
+    projects: projectAssignments?.length ?? 0,
     users: userRows.length,
     changes,
+    projectChanges,
     unknownEmails,
   };
+}
+
+/**
+ * Apply the file's `projects:` section in the caller's transaction. The DB registry is the project
+ * list; an unknown project id in the file is ignored and audited (never creates a project). For every
+ * registered project the section is authoritative: a missing account row is deleted, so the member
+ * falls back to the implicit viewer default.
+ */
+function applyProjectAssignments(db, blocks, { usersByEmail, emailByUserId, audit, logger }) {
+  const projects = db.prepare('SELECT id, name FROM projects ORDER BY id').all();
+  const known = new Set(projects.map((p) => p.id));
+  const blockByProject = new Map(blocks.map((block) => [block.projectId, block]));
+  const changes = [];
+
+  for (const block of blocks) {
+    if (known.has(block.projectId)) continue;
+    if (logger) logger.warn('team_yaml_unknown_project', { projectId: block.projectId });
+    report(audit, {
+      action: 'team.yaml.unknown_project',
+      outcome: 'failure',
+      detail: { projectId: block.projectId },
+    });
+  }
+
+  for (const project of projects) {
+    const block = blockByProject.get(project.id);
+    const desired = new Map();
+    for (const member of block?.members ?? []) {
+      const user = usersByEmail.get(member.email);
+      if (!user) {
+        if (logger) logger.warn('team_yaml_unknown_email', { email: member.email, projectId: project.id });
+        report(audit, {
+          action: 'team.yaml.unknown_email',
+          outcome: 'failure',
+          detail: { email: member.email, projectId: project.id },
+        });
+        continue;
+      }
+      desired.set(user.id, member);
+    }
+
+    const existing = new Map(db.prepare(
+      'SELECT user_id, role, max_mode, usd_cap_month FROM project_members WHERE project_id = ?',
+    ).all(project.id).map((row) => [row.user_id, row]));
+
+    for (const [userId, row] of existing) {
+      if (desired.has(userId)) continue;
+      db.prepare('DELETE FROM project_members WHERE user_id = ? AND project_id = ?').run(userId, project.id);
+      const change = {
+        userId,
+        email: emailByUserId.get(userId) ?? null,
+        projectId: project.id,
+        projectName: project.name,
+        from: { role: row.role, maxMode: row.max_mode, usdCapMonth: Number(row.usd_cap_month) },
+        to: null,
+      };
+      changes.push(change);
+      report(audit, {
+        action: 'team.yaml.apply', userId, resource: userId,
+        detail: { email: change.email, projectId: project.id, from: change.from, to: null },
+      });
+    }
+
+    for (const [userId, member] of desired) {
+      const current = existing.get(userId);
+      if (current && sameProjectGrant(current, member)) continue;
+      db.prepare(`
+        INSERT INTO project_members (user_id, project_id, role, max_mode, usd_cap_month, granted_by)
+        VALUES (?, ?, ?, ?, ?, NULL)
+        ON CONFLICT(user_id, project_id) DO UPDATE SET
+          role = excluded.role,
+          max_mode = excluded.max_mode,
+          usd_cap_month = excluded.usd_cap_month,
+          granted_by = NULL,
+          updated_at = datetime('now')
+      `).run(userId, project.id, member.role, member.maxMode, Number(member.usdCapMonth));
+      const change = {
+        userId,
+        email: member.email,
+        projectId: project.id,
+        projectName: project.name,
+        from: current
+          ? { role: current.role, maxMode: current.max_mode, usdCapMonth: Number(current.usd_cap_month) }
+          : null,
+        to: { role: member.role, maxMode: member.maxMode, usdCapMonth: Number(member.usdCapMonth) },
+      };
+      changes.push(change);
+      report(audit, {
+        action: 'team.yaml.apply', userId, resource: userId,
+        detail: { email: change.email, projectId: project.id, from: change.from, to: change.to },
+      });
+    }
+  }
+  return changes;
+}
+
+function sameProjectGrant(current, desired) {
+  return current.role === desired.role
+    && current.max_mode === desired.maxMode
+    && Number(current.usd_cap_month) === Number(desired.usdCapMonth);
 }
 
 function sameGrant(current, desired) {
@@ -564,6 +850,7 @@ export function persistTeamYaml(db, dir, { logger = null, audit = null, trigger 
 
   const file = path.join(dir, TEAM_YAML_FILENAME);
   const current = listTeamAssignments(db).map(({ userId: _userId, ...assignment }) => assignment);
+  const currentProjects = listTeamProjectAssignments(db);
   let existingText = null;
   if (fs.existsSync(file)) {
     try {
@@ -577,7 +864,7 @@ export function persistTeamYaml(db, dir, { logger = null, audit = null, trigger 
   // file would be authoritative at the next boot (the boot defers it too).
   if (current.length === 0 && existingText == null) {
     if (logger) logger.info('team_yaml_deferred', { path: file, reason: 'no_real_users' });
-    return { path: file, deferred: true, users: 0, preserved: 0, assignments: 0 };
+    return { path: file, deferred: true, users: 0, projects: 0, preserved: 0, assignments: 0 };
   }
 
   let merged;
@@ -613,6 +900,7 @@ export function persistTeamYaml(db, dir, { logger = null, audit = null, trigger 
 
   const text = serializeTeamYaml(merged.assignments, {
     comments: existingText == null ? [] : fullLineComments(existingText),
+    projects: currentProjects,
   });
   try {
     writeFileAtomic(file, text);
@@ -626,17 +914,18 @@ export function persistTeamYaml(db, dir, { logger = null, audit = null, trigger 
   }
   report(audit, {
     action: 'team.yaml.write',
-    detail: { trigger, users: current.length, preserved: merged.preserved.length },
+    detail: { trigger, users: current.length, projects: currentProjects.length, preserved: merged.preserved.length },
   });
   if (logger) {
     logger.info('team_yaml_written', {
-      path: file, trigger, users: current.length, preserved: merged.preserved.length,
+      path: file, trigger, users: current.length, projects: currentProjects.length, preserved: merged.preserved.length,
     });
   }
   return {
     path: file,
     deferred: false,
     users: current.length,
+    projects: currentProjects.length,
     preserved: merged.preserved.length,
     assignments: merged.assignments.length,
   };
