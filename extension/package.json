@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Conversation-driven autonomous project system — meetings → plans → tickets → code, fully local",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "start": "bash start.sh",

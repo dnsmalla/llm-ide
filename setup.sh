@@ -23,8 +23,8 @@ if ! command -v node &> /dev/null; then
 fi
 NODE_VERSION=$(node -v | sed 's/^v//')
 NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
-if [ "$NODE_MAJOR" -lt 20 ]; then
-    echo "❌ Error: Node.js 20+ is required (found v$NODE_VERSION)."
+if [ "$NODE_MAJOR" -lt 22 ]; then
+    echo "❌ Error: Node.js 22+ is required (found v$NODE_VERSION)."
     echo "Please upgrade from https://nodejs.org/"
     exit 1
 fi
