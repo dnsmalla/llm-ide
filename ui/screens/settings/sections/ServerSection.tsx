@@ -129,15 +129,15 @@ export default function ServerSection() {
         </p>
         {host.coreStart || host.coreStop || host.coreRestart ? (
           <div className="st-row">
-            {!health || info?.coreState === "stopped" || info?.coreState === "failed" || !info ? (
+            {!info || info.coreState === "stopped" || info.coreState === "failed" ? (
               <Button tone="primary" disabled={coreBusy !== null} onClick={() => void coreAction("start")}>{coreBusy === "start" ? "Starting…" : "Start backend"}</Button>
             ) : (
               <>
                 <Button disabled={coreBusy !== null} onClick={() => void coreAction("stop")}>{coreBusy === "stop" ? "Stopping…" : "Stop backend"}</Button>
-                <Button disabled={coreBusy !== null} onClick={() => void coreAction("restart")}>{coreBusy === "restart" ? "Restarting…" : "Kill & Restart"}</Button>
+                <Button tone={!health ? "primary" : undefined} disabled={coreBusy !== null} onClick={() => void coreAction("restart")}>{coreBusy === "restart" ? "Restarting…" : "Kill & Restart"}</Button>
               </>
             )}
-            <span className="st-hint">Stop leaves the app open; Start brings the core back. Kill &amp; Restart stops and starts it in one step.</span>
+            <span className="st-hint">{!health && info && info.coreState !== "stopped" && info.coreState !== "failed" ? "The backend is not answering. Kill & Restart replaces it. " : ""}Stop leaves the app open; Start brings the core back. Kill &amp; Restart stops and starts it in one step.</span>
           </div>
         ) : null}
         {notice ? <p className="st-ok" role="status">{notice}</p> : null}

@@ -166,3 +166,10 @@ test("Backend log poll: ServerSection reads the log only through the single-flig
   assert.match(src, /setInterval\(loadLog, LOG_POLL_MS\)/, "the poll drives the guarded reader");
   assert.match(src, /clearInterval\(id\)/, "the poll stops on unmount");
 });
+
+test("a ready but unhealthy core offers Kill & Restart, not a no-op Start", () => {
+  const src = readFileSync(new URL("../sections/ServerSection.tsx", import.meta.url), "utf8");
+  assert.match(src, /!info \|\| info\.coreState === "stopped" \|\| info\.coreState === "failed" \?/);
+  assert.match(src, /tone=\{!health \? "primary" : undefined\}/);
+  assert.match(src, /The backend is not answering/);
+});
