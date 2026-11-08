@@ -15,6 +15,17 @@ export interface EngineDeps {
   clearTimer?: (t: unknown) => void;
 }
 
+/** A 50k-node layout takes seconds, so the watchdog starts generous; it grows with edges and stops at 15 min. */
+export const LAYOUT_TIMEOUT_BASE_MS = 180_000;
+export const LAYOUT_TIMEOUT_MAX_MS = 15 * 60_000;
+export const LAYOUT_TIMEOUT_NOTICE = "Layout stopped early; positions are approximate.";
+
+/** The watchdog for a graph with `edges` edges: base 180 s + 1 s per 1,000 edges, capped at 15 min. */
+export function layoutTimeoutMs(edges: number, base = LAYOUT_TIMEOUT_BASE_MS): number {
+  const extra = Math.max(0, Math.floor(Number(edges) / 1000)) * 1000;
+  return Math.min(base + extra, LAYOUT_TIMEOUT_MAX_MS);
+}
+
 export interface Preview {
   model: GraphModel;
   layout: LayoutResult;
@@ -61,13 +72,29 @@ export class LayoutEngine {
       };
       this.settle = finish;
       let previewModel: GraphModel | null = null;
+      let preview: Preview | null = null;
+      const armTimer = () => {
+        this.clearTimer();
+        const ms = this.deps.timeoutMs ?? layoutTimeoutMs(preview?.model.m ?? 0);
+        this.timer = (this.deps.setTimer ?? ((fn, t) => setTimeout(fn, t)))(() => {
+          // A preview is a real (simpler) layout: show it rather than nothing when the long layout does not finish.
+          if (preview) {
+            finish({ kind: "done", entry: { model: preview.model, layout: preview.layout, notices: [LAYOUT_TIMEOUT_NOTICE, ...preview.notices] }, cached: false });
+          } else {
+            finish({ kind: "error", message: "Layout took too long and was stopped." });
+          }
+        }, ms);
+      };
       worker.onmessage = (ev) => {
         const m = ev.data;
         if (!isFromWorker(m) || m.job !== job) return;
         if (m.type === "progress") onProgress?.(m.stage);
         else if (m.type === "preview") {
           previewModel = m.model;
-          onPreview?.({ model: m.model, layout: m.layout, notices: m.notices });
+          preview = { model: m.model, layout: m.layout, notices: m.notices };
+          // The graph's size is only known now: extend the watchdog to the edge-scaled budget for the rest of the job.
+          if (this.deps.timeoutMs === undefined) armTimer();
+          onPreview?.(preview);
         } else if (m.type === "error") finish({ kind: "error", message: m.message });
         else {
           const model = m.model ?? previewModel;
@@ -79,8 +106,7 @@ export class LayoutEngine {
       };
       worker.onerror = (ev) => finish({ kind: "error", message: ev.message || "The layout worker failed." });
       worker.onmessageerror = () => finish({ kind: "error", message: "The layout worker sent an unreadable message." });
-      const ms = this.deps.timeoutMs ?? 180_000;
-      this.timer = (this.deps.setTimer ?? ((fn, t) => setTimeout(fn, t)))(() => finish({ kind: "error", message: "Layout took too long and was stopped." }), ms);
+      armTimer();
       try {
         worker.postMessage({ type: "run", job, text, wasmUrl: this.deps.wasmUrl });
       } catch (e) {

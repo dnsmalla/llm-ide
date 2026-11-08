@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LayoutEngine } from "../engine.ts";
+import { LayoutEngine, layoutTimeoutMs, LAYOUT_TIMEOUT_BASE_MS, LAYOUT_TIMEOUT_MAX_MS, LAYOUT_TIMEOUT_NOTICE } from "../engine.ts";
 import { LayoutCache, sha256Hex, estimateBytes, type CacheEntry } from "../cache.ts";
 import type { FromWorker, ToWorker, WorkerLike } from "../protocol.ts";
 import { decodeGraph } from "../decode.ts";
@@ -185,4 +185,32 @@ test("done without a model and without a preview is an error, not a crash", asyn
   ws[0].emit({ type: "done", job: ws[0].sent[0].job, layout: e.layout, notices: [] });
   const out = await p;
   assert.equal(out.kind === "error" && /no graph/.test(out.message), true);
+});
+
+test("the layout watchdog scales with the edge count and caps at 15 minutes", () => {
+  assert.equal(layoutTimeoutMs(0), LAYOUT_TIMEOUT_BASE_MS);
+  assert.equal(layoutTimeoutMs(999), LAYOUT_TIMEOUT_BASE_MS);
+  assert.equal(layoutTimeoutMs(50_000), LAYOUT_TIMEOUT_BASE_MS + 50_000);
+  assert.equal(layoutTimeoutMs(10_000_000), LAYOUT_TIMEOUT_MAX_MS);
+});
+
+test("a timeout with an intermediate layout renders it with the approximate notice", async () => {
+  const ws: FakeWorker[] = [];
+  let fire: (() => void) | null = null;
+  const eng = mk(ws, { setTimer: (fn: () => void) => { fire = fn; return 1; }, clearTimer: () => {} });
+  const p = eng.load("T");
+  await tick();
+  const e = await entry();
+  const j = ws[0].sent[0].job;
+  ws[0].emit({ type: "preview", job: j, model: e.model, layout: e.layout, notices: ["model notice"] });
+  assert.ok(fire, "the watchdog was re-armed for the larger graph");
+  (fire as () => void)();
+  const out = await p;
+  assert.equal(out.kind, "done", "the partial layout is rendered instead of an error");
+  if (out.kind !== "done") return;
+  assert.equal(out.entry.layout, e.layout);
+  assert.equal(out.entry.model, e.model);
+  assert.deepEqual(out.entry.notices, [LAYOUT_TIMEOUT_NOTICE, "model notice"]);
+  assert.equal(out.cached, false);
+  assert.equal(ws[0].terminated, true);
 });
