@@ -174,7 +174,7 @@ test("TemplateManager: dialog semantics, built-ins are read-only, delete asks fi
 });
 
 function fakeStoreDeps(surface = "doc") {
-  const api = { register: async () => {}, templates: async () => ({ items: [], truncated: false }), commands: async () => ({ items: [], truncated: false }), seed: async () => ({ written: 0 }), generate: async () => ({}), putTemplate: async () => null, deleteTemplate: async () => true };
+  const api = { register: async () => ({ id: 'p' }), templates: async () => ({ items: [], truncated: false }), commands: async () => ({ items: [], truncated: false }), seed: async () => ({ written: 0 }), generate: async () => ({}), putTemplate: async () => null, deleteTemplate: async () => true };
   return { surface, makeApi: () => api, run: { readers: { file: async () => ({ text: "", truncated: false }), note: async () => ({ text: "", truncated: false }) }, fs: { create: async () => "", write: async () => ({}) } }, idFor: async () => "p1" };
 }
 
