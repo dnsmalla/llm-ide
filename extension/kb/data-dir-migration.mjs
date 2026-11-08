@@ -1,5 +1,10 @@
 // One-time MOVE of the repo-level kb/ data into the system data dir (LLMIDE_DATA_DIR).
 //
+// NOTE: this is this app's own repo-kb -> data-dir MOVE, not the import of the retired Mac app's
+// ~/Library/Application Support/llm-ide/system. That is a separate COPY-only path in
+// kb/legacy-import.mjs (docs/how-to/import-old-mac-data.md); it must never checkpoint or rename
+// the old Mac folder. The two share the verified-copy ideas only.
+//
 // Runs at the top of server.mjs, imported before config and the DB are read
 // (kb/data-dir-boot.mjs), and never throws. It runs only when ALL hold, otherwise
 // it reports why it skipped:

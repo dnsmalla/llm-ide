@@ -413,6 +413,33 @@ Run through this against a real meeting before merging:
 - **DO NOT** prune backups outside the data dir's `backups/`, and never in the repo-kb layout (`config.backupPrune`).
 - **Known limit:** Node has no `F_FULLFSYNC`; on macOS the fsync is a plain fsync, so the `.pre-move` copies are the protection against power loss.
 
+## Legacy Mac app data import (`extension/kb/legacy-import.mjs`, `desktop/src-tauri/src/legacy_import.rs`)
+
+The retired Mac app's `~/Library/Application Support/llm-ide/system` is imported into the desktop's
+`~/Library/Application Support/llm-ide-desktop/core` by an explicit, one-time, verified COPY. It is
+not the repo-kb MOVE above and it never writes to the old folder. Guide:
+[import-old-mac-data.md](../how-to/import-old-mac-data.md).
+
+### ✅ MUST preserve (legacy Mac import)
+
+- **Detection only; no silent import.** The old folder counts only with a real `data.db` that passes `quick_check`, has tables and an applied `schema_migrations` version. The desktop target counts as empty/initial only when it has no `data.db`, a zero-byte one, or one with no tables.
+- **A non-empty desktop DB is replaced only after an explicit confirmation and a verified backup.** The desktop host shows a native, Cancel-first dialog naming both folders; the helper writes `backups/pre-import-<stamp>.db`, `.agent.db` and `.dev-secrets.json` and verifies the backup BEFORE moving the live files. The CLI needs `--force`.
+- **The old folder is never changed.** No rename, delete, checkpoint or write. Source snapshots run under a `BEGIN IMMEDIATE` write lock with a read-only `VACUUM INTO` connection; the writer is closed while the reader is still open so SQLite does not checkpoint on close, and only the empty `-wal`/`-shm` sidecars this run created are removed.
+- **Verify before switching, and again after.** `quick_check` on the locked source, `integrity_check` on every copy, per-table counts + `sqlite_sequence` against the source, `schema_migrations` (and `agent_schema_migrations`) versions, then the same checks plus the secrets bytes on the committed files. `data.db` is renamed last.
+- **Rollback restores the previous files; it never deletes the last copy.** Old target files move to `core/.legacy-import-replaced/` (not deleted), are restored on any failure, and only removed after the post-commit verification. A failed import leaves the live DB byte-identical (plus the verified backups).
+- **The vault key moves with the data.** The desktop core receives `LLMIDE_JWT_SECRET`/`LLMIDE_VAULT_KEY` from the OS keychain, which wins over `.dev-secrets.json`; the host backs up the current keychain values, stores the old app's values, and restores them if the import does not complete. Secrets are never logged, returned to the webview or put in an error.
+- **Once, idempotently.** `core/legacy-import.json` is written only after the committed files verify. A completed marker plus a healthy `data.db` makes every later run a no-op. A marker without a healthy DB, or a leftover `legacy-import.journal.json`, refuses instead of importing again.
+- **The core is stopped for the switch and restarted after it** (an adopted external server is never stopped; if it holds the target DB the import refuses `target-in-use`).
+
+### ❌ DO NOT do these (legacy Mac import)
+
+- **Do NOT import at boot or on a timer.** No detection may change data; the user's click (or explicit CLI flags) is the only entry point.
+- **Do NOT overwrite a non-empty desktop DB without `--force`/the native dialog and a verified backup first.**
+- **Do NOT checkpoint, rename, move or delete anything in the old folder** — including a WAL that is only cleaned up by a read.
+- **Do NOT trust the marker without a healthy target DB**, or hand-edit it to force a re-import.
+- **Do NOT skip the keychain transfer** when `.dev-secrets.json` exists, and do not copy the file only: the core would use the keychain key and the imported vault would not open.
+- **Do NOT log, return or error with a JWT secret, vault key or decrypted value.**
+
 ### ✅ MUST understand
 
 - **`git push` uses the user's ambient credentials.** The PR flow calls `git push -u origin <branch>` using whatever git config / credential helper the user has set up on their machine (SSH key, HTTPS keychain, etc.). No token is passed to the server; the server never stores one.

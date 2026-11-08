@@ -15,6 +15,8 @@ const COMMANDS: &[&str] = &[
     "backend_detect",
     "graph_generate",
     "graph_cancel",
+    "legacy_import_status",
+    "legacy_import_run",
     "loop_approve_loop",
     "loop_approve_stage",
     "loop_approval_status",

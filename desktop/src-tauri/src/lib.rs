@@ -33,6 +33,7 @@ mod fsutil;
 mod graph_file;
 mod mermaid_runtime;
 mod menu;
+mod legacy_import;
 mod loop_approval;
 mod loop_runner;
 mod notes_fs;
@@ -307,6 +308,8 @@ macro_rules! product_handlers {
                 backend_pick::backend_detect,
                 graph_gen::graph_generate,
                 graph_gen::graph_cancel,
+                legacy_import::legacy_import_status,
+                legacy_import::legacy_import_run,
                 loop_approval::loop_approve_loop,
                 loop_approval::loop_approve_stage,
                 loop_approval::loop_approval_status,

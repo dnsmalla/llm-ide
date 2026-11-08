@@ -30,6 +30,12 @@ listening on the port) keeps its own environment.
 `LLMIDE_USE_REPO_KB=1` keeps the old location for development: no data dir is
 passed, and the backend uses `<repo>/kb/`.
 
+**Coming from the retired Mac app?** Its data is in
+`~/Library/Application Support/llm-ide/system`, not the desktop folder. The one-time,
+verified copy is a separate explicit action (never a boot migration): see
+[Import the old Mac app's data](import-old-mac-data.md). The old folder is never
+changed; a non-empty desktop DB is only replaced after confirmation and a backup.
+
 ## The one-time MOVE
 
 On boot, before the server listens, the server **moves** the repo's `kb/` data

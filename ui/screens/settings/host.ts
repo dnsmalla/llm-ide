@@ -34,6 +34,65 @@ export interface DiagnosticsInfo {
   coreState?: string | null;
 }
 
+/** One side (old Mac app folder or desktop data folder) of the old-data import report. */
+export interface LegacyImportSide {
+  /** Absolute path, or null when the folder could not be resolved. */
+  path: string | null;
+  exists: boolean;
+  valid: boolean;
+  empty: boolean;
+  sizeBytes: number;
+  tableCount: number;
+  totalRows: number;
+  migration: number | null;
+  tables: Record<string, number>;
+  /** Why a side is not valid (missing | empty | integrity | unreadable | no-schema-migrations). */
+  reason: string;
+  agentDb: { exists: boolean; valid: boolean; sizeBytes: number; tableCount: number; migration: number | null };
+  secretsFile: boolean;
+}
+
+/** Read-only host answer for Settings → Server & Backend → "Old Mac app data". */
+export interface LegacyImportStatus {
+  formatVersion: number;
+  status: string;
+  reason: string | null;
+  /** What the helper would do: import | force | refuse | noop | none. */
+  action: string;
+  needsForce: boolean;
+  hasVaultSecrets: boolean;
+  legacy: LegacyImportSide;
+  target: LegacyImportSide;
+  marker: {
+    status: string;
+    importedAt: string | null;
+    backups: string[];
+    replaced: boolean;
+    totalRows: number | null;
+    tables: Record<string, number> | null;
+  } | null;
+  notes: string[];
+  durationMs: number;
+}
+
+/** The result of `run_legacy_import`: the report plus what was written. */
+export interface LegacyImportReport extends LegacyImportStatus {
+  ran?: boolean;
+  importedAt?: string | null;
+  replaced?: boolean;
+  /** Target-relative path of the verified data.db backup. */
+  backup?: string | null;
+  backups?: string[];
+  tables?: Record<string, number> | null;
+  totalRows?: number | null;
+  migration?: number | null;
+  agentMigration?: number | null;
+  secretsImported?: boolean;
+  /** Host-written copy of the previous OS-keychain secrets (owner-only, beside the DB backup). */
+  keychainBackup?: string | null;
+  rolledBack?: boolean | null;
+}
+
 /** One optional component the host can install on demand (the Mermaid diagram renderer today). */
 export interface ComponentStatus {
   installed: boolean;
@@ -191,6 +250,9 @@ export interface SettingsHost {
   removeMermaid?(): Promise<ComponentStatus>;
   /** Self-Heal's fix run (plan B): present only with a desktop host; its commands refuse in a release build. */
   selfHeal?: SelfHealHost;
+  /** Old Mac app data: read-only status, then the explicit one-time import (native confirmation). */
+  legacyImportStatus?(): Promise<LegacyImportStatus>;
+  runLegacyImport?(force: boolean): Promise<LegacyImportReport>;
   /** The core's log tail for the Server & Backend group (fixed paths under the app data dir, bounded). */
   coreLog?(): Promise<CoreLogText>;
   clearCoreLog?(): Promise<void>;

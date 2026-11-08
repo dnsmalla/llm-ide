@@ -10,6 +10,7 @@
 import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings/core-api";
 import { decodeComponentStatus, decodeCoreLog, decodeRtkStatus } from "../settings/components-model";
 import { decodeMemory, decodePaths } from "../settings/project-model";
+import { decodeLegacyImportReport, decodeLegacyImportStatus } from "../settings/legacy-import-model";
 import { decodeTrayStatus } from "../settings/misc-model";
 import { decodeDiff, decodePrepared, decodeVerified } from "../settings/self-heal-model";
 import { AGENT_TIMEOUT_MS } from "../settings/self-heal-run";
@@ -203,6 +204,16 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
             await d.invoke<unknown>("self_heal_remove", { runId });
           },
           flushIncidents: () => flushSelfHealNow(),
+        },
+        async legacyImportStatus() {
+          const r = decodeLegacyImportStatus(await d.invoke<unknown>("legacy_import_status"));
+          if (!r) throw new Error("the desktop host returned an old-data status this app cannot read");
+          return r;
+        },
+        async runLegacyImport(force) {
+          const r = decodeLegacyImportReport(await d.invoke<unknown>("legacy_import_run", { force }));
+          if (!r) throw new Error("the desktop host returned an old-data report this app cannot read");
+          return r;
         },
         async coreLog() {
           const l = decodeCoreLog(await d.invoke<unknown>("core_log_read"));

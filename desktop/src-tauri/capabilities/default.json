@@ -21,6 +21,8 @@
     "allow-backend-detect",
     "allow-graph-generate",
     "allow-graph-cancel",
+    "allow-legacy-import-status",
+    "allow-legacy-import-run",
     "allow-loop-approve-loop",
     "allow-loop-approve-stage",
     "allow-loop-approval-status",
