@@ -136,3 +136,41 @@ projects:
   `projectId` on `POST /admin/invites` is the follow-up.
 - The web/iOS visual project picker is minimal; the wire contract and client pass-through land first.
 - Project-scoped background jobs that never name a project keep the team grant (documented).
+
+## Integration checklist (after Batch C is pushed and the tree is clean)
+
+Isolated pieces already committed: migration 0070, `kb/projects.mjs`, per-project `team.yaml`,
+`routes/project-routes.mjs`, `routes/host-api/projects.mjs`, `kb/project-usage.mjs`, UI model/views/
+container, how-to doc. The remaining edits are exactly these:
+
+1. `kb/members.mjs`: add `'project.admin': { role: 'admin', mode: 'none', cap: false }` to `CLASS_GRANTS`.
+   (A project admin is *not* the team `admin` class; `projects.mjs` filters it for project permissions.)
+2. `server/route-authority.mjs`:
+   - resolve a project id from `?project=`, `?projectId=` or `/projects/:id/...`;
+   - `authorizeRoute` uses `effectiveProjectGrant` for a project id (otherwise the team member);
+   - add rules: `GET /projects` = `self.read`; `GET|POST /projects/:id/members` and
+     `PATCH|DELETE /projects/:id/members/:userId` = `project.admin`;
+   - a project-scoped class uses the effective project member and the matching cap/spend.
+3. `server.mjs`: dispatch `isProjectRoute`/`handleProjectRoute` after auth + `enforceRouteAuthority`
+   (API 126 changelog entry; next version).
+4. `server/auth-routes.mjs` `GET /auth/me`: add `projects: listProjectsForUser(db, req.user.id)`.
+5. `routes/docs-routes.mjs` `POST /kb/projects/register`: call `registerProject` (canonical row; creator
+   owner on a new project) after `registerProjectRoot`; a body id cannot be seen by route policy, so the
+   handler's `registerProject` gate is the authority check. Accept `name`.
+6. `routes/agent-v2.mjs` + `kb/usage.mjs`: resolve `projectId` from `body.projectId` /
+   `agentContext.projectId` / `projectIdForRoot(agentContext.workspaceRoot)`; use the effective project
+   grant for the viewer clamp, max_mode and project cap (`usedUsdMonthForProject`); pass `projectId` to
+   `recordUsage` (new column); `startHostTurn({ projectId })`.
+7. `routes/host-api/gateway.mjs`: `projects.list` (`COMMAND_CLASS` self.read or host, result
+   `projectsListResult`), optional `projectId` on the project-scoped payloads, and
+   `projectFrameAuthority` on every frame that names one (unassigned = viewer; `not_found`/`denied`/
+   USD message). `chat.send` forwards `projectId` to `startHostTurn`.
+8. Contracts: `schema/http` project schema + fixtures + `/auth/me` fixture; `schema/host-api/v1`
+   commands/fixtures, generate script, web types + Swift SharedProtocol; OpenAPI/api-types/INVENTORY.
+9. UI: mount `TeamProjectsSection` in `TeamSection` (non-admins see the project picker; global panels
+   stay owner/admin); SettingsScreen shows the Team group for any signed-in member; chat mode options
+   read the selected project's permissions.
+10. Tests: `project-e2e.test.mjs` (already written), route-policy coverage/e2e additions, Host API
+    gateway per-frame test, migration/API contract test, UI TeamSection integration test.
+11. Docs: ADR 0021 H1.3 amendment, invariants, api-server section 7p, overview, extension/CLAUDE.md.
+12. Final: `make test`, `make regression`, `make test-shared-protocol`, `make contract-gates`; push; CI.
