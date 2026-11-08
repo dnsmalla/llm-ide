@@ -25,7 +25,7 @@ use crate::remote::{prepare, ssh_args_with, PreparedTarget, RawOutput, SshTarget
 /// per stage; there is no wildcard and no free-form argument.
 pub const STAGES: &[&str] = &[
     "check", "predeploy-backup", "base", "env", "bundle", "nginx", "start",
-    "open-registration", "lock-registration", "backup", "rollback", "uninstall", "uninstall-purge",
+    "open-registration", "lock-registration", "backup", "rollback", "update", "uninstall", "uninstall-purge",
 ];
 
 pub const HELPER: &str = include_str!("../../../deploy/hub/llmide-deploy");
@@ -541,6 +541,29 @@ pub async fn remote_logs(target: SshTarget, lines: u16) -> Result<String, String
 }
 
 /// Removes the service and vhost; keeps `/var/lib/llmide` unless `purge` and the exact hostname are given.
+#[tauri::command]
+pub async fn remote_update(target: SshTarget, version: String, confirmation: String) -> Result<(), FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let prepared = prepare(&target)?;
+        if confirmation != target.host { return Err(herr("confirmation_mismatch", "type the hostname exactly to update")); }
+        let Some(bundle) = bundle_path(&version) else { return Err(herr("bundle_missing", "the staged hub bundle is missing; run node desktop/scripts/stage-hub-core.mjs")); };
+        let bytes = std::fs::read(&bundle).map_err(|e| herr("bundle_missing", format!("cannot read the bundle: {e}")))?;
+        if bytes.len() > 256 * 1024 * 1024 { return Err(herr("bundle_too_large", "the hub bundle is larger than 256 MB")); }
+        let staging = staging_for(&target.user);
+        let sha = hex(&Sha256::digest(&bytes));
+        let up = format!("mkdir -p \"{staging}\" && cat > \"{staging}/bundle.tar.gz\"");
+        let o = SystemDeploy.run(&prepared, &up, Some(&bytes))?;
+        if o.code != Some(0) { return Err(herr("upload_failed", "could not upload the update bundle")); }
+        let o = SystemDeploy.run(&prepared, &format!("cat > \"{staging}/bundle.sha256\""), Some(format!("{sha}  bundle.tar.gz\n").as_bytes()))?;
+        if o.code != Some(0) { return Err(herr("upload_failed", "could not write the update checksum")); }
+        let o = SystemDeploy.run(&prepared, &format!("cat > \"{staging}/VERSION\""), Some(format!("{version}\n").as_bytes()))?;
+        if o.code != Some(0) { return Err(herr("upload_failed", "could not write the update version")); }
+        let o = SystemDeploy.run(&prepared, &stage_command("update").unwrap(), None)?;
+        if o.code != Some(0) { return Err(herr("update_failed", "the hub update did not finish; the previous release is still current")); }
+        Ok(())
+    }).await.map_err(|e| herr("internal", format!("the update did not finish: {e}")))?
+}
+
 #[tauri::command]
 pub async fn remote_uninstall(target: SshTarget, confirmation: String, purge: bool) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {

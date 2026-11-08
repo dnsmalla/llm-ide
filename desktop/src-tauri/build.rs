@@ -176,6 +176,7 @@ const COMMANDS: &[&str] = &[
     "remote_backup_now",
     "remote_logs",
     "remote_uninstall",
+    "remote_update",
     "update_status", "update_check", "update_install",
     "open_external_url",
     "reveal_in_os",

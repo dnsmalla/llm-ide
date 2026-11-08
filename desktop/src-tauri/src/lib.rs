@@ -455,6 +455,7 @@ macro_rules! product_handlers {
                 remote_deploy::remote_backup_now,
                 remote_deploy::remote_logs,
                 remote_deploy::remote_uninstall,
+                remote_deploy::remote_update,
                 updater::update_status,
                 updater::update_check,
                 updater::update_install,

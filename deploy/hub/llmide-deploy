@@ -209,6 +209,18 @@ case "$stage" in
     say "ok"
     ;;
 
+  update)
+    staging
+    conf
+    [ -f "$STAGING/VERSION" ] || die "VERSION is missing"
+    new=$(tr -cd '0-9.' < "$STAGING/VERSION" | head -c 40)
+    case "$new" in *.*.*) ;; *) die "the new version is not x.y.z" ;; esac
+    sed -i "s/^LLMIDE_HUB_VERSION=.*/LLMIDE_HUB_VERSION=$new/" "$CONF"
+    "$0" bundle
+    "$0" start
+    say "ok ($new)"
+    ;;
+
   uninstall)
     systemctl disable --now llmide-core 2>/dev/null || true
     rm -f "$UNIT" "$BACKUP_UNIT"

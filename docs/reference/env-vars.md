@@ -108,6 +108,21 @@ python3 docs/_scripts/extract_env_vars.py
 | `LLMIDE_VAULT_KEY` | str | _(required in prod)_ |
 | `NODE_ENV` | str | `development` |
 
+## Hub mode (remote server)
+
+Set by the deploy's `/etc/llmide/core.env`; see [run-a-hub](../how-to/run-a-hub.md).
+
+| Var | Effect |
+|---|---|
+| `LLMIDE_HUB` | `1` runs the core in hub mode (invite-only registration, hub member defaults). |
+| `LLMIDE_TLS_TERMINATED` | `1` declares that nginx/Caddy is the only thing in front of a non-loopback bind. |
+| `LLMIDE_PROJECTS_ROOT` | The only folder where a hub may create a project (`/srv/llmide/projects`); unset means no confinement (local install). |
+| `LLMIDE_HOST_API_HUB` | `1` serves the Host API plaintext on `127.0.0.1:3016` behind the hub's TLS terminator. |
+| `LLMIDE_HOST_API_FINGERPRINT_FILE` | Root-owned file containing the front certificate's leaf SPKI pin (`sha256:…`), read per PIN request. |
+| `LLMIDE_HUB_PUBLIC_URL` | The public `wss://<hub>/host-api/v1` URL returned in a hub PIN. |
+| `LLMIDE_BOOTSTRAP_TOKEN` | One-time first-owner token, present only in `/etc/llmide/bootstrap.env` during the setup window. |
+| `LLMIDE_HUB_DOMAIN`, `LLMIDE_HUB_VERSION` | Non-secret deploy metadata used by the root helper (not application settings). |
+
 ## Worked examples
 
 ### Minimal production systemd unit

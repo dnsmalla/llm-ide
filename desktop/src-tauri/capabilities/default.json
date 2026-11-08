@@ -167,6 +167,7 @@
     "allow-remote-backup-now",
     "allow-remote-logs",
     "allow-remote-uninstall",
+    "allow-remote-update",
     "allow-chat-bind-session",
     "allow-chat-unbind-session",
     "allow-chat-list",
