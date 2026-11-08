@@ -1,6 +1,6 @@
 // Snapshot kinds (design 4.2): a fixed allow-list, every string re-redacted and clamped as routes/host-api/reads.mjs
 // does, trimmed from the oldest end to one padding bucket. Kind names only ever appear inside the ciphertext.
-import { MAX_FRAME } from '../../core/sync-envelope.mjs';
+import { MAX_FRAME, sha256 } from '../../core/sync-envelope.mjs';
 import { redactSecretsForStorage } from '../../core/redact-secrets.mjs';
 import { listChatSessions, getChatSession } from '../../kb/chat-sessions.mjs';
 import { listMeetingSummaries, listEntitiesForMeetings } from '../../kb/meetings.mjs';
@@ -30,6 +30,15 @@ function frame(kind, items, now) {
     if (kept.length <= 1) return Buffer.from(JSON.stringify({ v: 1, kind, generatedAt: now, truncated, items: [] }));
     kept = kept.slice(0, Math.max(1, Math.floor(kept.length * 0.8)));
   }
+}
+
+/**
+ * The change check for a produced frame. `generatedAt` is inside the frame the device reads, but a produce tick stamps
+ * a new one every minute, so hashing the whole frame would re-seal and re-upload every kind every tick (F5).
+ */
+export function frameHash(bytes) {
+  const { generatedAt: _ignored, ...items } = JSON.parse(bytes.toString('utf8'));
+  return sha256(JSON.stringify(items));
 }
 
 export function buildKinds(raw, now) {

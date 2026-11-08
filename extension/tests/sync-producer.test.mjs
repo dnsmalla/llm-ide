@@ -21,6 +21,7 @@ const S = await import('../core/sync-envelope.mjs');
 const { createMemoryStore } = await import('../connectors/sync-store/index.mjs');
 const { publishOnce, HEARTBEAT_MS } = await import('../routes/sync/producer.mjs');
 const { ensureSyncKeys } = await import('../routes/sync/keys.mjs');
+const { buildKinds } = await import('../routes/sync/kinds.mjs');
 
 let n = 0;
 const user = () => users.registerUser(kb.getDb(), { email: `sp-${Date.now()}-${++n}@example.com`, password: 'CorrectHorseBattery', displayName: 'p' }).id;
@@ -85,6 +86,23 @@ test('an unchanged publish writes nothing until the heartbeat, a change rewrites
   assert.deepEqual(kinds.chats.items, ['new']);
   const files = (await store.list(`${state.syncId}/d/${dev.dir}/s`)).map((f) => `s/${f.name}`).sort();
   assert.deepEqual(files, Object.values(manifest.kinds).map((k) => k.file).sort(), 'only manifest-named blobs remain');
+});
+
+test('snapshots built on a moving clock are not re-uploaded while their items are unchanged', async () => {
+  const u = user();
+  st.ensureSyncState(u, { storeKind: 'memory', storeConfig: {} });
+  st.setSyncEnabled(u, true);
+  device(u);
+  const store = createMemoryStore();
+  // The real clock moves between ticks; only `generatedAt` differs when nothing changed.
+  let clock = Date.now();
+  const raw = (content) => ({ phoneChatId: null, meetings: [], entities: {}, plans: [], usage: null,
+    sessions: [{ id: 'c1', title: 'Chat', updatedAt: 1, messages: [{ seq: 1, role: 'user', content }] }] });
+  const kindsAt = (content) => () => buildKinds(raw(content), (clock += 1000));
+  assert.deepEqual(await publishOnce({ userId: u, store, now: clock, loadKinds: kindsAt('hello') }), { devices: 1, blobs: 4, manifests: 1 });
+  assert.deepEqual(await publishOnce({ userId: u, store, now: (clock += 60_000), loadKinds: kindsAt('hello') }), { devices: 1, blobs: 0, manifests: 0 },
+    'an unchanged kind is not sealed and uploaded again just because the clock moved');
+  assert.deepEqual(await publishOnce({ userId: u, store, now: (clock += 60_000), loadKinds: kindsAt('hello again') }), { devices: 1, blobs: 1, manifests: 1 });
 });
 
 test('disabled sync publishes nothing', async () => {

@@ -6,7 +6,7 @@ import { deviceKeys, seal, makeSyncWrap, sha256 } from '../../core/sync-envelope
 import { getSyncState, listSyncDevices, getPublished, setPublishedMany, nextSeq, recordPublish, setDeviceWrapEpoch } from '../../kb/sync-state.mjs';
 import { ensureSyncKeys, syncIdsFor, rotateKeys } from './keys.mjs';
 import { pruneMissingDevices } from './registry.mjs';
-import { loadKinds as defaultLoadKinds, KINDS } from './kinds.mjs';
+import { loadKinds as defaultLoadKinds, KINDS, frameHash } from './kinds.mjs';
 
 export const HEARTBEAT_MS = 15 * 60_000;
 export const VALID_FOR_MS = 45 * 60_000;
@@ -45,7 +45,7 @@ export async function publishOnce({ userId, store, now = Date.now(), loadKinds =
     const header = (purpose, seq) => ({ purpose, userId, desktopId: state.syncId, from: state.syncId, to: dev.deviceId, epoch: keys.epoch, session: '', seq, issuedAt: now, tier: '' });
     if (dev.wrapEpoch !== keys.epoch) await writeDeviceWrap({ userId, store, state, keys, dev, now });
     const published = getPublished(userId, dev.deviceId);
-    const changed = KINDS.filter((k) => published[k]?.plainSha256 !== hex(sha256(frames[k])) || published[k]?.epoch !== keys.epoch);
+    const changed = KINDS.filter((k) => published[k]?.plainSha256 !== hex(frameHash(frames[k])) || published[k]?.epoch !== keys.epoch);
     if (!changed.length && !heartbeatDue) continue;
     const entries = Object.fromEntries(KINDS.filter((k) => published[k]).map((k) => [k, published[k]]));
     for (const kind of changed) {
@@ -53,7 +53,7 @@ export async function publishOnce({ userId, store, now = Date.now(), loadKinds =
       const bytes = envBytes(seal({ header: header('snapshot', seq), key: dk.snapshot, plaintext: frames[kind], signingKey: keys.signingKey }));
       const file = `s/${randomBytes(16).toString('hex')}.bin`;
       await store.put(`${base}/${file}`, bytes);
-      entries[kind] = { file, seq, fileSha256: hex(sha256(bytes)), plainSha256: hex(sha256(frames[kind])), epoch: keys.epoch };
+      entries[kind] = { file, seq, fileSha256: hex(sha256(bytes)), plainSha256: hex(frameHash(frames[kind])), epoch: keys.epoch };
       out.blobs += 1;
     }
     const manifestSeq = nextSeq(userId, now);
