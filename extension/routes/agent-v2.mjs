@@ -809,6 +809,8 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
   // usage event: it may carry a `total_cost_usd` from an interrupted result (R-013#1).
   let partialUsage = null;
   let usageRecorded = false;
+  // The USD the turn's ledger row carries (null = unknown), reused by the turn.end audit row.
+  let ledgerCostUsd = null;
   let runErrorCode = null;
   const toolAccounting = createToolAccounting();
   // SDK signals (rate limit, permission denial, refusal): audit and record only.
@@ -859,7 +861,6 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
   const recordTurnUsage = (usage, { conservativeCost = false } = {}) => {
     if (usageRecorded) return;
     usageRecorded = true;
-    if (adapterTurn) return;
     const meteredModel = resolvedModel ?? model;
     let costForLedger = usage?.costUsd ?? null;
     if (conservativeCost && costForLedger == null) {
@@ -867,6 +868,8 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
       // The monthly cap is only an upper bound, never the amount charged.
       costForLedger = turnBudgetUsd != null ? Math.min(estimate, turnBudgetUsd) : estimate;
     }
+    ledgerCostUsd = costForLedger;
+    if (adapterTurn) return;
     for (const row of ledgerRowsForTurn(meteredModel, { ...usage, costUsd: costForLedger })) {
       recordUsage(db, { userId, provider, requestId: turnId, ...row });
     }
@@ -1041,6 +1044,18 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
       else if (partialUsage) recordTurnUsage(partialUsage, { conservativeCost: true });
       else if (liveUsage) recordTurnUsage(liveUsage, { conservativeCost: true });
     }
+    // One audit row per finished turn (F12): who ran what. Names, counts and the mode/model/cost only —
+    // never the prompt, the reply, a file path or any tool input/output text.
+    try {
+      recordAudit(db, {
+        userId, action: 'turn.end', outcome: runErrorCode ? 'failure' : 'success',
+        detail: {
+          chatId: chatSessionId, mode, model: resolvedModel ?? model, provider,
+          toolNames: [...new Set(toolAccounting.events().map((e) => e.tool))],
+          costUsd: ledgerCostUsd, stopReason: runUsage?.stopReason ?? null,
+        },
+      });
+    } catch { /* bookkeeping never breaks the turn */ }
     replay.end();
     // Closed on every exit, a throw included: a run never stays 'running' because
     // bookkeeping failed. Status: cancelled (Stop / disconnect), error (the engine

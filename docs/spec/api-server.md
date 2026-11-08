@@ -425,6 +425,10 @@ that sum reaches the cap (audited `team.deny` `{ reason: 'usd_cap' }`), and `usd
 REMAINING budget (`min(model cap, cap - used)`) so one turn cannot cross the month line. `PUT /kb/usage/limits` stays
 self-service but may not write a usd row above the member's cap.
 
+Every finished turn (success, Stop or failure) writes one `audit_log` row: `action: 'turn.end'`, outcome `success`
+or `failure`, detail `{ chatId, mode, model, provider, toolNames, costUsd, stopReason }` — unique tool names, the
+ledger cost, and never the prompt, the reply, a file path or tool input/output text.
+
 The owner rules hold on both delete routes, not only on `PATCH /admin/members/:id`: `DELETE /admin/users/:id` answers
 `403 ROLE_DENIED` when the target is an owner the actor may not touch and `409 LAST_OWNER` for the last owner;
 `POST /auth/me/delete` answers `409 LAST_OWNER` for the sole owner (a second owner makes either deletable).

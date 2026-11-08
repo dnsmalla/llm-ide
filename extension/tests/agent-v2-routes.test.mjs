@@ -191,6 +191,42 @@ test('stream: happy path emits init → mode_set → … → result, maps sessio
   });
 });
 
+test('a finished turn leaves one turn.end audit row with mode, model, tools and cost — no content', async () => {
+  const db = getDb();
+  const user = newUser('v2route-audit@example.com');
+  const fakeTurn = async ({ onEvent }) => {
+    onEvent({ type: 'init', sessionId: 'sdk-audit', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+    onEvent({ type: 'tool_use_start', id: 't1', name: 'mcp__llmide__search_notes' });
+    onEvent({ type: 'tool_result', toolUseId: 't1', text: 'SECRET-TOOL-RESULT' });
+    onEvent({ type: 'tool_use_start', id: 't2', name: 'Bash' });
+    onEvent({ type: 'tool_result', toolUseId: 't2', text: 'SECRET-BASH-OUTPUT' });
+    onEvent({ type: 'delta', text: 'SECRET-REPLY' });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0.02, numTurns: 1, durationMs: 5, sessionId: 'sdk-audit', stopReason: 'end_turn' });
+    return { usageTotals: { inputTokens: 10, outputTokens: 2, costUsd: 0.02, stopReason: 'end_turn' } };
+  };
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'SECRET-PROMPT', mode: 'execute', model: 'claude-sonnet-5', agentContext: { chatSessionId: 'chat-audit', workspaceRoot: WS } },
+    user,
+  }), res, { runTurn: fakeTurn });
+
+  const rows = db.prepare("SELECT detail, outcome FROM audit_log WHERE user_id = ? AND action = 'turn.end'").all(user.id);
+  assert.equal(rows.length, 1, 'exactly one row per finished turn');
+  const detail = JSON.parse(rows[0].detail);
+  assert.deepEqual(detail, {
+    chatId: 'chat-audit',
+    mode: 'execute',
+    model: 'claude-sonnet-5',
+    provider: 'anthropic',
+    toolNames: ['search_notes', 'Bash'],
+    costUsd: 0.02,
+    stopReason: 'end_turn',
+  });
+  assert.ok(!rows[0].detail.includes('SECRET'), 'never the prompt, the reply or tool output');
+});
+
 // An Anthropic-compatible custom provider (Z.AI GLM's `…/api/anthropic` door)
 // rides the body as `provider`: the route forwards it verbatim to the engine
 // and meters the turn under it — not under a hardcoded 'anthropic'. Absent
