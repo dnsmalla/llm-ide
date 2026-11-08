@@ -1,7 +1,7 @@
 // Settings → Team → project (ADR 0021 H1.3): the project picker and per-project membership container.
 // Mounted by TeamSection during the integration window; kept separate so the project routes and views
 // are testable without the team admin panels.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { call } from "../core-api.ts";
 import { describeError } from "../errors.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
@@ -43,29 +43,53 @@ export default function TeamProjectsSection() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProjectMemberDraft | null>(null);
   const [add, setAdd] = useState<AddDraft>(emptyAdd);
+  // R-020 #9: every request gets a signal; a slow earlier load can never write another project's members.
+  const membersAc = useRef<AbortController | null>(null);
+  const loadAc = useRef<AbortController | null>(null);
+  const mutateAc = useRef<AbortController | null>(null);
+  const loadToken = useRef(0);
 
   const selected = projects?.find((p) => p.id === selectedId) ?? null;
 
+  useEffect(() => () => {
+    membersAc.current?.abort();
+    loadAc.current?.abort();
+    mutateAc.current?.abort();
+  }, []);
+
   const loadMembers = async (projectId: string): Promise<void> => {
+    const token = ++loadToken.current;
+    membersAc.current?.abort();
+    const controller = new AbortController();
+    membersAc.current = controller;
     try {
-      const out = await listProjectMemberRows(client, projectId);
+      const out = await listProjectMemberRows(client, projectId, controller.signal);
+      if (token !== loadToken.current || controller.signal.aborted) return;
       setMembers(out.members);
       setMemberError(null);
     } catch (e) {
+      if (token !== loadToken.current || controller.signal.aborted) return;
       setMembers(null);
       setMemberError(describeError(e));
     }
   };
 
   const load = async (): Promise<void> => {
+    loadAc.current?.abort();
+    const controller = new AbortController();
+    loadAc.current = controller;
+    loadToken.current += 1; // a members load for the previous selection is stale now
+    membersAc.current?.abort();
     let me: unknown;
     let list: ProjectSummary[];
     try {
-      [me, list] = await Promise.all([call(client, "GET", "/auth/me"), listProjects(client)]);
+      [me, list] = await Promise.all([call(client, "GET", "/auth/me", undefined, controller.signal), listProjects(client, controller.signal)]);
     } catch (e) {
+      if (controller.signal.aborted) return;
       setGate({ kind: "error", message: describeError(e) });
       return;
     }
+    if (controller.signal.aborted) return;
     const identity = decodeTeamIdentity(me);
     if (!identity) {
       setGate({ kind: "error", message: "Your account has no team role yet. Ask a team owner to assign one." });
@@ -88,6 +112,8 @@ export default function TeamProjectsSection() {
   });
 
   const selectProject = (id: string): void => {
+    loadToken.current += 1;
+    membersAc.current?.abort();
     setSelectedId(id);
     setEditingId(null);
     setDraft(null);
@@ -117,16 +143,20 @@ export default function TeamProjectsSection() {
     if (patch === null) return;
     setBusy(true);
     setActionError(null);
+    mutateAc.current?.abort();
+    const controller = new AbortController();
+    mutateAc.current = controller;
     try {
-      const updated = await patchProjectMember(client, selected.id, member.userId, patch);
+      const updated = await patchProjectMember(client, selected.id, member.userId, patch, controller.signal);
+      if (controller.signal.aborted) return;
       setMembers((prev) => (prev ? prev.map((m) => (m.userId === updated.userId ? updated : m)) : prev));
       setEditingId(null);
       setDraft(null);
       void loadMembers(selected.id);
     } catch (e) {
-      setActionError(describeError(e));
+      if (!controller.signal.aborted) setActionError(describeError(e));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   };
 
@@ -134,15 +164,19 @@ export default function TeamProjectsSection() {
     if (gate.kind !== "ready" || !selected || busy) return;
     setBusy(true);
     setActionError(null);
+    mutateAc.current?.abort();
+    const controller = new AbortController();
+    mutateAc.current = controller;
     try {
-      await removeProjectMember(client, selected.id, member.userId);
+      await removeProjectMember(client, selected.id, member.userId, controller.signal);
+      if (controller.signal.aborted) return;
       setMembers((prev) => (prev ? prev.filter((m) => m.userId !== member.userId) : prev));
       setEditingId(null);
       setDraft(null);
     } catch (e) {
-      setActionError(describeError(e));
+      if (!controller.signal.aborted) setActionError(describeError(e));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   };
 
@@ -153,15 +187,19 @@ export default function TeamProjectsSection() {
     if (body === null) return;
     setBusy(true);
     setActionError(null);
+    mutateAc.current?.abort();
+    const controller = new AbortController();
+    mutateAc.current = controller;
     try {
-      const member = await addProjectMember(client, selected.id, body);
+      const member = await addProjectMember(client, selected.id, body, controller.signal);
+      if (controller.signal.aborted) return;
       setMembers((prev) => (prev ? [...prev, member] : [member]));
       setAdd(emptyAdd());
       void loadMembers(selected.id);
     } catch (e) {
-      setActionError(describeError(e));
+      if (!controller.signal.aborted) setActionError(describeError(e));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   };
 

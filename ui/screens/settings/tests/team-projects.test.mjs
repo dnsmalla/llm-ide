@@ -230,3 +230,19 @@ test("container: no fake rows before /auth/me and /projects answer", () => {
   assert.ok(!/eng@example\.com|owner@example\.com/.test(out), "no fake rows");
   assert.equal(requested, 0, "the first paint makes no request");
 });
+
+test('R-020 #9: project list and member requests carry an AbortSignal', async () => {
+  const seen = [];
+  const client = {
+    async request(method, path, body, signal) {
+      seen.push({ path, signal });
+      if (path.endsWith('/members')) return { status: 200, body: { project: { id: 'p-one', name: 'One' }, members: [] } };
+      return { status: 200, body: { projects: [] } };
+    },
+  };
+  const ac = new AbortController();
+  await m.model.listProjects(client, ac.signal);
+  await m.model.listProjectMemberRows(client, 'p-one', ac.signal);
+  assert.equal(seen.length, 2);
+  assert.ok(seen.every((s) => s.signal === ac.signal), 'the signal reaches every request');
+});

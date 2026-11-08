@@ -249,37 +249,41 @@ export { decodeTeamIdentity } from "./team-model.ts";
 
 // ---- the routes (call() throws ApiError; a non-2xx is never data here) -------------------------------
 
-export const listProjects = async (client: CoreClient): Promise<ProjectSummary[]> =>
-  decodeProjects(await call(client, "GET", "/projects"));
+export const listProjects = async (client: CoreClient, signal?: AbortSignal): Promise<ProjectSummary[]> =>
+  decodeProjects(await call(client, "GET", "/projects", undefined, signal));
 
 export const listProjectMemberRows = async (
   client: CoreClient,
   projectId: string,
+  signal?: AbortSignal,
 ): Promise<{ project: { id: string; name: string }; members: ProjectMember[] }> =>
-  decodeProjectMembers(await call(client, "GET", `/projects/${encodeURIComponent(projectId)}/members`));
+  decodeProjectMembers(await call(client, "GET", `/projects/${encodeURIComponent(projectId)}/members`, undefined, signal));
 
 export const addProjectMember = async (
   client: CoreClient,
   projectId: string,
   body: AddProjectMemberBody,
+  signal?: AbortSignal,
 ): Promise<ProjectMember> =>
-  decodeProjectMemberResponse(await call(client, "POST", `/projects/${encodeURIComponent(projectId)}/members`, body));
+  decodeProjectMemberResponse(await call(client, "POST", `/projects/${encodeURIComponent(projectId)}/members`, body, signal));
 
 export const patchProjectMember = async (
   client: CoreClient,
   projectId: string,
   userId: string,
   patch: ProjectMemberPatch,
+  signal?: AbortSignal,
 ): Promise<ProjectMember> =>
   decodeProjectMemberResponse(await call(
-    client, "PATCH", `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`, patch,
+    client, "PATCH", `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`, patch, signal,
   ));
 
 export const removeProjectMember = async (
   client: CoreClient,
   projectId: string,
   userId: string,
+  signal?: AbortSignal,
 ): Promise<boolean> =>
   decodeProjectRemoved(await call(
-    client, "DELETE", `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+    client, "DELETE", `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`, undefined, signal,
   ));
