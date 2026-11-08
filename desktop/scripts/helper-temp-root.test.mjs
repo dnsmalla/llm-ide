@@ -12,10 +12,12 @@ import { fileURLToPath } from 'node:url';
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const HUB = join(REPO, 'deploy/hub');
 const skip = process.platform === 'win32' ? 'POSIX shell only' : false;
-const helperSource = readFileSync(join(HUB, 'llmide-deploy'), 'utf8');
-const unitSource = readFileSync(join(HUB, 'llmide-core.service'), 'utf8');
-const backupUnitSource = readFileSync(join(HUB, 'llmide-backup.service'), 'utf8');
-const logrotateSource = readFileSync(join(HUB, 'logrotate'), 'utf8');
+// Windows checkouts use CRLF; the helper and its embedded files are LF on the server.
+const read = (name) => readFileSync(join(HUB, name), 'utf8').replaceAll('\r\n', '\n');
+const helperSource = read('llmide-deploy');
+const unitSource = read('llmide-core.service');
+const backupUnitSource = read('llmide-backup.service');
+const logrotateSource = read('logrotate');
 
 function has(command) {
   return spawnSync('sh', ['-c', `command -v ${command}`], { encoding: 'utf8' }).status === 0;
@@ -211,6 +213,21 @@ test('a rejected first vhost is removed so nginx -t stays healthy', { skip: skip
     const result = h.runFail('nginx');
     assert.notEqual(result.status, 0);
     assert.ok(!existsSync(h.site), 'the rejected vhost must not be left in sites-enabled');
+  } finally { h.cleanup(); }
+});
+
+test('nginx refuses a certificate renewal without reuse_key', { skip }, () => {
+  const h = harness();
+  try {
+    h.run('base', `${h.stage}\n`);
+    h.run('env', 'NODE_ENV=production\nLLMIDE_HUB_DOMAIN=hub.example.test\nLLMIDE_HUB_VERSION=1.2.3\n');
+    const renewal = join(h.root, 'etc/letsencrypt/renewal/hub.example.test.conf');
+    mkdirSync(dirname(renewal), { recursive: true });
+    writeFileSync(renewal, '[renewalparams]\nkey_type = ecdsa\n');
+    h.run('upload', 'llm-ide-hub.nginx\nserver { listen 443 ssl; }\n');
+    const r = h.runFail('nginx');
+    assert.notEqual(r.status, 0, 'a renewing key rotation must be refused');
+    assert.match(r.stderr, /reuse-key/);
   } finally { h.cleanup(); }
 });
 
