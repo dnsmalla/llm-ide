@@ -15,7 +15,10 @@ import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId
 import { getDb } from '../../kb/db.mjs';
 import { getMember, classRefusal } from '../../kb/members.mjs';
 
-export const MAX_SESSIONS = 4;
+// ADR 0021 hub: the cap belongs to ONE member (their phones and browsers), not to the whole install. The
+// global ceiling is hub-sized so a team's members do not shut each other out; it still bounds the core.
+export const MAX_SESSIONS_PER_USER = 4;
+export const MAX_SESSIONS = 64;
 export const AUTH_DEADLINE_MS = 10_000; // a session not authenticated by then is closed
 const TOP_LEVEL_ID = /^\s*\{(?:\s*"(?:apiVersion|type|command|ts)"\s*:\s*(?:"[^"\\]*"|[0-9.eE+-]+)\s*,)*\s*"id"\s*:\s*"([^"\\]{1,128})"/;
 export const MAX_UNAUTHENTICATED_PER_PEER = 2; // so one peer cannot hold every MAX_SESSIONS slot before auth
@@ -188,7 +191,7 @@ export function createGateway(overrides) {
   function opened(session, peer) {
     const key = peerKey(peer);
     const pending = [...sessions.values()].filter((e) => !e.state.deviceId && peerKey(e.peer) === key).length;
-    const why = sessions.size >= MAX_SESSIONS ? 'This computer already has the maximum number of Host API connections.'
+    const why = sessions.size >= MAX_SESSIONS ? 'This hub already has the maximum number of Host API connections.'
       : pending >= MAX_UNAUTHENTICATED_PER_PEER ? 'This device already has connections waiting to sign in — finish or close one first.' : null;
     if (why) {
       fail(session, null, 'busy', why, { retryable: true });
@@ -216,6 +219,17 @@ export function createGateway(overrides) {
       o.zombie = true;
       requestCancel(o);
     }
+  }
+
+  // Per-member cap (ADR 0021 hub): count only this member's authenticated connections.
+  const userSessionCount = (userId) => [...sessions.values()].filter((e) => e.state.userId === userId).length;
+
+  /** Over the member's own cap: the per-install refusal text is unchanged; the connection is closed. */
+  function refuseUserCap(s, entry, replyTo, userId, event) {
+    audit(event, { peer: entry.peer, userId, detail: 'session_limit' });
+    fail(s, replyTo, 'busy', 'This computer already has the maximum number of Host API connections.', { retryable: true });
+    deps.close(s);
+    closed(s);
   }
 
   // cancelChatTurn is chat-wide: call it only for a command that holds the engine lock (its init arrived), so a
@@ -470,6 +484,8 @@ export function createGateway(overrides) {
           return fail(s, id, 'auth_failed', 'Wrong PIN.');
         }
         pairThrottle.success(entry.peer);
+        // The cap is per member: their own phones and browsers, not every member of the hub.
+        if (userSessionCount(pinUser) >= MAX_SESSIONS_PER_USER) return refuseUserCap(s, entry, id, pinUser, 'pair_failed');
         // ADR 0021: a viewer / `max_mode` none member is served the minimum only. The filter is applied
         // here, at pairing, so the token's scopes never carry chat / approvals / tool_approvals / compose.
         const served2 = minimalFor(deps.member(pinUser), served);
@@ -490,6 +506,7 @@ export function createGateway(overrides) {
           return fail(s, id, 'auth_failed', 'This device is no longer paired with this computer — pair again with a new PIN.');
         }
         tokenThrottle.success(entry.peer);
+        if (userSessionCount(auth.userId) >= MAX_SESSIONS_PER_USER) return refuseUserCap(s, entry, id, auth.userId, 'token_failed');
         entry.state.authenticated(auth.userId, auth.deviceId);
         clearTimeout(entry.timer);
         // Re-auth recomputes from the stored scopes ∩ the member filter, so a demoted member loses chat

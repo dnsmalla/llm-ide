@@ -8,7 +8,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
-function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null, member = () => ({ teamRole: 'owner', maxMode: 'execute' }) } = {}) {
+function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null, pinUser = () => 'u1', member = () => ({ teamRole: 'owner', maxMode: 'execute' }) } = {}) {
   const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, readCalls: [], pending: [], audits: [], modelCalls: 0, member };
   const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
@@ -30,7 +30,7 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     member: (userId) => t.member(userId),
     log: () => {},
     chatClearEnabled: () => chatClear,
-    pins: { consumePin: (pin) => (pin === '123456' ? 'u1' : null) },
+    pins: { consumePin: (pin) => (pin === '123456' ? pinUser() : null) },
     devices: t.devices,
     quickChat: { get: () => quick, set: (_u, id) => { quick = id; }, create: () => `chat-${++made}` },
     models: async () => { t.modelCalls += 1; if (models instanceof Error) throw models; return models ?? [{ id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5' }]; },
@@ -78,6 +78,28 @@ test('pairing: hello, pair, then the token authenticates a second session', asyn
   await t.g.receive(s2, req('c-t', 'host.auth.token', { token: result.token }));
   assert.equal(t.last().type, 'response');
   assert.deepEqual(t.last().result, { capabilities: ['host', 'chat', 'approvals'] });
+});
+
+test('the session cap is per member: four each for two users, a fifth for one is busy', async () => {
+  let who = 'u1';
+  const t = harness({ pinUser: () => who });
+  const open = async (n) => { const s = { n }; t.g.opened(s, '127.0.0.1'); await t.paired(s); return s; };
+  for (let i = 1; i <= 4; i += 1) {
+    const s = await open(i);
+    assert.equal(t.last().type, 'response', `user 1 session ${i} pairs`);
+    assert.ok(!t.closed.includes(s));
+  }
+  const fifth = await open(5);
+  assert.equal(t.lastError(), 'busy');
+  assert.equal(t.last().error.retryable, true);
+  assert.ok(t.closed.includes(fifth), 'the over-cap connection is closed');
+  // A different member is not affected by the first member's four connections.
+  who = 'u2';
+  const other = await open(6);
+  assert.equal(t.last().type, 'response', 'another user still pairs their first session');
+  assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals']);
+  assert.ok(!t.closed.includes(other));
+  assert.equal([...t.tokens.values()].filter((v) => v.userId === 'u1').length, 4, 'no token was issued for the refused session');
 });
 
 test('wrong PIN: auth_failed, not retryable; commands before auth are refused', async () => {
@@ -309,20 +331,22 @@ test('hello carries certificateFingerprint when the host has one', async () => {
   assert.equal(t.last().result.certificateFingerprint, fp);
 });
 
-test('a fifth session is refused busy; an unauthenticated session closes after 10 s', async () => {
+test('the hub-wide session cap is 64, and an unauthenticated session closes after 10 s', async () => {
   mock.timers.enable({ apis: ['setTimeout'] });
   try {
     const t = harness();
-    const ss = [{}, {}, {}, {}];
-    ss.forEach((s, i) => t.g.opened(s, `10.0.0.${i + 1}`)); // distinct peers: one peer may hold only 2 before auth
-    const fifth = {};
-    t.g.opened(fifth, '10.0.0.9');
+    const ss = Array.from({ length: 64 }, (_, i) => ({ i }));
+    ss.forEach((s, i) => t.g.opened(s, `10.0.${i}.1`)); // distinct peers: one peer may hold only 2 before auth
+    const over = {};
+    t.g.opened(over, '10.9.9.9');
     assert.equal(t.lastError(), 'busy');
-    assert.deepEqual(t.closed, [fifth]);
+    assert.match(t.last().error.message, /hub/, 'the global refusal names the hub, not "this computer"');
+    assert.deepEqual(t.closed, [over]);
     await t.g.receive(ss[0], req('c-h', 'host.hello', HELLO));
     await t.g.receive(ss[0], req('c-p', 'host.auth.pair', { pin: '123456' }));
     mock.timers.tick(10_000);
-    assert.deepEqual(new Set(t.closed), new Set([fifth, ss[1], ss[2], ss[3]]));
+    assert.equal(new Set(t.closed).size, 64, 'the over-cap session and every unauthenticated one (except the paired one) are closed');
+    assert.ok(t.closed.includes(over));
   } finally {
     mock.timers.reset();
   }
