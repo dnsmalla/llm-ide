@@ -23,6 +23,7 @@ import {
 import { getSecret } from '../server/vault.mjs';
 import { listCustomProviders } from '../server/custom-providers.mjs';
 import { listConnectionModels, testConnection } from '../providers/provider-models.mjs';
+import { authorizeAction, projectScopeRefusal } from '../server/route-authority.mjs';
 import { runProviderTurn, ProviderTurnError } from '../llm_agent/adapter/provider-turn.mjs';
 import { migrateLegacyProviderKeys, migrationView, legacyKeyFor } from '../providers/legacy-key-migration.mjs';
 import { logger } from '../core/logger.mjs';
@@ -146,6 +147,14 @@ export async function handleProviderCatalog(req, res, { userId, url }) {
 
 async function handleTurn(req, res, userId, db) {
   const b = await body(req, res, 1024 * 1024); if (!b) return true;
+  // R-020 Q1: a hub turn names a known project; the project grant may only narrow the team grant.
+  const projectId = typeof b.projectId === 'string' && b.projectId ? b.projectId : null;
+  const scopeRefusal = projectScopeRefusal(db, userId, projectId);
+  if (scopeRefusal) { err(res, scopeRefusal.status, scopeRefusal.code, scopeRefusal.message); return true; }
+  if (projectId) {
+    const decision = authorizeAction(db, userId, 'model.exec', { projectId, req });
+    if (!decision.ok) { err(res, decision.status, decision.code, decision.message); return true; }
+  }
   const ac = new AbortController();
   onClientDisconnect(req, res, () => ac.abort());
   let streaming = false;

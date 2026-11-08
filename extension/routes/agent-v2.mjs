@@ -36,7 +36,7 @@ import {
 } from '../kb/agent-sessions.mjs';
 import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens, usedUsdMonth, usdCapForModel, estimateTurnCostUsd } from '../kb/usage.mjs';
 import { usedUsdMonthForProject } from '../kb/project-usage.mjs';
-import { effectiveProjectGrant, getProjectMember, projectIdForRoot } from '../kb/projects.mjs';
+import { effectiveProjectGrant, getProject, getProjectMember, projectIdForRoot } from '../kb/projects.mjs';
 import { randomUUID } from 'node:crypto';
 import { hostApprovalEnabled, verifyRequestApproval, bypassForbiddenOrigin, bypassGrants, CHAT_ID_RE, bypassPurpose } from '../core/host-approval.mjs';
 import { recordAudit } from '../server/audit.mjs';
@@ -574,6 +574,11 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
     ? body.projectId
     : (typeof agentContext?.projectId === 'string' && agentContext.projectId ? agentContext.projectId : '');
   const turnProjectId = requestedProjectId || projectIdForRoot(getDb(), agentContext?.workspaceRoot) || null;
+  // R-020 Q1 (decision): on a hub every project-scoped turn names a known project; there is no team-role fallback.
+  if (config.hub) {
+    if (!turnProjectId) return io.refuse({ code: 'PROJECT_REQUIRED', status: 400, message: 'A project is required on this hub' });
+    if (!getProject(getDb(), turnProjectId)) return io.refuse({ code: 'PROJECT_DENIED', status: 403, message: 'That project is not available' });
+  }
   if (turnProjectId) body.projectId = turnProjectId;
   const projectGrant = turnProjectId ? effectiveProjectGrant(getDb(), userId, turnProjectId) : null;
   const projectMember = turnProjectId ? getProjectMember(getDb(), userId, turnProjectId) : null;

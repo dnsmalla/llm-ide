@@ -21,10 +21,11 @@
 
 import { usedUsdMonth } from '../kb/usage.mjs';
 import { usedUsdMonthForProject } from '../kb/project-usage.mjs';
-import { effectiveProjectGrant, getProjectMember, projectGrantAsMember } from '../kb/projects.mjs';
+import { canManageProjectGrant, effectiveProjectGrant, getProject, getProjectMember, projectGrantAsMember } from '../kb/projects.mjs';
 import { recordAudit } from './audit.mjs';
 import { sendJSON } from '../core/utils.mjs';
 import { getMember, classRefusal, CLASS_GRANTS } from '../kb/members.mjs';
+import { config } from '../core/config.mjs';
 
 const REFUSALS = Object.freeze({
   role_denied: { status: 403, code: 'ROLE_DENIED', message: (need) => `Requires team role ${need?.role ?? 'member'}` },
@@ -32,7 +33,33 @@ const REFUSALS = Object.freeze({
   max_mode_insufficient: { status: 403, code: 'ROLE_DENIED', message: (need) => `Requires the ${need?.mode} run mode` },
   usd_cap: { status: 429, code: 'USD_CAP', message: () => 'Monthly USD cap reached' },
   unknown_class: { status: 403, code: 'ROLE_DENIED', message: () => 'This action is not permitted' },
+  // Hub mode requires an explicit, known project for project work (R-020 Q1 decision).
+  project_required: { status: 400, code: 'PROJECT_REQUIRED', message: () => 'A project is required on this hub' },
+  project_denied: { status: 403, code: 'PROJECT_DENIED', message: () => 'That project is not available' },
 });
+
+/**
+ * R-020 Q1 (hub): the project-work routes whose handlers must name a project. The policy cannot see a body-carried
+ * id, so it validates one when present and the handler calls `projectScopeRefusal` + re-checks the project grant.
+ * A local/solo install keeps the team fallback for compatibility.
+ */
+export const PROJECT_WORK_ROUTES = Object.freeze([
+  'POST /agent/v2/stream', 'POST /kb/agent/ask', 'POST /kb/loop/agent-run', 'POST /kb/providers/turn',
+  'POST /kb/generate-code', 'POST /kb/project/install-skills',
+  'POST /kb/issues/create', 'POST /kb/issues/comment', 'POST /kb/issues/close',
+]);
+
+/** The refusal for a hub request that must name a known project, or null. A non-hub install is never refused. */
+export function projectScopeRefusal(db, userId, projectId) {
+  if (!config.hub) return null;
+  if (typeof projectId !== 'string' || projectId.length === 0) {
+    return { status: 400, code: 'PROJECT_REQUIRED', message: 'A project is required on this hub' };
+  }
+  if (!getProject(db, projectId)) {
+    return { status: 403, code: 'PROJECT_DENIED', message: 'That project is not available' };
+  }
+  return null;
+}
 
 function refuse(db, userId, reason, cls) {
   try {
@@ -72,27 +99,36 @@ export function authorizeAction(db, userId, cls, { req = null, projectId = null 
   if (!userId) return refuse(db, null, 'role_denied', cls);
   const member = getMember(db, userId);
   const pid = projectId ?? projectIdForRequest(req?.method, req?.url);
-  let scopeMember = member;
   let grant = null;
-  let usedUsd = () => usedUsdMonth(db, userId);
+  let projectMember = null;
   if (pid) {
     grant = effectiveProjectGrant(db, userId, pid);
-    scopeMember = projectGrantAsMember(grant);
-    const projectMember = getProjectMember(db, userId, pid);
-    const globalCap = Number(member?.usdCapMonth ?? 0);
-    const projectCap = Number(projectMember?.usdCapMonth ?? 0);
-    if (projectCap > 0 && (globalCap === 0 || projectCap <= globalCap)) {
-      usedUsd = () => usedUsdMonthForProject(db, userId, pid);
+    projectMember = getProjectMember(db, userId, pid);
+  }
+  // R-020 Q1: a project id a request names must exist on a hub (the required part is the handler's, since a
+  // body-carried id is not visible here).
+  if (config.hub && pid && !getProject(db, pid)) return refuse(db, userId, 'project_denied', cls);
+  // R-020 #3: a project grant may only NARROW the team role. `project.admin` is the one project-only class
+  // (a project owner is not a team admin); every other class must pass the team row AND the project row.
+  let reason = null;
+  if (cls === 'project.admin') {
+    reason = pid && canManageProjectGrant(grant) ? null : 'role_denied';
+  } else {
+    // R-020 #2: the member's month is always checked, even when a tighter project cap is in force.
+    reason = classRefusal(member, cls, () => usedUsdMonth(db, userId));
+    if (!reason && pid) {
+      const projectCap = Number(projectMember?.usdCapMonth ?? 0);
+      const usedProject = projectCap > 0 ? () => usedUsdMonthForProject(db, userId, pid) : null;
+      reason = classRefusal(projectGrantAsMember(grant), cls, usedProject);
     }
   }
-  const reason = classRefusal(scopeMember, cls, usedUsd);
   if (reason) return refuse(db, userId, reason, cls);
   if (req) {
     req.member = member;
     if (grant) req.projectGrant = grant;
     if (pid) req.projectId = pid;
   }
-  return { ok: true, member: scopeMember, projectGrant: grant, projectId: pid };
+  return { ok: true, member: grant && cls !== 'project.admin' ? projectGrantAsMember(grant) : member, projectGrant: grant, projectId: pid };
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

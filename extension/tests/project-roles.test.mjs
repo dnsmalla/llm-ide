@@ -332,3 +332,65 @@ test('a turn can inherit the registered project from its canonical root', () => 
   assert.equal(projectIdForRoot(db(), ''), null);
   assert.equal(projectIdForRoot(db(), null), null);
 });
+
+// ── R-020 #2/#3: the route-authority layer ─────────────────────────────────
+const { authorizeAction } = await import('../server/route-authority.mjs');
+
+test('#2 the member month is checked even when a tighter project cap is in force', () => {
+  const owner = user('cap-owner@example.com', 'owner', 'execute', 0);
+  const member = user('cap-member@example.com', 'member', 'execute', 20);
+  registerProject(db(), owner, { id: 'p-cap', root: '/r/cap' });
+  setProjectMember(db(), owner, 'p-cap', member, { role: 'member', maxMode: 'execute', usdCapMonth: 10 });
+  // The member already spent 50 of a 20 USD month; the project itself has spent nothing.
+  db().prepare("INSERT INTO usage_ledger (user_id, provider, model, source, runs, cost_usd) VALUES (?, 'anthropic', 'm', 'turn', 1, 50)").run(member);
+  assert.equal(authorizeAction(db(), member, 'model.exec').reason, 'usd_cap');
+  assert.equal(authorizeAction(db(), member, 'model.exec', { projectId: 'p-cap' }).reason, 'usd_cap',
+    'naming a project whose cap is tighter must not skip the member cap');
+});
+
+test('#3 a project role can never pass a team-level class (admin stays team-only)', () => {
+  const eng = user('eng-admin@example.com', 'member', 'execute', 0);
+  registerProject(db(), eng, { id: 'p-eng', root: '/r/eng' });
+  assert.equal(authorizeAction(db(), eng, 'admin').ok, false, 'engineer is not a team admin');
+  assert.equal(authorizeAction(db(), eng, 'admin', { req: { method: 'GET', url: '/admin/members?project=p-eng' } }).ok, false,
+    'project ownership must not widen the team admin class');
+  assert.equal(authorizeAction(db(), eng, 'project.admin', { projectId: 'p-eng' }).ok, true, 'but it does manage that project');
+
+  // A team viewer with a project owner row still cannot manage the project (H1.2 floor).
+  const owner = user('view-owner@example.com', 'owner', 'execute', 0);
+  const viewer = user('view-admin@example.com', 'viewer', 'read_only', 0);
+  registerProject(db(), owner, { id: 'p-view', root: '/r/view' });
+  addProjectMemberByEmail(db(), owner, 'p-view', { email: 'view-admin@example.com' });
+  setProjectMember(db(), owner, 'p-view', viewer, { role: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+  assert.equal(authorizeAction(db(), viewer, 'project.admin', { projectId: 'p-view' }).ok, false);
+  assert.equal(authorizeAction(db(), viewer, 'model.exec', { projectId: 'p-view' }).ok, false);
+});
+
+// ── R-020 #4/#5: one canonical root per project ───────────────────────────
+test('#5 a root is looked up canonically (trailing slash, dot segments, realpath, case on mac/windows)', () => {
+  const owner = user('canon-owner@example.com', 'owner', 'execute', 0);
+  const dir = fs.mkdtempSync(path.join(root, 'real-'));
+  registerProject(db(), owner, { id: 'p-real', root: dir });
+  assert.equal(projectIdForRoot(db(), `${dir}/`), 'p-real', 'a trailing slash still matches');
+  assert.equal(projectIdForRoot(db(), path.join(root, '.', path.basename(dir))), 'p-real', 'a dot segment still matches');
+  if (process.platform === 'darwin' || process.platform === 'win32') {
+    assert.equal(projectIdForRoot(db(), dir.toUpperCase()), 'p-real', 'case differences match on a case-insensitive platform');
+  }
+  assert.equal(projectIdForRoot(db(), `${dir}/missing`), null);
+});
+
+test('#4 a second project id cannot claim an already registered root', () => {
+  const owner = user('squat-owner@example.com', 'owner', 'execute', 0);
+  const eng = user('squat-eng@example.com', 'member', 'execute', 0);
+  registerProject(db(), owner, { id: 'p-victim', root: '/r/shared/victim' });
+  assert.throws(
+    () => registerProject(db(), eng, { id: 'p-squat', root: '/r/shared/victim' }),
+    (e) => e.code === 'PROJECT_EXISTS' && e.status === 409,
+  );
+  assert.throws(
+    () => registerProject(db(), eng, { id: 'p-squat-2', root: '/r/shared/victim/' }),
+    (e) => e.code === 'PROJECT_EXISTS',
+    'a trailing slash is the same folder',
+  );
+  assert.equal(projectIdForRoot(db(), '/r/shared/victim'), 'p-victim', 'the original project still resolves');
+});
