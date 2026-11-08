@@ -85,8 +85,11 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
   const hostAvailable = shellHost.isAvailable();
   const view = useCoreStatusView();
-  const remoteMode = coreStatusStore.getSnapshot().status?.mode === "remote";
-  const visibleSections = visibleSectionsFor(remoteMode ? "remote" : "local");
+  const serverMode = coreStatusStore.getSnapshot().status?.mode;
+  const modeKnown = serverMode === "local" || serverMode === "remote";
+  const remoteMode = serverMode === "remote";
+  // Until the first status poll the mode is unknown: render no section rather than briefly mounting local ones.
+  const visibleSections = modeKnown ? visibleSectionsFor(remoteMode ? "remote" : "local") : [];
   // Next-launch crash notice (Mac CrashReportBanner): read once; Dismiss deletes the host's records.
   const [crash, setCrash] = useState<CrashNotice | null>(null);
   useEffect(() => {

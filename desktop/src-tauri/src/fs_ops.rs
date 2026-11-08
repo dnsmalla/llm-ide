@@ -1073,6 +1073,7 @@ where
     F: FnOnce(PathBuf) -> R<T> + Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(move || {
+        crate::core_host::require_local_mode()?;
         let root = active_root()?;
         f(root)
     })

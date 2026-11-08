@@ -308,6 +308,15 @@ impl Drop for Inner {
     }
 }
 
+/// Process-wide mode for host commands that have no `CoreHost` state (fs, pty, capture). Set in `set_mode`.
+static MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn require_local_mode() -> Result<(), crate::fs_ops::FsError> {
+    if MODE.load(Ordering::SeqCst) == 1 {
+        Err(crate::fs_ops::FsError { code: "remote_mode", message: "This action uses the local computer and is unavailable in remote mode.".into() })
+    } else { Ok(()) }
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -360,7 +369,9 @@ impl CoreHost {
     /// echoes this launch's nonce. Callers that hand a credential to the core re-ask at every use, so a
     /// restart on another port (or a squatter) is never sent a stale URL's token.
     pub fn set_mode(&self, mode: ServerMode) {
-        self.inner.mode.store(if mode == ServerMode::Remote { 1 } else { 0 }, Ordering::SeqCst);
+        let v = if mode == ServerMode::Remote { 1 } else { 0 };
+        self.inner.mode.store(v, Ordering::SeqCst);
+        MODE.store(v, Ordering::SeqCst);
     }
 
     pub fn mode(&self) -> ServerMode {
