@@ -225,3 +225,10 @@ test('engine: an untrusted clean folder is strict with no notice; trusted or swi
     assert.equal(c.events.some((e) => e.kind === 'workspace_trust'), false);
   } finally { delete process.env.LLMIDE_WORKSPACE_TRUST; }
 });
+
+test('R-020 #8: a hub turn is strict even in a trusted folder', async () => {
+  const { strictMcpForTurn } = await import('../llm_agent/sdk/engine.mjs');
+  assert.equal(strictMcpForTurn({ strict: false }, true), true, 'the hub is strict regardless of folder trust');
+  assert.equal(strictMcpForTurn({ strict: true }, false), true, 'an untrusted folder stays strict');
+  assert.equal(strictMcpForTurn({ strict: false }, false), false, 'a solo trusted folder keeps the legacy discovery');
+});

@@ -63,6 +63,7 @@ import { neutralizePromptFences } from '../../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel, remainingMonthlyUsd, getLimits } from '../../kb/usage.mjs';
+import { config } from '../../core/config.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { selectSessionMemory } from '../memory/session-memory-select.mjs';
@@ -1275,6 +1276,15 @@ export function approvalArgsFor(toolName, input) {
 // resuming (`init`, `usage` and passthrough `sdk` events don't count).
 const TURN_PROGRESS_EVENTS = new Set(['delta', 'tool_use_start', 'tool_args_delta', 'tool_result']);
 
+/**
+ * Whether a turn runs with the CLI's MCP discovery disabled. An untrusted folder is always strict; on a HUB every
+ * turn is, because the CLI would otherwise load a workspace `.mcp.json` or the service user's `~/.claude.json` and
+ * spawn stdio servers as the core's OS user (R-020 #8). `hub` is injectable for the test.
+ */
+export function strictMcpForTurn(wsTrust, hub = config.hub) {
+  return wsTrust?.strict === true || hub === true;
+}
+
 export async function runAgentV2Turn(
   {
     message, userId, mode, model, language, skills, agentContext, attachments, effort,
@@ -1755,7 +1765,9 @@ export async function runAgentV2Turn(
   if (wsTrustNotice) onEvent?.(wsTrustNotice);
   const q = queryFactory(buildPromptInput(prompt, images), {
     ...queryOptions,
-    ...(wsTrust.strict ? { strictMcpConfig: true } : {}),
+    // R-020 #8: on a hub the CLI's own MCP discovery (workspace .mcp.json and the service user's ~/.claude.json)
+    // must never spawn a stdio server as the core's OS user; only llmide + the already-filtered user servers mount.
+    ...(strictMcpForTurn(wsTrust) ? { strictMcpConfig: true } : {}),
     // A gateway (Anthropic-compatible custom provider) may not accept the
     // effort parameter; leave that turn at its backend's own default.
     ...(gatewayBaseUrl && queryOptions.effort ? { effort: undefined } : {}),
