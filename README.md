@@ -263,6 +263,7 @@ Access, or move the project outside `~/Desktop`, `~/Documents` and `~/Downloads`
 - **Auto Tasks** page: built-in + custom tasks, cron schedules, Loop Engineering
 - **Plugins**, **MCP connectors**, **SCIP ingestion** (`POST /kb/ingest-scip`)
 - Settings → Phone and web sync: encrypted sync to your own server, Box or MEGA
+- Settings → Server & Backend → Remote server: choose **Local desktop** or an SSH **Remote server** and test the key connection (phase 1; deploy lands in phase 2). See [configure a remote server](docs/how-to/configure-remote-server.md).
 
 ### iPhone and Web
 - Pair with the desktop (Settings → Phone and web sync, or Host API v1 pairing)
@@ -408,6 +409,7 @@ Inside each **project**, LLM-IDE scaffolds `source/{meetings,emails,documents}/`
 | API overview | [docs/reference/api/overview.md](docs/reference/api/overview.md) |
 | Project folder layout | [docs/reference/project-layout.md](docs/reference/project-layout.md) |
 | Architecture decisions | [docs/decisions/](docs/decisions/) (ADRs 0001–0022) |
+| Remote server mode (phase 1) | [docs/how-to/configure-remote-server.md](docs/how-to/configure-remote-server.md) |
 | Central skills install | [docs/how-to/install-central-skills.md](docs/how-to/install-central-skills.md) |
 | Contribute | [docs/how-to/contribute.md](docs/how-to/contribute.md) |
 
