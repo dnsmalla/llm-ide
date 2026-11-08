@@ -40,6 +40,8 @@ import { isDeclined, isPendingCorrupt, PENDING_CORRUPT_NOTICE } from "./tauri-st
 import { claimSession, sessionVisible } from "./surface-sessions";
 import { coreStatusStore } from "../shell/runtime";
 import { allowedModes, chatBlockReason, permissionsFromMe } from "../shell/permissions";
+import { projectIdFor } from "../docgen/docs-api";
+import { projectsFromMe } from "../settings/team-projects-model";
 
 export interface ChatHost {
   /** Opens an allowlisted URL with the system handler. */
@@ -125,7 +127,10 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const effortPick = useSyncExternalStore(effortStore.subscribe, effortStore.get, effortStore.get);
   const [route, setRoute] = useState<RouteView | null>(null);
   // Plan H1.2: the action classes the core says this member may use; null = unknown (an older core), hide nothing.
+  // ADR 0022: when a project is open, the PROJECT grant's permissions replace the team ones, so a project
+  // viewer sees Ask only even if they are an engineer elsewhere.
   const [perms, setPerms] = useState<ReadonlySet<string> | null>(null);
+  const openProjectRoot = host.projectRoot?.() ?? null;
   // A supervised core restart invalidates running-turn state and provider/model caches: follow its restart counter.
   const coreRestarts = useSyncExternalStore(coreStatusStore.subscribe, () => coreStatusStore.getSnapshot().status?.restarts ?? 0, () => 0);
   const plans = useMemo(() => new PlanController(host.compose?.project ?? null), [host.compose?.project]);
@@ -159,10 +164,17 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   useEffect(() => {
     const ac = new AbortController();
     core.json<unknown>("GET", "/auth/me", undefined, ac.signal)
-      .then((body) => setPerms(permissionsFromMe(body)))
+      .then(async (body) => {
+        if (openProjectRoot) {
+          const projectId = await projectIdFor(openProjectRoot);
+          const project = projectsFromMe(body)?.find((p) => p.id === projectId);
+          if (project) { setPerms(new Set(project.permissions)); return; }
+        }
+        setPerms(permissionsFromMe(body));
+      })
       .catch(() => setPerms(null));
     return () => ac.abort();
-  }, [core, coreRestarts]);
+  }, [core, coreRestarts, openProjectRoot]);
 
   // A restarted core may have lost the live stream: pick up a turn that is still running.
   useEffect(() => {

@@ -172,7 +172,15 @@ export default function TeamSection() {
   };
 
   if (gate.kind === "checking") return <p className="st-hint" role="status">Checking your team role…</p>;
-  if (gate.kind === "forbidden") return <TeamAccessNotice teamRole={gate.teamRole} />;
+  if (gate.kind === "forbidden") {
+    return (
+      <div className="st-stack">
+        <TeamAccessNotice teamRole={gate.teamRole} />
+        <p className="st-hint">Project roles are below. Team-wide members and invites stay with the team owner and admins.</p>
+        <TeamProjectsSection />
+      </div>
+    );
+  }
   if (gate.kind === "error") {
     return (
       <div className="st-stack">
@@ -184,6 +192,8 @@ export default function TeamSection() {
 
   return (
     <div className="st-stack">
+      <TeamProjectsSection />
+      <hr className="st-rule" />
       <div className="st-row">
         <p className="st-hint st-grow">
           Signed in as {roleLabel(gate.actorRole)}. Changes apply on the member&apos;s next request. An admin cannot change an
