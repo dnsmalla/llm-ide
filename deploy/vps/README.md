@@ -50,6 +50,24 @@ The first account was created with registration temporarily open, then `LLMIDE_D
 was restored and the service restarted. The credentials are root-owned at `/root/llm-ide-admin.txt`
 (mode `0600`) — move them into a password manager and remove that file.
 
+## Backups
+
+The core snapshots `data.db` + `agent.db` with `VACUUM INTO` every 24 h (`LLMIDE_BACKUP_INTERVAL_HOURS`,
+disabled with `0`) into `/var/lib/llmide/backups`, keeping `LLMIDE_BACKUP_KEEP` stamps (2 by default,
+**7 in hub mode**). `POST /admin/backup` does the same on demand.
+
+Copy the newest pair off the host every night (the script keeps the newest 7 there):
+
+```bash
+# /etc/cron.d/llmide-backup-offhost
+15 3 * * * llmide LLMIDE_BACKUP_DIR=/var/lib/llmide/backups LLMIDE_OFFHOST_HOST=sync.example.com LLMIDE_OFFHOST_USER=llmide LLMIDE_OFFHOST_KEEP=7 /srv/llm-ide/repo/scripts/backup-offhost.sh
+```
+
+`scripts/backup-offhost.sh` `scp`s `data-<stamp>.db` and its `data-<stamp>.agent.db` into the sync host's
+`backups/` folder and prunes older pairs there. It uses the `llmide` service user's SSH key and
+`known_hosts`; the script itself holds no secrets. Test the key by hand once
+(`sudo -u llmide ssh -o BatchMode=yes sync.example.com true`) before trusting cron.
+
 ## nginx
 
 The full vhost is [llm-ide.com.nginx](llm-ide.com.nginx). It is enabled as
