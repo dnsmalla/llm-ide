@@ -326,7 +326,9 @@ const HOST = config.host;
 //   v125 — additive, no new route (REQ-014): a disabled account is refused on its next request with
 //          401 { error: { code: 'ACCOUNT_DISABLED' } } even while its access token is still valid (auth.mjs),
 //          and a turn that waits 30 s for a free in-flight slot answers 429 { error: { code: 'BUSY' } } before
-//          the engine starts (LLMIDE_MAX_TURNS, routes/agent-v2.mjs).
+//          the engine starts (LLMIDE_MAX_TURNS, routes/agent-v2.mjs). In hub mode (LLMIDE_HUB=1) the
+//          /host-api/pin|devices|push HTTP routes accept the member's JWT + `member` team role instead of the
+//          desktop bus host proof (403 ROLE_DENIED for a viewer); outside hub mode nothing changes.
 //   v124 — Team Hub H1.2 (plan 2026-11-08), additive: GET /auth/me member.permissions (the action
 //          classes the caller may use). Every route now has an action class; an authenticated request
 //          no rule declares answers 404 NOT_FOUND. Refusals stay 403 ROLE_DENIED / 429 USD_CAP.

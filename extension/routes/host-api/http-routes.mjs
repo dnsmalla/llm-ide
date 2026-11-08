@@ -1,6 +1,8 @@
 // Host-only HTTP routes of the Host API v1 desktop adapter (contract schema/http/host-api.schema.json). Registered by
-// server.mjs after authenticate and the rate limiter; nothing else imports it. Every route needs the JWT (req.user) AND
-// the bus host proof, so only the desktop UI the Tauri host spawned this core for can mint a PIN or manage devices.
+// server.mjs after authenticate and the rate limiter; nothing else imports it. Every route needs the JWT (req.user)
+// and, outside hub mode, the bus host proof, so only the desktop UI the Tauri host spawned this core for can mint a
+// PIN or manage devices. In hub mode (ADR 0021) the proof cannot exist — no desktop spawned this core — so the
+// member's `member` team role is the authority instead (a viewer is refused ROLE_DENIED).
 //
 //   POST   /host-api/pin           { pin, expiresAt, port, fingerprint, addresses }   mint the user's one-use 10-minute
 //                                   pairing PIN (fingerprint: the TLS listener's certificate pin, null for the dev
@@ -8,14 +10,16 @@
 //   GET    /host-api/devices       { devices: [...] }         the user's paired devices (never a token)
 //   DELETE /host-api/devices/:id   { revoked }                revoke one device and drop its live sessions
 //
-// Order: proof first (403 HOST_PROOF_REQUIRED), then the flag (404 HOST_API_DISABLED), so an unproven caller learns
-// nothing about the flag. The PIN is returned once and never logged.
+// Order: proof/role first (403 HOST_PROOF_REQUIRED or ROLE_DENIED), then the flag (404 HOST_API_DISABLED), so an
+// unproven caller learns nothing about the flag. The PIN is returned once and never logged.
 import { networkInterfaces } from 'node:os';
 import { send, readJson } from '../../server/route-http.mjs';
 import { sendError } from '../../core/errors.mjs';
 import { config } from '../../core/config.mjs';
 import { logger } from '../../core/logger.mjs';
 import { verifyBusHostProof } from '../../core/host-approval.mjs';
+import { requireRole } from '../../server/auth.mjs';
+import { getDb } from '../../kb/db.mjs';
 import { mintPin } from './pin.mjs';
 import { listDevices, revokeDevice } from '../../kb/host-api-devices.mjs';
 import { sharedAuditSink } from './audit.mjs';
@@ -60,10 +64,19 @@ export async function handleHostApiRoute(req, res, opts = {}) {
   }
 }
 
-async function route(req, res, { hostApi = () => null, enabled = config.hostApiMode !== 'off', env = process.env, audit = sharedAuditSink, interfaces = networkInterfaces, pushDeps = {} }) {
+async function route(req, res, { hostApi = () => null, enabled = config.hostApiMode !== 'off', hub = config.hub, env = process.env, audit = sharedAuditSink, interfaces = networkInterfaces, pushDeps = {} }) {
   const path = String(req.url || '').split('?')[0];
   const userId = req.user?.id;
-  if (!verifyBusHostProof(req, env)) return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
+  if (hub) {
+    // ADR 0021 hub: no desktop spawned this core, so there is no host proof to present. The member's own JWT plus
+    // the `member` team role (an engineer or above) is the authority to pair a phone or browser. A viewer stays
+    // Ask-only; the role is read from `members` on every request, never the JWT.
+    try { requireRole(getDb(), req, 'member'); } catch (e) {
+      return fail(res, e.status ?? 403, e.code ?? 'ROLE_DENIED', e.message);
+    }
+  } else if (!verifyBusHostProof(req, env)) {
+    return fail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
+  }
   if (!enabled) return fail(res, 404, 'HOST_API_DISABLED', 'Host API is not enabled on this core');
   if (!userId) return fail(res, 401, 'UNAUTHORIZED', 'Sign in first');
 

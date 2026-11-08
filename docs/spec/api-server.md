@@ -457,6 +457,10 @@ table in ADR 0021): `public`, `self.read`, `self.write`, `model.ask`, `model.rea
   applied. Additive; older clients ignore it.
 - **Host API `COMMAND_CLASS`** re-checks the class on every frame (`chat.send` / `approvals.answer` = `model.ask`,
   `toolApprovals.answer` = `model.exec`), so a demotion applies on the next frame.
+- **Hub pairing (API 125):** in hub mode (`LLMIDE_HUB=1`) a VPS hub has no desktop-spawned host proof, so
+  `POST /host-api/pin`, `GET/DELETE /host-api/devices*` and `/host-api/push/*` take the caller's JWT + the `member`
+  team role instead (`403 ROLE_DENIED` for a viewer). Outside hub mode the bus host proof stays mandatory and
+  nothing else changes.
 - **Background jobs** re-check when they act: the bus executor (`KIND_CLASS`), the meeting agent (`tickRun`) and the
   outcome poller (`usersAllowedToPoll`).
 
