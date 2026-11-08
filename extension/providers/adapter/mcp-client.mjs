@@ -36,6 +36,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { assertProviderBaseUrl } from '../../server/base-url-guard.mjs';
 import { makePinnedFetch, SsrfBlockedError } from '../../server/pinned-fetch.mjs';
+import { config } from '../../core/config.mjs';
 
 export const MCP_LIMITS = Object.freeze({
   connectMs: 15_000,
@@ -115,7 +116,7 @@ function withDeadline(promise, ms, label, onTimeout) {
 }
 
 /** The transport for one server config, or throws. HTTP goes through the pinned fetch (SSRF guard). */
-export function transportFor(cfg, { allowPrivate = false, makeFetch = makePinnedFetch, cwd, maxResponseBytes = MCP_LIMITS.httpResponseBytes } = {}) {
+export function transportFor(cfg, { allowPrivate = false, makeFetch = makePinnedFetch, cwd, maxResponseBytes = MCP_LIMITS.httpResponseBytes, hub = config.hub } = {}) {
   if (cfg && (cfg.type === 'http' || cfg.type === 'sse')) {
     let url;
     try { url = new URL(cfg.url); } catch { throw new Error('the server url is not valid'); }
@@ -131,6 +132,12 @@ export function transportFor(cfg, { allowPrivate = false, makeFetch = makePinned
       : new StreamableHTTPClientTransport(url, { requestInit, fetch: fetchImpl });
   }
   if (!cfg || typeof cfg.command !== 'string' || !cfg.command) throw new Error('the server has no command');
+  // A hub serves several members from one core; a stdio server would run as that core's OS user (F16).
+  if (hub) {
+    const err = new Error('stdio MCP servers are disabled on a hub: they would run as this core\'s service user');
+    err.code = 'MCP_STDIO_DISABLED_IN_HUB';
+    throw err;
+  }
   const env = { ...getDefaultEnvironment() };
   for (const [k, v] of Object.entries(cfg.env && typeof cfg.env === 'object' ? cfg.env : {})) if (typeof v === 'string') env[k] = v;
   const args = Array.isArray(cfg.args) ? cfg.args.filter((a) => typeof a === 'string') : [];

@@ -9,6 +9,7 @@ import { pluginEnabledFor } from '../skills/index.mjs';
 import { RESERVED_MCP_NAME } from '../sdk/constants.mjs';
 import { gateFor, mcpServerGate } from './gate.mjs';
 import { activeInstalled } from './installed-runtime.mjs';
+import { config } from '../../core/config.mjs';
 
 // The in-process llmide server owns RESERVED_MCP_NAME (./constants.mjs); a
 // user server answering to it would REPLACE llm-ide's own tool surface for
@@ -35,6 +36,7 @@ export function buildUserMcpServers(userId, mode, {
   readSecret,
   pluginEnabled,
   gate,
+  hub = config.hub,
 } = {}) {
   const empty = { servers: {}, allowedTools: [] };
   const requestedMode = typeof mode === 'string' && mode ? mode : 'execute';
@@ -56,7 +58,13 @@ export function buildUserMcpServers(userId, mode, {
     return empty;
   }
   const servers = {};
+  const remoteOnly = (cfg) => cfg?.type === 'http' || cfg?.type === 'sse';
   for (const [id, cfg] of Object.entries(effective)) {
+    // A hub serves several members from one core: a stdio server would run as the core's OS user (F16).
+    if (hub && !remoteOnly(cfg)) {
+      console.warn(`[agent-v2] stdio MCP server '${id}' is not mounted on a hub (MCP_STDIO_DISABLED_IN_HUB)`);
+      continue;
+    }
     if (id === RESERVED_MCP_NAME) {
       console.warn(`[agent-v2] MCP server '${id}' shadows llm-ide's own tool server — not mounted`);
       continue;
@@ -73,6 +81,10 @@ export function buildUserMcpServers(userId, mode, {
     const asked = [];
     for (const s of activeInstalled(userId, g).mcp) {
       if (s.id === RESERVED_MCP_NAME || Object.hasOwn(servers, s.id)) continue;
+      if (hub && !remoteOnly(s.config)) {
+        console.warn(`[agent-v2] stdio MCP server '${s.id}' is not mounted on a hub (MCP_STDIO_DISABLED_IN_HUB)`);
+        continue;
+      }
       servers[s.id] = s.config;
       asked.push(s.id);
     }

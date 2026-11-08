@@ -49,6 +49,13 @@ test('an enabled+consented server is mounted and pre-approved server-wide', () =
   assert.deepEqual(allowedTools, ['mcp__linear']);
 });
 
+test('hub mode mounts no stdio server, while a normal core still does', () => {
+  writeMcpRegistry([server('linear')]);
+  activate('hub-mcp', 'linear');
+  assert.deepEqual(buildUserMcpServers('hub-mcp', 'execute', { restrictsToolsFn: noRestrict, hub: true }).servers, {});
+  assert.deepEqual(Object.keys(buildUserMcpServers('hub-mcp', 'execute', { restrictsToolsFn: noRestrict, hub: false }).servers), ['linear']);
+});
+
 // A fresh user id per case: per-user consent is persisted state, so reusing
 // one id would let an earlier test's approval leak into this one.
 test('an unconsented or disabled server is not mounted', () => {
