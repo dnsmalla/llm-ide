@@ -10,6 +10,7 @@ import SharedProtocol
 struct LlmIdeControlView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
+    @EnvironmentObject var projectsStore: ProjectsStore
     @Environment(\.dismiss) private var dismiss
     /// True when hosted by the tab shell (no own stack, no "Done").
     var embedded: Bool = false
@@ -35,6 +36,11 @@ struct LlmIdeControlView: View {
                 }
                 if let err = connection.errorMessage {
                     StatusBanner(.error(message: err) { connection.errorMessage = nil })
+                }
+                // The paired desktop's projects, each with this account's role. Hidden until there is
+                // either a live host to ask or a list already loaded for an offline read.
+                if isConnected || projectsStore.state.loaded {
+                    ProjectPickerBar(isBusy: llmIdeStore.isStreaming, onSelect: selectProject)
                 }
                 chatTranscript
                 pinnedToolApproval
@@ -92,10 +98,15 @@ struct LlmIdeControlView: View {
             .onChange(of: speech.errorMessage) { msg in
                 if let msg { connection.errorMessage = msg }
             }
-            .onAppear { llmIdeStore.loadSharedHistory() }
+            .onAppear {
+                llmIdeStore.loadSharedHistory()
+            }
             .onChange(of: connection.connectionStatus) { status in
                 if status == .connected { llmIdeStore.loadSharedHistory() }
             }
+            // The first project is selected once `projects.list` lands, and the user can pick another:
+            // either way the transcript is the one for the newly selected project.
+            .onChange(of: projectsStore.state.selectedId) { _ in llmIdeStore.loadSharedHistory() }
             .fileImporter(isPresented: $showFilePicker,
                           allowedContentTypes: [.pdf, .plainText, .text]) { result in
                 switch result {
@@ -307,6 +318,12 @@ struct LlmIdeControlView: View {
         pendingFiles = []
         isInputFocused = false
         haptic(.light)
+    }
+
+    private func selectProject(_ id: String) {
+        guard projectsStore.select(id) else { return }
+        haptic(.light)
+        // The store's `selectedId` change reloads the transcript (see `onChange`).
     }
 
     private func removeFile(at index: Int) {

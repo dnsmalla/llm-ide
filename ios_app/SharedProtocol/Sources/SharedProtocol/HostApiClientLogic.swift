@@ -116,14 +116,16 @@ public enum HostApiChatSendPolicy {
     public enum Outcome: Sendable, Equatable { case send(HostApiChatSendRequest), refuse(String) }
 
     /// A files-only message (v1 `text` needs minLength 1) carries the file names as its text.
-    public static func request(text: String, files: [ChatFileText]) -> Outcome {
+    /// `projectId` scopes the frame; nil keeps the v1 team behavior.
+    public static func request(text: String, files: [ChatFileText], projectId: String? = nil) -> Outcome {
         guard files.count <= maxAttachments else { return .refuse(tooManyFiles) }
         guard files.allSatisfy({ $0.text.utf16.count <= maxAttachmentTextUTF16 }) else { return .refuse(fileTooLarge) }
         let names = files.map { $0.name.isEmpty ? "file" : HostApiFrame.clamp($0.name, maxUTF16: maxNameUTF16) }
         let body = text.isEmpty ? "Attached: " + names.joined(separator: ", ") : text
         guard !body.isEmpty, body.utf16.count <= maxTextUTF16 else { return .refuse(textTooLong) }
         let attachments = zip(names, files).map { HostApiChatSendRequestAttachmentsItem(name: $0, text: $1.text) }
-        let request = HostApiChatSendRequest(attachments: attachments.isEmpty ? nil : attachments, text: body)
+        let request = HostApiChatSendRequest(attachments: attachments.isEmpty ? nil : attachments,
+                                             projectId: projectId, text: body)
         // Together the files can still pass the 1 MiB frame cap; 4 KiB is left for the envelope.
         guard let bytes = try? JSONEncoder().encode(request).count,
               bytes <= HostApi.limits.maxFrameBytes - 4096 else { return .refuse(fileTooLarge) }

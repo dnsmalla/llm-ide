@@ -7,6 +7,7 @@ struct MyAppApp: App {
     @StateObject private var connection: ConnectionService
     @StateObject private var llmIdeStore: LlmIdeChatStore
     @StateObject private var usageStore: UsageStore
+    @StateObject private var projectsStore: ProjectsStore
     @StateObject private var syncStore: SyncStore
     @StateObject private var sourceReadStore: SourceReadStore
 
@@ -22,6 +23,7 @@ struct MyAppApp: App {
 
         _llmIdeStore = StateObject(wrappedValue: LlmIdeChatStore(connection: connection))
         _usageStore = StateObject(wrappedValue: UsageStore(connection: connection))
+        _projectsStore = StateObject(wrappedValue: ProjectsStore(connection: connection, connectionStore: connectionStore))
         _syncStore = StateObject(wrappedValue: SyncStore())
         _sourceReadStore = StateObject(wrappedValue: SourceReadStore())
     }
@@ -33,6 +35,7 @@ struct MyAppApp: App {
                 .environmentObject(connection)
                 .environmentObject(llmIdeStore)
                 .environmentObject(usageStore)
+                .environmentObject(projectsStore)
                 .environmentObject(syncStore)
                 .environmentObject(sourceReadStore)
         }

@@ -41,6 +41,8 @@
 		F0A1B2C3D4E5F607180A000A /* ViewExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A0009 /* ViewExtensions.swift */; };
 		F0A1B2C3D4E5F607180A000C /* ChatMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A000B /* ChatMarkdown.swift */; };
 		F0A1B2C3D4E5F607180A00A2 /* ApprovalQuestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A00A1 /* ApprovalQuestionCard.swift */; };
+		A9C1E2F3B4D5061728394A01 /* ProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */; };
+		A9C1E2F3B4D5061728394B01 /* ProjectPickerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C1E2F3B4D5061728394B02 /* ProjectPickerBar.swift */; };
 		FCA16A9A87B1018E6AC5A76C /* MyAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CD17436AE4D69811BA8EDA /* MyAppApp.swift */; };
 /* End PBXBuildFile section */
 
@@ -81,6 +83,8 @@
 		F0A1B2C3D4E5F607180A0009 /* ViewExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewExtensions.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A000B /* ChatMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMarkdown.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A00A1 /* ApprovalQuestionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalQuestionCard.swift; sourceTree = "<group>"; };
+		A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsStore.swift; sourceTree = "<group>"; };
+		A9C1E2F3B4D5061728394B02 /* ProjectPickerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectPickerBar.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -190,6 +194,7 @@
 				F0A1B2C3D4E5F607180A0005 /* StatusBanner.swift */,
 				F0A1B2C3D4E5F607180A0007 /* EmptyChatState.swift */,
 				F0A1B2C3D4E5F607180A0009 /* ViewExtensions.swift */,
+				A9C1E2F3B4D5061728394B02 /* ProjectPickerBar.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -213,6 +218,7 @@
 				C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */,
 				A7B80010CC00000000000002 /* ConnectionService.swift */,
 				A7B80010CC00000000000004 /* LlmIdeChatStore.swift */,
+				A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -335,6 +341,8 @@
 				F0A1B2C3D4E5F607180A0006 /* StatusBanner.swift in Sources */,
 				F0A1B2C3D4E5F607180A0008 /* EmptyChatState.swift in Sources */,
 				F0A1B2C3D4E5F607180A000A /* ViewExtensions.swift in Sources */,
+				A9C1E2F3B4D5061728394A01 /* ProjectsStore.swift in Sources */,
+				A9C1E2F3B4D5061728394B01 /* ProjectPickerBar.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

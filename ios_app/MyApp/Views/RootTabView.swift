@@ -10,6 +10,7 @@ struct RootTabView: View {
     @EnvironmentObject var syncStore: SyncStore
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
     @EnvironmentObject var usageStore: UsageStore
+    @EnvironmentObject var projectsStore: ProjectsStore
 
     enum Tab: Hashable { case chat, history, settings }
     @State private var selection: Tab = .chat
@@ -53,7 +54,11 @@ struct RootTabView: View {
     }
 
     private func refreshHostData() {
-        guard connection.connectionStatus == .connected, connection.servesV1Read else { return }
+        guard connection.connectionStatus == .connected else { return }
+        // `projects.list` is a `host` command (not gated on `read`): load the picker even when this
+        // host serves no read screens. A failed list leaves the v1 team chat available.
+        projectsStore.refresh()
+        guard connection.servesV1Read else { return }
         usageStore.refresh()
         Task { await connection.reads.refresh() }
     }

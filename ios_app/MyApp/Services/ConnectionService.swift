@@ -121,6 +121,7 @@ final class ConnectionService: ObservableObject {
     // Weak back-references to the stores (the app owns them via `@StateObject`).
     weak var llmIdeStore: LlmIdeChatStore?
     weak var usageStore: UsageStore?
+    weak var projectsStore: ProjectsStore?
     /// Set at app launch: the pairing (address, pin, token) and the host name.
     weak var connectionStore: ConnectionStore?
 
@@ -247,6 +248,7 @@ final class ConnectionService: ObservableObject {
             scheduleReconnect(retryAfterMs: reason.retryAfterMs)
         case .resync:
             llmIdeStore?.handle(event)
+            projectsStore?.refresh()
             if servesV1Read { Task { await reads.refresh() } }
         case .event:
             llmIdeStore?.handle(event)
@@ -258,6 +260,7 @@ final class ConnectionService: ObservableObject {
     func resetStoresForNewDevice() {
         llmIdeStore?.resetForNewDevice()
         usageStore?.resetForNewDevice()
+        projectsStore?.resetForNewDevice()
         reads.reset()
         // The next host may serve a different feature set; forget this one's until it says.
         hostCapabilities = nil

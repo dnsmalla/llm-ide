@@ -41,6 +41,8 @@ struct HostApiPayloadsTests {
         try roundTrip(HostApiApprovalsAnswerResult.self, "fixtures/commands/approvals.answer.result.json")
         try roundTrip(HostApiToolApprovalsAnswerRequest.self, "fixtures/commands/toolApprovals.answer.request.json")
         try roundTrip(HostApiToolApprovalsAnswerResult.self, "fixtures/commands/toolApprovals.answer.result.json")
+        try roundTrip(HostApiProjectsListRequest.self, "fixtures/commands/projects.list.request.json")
+        try roundTrip(HostApiProjectsListResult.self, "fixtures/commands/projects.list.result.json")
     }
 
     @Test("every event fixture payload round-trips")

@@ -44,6 +44,15 @@ final class LlmIdeChatStore: ObservableObject {
         connection.llmIdeStore = self
     }
 
+    /// The project every project-scoped frame names (ADR 0022); nil keeps the v1 team behavior.
+    private var selectedProjectId: String? { connection?.projectsStore?.selectedId }
+
+    /// Send a refused frame's reason to the picker. A non-project error is left to the caller.
+    @discardableResult
+    private func noteProjectRefusal(_ error: Error) -> Bool {
+        connection?.projectsStore?.noteRefusal(error) == true
+    }
+
     // MARK: — Send
 
     /// Ask llm-ide's agent a question through `connection.host`. The reply streams back as
@@ -59,7 +68,7 @@ final class LlmIdeChatStore: ObservableObject {
         }
         // Validated against the `chat.send` schema limits before any turn starts.
         let request: HostApiChatSendRequest
-        switch HostApiChatSendPolicy.request(text: text, files: files) {
+        switch HostApiChatSendPolicy.request(text: text, files: files, projectId: selectedProjectId) {
         case .send(let r): request = r
         case .refuse(let message): connection?.errorMessage = message; return false
         }
@@ -78,22 +87,34 @@ final class LlmIdeChatStore: ObservableObject {
         return true
     }
 
-    /// An encode failure disconnects; a host refusal (`denied`, `busy`, …) only ends the turn.
+    /// An encode failure disconnects; a host refusal (`denied`, `busy`, …) only ends the turn. A project
+    /// refusal is shown by the picker instead of the connection banner.
     private func chatSendFailed(_ id: String, _ error: Error) {
         let r = error as? HostApiRejection
         let local = HostApiChatNotices.disconnectsAfterSendFailure(error)
+        if noteProjectRefusal(error) {
+            handleChatError(commandId: id)
+            if local { connection?.disconnect() }
+            return
+        }
         connection?.errorMessage = r?.message ?? (local ? "Failed to encode chat message: \(error.localizedDescription)"
                                                          : "The desktop sent a reply this app could not read.")
         handleChatError(commandId: id)
         if local { connection?.disconnect() }
     }
 
-    /// Load the host's shared chat transcript (`chat.snapshot`).
+    /// Load the host's shared chat transcript (`chat.snapshot`) for the selected project.
     func loadSharedHistory() {
         Task { [weak self] in
-            guard let result = try? await self?.connection?.host.send(
-                .chatSnapshot, HostApiChatSnapshotRequest(limit: 50), as: HostApiChatSnapshotResult.self) else { return }
-            self?.applySnapshot(result)
+            guard let self else { return }
+            do {
+                let result = try await self.connection?.host.send(
+                    .chatSnapshot, HostApiChatSnapshotRequest(limit: 50, projectId: self.selectedProjectId),
+                    as: HostApiChatSnapshotResult.self)
+                if let result { self.applySnapshot(result) }
+            } catch {
+                self.noteProjectRefusal(error)
+            }
         }
     }
 
@@ -110,14 +131,19 @@ final class LlmIdeChatStore: ObservableObject {
     func clearLlmIdeChat() {
         llmIdeMessages.removeAll()
         Task { [weak self] in
+            guard let self else { return }
             do {
-                if try await self?.connection?.host.send(.chatHistoryClear, HostApiChatHistoryClearRequest(),
-                                                          as: HostApiChatHistoryClearResult.self).cleared == true {
-                    self?.llmIdeMessages.removeAll()
+                let request = HostApiChatHistoryClearRequest(projectId: self.selectedProjectId)
+                if try await self.connection?.host.send(.chatHistoryClear, request,
+                                                        as: HostApiChatHistoryClearResult.self).cleared == true {
+                    self.llmIdeMessages.removeAll()
                 }
-            } catch let r as HostApiRejection where r.code != "host_unreachable" {
-                self?.connection?.errorMessage = r.message
-            } catch {}
+            } catch {
+                guard !self.noteProjectRefusal(error) else { return }
+                if let r = error as? HostApiRejection, r.code != "host_unreachable" {
+                    self.connection?.errorMessage = r.message
+                }
+            }
         }
     }
 
@@ -134,8 +160,14 @@ final class LlmIdeChatStore: ObservableObject {
     private func sendCancel(_ id: String) {
         cancelledCommandIds.insert(id)
         Task { [weak self] in
-            let result = try? await self?.connection?.host.send(.chatCancel, HostApiChatCancelRequest(),
-                                                                 as: HostApiChatCancelResult.self)
+            var result: HostApiChatCancelResult?
+            do {
+                let request = HostApiChatCancelRequest(projectId: self?.selectedProjectId)
+                result = try await self?.connection?.host.send(.chatCancel, request, as: HostApiChatCancelResult.self)
+            } catch {
+                // Stop still ends the local turn even when the host refuses the project.
+                _ = self?.noteProjectRefusal(error)
+            }
             guard let self, HostApiChatTurn.endsAfterCancel(cancelled: result?.cancelled) else { return }
             self.cancelledCommandIds.remove(id)
             // A late reply must not end the next turn's spinner.
@@ -157,11 +189,17 @@ final class LlmIdeChatStore: ObservableObject {
         guard let request = pendingApproval else { return }
         let answers = request.answers(from: selection)
         guard !answers.isEmpty else { return }
-        let answer = HostApiApprovalsAnswerRequest(answers: answers, commandId: request.commandId, requestId: request.requestId)
+        let answer = HostApiApprovalsAnswerRequest(answers: answers, commandId: request.commandId,
+                                                   projectId: selectedProjectId, requestId: request.requestId)
         Task { [weak self] in
-            do { _ = try await self?.connection?.host.send(.approvalsAnswer, answer, as: HostApiApprovalsAnswerResult.self) }
-            catch let r as HostApiRejection where r.code != "host_unreachable" { self?.connection?.errorMessage = r.message }
-            catch {}
+            guard let self else { return }
+            do { _ = try await self.connection?.host.send(.approvalsAnswer, answer, as: HostApiApprovalsAnswerResult.self) }
+            catch {
+                guard !self.noteProjectRefusal(error) else { return }
+                if let r = error as? HostApiRejection, r.code != "host_unreachable" {
+                    self.connection?.errorMessage = r.message
+                }
+            }
         }
         pendingApproval = nil
         approvalNotice = nil
@@ -183,11 +221,16 @@ final class LlmIdeChatStore: ObservableObject {
             return
         }
         let answer = HostApiToolApprovalsAnswerRequest(commandId: request.commandId, decision: allow ? "allow_once" : "deny",
-                                                       requestId: request.requestId)
+                                                       projectId: selectedProjectId, requestId: request.requestId)
         Task { [weak self] in
-            do { _ = try await self?.connection?.host.send(.toolApprovalsAnswer, answer, as: HostApiToolApprovalsAnswerResult.self) }
-            catch let r as HostApiRejection where r.code != "host_unreachable" { self?.connection?.errorMessage = r.message }
-            catch {}
+            guard let self else { return }
+            do { _ = try await self.connection?.host.send(.toolApprovalsAnswer, answer, as: HostApiToolApprovalsAnswerResult.self) }
+            catch {
+                guard !self.noteProjectRefusal(error) else { return }
+                if let r = error as? HostApiRejection, r.code != "host_unreachable" {
+                    self.connection?.errorMessage = r.message
+                }
+            }
         }
         pendingToolApproval = nil
         approvalNotice = nil
