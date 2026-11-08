@@ -70,10 +70,12 @@ fixtures.sort((a, b) => (a.endpoint === 'POST /auth/register' ? 0 : 1) - (b.endp
 const pairOf = (ep, status) => `${ep} ${status}`;
 // Fixture groups whose routes exist only behind a switch this replay server never sets (the debug-only
 // LLMIDE_SELF_HEAL=1 plus the bus host proof, schema/http/self-heal.schema.json) cannot be replayed here at all: the
-// server answers 404 feature_disabled before the handler. Their fixtures stay in the skip table below and their pairs
-// stay in `declaredPairs`, but they must not push the replay ratio down, because no fixture of such a group can ever
-// replay. tests/self-heal-runs.test.mjs and tests/self-heal-server.test.mjs cover the handlers live.
-const NOT_REPLAYABLE_GROUPS = new Set(['self-heal']);
+// server answers 404 feature_disabled before the handler; the project routes need a registered project row and
+// two users' grants, which the id-addressed fixtures cannot assume. Their fixtures stay in the skip table below and
+// their pairs stay in `declaredPairs`, but they must not push the replay ratio down, because no fixture of such a
+// group can replay unchanged. tests/self-heal-runs.test.mjs, tests/self-heal-server.test.mjs and
+// tests/project-e2e.test.mjs cover the handlers live.
+const NOT_REPLAYABLE_GROUPS = new Set(['self-heal', 'projects']);
 const withFixturePairs = new Set(fixtures.filter((fx) => !NOT_REPLAYABLE_GROUPS.has(fx.file.split('/')[0]))
   .map((fx) => pairOf(fx.endpoint, fx.status)));
 const declaredPairs = new Set();
@@ -85,6 +87,13 @@ for (const [key, { spec }] of endpoints) for (const s of Object.keys(spec.respon
 // fail before any external or model call, so they are replayed even on
 // endpoints whose success path is skipped.
 const SKIP_RULES = [
+  {
+    // Project roles: the replay user has no registered project row, so every id-addressed project route
+    // answers 404 before its own status. Covered end to end by tests/project-e2e.test.mjs (a real server
+    // that registers a project and grants roles); GET /projects itself still replays.
+    why: 'project roles: needs a registered project row; covered by tests/project-e2e.test.mjs',
+    when: (fx) => /^(GET|POST|PATCH|DELETE) \/projects\//.test(fx.endpoint),
+  },
   {
     // Command bus: the replay sends no x-llmide-client header, so the host resolves the class `extension` (the cap for an
     // unproven caller). What that class can reproduce is replayed: validation, auth, TIER_DENIED, the read routes and the

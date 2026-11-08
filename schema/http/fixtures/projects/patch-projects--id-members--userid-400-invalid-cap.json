@@ -1,0 +1,19 @@
+{
+  "endpoint": "PATCH /projects/:id/members/:userId",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "p-capture",
+      "userId": "33f9f8843aa2fd39"
+    },
+    "body": {
+      "usdCapMonth": -1
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Invalid USD cap"
+    }
+  }
+}

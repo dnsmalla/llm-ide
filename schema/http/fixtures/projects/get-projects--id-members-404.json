@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /projects/:id/members",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "p-nope"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Project not found"
+    }
+  }
+}

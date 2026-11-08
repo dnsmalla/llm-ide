@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /projects/:id/members",
+  "status": 403,
+  "request": {
+    "params": {
+      "id": "p-capture"
+    },
+    "body": {
+      "email": "capture-outsider@example.test"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ROLE_DENIED",
+      "message": "Requires team role admin"
+    }
+  }
+}

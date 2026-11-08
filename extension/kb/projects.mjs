@@ -382,7 +382,9 @@ export function setProjectMember(db, actorId, projectId, userId, patch = {}) {
 export function addProjectMemberByEmail(db, actorId, projectId, { email, role = 'viewer', maxMode = 'read_only', usdCapMonth = 20 } = {}) {
   requireProject(db, projectId);
   const clean = typeof email === 'string' ? email.trim() : '';
-  if (!clean || clean.length > 254) throw err('VALIDATION', 'Invalid email', 400);
+  if (!clean || clean.length > 254 || !/^[^\s@]+@[^\s@]+$/.test(clean)) {
+    throw err('VALIDATION', 'Invalid email', 400);
+  }
   const user = db.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE').get(clean);
   if (!user) throw err('NOT_FOUND', 'Member not found', 404);
   return setProjectMember(db, actorId, projectId, user.id, { role, maxMode, usdCapMonth });

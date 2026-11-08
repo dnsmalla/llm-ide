@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /projects/:id/members",
+  "status": 403,
+  "request": {
+    "params": {
+      "id": "p-capture"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ROLE_DENIED",
+      "message": "Requires team role admin"
+    }
+  }
+}

@@ -1186,6 +1186,15 @@ export type Me = {
     /** Action classes the caller may use (kb/members.mjs CLASS_GRANTS), cap not applied. Plan H1.2, API 124. */
     permissions?: string[];
   } | null;
+  /** ADR 0022: the caller's projects with the effective role on each (unassigned = viewer; a global owner/admin overrides). Same shape as GET /projects. */
+  projects?: ({
+    id: string;
+    name: string;
+    role: "viewer" | "member" | "admin" | "owner";
+    maxMode: "none" | "read_only" | "execute";
+    usdCapMonth: number;
+    permissions: string[];
+  })[];
 };
 
 export type Device = {
@@ -1869,6 +1878,34 @@ export type PlanTask = {
   }[];
   /** Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots), or null. */
   meta?: Record<string, unknown> | null;
+};
+
+export type ProjectSummary = {
+  /** Stable project id (1-128 letters, digits, _ or -) */
+  id: string;
+  /** Project name */
+  name: string;
+  /** The caller's effective role on this project */
+  role: "viewer" | "member" | "admin" | "owner";
+  /** The tighter of the global and project run modes */
+  maxMode: "none" | "read_only" | "execute";
+  /** The tighter positive monthly USD cap; 0 = no cap */
+  usdCapMonth: number;
+  /** Action classes this project role may use (kb/members.mjs CLASS_GRANTS; project.admin instead of the team admin class) */
+  permissions: string[];
+};
+
+export type ProjectMember = {
+  userId: string;
+  email: string;
+  displayName: string;
+  /** active | disabled */
+  status: string;
+  role: "viewer" | "member" | "admin" | "owner";
+  maxMode: "none" | "read_only" | "execute";
+  /** Monthly project USD cap; 0 = no cap */
+  usdCapMonth: number;
+  updatedAt: string;
 };
 
 export type Connection = {
@@ -7584,6 +7621,113 @@ export type GetKbOutcomesStatsResponse200 = {
 
 export type GetKbOutcomesStatsResponse401 = CommonError;
 
+/** Request parts for `GET /projects` (schema/http/projects.schema.json). */
+export type GetProjectsRequest = Record<string, never>;
+
+export type GetProjectsResponse200 = {
+  /** Every registered project, with the caller's effective role (unassigned = viewer) */
+  projects: ProjectSummary[];
+};
+
+export type GetProjectsResponse401 = CommonError;
+
+/** Request parts for `GET /projects/:id/members` (schema/http/projects.schema.json). */
+export type GetProjectsIdMembersRequest = {
+  params: {
+    /** Project id */
+    id: string;
+  };
+};
+
+export type GetProjectsIdMembersResponse200 = {
+  project: {
+    id: string;
+    name: string;
+  };
+  /** Explicit rows only; an active team member with no row is an implicit viewer */
+  members: ProjectMember[];
+};
+
+export type GetProjectsIdMembersResponse401 = CommonError;
+
+export type GetProjectsIdMembersResponse403 = CommonError;
+
+export type GetProjectsIdMembersResponse404 = CommonError;
+
+/** Request parts for `POST /projects/:id/members` (schema/http/projects.schema.json). */
+export type PostProjectsIdMembersRequest = {
+  params: {
+    id: string;
+  };
+  body: {
+    /** An existing account's address (case-insensitive) */
+    email: string;
+    /** Default viewer */
+    role?: "viewer" | "member" | "admin" | "owner";
+    /** Default read_only */
+    maxMode?: "none" | "read_only" | "execute";
+    /** 0-100000; 0 = no cap (default 20) */
+    usdCapMonth?: number;
+  };
+};
+
+export type PostProjectsIdMembersResponse200 = {
+  member: ProjectMember;
+};
+
+export type PostProjectsIdMembersResponse400 = CommonError;
+
+export type PostProjectsIdMembersResponse401 = CommonError;
+
+export type PostProjectsIdMembersResponse403 = CommonError;
+
+export type PostProjectsIdMembersResponse404 = CommonError;
+
+/** Request parts for `PATCH /projects/:id/members/:userId` (schema/http/projects.schema.json). */
+export type PatchProjectsIdMembersUserIdRequest = {
+  params: {
+    id: string;
+    userId: string;
+  };
+  body: {
+    role?: "viewer" | "member" | "admin" | "owner";
+    maxMode?: "none" | "read_only" | "execute";
+    /** 0-100000; 0 = no cap */
+    usdCapMonth?: number;
+  };
+};
+
+export type PatchProjectsIdMembersUserIdResponse200 = {
+  member: ProjectMember;
+};
+
+export type PatchProjectsIdMembersUserIdResponse400 = CommonError;
+
+export type PatchProjectsIdMembersUserIdResponse401 = CommonError;
+
+export type PatchProjectsIdMembersUserIdResponse403 = CommonError;
+
+export type PatchProjectsIdMembersUserIdResponse404 = CommonError;
+
+/** Request parts for `DELETE /projects/:id/members/:userId` (schema/http/projects.schema.json). */
+export type DeleteProjectsIdMembersUserIdRequest = {
+  params: {
+    id: string;
+    userId: string;
+  };
+};
+
+export type DeleteProjectsIdMembersUserIdResponse200 = {
+  /** false when the member had no explicit row */
+  removed: boolean;
+};
+
+export type DeleteProjectsIdMembersUserIdResponse401 = CommonError;
+
+export type DeleteProjectsIdMembersUserIdResponse403 = CommonError;
+
+export type DeleteProjectsIdMembersUserIdResponse404 = CommonError;
+
 /** Request parts for `GET /kb/providers/catalog` (schema/http/provider-catalog.schema.json). */
 export type GetKbProvidersCatalogRequest = Record<string, never>;
 
@@ -10846,6 +10990,51 @@ export interface ApiEndpoints {
     responses: {
       200: GetKbOutcomesStatsResponse200;
       401: GetKbOutcomesStatsResponse401;
+    };
+  };
+  "GET /projects": {
+    request: GetProjectsRequest;
+    responses: {
+      200: GetProjectsResponse200;
+      401: GetProjectsResponse401;
+    };
+  };
+  "GET /projects/:id/members": {
+    request: GetProjectsIdMembersRequest;
+    responses: {
+      200: GetProjectsIdMembersResponse200;
+      401: GetProjectsIdMembersResponse401;
+      403: GetProjectsIdMembersResponse403;
+      404: GetProjectsIdMembersResponse404;
+    };
+  };
+  "POST /projects/:id/members": {
+    request: PostProjectsIdMembersRequest;
+    responses: {
+      200: PostProjectsIdMembersResponse200;
+      400: PostProjectsIdMembersResponse400;
+      401: PostProjectsIdMembersResponse401;
+      403: PostProjectsIdMembersResponse403;
+      404: PostProjectsIdMembersResponse404;
+    };
+  };
+  "PATCH /projects/:id/members/:userId": {
+    request: PatchProjectsIdMembersUserIdRequest;
+    responses: {
+      200: PatchProjectsIdMembersUserIdResponse200;
+      400: PatchProjectsIdMembersUserIdResponse400;
+      401: PatchProjectsIdMembersUserIdResponse401;
+      403: PatchProjectsIdMembersUserIdResponse403;
+      404: PatchProjectsIdMembersUserIdResponse404;
+    };
+  };
+  "DELETE /projects/:id/members/:userId": {
+    request: DeleteProjectsIdMembersUserIdRequest;
+    responses: {
+      200: DeleteProjectsIdMembersUserIdResponse200;
+      401: DeleteProjectsIdMembersUserIdResponse401;
+      403: DeleteProjectsIdMembersUserIdResponse403;
+      404: DeleteProjectsIdMembersUserIdResponse404;
     };
   };
   "GET /kb/providers/catalog": {

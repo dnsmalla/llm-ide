@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /projects/:id/members",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "p-capture"
+    },
+    "body": {
+      "email": "not-an-email"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Invalid email"
+    }
+  }
+}

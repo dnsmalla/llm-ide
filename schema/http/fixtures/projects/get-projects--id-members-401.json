@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /projects/:id/members",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "p-capture"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

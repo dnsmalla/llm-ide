@@ -1,0 +1,19 @@
+{
+  "endpoint": "PATCH /projects/:id/members/:userId",
+  "status": 403,
+  "request": {
+    "params": {
+      "id": "p-capture",
+      "userId": "8c901ac3061e7cec"
+    },
+    "body": {
+      "role": "viewer"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ROLE_DENIED",
+      "message": "Requires team role admin"
+    }
+  }
+}

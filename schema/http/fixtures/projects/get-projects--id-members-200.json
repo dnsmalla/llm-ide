@@ -1,0 +1,37 @@
+{
+  "endpoint": "GET /projects/:id/members",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "p-capture"
+    }
+  },
+  "response": {
+    "project": {
+      "id": "p-capture",
+      "name": "Capture"
+    },
+    "members": [
+      {
+        "userId": "8c901ac3061e7cec",
+        "email": "capture-owner@example.test",
+        "displayName": "capture-owner",
+        "status": "active",
+        "role": "owner",
+        "maxMode": "execute",
+        "usdCapMonth": 0,
+        "updatedAt": "2026-11-08 04:09:42"
+      },
+      {
+        "userId": "2bd4a6f54271295b",
+        "email": "capture-engineer@example.test",
+        "displayName": "capture-engineer",
+        "status": "active",
+        "role": "admin",
+        "maxMode": "execute",
+        "usdCapMonth": 0,
+        "updatedAt": "2026-11-08 04:09:42"
+      }
+    ]
+  }
+}

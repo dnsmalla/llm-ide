@@ -1,0 +1,16 @@
+{
+  "endpoint": "DELETE /projects/:id/members/:userId",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "p-nope",
+      "userId": "33f9f8843aa2fd39"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Project not found"
+    }
+  }
+}

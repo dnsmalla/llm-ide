@@ -1,0 +1,173 @@
+{
+  "description": "Project-scoped team roles (ADR 0022, API 126). Handled by extension/routes/project-routes.mjs, dispatched from server.mjs after the route policy. A team member with no project_members row is an implicit viewer on that project (read/Ask only); a global team owner/admin overrides every project, and a project row never lifts a global viewer above viewer (H1.2). A project admin/owner (or a global team admin/owner) manages that project's members; /admin/* stays team-only. Membership writes are audited and written through to team.yaml atomically (a failed file write rolls the row back). Fixtures are real responses from `node server.mjs` on a temp DB with a temp project folder.",
+  "$defs": {
+    "ProjectSummary": {
+      "type": "object",
+      "required": ["id", "name", "role", "maxMode", "usdCapMonth", "permissions"],
+      "properties": {
+        "id": { "type": "string", "description": "Stable project id (1-128 letters, digits, _ or -)" },
+        "name": { "type": "string", "description": "Project name" },
+        "role": { "type": "string", "enum": ["viewer", "member", "admin", "owner"], "description": "The caller's effective role on this project" },
+        "maxMode": { "type": "string", "enum": ["none", "read_only", "execute"], "description": "The tighter of the global and project run modes" },
+        "usdCapMonth": { "type": "number", "description": "The tighter positive monthly USD cap; 0 = no cap" },
+        "permissions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Action classes this project role may use (kb/members.mjs CLASS_GRANTS; project.admin instead of the team admin class)"
+        }
+      }
+    },
+    "ProjectMember": {
+      "type": "object",
+      "required": ["userId", "email", "displayName", "status", "role", "maxMode", "usdCapMonth", "updatedAt"],
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "status": { "type": "string", "description": "active | disabled" },
+        "role": { "type": "string", "enum": ["viewer", "member", "admin", "owner"] },
+        "maxMode": { "type": "string", "enum": ["none", "read_only", "execute"] },
+        "usdCapMonth": { "type": "number", "description": "Monthly project USD cap; 0 = no cap" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /projects": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["projects"],
+          "properties": {
+            "projects": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ProjectSummary" },
+              "description": "Every registered project, with the caller's effective role (unassigned = viewer)"
+            }
+          }
+        },
+        "401": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "GET /projects/:id/members": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "description": "Project id" }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["project", "members"],
+          "properties": {
+            "project": {
+              "type": "object",
+              "required": ["id", "name"],
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" }
+              }
+            },
+            "members": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ProjectMember" },
+              "description": "Explicit rows only; an active team member with no row is an implicit viewer"
+            }
+          }
+        },
+        "401": { "$ref": "_common#/$defs/Error" },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "POST /projects/:id/members": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } }
+        },
+        "body": {
+          "type": "object",
+          "required": ["email"],
+          "properties": {
+            "email": { "type": "string", "description": "An existing account's address (case-insensitive)" },
+            "role": { "type": "string", "enum": ["viewer", "member", "admin", "owner"], "description": "Default viewer" },
+            "maxMode": { "type": "string", "enum": ["none", "read_only", "execute"], "description": "Default read_only" },
+            "usdCapMonth": { "type": "number", "description": "0-100000; 0 = no cap (default 20)" }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["member"],
+          "properties": { "member": { "$ref": "#/$defs/ProjectMember" } }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "401": { "$ref": "_common#/$defs/Error" },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "PATCH /projects/:id/members/:userId": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": ["id", "userId"],
+          "properties": {
+            "id": { "type": "string" },
+            "userId": { "type": "string" }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "role": { "type": "string", "enum": ["viewer", "member", "admin", "owner"] },
+            "maxMode": { "type": "string", "enum": ["none", "read_only", "execute"] },
+            "usdCapMonth": { "type": "number", "description": "0-100000; 0 = no cap" }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["member"],
+          "properties": { "member": { "$ref": "#/$defs/ProjectMember" } }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "401": { "$ref": "_common#/$defs/Error" },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "DELETE /projects/:id/members/:userId": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": ["id", "userId"],
+          "properties": {
+            "id": { "type": "string" },
+            "userId": { "type": "string" }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["removed"],
+          "properties": {
+            "removed": { "type": "boolean", "description": "false when the member had no explicit row" }
+          }
+        },
+        "401": { "$ref": "_common#/$defs/Error" },
+        "403": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    }
+  }
+}

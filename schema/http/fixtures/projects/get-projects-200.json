@@ -1,0 +1,29 @@
+{
+  "endpoint": "GET /projects",
+  "status": 200,
+  "response": {
+    "projects": [
+      {
+        "id": "p-capture",
+        "name": "Capture",
+        "role": "owner",
+        "maxMode": "execute",
+        "usdCapMonth": 0,
+        "permissions": [
+          "self.read",
+          "self.write",
+          "model.ask",
+          "model.read",
+          "model.exec",
+          "fs.read",
+          "fs.write",
+          "external.read",
+          "external.write",
+          "install",
+          "admin",
+          "project.admin"
+        ]
+      }
+    ]
+  }
+}

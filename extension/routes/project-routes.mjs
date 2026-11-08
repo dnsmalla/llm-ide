@@ -24,12 +24,15 @@ import {
 const BODY_MAX = 64 * 1024;
 const PROJECT_MEMBERS = /^\/projects\/([A-Za-z0-9_-]{1,128})\/members$/;
 const PROJECT_MEMBER = /^\/projects\/([A-Za-z0-9_-]{1,128})\/members\/([A-Za-z0-9_-]{1,64})$/;
+const MEMBERS_SUFFIX = '/members';
 const PATCH_KEYS = ['role', 'maxMode', 'usdCapMonth'];
 const ADD_KEYS = ['email', 'role', 'maxMode', 'usdCapMonth'];
 
 export function isProjectRoute(url) {
   const p = String(url || '').split('?')[0];
-  return p === '/projects' || p.startsWith('/projects/');
+  if (p === '/projects') return true;
+  if (!p.startsWith('/projects/')) return false;
+  return p.endsWith(MEMBERS_SUFFIX) || p.includes(`${MEMBERS_SUFFIX}/`);
 }
 
 const fail = (res, status, code, message) => {

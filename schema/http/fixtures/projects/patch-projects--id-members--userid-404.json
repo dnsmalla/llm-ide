@@ -1,0 +1,19 @@
+{
+  "endpoint": "PATCH /projects/:id/members/:userId",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "p-capture",
+      "userId": "no-such-user"
+    },
+    "body": {
+      "role": "viewer"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Member not found"
+    }
+  }
+}

@@ -35,6 +35,7 @@ tags:
   - name: "notes-generation"
   - name: "os"
   - name: "planning"
+  - name: "projects"
   - name: "provider-catalog"
   - name: "providers-usage"
   - name: "review"
@@ -16450,6 +16451,280 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /projects:
+    get:
+      tags:
+        - "projects"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "projects"
+                properties:
+                  projects:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ProjectSummary"
+                    description: "Every registered project, with the caller's effective role (unassigned = viewer)"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /projects/{id}/members:
+    get:
+      tags:
+        - "projects"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "Project id"
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "project"
+                  - "members"
+                properties:
+                  project:
+                    type: "object"
+                    required:
+                      - "id"
+                      - "name"
+                    properties:
+                      id:
+                        type: "string"
+                      name:
+                        type: "string"
+                  members:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ProjectMember"
+                    description: "Explicit rows only; an active team member with no row is an implicit viewer"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      tags:
+        - "projects"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "email"
+              properties:
+                email:
+                  type: "string"
+                  description: "An existing account's address (case-insensitive)"
+                role:
+                  type: "string"
+                  enum:
+                    - "viewer"
+                    - "member"
+                    - "admin"
+                    - "owner"
+                  description: "Default viewer"
+                maxMode:
+                  type: "string"
+                  enum:
+                    - "none"
+                    - "read_only"
+                    - "execute"
+                  description: "Default read_only"
+                usdCapMonth:
+                  type: "number"
+                  description: "0-100000; 0 = no cap (default 20)"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "member"
+                properties:
+                  member:
+                    "$ref": "#/components/schemas/ProjectMember"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /projects/{id}/members/{userId}:
+    patch:
+      tags:
+        - "projects"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "userId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                role:
+                  type: "string"
+                  enum:
+                    - "viewer"
+                    - "member"
+                    - "admin"
+                    - "owner"
+                maxMode:
+                  type: "string"
+                  enum:
+                    - "none"
+                    - "read_only"
+                    - "execute"
+                usdCapMonth:
+                  type: "number"
+                  description: "0-100000; 0 = no cap"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "member"
+                properties:
+                  member:
+                    "$ref": "#/components/schemas/ProjectMember"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      tags:
+        - "projects"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "userId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "removed"
+                properties:
+                  removed:
+                    type: "boolean"
+                    description: "false when the member had no explicit row"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
 components:
   securitySchemes:
     bearerAuth:
@@ -20006,6 +20281,42 @@ components:
               items:
                 type: "string"
               description: "Action classes the caller may use (kb/members.mjs CLASS_GRANTS), cap not applied. Plan H1.2, API 124."
+        projects:
+          type: "array"
+          description: "ADR 0022: the caller's projects with the effective role on each (unassigned = viewer; a global owner/admin overrides). Same shape as GET /projects."
+          items:
+            type: "object"
+            required:
+              - "id"
+              - "name"
+              - "role"
+              - "maxMode"
+              - "usdCapMonth"
+              - "permissions"
+            properties:
+              id:
+                type: "string"
+              name:
+                type: "string"
+              role:
+                type: "string"
+                enum:
+                  - "viewer"
+                  - "member"
+                  - "admin"
+                  - "owner"
+              maxMode:
+                type: "string"
+                enum:
+                  - "none"
+                  - "read_only"
+                  - "execute"
+              usdCapMonth:
+                type: "number"
+              permissions:
+                type: "array"
+                items:
+                  type: "string"
       description: "GET /auth/me: the profile plus the caller's team authority (ADR 0021)."
     Meeting:
       type: "object"
@@ -20970,12 +21281,90 @@ components:
             type: "object"
             additionalProperties: true
             description: "one exported plan; not pinned, the captured project has no plans"
+    ProjectMember:
+      type: "object"
+      required:
+        - "userId"
+        - "email"
+        - "displayName"
+        - "status"
+        - "role"
+        - "maxMode"
+        - "usdCapMonth"
+        - "updatedAt"
+      properties:
+        userId:
+          type: "string"
+        email:
+          type: "string"
+        displayName:
+          type: "string"
+        status:
+          type: "string"
+          description: "active | disabled"
+        role:
+          type: "string"
+          enum:
+            - "viewer"
+            - "member"
+            - "admin"
+            - "owner"
+        maxMode:
+          type: "string"
+          enum:
+            - "none"
+            - "read_only"
+            - "execute"
+        usdCapMonth:
+          type: "number"
+          description: "Monthly project USD cap; 0 = no cap"
+        updatedAt:
+          type: "string"
     ProjectQuery:
       type: "object"
       properties:
         project:
           type: "string"
           description: "A registered project id (1 to 128 letters, digits, _ or -). Required: a request without it answers 400 VALIDATION_FAILED."
+    ProjectSummary:
+      type: "object"
+      required:
+        - "id"
+        - "name"
+        - "role"
+        - "maxMode"
+        - "usdCapMonth"
+        - "permissions"
+      properties:
+        id:
+          type: "string"
+          description: "Stable project id (1-128 letters, digits, _ or -)"
+        name:
+          type: "string"
+          description: "Project name"
+        role:
+          type: "string"
+          enum:
+            - "viewer"
+            - "member"
+            - "admin"
+            - "owner"
+          description: "The caller's effective role on this project"
+        maxMode:
+          type: "string"
+          enum:
+            - "none"
+            - "read_only"
+            - "execute"
+          description: "The tighter of the global and project run modes"
+        usdCapMonth:
+          type: "number"
+          description: "The tighter positive monthly USD cap; 0 = no cap"
+        permissions:
+          type: "array"
+          items:
+            type: "string"
+          description: "Action classes this project role may use (kb/members.mjs CLASS_GRANTS; project.admin instead of the team admin class)"
     QaIndex:
       type: "object"
       required:

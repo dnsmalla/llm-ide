@@ -1011,7 +1011,7 @@
       "required": [
         "code"
       ],
-      "description": "Deliberately a bare {code} body, not the {error:{...}} envelope: on this route bare bodies are the update outcome protocol the Mac decodes (PluginUpdateOutcome.decode → .notFound), while an envelope means the route itself is missing (older server). Do not wrap it — PluginUpdatePresentationTests.updateOutcomeDecoding guards this.",
+      "description": "Deliberately a bare {code} body, not the {error:{...}} envelope: on this route bare bodies are the update outcome protocol the Mac decodes (PluginUpdateOutcome.decode \u2192 .notFound), while an envelope means the route itself is missing (older server). Do not wrap it \u2014 PluginUpdatePresentationTests.updateOutcomeDecoding guards this.",
       "properties": {
         "code": {
           "type": "string"
@@ -1095,7 +1095,62 @@
               "type": "number",
               "description": "Monthly USD cap; 0 = no cap"
             },
-            "permissions": { "type": "array", "items": { "type": "string" }, "description": "Action classes the caller may use (kb/members.mjs CLASS_GRANTS), cap not applied. Plan H1.2, API 124." }
+            "permissions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Action classes the caller may use (kb/members.mjs CLASS_GRANTS), cap not applied. Plan H1.2, API 124."
+            }
+          }
+        },
+        "projects": {
+          "type": "array",
+          "description": "ADR 0022: the caller's projects with the effective role on each (unassigned = viewer; a global owner/admin overrides). Same shape as GET /projects.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "role",
+              "maxMode",
+              "usdCapMonth",
+              "permissions"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "viewer",
+                  "member",
+                  "admin",
+                  "owner"
+                ]
+              },
+              "maxMode": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "read_only",
+                  "execute"
+                ]
+              },
+              "usdCapMonth": {
+                "type": "number"
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
@@ -1646,7 +1701,7 @@
           "required": [
             "key"
           ],
-          "description": "A missing or non-string `value` deletes the secret (auth-routes.mjs: deleted = !value) — by design today; an explicit delete would be clearer."
+          "description": "A missing or non-string `value` deletes the secret (auth-routes.mjs: deleted = !value) \u2014 by design today; an explicit delete would be clearer."
         }
       },
       "responses": {

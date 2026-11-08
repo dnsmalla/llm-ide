@@ -1,0 +1,56 @@
+{
+  "endpoint": "GET /auth/me",
+  "status": 200,
+  "response": {
+    "id": "8c901ac3061e7cec",
+    "email": "capture-owner@example.test",
+    "displayName": "capture-owner",
+    "role": "admin",
+    "status": "active",
+    "createdAt": "2026-11-08 04:09:42",
+    "lastLoginAt": "2026-11-08 04:09:42",
+    "member": {
+      "teamRole": "owner",
+      "maxMode": "execute",
+      "usdCapMonth": 0,
+      "permissions": [
+        "self.read",
+        "self.write",
+        "model.ask",
+        "model.read",
+        "model.exec",
+        "fs.read",
+        "fs.write",
+        "external.read",
+        "external.write",
+        "install",
+        "admin",
+        "project.admin",
+        "host"
+      ]
+    },
+    "projects": [
+      {
+        "id": "p-capture",
+        "name": "Capture",
+        "role": "owner",
+        "maxMode": "execute",
+        "usdCapMonth": 0,
+        "permissions": [
+          "self.read",
+          "self.write",
+          "model.ask",
+          "model.read",
+          "model.exec",
+          "fs.read",
+          "fs.write",
+          "external.read",
+          "external.write",
+          "install",
+          "admin",
+          "project.admin"
+        ]
+      }
+    ]
+  }
+}
