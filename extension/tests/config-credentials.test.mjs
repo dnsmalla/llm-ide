@@ -3,7 +3,7 @@
 // agent Bash child running as the same uid cannot read them from /proc/<core>/environ.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,9 +21,11 @@ function runConfig(extraEnv) {
   for (const k of ['LLMIDE_JWT_SECRET', 'LLMIDE_VAULT_KEY', 'LLMIDE_DB_PATH', 'CREDENTIALS_DIRECTORY']) {
     if (!(k in extraEnv)) delete env[k];
   }
-  return execFileSync(process.execPath, ['--input-type=module', '-e',
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e',
     "import('./core/config.mjs').then(({config}) => console.log(JSON.stringify({jwt: config.jwtSecret, vault: config.vaultKey})));",
-  ], { cwd: EXT, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  ], { cwd: EXT, env, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(r.stderr || `child exited ${r.status}`);
+  return r.stdout;
 }
 
 test('R-034 #1: production reads the JWT/vault secrets from CREDENTIALS_DIRECTORY', () => {
