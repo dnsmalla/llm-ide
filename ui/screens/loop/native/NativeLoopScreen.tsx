@@ -382,7 +382,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         order: l.config.stages.length, skillId: null, targetPath: null, outputPath: null, prompt: null,
         isDefault: false, enabled: true, defaultKey: null, severity: "blocking", timeoutSeconds: null,
         detectedCommand: null, check: null, testOp: kind === "testMap" ? "structure" : null,
-        graphOp: kind === "codeGraph" ? "snapshot" : null, allowsRepair: true, defaultRevision: null,
+        graphOp: kind === "codeGraph" ? "snapshot" : null, allowsRepair: true, runOnce: false, defaultRevision: null,
         disabledByDetection: null, raw: null,
       });
     });

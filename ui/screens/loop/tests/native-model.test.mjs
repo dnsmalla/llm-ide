@@ -62,3 +62,26 @@ test("isNativeRunnable is the single list of kinds the native runner executes", 
   assert.equal(m.isNativeRunnable({ kind: "testMap", testOp: null }), false);
   for (const kind of ["incidentTriage", "sdkSurfaceDiff", "unsupported"]) assert.equal(m.isNativeRunnable({ kind, testOp: null }), false, kind);
 });
+
+test("runOnce defaults to false and round-trips when true", () => {
+  const store = m.decodeProjectStore({ schemaVersion: 2, loops: [{ id: "l", name: "F", config: { stages: [
+    { id: "a", name: "Plain", kind: "shellCommand", order: 0 },
+    { id: "b", name: "Once", kind: "skill", order: 1, runOnce: true },
+    { id: "c", name: "Junk", kind: "shellCommand", order: 2, runOnce: "yes" },
+  ] } }] });
+  const [plain, once, junk] = store.loops[0].config.stages;
+  assert.equal(plain.runOnce, false);
+  assert.equal(once.runOnce, true);
+  assert.equal(junk.runOnce, false, "a non-boolean decodes as false");
+  const encoded = JSON.parse(m.encodeProjectStore(store)).loops[0].config.stages;
+  assert.equal(encoded[1].runOnce, true);
+  assert.equal("runOnce" in encoded[0], false, "false is not written");
+  assert.equal("runOnce" in encoded[2], false, "false is not written");
+});
+
+test("verdict check survives a decode/encode round trip", () => {
+  const check = { verdict: { path: ".factory/READINESS.md", line: "Verdict: ready" } };
+  const store = m.decodeProjectStore({ schemaVersion: 2, loops: [{ id: "l", name: "F", config: { stages: [{ id: "g", name: "Intake gate", kind: "artifactCheck", order: 0, check }] } }] });
+  const again = m.decodeProjectStore(JSON.parse(m.encodeProjectStore(store)));
+  assert.deepEqual(again.loops[0].config.stages[0].check, check);
+});

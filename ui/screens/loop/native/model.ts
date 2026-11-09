@@ -38,6 +38,8 @@ export interface LoopStage {
   testOp: "structure" | "map" | "ledger" | null;
   graphOp: "snapshot" | "verify" | null;
   allowsRepair: boolean;
+  /** Skip this stage in later iterations of the same run once it has passed in that run. Default false. */
+  runOnce: boolean;
   defaultRevision: number | null;
   disabledByDetection: boolean | null;
   /** Original object for an unknown kind, so saving does not destroy a newer build's fields. */
@@ -110,6 +112,7 @@ export function decodeStage(v: unknown): LoopStage | null {
     testOp: v.testOp === "structure" || v.testOp === "map" || v.testOp === "ledger" ? v.testOp : null,
     graphOp: v.graphOp === "snapshot" || v.graphOp === "verify" ? v.graphOp : null,
     allowsRepair: bool(v.allowsRepair, true),
+    runOnce: bool(v.runOnce, false),
     defaultRevision: num(v.defaultRevision),
     disabledByDetection: typeof v.disabledByDetection === "boolean" ? v.disabledByDetection : null,
     raw: kind === "unsupported" ? v : null,
@@ -203,6 +206,7 @@ function encodeStage(s: LoopStage): Record<string, unknown> {
     ...(s.testOp !== null ? { testOp: s.testOp } : {}),
     ...(s.graphOp !== null ? { graphOp: s.graphOp } : {}),
     allowsRepair: s.allowsRepair,
+    ...(s.runOnce ? { runOnce: true } : {}),
     ...(s.defaultRevision !== null ? { defaultRevision: s.defaultRevision } : {}),
     ...(s.disabledByDetection !== null ? { disabledByDetection: s.disabledByDetection } : {}),
   };

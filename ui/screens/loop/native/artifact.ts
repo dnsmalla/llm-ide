@@ -11,6 +11,8 @@ export interface ArtifactCheck {
   projectRootFallback?: boolean;
   outputRules?: { stage: string; skillId?: string | null; shape: "file" | "directory"; maxLines: number; subGlob?: string | null; excludeStages?: string[]; citations?: boolean }[];
   sectionRules?: { headerPrefix: string; requiredLinePrefixes: string[] }[];
+  /** One explicit report file (relative to the run root; dot-folders allowed) that must contain `line` as a whole line. */
+  verdict?: { path: string; line: string };
 }
 
 export type ArtifactFs = Pick<FsApi, "read" | "list">;

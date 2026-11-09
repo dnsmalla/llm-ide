@@ -18,7 +18,7 @@ function config(stages: Partial<LoopStage>[], overrides: Partial<LoopEngineConfi
       id: crypto.randomUUID(), name: s.name ?? `Stage ${i + 1}`, kind: s.kind ?? "shellCommand", command: s.command ?? null,
       order: i, skillId: null, targetPath: null, outputPath: null, prompt: null, isDefault: false, enabled: true,
       defaultKey: null, severity: s.severity ?? "blocking", timeoutSeconds: null, detectedCommand: null, check: null,
-      testOp: null, graphOp: null, allowsRepair: true, defaultRevision: null, disabledByDetection: null, raw: null,
+      testOp: null, graphOp: null, allowsRepair: true, runOnce: s.runOnce ?? false, defaultRevision: null, disabledByDetection: null, raw: null,
     })),
     maxIterations: 10, consecutiveFailureStop: 3, wallClockBudgetSeconds: null, pauseTimeoutSeconds: 1800,
     maxRepairsPerStage: 3, repairModel: null, protectedPathPolicy: "revert", writeSummaryNote: false,
