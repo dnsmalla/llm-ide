@@ -4,6 +4,7 @@ import { LiveTranscript } from "./transcript.ts";
 import { PermissionCard } from "./PermissionCard.tsx";
 import { TranscriptList } from "./TranscriptList.tsx";
 import { RecoveryList } from "./RecoveryList.tsx";
+import { phaseAfterFailedStop } from "./stop-phase.ts";
 export interface LiveRecording { sessionId: string; startedAtMs: number; platform: string | null }
 export interface LiveDeps { capture: CaptureHost; language(): string; openLibrary(): void; onRecordingChange?(r: LiveRecording | null): void; indexNote?(note: FinalizedNote): Promise<"indexed" | "skipped" | "failed">; /** The tray Start/Stop toggle; returns unsubscribe. */ onToggleRequest?(run: () => void): () => void }
 type Phase = "idle" | "starting" | "recording" | "stopping" | "done";
@@ -11,18 +12,22 @@ type Phase = "idle" | "starting" | "recording" | "stopping" | "done";
 export function adoptPhase(phase: Phase, s: CaptureStatus): Phase { return s.recording && (phase === "idle" || phase === "done") ? "recording" : phase; }
 const PLATFORM_LABEL: Record<string,string> = { zoom: "Zoom", teams: "Teams" };
 function elapsed(fromMs:number,nowMs:number){const s=Math.max(0,Math.floor((nowMs-fromMs)/1000));const p=(n:number)=>String(n).padStart(2,"0");return `${p(Math.floor(s/3600))}:${p(Math.floor((s%3600)/60))}:${p(s%60)}`;}
+// The transcript lives at module level: the capture channel keeps feeding it across a remount (a project switch remounts
+// the screen), so the lines a capture already has are still shown by the new instance.
+export const liveTranscript=new LiveTranscript();
 export function LiveScreen({active,deps,initialStatus}:{active:boolean;deps:LiveDeps;initialStatus?:CaptureStatus}) {
- const [status,setStatus]=useState<CaptureStatus|null>(initialStatus??null); const [asked,setAsked]=useState(false); const [phase,setPhase]=useState<Phase>(initialStatus?.recording?"recording":"idle"); const [title,setTitle]=useState(""); const [platform,setPlatform]=useState<string|null>(null); const [notice,setNotice]=useState<(CaptureEvent&{type:"state"})|null>(null); const [startedAt,setStartedAt]=useState<number|null>(initialStatus?.startedAtMs??null); const [now,setNow]=useState(()=>Date.now()); const [result,setResult]=useState<StopResult|null>(null); const [error,setError]=useState<string|null>(null); const transcript=useRef(new LiveTranscript()).current;
+ const [status,setStatus]=useState<CaptureStatus|null>(initialStatus??null); const [asked,setAsked]=useState(false); const [phase,setPhase]=useState<Phase>(initialStatus?.recording?"recording":"idle"); const [title,setTitle]=useState(""); const [platform,setPlatform]=useState<string|null>(null); const [notice,setNotice]=useState<(CaptureEvent&{type:"state"})|null>(null); const [startedAt,setStartedAt]=useState<number|null>(initialStatus?.startedAtMs??null); const [now,setNow]=useState(()=>Date.now()); const [result,setResult]=useState<StopResult|null>(null); const [error,setError]=useState<string|null>(null); const transcript=liveTranscript;
  const [indexState,setIndexState]=useState<string|null>(null);
  // A remount (project switch, reload) while the host still captures adopts that capture, so Stop is always reachable.
- const refresh=useCallback(async()=>{try{const s=await deps.capture.status();setStatus(s);if(s.recording){setPhase((p)=>adoptPhase(p,s));setStartedAt((a)=>a??s.startedAtMs??null);if(s.sessionId)deps.onRecordingChange?.({sessionId:s.sessionId,startedAtMs:s.startedAtMs??Date.now(),platform:null})}}catch(e){setError(captureErrorText(e))}},[deps]);
+ const refresh=useCallback(async():Promise<CaptureStatus|null>=>{try{const s=await deps.capture.status();setStatus(s);if(s.recording){setPhase((p)=>adoptPhase(p,s));setStartedAt((a)=>a??s.startedAtMs??null);if(s.sessionId)deps.onRecordingChange?.({sessionId:s.sessionId,startedAtMs:s.startedAtMs??Date.now(),platform:null})}return s}catch(e){setError(captureErrorText(e));return null}},[deps]);
  useEffect(()=>{if(active&&!initialStatus)void refresh()},[active,refresh,initialStatus]);
  const needsPermission=!!status&&status.supported&&!status.trusted&&phase==="idle";
  useEffect(()=>{if(!active||!needsPermission)return;const id=setInterval(()=>void refresh(),1000);return()=>clearInterval(id)},[active,needsPermission,refresh]);
  useEffect(()=>{if(!active||phase!=="recording")return;const id=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(id)},[active,phase]);
  const onEvent=useCallback((ev:CaptureEvent)=>{if(ev.type!=="state"){transcript.apply(ev);return}if(ev.state==="recording"){setPlatform(ev.platform);setNotice(null)}else if(ev.state!=="stopped")setNotice(ev)},[transcript]);
  const start=useCallback(async()=>{setError(null);setResult(null);setNotice(null);setPlatform(null);transcript.clear();setPhase("starting");try{const s=await deps.capture.start(deps.language(),onEvent);setStartedAt(s.startedAtMs);setNow(Date.now());setPhase("recording");deps.onRecordingChange?.({sessionId:s.sessionId,startedAtMs:s.startedAtMs,platform:null})}catch(e){setError(captureErrorText(e));setPhase("idle");void refresh()}},[deps,onEvent,refresh,transcript]);
- const stop=useCallback(async()=>{setPhase("stopping");try{const r=await deps.capture.stop(title);setResult(r);setPhase("done");setIndexState(null);if(r.note&&deps.indexNote)setIndexState(await deps.indexNote(r.note))}catch(e){setError(captureErrorText(e));setPhase("done")}finally{deps.onRecordingChange?.(null)}},[deps,title]);
+ const stop=useCallback(async()=>{setPhase("stopping");let keepRecording=false;try{const r=await deps.capture.stop(title);setResult(r);setPhase("done");setIndexState(null);if(r.note&&deps.indexNote)setIndexState(await deps.indexNote(r.note))}catch(e){setError(captureErrorText(e));// A refused save (verify_failed, no_root, ...) keeps the capture: the host still records, so Stop must stay reachable. A failed status read is unknown, so it is treated as still recording too.
+const s=await refresh();const next=phaseAfterFailedStop(s);keepRecording=!next.releaseRecording;setPhase(next.phase)}finally{if(!keepRecording)deps.onRecordingChange?.(null)}},[deps,title,refresh]);
  const toggleRef=useRef<(()=>void)|null>(null);
  toggleRef.current=phase==="recording"?()=>void stop():phase==="idle"||phase==="done"?()=>void start():null;
  useEffect(()=>deps.onToggleRequest?.(()=>toggleRef.current?.()),[deps]);

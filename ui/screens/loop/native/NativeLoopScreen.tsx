@@ -18,7 +18,7 @@ import { runNativeLoop, runStatusCode } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
 import { evaluateArtifact } from "./artifact.ts";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
-import { reopenFault, runRegression } from "./regression.ts";
+import { faultPathsFromOutput, reopenFault, runRegression } from "./regression.ts";
 import { runCodeGraph } from "./codegraph.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { writeSummaryNote } from "./summary.ts";
@@ -108,6 +108,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [approvalState, setApprovalState] = useState<LoopApprovalStatus | null>(null);
   const runningRef = useRef(false);
   const cancelledRef = useRef(false);
+  /** Aborts the active run's in-flight agent call (skill or repair stage); Stop and leaving the screen both use it. */
+  const runAbortRef = useRef<AbortController | null>(null);
+  /** Set when the screen unmounts, so a finishing run does not start the next queued one in a stale project. */
+  const unmountedRef = useRef(false);
   const haltRef = useRef<string | null>(null);
   /** The halt is a failed agent call with nothing out of scope (recorded as `error`, as the Mac does), not a block. */
   const haltErrorRef = useRef(false);
@@ -176,6 +180,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   }, [fs, projectRoot]);
 
   useEffect(() => {
+    // `live` guards the race where the screen unmounts before listen() resolves: the listener is then removed on resolve.
+    let live = true;
     let un: (() => void) | null = null;
     void listen<{ stageId: string; stream: "stdout" | "stderr"; text: string }>("loop-stage-output", (e) => {
       const text = e.payload.text;
@@ -186,8 +192,19 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         copy[copy.length - 1] = copy[copy.length - 1] + text;
         return copy;
       });
-    }).then((fn) => { un = fn; }).catch(() => undefined);
-    return () => { if (un) un(); };
+    }).then((fn) => { if (live) un = fn; else fn(); }).catch(() => undefined);
+    return () => { live = false; if (un) un(); };
+  }, []);
+
+  // A project switch remounts this screen (the shell keys it by project). A run still in flight would keep editing the
+  // project with no screen to show it, so leaving the screen cancels it, as Stop does; the queue is kept for the next mount.
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      if (runningRef.current) cancelActiveRun();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -488,6 +505,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         before,
         call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
           method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
+          signal: runAbortRef.current?.signal,
         }),
         changedNow: changedPathsNow,
         check: (paths, b, created) => guardProtected(paths, target, b, created),
@@ -555,12 +573,22 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
   };
 
-  const stopRun = () => {
+  /** Cancels the active run: shell and fault stages through loop_cancel, agent calls through their abort signal. */
+  const cancelActiveRun = () => {
     cancelledRef.current = true;
     pausedRef.current = false;
     setPaused(false);
+    runAbortRef.current?.abort();
     void invokeHost("loop_cancel").catch(() => undefined);
-    setNotice("Stopping the current stage; the loop will end after it returns.");
+  };
+
+  const stopRun = () => {
+    // Stop ends the queue too: otherwise the run's finally would start the next queued loop right after the user stopped.
+    queueRef.current = [];
+    setQueued(0);
+    if (projectRoot) clearQueue(projectRoot);
+    cancelActiveRun();
+    setNotice("Stopping the current stage; the loop will end after it returns. Queued runs were cleared.");
   };
 
   // Pause holds the loop at the next stage boundary (the Mac's between-stages hold, not a mid-stage suspend).
@@ -617,8 +645,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setNotice(e instanceof Error ? e.message : "The Loop commands could not be approved.");
       return;
     }
+    // The approval dialog is modal and can outlive the screen: a leave while it was open must not start the loop
+    // (the unmount cleanup only cancels a run whose runningRef is already set).
+    if (unmountedRef.current) return;
     runningRef.current = true;
     cancelledRef.current = false;
+    runAbortRef.current = new AbortController();
     haltRef.current = null;
     haltErrorRef.current = false;
     pausedRef.current = false;
@@ -647,6 +679,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             before,
             call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
               method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
+              signal: runAbortRef.current?.signal,
             }),
             changedNow: changedPathsNow,
             check: (paths, b, created) => guardProtected(paths, target, b, created),
@@ -668,7 +701,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setRunLog((l) => [...l, outcome.cancelled ? (cancelledRef.current ? "Loop cancelled." : `Loop aborted: ${outcome.statusSummary}`) : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
       if (!outcome.cancelled && !outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
         const failedRun = [...outcome.stages].reverse().find((o) => o.stage.kind === "regressionSweep" && !o.ok);
-        const faultPaths = [...new Set(Array.from(failedRun?.output.matchAll(/^([^\n:]+\\.md):/gm) ?? [], (m) => m[1].trim()))];
+        const faultPaths = faultPathsFromOutput(failedRun?.output ?? "");
         let reopened = 0;
         for (const rel of faultPaths) if (await reopenFault(fs, rel)) reopened += 1;
         if (reopened > 0) setRunLog((l) => [...l, `reopened ${reopened} fixed fault(s).`]);
@@ -691,12 +724,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       void notifyTask("loop", false);
     } finally {
       runningRef.current = false;
+      runAbortRef.current = null;
       pausedRef.current = false;
       setPaused(false);
       setLoopRunning(false);
       setRunningStage(false);
       void refreshApproval(target.id);
-      const next = queueRef.current.shift();
+      // A run ended by leaving the screen keeps the queue as persisted: the next mount restores it.
+      const next = unmountedRef.current ? undefined : queueRef.current.shift();
       setQueued(queueRef.current.length);
       persistQueue();
       if (next) window.setTimeout(() => void executeLoop(next.loop, next.scheduled), 0);

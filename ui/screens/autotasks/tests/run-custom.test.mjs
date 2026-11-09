@@ -67,3 +67,21 @@ test("custom runner: a failed revert is reported and its writes are left behind"
   assert.match(r.error, /revert failed/);
   assert.deepEqual(r.writes, ["src/a.ts"]);
 });
+
+test("custom runner: the page's abort signal reaches the agent call, and an aborted call is a failed run", async () => {
+  const ctrl = new AbortController();
+  let agentSignal = null;
+  const r = await runCustomTask(base, {
+    request: async (path, init) => {
+      if (path.startsWith("/kb/usage/resolve")) return { provider: "anthropic", model: null, status: "ok" };
+      agentSignal = init?.signal ?? null;
+      ctrl.abort();
+      throw new DOMException("The operation was aborted.", "AbortError");
+    },
+    workRoot: async () => "/p", changedPaths: async () => [], revert: async () => {},
+    signal: ctrl.signal,
+  });
+  assert.equal(agentSignal, ctrl.signal);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /aborted/);
+});

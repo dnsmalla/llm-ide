@@ -7,16 +7,22 @@ function fieldOk(field: string, min: number, max: number): boolean {
   if (field === "*") return true;
   for (const part of field.split(",")) {
     if (part === "") return false;
-    let base = part;
-    const stepMatch = /^\*\/(\d+)$/.exec(part);
-    if (stepMatch) { base = "*"; if (Number(stepMatch[1]) <= 0) return false; }
-    const step = part.includes("/") ? part.split("/")[1] : null;
-    if (step !== null && (!/^\d+$/.test(step) || Number(step) <= 0)) return false;
+    // The step is split off first, so a range step (`0-30/10`) is checked against its range like a plain one.
+    const pieces = part.split("/");
+    if (pieces.length > 2) return false;
+    const base = pieces[0] ?? "";
+    const step = pieces[1];
+    if (step !== undefined && (!/^\d+$/.test(step) || Number(step) <= 0)) return false;
+    // A step needs a range or `*` to count from; `5/10` is not a form cronMatches supports.
+    if (step !== undefined && base !== "*" && !base.includes("-")) return false;
+    if (base === "*") continue;
     if (base.includes("-")) {
-      const [a, b] = base.split("-");
+      const bounds = base.split("-");
+      if (bounds.length !== 2) return false;
+      const [a = "", b = ""] = bounds;
       if (!/^\d+$/.test(a) || !/^\d+$/.test(b) || Number(a) < min || Number(b) > max || Number(a) > Number(b)) return false;
-    } else if (base !== "*") {
-      if (!/^\d+$/.test(base) || Number(base) < min || Number(base) > max) return false;
+    } else if (!/^\d+$/.test(base) || Number(base) < min || Number(base) > max) {
+      return false;
     }
   }
   return true;

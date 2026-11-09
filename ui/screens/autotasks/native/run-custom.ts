@@ -10,7 +10,9 @@ import { decideRun, resolvePath } from "./usage.ts";
 export type CustomAgentReply = AgentWrites & { reply?: string; ran?: boolean; unresolvedSkills?: string[]; resultSubtype?: string };
 
 export interface CustomRunDeps {
-  request<T>(path: string, init?: { method?: "GET" | "POST"; body?: unknown }): Promise<T>;
+  request<T>(path: string, init?: { method?: "GET" | "POST"; body?: unknown; signal?: AbortSignal }): Promise<T>;
+  /** Aborts the agent call (the page's Stop). Absent = not stoppable from outside. */
+  signal?: AbortSignal;
   workRoot(): Promise<string>;
   changedPaths(): Promise<string[] | null>;
   revert(paths: string[], created: string[]): Promise<void>;
@@ -47,6 +49,7 @@ export async function runCustomTask(task: CustomAutoTask, deps: CustomRunDeps): 
     call: () => deps.request<CustomAgentReply>("/kb/loop/agent-run", {
       method: "POST",
       body: { message: customTaskMessage(task), repoRoot: workRoot, model: decision.model, timeoutMs: 30 * 60 * 1000 },
+      signal: deps.signal,
     }),
     changedNow: deps.changedPaths,
     check: readOnlyCheck(async (paths, created) => { await deps.revert(paths, created); }),

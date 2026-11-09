@@ -90,3 +90,8 @@ export async function reopenFault(fs: RegressionFs & { write: FsApi["write"] }, 
   const next = text.replace(/^status:\s*fixed\s*$/m, "status: open");
   try { await fs.write(rel, next, { expected_hash: null }); return true; } catch { return false; }
 }
+
+/** The fault paths a failed sweep names (`system/faults/a.md: verify failed`), each once, in output order. */
+export function faultPathsFromOutput(output: string): string[] {
+  return [...new Set(Array.from(output.matchAll(/^([^\n:]+\.md):/gm), (m) => m[1].trim()))];
+}

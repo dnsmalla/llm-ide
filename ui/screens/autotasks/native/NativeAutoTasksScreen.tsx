@@ -10,7 +10,8 @@ import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
 import { createHostFs } from "../../explorer/fs";
 import { GROUPS, MAC_ONLY_MESSAGE, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, TASKS, TASK_BY_ID, agentRunSucceeded, composeTaskMessage, desktopRunnable, scheduleStatusLine, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, scheduledRunAllowed, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
-import { cronMatches, describeCron, validateCron } from "./cron.ts";
+import { describeCron, validateCron } from "./cron.ts";
+import { minuteKey, takeDueAutoTasks } from "./due.ts";
 import { addTemplate, loadTemplates, removeTemplate, saveTemplates, type PromptTemplate } from "./prompt-templates.ts";
 import { scanLibraryFolders, type LibraryFolder } from "./folders.ts";
 import { scanProjectSkills, skillOptionLabel, skillRunId, type ProjectSkill } from "./skills.ts";
@@ -64,6 +65,11 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const [folderList, setFolderList] = useState<LibraryFolder[] | null>(null);
   const [folderFilter, setFolderFilter] = useState("");
   const firedRef = useRef<Record<string, string>>({});
+  /** Scheduled tasks due but not yet started, in order. */
+  const pendingRef = useRef<AutoTaskId[]>([]);
+  /** Aborts the one in-flight Auto Task (built-in or custom: the shared lock allows only one). Stop and leaving use it. */
+  const runAbortRef = useRef<AbortController | null>(null);
+  const [customDeleteOpen, setCustomDeleteOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [runs, setRuns] = useState<AutoTaskRun[]>(() => {
@@ -83,6 +89,8 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     return () => { live = false; };
   }, [fs, projectRoot]);
   useEffect(() => { setCronDraft(config.cron); setScheduleError(false); }, [selected, config.cron]);
+  // A delete armed for one custom task must not carry over to another task's editor.
+  useEffect(() => { setCustomDeleteOpen(false); }, [customEdit]);
   useEffect(() => {
     setCustomTasks(projectRoot ? loadCustomTasks(projectRoot) : []);
     setCustomEdit(null);
@@ -107,34 +115,49 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     });
   };
   useEffect(() => {
-    if (!state.masterEnabled) return;
+    if (!state.masterEnabled) { pendingRef.current = []; return; }
     const tick = () => {
       if (running) return;
+      // Do not arm a scheduled task that cannot start: the shell scheduler or another run may hold the shared lock.
+      // runTask acquires synchronously before its first await, so this check is race-free with it.
+      if (autoTaskBusy()) return;
       const now = new Date();
-      const minute = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
-      for (const t of TASKS) {
-        const c = state.configs[t.id];
-        if (!scheduledRunAllowed(t.id, c, hasRepo) || !validateCron(c.cron)) continue;
-        if (!cronMatches(c.cron, now)) continue;
-        // Do not arm a scheduled task that cannot start: the shell scheduler or another run may hold the shared lock.
-        // runTask acquires synchronously before its first await, so this check is race-free with it.
-        if (autoTaskBusy()) return;
-        const key = `${t.id}:${minute}`;
-        if (firedRef.current[key]) continue;
-        let persisted: Record<string, string> = {};
-        try { persisted = JSON.parse(localStorage.getItem("llmide.autoTaskFired.v1") ?? "{}") as Record<string, string>; } catch { persisted = {}; }
-        if (persisted[key]) { firedRef.current[key] = minute; continue; }
-        persisted[key] = minute;
-        firedRef.current[key] = minute;
+      const minute = minuteKey(now);
+      let persisted: Record<string, string> = {};
+      try { persisted = JSON.parse(localStorage.getItem("llmide.autoTaskFired.v1") ?? "{}") as Record<string, string>; } catch { persisted = {}; }
+      // Every task due this minute is queued, not only the first: they run one after another (see the effect's re-run).
+      const due = takeDueAutoTasks(
+        TASKS.map((t) => ({ id: t.id, cron: state.configs[t.id].cron, allowed: scheduledRunAllowed(t.id, state.configs[t.id], hasRepo) })),
+        now,
+        (key) => Boolean(firedRef.current[key] || persisted[key]),
+        (key) => { firedRef.current[key] = minute; persisted[key] = minute; },
+      );
+      if (due.length > 0) {
         try { localStorage.setItem("llmide.autoTaskFired.v1", JSON.stringify(Object.fromEntries(Object.entries(persisted).slice(-200)))); } catch { /* session */ }
-        void runTask(t.id);
-        return;
+        pendingRef.current.push(...due);
       }
+      // The next queued task starts now; a finished run re-runs this effect (running changes), which starts the one after.
+      const next = pendingRef.current.shift();
+      if (next) void runTask(next);
     };
     tick();
     const timer = window.setInterval(tick, 30_000);
     return () => window.clearInterval(timer);
   }, [state, running, hasRepo]);
+
+  /** Stops the running Auto Task (built-in or custom) through its abort signal, and drops the scheduled runs queued behind it. */
+  const stopTask = () => {
+    pendingRef.current = [];
+    runAbortRef.current?.abort();
+    setNotice("Stopping the task…");
+  };
+
+  // Leaving the page (a project switch remounts it) cancels a run still in flight, as Stop does. The lock is released by
+  // the run's own finally once its call rejects.
+  useEffect(() => () => {
+    pendingRef.current = [];
+    runAbortRef.current?.abort();
+  }, []);
 
   const runTask = async (id: AutoTaskId = selected) => {
     if (running) return;
@@ -148,6 +171,8 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     const skillId = c.skillName ? skillRunId(c.skillName) : null;
     if (c.skillName && !skillId) { setNotice(`“${c.skillName}” cannot run in an Auto Task (code-applying or not a plain skill name).`); return; }
     if (!tryAcquireAutoTask()) { setNotice("Another Auto Task is running; wait for it to finish."); return; }
+    const abort = new AbortController();
+    runAbortRef.current = abort;
     setRunning(true);
     setLog((l) => [...l, `▶ ${t.label}`, ""]);
     const started = new Date();
@@ -172,6 +197,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         before: snapshot === null ? null : new Set(snapshot),
         call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
           method: "POST", body: { message: composeTaskMessage(c.prompt, inputPath, outputPath), repoRoot: workRoot, skills: skillId ? [skillId] : undefined, model: decision.proceed ? decision.model : undefined, timeoutMs: 30 * 60 * 1000 },
+          signal: abort.signal,
         }),
         changedNow: changedPathsNow,
         check: t.readOnlyOutput
@@ -181,7 +207,10 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       if (t.readOnlyOutput && g.writes.length) {
         setLog((l) => [...l, g.violation ? `read-only task not reverted: ${g.violation}` : `read-only task reverted: ${g.writes.join(", ")}`]);
       }
-      if (g.result === null) throw new Error(`the agent run failed (${g.error ?? "unknown error"})${g.violation ? `; ${g.violation}` : ""}`);
+      if (g.result === null) {
+        const why = abort.signal.aborted ? "stopped before the agent run finished" : `the agent run failed (${g.error ?? "unknown error"})`;
+        throw new Error(`${why}${g.violation ? `; ${g.violation}` : ""}`);
+      }
       const r = g.result;
       const touched = t.readOnlyOutput && g.violation === null ? [] : g.writes;
       // A read-only task whose edits could not be reverted did not complete: its writes are left in place and reported.
@@ -191,11 +220,14 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       setNotice(ok ? `${t.label} completed.` : `${t.label} did not complete.`);
       void notifyTask("autotask", ok);
     } catch (e) {
-      setLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
-      setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed", durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
-      setNotice(e instanceof Error ? e.message : "The task could not run.");
-      void notifyTask("autotask", false);
-    } finally { setRunning(false); releaseAutoTask(); }
+      const message = e instanceof Error ? e.message : String(e);
+      setLog((l) => [...l, message]);
+      // A user Stop (or leaving the page) aborts the call: it is logged as stopped, not as a failure to notify about.
+      const stopped = abort.signal.aborted;
+      setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: stopped ? "stopped" : message, durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
+      setNotice(stopped ? `${t.label} stopped.` : message || "The task could not run.");
+      if (!stopped) void notifyTask("autotask", false);
+    } finally { runAbortRef.current = null; setRunning(false); releaseAutoTask(); }
   };
 
   const openCustom = (task?: CustomAutoTask) => {
@@ -238,11 +270,14 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     if (!customTaskRunnable(task)) { setNotice(CUSTOM_IMPLEMENT_MESSAGE); return; }
     if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
     if (!tryAcquireAutoTask()) { setNotice("Another Auto Task is running; wait for it to finish."); return; }
+    const abort = new AbortController();
+    runAbortRef.current = abort;
     setCustomRunning(true);
     const started = new Date();
     try {
       const result = await runCustomTask(task, {
         request: (path, init) => core.request(path, init as never),
+        signal: abort.signal,
         workRoot: () => invokeHost<string>("loop_work_root"),
         changedPaths: async () => { try { return await invokeHost<string[]>("loop_changed_paths"); } catch { return null; } },
         revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
@@ -257,10 +292,12 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       setNotice(result.ok ? `${task.name} completed.` : `${task.name} did not complete: ${result.error ?? "failed"}`);
       void notifyTask("autotask", result.ok);
     } catch (e) {
-      appendCustomRun({ id: crypto.randomUUID(), taskId: task.id, task: task.name, projectRoot: projectRoot ?? "", at: started.toISOString(), ok: false, summary: e instanceof Error ? e.message : "failed", trigger: "manual" });
-      setNotice(e instanceof Error ? e.message : "The custom task could not run.");
-      void notifyTask("autotask", false);
-    } finally { setCustomRunning(false); releaseAutoTask(); }
+      // A user Stop is not a failure: logged as stopped, and no failure notification.
+      const stopped = abort.signal.aborted;
+      appendCustomRun({ id: crypto.randomUUID(), taskId: task.id, task: task.name, projectRoot: projectRoot ?? "", at: started.toISOString(), ok: false, summary: stopped ? "stopped" : e instanceof Error ? e.message : "failed", trigger: "manual" });
+      setNotice(stopped ? `${task.name} stopped.` : e instanceof Error ? e.message : "The custom task could not run.");
+      if (!stopped) void notifyTask("autotask", false);
+    } finally { runAbortRef.current = null; setCustomRunning(false); releaseAutoTask(); }
   };
 
   const openFolderPicker = (field: "inputPath" | "outputPath") => {
@@ -323,7 +360,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         <button type="button" className="atn-model" onClick={() => setLimitsOpen(true)}>Model &amp; Limits</button>
         <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{r.durationSeconds}s · {new Date(r.at).toLocaleString()}</span></li>)}</ul>}</section>
         <section className="atn-history"><h3>Action items</h3><p className="atn-hint">No action items yet. Run Sources → Issue or record a meeting with action items.</p></section>
-        <button type="button" className="atn-run-now" disabled={running || !desktopRunnable(selected)} title={!desktopRunnable(selected) ? MAC_ONLY_MESSAGE : running ? "A task is running" : "Run the selected task now"} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run Now"}</button>
+        <button type="button" className="atn-run-now" disabled={!running && !desktopRunnable(selected)} title={running ? "Stop the running task" : !desktopRunnable(selected) ? MAC_ONLY_MESSAGE : "Run the selected task now"} onClick={running ? stopTask : () => void runTask()}>{running ? "■ Stop" : "▶ Run Now"}</button>
       </aside>
 
       <main className="atn-main">
@@ -331,7 +368,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           <span className="atn-title-icon" aria-hidden="true">✓</span>
           <h1>{task.label}</h1>
           <span className="atn-spacer" />
-          <button type="button" className="atn-btn atn-primary" disabled={running || !desktopRunnable(selected)} title={!desktopRunnable(selected) ? MAC_ONLY_MESSAGE : undefined} onClick={() => void runTask()}>{running ? "Running…" : "▶ Run"}</button>
+          <button type="button" className="atn-btn atn-primary" disabled={!running && !desktopRunnable(selected)} title={!desktopRunnable(selected) ? MAC_ONLY_MESSAGE : undefined} onClick={running ? stopTask : () => void runTask()}>{running ? "■ Stop" : "▶ Run"}</button>
         </header>
         <div className="atn-stars" aria-label="Task rating">★ ★ ★ ★ ☆</div>
         <div className="atn-subtitle"><span className="atn-hint" role="status">◷ {scheduleStatusLine(state.masterEnabled, config, selected, new Date())}{desktopRunnable(selected) && config.scheduleActive && config.enabled && state.masterEnabled ? ` (${describeCron(config.cron)})` : ""}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} disabled={!desktopRunnable(selected)} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => { setCronDraft(config.cron); setScheduleActiveDraft(config.scheduleActive); setScheduleError(false); setScheduleOpen(true); }}>Edit</button></div>
@@ -380,10 +417,11 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
             <label className="atn-field"><span>Prompt</span><textarea rows={8} value={customDraft.prompt} onChange={(e) => setCustomDraft((d) => ({ ...d, prompt: e.target.value }))} /></label>
             {customError ? <p className="atn-notice" role="alert">{customError}</p> : null}
             {customEdit !== "new" ? <p className="atn-hint">{customTaskStatus(customEdit, state.masterEnabled, new Date())}</p> : null}
+            {customEdit !== "new" && customDeleteOpen ? <p className="atn-notice" role="alert">Delete “{customEdit.name}”? This cannot be undone.</p> : null}
             <div className="atn-modal-actions">
-              {customEdit !== "new" ? <button type="button" className="atn-btn atn-danger" onClick={deleteCustom}>Delete</button> : null}
+              {customEdit !== "new" ? <button type="button" className="atn-btn atn-danger" onClick={() => (customDeleteOpen ? deleteCustom() : setCustomDeleteOpen(true))}>{customDeleteOpen ? "Confirm delete" : "Delete"}</button> : null}
               <span className="atn-spacer" />
-              {customEdit !== "new" ? <button type="button" className="atn-btn" disabled={customRunning || !customTaskRunnable(customEdit)} title={!customTaskRunnable(customEdit) ? CUSTOM_IMPLEMENT_MESSAGE : undefined} onClick={() => void runCustom(customEdit)}>{customRunning ? "Running…" : "▶ Run now"}</button> : null}
+              {customEdit !== "new" ? <button type="button" className="atn-btn" disabled={!customRunning && !customTaskRunnable(customEdit)} title={!customTaskRunnable(customEdit) ? CUSTOM_IMPLEMENT_MESSAGE : undefined} onClick={() => (customRunning ? stopTask() : void runCustom(customEdit))}>{customRunning ? "■ Stop" : "▶ Run now"}</button> : null}
               <button type="button" className="atn-btn" onClick={() => setCustomEdit(null)}>Cancel</button>
               <button type="button" className="atn-btn atn-primary" onClick={saveCustom}>{customEdit === "new" ? "Create" : "Save"}</button>
             </div>
