@@ -446,12 +446,18 @@ pub async fn project_open(app: tauri::AppHandle) -> Result<Option<ProjectInfo>, 
 
 /// Re-opens recent project `index` (as listed by `project_recent`).
 #[tauri::command]
-pub fn project_open_recent(app: tauri::AppHandle, index: usize) -> Result<ProjectInfo, String> {
-    let dir = data_dir(&app)?;
+pub async fn project_open_recent(app: tauri::AppHandle, index: usize) -> Result<ProjectInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || open_recent_now(&app, index))
+        .await
+        .map_err(|e| format!("open project task failed: {e}"))?
+}
+
+fn open_recent_now(app: &tauri::AppHandle, index: usize) -> Result<ProjectInfo, String> {
+    let dir = data_dir(app)?;
     let list = valid_recent(&dir);
     let chosen = list.get(index).ok_or("no such recent project")?;
     let info = activate(&dir, chosen)?;
-    crate::tray::set_project_label(&app, Some(&info.name));
+    crate::tray::set_project_label(app, Some(&info.name));
     Ok(info)
 }
 

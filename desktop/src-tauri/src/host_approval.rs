@@ -93,7 +93,7 @@ pub fn bus_proof() -> Result<String, String> {
 /// Host command: the bus proof, to the main window only and only while the core is the one this app spawned and
 /// verified (`trust == spawned`, `ready`). Otherwise `None`: an adopted or unverified core never receives it.
 #[tauri::command]
-pub fn host_bus_proof(window: tauri::Window, host: tauri::State<'_, crate::core_host::CoreHost>) -> Result<Option<String>, crate::fs_ops::FsError> {
+pub async fn host_bus_proof(window: tauri::Window, host: tauri::State<'_, crate::core_host::CoreHost>) -> Result<Option<String>, crate::fs_ops::FsError> {
     if window.label() != "main" {
         return Err(crate::confirm::herr("forbidden", "only the main window may ask for the bus proof"));
     }
@@ -101,7 +101,12 @@ pub fn host_bus_proof(window: tauri::Window, host: tauri::State<'_, crate::core_
     if st.trust != "spawned" || st.state != crate::core_host::Phase::Ready {
         return Ok(None);
     }
-    bus_proof().map(Some).map_err(|e| crate::confirm::herr("io", e))
+    // The key comes from the OS keychain, which can block.
+    tauri::async_runtime::spawn_blocking(bus_proof)
+        .await
+        .map_err(|e| crate::confirm::herr("io", format!("bus proof task failed: {e}")))?
+        .map(Some)
+        .map_err(|e| crate::confirm::herr("io", e))
 }
 
 fn signed_part(purpose: &str, expiry: u64, nonce: &str) -> String {

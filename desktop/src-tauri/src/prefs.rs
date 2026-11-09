@@ -489,7 +489,13 @@ pub fn get_prefs() -> PrefsView {
 
 /// Strict typed update. Unknown keys and invalid values fail at deserialisation (before this runs).
 #[tauri::command]
-pub fn set_prefs(patch: PrefsPatch) -> Result<PrefsView, FsError> {
+pub async fn set_prefs(patch: PrefsPatch) -> Result<PrefsView, FsError> {
+    tauri::async_runtime::spawn_blocking(move || set_prefs_now(patch))
+        .await
+        .map_err(|e| crate::confirm::herr("io", format!("prefs task failed: {e}")))?
+}
+
+fn set_prefs_now(patch: PrefsPatch) -> Result<PrefsView, FsError> {
     if !LIMIT.allow() {
         return Err(herr("rate_limited", "too many preference changes"));
     }

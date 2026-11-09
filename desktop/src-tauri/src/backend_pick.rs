@@ -34,7 +34,13 @@ pub async fn backend_pick_dir() -> Result<Option<String>, String> {
 /// Best-effort defaults: the node the app would use, and the checkout's `extension` folder (the app records its
 /// source checkout for Apply & Rebuild; a dev binary can also be inside one).
 #[tauri::command]
-pub fn backend_detect() -> BackendPaths {
+pub async fn backend_detect() -> BackendPaths {
+    tauri::async_runtime::spawn_blocking(detect_paths)
+        .await
+        .unwrap_or_else(|_| BackendPaths { node: String::new(), dir: String::new() })
+}
+
+fn detect_paths() -> BackendPaths {
     let node = crate::core_host::node_binary();
     let dir = if let Ok(root) = crate::core_host::repo_root() {
         root.join("extension")

@@ -268,6 +268,10 @@ struct Inner {
     mode: std::sync::atomic::AtomicU8,
     /// The loopback pinned proxy while remote mode is running.
     remote_proxy: Mutex<Option<ProxyHandle>>,
+    /// Held by `start` and `stop` for their whole duration. The guard check, the join of the old supervisor
+    /// and the `Starting` write must be one step: otherwise two quick starts both pass the guard and run two
+    /// supervisors, i.e. two cores on one SQLite DB.
+    lifecycle: Mutex<()>,
 }
 
 struct Status {
@@ -360,6 +364,7 @@ impl CoreHost {
                 claude_in_flight: AtomicBool::new(false),
                 mode: std::sync::atomic::AtomicU8::new(0),
                 remote_proxy: Mutex::new(None),
+                lifecycle: Mutex::new(()),
             }),
         }
     }
@@ -486,6 +491,7 @@ impl CoreHost {
     /// Stop the core the user sees (never an adopted server). Blocks until the supervisor has ended so a following
     /// Start cannot race it. The app keeps running; Settings offers Start.
     pub fn stop(&self) -> Result<(), String> {
+        let _lifecycle = lock(&self.inner.lifecycle);
         self.shutdown();
         if let Some(handle) = lock(&self.inner.startup).take() {
             let _ = handle.join();
@@ -508,6 +514,7 @@ impl CoreHost {
 
     /// Start the core again after a user Stop (or a failed start). Idempotent while starting/running.
     pub fn start(&self) -> Result<(), String> {
+        let _lifecycle = lock(&self.inner.lifecycle);
         if self.mode() == ServerMode::Remote {
             let s = lock(&self.inner.status);
             if matches!(s.state, Phase::Starting | Phase::Remote) { return Ok(()); }
@@ -1961,6 +1968,45 @@ process.on('SIGTERM', () => process.exit(0));
         assert_ne!(s.pid, first, "the user start launched a new child");
         f.host.stop().unwrap();
         assert_eq!(f.host.status().state, Phase::Stopped);
+    }
+
+    #[test]
+    fn concurrent_starts_launch_exactly_one_core() {
+        let launches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let release = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (seen, gate) = (Arc::clone(&launches), Arc::clone(&release));
+        // The launcher parks while the first start is in flight, so a second start that got past the
+        // guard would show up as a second launch before the gate opens.
+        let launcher: Launcher = Arc::new(move |_: &LaunchCtx<'_>| {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            while !gate.load(std::sync::atomic::Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err("test launcher".into())
+        });
+        let host = CoreHost::with(tuning_fast(free_ports(2)), launcher, no_claude());
+        host.mark_stopped(Some(std::env::temp_dir()));
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let callers: Vec<_> = (0..8)
+            .map(|_| {
+                let (h, b) = (host.clone(), Arc::clone(&barrier));
+                thread::spawn(move || {
+                    b.wait();
+                    h.start().unwrap();
+                })
+            })
+            .collect();
+        for c in callers {
+            c.join().unwrap();
+        }
+        let end = Instant::now() + Duration::from_secs(5);
+        while launches.load(std::sync::atomic::Ordering::SeqCst) == 0 && Instant::now() < end {
+            thread::sleep(Duration::from_millis(10));
+        }
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(launches.load(std::sync::atomic::Ordering::SeqCst), 1, "two supervisors ran");
+        release.store(true, std::sync::atomic::Ordering::SeqCst);
+        host.stop().unwrap();
     }
 
     #[test]

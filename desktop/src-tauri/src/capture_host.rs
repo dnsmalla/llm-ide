@@ -96,21 +96,30 @@ pub fn capture_request_permission() -> bool {
     ax::prompt_trust()
 }
 #[tauri::command]
-pub fn capture_open_settings() -> Result<(), String> {
+pub async fn capture_open_settings() -> Result<(), String> {
     if !ax::SUPPORTED {
         return Err("unsupported: Accessibility settings exist on macOS only".into());
     }
-    std::process::Command::new("/usr/bin/open")
-        .arg(AX_SETTINGS)
-        .status()
-        .map_err(|e| format!("io: {e}"))?;
-    Ok(())
+    tauri::async_runtime::spawn_blocking(|| -> Result<(), String> {
+        std::process::Command::new("/usr/bin/open")
+            .arg(AX_SETTINGS)
+            .status()
+            .map_err(|e| format!("io: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("io: {e}"))?
 }
 #[tauri::command]
-pub fn capture_start(
+pub async fn capture_start(
     language: String,
     on_event: Channel<CaptureEvent>,
 ) -> Result<StartInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || start_capture(language, on_event))
+        .await
+        .map_err(|e| format!("io: {e}"))?
+}
+fn start_capture(language: String, on_event: Channel<CaptureEvent>) -> Result<StartInfo, String> {
     if !ax::SUPPORTED {
         return Err("unsupported: live capture is macOS-only in this version".into());
     }
@@ -240,10 +249,14 @@ fn active_id() -> Option<String> {
         .and_then(|g| g.as_ref().map(|a| a.id.clone()))
 }
 #[tauri::command]
-pub fn capture_recover_list() -> Vec<PartialSummary> {
-    capture_dir()
-        .map(|d| capture_store::list_partials(&d, active_id().as_deref()))
-        .unwrap_or_default()
+pub async fn capture_recover_list() -> Vec<PartialSummary> {
+    tauri::async_runtime::spawn_blocking(|| {
+        capture_dir()
+            .map(|d| capture_store::list_partials(&d, active_id().as_deref()))
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
 }
 fn recover_path(id: &str) -> Result<PathBuf, String> {
     if active_id().as_deref() == Some(id) {

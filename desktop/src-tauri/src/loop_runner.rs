@@ -541,6 +541,8 @@ pub fn loop_work_root() -> Result<String, String> {
 
 #[tauri::command]
 pub async fn loop_run_loop(loop_id: String, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<LoopRunResult, String> {
+    // A cancel pressed while idle must not stick and abort the next run before it starts.
+    CANCEL.store(false, Ordering::SeqCst);
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
@@ -637,15 +639,22 @@ pub fn changed_paths_in(work: &Path) -> Result<Vec<String>, String> {
     let out = git_command().arg("-C").arg(crate::fsutil::plain_path(work)).args(["status", "--porcelain", "-z"]).output()
         .map_err(|e| format!("cannot run git status: {e}"))?;
     if !out.status.success() { return Err("git status failed; the changed paths are unknown".into()); }
-    let text = String::from_utf8_lossy(&out.stdout);
+    parse_porcelain_z(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Parses `git status --porcelain -z` output into sorted, unique paths. Split from `changed_paths_in` so a
+/// crafted listing can be tested without a repository.
+fn parse_porcelain_z(text: &str) -> Result<Vec<String>, String> {
     let mut paths: Vec<String> = Vec::new();
     let mut fields = text.split('\0');
     while let Some(entry) = fields.next() {
         if entry.len() < 4 { continue; }
-        let (status, path) = entry.split_at(3);
+        // Byte-indexed `get` rather than slicing: a non-ASCII byte at 3 must not panic the host.
+        let (Some(status), Some(path)) = (entry.get(..3), entry.get(3..)) else { continue; };
         if !path.is_empty() { paths.push(path.to_string()); }
+        let worktree_status = status.get(1..).unwrap_or("");
         // `-z` puts a rename/copy source in the next field, with no status of its own.
-        if status.starts_with('R') || status.starts_with('C') || status[1..].starts_with('R') || status[1..].starts_with('C') {
+        if status.starts_with('R') || status.starts_with('C') || worktree_status.starts_with('R') || worktree_status.starts_with('C') {
             if let Some(src) = fields.next() { if !src.is_empty() { paths.push(src.to_string()); } }
         }
         if paths.len() > MAX_CHANGED_PATHS { return Err(format!("more than {MAX_CHANGED_PATHS} changed paths; the list is incomplete")); }
@@ -679,6 +688,7 @@ pub async fn loop_environment_check() -> Result<EnvironmentStatus, String> {
 
 #[tauri::command]
 pub async fn loop_run_fault_verify(rel: String, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<StageRun, String> {
+    CANCEL.store(false, Ordering::SeqCst);
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
@@ -1020,6 +1030,14 @@ mod tests {
         std::fs::create_dir_all(&plain).unwrap();
         assert!(changed_paths_in(&plain).is_err(), "a non-repo must not read as clean");
         let _ = std::fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn porcelain_parse_skips_an_entry_whose_status_ends_inside_a_character() {
+        // "ab日x" puts byte 3 inside the three-byte "日": the old split_at(3) panicked there.
+        let listing = " M a.txt\0ab日x\0?? 日本.txt\0R  new.txt\0old.txt\0";
+        let want: Vec<String> = ["a.txt", "new.txt", "old.txt", "日本.txt"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(parse_porcelain_z(listing).unwrap(), want);
     }
 
     #[cfg(windows)]

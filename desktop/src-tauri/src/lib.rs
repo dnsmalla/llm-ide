@@ -510,11 +510,17 @@ macro_rules! app_handler {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Same order as `updater::update_install`: `restart()` may skip `RunEvent::ExitRequested`/`Exit` (it does on the main thread), so the core,
+/// PTYs, graph generation and chat archive must be stopped here, or the new process finds port 3456 busy.
+#[tauri::command]
+async fn app_restart(app: tauri::AppHandle, host: tauri::State<'_, CoreHost>) -> Result<(), crate::fs_ops::FsError> {
+    exit_cleanup(&app);
+    let _ = host.stop();
+    app.restart();
+}
+
 /// The native "cannot start" dialog for an unavailable explicit data root (R-021 #5). Uses `rfd` (already a
 /// dependency); the decision and the text are tested, the GUI itself is not.
-#[tauri::command]
-fn app_restart(app: tauri::AppHandle) { app.restart(); }
-
 fn show_data_root_error(message: &str) {
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)

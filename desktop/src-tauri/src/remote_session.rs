@@ -70,22 +70,40 @@ pub fn stored_present(b: &dyn SecretBackend) -> bool {
     b.get(ACCOUNT_HUB_SESSION).ok().flatten().is_some_and(|v| !v.is_empty())
 }
 
+// Keychain calls block on the OS, so they run off the command thread.
 #[tauri::command]
-pub fn remote_session_store(hub: String, pin: String, refresh: String) -> Result<(), FsError> {
-    let b = crate::secrets::default_backend().map_err(|e| herr("keychain_unavailable", e.to_string()))?;
-    store(b.as_ref(), &hub, &pin, &refresh)
+pub async fn remote_session_store(hub: String, pin: String, refresh: String) -> Result<(), FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let b = crate::secrets::default_backend().map_err(|e| herr("keychain_unavailable", e.to_string()))?;
+        let result = store(b.as_ref(), &hub, &pin, &refresh);
+        // `secrets_status` reports hub_session presence and caches it for a minute.
+        crate::secrets::invalidate_status_cache();
+        result
+    })
+    .await
+    .map_err(|e| herr("io", format!("session task failed: {e}")))?
 }
 
 #[tauri::command]
-pub fn remote_session_load(hub: String, pin: String) -> Result<Option<String>, FsError> {
-    let b = crate::secrets::default_backend().map_err(|e| herr("keychain_unavailable", e.to_string()))?;
-    load(b.as_ref(), &hub, &pin)
+pub async fn remote_session_load(hub: String, pin: String) -> Result<Option<String>, FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let b = crate::secrets::default_backend().map_err(|e| herr("keychain_unavailable", e.to_string()))?;
+        load(b.as_ref(), &hub, &pin)
+    })
+    .await
+    .map_err(|e| herr("io", format!("session task failed: {e}")))?
 }
 
 #[tauri::command]
-pub fn remote_session_clear() -> Result<(), FsError> {
-    let b = crate::secrets::default_backend().map_err(|e| herr("keychain_unavailable", e.to_string()))?;
-    clear(b.as_ref())
+pub async fn remote_session_clear() -> Result<(), FsError> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let b = crate::secrets::default_backend().map_err(|e| herr("keychain_unavailable", e.to_string()))?;
+        let result = clear(b.as_ref());
+        crate::secrets::invalidate_status_cache();
+        result
+    })
+    .await
+    .map_err(|e| herr("io", format!("session task failed: {e}")))?
 }
 
 #[cfg(test)]

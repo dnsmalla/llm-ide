@@ -528,14 +528,17 @@ pub async fn notes_root_choose() -> Result<Option<NotesRootInfo>, String> {
 
 /// Forgets the notes folder (the files are untouched).
 #[tauri::command]
-pub fn notes_root_clear() -> Result<(), String> {
-    if let Ok(mut g) = ROOT.lock() {
-        *g = None;
-    }
-    if let Ok(dir) = crate::fsutil::desktop_data_dir() {
-        let _ = std::fs::remove_file(root_file(&dir));
-    }
-    Ok(())
+pub async fn notes_root_clear() -> Result<(), String> {
+    blocking(|| {
+        if let Ok(mut g) = ROOT.lock() {
+            *g = None;
+        }
+        if let Ok(dir) = crate::fsutil::desktop_data_dir() {
+            let _ = std::fs::remove_file(root_file(&dir));
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
