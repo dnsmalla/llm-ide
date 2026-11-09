@@ -15,7 +15,7 @@ import { scanForSecrets } from './github-pr.mjs';
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const FACTORY_BRANCH_RE = /^factory\/[A-Za-z0-9_-]{1,64}$/;
 const FACTORY_DIR = '.factory';
-const EXCLUDE_FACTORY = ':!.factory';
+const EXCLUDE_FACTORY = ':(exclude,icase).factory';
 const PUSH_TIMEOUT_MS = 120_000;
 const PROVIDER_TIMEOUT_MS = 15_000;
 const MAX_PROVIDER_BYTES = 1024 * 1024;
@@ -119,7 +119,9 @@ export async function originMatchesRepo(worktree, provider, repo) {
  * line (scanForSecrets only reads those), so the same rules apply as for the pushed diff.
  */
 export function scanShipText(title, body) {
-  const added = `${title}\n${body}`.split('\n').map((l) => `+${l}`).join('\n');
+  // '+ ' (not '+'): scanForSecrets skips lines starting with '+++', so a text line starting with '++' would
+  // otherwise be read as diff metadata and never scanned.
+  const added = `${title}\n${body}`.split('\n').map((l) => `+ ${l}`).join('\n');
   return scanForSecrets(added);
 }
 

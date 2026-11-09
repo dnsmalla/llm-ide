@@ -347,6 +347,30 @@ test('ship never lets a textconv driver rewrite what the secret scan sees', asyn
   }
 });
 
+test('ship refuses a secret on a title/body line starting with ++', async () => {
+  const fake = `ghp_${'Ab1'.repeat(12)}`;
+  const seen = fakeProvider(() => json(201, {}));
+  try {
+    const r = await ship(shipBody({ body: `notes\n++ ${fake}` }));
+    assert.equal(r.status, 400, r.raw);
+    assert.equal(r.body.error.code, 'secret_detected');
+    assert.equal(seen.length, 0);
+  } finally { _setPinnedFetchForTests(null); }
+});
+
+test('ship neither stages nor commits a case-variant .FACTORY path', async () => {
+  fs.mkdirSync(path.join(WT, '.FACTORY'), { recursive: true });
+  fs.writeFileSync(path.join(WT, '.FACTORY', 'REVIEW.md'), 'Verdict: approve\n');
+  fs.writeFileSync(path.join(WT, 'src', 'icase.txt'), 'i\n');
+  try {
+    const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'icase' });
+    const files = git(['show', '--name-only', '--format=', out.commit], WT).split('\n').filter(Boolean);
+    assert.deepEqual(files, ['src/icase.txt'], 'only the real file was committed');
+  } finally {
+    fs.rmSync(path.join(WT, '.FACTORY'), { recursive: true, force: true });
+  }
+});
+
 test('ship with an origin that does not match the repo is a 400 and changes nothing', async () => {
   fs.writeFileSync(path.join(WT, 'src', 'h.txt'), 'h\n');
   const before = git(['rev-parse', 'HEAD'], WT);
