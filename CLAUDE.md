@@ -41,7 +41,7 @@ LLM-IDE is a **local-first AI meeting intelligence system**: several surfaces sh
 
 1. **Chrome Extension** (React 18 + TypeScript + Vite) — Meeting capture via platform captions, side panel UI
 2. **Desktop app** (Tauri: Rust host in `desktop/src-tauri/`, React screens in `ui/`) — macOS, Windows, Linux; spawns and supervises the core; full KB + Issues + Gantt + Code Assistant
-3. **Local core** (`extension/`, Node 20+, pure HTTP) — Bound to 127.0.0.1, handles AI orchestration and data persistence
+3. **Local core** (`extension/`, Node 22+, pure HTTP) — Bound to 127.0.0.1, handles AI orchestration and data persistence
 4. **Web app** (`web/`) and **iPhone app** (`ios_app/`) — pair with the desktop over Host API v1 and read encrypted sync snapshots when it is off (ADR 0020)
 
 The Swift Mac app (`mac/`) was removed on 2026-11-06 (it is in git history); the desktop app replaces it.

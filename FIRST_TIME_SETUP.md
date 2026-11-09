@@ -3,18 +3,24 @@
 ## New Machine Setup
 
 ```bash
-# 1. Clone the repo
-git clone git@github.com:dnsmalla/llm-ide.git
+# 0. Prerequisites (new Mac): Xcode CLT, Node 22+, Rust 1.88+, Claude CLI
+xcode-select --install
+brew install node                                   # must be v22 or newer
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # then open a new shell
+# Claude CLI: https://docs.claude.com/en/docs/claude-code/quickstart, then `claude login`
+
+# 1. Clone the repo (with submodules: graph-kit, .skills)
+git clone --recurse-submodules git@github.com:dnsmalla/llm-ide.git
 cd llm-ide
 
-# 2. Run setup (installs all dependencies)
+# 2. Run setup (checks prerequisites; installs extension, ui/kit, desktop and graph-kit/web deps)
 ./setup.sh
 
 # 3. Start the Node server
 cd extension && npm run server
 
-# 4. In another terminal, run the desktop app
-cd desktop && npm ci && npm run tauri dev
+# 4. In another terminal, run the desktop app (deps already installed by setup.sh)
+cd desktop && npm run tauri dev
 ```
 
 ---

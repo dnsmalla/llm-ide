@@ -54,7 +54,7 @@ for d in "$HOME/.rustup/toolchains/stable-$RUST_TRIPLE/bin"; do
   [ -x "$d/cargo" ] && PATH="$d:$PATH" && break
 done
 [ -x "$HOME/.cargo/bin/cargo" ] && PATH="$PATH:$HOME/.cargo/bin"
-need node "install Node 20+"; need npm "comes with Node"; need cargo "install Rust with rustup (https://rustup.rs)"
+need node "install Node 22+"; need npm "comes with Node"; need cargo "install Rust with rustup (https://rustup.rs)"
 need codesign "Xcode command line tools: xcode-select --install"; need plutil "macOS"
 echo "node $(node -v), $(cargo --version), target $TARGET"
 
@@ -67,6 +67,8 @@ npm_ci_if_needed() { # dir
 }
 npm_ci_if_needed "$ROOT/ui/kit"
 npm_ci_if_needed "$DESKTOP"
+# desktop/vite.config.ts aliases three into graph-kit/web/node_modules
+npm_ci_if_needed "$ROOT/graph-kit/web"
 
 step "Stage the core (pinned official Node, production dependencies, no SDK claude binary)"
 LLMIDE_STAGE_RELEASE=1 node "$DESKTOP/scripts/stage-core.mjs" --target "$TARGET"

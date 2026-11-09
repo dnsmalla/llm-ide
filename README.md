@@ -161,7 +161,7 @@ Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Rec
 ### Prerequisites
 
 - **macOS, Windows or Linux** for the desktop app (the iPhone app needs Xcode + a physical device)
-- **Node.js 20+** — [Download](https://nodejs.org/)
+- **Node.js 22+** — [Download](https://nodejs.org/)
 - **Claude CLI** — [Install guide](https://docs.claude.com/en/docs/claude-code/quickstart) (`claude login`)
 - **Git**
 - **Rust** (stable, via rustup) — for the desktop app
@@ -171,7 +171,7 @@ Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Rec
 **Check what you have:**
 
 ```bash
-node --version        # v20+
+node --version        # v22+
 npm --version         # v10+
 claude --version      # should work
 git --version
@@ -335,7 +335,7 @@ Agent/developer guide: [CLAUDE.md](CLAUDE.md)
 ```
 
 ### ❌ "node: command not found"
-Install Node.js 20+ from https://nodejs.org/
+Install Node.js 22+ from https://nodejs.org/
 
 ### ❌ "claude: command not found"
 Install and authenticate: https://docs.claude.com/en/docs/claude-code/quickstart → `claude login`

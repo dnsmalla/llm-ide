@@ -54,27 +54,22 @@ else
 fi
 
 echo ""
-# 4. Verify Claude CLI (required — see docs/decisions/0001-claude-cli-not-api-key.md)
+# 4. Claude CLI (see docs/decisions/0001-claude-cli-not-api-key.md)
 # LLM-IDE shells out to the `claude` CLI authenticated as the user.
 # ANTHROPIC_API_KEY is NOT required and NOT used.
+# NOTE: a missing CLI is a deferred failure, not an abort: exiting here used to skip the
+# submodules, hooks and desktop dependencies below, leaving a half-configured checkout.
+SETUP_FAILED=0
 if ! command -v claude &> /dev/null; then
-    echo "❌ Error: the 'claude' CLI is not installed or not on PATH."
-    echo ""
-    echo "LLM-IDE uses the Claude CLI (authenticated via 'claude login') to talk to the model."
-    echo "We do NOT use an Anthropic API key."
-    echo ""
-    echo "Install instructions: https://docs.claude.com/en/docs/claude-code/quickstart"
-    echo "Then run 'claude login' to authenticate, and re-run this script."
-    exit 1
-fi
-echo "✅ Claude CLI detected: $(claude --version 2>/dev/null || echo 'version check failed')"
-
-# Best-effort auth check: `claude --version` succeeding is a weak signal; a real
-# call to the model is the only reliable check, but that's too heavy for setup.
-# Just nudge the user if they haven't logged in.
-if ! claude --version &> /dev/null; then
-    echo "⚠️  'claude --version' failed. If the CLI is installed but not authenticated,"
-    echo "    run: claude login"
+    echo "❌ The 'claude' CLI is not installed or not on PATH (setup continues; fix before using LLM-IDE)."
+    echo "   Install: https://docs.claude.com/en/docs/claude-code/quickstart, then run 'claude login'."
+    SETUP_FAILED=1
+else
+    echo "✅ Claude CLI detected: $(claude --version 2>/dev/null || echo 'version check failed')"
+    # `claude --version` is a weak signal; a real model call is too heavy for setup.
+    if ! claude --version &> /dev/null; then
+        echo "⚠️  'claude --version' failed. If the CLI is installed but not authenticated, run: claude login"
+    fi
 fi
 
 # Enable the repo's git hooks (same as `make hooks`). The pre-push hook runs the
@@ -91,6 +86,56 @@ if [ -f "$REPO_ROOT/.gitmodules" ] && grep -q 'path = graph-kit' "$REPO_ROOT/.gi
     echo "⚙️  Fetching graph-kit (graph engine submodule)..."
     git -C "$REPO_ROOT" submodule update --init --recursive graph-kit
     echo "✅ graph-kit ready"
+fi
+
+# 4c. Desktop app prerequisites and JS dependencies.
+# The desktop Vite build aliases `three` into graph-kit/web/node_modules
+# (desktop/vite.config.ts), and consumes ui/kit from source, so all three trees need
+# `npm ci` — without graph-kit/web the build dies with "Could not load .../three.module.js".
+echo ""
+echo "⚙️  Desktop app prerequisites..."
+if ! xcode-select -p &> /dev/null && [ "$(uname -s)" = "Darwin" ]; then
+    echo "❌ Xcode Command Line Tools missing. Run: xcode-select --install"
+    SETUP_FAILED=1
+fi
+RUST_PATH_HINT="$HOME/.cargo/bin"
+if ! command -v cargo &> /dev/null && [ -x "$RUST_PATH_HINT/cargo" ]; then
+    export PATH="$RUST_PATH_HINT:$PATH"
+fi
+if command -v cargo &> /dev/null; then
+    echo "✅ Rust detected: $(cargo --version)  (desktop needs 1.88+)"
+else
+    echo "❌ Rust is not installed (needed for the desktop app only)."
+    echo "   Install: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   then open a new shell"
+    SETUP_FAILED=1
+fi
+for dir in ui/kit desktop graph-kit/web; do
+    if [ -f "$REPO_ROOT/$dir/package-lock.json" ]; then
+        echo "⚙️  npm ci in $dir ..."
+        if (cd "$REPO_ROOT/$dir" && npm ci --no-audit --no-fund >/dev/null 2>&1); then
+            echo "✅ $dir dependencies installed"
+        else
+            echo "❌ npm ci failed in $dir (re-run: cd $dir && npm ci)"
+            SETUP_FAILED=1
+        fi
+    else
+        echo "⚠️  $dir/package-lock.json not found — skipped (is the graph-kit submodule checked out?)"
+        SETUP_FAILED=1
+    fi
+done
+
+# The Tauri build script (desktop/src-tauri/build.rs) fails with "resource path
+# ../resources/core doesn't exist" unless the core is staged; that directory is gitignored.
+if [ -d "$REPO_ROOT/desktop/resources/core" ]; then
+    echo "✅ desktop core already staged (re-stage: node desktop/scripts/stage-core.mjs)"
+else
+    echo "⚙️  Staging the Node core for the desktop app (downloads the pinned Node once)..."
+    if node "$REPO_ROOT/desktop/scripts/stage-core.mjs" >/dev/null 2>&1; then
+        echo "✅ desktop core staged"
+    else
+        echo "❌ core staging failed (re-run: node desktop/scripts/stage-core.mjs)"
+        SETUP_FAILED=1
+    fi
 fi
 
 # 5. Central skills kit — pin via `.skills` submodule, then symlink into
@@ -131,6 +176,12 @@ fi
 
 echo ""
 echo "========================================="
+if [ "$SETUP_FAILED" -ne 0 ]; then
+    echo "⚠️  Setup finished WITH PROBLEMS — see the ❌ lines above."
+    echo "========================================="
+    echo "Fix them and re-run ./setup.sh (it is safe to repeat)."
+    exit 1
+fi
 echo "🎉 Setup Complete!"
 echo "========================================="
 echo "The system is fully resolved and ready to activate."
