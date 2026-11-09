@@ -7,7 +7,7 @@
 //   - a job exists only once a command may run; jobs.id = bus_commands.id.
 import crypto from 'node:crypto';
 import { getDb } from './db.mjs';
-import { enqueueJob, getJob } from './job-queue.mjs';
+import { enqueueJob, getJob, finishJobSystem } from './job-queue.mjs';
 import { redactSecrets } from '../core/redact-secrets.mjs';
 
 const nowIso = () => new Date().toISOString();
@@ -139,6 +139,7 @@ const shapeRow = (r, job) => {
     approvalReason: r.approval_reason, approvedBy: r.approved_by, scheduleId: r.schedule_id ?? null, ttlAt: r.ttl_at, createdAt: r.created_at,
     startedAt: job?.startedAt ?? null, finishedAt: job?.finishedAt ?? null,
     error: job?.error ?? null, result: job?.result ?? null, jobId: job ? job.id : null,
+    claimedBy: r.claimed_by ?? null, claimedAt: r.claimed_at ?? null, leaseExpiresAt: r.lease_expires_at ?? null,
   };
 };
 
@@ -212,7 +213,7 @@ export function createCommand(userId, { kind, tier, idem, args, originClient, ne
 }
 
 /** awaiting_approval -> enqueued (job created). Throws NOT_FOUND / NOT_PENDING / EXPIRED. */
-export function approveCommand(userId, id, { approvedBy, lane, jobPayload, scheduleId = null, now = Date.now() }) {
+export function approveCommand(userId, id, { approvedBy, lane, jobPayload, scheduleId = null, now = Date.now(), runner = 'core' }) {
   const db = getDb();
   const out = db.transaction(() => {
     const r = db.prepare('SELECT * FROM bus_commands WHERE user_id = ? AND id = ?').get(userId, id);
@@ -223,7 +224,7 @@ export function approveCommand(userId, id, { approvedBy, lane, jobPayload, sched
     db.prepare("UPDATE bus_commands SET state='enqueued', approved_by=?, schedule_id=?, decided_at=? WHERE user_id=? AND id=?").run(approvedBy, scheduleId, nowIso(), userId, id);
     // Same transaction: the rate check of the next standing approval reads last_run_at.
     if (scheduleId) db.prepare('UPDATE bus_schedules SET last_run_at = ? WHERE user_id = ? AND id = ?').run(nowIso(), userId, scheduleId);
-    enqueueJob(userId, { id, kind: r.kind, lane, payload: jobPayload ?? { args: jparse(r.args_json, {}) } });
+    enqueueJob(userId, { id, kind: r.kind, lane, payload: jobPayload ?? { args: jparse(r.args_json, {}) }, runner });
     appendEvent(userId, id, { type: 'progress', payload: { step: 'approved' } });
     return { command: getCommand(userId, id) };
   })();
@@ -312,6 +313,119 @@ export function terminalFor(state, result, error) {
 }
 
 /** Terminal events for every finished bus job that lacks one (run at boot after the sweep). */
+// ---------- desktop-claimed commands (B5, migration 0076) ----------
+
+const LEASE_MS = 90_000;
+const MIN_LEASE_MS = 5_000;
+const tokenHashOf = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+const tokenMatches = (stored, token) => {
+  if (typeof stored !== 'string' || typeof token !== 'string' || token === '') return false;
+  const a = Buffer.from(stored, 'hex');
+  const b = Buffer.from(tokenHashOf(token), 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
+function leaseRow(userId, id) {
+  return getDb().prepare('SELECT * FROM bus_commands WHERE user_id = ? AND id = ?').get(userId, id);
+}
+
+/**
+ * Claim an approved desktop-runner command. One holder at a time: while the lease is live a second claim is LEASE_HELD;
+ * an expired lease can be reclaimed (the previous token dies with it). Returns the token ONCE; only its hash is stored.
+ * @returns {{ command: object, token: string }}
+ */
+export function claimDesktopCommand(userId, id, { claimedBy = 'desktop-ui', leaseMs = LEASE_MS, now = Date.now() } = {}) {
+  const db = getDb();
+  return db.transaction(() => {
+    const r = leaseRow(userId, id);
+    if (!r) throw busError('NOT_FOUND', 'command not found');
+    if (r.state !== 'enqueued') throw busError('LEASE_LOST', 'the command is not waiting for a desktop run', { state: r.state });
+    const job = getJob(userId, id);
+    if (!job) throw busError('LEASE_LOST', 'the command has no job to claim');
+    if (job.runner !== 'desktop') throw busError('LEASE_LOST', 'this command belongs to the core runner');
+    if (job.state === 'running' && r.lease_expires_at && Date.parse(r.lease_expires_at) > now) {
+      throw busError('LEASE_HELD', 'another desktop holds this command', { leaseExpiresAt: r.lease_expires_at });
+    }
+    if (job.state !== 'queued' && job.state !== 'running') throw busError('LEASE_LOST', 'the command already finished', { state: job.state });
+    const token = crypto.randomBytes(32).toString('base64url');
+    const expiresAt = new Date(now + Math.max(MIN_LEASE_MS, leaseMs)).toISOString();
+    db.prepare("UPDATE jobs SET state='running', started_at=COALESCE(started_at, ?), updated_at=?, attempts=attempts+1 WHERE user_id=? AND id=? AND state IN ('queued','running')").run(nowIso(), nowIso(), userId, id);
+    db.prepare('UPDATE bus_commands SET claimed_by=?, claim_token_hash=?, claimed_at=?, lease_expires_at=? WHERE user_id=? AND id=?')
+      .run(claimedBy, tokenHashOf(token), nowIso(), expiresAt, userId, id);
+    return { command: getCommand(userId, id), token };
+  })();
+}
+
+/** Extend the lease. Only the current token may renew it; false is never returned (a refusal throws LEASE_LOST). */
+export function renewDesktopLease(userId, id, { token, leaseMs = LEASE_MS, now = Date.now() } = {}) {
+  const db = getDb();
+  return db.transaction(() => {
+    const r = leaseRow(userId, id);
+    if (!r || r.state !== 'enqueued') throw busError('LEASE_LOST', 'the command is not claimed');
+    const job = getJob(userId, id);
+    if (!job || job.state !== 'running') throw busError('LEASE_LOST', 'the job is not running');
+    if (!tokenMatches(r.claim_token_hash, token)) throw busError('LEASE_LOST', 'the claim token is missing or wrong');
+    db.prepare('UPDATE bus_commands SET lease_expires_at=? WHERE user_id=? AND id=?')
+      .run(new Date(now + Math.max(MIN_LEASE_MS, leaseMs)).toISOString(), userId, id);
+    return true;
+  })();
+}
+
+const FINISH_STATES = new Set(['succeeded', 'failed', 'interrupted']);
+
+/**
+ * End a claimed command: the job becomes terminal and exactly one terminal event is written. A replay with the same
+ * state is idempotent; any other change (or a wrong token) is LEASE_LOST and writes nothing.
+ */
+export function finishClaimedCommand(userId, id, { token, state, result, errorCode } = {}) {
+  if (!FINISH_STATES.has(state)) throw busError('invalid_args', 'state must be succeeded, failed or interrupted');
+  const db = getDb();
+  return db.transaction(() => {
+    const r = leaseRow(userId, id);
+    if (!r) throw busError('NOT_FOUND', 'command not found');
+    const job = getJob(userId, id);
+    if (!job) throw busError('LEASE_LOST', 'the command has no job');
+    if (job.state === state && hasTerminal(userId, id)) return getCommand(userId, id);
+    if (r.state !== 'enqueued' || job.state !== 'running') throw busError('LEASE_LOST', 'the command is not running under this lease', { state: job.state });
+    if (!tokenMatches(r.claim_token_hash, token)) throw busError('LEASE_LOST', 'the claim token is missing or wrong');
+    const error = state === 'succeeded' ? null : (ERROR_CODES.includes(errorCode) ? errorCode : state === 'interrupted' ? 'interrupted' : 'engine_failed');
+    finishJobSystem(id, state, { result: state === 'succeeded' ? (result ?? {}) : undefined, error });
+    ensureTerminal(userId, id);
+    db.prepare('UPDATE bus_commands SET lease_expires_at=NULL WHERE user_id=? AND id=?').run(userId, id);
+    return getCommand(userId, id);
+  })();
+}
+
+/** A running desktop command whose lease ran out: interrupted, with one terminal event naming the lost lease. */
+export function expireDesktopLeasesSystem({ now = Date.now() } = {}) {
+  const db = getDb();
+  return db.transaction(() => {
+    const rows = db.prepare(`SELECT c.id, c.user_id FROM bus_commands c JOIN jobs j ON j.id = c.id AND j.user_id = c.user_id
+      WHERE c.state = 'enqueued' AND j.runner = 'desktop' AND j.state = 'running'
+        AND c.lease_expires_at IS NOT NULL AND c.lease_expires_at <= ?`).all(new Date(now).toISOString());
+    const out = [];
+    for (const r of rows) {
+      if (!finishJobSystem(r.id, 'interrupted', { error: 'lease_expired' })) continue;
+      appendEvent(r.user_id, r.id, { type: 'error', terminal: true, payload: { code: 'interrupted', message: 'the desktop stopped renewing its lease' } });
+      db.prepare('UPDATE bus_commands SET lease_expires_at=NULL WHERE user_id=? AND id=?').run(r.user_id, r.id);
+      out.push({ id: r.id, userId: r.user_id });
+    }
+    return out;
+  })();
+}
+
+/** This user's approved desktop-runner commands no live lease holds, oldest first (GET /bus/claimable). No token. */
+export function listClaimableCommands(userId, kinds = [], { limit = 50 } = {}) {
+  const wanted = (Array.isArray(kinds) ? kinds : []).filter((k) => typeof k === 'string' && k);
+  if (wanted.length === 0) return [];
+  const n = Math.max(1, Math.min(200, Math.floor(limit) || 50));
+  const ph = wanted.map(() => '?').join(',');
+  return getDb().prepare(`SELECT c.* FROM bus_commands c JOIN jobs j ON j.id = c.id AND j.user_id = c.user_id
+    WHERE c.user_id = ? AND c.state = 'enqueued' AND j.runner = 'desktop' AND j.state = 'queued' AND c.kind IN (${ph})
+    ORDER BY c.created_at, c.rowid LIMIT ${n}`).all(userId, ...wanted)
+    .map((r) => ({ ...shapeRow(r, getJob(userId, r.id)), args: jparse(r.args_json, {}) }));
+}
+
 export function backfillTerminalsSystem() {
   const rows = getDb().prepare(`SELECT c.user_id, c.id FROM bus_commands c JOIN jobs j ON j.id = c.id
     WHERE c.state = 'enqueued' AND j.state IN ('succeeded','failed','cancelled','interrupted')

@@ -10,7 +10,7 @@ const nowIso = () => new Date().toISOString();
 
 const parse = (s) => { try { return s == null ? null : JSON.parse(s); } catch { return null; } };
 const shape = (r) => !r ? null : ({
-  id: r.id, userId: r.user_id, kind: r.kind, lane: r.lane, state: r.state,
+  id: r.id, userId: r.user_id, kind: r.kind, lane: r.lane, state: r.state, runner: r.runner ?? 'core',
   payload: parse(r.payload_json) ?? {}, result: parse(r.result_json), error: r.error,
   attempts: r.attempts, cancelRequested: !!r.cancel_requested,
   createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at,
@@ -22,9 +22,11 @@ export const MAX_ATTEMPTS = 3;
 const jobError = (code, message) => Object.assign(new Error(message), { code });
 
 // `id` is for a caller that owns the id space (the command bus gives a job its command's id); omitted = a fresh UUID.
-export function enqueueJob(userId, { kind, lane, payload = {}, id: givenId } = {}) {
+// `runner` is 'core' (this process runs it) or 'desktop' (only the desktop app claims it; the core never will).
+export function enqueueJob(userId, { kind, lane, payload = {}, id: givenId, runner = 'core' } = {}) {
   if (!userId) throw new Error('enqueueJob: userId required');
   if (!kind || !lane) throw new Error('enqueueJob: kind and lane required');
+  if (runner !== 'core' && runner !== 'desktop') throw new Error('enqueueJob: runner must be core or desktop');
   const body = JSON.stringify(payload);
   if (Buffer.byteLength(body, 'utf8') > MAX_PAYLOAD_BYTES) throw jobError('payload_too_large', `job payload is over ${MAX_PAYLOAD_BYTES} bytes`);
   if (givenId != null && !/^[A-Za-z0-9_-]{8,64}$/.test(String(givenId))) throw new Error('enqueueJob: bad id');
@@ -33,7 +35,7 @@ export function enqueueJob(userId, { kind, lane, payload = {}, id: givenId } = {
   db.transaction(() => {
     const n = db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE user_id = ? AND state IN ('queued','running')").get(userId).n;
     if (n >= MAX_ACTIVE_JOBS_PER_USER) throw jobError('quota_exceeded', 'too many queued or running jobs; wait for some to finish');
-    db.prepare('INSERT INTO jobs (id, user_id, kind, lane, payload_json) VALUES (?,?,?,?,?)').run(id, userId, String(kind), String(lane), body);
+    db.prepare('INSERT INTO jobs (id, user_id, kind, lane, payload_json, runner) VALUES (?,?,?,?,?,?)').run(id, userId, String(kind), String(lane), body, runner);
   })();
   return getJob(userId, id);
 }
@@ -85,6 +87,7 @@ export function claimNextJobSystem({ perUserLimit } = {}) {
     const row = db.prepare(`
       SELECT q.* FROM jobs q
       WHERE q.state = 'queued'
+        AND q.runner = 'core'
         AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.user_id = q.user_id AND r.lane = q.lane AND r.state = 'running')
         AND (SELECT COUNT(*) FROM jobs u WHERE u.user_id = q.user_id AND u.state = 'running') < ?
       ORDER BY q.created_at, q.rowid LIMIT 1`).get(cap);
@@ -113,11 +116,12 @@ export function finishJobSystem(id, state, { result, error } = {}) {
 export function sweepInterruptedSystem(resumableKinds = [], { maxAttempts = MAX_ATTEMPTS } = {}) {
   const db = getDb();
   return db.transaction(() => {
-    const rows = db.prepare("SELECT id, kind, attempts, cancel_requested FROM jobs WHERE state='running'").all();
+    const rows = db.prepare("SELECT id, kind, attempts, cancel_requested, runner FROM jobs WHERE state='running'").all();
     const out = { requeued: [], interrupted: [], cancelled: [], failed: [] };
     const end = (id, state, error) => db.prepare('UPDATE jobs SET state=?, error=?, finished_at=?, updated_at=? WHERE id=?').run(state, error, nowIso(), nowIso(), id);
-    for (const { id, kind, attempts, cancel_requested: cancelRequested } of rows) {
+    for (const { id, kind, attempts, cancel_requested: cancelRequested, runner } of rows) {
       if (cancelRequested) { end(id, 'cancelled', 'cancelled'); out.cancelled.push(id); } // the user asked: never run it again
+      else if ((runner ?? 'core') === 'desktop') { end(id, 'interrupted', 'lease_lost'); out.interrupted.push(id); } // a core restart drops the desktop's lease
       else if (resumableKinds.includes(kind)) {
         if (attempts >= maxAttempts) { end(id, 'failed', 'too_many_attempts'); out.failed.push(id); } // poison job: stop the crash loop
         else {
@@ -141,7 +145,8 @@ export function reapOrphanedRunningSystem(activeIds = [], { staleMs = 30_000, no
   const cutoff = new Date(now - staleMs).toISOString();
   const held = new Set(activeIds);
   return db.transaction(() => {
-    const rows = db.prepare("SELECT id, user_id FROM jobs WHERE state = 'running' AND started_at IS NOT NULL AND started_at <= ?").all(cutoff);
+    // A desktop-runner row is deliberately not held by this runner: its lease decides, not this sweep.
+    const rows = db.prepare("SELECT id, user_id FROM jobs WHERE state = 'running' AND runner = 'core' AND started_at IS NOT NULL AND started_at <= ?").all(cutoff);
     const out = [];
     for (const r of rows) {
       if (held.has(r.id)) continue;
@@ -151,6 +156,19 @@ export function reapOrphanedRunningSystem(activeIds = [], { staleMs = 30_000, no
     }
     return out;
   })();
+}
+
+/**
+ * Queued desktop-runner jobs of the given kinds, oldest first (the desktop's `GET /bus/claimable`). Never reaches a
+ * request: the route filters by the caller's user id.
+ */
+export function listClaimableJobsSystem(kinds = [], { limit = 50 } = {}) {
+  const wanted = (Array.isArray(kinds) ? kinds : []).filter((k) => typeof k === 'string' && k);
+  if (wanted.length === 0) return [];
+  const n = Math.max(1, Math.min(200, Math.floor(limit) || 50));
+  const ph = wanted.map(() => '?').join(',');
+  return getDb().prepare(`SELECT * FROM jobs WHERE state = 'queued' AND runner = 'desktop' AND kind IN (${ph})
+    ORDER BY created_at, rowid LIMIT ${n}`).all(...wanted).map(shape);
 }
 
 export function hasQueuedJobsSystem() {
