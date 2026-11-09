@@ -14,7 +14,8 @@ import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { STATUS_REFRESH_MS, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { STATUS_REFRESH_MS, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
 
 // Wire the run manager to the real host once, when this chunk loads: startRun throws without it, and runs must
@@ -159,7 +160,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     }
   };
 
-  const onAction = (item: WorkItemRecord, action: CardAction) => {
+  const onAction = (item: WorkItemRecord, action: CardAction, note?: string) => {
     if (!projectRoot) return;
     const root = projectRoot;
     const lastRunId = item.runIds.at(-1) ?? null;
@@ -189,9 +190,16 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           setSelectedKey((k) => (k === item.key ? null : k));
         });
         return;
-      case "sendBack":
-        setError("Send back is not available yet.");
+      case "sendBack": {
+        const f = facts.get(item.key);
+        const status = f?.ship ?? null;
+        if (!f || !status || !sendBackAllowed(f)) {
+          setError("Send back needs the PR/MR status (failing CI or new comments) and the card's worktree. Refresh and try again.");
+          return;
+        }
+        void act(async () => { await sendBack({ fs, start: startRun, projectRoot: root }, item, status, note ?? ""); });
         return;
+      }
     }
   };
 
@@ -224,7 +232,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
               <h3 className="fx-col-title">{COLUMN_LABELS[col]} <span>{board[col].length}</span></h3>
               <ul className="fx-cards">
                 {board[col].map((view) => (
-                  <Card key={view.key} view={view} selected={view.key === selectedKey} onOpen={() => setSelectedKey(view.key)} onAction={(a) => { const it = byKey.get(view.key); if (it) onAction(it, a); }} />
+                  <Card key={view.key} view={view} selected={view.key === selectedKey} onOpen={() => setSelectedKey(view.key)} onAction={(a, note) => { const it = byKey.get(view.key); if (it) onAction(it, a, note); }} />
                 ))}
               </ul>
             </section>

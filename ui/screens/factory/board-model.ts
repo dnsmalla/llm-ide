@@ -208,3 +208,9 @@ export function otherProjectsNote(live: readonly LiveRun[], projectRoot: string 
 export function toWorkItem(item: WorkItemRecord): WorkItem {
   return { source: item.source, id: item.id, title: item.title, body: item.body, repo: item.repo };
 }
+
+/** Send back needs a readable PR/MR status that asks for work (failing CI or new comments) and the run's worktree. */
+export function sendBackAllowed(facts: ItemFacts): boolean {
+  const s = facts.ship;
+  return facts.worktreeExists && !facts.shipStatusError && s !== null && (s.ci === "failed" || s.comments.length > 0);
+}
