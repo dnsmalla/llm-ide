@@ -67,6 +67,20 @@ test('extensionChatWorkspace is an existing, empty, server-owned directory', () 
   assert.equal(extensionChatWorkspace(root), dir);
 });
 
+test('R-034 #4: the scratch workspace is per user and cannot escape the base folder', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-chat-ws-'));
+  const a = extensionChatWorkspace(root, 'u-a');
+  const b = extensionChatWorkspace(root, 'u-b');
+  assert.equal(a, path.join(root, 'extension-chat', 'u-a'));
+  assert.equal(b, path.join(root, 'extension-chat', 'u-b'));
+  assert.notEqual(a, b);
+  assert.ok(fs.statSync(a).isDirectory() && fs.statSync(b).isDirectory());
+  // A hostile id is hashed, never used as a path segment.
+  const evil = extensionChatWorkspace(root, '../../etc');
+  assert.equal(path.dirname(evil), path.join(root, 'extension-chat'));
+  assert.match(path.basename(evil), /^[a-f0-9]{32}$/);
+});
+
 test('v2 stream: surface extension needs no workspaceRoot; any other surface still does', async () => {
   const seen = [];
   const deps = {
@@ -81,7 +95,7 @@ test('v2 stream: surface extension needs no workspaceRoot; any other surface sti
   }), ok, deps);
   assert.equal(ok.statusCode, 200, ok._body.slice(0, 200));
   assert.ok(seen.length === 1);
-  assert.equal(seen[0].agentContext.workspaceRoot, extensionChatWorkspace());
+  assert.equal(seen[0].agentContext.workspaceRoot, extensionChatWorkspace(undefined, 'u-410'));
   assert.equal(seen[0].mode, 'ask');
 
   const bad = makeRes();

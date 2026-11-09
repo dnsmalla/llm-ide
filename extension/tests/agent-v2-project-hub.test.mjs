@@ -23,7 +23,8 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const { getDb } = await import('../kb/db.mjs');
 const { grant } = await import('./helpers/grant.mjs');
 const { registerProject } = await import('../kb/projects.mjs');
-const { handleAgentV2Routes } = await import('../routes/agent-v2.mjs');
+const { handleAgentV2Routes, startHostTurn } = await import('../routes/agent-v2.mjs');
+const { extensionChatWorkspace } = await import('../core/extension-chat-workspace.mjs');
 
 const db = getDb();
 db.prepare("INSERT INTO users (id, email, display_name, password_hash, role, status) VALUES ('hub-u1', 'hub1@example.com', 'H', 'x', 'user', 'active')").run();
@@ -52,7 +53,10 @@ function makeRes() {
 }
 
 let turns = 0;
-const fakeTurn = async ({ onEvent }) => {
+const turnArgs = [];
+const fakeTurn = async (args) => {
+  const { onEvent } = args;
+  turnArgs.push(args);
   turns += 1;
   onEvent({ type: 'init', sessionId: 'sdk-hub', tools: [], capabilities: [] });
   onEvent({ type: 'result', subtype: 'success', costUsd: 0.01, sessionId: 'sdk-hub', stopReason: 'end_turn' });
@@ -103,4 +107,49 @@ test('R-022 #1: a turn inside the project subfolder runs as that project', async
   const res = await run({ projectId: 'p-hub', agentContext: { chatSessionId: 'chat-sub', workspaceRoot: src } });
   assert.equal(res.statusCode, 200);
   assert.equal(turns, before + 1);
+});
+
+// ── R-034 #4: host-api and extension chat surfaces on a hub ─────────────────
+
+const hostDeps = {
+  runTurn: fakeTurn,
+  classifyMode: async () => ({ mode: 'ask' }),
+  expandSlash: () => null,
+};
+
+test('R-034 #4: an EXTENSION turn with a project runs on a hub in the per-user scratch folder', async () => {
+  const before = turnArgs.length;
+  const res = await run({ projectId: 'p-hub', agentContext: { chatSessionId: 'chat-ext-hub', surface: 'extension' } });
+  assert.equal(res.statusCode, 200, res._body.slice(0, 200));
+  assert.equal(turns, before + 1);
+  const args = turnArgs[turnArgs.length - 1];
+  assert.equal(args.agentContext.workspaceRoot, extensionChatWorkspace(undefined, 'hub-u1'));
+  assert.ok(args.agentContext.workspaceRoot.endsWith(path.join('extension-chat', 'hub-u1')));
+});
+
+test('R-034 #4: an extension surface with NO project is still refused (the grant check stays)', async () => {
+  const res = await run({ agentContext: { chatSessionId: 'chat-ext-noproj', surface: 'extension' } });
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.json().error.code, 'PROJECT_DENIED');
+});
+
+test('R-034 #4: a Host API chat.send with a valid project runs on a hub', async () => {
+  const events = [];
+  const before = turnArgs.length;
+  await startHostTurn({
+    userId: 'hub-u1', chatSessionId: 'chat-host-hub', message: 'hello', projectId: 'p-hub',
+    onEvent: (e) => events.push(e), deps: hostDeps,
+  });
+  assert.equal(turns, before + 1, 'the turn reached the engine');
+  assert.ok(events.some((e) => e.type === 'result'));
+  const args = turnArgs[turnArgs.length - 1];
+  assert.equal(args.agentContext.surface, 'host-api');
+  assert.equal(args.agentContext.workspaceRoot, extensionChatWorkspace(undefined, 'hub-u1'));
+});
+
+test('R-034 #4: a Host API turn with no project is still refused on a hub', async () => {
+  await assert.rejects(
+    startHostTurn({ userId: 'hub-u1', chatSessionId: 'chat-host-noproj', message: 'hello', onEvent: () => {}, deps: hostDeps }),
+    (e) => e.code === 'PROJECT_DENIED',
+  );
 });
