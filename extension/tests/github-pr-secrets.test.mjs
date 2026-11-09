@@ -34,3 +34,15 @@ test('scanForSecrets ignores diff metadata and clean lines', () => {
   assert.equal(scanForSecrets(added('const timeout = 30000 // ms')), null);
   assert.equal(scanForSecrets('-const k = "sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa"'), null, 'removed lines are not scanned');
 });
+
+test('C1c-3: an added line whose content begins with ++ is scanned; file headers are not', () => {
+  const fake = `ghp_${'Ab1'.repeat(12)}`;
+  const diff = [
+    'diff --git a/x.txt b/x.txt', 'index 1..2 100644', '--- a/x.txt', '+++ b/x.txt', '@@ -1 +1,2 @@',
+    '-old', `+++ ${fake}`, '',
+  ].join('\n');
+  assert.equal(scanForSecrets(diff), 'GitHub token');
+  assert.equal(scanForSecrets(`+++${fake}`), 'GitHub token', 'headerless text: every + line is content');
+  const headerOnly = ['diff --git a/ghp_x b/ghp_x', '--- a/x', `+++ b/${fake}`, '@@ -0,0 +1 @@', '+safe'].join('\n');
+  assert.equal(scanForSecrets(headerOnly), null, 'a file NAME in the +++ header is metadata');
+});

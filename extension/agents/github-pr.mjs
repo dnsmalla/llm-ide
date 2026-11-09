@@ -105,9 +105,15 @@ const SECRET_RULES = [
 
 export function scanForSecrets(diffText) {
   if (!diffText) return null;
+  // File headers (`diff --git` up to the first `@@`) are metadata; a content line that merely begins with '++' is not.
+  let inHeader = false;
   for (const rawLine of diffText.split('\n')) {
-    // Only inspect added lines; ignore diff metadata ('+++ b/file').
-    if (rawLine[0] !== '+' || rawLine.startsWith('+++')) continue;
+    if (rawLine.startsWith('diff --git ')) { inHeader = true; continue; }
+    if (inHeader) {
+      if (rawLine.startsWith('@@')) inHeader = false;
+      continue;
+    }
+    if (rawLine[0] !== '+') continue;
     const added = rawLine.slice(1);
     for (const [name, re] of SECRET_RULES) {
       if (re.test(added)) return name;
