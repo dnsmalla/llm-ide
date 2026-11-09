@@ -661,6 +661,26 @@
             "type": "string"
           },
           "x-optional": true
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-optional": true,
+          "description": "values redacted to bullets"
+        },
+        "url": {
+          "type": "string",
+          "x-optional": true
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-optional": true,
+          "description": "values redacted to bullets"
         }
       }
     },
