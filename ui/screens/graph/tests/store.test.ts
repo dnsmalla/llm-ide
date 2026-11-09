@@ -120,7 +120,8 @@ test("store: openPath validates before reading; a newer load wins over a slower 
   assert.equal(s.openPath("../escape/graph.json"), false);
   assert.equal(s.openPath("notgraph.txt"), false);
   assert.equal(s.openPath("other/graph.json"), true);
-  await new Promise((r) => setTimeout(r, 50));
+  // Wait for the load itself, not a fixed delay: the real wasm layout can take longer than any sleep under load.
+  assert.ok(await waitFor(() => s.getSnapshot().sourcePath === "other/graph.json" && s.getSnapshot().phase === "ready"));
   assert.equal(s.getSnapshot().phase, "ready");
   assert.equal(s.getSnapshot().sourcePath, "other/graph.json");
   assert.ok(!log.some((l) => l.includes("escape")), "an invalid path never reaches the host");
@@ -163,6 +164,9 @@ test("store.refresh: unchanged file does no work; changed file keeps the graph a
   let engineCalls = 0;
   let text = GOOD;
   let release!: () => void;
+  // How many loads have reached their gate. The real wasm layout runs BEFORE the gate, so a fixed sleep raced it
+  // under load: release() then hit the previous load's resolver and the refresh below never settled (a hang).
+  let gated = 0;
   let preview = true;
   const engine = {
     cancel() {},
@@ -171,13 +175,13 @@ test("store.refresh: unchanged file does no work; changed file keeps the graph a
       const r = await runJob(t, { loadWasm: loadWasmBytes });
       const entry = { model: r.model, layout: r.layout, notices: r.notices };
       if (preview) onPreview?.(entry);
-      await new Promise<void>((res) => { release = res; });
+      await new Promise<void>((res) => { release = res; gated++; });
       return { kind: "done", entry, cached: false };
     },
   };
   const s = new GraphStore({ invoke: async () => text, engine: engine as never });
   const first = s.load("/p");
-  await new Promise((res) => setTimeout(res, 5));
+  assert.ok(await waitFor(() => gated === 1), "the first layout reached its gate");
   release();
   await first;
   s.select(1);
@@ -191,7 +195,7 @@ test("store.refresh: unchanged file does no work; changed file keeps the graph a
   text = JSON.stringify({ files: [{ path: "a.ts", imports: ["b.ts"] }, { path: "b.ts" }, { path: "c.ts" }] });
   preview = false;
   const refreshing = s.refresh("/p");
-  await new Promise((res) => setTimeout(res, 5));
+  assert.ok(await waitFor(() => gated === 2), "the refresh layout reached its gate");
   assert.equal(s.getSnapshot().phase, "ready", "the old graph stays on screen while the new one loads");
   assert.equal(s.getSnapshot().entry?.model.n, 2, "the old graph is still the one on screen");
   assert.equal(s.getSnapshot().filters.minWeight, 0.7, "view state is kept during a refresh");
@@ -291,12 +295,14 @@ test("revealNode unhides a searched kind and clears a community/preset filter", 
 });
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-async function waitFor(cond: () => boolean): Promise<boolean> {
-  for (let i = 0; i < 400; i++) {
+// A deadline, not a poll count: under a loaded gate the wasm layout alone can take seconds.
+async function waitFor(cond: () => boolean, timeoutMs = 10_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (cond()) return true;
     await sleep(5);
   }
-  return false;
+  return cond();
 }
 
 async function previewOf(text: string): Promise<CacheEntry> {
