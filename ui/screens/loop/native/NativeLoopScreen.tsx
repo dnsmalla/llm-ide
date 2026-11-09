@@ -31,7 +31,7 @@ import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
-import { FACTORY_DEFAULT_KEY, FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, guardedPaths, isFactoryLoop, needsDecisionSummary, reviewDiffSection, taskMarkdown, withSetupCommand, writeScopeFor, type WorkItem } from "./factory.ts";
+import { FACTORY_DEFAULT_KEY, FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FACTORY_TEMPLATE, agentRunBody, factoryStartRefusal, guardedPaths, isFactoryLoop, needsDecisionSummary, reviewDiffSection, taskMarkdown, withSetupCommand, type WorkItem } from "./factory.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
@@ -538,7 +538,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
       if (s.targetPath) parts.push(`Target path: ${s.targetPath}`);
       if (s.outputPath) parts.push(`Output path: ${s.outputPath}`);
-      const scope = writeScopeFor(s);
       const run = activeRunRef.current;
       if (run && s.skillId === FACTORY_REVIEW_SKILL) {
         try {
@@ -549,10 +548,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         }
       }
       const before = await dirtyBefore();
+      const llmDocExists = s.skillId === FACTORY_INTAKE_SKILL && projectRoot ? await fs.list("llm-doc").then(() => true, () => false) : false;
       const g = await guardedAgentCall<AgentRunReply>({
         before,
         call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
-          method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: currentRunRoot(), timeoutMs: (s.timeoutSeconds ?? 1800) * 1000, ...(scope ? { writeScope: scope } : {}) },
+          method: "POST", body: agentRunBody({ message: parts.join("\n\n"), stage: s, repoRoot: currentRunRoot(), timeoutMs: (s.timeoutSeconds ?? 1800) * 1000, projectRoot: projectRoot ?? "", llmDocExists }),
           signal: runAbortRef.current?.signal,
         }),
         changedNow: changedPathsNow,

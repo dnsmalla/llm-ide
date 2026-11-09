@@ -152,3 +152,20 @@ test("the picker's Start refuses while a run is active, when the loop is gone, o
   assert.equal(f.factoryStartRefusal({ ...ok, dirty: true }), "Save or discard your edits before starting the Factory run.");
   assert.equal(f.factoryStartRefusal({ ...ok, loopExists: false }), "That Factory loop no longer exists.");
 });
+
+test("agentRunBody: only Intake sees the project llm-doc folder, and only when the run root is not the project root", () => {
+  const base = { message: "m", repoRoot: "/p/system/loop-worktrees/r1", timeoutMs: 1000, projectRoot: "/p", llmDocExists: true };
+  const intake = { kind: "skill", skillId: f.FACTORY_INTAKE_SKILL };
+  const body = f.agentRunBody({ ...base, stage: intake });
+  assert.deepEqual(body.extraRoots, ["/p/llm-doc"]);
+  assert.equal(body.writeScope, ".factory");
+  assert.deepEqual(body.skills, [f.FACTORY_INTAKE_SKILL]);
+  assert.equal(body.repoRoot, "/p/system/loop-worktrees/r1");
+  for (const skillId of [f.FACTORY_REVIEW_SKILL, f.FACTORY_PLAN_SKILL, f.FACTORY_IMPLEMENT_SKILL, "skills/other"]) {
+    assert.equal("extraRoots" in f.agentRunBody({ ...base, stage: { kind: "skill", skillId } }), false, skillId);
+  }
+  assert.equal("extraRoots" in f.agentRunBody({ ...base, stage: intake, repoRoot: "/p" }), false, "run root is the project root");
+  assert.equal("extraRoots" in f.agentRunBody({ ...base, stage: intake, llmDocExists: false }), false, "no llm-doc folder");
+  assert.equal("extraRoots" in f.agentRunBody({ ...base, stage: intake, projectRoot: "" }), false, "no project root");
+  assert.equal("writeScope" in f.agentRunBody({ ...base, stage: { kind: "skill", skillId: f.FACTORY_PLAN_SKILL } }), false);
+});

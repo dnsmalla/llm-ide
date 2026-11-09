@@ -69,6 +69,43 @@ export function writeScopeFor(s: Pick<LoopStage, "kind" | "skillId">): ".factory
   return s.kind === "skill" && (s.skillId === FACTORY_INTAKE_SKILL || s.skillId === FACTORY_REVIEW_SKILL) ? ".factory" : null;
 }
 
+/** The `/kb/loop/agent-run` body of a skill stage. */
+export interface AgentRunBody {
+  message: string;
+  skills: string[];
+  repoRoot: string;
+  timeoutMs: number;
+  writeScope?: ".factory";
+  extraRoots?: string[];
+}
+
+/**
+ * Builds the agent-run body. Only the Intake stage (which also carries the `.factory` write scope) is given the
+ * project's `llm-doc/` folder as an extra read root, so it can see the docs of a split layout where the run root is
+ * a worktree outside `llm-doc/`. The scope still confines its writes to `.factory/`. Plan, Implement, Review and
+ * repairs never get it.
+ */
+export function agentRunBody(a: {
+  message: string;
+  stage: Pick<LoopStage, "kind" | "skillId">;
+  repoRoot: string;
+  timeoutMs: number;
+  projectRoot: string;
+  llmDocExists: boolean;
+}): AgentRunBody {
+  const scope = writeScopeFor(a.stage);
+  const project = a.projectRoot.replace(/\/+$/, "");
+  const wantsDocs = a.stage.skillId === FACTORY_INTAKE_SKILL && a.llmDocExists && project !== "" && a.repoRoot.replace(/\/+$/, "") !== project;
+  return {
+    message: a.message,
+    skills: a.stage.skillId ? [a.stage.skillId] : [],
+    repoRoot: a.repoRoot,
+    timeoutMs: a.timeoutMs,
+    ...(scope ? { writeScope: scope } : {}),
+    ...(wantsDocs ? { extraRoots: [`${project}/llm-doc`] } : {}),
+  };
+}
+
 /**
  * The written paths the protected-path/scope guard judges. `.factory/` (the run's own reports) is never judged. In a
  * Factory loop the Implement stage writes tests and code by design (Verify and Review judge it); its repairs do not
