@@ -43,7 +43,7 @@ pub const SETUP_HTML: &str = include_str!("../../../deploy/hub/setup.html");
 
 pub const MIN_DISK_MB: u64 = 2048;
 /// Bumped when the helper's stage set/semantics changes; a mismatch reinstalls it.
-pub const HELPER_VERSION: &str = "4";
+pub const HELPER_VERSION: &str = "5";
 const MAX_DOMAIN: usize = 253;
 const PLAN_TTL_MS: u64 = 30 * 60 * 1000;
 
@@ -343,7 +343,7 @@ const ENV_KEYS: &[&str] = &[
     "LLMIDE_BACKUP_DIR", "LLMIDE_BACKUP_KEEP", "LLMIDE_DISABLE_REGISTRATION", "LLMIDE_TRUST_PROXY",
     "LLMIDE_LOG_JSON", "LLMIDE_LOG_LEVEL", "LLMIDE_LOG_ROTATE", "LLMIDE_BACKUP_REMOTE", "LLMIDE_MAX_TURNS", "LLMIDE_HOST_API_HUB",
     "LLMIDE_HOST_API_WEB_ORIGINS", "LLMIDE_HOST_API_FINGERPRINT_FILE", "LLMIDE_HUB_PUBLIC_URL",
-    "LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY",
+    "LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY", "ANTHROPIC_API_KEY",
 ];
 
 /// Root-side shape check mirrored in the helper: only known keys, no loader/option injection, no CR.

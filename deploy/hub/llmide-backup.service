@@ -6,4 +6,4 @@ Type=oneshot
 User=llmide
 Group=llmide
 EnvironmentFile=/etc/llmide/core.env
-ExecStart=/opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs
+ExecStart=/opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs --keep 7

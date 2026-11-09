@@ -28,6 +28,9 @@ use crate::fs_ops::FsError;
 #[serde(rename_all = "camelCase")]
 pub struct TlsInfo {
     pub fingerprint: String,
+    /// True when the handshake was validated by the public WebPKI roots alone. A public CA
+    /// certificate needs no pin; the fingerprint is shown only as an optional fallback.
+    pub web_pki: bool,
     pub subject: String,
     pub issuer: String,
     pub not_before: i64,
@@ -194,6 +197,25 @@ pub fn pinned_agent(pin: &str) -> Result<ureq::Agent, FsError> {
         .build())
 }
 
+/// Normal WebPKI trust: the public roots only. This is the default for a hub on a public domain;
+/// a valid publicly-issued certificate is accepted without the user pinning anything.
+pub fn public_agent() -> Result<ureq::Agent, FsError> {
+    let cfg = ClientConfig::builder()
+        .with_root_certificates(roots())
+        .with_no_client_auth();
+    Ok(ureq::AgentBuilder::new()
+        .tls_config(Arc::new(cfg))
+        .redirects(0)
+        .timeout_connect(Duration::from_secs(10))
+        .build())
+}
+
+/// The hub agent for a saved pin: an empty pin means ordinary WebPKI trust, any pin means the
+/// explicit fallback. A pin never replaces chain validation (the verifier still runs WebPKI).
+pub fn hub_agent(pin: &str) -> Result<ureq::Agent, FsError> {
+    if pin.trim().is_empty() { public_agent() } else { pinned_agent(pin.trim()) }
+}
+
 pub(crate) fn split_hub(hub: &str) -> Result<(String, u16), FsError> {
     let rest = hub.strip_prefix("https://").ok_or_else(|| herr("invalid_hub", "the hub URL must start with https://"))?;
     if rest.contains('/') || rest.contains('@') || rest.contains('?') || rest.contains('#') || rest.contains(['\r', '\n', ' ']) {
@@ -209,14 +231,64 @@ pub(crate) fn split_hub(hub: &str) -> Result<(String, u16), FsError> {
     Ok((host.to_string(), port))
 }
 
+/// A public DNS name: at least two labels, no IP literal, no localhost/private-only name.
+/// The TLD cannot be numeric so a bare IPv4 literal is refused.
+pub fn is_public_domain(host: &str) -> bool {
+    let h = host.to_ascii_lowercase();
+    if h.is_empty() || h.len() > 253 || h.parse::<std::net::Ipv4Addr>().is_ok() || h.parse::<std::net::Ipv6Addr>().is_ok() {
+        return false;
+    }
+    let labels: Vec<&str> = h.split('.').collect();
+    if labels.len() < 2 { return false; }
+    let Some(tld) = labels.last() else { return false; };
+    if tld.chars().all(|c| c.is_ascii_digit()) { return false; }
+    // Names reserved for local networks are never a public domain, so a public CA cannot issue them.
+    if matches!(*tld, "local" | "localhost" | "internal" | "lan" | "home" | "test" | "invalid" | "onion" | "alt") { return false; }
+    labels.iter().all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    })
+}
+
+pub fn is_dev_localhost(host: &str) -> bool {
+    matches!(host.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "[::1]" | "::1")
+}
+
+/// URL-first validation: `https://<public-domain>[:port]`, no path/query/fragment/userinfo.
+/// A localhost name is accepted only when `allow_localhost` (debug builds), never in a release.
+/// Returns `(canonical_url, host, port)`, with the default 443 port omitted.
+pub fn validate_hub_url(url: &str, allow_localhost: bool) -> Result<(String, String, u16), FsError> {
+    let text = url.trim();
+    if text.is_empty() || text.len() > 300 {
+        return Err(herr("invalid_hub_url", "Enter an https:// URL for the hub."));
+    }
+    let (host, port) = split_hub(text)?;
+    if port == 0 { return Err(herr("invalid_hub_url", "The hub port must be between 1 and 65535.")); }
+    let host_l = host.to_ascii_lowercase();
+    if is_dev_localhost(&host_l) {
+        if !allow_localhost {
+            return Err(herr("invalid_hub_url", "Use the hub's public HTTPS domain. localhost is allowed only in a development build."));
+        }
+    } else if !is_public_domain(&host_l) {
+        return Err(herr("invalid_hub_url", "Enter a public domain name (for example hub.example.com), not an IP address or a bare host name."));
+    }
+    let canonical = if port == 443 { format!("https://{host_l}") } else { format!("https://{host_l}:{port}") };
+    Ok((canonical, host_l, port))
+}
+
 /// Reads the leaf certificate over a normal (chain-validated) TLS handshake and returns its SPKI pin.
 /// It never trusts the pin; the caller shows it and the user confirms it.
 #[tauri::command]
 pub async fn remote_tls_probe(hub_url: String) -> Result<TlsInfo, FsError> {
     tauri::async_runtime::spawn_blocking(move || {
-        let (host, port) = split_hub(hub_url.trim())?;
+        // The probe validates the chain against the public roots; a valid public CA certificate
+        // succeeds and needs no pin. The fingerprint is offered only as an optional fallback.
+        let (canonical, host, port) = validate_hub_url(&hub_url, cfg!(debug_assertions))?;
         let cfg = ClientConfig::builder().with_root_certificates(roots()).with_no_client_auth();
-        let name = ServerName::try_from(host.clone()).map_err(|_| herr("invalid_hub", "the hub host is not a valid DNS name"))?;
+        let name = ServerName::try_from(host.clone()).map_err(|_| herr("invalid_hub_url", "the hub host is not a valid DNS name"))?;
         let mut conn = ClientConnection::new(Arc::new(cfg), name).map_err(|e| herr("tls_failed", format!("TLS setup failed: {e}")))?;
         let mut sock = TcpStream::connect((host.as_str(), port)).map_err(|e| herr("tls_unreachable", format!("cannot reach {host}:{port}: {e}")))?;
         sock.set_read_timeout(Some(Duration::from_secs(10))).ok();
@@ -227,9 +299,9 @@ pub async fn remote_tls_probe(hub_url: String) -> Result<TlsInfo, FsError> {
         let certs = conn.peer_certificates().ok_or_else(|| herr("tls_failed", "the hub presented no certificate"))?;
         let leaf = certs.first().ok_or_else(|| herr("tls_failed", "the hub presented no leaf certificate"))?;
         let fingerprint = fingerprint_of_certificate(leaf.as_ref()).ok_or_else(|| herr("tls_failed", "the leaf SPKI is unreadable"))?;
-        *last_probe().lock().unwrap_or_else(|e| e.into_inner()) = Some((hub_url.trim().to_string(), fingerprint.clone()));
+        *last_probe().lock().unwrap_or_else(|e| e.into_inner()) = Some((canonical.clone(), fingerprint.clone()));
         let _ = sock.flush();
-        Ok(TlsInfo { fingerprint, subject: String::new(), issuer: String::new(), not_before: 0, not_after: 0, dns_names: Vec::new() })
+        Ok(TlsInfo { fingerprint, web_pki: true, subject: String::new(), issuer: String::new(), not_before: 0, not_after: 0, dns_names: Vec::new() })
     }).await.map_err(|e| herr("internal", format!("the TLS probe did not finish: {e}")))?
 }
 
@@ -239,34 +311,45 @@ fn last_probe() -> &'static Mutex<Option<(String, String)>> {
 }
 
 /// Stores `remote_server.hub_url` + `tls_pin` after the user confirms the probe. No other pref changes.
-/// Runs the native trust dialog and the pref write, both blocking, so the command is async.
 #[tauri::command]
 pub async fn remote_tls_pin(hub_url: String, fingerprint: String) -> Result<(), FsError> {
-    tauri::async_runtime::spawn_blocking(move || pin_remote(hub_url, fingerprint))
+    // The native confirm blocks: keep it off the main thread like every other confirm::ask caller.
+    tauri::async_runtime::spawn_blocking(move || pin_blocking(hub_url, fingerprint))
         .await
-        .map_err(|e| herr("io", format!("pin task failed: {e}")))?
+        .map_err(|_| herr("cancelled", "the certificate was not trusted"))?
 }
 
-fn pin_remote(hub_url: String, fingerprint: String) -> Result<(), FsError> {
-    let (host, port) = split_hub(hub_url.trim())?;
+fn pin_blocking(hub_url: String, fingerprint: String) -> Result<(), FsError> {
+    let (canonical, _host, _port) = validate_hub_url(&hub_url, cfg!(debug_assertions))?;
     if !valid_pin(&fingerprint) { return Err(herr("invalid_pin", "the fingerprint is not a sha256 SPKI pin")); }
     // Pin only a fingerprint this host actually probed for this URL (the UI comparison is not authority).
     let matches = last_probe().lock().unwrap_or_else(|e| e.into_inner()).as_ref()
-        .is_some_and(|(h, f)| h == hub_url.trim() && f == &fingerprint);
+        .is_some_and(|(h, f)| h == &canonical && f == &fingerprint);
     if !matches { return Err(herr("probe_required", "probe the hub certificate before trusting it")); }
     // R-034 #11: the final pin is a native decision, not only a webview button.
-    let hub_url = if port == 443 { format!("https://{host}") } else { format!("https://{host}:{port}") };
     if !crate::confirm::ask(
         "Trust this hub certificate?",
-        &format!("Pin the certificate now presented by {hub_url}? A different certificate later will refuse to connect."),
+        &format!("Pin the certificate now presented by {canonical}? A different certificate later will refuse to connect. Public CA certificates do not need a pin."),
         "Trust certificate",
         true,
     ) {
         return Err(herr("cancelled", "the certificate was not trusted"));
     }
-    let view = crate::prefs::set_remote_pin(hub_url, fingerprint)?;
+    let view = crate::prefs::set_remote_pin(canonical, fingerprint)?;
     if !view.persisted { return Err(herr("prefs_unavailable", "the pin could not be saved (no data folder)")); }
     Ok(())
+}
+
+/// Drop the optional pin after the user explicitly chooses public-CA trust again. No native
+/// prompt is needed: removing a pin only restores ordinary WebPKI validation, never weakens it.
+#[tauri::command]
+pub async fn remote_tls_unpin(hub_url: String) -> Result<(), FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (canonical, _host, _port) = validate_hub_url(&hub_url, cfg!(debug_assertions))?;
+        let view = crate::prefs::set_remote_pin(canonical, String::new())?;
+        if !view.persisted { return Err(herr("prefs_unavailable", "the pin could not be saved (no data folder)")); }
+        Ok(())
+    }).await.map_err(|e| herr("internal", format!("the pin removal did not finish: {e}")))?
 }
 
 #[cfg(test)]
@@ -292,7 +375,7 @@ mod tests {
 
     #[test]
     fn pinning_requires_a_matching_probe() {
-        let err = pin_remote("https://hub.example.com".into(), "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into()).unwrap_err();
+        let err = pin_blocking("https://hub.example.com".into(), "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into()).unwrap_err();
         assert_eq!(err.code, "probe_required");
     }
 
@@ -371,5 +454,27 @@ mod tests {
         for bad in ["http://hub.example.com", "https://hub.example.com/path", "https://u@hub.example.com", "https://hub.example.com?x", "https://-hub.example.com"] {
             assert!(split_hub(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn url_first_validation_requires_a_public_domain_and_trims() {
+        assert_eq!(validate_hub_url("  https://Hub.Example.com  ", false).unwrap(), ("https://hub.example.com".into(), "hub.example.com".into(), 443));
+        assert_eq!(validate_hub_url("https://hub.example.com:8443", false).unwrap().2, 8443);
+        // A bare IP, a private/single-label name and localhost are not public domains.
+        for bad in ["https://8.8.8.8", "https://192.168.1.10", "https://hub", "https://hub.local", "http://hub.example.com", "https://hub.example.com/path", "https://user@hub.example.com"] {
+            assert!(validate_hub_url(bad, false).is_err(), "{bad}");
+        }
+        // localhost is the explicit development exception.
+        assert!(validate_hub_url("https://localhost", false).is_err());
+        assert_eq!(validate_hub_url("https://localhost:3457", true).unwrap(), ("https://localhost:3457".into(), "localhost".into(), 3457));
+        assert_eq!(validate_hub_url("https://127.0.0.1", true).unwrap().1, "127.0.0.1");
+    }
+
+    #[test]
+    fn an_empty_pin_selects_webpki_and_a_pin_is_the_optional_fallback() {
+        assert!(hub_agent("").is_ok());
+        assert!(hub_agent("   ").is_ok());
+        assert!(hub_agent("sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").is_ok());
+        assert!(hub_agent("sha256:short").is_err());
     }
 }

@@ -1,5 +1,9 @@
 # Run an always-online hub (remote server mode)
 
+> **Fast path:** install with **[Install a server](install-a-server.md)** (one command, Ubuntu/Debian),
+> then connect the desktop with **[Connect the desktop to a server](configure-remote-server.md)**.
+> This page is the deeper operator runbook for deploy internals, backups, updates and limits.
+
 LLM-IDE has two server modes. **Local desktop** is the default: the app runs the Node core on this
 computer and phones/browsers read encrypted MEGA/Box/SFTP snapshots while it is online (ADR 0020).
 **Remote SSH hub** runs the same core on a server you own, behind nginx TLS, so the desktop, web app

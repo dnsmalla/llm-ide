@@ -22,7 +22,7 @@ import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { authorizeAction, hubFolderRefusal, projectScopeRefusal } from '../server/route-authority.mjs';
 import { projectIdForFolder, getProject } from '../kb/projects.mjs';
 import {
-  assignPlanTask, getTaskAssignment, getTaskContext, listMyAssignments, unassignPlanTask,
+  assignPlanTask, assigneeEligibility, getTaskAssignment, getTaskContext, listMyAssignments, unassignPlanTask,
 } from '../kb/plan-assignments.mjs';
 import { recordActivity } from '../kb/activity.mjs';
 import { clientIp, safeAudit } from '../server/route-http.mjs';
@@ -162,6 +162,14 @@ export async function handlePlanningRoutes(req, res, ctx) {
     const body = parseJSON(await readBody(req, 1024 * 1024));
     if (!body?.title) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing title' } });
+      return true;
+    }
+    // A plan's meta.projectId puts its tasks on that project's board (GET /projects/:id/plan-tasks), so only
+    // a project member may tag one; otherwise a non-member could plant tasks on another project's board.
+    const taggedProject = body.meta && typeof body.meta === 'object' ? body.meta.projectId : undefined;
+    if (taggedProject !== undefined && taggedProject !== null
+      && !assigneeEligibility(kb.getDb(), userId, taggedProject).eligible) {
+      sendJSON(res, 403, { error: { code: 'PROJECT_DENIED', message: 'You are not a member of that project' } });
       return true;
     }
     try {

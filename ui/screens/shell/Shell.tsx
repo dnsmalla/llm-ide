@@ -24,8 +24,8 @@ import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type SectionDef, type SectionId } from "./sections";
 import { RemoteProjectBar } from "./RemoteProjectBar";
-import { remoteBanner } from "./remote-status";
-import { bindRemoteSession, isRemoteSessionReady } from "./remote-session";
+import { getHubError, remoteBanner, subscribeHubError } from "./remote-status";
+import { bindRemoteSession } from "./remote-session";
 import { landingFor, readHome, selectHome } from "./landing";
 import { activityStore, core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
@@ -102,13 +102,16 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     setCrash(null);
     void dismissCrashNotice().catch(() => undefined);
   }, []);
-  // R-034 #10: once the remote core is reachable, restore the keychain-held hub session and keep it in step.
-  const remoteSessionReady = isRemoteSessionReady(coreStatusStore.getSnapshot().status);
+  // R-034 #10: once the remote core is reachable, restore the keychain-held hub session and keep it
+  // in step. Waiting for the ready/remote state avoids a first attempt against a null base URL.
+  const remoteSessionReady = remoteMode && !view.down;
   useEffect(() => {
     if (!remoteSessionReady) return undefined;
     return bindRemoteSession();
   }, [remoteSessionReady]);
   const session = useCoreSession();
+  const hubError = useSyncExternalStore(subscribeHubError, getHubError, getHubError);
+  const hubBanner = remoteBanner(view.down ? "offline" : "online", session.signedIn, hubError);
   const features = useFeatures();
   const { project, loaded: projectLoaded, notice, dismissNotice, recentAll, openRecent } = useActiveProject();
   // Notifications and the tray (desktop only): counts and sync state to the host, tray actions back to the shell.
@@ -339,7 +342,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         <div className="sh-section-column">
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={visibleSections.find((s) => s.id === nav.active)?.label}>
           {remoteMode ? <div className="sh-row"><RemoteProjectBar /></div> : null}
-          {remoteMode && remoteBanner(view.down ? "offline" : "online", session.signedIn) ? <StatusBanner severity="warning" message={remoteBanner(view.down ? "offline" : "online", session.signedIn)!.title} /> : null}
+          {remoteMode && hubBanner ? <StatusBanner severity="warning" message={hubError ? `${hubBanner.title}. ${hubBanner.body}` : hubBanner.title} /> : null}
           <LiveBanner activeSection={nav.active} onOpen={() => dispatch({ type: "select", id: "live" })} />
           {crash && <CrashReportBanner notice={crash} onDismiss={dismissCrash} />}
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}

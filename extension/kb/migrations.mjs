@@ -112,7 +112,7 @@ export function applyMigrations(db, { logger, dir = MIGRATIONS_DIR, table = 'sch
   // the hub rollback's restore-db. A database with no files shipped (a test subset) is not "ahead".
   const appliedMax = Math.max(0, ...applied.keys());
   const fileMax = files.length ? files[files.length - 1].version : 0;
-  if (appliedMax > fileMax) {
+  if (files.length && appliedMax > fileMax) {
     throw new Error(
       `Database schema is at v${appliedMax}, ahead of this build (v${fileMax}). ` +
       'Run the newer release, or restore the pre-deploy database backup before starting this one.',

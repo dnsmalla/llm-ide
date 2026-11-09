@@ -10,14 +10,21 @@ test("loopback ws and any wss are accepted and normalised", () => {
   }
 });
 
+test("a hub's https or /app/ URL normalises to the Host API websocket", () => {
+  assert.deepEqual(checkHostUrl(" https://hub.example.com ", "https:"), { ok: true, url: "wss://hub.example.com/host-api/v1" });
+  assert.deepEqual(checkHostUrl("https://hub.example.com/app/", "https:"), { ok: true, url: "wss://hub.example.com/host-api/v1" });
+  assert.deepEqual(checkHostUrl("wss://hub.example.com", "https:"), { ok: true, url: "wss://hub.example.com/host-api/v1" });
+  assert.deepEqual(checkHostUrl("http://127.0.0.1:3016", "http:"), { ok: true, url: "ws://127.0.0.1:3016/host-api/v1" });
+});
+
 test("everything else is refused with a reason", () => {
   const bad = {
     "ws://192.168.1.20:3016/host-api/v1": /wss:\/\//,
-    "http://127.0.0.1:3016/host-api/v1": /ws:\/\/ or wss:\/\//,
+    "http://evil.example.com/host-api/v1": /only to this computer/,
     "ws://127.0.0.1:3016/other": /\/host-api\/v1/,
     "ws://u:p@127.0.0.1:3016/host-api/v1": /user, query or fragment/,
     "ws://127.0.0.1:3016/host-api/v1?t=1": /user, query or fragment/,
-    "not a url": /ws:\/\/ or wss:\/\//,
+    "not a url": /Enter a hub address/,
     "ws://127.0.0.1.evil.com:3016/host-api/v1": /only to this computer/,
     "ws://127.0.0.1:3016/host-api/v1?x=1": /user, query or fragment/,
     "ws://127.0.0.1:3016/host-api/v1#f": /user, query or fragment/,

@@ -1,8 +1,8 @@
 // Remote mode's project picker: the hub's projects with the caller's effective role. It never reads a
 // local folder; selecting one scopes every project-scoped request to that project id.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { core, coreStatusStore } from "./runtime";
-import { RemoteProjects, type RemoteProject } from "./remote-projects";
+import { RemoteProjects, remoteProjectsReady, type RemoteProject } from "./remote-projects";
 import { setRemoteProjectId } from "./remote-selection";
 
 // Selection is in memory only: the token-storage invariant allows web storage for the theme,
@@ -14,7 +14,13 @@ export function RemoteProjectBar(): ReactNode {
   const [projects, setProjects] = useState<RemoteProject[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The keychain session restores after this screen mounts; asking for /projects before the token
+  // exists would 401 and leave the bar stuck. Re-run when sign-in completes or the account changes.
+  const session = useSyncExternalStore(core.subscribe, core.getSnapshot, core.getSnapshot);
+  const signedIn = remoteProjectsReady(session.signedIn);
+  const userId = session.user?.id ?? null;
   useEffect(() => {
+    if (!signedIn) return undefined;
     const status = coreStatusStore.getSnapshot().status;
     const key = status?.url ? status.url.replace(/\/[^/]+$/, "") : "hub";
     const store = new RemoteProjects(core, storage, key);
@@ -28,7 +34,7 @@ export function RemoteProjectBar(): ReactNode {
     });
     const off = store.subscribe(() => { if (!live) return; setProjects(store.getState().projects); setSelected(store.getState().selectedId); setError(store.getState().error); });
     return () => { live = false; off(); };
-  }, []);
+  }, [signedIn, userId]);
   if (error) return <span className="sh-hint" role="status">Hub projects: {error}</span>;
   if (projects.length === 0) return <span className="sh-hint" role="status">Loading hub projects…</span>;
   const role = projects.find((p) => p.id === selected)?.role ?? "viewer";

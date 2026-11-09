@@ -496,7 +496,11 @@ async function handleV2Stream(req, res, userId, deps) {
   }
   // The extension side panel has no project folder and sends no paths: its
   // turns run in a server-owned scratch directory (core/extension-chat-workspace.mjs).
-  if (agentContext.surface === 'extension' && !agentContext.workspaceRoot) {
+  // On a hub the scratch surfaces ALWAYS run in the server-owned folder: runV2Turn exempts them from
+  // the folder-in-a-project rule, so a client-supplied root here would be an unregistered folder the
+  // SDK then reads from (R-034 #4 follow-up).
+  const scratchSurface = agentContext.surface === 'extension' || agentContext.surface === 'host-api';
+  if ((agentContext.surface === 'extension' && !agentContext.workspaceRoot) || (config.hub && scratchSurface)) {
     agentContext = { ...agentContext, workspaceRoot: extensionChatWorkspace(config.dataDir, userId) };
   }
   const workspaceRoot = typeof agentContext.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';

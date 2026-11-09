@@ -19,6 +19,22 @@ export function remoteBanner(state: RemoteState, hasSession: boolean, errorCode:
   };
 }
 
+// R-034 #11: the last hub-level error a proxied request answered with. Only the pin mismatch is kept:
+// it is the one error the generic "unreachable" text would hide. Any successful answer clears it.
+let hubError: string | null = null;
+const hubErrorListeners = new Set<() => void>();
+export function noteHubError(code: string | null): void {
+  const next = code === "HUB_PIN_MISMATCH" ? code : null;
+  if (next === hubError) return;
+  hubError = next;
+  for (const l of [...hubErrorListeners]) l();
+}
+export function getHubError(): string | null { return hubError; }
+export function subscribeHubError(l: () => void): () => void {
+  hubErrorListeners.add(l);
+  return () => { hubErrorListeners.delete(l); };
+}
+
 export async function remoteFallbackAction(deps: { setMode(mode: "local"): Promise<void>; restart(): Promise<void> }): Promise<void> {
   await deps.setMode("local");
   await deps.restart();

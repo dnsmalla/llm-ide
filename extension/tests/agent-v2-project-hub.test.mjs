@@ -137,6 +137,19 @@ test('R-034 #4: a projectless EXTENSION surface runs read-only on a hub', async 
   assert.equal(args.agentContext.workspaceRoot, extensionChatWorkspace(undefined, 'hub-u1'));
 });
 
+test('R-034 #4: a scratch surface cannot bring its own folder onto a hub', async () => {
+  for (const surface of ['extension', 'host-api']) {
+    const before = turnArgs.length;
+    const res = await run({ agentContext: { chatSessionId: `chat-${surface}-own-root`, surface, workspaceRoot: WS } });
+    if (res.statusCode === 200) {
+      assert.equal(turns, before + 1);
+      assert.equal(turnArgs[turnArgs.length - 1].agentContext.workspaceRoot, extensionChatWorkspace(undefined, 'hub-u1'), surface);
+    } else {
+      assert.equal(res.json().error.code, 'PROJECT_DENIED', surface);
+    }
+  }
+});
+
 test('R-034 #4: a non-extension folder in no project is still refused on a hub', async () => {
   const res = await run({ agentContext: { chatSessionId: 'chat-plain-noproj', workspaceRoot: WS } });
   assert.equal(res.statusCode, 403);

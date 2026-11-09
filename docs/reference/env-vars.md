@@ -122,6 +122,7 @@ Set by the deploy's `/etc/llmide/core.env`; see [run-a-hub](../how-to/run-a-hub.
 | `LLMIDE_HUB_PUBLIC_URL` | The public `wss://<hub>/host-api/v1` URL returned in a hub PIN. |
 | `LLMIDE_BOOTSTRAP_TOKEN` | One-time first-owner token, present only in `/etc/llmide/bootstrap.env` during the setup window. |
 | `LLMIDE_HUB_DOMAIN`, `LLMIDE_HUB_VERSION` | Non-secret deploy metadata used by the root helper (not application settings). |
+| `ANTHROPIC_API_KEY` | Model key for a hub. The one-command installer reads it from the environment or a hidden prompt and writes it to `/etc/llmide/core.env` (`0600 root:root`); the helper preserves it across desktop deploys. Never put it in argv. |
 
 ## Worked examples
 

@@ -62,12 +62,31 @@ test("no stored token means no refresh call", async () => {
   assert.ok(!h.calls.some((c) => c[0] === "restore"));
 });
 
-test("the hub session binds only for a remote core whose raw state is remote or ready", async () => {
-  const { isRemoteSessionReady } = await load("remote-session.ts");
-  assert.equal(isRemoteSessionReady({ mode: "remote", state: "remote" }), true);
-  assert.equal(isRemoteSessionReady({ mode: "remote", state: "ready" }), true);
-  assert.equal(isRemoteSessionReady({ mode: "remote", state: "starting" }), false);
-  assert.equal(isRemoteSessionReady({ mode: "local", state: "ready" }), false);
-  assert.equal(isRemoteSessionReady(null), false);
-  assert.equal(isRemoteSessionReady(undefined), false);
+test("a public-CA hub (empty pin) restores the keychain session just like a pinned one", async () => {
+  const calls = [];
+  let listener = null;
+  const core = {
+    subscribeRefreshToken(cb) { listener = cb; return () => { listener = null; }; },
+    async restoreSession(token) { calls.push(["restore", token]); },
+  };
+  const host = {
+    async remoteServerTarget() { return { hubUrl: "https://hub.example.com", pin: "" }; },
+    async remoteSessionLoad(hub, pin) { calls.push(["load", hub, pin]); return "refresh-webpki"; },
+    async remoteSessionStore(hub, pin, refresh) { calls.push(["store", hub, pin, refresh]); },
+    async remoteSessionClear() { calls.push(["clear"]); },
+  };
+  const off = createRemoteSessionBinder(core, host);
+  await tick();
+  assert.deepEqual(calls[0], ["load", "https://hub.example.com", ""]);
+  assert.deepEqual(calls[1], ["restore", "refresh-webpki"]);
+  listener?.("refresh-rotated");
+  await tick();
+  assert.deepEqual(calls.at(-1), ["store", "https://hub.example.com", "", "refresh-rotated"]);
+  off();
+});
+
+test("projects are requested only after a session exists", async () => {
+  const { remoteProjectsReady } = await load("remote-projects.ts");
+  assert.equal(remoteProjectsReady(false), false);
+  assert.equal(remoteProjectsReady(true), true);
 });

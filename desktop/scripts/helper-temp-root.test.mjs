@@ -165,7 +165,7 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     assert.ok(existsSync(h.releaseNode), 'the release has core/node/node');
     assert.notEqual(statSync(h.releaseNode).mode & 0o005, 0, 'node must be executable by the service user');
     assert.ok(existsSync(join(h.root, 'var/www/llmide-web/index.html')), 'the PWA is copied after the release switch');
-    assert.match(h.run('check'), /helper=4/, "check reports the helper version");
+    assert.match(h.run('check'), /helper=5/, "check reports the helper version");
     h.run('upload', 'VERSION\n1.2.4\n');
     assert.notEqual(h.runFail('update').status, 0, 'a same-version update is refused');
 

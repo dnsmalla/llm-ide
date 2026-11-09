@@ -297,12 +297,12 @@ export const host = {
     await invokeHost<unknown>("reveal_in_os", { relPath: "" });
   },
 
-  /** R-034 #10: the saved hub URL and TLS pin, or null when remote mode has not been configured. */
+  /** R-034 #10 / URL-first: the saved hub URL and optional pin (empty = public-CA trust). */
   async remoteServerTarget(): Promise<{ hubUrl: string; pin: string } | null> {
     if (!isHostAvailable()) return null;
     const v = decodePrefsView(await invokeHost<unknown>("get_prefs"));
     const r = v?.stored.remoteServer;
-    return r && r.hubUrl && r.tlsPin ? { hubUrl: r.hubUrl, pin: r.tlsPin } : null;
+    return r && r.hubUrl ? { hubUrl: r.hubUrl, pin: r.tlsPin } : null;
   },
 
   /** The stored hub refresh token, only when the hub URL and TLS pin still match. */

@@ -1,9 +1,10 @@
-//! The hub session in the OS keychain, bound to the hub URL and its TLS pin.
+//! The hub session in the OS keychain, bound to the hub URL and its TLS identity.
 //!
 //! A refresh token is a long-lived credential. It is stored as one JSON entry (`hub-session`) and
 //! returned only when the current `remote_server.hub_url` and `remote_server.tls_pin` match the
-//! values it was stored with. A re-pointed or re-keyed hub therefore gets nothing; the old entry is
-//! deleted on the mismatch. Nothing here logs or Debug-prints the token.
+//! values it was stored with. An empty pin is the normal WebPKI case (a public-CA certificate needs
+//! no manual pin); a non-empty pin is the explicit fallback. A re-pointed or re-keyed hub therefore
+//! gets nothing; the old entry is deleted on the mismatch. Nothing here logs or Debug-prints the token.
 
 use serde::{Deserialize, Serialize};
 
@@ -31,8 +32,9 @@ fn valid_hub(hub: &str) -> bool {
     hub.starts_with("https://") && hub.len() <= 300 && !hub.contains('@') && !hub.contains(['\r', '\n', ' ', '\t'])
 }
 
+/// Empty = ordinary WebPKI trust (the common public-domain case). Anything else must be a real pin.
 fn valid_pin(pin: &str) -> bool {
-    pin.len() == 50 && pin.starts_with("sha256:") && pin[7..].chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    pin.is_empty() || (pin.len() == 50 && pin.starts_with("sha256:") && pin[7..].chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
 }
 
 fn valid_refresh(token: &str) -> bool {
@@ -125,6 +127,29 @@ mod tests {
         store(&b, HUB, PIN, "refresh-2").unwrap();
         assert_eq!(load(&b, "https://evil.example.com", PIN).unwrap(), None);
         assert!(!stored_present(&b));
+    }
+
+    #[test]
+    fn a_webpki_session_binds_to_the_url_with_an_empty_pin() {
+        let b = MemoryBackend::default();
+        store(&b, HUB, "", "refresh-webpki").unwrap();
+        assert_eq!(load(&b, HUB, "").unwrap().as_deref(), Some("refresh-webpki"));
+        // The same URL with a later explicit pin is a different identity: the old token is not replayed.
+        assert_eq!(load(&b, HUB, PIN).unwrap(), None);
+        assert!(!stored_present(&b));
+        store(&b, HUB, "", "refresh-2").unwrap();
+        assert_eq!(load(&b, "https://other.example.com", "").unwrap(), None);
+        assert!(!stored_present(&b));
+    }
+
+    #[test]
+    fn clearing_the_session_removes_the_stored_refresh_token() {
+        let b = MemoryBackend::default();
+        store(&b, HUB, "", "refresh-1").unwrap();
+        assert!(stored_present(&b));
+        clear(&b).unwrap();
+        assert!(!stored_present(&b));
+        assert_eq!(load(&b, HUB, "").unwrap(), None);
     }
 
     #[test]

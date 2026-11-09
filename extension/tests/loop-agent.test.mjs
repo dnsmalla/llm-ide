@@ -1465,3 +1465,17 @@ test('C1c: link targets with .. cannot make a Loop Write land outside the repo (
   }
   assert.ok(loopToolRefusal('Read', { file_path: path.join(repo, 'src', 'd2', 'x.md') }, [repo]), 'read through d2');
 });
+
+test('runLoopAgent: R-034 #6 the run carries the same USD budget as a chat turn, project included', () => withKey(async () => {
+  const capture = {};
+  const seen = [];
+  const budget = (uid, model, opts) => { seen.push([uid, opts.projectId]); return 0.5; };
+  await runLoopAgent({
+    message: 'x', root: REPO, userId: user.id, projectId: 'p-loop', budget, queryFactory: toolPlayingQuery(capture, []),
+  }, noSkill);
+  assert.equal(capture.options.maxBudgetUsd, 0.5);
+  assert.deepEqual(seen, [[user.id, 'p-loop']]);
+  const none = {};
+  await runLoopAgent({ message: 'x', root: REPO, userId: user.id, budget: () => null, queryFactory: toolPlayingQuery(none, []) }, noSkill);
+  assert.equal('maxBudgetUsd' in none.options, false, 'no cap → no budget option');
+}));

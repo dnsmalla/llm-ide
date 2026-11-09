@@ -268,6 +268,9 @@ test('R-034 #14: a project downgrade at boot logs a warning', () => {
   ].join('\n')));
   applyTeamYaml(db(), dir, { logger, audit: teamAudit });
   assert.ok(warnings.some(([action]) => action === 'team_yaml_project_downgrade'), 'the narrowing is visible');
+
+  // The registering owner's row is not in the block, so the file leaves the project ownerless.
+  assert.ok(warnings.some(([action, detail]) => action === 'team_yaml_project_no_owner' && detail.projectId === 'p-warn'));
 });
 
 test('an invalid projects section refuses the boot and changes nothing', () => {

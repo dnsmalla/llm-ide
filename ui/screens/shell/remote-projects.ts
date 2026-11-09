@@ -2,6 +2,9 @@
 // No local folder is involved: the id is the canonical project id the hub's routes use.
 import type { CoreClient } from "./core";
 
+/** Remote mode must not ask for projects before the keychain session has restored a token. */
+export const remoteProjectsReady = (signedIn: boolean): boolean => signedIn;
+
 export type ProjectRole = "owner" | "admin" | "member" | "viewer";
 export type RunMode = "none" | "read_only" | "execute";
 export interface RemoteProject {

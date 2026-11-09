@@ -52,6 +52,7 @@ mod project_search;
 mod pty;
 mod remote;
 mod remote_deploy;
+mod remote_hub;
 mod remote_session;
 mod remote_tls;
 mod remote_proxy;
@@ -459,6 +460,9 @@ macro_rules! product_handlers {
                 remote_session::remote_session_clear,
                 remote_tls::remote_tls_probe,
                 remote_tls::remote_tls_pin,
+                remote_tls::remote_tls_unpin,
+                remote_hub::remote_hub_check,
+                remote_hub::remote_hub_login,
                 remote_deploy::remote_backup_now,
                 remote_deploy::remote_logs,
                 remote_deploy::remote_uninstall,

@@ -1,9 +1,10 @@
-//! Loopback-only HTTP/SSE proxy from the webview to the pinned hub.
+//! Loopback-only HTTP/SSE proxy from the webview to the hub.
 //!
 //! The webview keeps talking to `http://127.0.0.1:<port>/<32-byte-token>/…`, so the existing core
 //! client's loopback rule and the CSP are unchanged. The proxy forwards to `https://hub` through an
-//! agent whose rustls verifier enforces the leaf-SPKI pin. It adds no credentials of its own, never
-//! follows a redirect, caps request bodies at 8 MiB, and rejects any path without the token.
+//! agent that validates the public WebPKI chain by default; when the user explicitly pinned the hub
+//! certificate, the same agent additionally enforces the leaf-SPKI pin. It adds no credentials of
+//! its own, never follows a redirect, caps request bodies at 8 MiB, and rejects any path without the token.
 //!
 //! The token is in the base URL the host hands the shell; the UI displays only the origin.
 
@@ -18,7 +19,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
-use crate::remote_tls::pinned_agent;
+use crate::remote_tls::hub_agent;
 
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_HEADERS: usize = 64 * 1024;
@@ -201,9 +202,10 @@ fn handle(mut stream: TcpStream, agent: &ureq::Agent, hub: &str, token: &str) {
 
 /// Starts the proxy on the first free loopback port in `[3459, 3458, 3457]` (all in the app CSP).
 pub fn start(hub_url: &str, pin: &str) -> Result<ProxyHandle, FsError> {
-    // A plaintext hub would bypass the pin entirely: the pinned agent serves http:// without TLS.
-    let _ = crate::remote_tls::split_hub(hub_url)?;
-    let agent = pinned_agent(pin)?;
+    // A plaintext hub would bypass TLS entirely; only an https URL is accepted. An empty pin is
+    // ordinary WebPKI trust (public CA); a non-empty pin also enforces the leaf-SPKI pin.
+    let _ = crate::remote_tls::validate_hub_url(hub_url, cfg!(debug_assertions))?;
+    let agent = hub_agent(pin)?;
     start_with_agent(agent, hub_url)
 }
 

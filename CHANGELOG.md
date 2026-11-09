@@ -5,6 +5,24 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Remote server: URL-first connection
+
+- **Settings → Server & Backend → Remote server** is URL-first: enter a running hub's https URL,
+  email and password, then Connect / Test connection / Sign out. The host logs in at `/auth/login`,
+  stores the refresh token in the OS keychain bound to the URL and optional pin, and shows the
+  account role and connection state.
+- Public-CA TLS is the default and needs no manual pin; the leaf pin is an optional, explicitly
+  trusted fallback. A changed pinned certificate still fails closed.
+- Switching back to **Local desktop** is explicit and restarts the core. SSH deploy, update, backup
+  and uninstall moved under **Install or manage server over SSH**, collapsed by default.
+- `deploy/hub/install-hub.sh` installs a hub on Ubuntu/Debian in one command using the existing
+  helper/bundle/unit/nginx flow; the domain is an argument and the model key comes from the
+  environment or a hidden prompt (never argv/logs).
+- Web pairing accepts a hub's `https://` (or `/app/`) address and normalises it to
+  `wss://host/host-api/v1`.
+- Docs: [connect to a server](docs/how-to/configure-remote-server.md) vs
+  [install a server](docs/how-to/install-a-server.md).
+
 ### Shipped in October 2026, by surface
 
 Summary of this month's `feat` and `fix` commits (`git log --since=2026-10-01`), grouped by the surface a
