@@ -1390,3 +1390,24 @@ test('route passes writeScope ".factory" to the engine, and nothing when absent'
     assert.equal(seen.writeScope, want);
   }
 });
+
+test('C1: a symlink leaf (dangling or to an outside file) is refused for Edit/Write, scoped and unscoped', () => {
+  const repo = path.join(SANDBOX, 'linkleaf');
+  fs.mkdirSync(path.join(repo, '.factory'), { recursive: true });
+  const planted = path.join(SANDBOX, 'planted.md');
+  fs.writeFileSync(planted, 'Verdict: approve\n');
+  fs.symlinkSync(path.join(SANDBOX, 'outside-created.md'), path.join(repo, '.factory', 'PLAN.md')); // dangling
+  fs.symlinkSync(planted, path.join(repo, '.factory', 'REVIEW.md')); // to a planted file
+  fs.symlinkSync(planted, path.join(repo, 'plain-link.md'));
+  for (const name of ['PLAN.md', 'REVIEW.md']) {
+    const file_path = path.join(repo, '.factory', name);
+    for (const tool of ['Write', 'Edit']) {
+      assert.ok(loopToolRefusal(tool, { file_path }, [repo], { writeScope: '.factory' }), `scoped ${tool} ${name}`);
+      assert.ok(loopToolRefusal(tool, { file_path }, [repo]), `unscoped ${tool} ${name}`);
+    }
+  }
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(repo, 'plain-link.md') }, [repo]), 'unscoped link in the repo root');
+  assert.equal(fs.existsSync(path.join(SANDBOX, 'outside-created.md')), false, 'nothing was written');
+  // A regular file in the scope still works.
+  assert.equal(loopToolRefusal('Write', { file_path: path.join(repo, '.factory', 'READINESS.md') }, [repo], { writeScope: '.factory' }), null);
+});

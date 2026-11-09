@@ -232,11 +232,22 @@ export function autoGate() {
  * checked on the nearest EXISTING ancestor's realpath plus the remaining
  * lexical suffix — a symlink anywhere in the existing part cannot escape.
  */
-export function writePathGate(filePath, roots) {
+function isSymlinkLeaf(abs) {
+  try {
+    return fs.lstatSync(abs).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+export function writePathGate(filePath, roots, { allowLeafLink = false } = {}) {
   if (typeof filePath !== 'string' || !filePath) return 'blocked';
   if (!Array.isArray(roots) || roots.length === 0) return 'blocked';
   const primary = roots[0];
   const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(primary, filePath);
+  // A link as the final component (dangling ones included, which existsSync cannot see) would make a write land
+  // wherever the link points, e.g. a repo-committed symlink. Writes refuse it; read callers opt out.
+  if (!allowLeafLink && isSymlinkLeaf(abs)) return 'blocked';
   let existing = abs;
   while (!fs.existsSync(existing)) {
     const parent = path.dirname(existing);

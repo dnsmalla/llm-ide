@@ -277,6 +277,10 @@ export function withSecretExclusions(input) {
 function resolveWriteTarget(filePath, base) {
   if (typeof filePath !== 'string' || !filePath) return null;
   const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(base, filePath);
+  // A link as the leaf (dangling included) would redirect the write; a repo can commit one under .factory/.
+  try {
+    if (fs.lstatSync(abs).isSymbolicLink()) return null;
+  } catch { /* the leaf does not exist yet: fine */ }
   let existing = abs;
   while (!fs.existsSync(existing)) {
     const parent = path.dirname(existing);
@@ -321,9 +325,10 @@ export function loopToolRefusal(toolName, input, roots, { readOnly = false, writ
   if (toolName === LOOP_FIND_CODE_TOOL) return null;
   // A read-only run (the command bus's review kind) never writes: Edit and Write are refused outright.
   if (readOnly && WRITE_TOOLS.has(toolName)) return `${toolName} is not available in a read-only run.`;
-  const inside = (p) => writePathGate(p, allowed) !== 'blocked';
+  // Reads may follow a link that stays inside the roots; writes may not end in a link at all.
+  const inside = (p, allowLeafLink = true) => writePathGate(p, allowed, { allowLeafLink }) !== 'blocked';
   if (toolName === 'Read' || WRITE_TOOLS.has(toolName)) {
-    if (!inside(input?.file_path)) {
+    if (!inside(input?.file_path, !WRITE_TOOLS.has(toolName))) {
       return `${toolName} refused: ${String(input?.file_path ?? '(no path)')} is outside the Loop's repository ${where} (or is a protected secret path).`;
     }
     // A scoped run (Factory Intake / Review) may write only its own reports under <git root>/<writeScope>/.
