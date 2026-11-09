@@ -97,6 +97,7 @@ const NON_WIRE_TYPE_LITERALS = new Set([
   'user',                     // sdk/engine.mjs buildPromptInput — SDKUserMessage envelope
   'noul', 'choice', 'score',  // tools/decide.mjs — Jev answer shapes inside the `decide` tool result, never stream events
   'hello',                    // routes/os.mjs — first event of GET /kb/os/stream (the System view change feed), a separate wire
+  'progress',                 // routes/bus/bus-routes.mjs — a command-bus job_events row appended by the desktop claim route; it rides GET /bus/commands/:id/events, never the agent stream
   'spki',                     // routes/sync/keys.mjs — createPublicKey(...).export({ type: 'spki' }), never an SSE event
   'skill', 'command', 'agent', 'mcp', 'hook', 'lsp', 'bin', // llm_agent/extensions/importer.mjs — extension catalog member kinds, not stream events
   // JSON-Schema fragments inside tool definitions.
