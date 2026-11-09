@@ -552,6 +552,22 @@ test('R-034 #9: an extra root in a project the caller has no grant on is refused
   assert.equal(ran, false, 'the engine never starts');
 });
 
+test('R-034 #13: Loop canUseTool re-checks authority and aborts the step', () => withKey(async () => {
+  const capture = {};
+  const queryFactory = (prompt, options) => {
+    capture.options = options;
+    return (async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 's1', model: 'test-model', tools: options.tools };
+      yield { type: 'result', subtype: 'success', result: 'done', total_cost_usd: 0.01, num_turns: 1, duration_ms: 1, modelUsage: {} };
+    })();
+  };
+  await runLoopAgent({ message: 'x', root: REPO, userId: user.id, queryFactory, authorityCheck: () => ({ ok: false, message: 'access changed' }) });
+  const perm = await capture.options.canUseTool('Read', { file_path: path.join(REPO, 'src', 'a.txt') }, {});
+  assert.equal(perm.behavior, 'deny');
+  assert.match(perm.message, /access changed/);
+  assert.equal(capture.options.abortController.signal.aborted, true, 'the step is aborted');
+}));
+
 test('runLoopAgent: a write into an accepted extra root lands; outside both stays refused', () => withKey(async () => {
   const { repo, llmDoc } = splitProject('split-run');
   const capture = {};

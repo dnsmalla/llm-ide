@@ -231,6 +231,14 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   // Counted for GET /kb/agent-sdk's busy summary: the SDK updater must not run under it.
   const endBusy = beginLoopRun();
 
+  // R-034 #13: a Loop can run for hours. The engine re-reads this before every tool call and aborts
+  // the step when the grant or cap no longer allows model.exec on this project.
+  const authorityCheck = () => {
+    const decision = authorizeAction(getDb(), userId, 'model.exec', { projectId });
+    return decision.ok
+      ? { ok: true }
+      : { ok: false, message: 'Your team or project access changed during this run; it was stopped.' };
+  };
   try {
     const out = await runAgent({
       message: body.message,
@@ -241,6 +249,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       language,
       model,
       provider,
+      authorityCheck,
       abortController: ac,
       // The same auth ladder as /agent/v2/stream: vault key → env key →
       // the operator's ambient `claude login`.

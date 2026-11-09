@@ -1067,6 +1067,21 @@ const turnInjectable = {
   sessionMemory: () => [], persistMemory: async () => null,
 };
 
+test('R-034 #13: canUseTool re-checks authority and aborts the subprocess on a refusal',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const script = { messages: [] };
+    const ac = new AbortController();
+    await runAgentV2Turn({
+      message: 'hi', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
+      onEvent: () => {}, abortController: ac, queryFactory: makeFakeQuery(script),
+      authorityCheck: () => ({ ok: false, message: 'your access changed' }),
+    }, turnInjectable);
+    const d = await script.options.canUseTool('Read', { file_path: 'a.txt' });
+    assert.equal(d.behavior, 'deny');
+    assert.match(d.message, /access changed/);
+    assert.equal(ac.signal.aborted, true, 'the running turn is aborted, not merely denied');
+  }));
+
 test('AskUserQuestion round-trip: request event → answer → allow with updatedInput',
   withAnthropicKey('sk-ant-v2-test', async () => {
     const script = { messages: [

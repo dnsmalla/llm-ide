@@ -1305,6 +1305,9 @@ export async function runAgentV2Turn(
     // R-034 #6: the project this turn was clamped to (if any), so the USD budget also respects the
     // project's remaining monthly cap, not only the member's.
     projectId = null,
+    // R-034 #13: re-checked before EVERY tool call, so a demotion/cap change mid-turn stops the work
+    // instead of letting a four-hour run keep going on stale authority.
+    authorityCheck = null,
     // The app's record of the chat, only on a fresh turn (routes/agent-v2.mjs
     // freshTurnHistory) — see buildEngineOptions.
     history,
@@ -1521,6 +1524,13 @@ export async function runAgentV2Turn(
     return rule ? { ...rule, scope: 'project' } : null;
   };
   const canUseTool = async (toolName, input, callOpts) => {
+    // R-034 #13: authority and caps are read once at turn start; re-read them now, and abort the
+    // subprocess on a refusal rather than returning a denial the model could simply route around.
+    const current = typeof authorityCheck === 'function' ? authorityCheck() : null;
+    if (current && current.ok === false) {
+      try { abortController?.abort(); } catch { /* already stopping */ }
+      return { behavior: 'deny', message: current.message || 'Your team or project access changed; this turn was stopped.' };
+    }
     const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
     const entry = registryName ? registryGet(registryName) : null;
     // The sandbox asking to let a running command reach a host. The sandbox

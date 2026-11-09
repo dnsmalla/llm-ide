@@ -508,7 +508,7 @@ const sdkQueryFactory = (prompt, options) => {
 export async function runLoopAgent(
   {
     message, skills, root, extraRoots = [], userId, language, model, provider, abortController,
-    allowAmbientAuth = false, queryFactory = sdkQueryFactory, readOnly = false,
+    authorityCheck = null, allowAmbientAuth = false, queryFactory = sdkQueryFactory, readOnly = false,
   } = {},
   { readSkill = readSkillInstructions } = {},
 ) {
@@ -636,6 +636,14 @@ export async function runLoopAgent(
   };
   // Decides instead of asking: never parks, never prompts.
   const canUseTool = async (toolName, input) => {
+    // R-034 #13: a Loop may run for hours; re-read authority/caps before every tool and abort the
+    // step on a refusal instead of letting the model keep working on stale grants.
+    const current = typeof authorityCheck === 'function' ? authorityCheck() : null;
+    if (current && current.ok === false) {
+      refuse(toolName, current.message || 'authority_changed');
+      try { stepAc.abort(); } catch { /* already stopping */ }
+      return { behavior: 'deny', message: current.message || 'Your team or project access changed; this run was stopped.' };
+    }
     const reason = loopToolRefusal(toolName, input, roots, { readOnly });
     if (reason) {
       refuse(toolName, reason);

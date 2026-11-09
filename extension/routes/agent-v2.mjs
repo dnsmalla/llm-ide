@@ -37,6 +37,7 @@ import {
 import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens, usedUsdMonth, usdCapForModel, estimateTurnCostUsd } from '../kb/usage.mjs';
 import { usedUsdMonthForProject } from '../kb/project-usage.mjs';
 import { effectiveProjectGrant, getProject, getProjectMember, projectIdForFolder } from '../kb/projects.mjs';
+import { authorizeAction } from '../server/route-authority.mjs';
 import { randomUUID } from 'node:crypto';
 import { hostApprovalEnabled, verifyRequestApproval, bypassForbiddenOrigin, bypassGrants, CHAT_ID_RE, bypassPurpose } from '../core/host-approval.mjs';
 import { recordAudit } from '../server/audit.mjs';
@@ -795,6 +796,15 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
   const budgets = [memberBudget, projectBudget].filter((v) => v != null);
   const turnBudgetUsd = budgets.length ? Math.min(...budgets) : null;
 
+  // R-034 #13: the engine calls this before EVERY tool. It re-reads the member row and the project
+  // grant (and their caps) at that moment, so a demotion or a cap reached mid-turn aborts the work.
+  const toolAuthorityCheck = () => {
+    const decision = authorizeAction(db, userId, restrictsTools(mode) ? 'model.ask' : 'model.exec', { projectId: ledgerProjectId ?? null });
+    return decision.ok
+      ? { ok: true }
+      : { ok: false, message: 'Your team or project access changed during this turn; the tool call was refused.' };
+  };
+
   io.start();
   const ac = new AbortController();
   // The SDK session THIS turn runs in: the resumed id until the stream
@@ -984,6 +994,7 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
         // R-034 #6: the project the turn was clamped to, so the engine's USD budget also respects the
         // project's remaining monthly cap.
         projectId: ledgerProjectId ?? undefined,
+        authorityCheck: toolAuthorityCheck,
         language: body.language,
         // The composer's effort pick (a level string, or "auto"); the engine
         // checks it against the model's own levels. Older clients send none.
