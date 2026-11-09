@@ -181,7 +181,21 @@ fn handle(mut stream: TcpStream, agent: &ureq::Agent, hub: &str, token: &str) {
             let _ = resp.into_reader().take(64 * 1024).read_to_end(&mut body);
             respond(&mut stream, status, "Error", &body, &content_type, origin.as_deref());
         }
-        Err(_) => respond(&mut stream, 502, "Bad Gateway", b"{\"error\":{\"code\":\"HUB_UNREACHABLE\"}}", "application/json", origin.as_deref()),
+        Err(err) => {
+            // R-034 #11: a changed hub certificate is not an outage. The pin verifier recorded the
+            // presented fingerprint during the handshake; surface it so the UI can offer a re-probe.
+            let text = match &err { ureq::Error::Transport(t) => t.to_string(), other => other.to_string() };
+            let got = crate::remote_tls::take_pin_mismatch()
+                .or_else(|| crate::remote_tls::mismatch_fingerprint(&text));
+            if let Some(got) = got {
+                let body = format!(
+                    r#"{{"error":{{"code":"HUB_PIN_MISMATCH","message":"The hub's certificate changed. Re-probe it in Settings and trust the new pin.","fingerprint":"{got}"}}}}"#,
+                );
+                respond(&mut stream, 502, "Bad Gateway", body.as_bytes(), "application/json", origin.as_deref());
+            } else {
+                respond(&mut stream, 502, "Bad Gateway", b"{\"error\":{\"code\":\"HUB_UNREACHABLE\"}}", "application/json", origin.as_deref());
+            }
+        }
     }
 }
 

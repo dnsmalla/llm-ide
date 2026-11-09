@@ -66,3 +66,7 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Secu
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "=3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+
+[dev-dependencies]
+# R-034 #11: generate a throwaway CA/leaf to exercise the pin verifier's chain + pin paths.
+rcgen = "=0.13.2"

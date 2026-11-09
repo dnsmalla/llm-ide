@@ -129,9 +129,9 @@ export default function RemoteServerCard(): ReactNode {
           <TestResult m={m} s={s} />
           <div className="st-note">
             <span className="st-label">Hub certificate</span>
-            <p className="st-hint">{s.tlsPin ? `Pinned: ${s.tlsPin}` : "Not pinned yet. Probe the hub, compare the fingerprint, then trust it."}</p>
+            <p className="st-hint">{s.tlsPin ? `Pinned: ${s.tlsPin}. If the hub certificate changed, re-probe it and trust the new pin; the app refuses a connection until you do.` : "Not pinned yet. Probe the hub, compare the fingerprint, then trust it."}</p>
             <div className="st-row">
-              <button type="button" className="st-btn" disabled={tls.busy || !s.hubUrl.trim()} onClick={() => void probe()}>{tls.busy ? "Probing…" : "Probe TLS"}</button>
+              <button type="button" className="st-btn" disabled={tls.busy || !s.hubUrl.trim()} onClick={() => void probe()}>{tls.busy ? "Probing…" : s.tlsPin ? "Re-probe TLS" : "Probe TLS"}</button>
               {tls.fingerprint ? <button type="button" className="st-btn" data-tone="primary" onClick={() => void trust()}>Trust this certificate</button> : null}
             </div>
             {tls.fingerprint ? <p className="st-pre" style={{ userSelect: "text", wordBreak: "break-all" }}>{tls.fingerprint}</p> : null}

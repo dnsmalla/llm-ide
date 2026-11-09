@@ -2,7 +2,13 @@
 // only `remoteFallbackAction` writes the local mode and asks the host to restart.
 export type RemoteState = "connecting" | "online" | "offline";
 
-export function remoteBanner(state: RemoteState, hasSession: boolean): { title: string; body: string } | null {
+export function remoteBanner(state: RemoteState, hasSession: boolean, errorCode: string | null = null): { title: string; body: string } | null {
+  if (errorCode === "HUB_PIN_MISMATCH") {
+    return {
+      title: "Hub certificate changed",
+      body: "The hub presents a different certificate than the one you trusted. In Settings → Server & Backend, probe it again and confirm the new fingerprint before using this hub.",
+    };
+  }
   if (state === "online") return null;
   if (state === "connecting") return { title: "Connecting to the hub…", body: "No chats or projects are available until the hub answers." };
   return {

@@ -103,9 +103,48 @@ struct PinVerifier {
     pin: String,
 }
 
+/// The most recent pin mismatch seen by a handshake (fingerprint + unix seconds). The loopback proxy
+/// takes it after a transport error so the webview gets HUB_PIN_MISMATCH instead of a generic outage.
+fn last_mismatch() -> &'static Mutex<Option<(u64, String)>> {
+    static LAST: OnceLock<Mutex<Option<(u64, String)>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(None))
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn note_mismatch(got: &str) {
+    if valid_pin(got) {
+        *last_mismatch().lock().unwrap_or_else(|e| e.into_inner()) = Some((now_secs(), got.to_string()));
+    }
+}
+
+/// Take a pin mismatch seen in the last 10 seconds. Taking clears it, so one failed handshake explains
+/// exactly one proxy error and a stale entry cannot label an unrelated outage.
+pub fn take_pin_mismatch() -> Option<String> {
+    let mut slot = last_mismatch().lock().unwrap_or_else(|e| e.into_inner());
+    let (at, got) = slot.take()?;
+    if now_secs().saturating_sub(at) > 10 { return None; }
+    Some(got)
+}
+
+/// Parse the verifier's error text when the global slot was already consumed (a retry / race).
+pub fn mismatch_fingerprint(text: &str) -> Option<String> {
+    let marker = "REMOTE_TLS_PIN_MISMATCH: the hub now presents ";
+    let rest = text.split_once(marker)?.1;
+    let got: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_')).collect();
+    if valid_pin(&got) { Some(got) } else { None }
+}
+
 impl PinVerifier {
     fn new(pin: &str) -> Result<Self, FsError> {
-        let inner = WebPkiServerVerifier::builder(roots()).build()
+        Self::with_roots(pin, roots())
+    }
+
+    /// Test seam: the WebPKI chain is checked against the same store, so a pin never bypasses it.
+    fn with_roots(pin: &str, roots: Arc<RootCertStore>) -> Result<Self, FsError> {
+        let inner = WebPkiServerVerifier::builder(roots).build()
             .map_err(|e| herr("tls_config", format!("cannot build the TLS verifier: {e}")))?;
         Ok(Self { inner, pin: pin.to_string() })
     }
@@ -120,6 +159,7 @@ impl ServerCertVerifier for PinVerifier {
         let got = fingerprint_of_certificate(end_entity.as_ref())
             .ok_or_else(|| Error::General("the hub certificate has no readable SPKI".into()))?;
         if !constant_eq(got.as_bytes(), self.pin.as_bytes()) {
+            note_mismatch(&got);
             return Err(Error::General(format!("REMOTE_TLS_PIN_MISMATCH: the hub now presents {got}")));
         }
         Ok(ok)
@@ -207,7 +247,16 @@ pub fn remote_tls_pin(hub_url: String, fingerprint: String) -> Result<(), FsErro
     let matches = last_probe().lock().unwrap_or_else(|e| e.into_inner()).as_ref()
         .is_some_and(|(h, f)| h == hub_url.trim() && f == &fingerprint);
     if !matches { return Err(herr("probe_required", "probe the hub certificate before trusting it")); }
+    // R-034 #11: the final pin is a native decision, not only a webview button.
     let hub_url = if port == 443 { format!("https://{host}") } else { format!("https://{host}:{port}") };
+    if !crate::confirm::ask(
+        "Trust this hub certificate?",
+        &format!("Pin the certificate now presented by {hub_url}? A different certificate later will refuse to connect."),
+        "Trust certificate",
+        true,
+    ) {
+        return Err(herr("cancelled", "the certificate was not trusted"));
+    }
     let view = crate::prefs::set_remote_pin(hub_url, fingerprint)?;
     if !view.persisted { return Err(herr("prefs_unavailable", "the pin could not be saved (no data folder)")); }
     Ok(())
@@ -238,6 +287,67 @@ mod tests {
     fn pinning_requires_a_matching_probe() {
         let err = remote_tls_pin("https://hub.example.com".into(), "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into()).unwrap_err();
         assert_eq!(err.code, "probe_required");
+    }
+
+    fn test_chain() -> (rcgen::Certificate, rcgen::KeyPair, rcgen::Certificate, rcgen::KeyPair, rcgen::Certificate, rcgen::Certificate) {
+        use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
+        let mut ca_params = CertificateParams::new(Vec::new()).unwrap();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca_key = KeyPair::generate().unwrap();
+        let ca = ca_params.self_signed(&ca_key).unwrap();
+        let mut leaf_params = CertificateParams::new(vec!["hub.example.com".to_string()]).unwrap();
+        let leaf_key = KeyPair::generate().unwrap();
+        let leaf = leaf_params.signed_by(&leaf_key, &ca, &ca_key).unwrap();
+        let mut other_ca_params = CertificateParams::new(Vec::new()).unwrap();
+        other_ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let other_ca_key = KeyPair::generate().unwrap();
+        let other_ca = other_ca_params.self_signed(&other_ca_key).unwrap();
+        let mut other_leaf_params = CertificateParams::new(vec!["hub.example.com".to_string()]).unwrap();
+        let other_leaf_key = KeyPair::generate().unwrap();
+        let other_leaf = other_leaf_params.signed_by(&other_leaf_key, &other_ca, &other_ca_key).unwrap();
+        (ca, ca_key, leaf, leaf_key, other_ca, other_leaf)
+    }
+
+    fn verifier_for(ca: &rcgen::Certificate, pin: &str) -> PinVerifier {
+        let mut store = RootCertStore::empty();
+        store.add(ca.der().clone()).unwrap();
+        PinVerifier::with_roots(pin, Arc::new(store)).unwrap()
+    }
+
+    fn verify(v: &PinVerifier, leaf: &rcgen::Certificate) -> Result<ServerCertVerified, Error> {
+        let name = ServerName::try_from("hub.example.com").unwrap();
+        let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs()));
+        v.verify_server_cert(leaf.der(), &[], &name, &[], now)
+    }
+
+    #[test]
+    fn r034_a_matching_pin_with_a_valid_chain_verifies() {
+        let (ca, _ca_key, leaf, _leaf_key, _other_ca, _other_leaf) = test_chain();
+        let pin = fingerprint_of_certificate(leaf.der()).unwrap();
+        let v = verifier_for(&ca, &pin);
+        assert!(verify(&v, &leaf).is_ok());
+    }
+
+    #[test]
+    fn r034_another_pin_is_a_distinct_mismatch_and_records_the_presented_pin() {
+        let (ca, _ca_key, leaf, _leaf_key, _other_ca, _other_leaf) = test_chain();
+        let _ = take_pin_mismatch();
+        let wrong = fingerprint_from_spki(b"not this key");
+        let v = verifier_for(&ca, &wrong);
+        let err = verify(&v, &leaf).unwrap_err();
+        assert!(format!("{err}").contains("REMOTE_TLS_PIN_MISMATCH"));
+        let got = take_pin_mismatch().expect("the verifier records what the hub presented");
+        assert_eq!(got, fingerprint_of_certificate(leaf.der()).unwrap());
+        assert_eq!(mismatch_fingerprint(&format!("{err}")).as_deref(), Some(got.as_str()));
+    }
+
+    #[test]
+    fn r034_a_pin_never_bypasses_webpki_chain_validation() {
+        let (ca, _ca_key, _leaf, _leaf_key, _other_ca, other_leaf) = test_chain();
+        let pin = fingerprint_of_certificate(other_leaf.der()).unwrap();
+        let v = verifier_for(&ca, &pin);
+        let err = verify(&v, &other_leaf).unwrap_err();
+        assert!(!format!("{err}").contains("REMOTE_TLS_PIN_MISMATCH"), "an untrusted chain fails before the pin comparison");
     }
 
     #[test]

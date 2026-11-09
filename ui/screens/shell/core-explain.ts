@@ -44,6 +44,8 @@ export function sentenceForCoreCode(code: string, status: CoreStatus | null): st
       return "You are not signed in. Sign in again.";
     case "SESSION_EXPIRED":
       return "Your session expired. Sign in again.";
+    case "HUB_PIN_MISMATCH":
+      return "The hub's certificate changed. In Settings → Server & Backend, probe the hub certificate and trust the new pin.";
     case "UNSAFE_URL":
       return "The app refused to contact a core that is not on this computer.";
     case "BAD_RESPONSE":
