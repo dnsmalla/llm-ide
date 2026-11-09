@@ -64,7 +64,7 @@ case "$stage" in
     [ -r "$CONF" ] || { echo "llmide-deploy: check: no env file yet" >&2; }
     systemctl is-active --quiet llmide-core 2>/dev/null && echo "service=active" || echo "service=inactive"
     printf 'version=%s\n' "$(cat /opt/llmide/current/VERSION 2>/dev/null || true)"
-    echo "helper=2"
+    echo "helper=3"
     echo "ok"
     ;;
 
@@ -138,6 +138,10 @@ SystemCallArchitectures=native
 WantedBy=multi-user.target
 LLMIDE_UNIT
     chmod 0644 "$UNIT"; chown root:root "$UNIT"
+    # R-034 #15: a syntactically bad drop-in locks the operator out of sudo. Never reload one.
+    if [ -f /etc/sudoers.d/llmide-deploy ]; then
+      visudo -cf /etc/sudoers.d/llmide-deploy >/dev/null 2>&1 || die "the existing sudoers drop-in does not parse; fix it before deploying"
+    fi
     cat > "$BACKUP_UNIT" <<'LLMIDE_BACKUP'
 [Unit]
 Description=LLM-IDE hub on-demand backup
@@ -211,6 +215,19 @@ LLMIDE_LOG
     chown root:root "$tmp"; chmod 0600 "$tmp"
     mv "$tmp" "$CONF"
     if systemctl is-active --quiet llmide-core 2>/dev/null; then systemctl restart llmide-core; fi
+    say "ok"
+    ;;
+
+  check-cert)
+    # R-034 #15: the certificate must exist and use --reuse-key BEFORE the bundle switches. The nginx
+    # stage runs after the switch, so checking there leaves a half-switched install on a fresh host.
+    conf
+    cert="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+    renewal="/etc/letsencrypt/renewal/$DOMAIN.conf"
+    if [ -f "$renewal" ] && ! grep -Eq '^[[:space:]]*reuse_key[[:space:]]*=[[:space:]]*True' "$renewal"; then
+      die "the certificate was not issued with --reuse-key; run: certbot certonly --webroot -w /var/www/llmide-web -d $DOMAIN --key-type ecdsa --reuse-key"
+    fi
+    [ -f "$cert" ] || die "no certificate at $cert; run certbot before deploying"
     say "ok"
     ;;
 

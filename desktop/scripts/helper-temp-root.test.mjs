@@ -161,7 +161,7 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     assert.ok(existsSync(h.releaseNode), 'the release has core/node/node');
     assert.notEqual(statSync(h.releaseNode).mode & 0o005, 0, 'node must be executable by the service user');
     assert.ok(existsSync(join(h.root, 'var/www/llmide-web/index.html')), 'the PWA is copied after the release switch');
-    assert.match(h.run('check'), /helper=2/, 'check reports the helper version');
+    assert.match(h.run('check'), /helper=3/, "check reports the helper version");
     h.run('upload', 'VERSION\n1.2.4\n');
     assert.notEqual(h.runFail('update').status, 0, 'a same-version update is refused');
 
@@ -246,6 +246,30 @@ test('env rejects CR and a final line without a newline, and accepts a valid one
     const noNewline = 'NODE_ENV=production\nLLMIDE_JWT_SECRET=aaaa\nLLMIDE_HUB_DOMAIN=hub.example.com\nLLMIDE_HUB_VERSION=1.2.3';
     h.run('env', noNewline);
     assert.ok(readFileSync(h.envPath, 'utf8').includes('LLMIDE_HUB_VERSION=1.2.3'));
+  } finally { h.cleanup(); }
+});
+
+test('R-034 #15: check-cert refuses before the bundle switch when the certificate is absent or not reuse-key', { skip }, () => {
+  const h = harness();
+  try {
+    h.run('base', `${h.stage}\n`);
+    h.run('env', ENV1);
+    const live = join(h.root, 'etc/letsencrypt/live/hub.example.com');
+    mkdirSync(live, { recursive: true });
+    const cert = join(live, 'fullchain.pem');
+    writeFileSync(cert, 'cert');
+    h.run('check-cert');
+    assert.match(readFileSync(h.systemctlLog, 'utf8'), /^daemon-reload$/m);
+
+    const renewal = join(h.root, 'etc/letsencrypt/renewal/hub.example.com.conf');
+    mkdirSync(dirname(renewal), { recursive: true });
+    writeFileSync(renewal, '[renewalparams]\nreuse_key = True\n');
+    h.run('check-cert');
+    writeFileSync(renewal, '[renewalparams]\nreuse_key = False\n');
+    assert.notEqual(h.runFail('check-cert').status, 0, 'a non-reuse-key certificate is refused');
+    rmSync(renewal);
+    rmSync(cert);
+    assert.notEqual(h.runFail('check-cert').status, 0, 'a missing certificate is refused');
   } finally { h.cleanup(); }
 });
 

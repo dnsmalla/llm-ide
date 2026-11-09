@@ -28,7 +28,7 @@ use crate::remote::{
 /// The complete helper stage list. The sudoers file is generated from this list, one exact command
 /// per stage; there is no wildcard and no free-form argument.
 pub const STAGES: &[&str] = &[
-    "check", "upload", "predeploy-backup", "base", "env", "bundle", "nginx", "start",
+    "check", "upload", "predeploy-backup", "base", "env", "check-cert", "bundle", "nginx", "start",
     "open-registration", "lock-registration", "backup", "restore-db", "rollback", "update", "uninstall",
     "uninstall-purge",
 ];
@@ -42,7 +42,7 @@ pub const SETUP_HTML: &str = include_str!("../../../deploy/hub/setup.html");
 
 pub const MIN_DISK_MB: u64 = 2048;
 /// Bumped when the helper's stage set/semantics changes; a mismatch reinstalls it.
-pub const HELPER_VERSION: &str = "2";
+pub const HELPER_VERSION: &str = "3";
 const MAX_DOMAIN: usize = 253;
 const PLAN_TTL_MS: u64 = 30 * 60 * 1000;
 
@@ -264,6 +264,7 @@ pub fn stages() -> Vec<DeployStage> {
         ("base", "Repair the service user, unit and directories", true, "Idempotent: useradd, dirs, embedded unit/logrotate, daemon-reload."),
         ("predeploy-backup", "Back up the existing hub database", true, "Stops the old service, VACUUM INTO a pre-deploy snapshot, starts it again. Skipped on a fresh server."),
         ("env", "Write the secret env file over stdin", true, "0600 root:root; JWT and vault secrets generated locally; never in argv or a log."),
+        ("check-cert", "Check the TLS certificate before switching the release", false, "Refuses a missing certificate or one not issued with --reuse-key; runs before the bundle switch."),
         ("bundle", "Upload and switch the Linux core release", true, "Verifies SHA-256, unpacks, requires Node 22, updates current/previous symlinks, keeps three releases."),
         ("nginx", "Install the TLS vhost and certificate pin", true, "nginx -t before reload; restores the previous site on failure; publishes the front SPKI."),
         ("start", "Start the hub service", true, "systemctl enable --now llmide-core."),
@@ -412,6 +413,9 @@ pub fn bootstrap_with<R: DeployRunner>(runner: &R, target: &PreparedTarget) -> R
     }
     upload_home(runner, target, "llmide-deploy", HELPER.as_bytes())?;
     upload_home(runner, target, "sudoers", sudoers_text(&target.user).as_bytes())?;
+    // R-034 #15: validate the exact drop-in root will install; a bad file locks the operator out of sudo.
+    let sudoers_check = runner.run(target, &format!("sudo -n visudo -cf \"{dir}/sudoers\""), None)?;
+    if sudoers_check.code != Some(0) { return Err(herr("sudoers_invalid", "the generated sudoers drop-in does not parse; refusing to install it")); }
     let install = format!("chmod 0700 \"{dir}/llmide-deploy\" && sudo -n install -m 0755 -o root -g root \"{dir}/llmide-deploy\" /usr/local/sbin/llmide-deploy && sudo -n install -m 0440 -o root -g root \"{dir}/sudoers\" /etc/sudoers.d/llmide-deploy");
     let out = runner.run(target, &install, None)?;
     if out.code != Some(0) {
@@ -1058,6 +1062,15 @@ mod tests {
         let calls = fake.calls.lock().unwrap().clone();
         assert!(calls.iter().any(|c| c.contains("install -m 0755")), "the old helper is reinstalled");
         assert!(calls.iter().any(|c| c.contains("base")));
+    }
+
+    #[test]
+    fn r034_a_sudoers_drop_in_that_does_not_parse_is_never_installed() {
+        let fake = Fake::new();
+        fake.fail("visudo -cf");
+        let err = bootstrap_with(&fake, &target()).unwrap_err();
+        assert_eq!(err.code, "sudoers_invalid");
+        assert!(!fake.calls().iter().any(|(c, _)| c.contains("install -m 0440")), "the bad drop-in is not installed");
     }
 
     #[test]
