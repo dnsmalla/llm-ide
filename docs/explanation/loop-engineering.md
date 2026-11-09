@@ -64,6 +64,11 @@ flowchart TD
 Every iteration re-runs **every** stage from the top, so a fix to a later stage
 cannot silently leave an earlier one broken.
 
+The one exception is a stage marked **`runOnce`**: once it has passed in a run,
+later iterations of that run skip it and log `↷ <name>: passed earlier in this
+run`. The Factory template uses this so that a repair re-runs only Verify and
+Review, not Intake, Plan and Implement. A `runOnce` stage that failed runs again.
+
 ## The contract pane
 
 Everything above is decided before a run starts, so the Loop Engineering page puts
@@ -108,7 +113,7 @@ and reusable stage lists are what templates are for.
 ## Templates
 
 A `LoopTemplate` is a named stage list plus the budgets and policy it expects —
-the knowledge "this is what a docs-refresh loop looks like", made portable. Eleven
+the knowledge "this is what a docs-refresh loop looks like", made portable. Twelve
 starters ship:
 
 | Template | Pipeline |
@@ -124,6 +129,7 @@ starters ship:
 | **Plan Director** | Structure-index skill → plan-director skill: consolidate `llm-doc/plans/` into one indexed master plan |
 | **Refactoring** | Refactor-planner skill → refactor-apply skill → Conform skill → Test: read the project's own rules (`RULES.md`), plan the restructuring in batches, apply one, fix non-mechanical rule violations, prove behaviour held, advance to several batches per run |
 | **Doc Optimization** | Doc-structure-index skill → doc-writer skill: a generated, code-cited doc tree under `llm-doc/loop/docs/` |
+| **Factory** | Set up (optional) → Intake (`factory-intake` skill) → Intake gate → Plan → Implement → Verify → Review (`factory-review` skill) → Review gate. One work item per run, in its own git worktree; a pass offers Ship as a draft PR/MR |
 
 `LoopTemplateStore` holds these plus the user's own saved recipes. It is
 **app-wide, not per-project** — carrying a recipe to the next project is the whole
@@ -146,6 +152,22 @@ in another. Apply persists like any other edit, via the Loop page's debounced
 autosave — the earlier design deliberately kept Apply unsaved so recipes could be
 compared, but edits silently dying on a project switch proved the worse trap, so
 the TEMPLATE section now warns that applying replaces and saves.
+
+### The Factory template
+
+The Factory template runs one work item (an issue, a file under `llm-doc/`, or
+free text) in its own git worktree at `<project>/system/loop-worktrees/<run_id>`,
+on branch `factory/<run_id>`. The work item is written to `.factory/TASK.md`,
+fenced as untrusted data. Intake and Review are skill stages that may write only
+under `.factory/`. Each is followed by an `artifactCheck` gate with a `verdict`
+rule: the Intake gate requires `Verdict: ready` in `.factory/READINESS.md` (a
+failure ends the run as **needs decision**), and the Review gate requires
+`Verdict: approve` in `.factory/REVIEW.md` (a failure sends the findings to
+repair). Set up, Intake, Intake gate, Plan and Implement are `runOnce`; Verify,
+Review and Review gate run every iteration. The template forces
+`alwaysUseWorktree`. After a passed run the Loop screen shows the diff with Ship
+(a draft PR/MR through `POST /kb/loop/ship`) and Discard (removes the worktree
+and branch). The worktree is never removed any other way.
 
 ## Loops
 
@@ -224,7 +246,7 @@ A stage is one step of the run (`LoopStage`). Seven kinds are described here; th
   operation, because a build that predates it reads an unknown kind as
   unsupported (kept, never run) but rejects an unknown `testOp`, which would
   set the whole `loop.json` aside.
-- **`artifactCheck`** — an in-app check of generated artifacts, with no shell and no agent: files that must exist, line caps and resolvable citations, configured by `check`. Refactor Plan Check is one. A build that predates this kind reads it as `.unsupported`.
+- **`artifactCheck`** — an in-app check of generated artifacts, with no shell and no agent: files that must exist, line caps and resolvable citations, configured by `check`. Refactor Plan Check is one. Its `verdict` rule (`check.verdict: { path, line }`) reads one explicit file under the run root, dot-folders such as `.factory/` included, and fails with `verdict file missing: <path>` or `verdict line missing: "<line>" in <path>` unless a trimmed line equals `line` exactly; the Factory gates use it. A build that predates this kind reads it as `.unsupported`.
 
 - **`codeGraph`** — a native step of the Refactoring loop; the model never runs it. Its `graphOp` is `snapshot` or `verify`. `snapshot` asks CodeGraph for a rescan through the `GraphRescanning` protocol in `Core/Contracts/` (optional: without a rescanner, as in a build with no code graph, snapshot still reads an existing `graph.json` and passes when none loads; with an existing file but a busy or unavailable rescan it uses the existing file with a warning), rescans and loads the graph at the run root, and writes `system/loop/refactor/graph/before.json` and `llm-doc/loop/refactor/GRAPH.md` under the main checkout root. It is taken once per run; later iterations pass without rewriting it. `verify` rescans again: a rescan that is busy or unavailable fails the attempt ("graph not regenerated (<reason>); batch R<n> not verified"), so a stale graph is never compared. Without a rescanner `verify` never compares either, even against a `graph.json` an earlier build left behind: it passes with "code graph not available in this build; batch R<n> not verified", records no delta, and the run summary prints `**Graph:** not verified (no code graph in this build)`. Otherwise it writes `system/loop/refactor/graph/after.json` and `GRAPH-DELTA.md` and fails when a structural counter regressed or the batch's `Expect:` counter did not fall. A batch marked `skipped` passes with nothing to verify. Builds older than this read `.codeGraph` stages as `.unsupported` and leave them untouched.
 
@@ -257,7 +279,7 @@ A stage is one step of the run (`LoopStage`). Seven kinds are described here; th
 Which stages a default loop starts with is `LoopStageDetector`'s decision — see
 [Loops](#loops) above.
 
-Three per-stage properties shape how a stage participates:
+Four per-stage properties shape how a stage participates:
 
 - **`enabled`** — `true` (default) or `false`. A disabled stage is skipped
   entirely: not run, not preflighted for approval, never gating the run. This is
@@ -273,6 +295,9 @@ Three per-stage properties shape how a stage participates:
 - **`timeoutSeconds`** — per-stage override of the runner's 600 s default. A full
   build-and-test cycle and a two-second format check do not belong under one
   number.
+- **`runOnce`** — `false` (default) or `true`. A `runOnce` stage that passed is
+  skipped in later iterations of the same run, so a repair does not pay for it
+  again. It is written to `loop.json` only when `true`.
 
 ### Where a loop writes what it generates
 

@@ -533,6 +533,36 @@ not the repo-kb MOVE above and it never writes to the old folder. Guide:
 - **Do NOT approve a command the host did not read and display**, and do not truncate the approved command set in the dialog. If it is too large to show, refuse rather than approve unseen commands.
 - **Do NOT blanket-approve every shell command in every project.** A grant is scoped to the shown hashes, loop/stage, canonical folder and expiry; a changed command or another loop/folder is refused.
 
+## Factory runs and worktrees (`desktop/src-tauri/src/loop_worktree.rs`, `ui/screens/loop/native/{runner,artifact,factory}.ts`, `extension/agents/factory-ship.mjs`)
+
+A Factory run takes one work item through intake → plan → implement → verify → review in its own git worktree; after a pass the user may ship it as a draft PR/MR.
+
+### ✅ MUST preserve
+
+- **The agent never pushes, merges or holds a token.** Only `POST /kb/loop/ship`, triggered by a user click, commits, pushes and opens the PR/MR — in the core, with the user's credentials, after `scanForSecrets`.
+- **Draft only.** Ship opens draft GitHub PRs and draft gitlab.com MRs only. Nothing auto-merges.
+- **The main working tree is never written.** A factory run writes only inside its worktree; the one write outside it is the readiness copy under `llm-doc/factory/<yyyy>/<MM>/<run_id>-readiness.md`.
+- **Worktrees are never deleted without a user action.** Only Discard removes a worktree and its branch; orphaned worktrees are listed, never auto-deleted.
+- **Fixed layout.** Worktree `<project>/system/loop-worktrees/<run_id>`, branch `factory/<run_id>`, work item `.factory/TASK.md`, reports `.factory/READINESS.md`, `.factory/PLAN.md`, `.factory/REVIEW.md`. When the project root is itself the repo, `system/loop-worktrees/` is listed in `.git/info/exclude`.
+- **Run ids are validated before any git call.** `^[A-Za-z0-9_-]{1,64}$` through `loop_worktree::valid_run_id`. The webview passes only a `run_id`, never a path, and the host re-checks that the worktree belongs to the run's repo.
+- **A run stays bound to its own project.** A Loop host command called with a `run_id` uses that run's `RunInfo.project` and worktree, never `active_root()`; `loop_cancel` with a `run_id` cancels only that run.
+- **`.factory/` is excluded** from the worktree diff, from Ship's commit and from the protected-path revert.
+- **Intake and Review write only under `.factory/`.** Their agent runs send `writeScope: ".factory"` to `/kb/loop/agent-run`; any other `writeScope` value is a 400 `invalid_write_scope`.
+- **Claude only.** Agent stages go through `POST /kb/loop/agent-run`; there is no Codex or Gemini write mode.
+- **Gates read an explicit verdict line.** The `verdict` artifact rule reads one named file (dot-folders allowed) and fails when the file or the exact line is missing. The `factory-intake` and `factory-review` skills end their reports with exactly one `Verdict: …` line.
+- **A `runOnce` stage runs once per run.** After it passes, later iterations of the same run skip it (logged `↷ <name>: passed earlier in this run`); a failed `runOnce` stage runs again.
+- **New `loop.json` fields decode tolerantly.** `runOnce` defaults to `false` and is written only when `true`; `check.verdict` round-trips verbatim.
+
+Pinned by the tests in `desktop/src-tauri/src/loop_worktree.rs` and `loop_runner.rs`, `extension/tests/loop-agent.test.mjs`, `extension/tests/factory-ship.test.mjs` and `ui/screens/loop/tests/native-{model,runner,artifact,factory}.test.mjs`.
+
+### ❌ DO NOT do these
+
+- **Do NOT give a Loop agent stage a push, merge, shell or network path, or a token.**
+- **Do NOT reuse `openPullRequest` for Ship.** It checks out a branch in the given repo, refuses a dirty tree and stages only `.llmide-auto/`.
+- **Do NOT accept a worktree path from the webview**, and do not resolve a call that carries a `run_id` against `active_root()`.
+- **Do NOT delete a worktree** when a run ends, fails or is stopped, or when the app starts.
+- **Do NOT implement a verdict gate with `expand()`** (it skips dot-folders) **or a section rule** (it passes when the header is missing).
+
 ## Agent-engine prompt cache + metering (`extension/llm_agent/sdk/{engine,turn-context}.mjs`, `routes/agent-v2.mjs`)
 
 ### ✅ MUST preserve
