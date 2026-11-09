@@ -18,6 +18,7 @@
 // `createCoreClient`; the default works in `vite dev` (127.0.0.1 origin) and in tests.
 
 import { SseDecoder, SseError, type SseEvent } from "./sse";
+import { noteHubError } from "./remote-status";
 
 export type { SseEvent } from "./sse";
 
@@ -427,6 +428,8 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
       }
     }
     const res = await rawFetch(path, { method: opts.method ?? "GET", headers, body: enc.body }, opts.timeoutMs ?? defaultTimeout, opts.signal);
+    if (res.status === 502) void res.clone().json().then((b: { error?: { code?: unknown } } | null) => noteHubError(typeof b?.error?.code === "string" ? b.error.code : null), () => undefined);
+    else if (res.ok) noteHubError(null);
     if (res.status === 401 && auth && !retried && tokens) {
       await res.body?.cancel().catch(() => undefined);
       await doRefresh();

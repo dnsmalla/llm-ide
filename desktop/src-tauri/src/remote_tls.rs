@@ -240,7 +240,14 @@ fn last_probe() -> &'static Mutex<Option<(String, String)>> {
 
 /// Stores `remote_server.hub_url` + `tls_pin` after the user confirms the probe. No other pref changes.
 #[tauri::command]
-pub fn remote_tls_pin(hub_url: String, fingerprint: String) -> Result<(), FsError> {
+pub async fn remote_tls_pin(hub_url: String, fingerprint: String) -> Result<(), FsError> {
+    // The native confirm blocks: keep it off the main thread like every other confirm::ask caller.
+    tauri::async_runtime::spawn_blocking(move || pin_blocking(hub_url, fingerprint))
+        .await
+        .map_err(|_| herr("cancelled", "the certificate was not trusted"))?
+}
+
+fn pin_blocking(hub_url: String, fingerprint: String) -> Result<(), FsError> {
     let (host, port) = split_hub(hub_url.trim())?;
     if !valid_pin(&fingerprint) { return Err(herr("invalid_pin", "the fingerprint is not a sha256 SPKI pin")); }
     // Pin only a fingerprint this host actually probed for this URL (the UI comparison is not authority).
@@ -285,7 +292,7 @@ mod tests {
 
     #[test]
     fn pinning_requires_a_matching_probe() {
-        let err = remote_tls_pin("https://hub.example.com".into(), "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into()).unwrap_err();
+        let err = pin_blocking("https://hub.example.com".into(), "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into()).unwrap_err();
         assert_eq!(err.code, "probe_required");
     }
 
