@@ -33,6 +33,7 @@ import { appendRunRecord, iterationRecordsWithScores, loadRunRecord, readRecentR
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_DEFAULT_KEY, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, guardedPaths, isFactoryLoop, needsDecisionSummary, reviewDiffSection, taskMarkdown, withSetupCommand, writeScopeFor, type WorkItem } from "./factory.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
+import { ShipPanel } from "./ShipPanel.tsx";
 import "./native-loop.css";
 
 /** The `/kb/loop/agent-run` answer fields the Loop reads. */
@@ -139,6 +140,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
   const [runRecord, setRunRecord] = useState<Record<string, unknown> | null>(null);
   const [runRecordLoaded, setRunRecordLoaded] = useState(false);
+  /** The run whose worktree is open in the Review and Ship panel. */
+  const [shipRun, setShipRun] = useState<{ info: RunInfo; item: WorkItem; entry: LoopRunIndexEntry; passed: boolean } | null>(null);
   /** The Factory loop waiting for its work item; the picker is shown while this is set. */
   const [pickerLoop, setPickerLoop] = useState<LoopDefinition | null>(null);
   // A picker card for a loop the user has since left must not start that loop over the one now shown.
@@ -723,6 +726,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setLoopRunning(true);
     setSelectedRun(null);
     setRunRecord(null);
+    setShipRun(null);
     setRunningStage(true);
     setRunLog((l) => [...l, `▶ ${target.name}`, ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`] : []), ""]);
     const started = Date.now();
@@ -783,6 +787,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (!outcome.cancelled) void notifyTask("loop", outcome.passed);
       const startedAt = new Date(started).toISOString();
       const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
+      if (isFactoryLoop(target) && activeRun && start && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) setShipRun({ info: activeRun, item: start.item, entry, passed: true });
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
       void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {
@@ -1025,6 +1030,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       <main className="loop-run" aria-label="Run">
         <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
+        {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} item={shipRun.item} passed={shipRun.passed} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => setRunLog((l) => [...l, `shipped: ${r.url}`])} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
@@ -1059,13 +1065,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <label className="loop-field"><span>Extra protected globs (comma separated)</span><input value={loop.config.extraProtectedGlobs.join(", ")} onChange={(e) => patchLoop((l) => { l.config.extraProtectedGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
             <button type="button" className="loop-btn" onClick={() => { void revokeApprovals().then(() => { setApprovalState(null); if (loop) void refreshApproval(loop.id); setNotice("Revoked every host Loop command approval."); }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : "The approvals could not be revoked.")); }}>Revoke command approvals</button>
-            <label className="loop-check"><input type="checkbox" disabled checked={loop.config.openMergeRequest} onChange={() => undefined} /> Open a merge request after a successful run (not ported)</label>
+            <label className="loop-check"><input type="checkbox" checked={loop.config.openMergeRequest} onChange={(e) => patchLoop((l) => { l.config.openMergeRequest = e.target.checked; })} /> Offer Ship after a passed run</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.alwaysUseWorktree || isFactoryLoop(loop)} disabled={isFactoryLoop(loop)} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
           </details>
           <details className="loop-advanced">
             <summary>Desktop limits (explicit)</summary>
-            <p className="loop-native-hint">Not ported yet: incident-triage execution, merge-request shipping and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
+            <p className="loop-native-hint">Not ported yet: incident-triage execution and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
           </details>
         </section>
 

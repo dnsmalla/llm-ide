@@ -61,3 +61,11 @@
 .loop-add-stage { background: transparent; border: 1px solid var(--tok-color-border); border-radius: 5px; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); padding: 2px 4px; }
 .loop-warn { color: var(--tok-color-accent-4, #b45309); font-size: 11px; margin: 4px 0; }
 .loop-unapproved { font-size: 9px; color: var(--tok-color-accent-4, #b45309); }
+.loop-ship-files { list-style: none; margin: 6px 0; padding: 0; }
+.loop-ship-files summary { cursor: pointer; font-size: var(--tok-type-caption-size); }
+.loop-diff { margin: 4px 0 8px; padding: 0 6px; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); white-space: pre; overflow: auto; max-height: 320px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); user-select: text; }
+.loop-confirm { margin: 6px 0; padding: 8px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); }
+.loop-diff-line { display: block; }
+.loop-diff-line[data-kind="add"] { background: color-mix(in srgb, var(--tok-color-success) 16%, transparent); }
+.loop-diff-line[data-kind="del"] { background: color-mix(in srgb, var(--tok-color-danger) 16%, transparent); }
+.loop-diff-line[data-kind="hunk"] { color: var(--tok-color-text-muted); }
