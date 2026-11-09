@@ -275,7 +275,7 @@ Access, or move the project outside `~/Desktop`, `~/Documents` and `~/Downloads`
 - **Auto Tasks** page: built-in + custom tasks, cron schedules, Loop Engineering
 - **Plugins**, **MCP connectors**, **SCIP ingestion** (`POST /kb/ingest-scip`)
 - Settings → Phone and web sync: encrypted sync to your own server, Box or MEGA
-- Settings → Server & Backend → Remote server: choose **Local desktop** or an SSH **Remote server**, test the key connection, then plan, deploy, update, roll back or uninstall the hub from the desktop. See [configure a remote server](docs/how-to/configure-remote-server.md) and [run an always-online hub](docs/how-to/run-a-hub.md).
+- Settings → Server & Backend → Remote server: enter a running hub’s **Server URL**, **email** and **password**, then **Connect**. Public-CA TLS needs no pin; SSH deploy/update/uninstall lives under **Advanced**. See [connect the desktop to a server](docs/how-to/configure-remote-server.md), [install a server](docs/how-to/install-a-server.md) and [run an always-online hub](docs/how-to/run-a-hub.md).
 - Settings → Team (owners and admins on a hub): members, invites, team roles, max mode and monthly USD caps. See [manage team members](docs/how-to/manage-team-members.md) and [project roles](docs/how-to/project-roles.md).
 
 ### iPhone and Web
@@ -432,7 +432,7 @@ Inside each **project**, LLM-IDE scaffolds `source/{meetings,emails,documents}/`
 | API overview | [docs/reference/api/overview.md](docs/reference/api/overview.md) |
 | Project folder layout | [docs/reference/project-layout.md](docs/reference/project-layout.md) |
 | Architecture decisions | [docs/decisions/](docs/decisions/) (ADRs 0001–0022) |
-| Remote server and team hub | [configure-remote-server](docs/how-to/configure-remote-server.md) · [run-a-hub](docs/how-to/run-a-hub.md) · [manage-team-members](docs/how-to/manage-team-members.md) · [project-roles](docs/how-to/project-roles.md) |
+| Remote server and team hub | [connect-to-a-server](docs/how-to/configure-remote-server.md) · [install-a-server](docs/how-to/install-a-server.md) · [run-a-hub](docs/how-to/run-a-hub.md) · [manage-team-members](docs/how-to/manage-team-members.md) · [project-roles](docs/how-to/project-roles.md) |
 | Runbooks (restore, rotate keys, server won't start) | [docs/runbooks/](docs/runbooks/index.md) |
 | Central skills install | [docs/how-to/install-central-skills.md](docs/how-to/install-central-skills.md) |
 | Contribute | [docs/how-to/contribute.md](docs/how-to/contribute.md) |
