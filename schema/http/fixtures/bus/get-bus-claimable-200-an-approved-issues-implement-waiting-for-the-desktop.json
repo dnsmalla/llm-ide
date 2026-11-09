@@ -1,0 +1,26 @@
+{
+  "endpoint": "GET /bus/claimable",
+  "status": 200,
+  "description": "an approved issues.implement waiting for the desktop, with its project's registered folder and no token",
+  "response": {
+    "items": [
+      {
+        "id": "7c1d2e3f-0000-4000-8000-000000000021",
+        "kind": "issues.implement",
+        "tier": "T2",
+        "args": {
+          "projectId": "proj-1",
+          "issueIds": [
+            "12",
+            "13"
+          ],
+          "ship": true
+        },
+        "createdAt": "2026-11-09T10:00:00.000Z",
+        "expiresAt": "2026-11-09T10:10:00.000Z",
+        "projectId": "proj-1",
+        "projectRoot": "/example/proj"
+      }
+    ]
+  }
+}

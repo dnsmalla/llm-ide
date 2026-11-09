@@ -1,0 +1,31 @@
+{
+  "endpoint": "POST /bus/commands/:id/events",
+  "status": 200,
+  "description": "a progress step that also renews the lease",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000021"
+    },
+    "body": {
+      "claimToken": "hK0n2vXQ7t4mYb9c1sPq3rLd5wZf8gJj",
+      "type": "progress",
+      "payload": {
+        "step": "stage: Implement"
+      }
+    }
+  },
+  "response": {
+    "event": {
+      "v": 1,
+      "cmd": "7c1d2e3f-0000-4000-8000-000000000021",
+      "seq": 4,
+      "type": "progress",
+      "payload": {
+        "step": "stage: Implement"
+      },
+      "terminal": false,
+      "at": 1762682405000
+    },
+    "leaseExpiresAt": "2026-11-09T10:02:05.000Z"
+  }
+}

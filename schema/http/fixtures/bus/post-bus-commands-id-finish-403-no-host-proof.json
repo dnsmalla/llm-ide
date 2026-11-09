@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /bus/commands/:id/finish",
+  "status": 403,
+  "description": "no bus host proof",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000021"
+    },
+    "body": {
+      "claimToken": "hK0n2vXQ7t4mYb9c1sPq3rLd5wZf8gJj",
+      "state": "succeeded",
+      "result": {
+        "readyToShip": true,
+        "shipped": false
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "this route is for the desktop host that spawned this core"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "endpoint": "POST /bus/commands/:id/finish",
+  "status": 200,
+  "description": "the one terminal event: a passed Factory run is ready to ship and nothing was shipped from the phone",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000021"
+    },
+    "body": {
+      "claimToken": "hK0n2vXQ7t4mYb9c1sPq3rLd5wZf8gJj",
+      "state": "succeeded",
+      "result": {
+        "readyToShip": true,
+        "shipped": false
+      }
+    }
+  },
+  "response": {
+    "command": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000021",
+      "kind": "issues.implement",
+      "tier": "T2",
+      "state": "succeeded",
+      "originClient": "ios-native",
+      "createdAt": "2026-11-09T10:00:00.000Z",
+      "expiresAt": "2026-11-09T10:10:00.000Z",
+      "lastSeq": 5,
+      "startedAt": "2026-11-09T10:00:05.000Z",
+      "finishedAt": "2026-11-09T10:04:00.000Z",
+      "result": {
+        "readyToShip": true,
+        "shipped": false
+      }
+    }
+  }
+}

@@ -191,6 +191,14 @@
           "type": "string",
           "description": "Why the kind is not available on this server (only when available is false).",
           "x-optional": true
+        },
+        "runner": {
+          "type": "string",
+          "enum": [
+            "core",
+            "desktop"
+          ],
+          "description": "Who runs it: the core's job runner (`core`) or the desktop's Factory poller, which claims it with a lease (`desktop`)."
         }
       },
       "required": [
@@ -204,7 +212,8 @@
         "args",
         "enabled",
         "allowed",
-        "needsApproval"
+        "needsApproval",
+        "runner"
       ]
     },
     "BusApproval": {
@@ -313,6 +322,120 @@
         "createdAt",
         "lastRunAt"
       ]
+    },
+    "BusClaimableCommand": {
+      "type": "object",
+      "description": "One approved desktop-runner command no live lease holds. No nonce and no claim token ever appears here.",
+      "required": [
+        "id",
+        "kind",
+        "tier",
+        "args",
+        "createdAt",
+        "expiresAt",
+        "projectId",
+        "projectRoot"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "R",
+            "C",
+            "T0",
+            "T1",
+            "T2",
+            "D"
+          ]
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Typed per kind in schema/bus/registry.json."
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectRoot": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The project's registered folder; the desktop only runs a command whose folder is open."
+        }
+      }
+    },
+    "BusClaimResponse": {
+      "type": "object",
+      "required": [
+        "command",
+        "leaseExpiresAt"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/BusCommand"
+        },
+        "claimToken": {
+          "type": "string",
+          "description": "The single-claimer token, returned ONCE by a fresh claim; every progress report, heartbeat and finish must send it. Absent on a heartbeat renewal.",
+          "x-optional": true
+        },
+        "leaseExpiresAt": {
+          "type": "string"
+        }
+      }
+    },
+    "BusAppendedEvent": {
+      "type": "object",
+      "required": [
+        "v",
+        "cmd",
+        "seq",
+        "type",
+        "payload",
+        "terminal",
+        "at"
+      ],
+      "properties": {
+        "v": {
+          "type": "integer"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string",
+          "description": "Only `progress` can be appended from the desktop; the terminal event is written by finish."
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "terminal": {
+          "type": "boolean"
+        },
+        "at": {
+          "type": "number"
+        }
+      }
     }
   },
   "endpoints": {
@@ -903,6 +1026,190 @@
           "$ref": "_common#/$defs/Error"
         },
         "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /bus/claimable": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "items"
+          ],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/BusClaimableCommand"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /bus/commands/:id/claim": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The command id."
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "claimToken": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Omit to take the lease; send the current token to renew it (the heartbeat)."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/BusClaimResponse"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /bus/commands/:id/events": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The command id."
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "required": [
+            "claimToken",
+            "type",
+            "payload"
+          ],
+          "properties": {
+            "claimToken": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "progress"
+              ],
+              "description": "Only progress can be appended from the desktop (400 otherwise)."
+            },
+            "payload": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "At most 4 KiB of JSON (413 otherwise); redacted before it is stored."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "event",
+            "leaseExpiresAt"
+          ],
+          "properties": {
+            "event": {
+              "$ref": "#/$defs/BusAppendedEvent"
+            },
+            "leaseExpiresAt": {
+              "type": "string"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /bus/commands/:id/finish": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The command id."
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "required": [
+            "claimToken",
+            "state"
+          ],
+          "properties": {
+            "claimToken": {
+              "type": "string",
+              "description": "The token from the claim; a wrong token is 409 LEASE_LOST."
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "succeeded",
+                "failed",
+                "interrupted"
+              ]
+            },
+            "result": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-optional": true,
+              "description": "The bounded result of a succeeded command (16 KiB cap); issues.implement answers { readyToShip, shipped: false } — the phone never ships."
+            },
+            "errorCode": {
+              "type": "string",
+              "x-optional": true,
+              "description": "A schema/bus/registry.json error code for a failed or interrupted command."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/BusCommandEnvelope"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
           "$ref": "_common#/$defs/Error"
         }
       }

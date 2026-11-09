@@ -1,0 +1,25 @@
+{
+  "endpoint": "POST /bus/commands/:id/claim",
+  "status": 200,
+  "description": "the single-claimer lease and the one token the desktop must send with every later report",
+  "request": {
+    "params": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000021"
+    },
+    "body": {}
+  },
+  "response": {
+    "command": {
+      "id": "7c1d2e3f-0000-4000-8000-000000000021",
+      "kind": "issues.implement",
+      "tier": "T2",
+      "state": "running",
+      "originClient": "ios-native",
+      "createdAt": "2026-11-09T10:00:00.000Z",
+      "expiresAt": "2026-11-09T10:10:00.000Z",
+      "lastSeq": 3
+    },
+    "claimToken": "hK0n2vXQ7t4mYb9c1sPq3rLd5wZf8gJj",
+    "leaseExpiresAt": "2026-11-09T10:01:35.000Z"
+  }
+}

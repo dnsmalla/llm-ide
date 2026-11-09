@@ -181,13 +181,13 @@ Detail: [`knowledge-base.md` §4](knowledge-base.md#4-tenancy-contract).
 
 ### Stale-server detection
 
-`SERVER_API_VERSION = 132` (`server.mjs:392`). Both `GET /` and `GET /health` return this value as `apiVersion`. Clients compare against their expected version; a mismatch surfaces "restart the server" rather than a raw 404. The `endpoints` array is also returned so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 133` (`server.mjs:392`). Both `GET /` and `GET /health` return this value as `apiVersion`. Clients compare against their expected version; a mismatch surfaces "restart the server" rather than a raw 404. The `endpoints` array is also returned so clients can detect missing capabilities by name.
 
 Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and stale-server detection).
 
 ### Append-only migrations
 
-Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0075` (`0075_plan_task_assignments.sql`: plan_task_assignments + plan_task_assignment_log, assigning a plan task to a project member; `0074_chat_project_scope.sql`: per-project Host API chat history; `0073_sync_password_changed.sql`: the post-revoke password-change record; `0072_search_user_column.sql` partitions FTS by user; `0071_project_root_unique.sql` makes one project per canonical folder; `0070_projects.sql` added `projects`, `project_members` and `usage_ledger.project_id`, the project-scoped team roles; `0069_usage_cost_usd.sql` added `usage_ledger.cost_usd`, the monthly USD sum behind the member cap; `0068_team_members.sql` added `members` and `invites`, ADR 0021). Migrations are never edited after they land; schema changes always add a new migration file.
+Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0076` (`0076_bus_desktop_claim.sql`: `jobs.runner` plus the desktop claim lease on `bus_commands` — claimed_by, claim_token_hash, claimed_at, lease_expires_at — so the core never runs a desktop-claimed command; `0075_plan_task_assignments.sql`: plan_task_assignments + plan_task_assignment_log, assigning a plan task to a project member; `0074_chat_project_scope.sql`: per-project Host API chat history; `0073_sync_password_changed.sql`: the post-revoke password-change record; `0072_search_user_column.sql` partitions FTS by user; `0071_project_root_unique.sql` makes one project per canonical folder; `0070_projects.sql` added `projects`, `project_members` and `usage_ledger.project_id`, the project-scoped team roles; `0069_usage_cost_usd.sql` added `usage_ledger.cost_usd`, the monthly USD sum behind the member cap; `0068_team_members.sql` added `members` and `invites`, ADR 0021). Migrations are never edited after they land; schema changes always add a new migration file.
 
 Source: `extension/kb/migrations.mjs:8`, `migrations.mjs:43`.
 

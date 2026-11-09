@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /bus/claimable",
+  "status": 403,
+  "description": "no bus host proof: only the desktop host that spawned this core may claim a Factory command",
+  "response": {
+    "error": {
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "this route is for the desktop host that spawned this core"
+    }
+  }
+}

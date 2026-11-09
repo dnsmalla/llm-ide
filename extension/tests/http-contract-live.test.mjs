@@ -112,6 +112,9 @@ const SKIP_RULES = [
       fx.status === 401
       || (fx.status === 400 && fx.endpoint !== 'PUT /bus/kinds/:kind' && !fx.endpoint.includes('/bus/schedules'))
       || (fx.status === 403 && fx.response?.error?.code === 'TIER_DENIED' && !/\/(approve|deny)$/.test(fx.endpoint) && fx.endpoint !== 'GET /bus/approvals')
+      // B5: the replay server is not started by the Tauri host, so the four desktop-claim routes answer
+      // HOST_PROOF_REQUIRED; that row replays live, the success rows are covered by tests/bus-desktop-claim.test.mjs.
+      || (fx.status === 403 && fx.response?.error?.code === 'HOST_PROOF_REQUIRED' && /^(GET \/bus\/claimable|POST \/bus\/commands\/:id\/(claim|events|finish))$/.test(fx.endpoint))
       || (fx.status === 200 && /^GET \/bus\/(kinds|commands)$/.test(fx.endpoint))
       || (fx.status === 404 && /^(GET|POST) \/bus\/commands\/:id(\/(events|cancel))?$/.test(fx.endpoint))
     ),

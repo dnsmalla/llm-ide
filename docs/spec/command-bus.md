@@ -83,7 +83,7 @@ Receipt gate (`decideReceipt`, pure, tested by `fixtures/tiers`): unknown kind r
 | `review` | T0 | **yes** | read-only review of a registered project (`focus`: `code`, `doc`, `conflicts`), engine chosen by `engine: { provider, model?, credential? }` |
 | `sources.update` | T1 | yes (no engine) | Syncs the server-side connected sources (`gcal:<account>`, `gdrive:<account>`, `ical:<source>`, `box:default`; none = all). Re-checks connection and scope at execution; Gmail, Slack and email ids are skipped (fetch-only). A scheduled Box re-index is capped at one run per user per 6 hours (`BOX_SCHEDULED_MIN_INTERVAL_MS`) and reports `skipped`/`BOX_TOO_SOON` inside the interval |
 | `issues.from_notes` | T1 | no | the deterministic note action extractor and the tracker allow-list are in the Mac app; Node has only the meeting planner |
-| `issues.implement` | T2 | no | no Node worktree runner or write-mode engine; codex and gemini write mode needs a design and a user decision |
+| `issues.implement` | T2 | **yes** (desktop runner, no engine) | the desktop's Factory claims the approved command with a lease and runs one worktree per issue (§10). `ship` never ships: a passed run answers `readyToShip` and a desktop click is still the only Ship |
 | `loop.run` | T1 | no | loop definitions (stages, verify commands, scope) live in the Mac app; Node has only the confined agent step |
 | `custom.run` | T1 | no | saved custom tasks live in the Mac app; Node has no store for a `customTaskId`. Desktop-only: registry `clients: ["desktop-ui"]`, so phone-pwa, extension and ios-native get 403 `KIND_NOT_ALLOWED_FOR_CLIENT` and `GET /bus/kinds` reports `allowed: false` |
 
@@ -142,3 +142,51 @@ The core never runs a timer for the bus (G7 ruling: a server timer would bypass 
 - **Execution-time re-check:** the T1/T2 `approved_by` check is unchanged; a run approved on a standing approval is refused `switch_off` when its schedule was deleted or its approval expired before the run started.
 - **Limit, stated plainly:** the desktop webview already holds the host proof and can approve any single T1 command. A standing approval adds no power: it records a human decision with a bounded scope, rate and lifetime, so unattended runs are explainable and revocable.
 - **What the phone sees:** scheduled runs in `GET /bus/commands` (`originClient: desktop-ui`) and the schedules read-only; it cannot create, delete or approve. A command that the phone queued is never covered by a standing approval.
+
+## 10. Desktop-claimed commands (API 133)
+
+The Factory runs in the desktop webview, in the project's git worktrees, so a bus command it backs cannot run
+inside the core. `issues.implement` is therefore a **desktop-runner kind**: the core creates the job on the
+phone's T2 desktop approval and **never runs it**, and the desktop host that spawned the core claims it with a
+single-claimer lease. A command started this way still cannot ship from the phone (decision, 2026-11-09).
+
+- **The core never claims it.** `jobs.runner` (`core` | `desktop`, migration 0076) is `desktop` for the kind;
+  `claimNextJobSystem` only takes `runner = 'core'` rows, the boot sweep interrupts a leftover desktop run
+  `lease_lost` instead of requeueing it, and `reapOrphanedRunningSystem` leaves it to the lease. `execute()`
+  builds no handler for it, so a desktop kind can never hold the write lane or hit the job timeout.
+- **`GET /bus/claimable`** (desktop class **and** the bus host proof): the caller's approved desktop commands no
+  live lease holds, oldest first, each with its `args` and the project's registered folder (`projectRoot`, so the
+  desktop only runs a command whose project is open). A command whose grant no longer allows `model.exec` is
+  hidden, and `expired`/lease-expired rows are swept first. No nonce and no token ever appears here.
+- **`POST /bus/commands/:id/claim`** `{ claimToken? }` → `{ command, claimToken, leaseExpiresAt }`. A fresh claim
+  writes `claimed_by`, `claimed_at`, a 90 s `lease_expires_at` and the SHA-256 of a 32-byte random token (returned
+  **once**; never stored in clear). While a live lease holds the command a second claim is 409 `LEASE_HELD`; an
+  expired lease is reclaimable and the old token dies with it. The same route with the current `claimToken` renews
+  the lease (the heartbeat) and answers without a token. The grant is re-checked on every claim: a member demoted
+  after approval gets 403 `TIER_DENIED` and nothing runs.
+- **`POST /bus/commands/:id/events`** `{ claimToken, type: "progress", payload }` appends one `progress` event —
+  the only type accepted (400 otherwise), at most 4 KiB of JSON (413 otherwise), redacted like every other bus
+  event. It is also the heartbeat: it renews the lease, so a desktop that stops reporting is caught in one minute.
+  A terminal event can never be written this way.
+- **`POST /bus/commands/:id/finish`** `{ claimToken, state: succeeded|failed|interrupted, result?, errorCode? }`
+  writes the job's terminal state and exactly one terminal event; a replay of the same state is idempotent (200),
+  a wrong token or a different state is 409 `LEASE_LOST`, and a `result` over 16 KiB is 413. An `interrupted`
+  state is how a desktop that gives up (a stop, a quit) tells the phone.
+- **Lease expiry.** The minute sweep (`expireDesktopLeasesSystem`) turns a running desktop job whose lease ran out
+  into `interrupted` with a terminal error `code: "interrupted"` and releases the lane.
+- **`ship` never ships.** The desktop's poller ignores `args.ship`: a passed run finishes the command with
+  `{ readyToShip: true, shipped: false }`, and `POST /kb/loop/ship` is still only ever called from a user click in
+  the Loop/Factory screen. A `ship: true` command is therefore a request to bring the card to Ready to ship.
+- **Concurrency and de-duplication.** The poller (60 s, `ui/screens/loop/native/bus-runner.ts`) claims at most the
+  free slots of the run manager's cap, in the open project only, and stores each issue through `sendToFactory`
+  (de-duplicated by `(source, id)`) before starting one `full` Factory run per issue. Its progress event is the
+  run's last stage (`stage: Implement`), which is also the heartbeat.
+- **Security.** All four routes need the desktop client class **and** the bus host proof, and the audit rows are
+  `bus.claim` / `bus.finish` with the kind, client and reason code only — never an arg, a token or a path. The
+  claim token is a bearer secret for exactly one command, its hash is the only thing stored, and a wrong token
+  changes nothing.
+
+Tests: `extension/tests/job-queue-desktop.test.mjs` (the queue never claims a desktop row; the sweeps),
+`extension/tests/bus-desktop-lease.test.mjs` (claim/renew/finish/expiry on the store),
+`extension/tests/bus-desktop-claim.test.mjs` (the four routes, host proof, grants, progress and finish),
+`ui/screens/loop/tests/native-bus-runner.test.mjs` (the poller: cap, project, progress, finish, never ship).

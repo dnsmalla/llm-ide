@@ -51,6 +51,8 @@ export interface RunManagerDeps {
   now(): Date;
   rand(): number;
   newId(): string;
+  /** A finished run's record was written (or held): the Factory bus runner reports it to the phone. */
+  onRunFinished?(info: { runId: string; itemKey: string; projectRoot: string; mode: RunMode; statusCode: string; statusSummary: string }): void;
 }
 
 /** The host's RunInfo (Phase A Task 4), camelCase on the wire. */
@@ -256,6 +258,9 @@ async function execute(run: ManagedRun): Promise<void> {
   if (finished) {
     try { await saveRecord(d, run, fs, finished, started); }
     catch (e) { appendLog(run, `run record not written: ${e instanceof Error ? e.message : String(e)}`); }
+    try {
+      d.onRunFinished?.({ runId: run.live.runId, itemKey: run.item.key, projectRoot: run.live.projectRoot, mode: run.live.mode, statusCode: runStatusCode(finished.outcome), statusSummary: finished.outcome.statusSummary });
+    } catch { /* a listener must never change the run's own outcome */ }
   }
   runs.delete(run.live.runId);
   emit();

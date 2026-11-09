@@ -460,6 +460,8 @@ export type BusKind = {
   needsApproval: boolean;
   /** Why the kind is not available on this server (only when available is false). */
   unavailableReason?: string;
+  /** Who runs it: the core's job runner (`core`) or the desktop's Factory poller, which claims it with a lease (`desktop`). */
+  runner: "core" | "desktop";
 };
 
 export type BusApproval = {
@@ -488,6 +490,38 @@ export type BusSchedule = {
   createdAt: string;
   /** When a run was last approved on the standing approval. */
   lastRunAt: string | null;
+};
+
+/** One approved desktop-runner command no live lease holds. No nonce and no claim token ever appears here. */
+export type BusClaimableCommand = {
+  id: string;
+  kind: string;
+  tier: "R" | "C" | "T0" | "T1" | "T2" | "D";
+  /** Typed per kind in schema/bus/registry.json. */
+  args: Record<string, unknown>;
+  createdAt: string;
+  expiresAt: string;
+  projectId: string | null;
+  /** The project's registered folder; the desktop only runs a command whose folder is open. */
+  projectRoot: string | null;
+};
+
+export type BusClaimResponse = {
+  command: BusCommand;
+  /** The single-claimer token, returned ONCE by a fresh claim; every progress report, heartbeat and finish must send it. Absent on a heartbeat renewal. */
+  claimToken?: string;
+  leaseExpiresAt: string;
+};
+
+export type BusAppendedEvent = {
+  v: number;
+  cmd: string;
+  seq: number;
+  /** Only `progress` can be appended from the desktop; the terminal event is written by finish. */
+  type: string;
+  payload: Record<string, unknown>;
+  terminal: boolean;
+  at: number;
 };
 
 export type CalendarIcalSource = {
@@ -3415,6 +3449,82 @@ export type DeleteBusSchedulesIdResponse401 = CommonError;
 export type DeleteBusSchedulesIdResponse403 = CommonError;
 
 export type DeleteBusSchedulesIdResponse404 = CommonError;
+
+/** Request parts for `GET /bus/claimable` (schema/http/bus.schema.json). */
+export type GetBusClaimableRequest = Record<string, never>;
+
+export type GetBusClaimableResponse200 = {
+  items: BusClaimableCommand[];
+};
+
+export type GetBusClaimableResponse401 = CommonError;
+
+export type GetBusClaimableResponse403 = CommonError;
+
+/** Request parts for `POST /bus/commands/:id/claim` (schema/http/bus.schema.json). */
+export type PostBusCommandsIdClaimRequest = {
+  params: {
+    /** The command id. */
+    id: string;
+  };
+  body: {
+    /** Omit to take the lease; send the current token to renew it (the heartbeat). */
+    claimToken?: string;
+  };
+};
+
+export type PostBusCommandsIdClaimResponse200 = BusClaimResponse;
+
+export type PostBusCommandsIdClaimResponse401 = CommonError;
+
+export type PostBusCommandsIdClaimResponse403 = CommonError;
+
+/** Request parts for `POST /bus/commands/:id/events` (schema/http/bus.schema.json). */
+export type PostBusCommandsIdEventsRequest = {
+  params: {
+    /** The command id. */
+    id: string;
+  };
+  body: {
+    claimToken: string;
+    /** Only progress can be appended from the desktop (400 otherwise). */
+    type: "progress";
+    /** At most 4 KiB of JSON (413 otherwise); redacted before it is stored. */
+    payload: Record<string, unknown>;
+  };
+};
+
+export type PostBusCommandsIdEventsResponse200 = {
+  event: BusAppendedEvent;
+  leaseExpiresAt: string;
+};
+
+export type PostBusCommandsIdEventsResponse401 = CommonError;
+
+export type PostBusCommandsIdEventsResponse403 = CommonError;
+
+/** Request parts for `POST /bus/commands/:id/finish` (schema/http/bus.schema.json). */
+export type PostBusCommandsIdFinishRequest = {
+  params: {
+    /** The command id. */
+    id: string;
+  };
+  body: {
+    /** The token from the claim; a wrong token is 409 LEASE_LOST. */
+    claimToken: string;
+    state: "succeeded" | "failed" | "interrupted";
+    /** The bounded result of a succeeded command (16 KiB cap); issues.implement answers { readyToShip, shipped: false } — the phone never ships. */
+    result?: Record<string, unknown>;
+    /** A schema/bus/registry.json error code for a failed or interrupted command. */
+    errorCode?: string;
+  };
+};
+
+export type PostBusCommandsIdFinishResponse200 = BusCommandEnvelope;
+
+export type PostBusCommandsIdFinishResponse401 = CommonError;
+
+export type PostBusCommandsIdFinishResponse403 = CommonError;
 
 /** Request parts for `POST /kb/calendar-ical/sources` (schema/http/calendar-ical.schema.json). */
 export type PostKbCalendarIcalSourcesRequest = {
@@ -9564,6 +9674,38 @@ export interface ApiEndpoints {
       401: DeleteBusSchedulesIdResponse401;
       403: DeleteBusSchedulesIdResponse403;
       404: DeleteBusSchedulesIdResponse404;
+    };
+  };
+  "GET /bus/claimable": {
+    request: GetBusClaimableRequest;
+    responses: {
+      200: GetBusClaimableResponse200;
+      401: GetBusClaimableResponse401;
+      403: GetBusClaimableResponse403;
+    };
+  };
+  "POST /bus/commands/:id/claim": {
+    request: PostBusCommandsIdClaimRequest;
+    responses: {
+      200: PostBusCommandsIdClaimResponse200;
+      401: PostBusCommandsIdClaimResponse401;
+      403: PostBusCommandsIdClaimResponse403;
+    };
+  };
+  "POST /bus/commands/:id/events": {
+    request: PostBusCommandsIdEventsRequest;
+    responses: {
+      200: PostBusCommandsIdEventsResponse200;
+      401: PostBusCommandsIdEventsResponse401;
+      403: PostBusCommandsIdEventsResponse403;
+    };
+  };
+  "POST /bus/commands/:id/finish": {
+    request: PostBusCommandsIdFinishRequest;
+    responses: {
+      200: PostBusCommandsIdFinishResponse200;
+      401: PostBusCommandsIdFinishResponse401;
+      403: PostBusCommandsIdFinishResponse403;
     };
   };
   "POST /kb/calendar-ical/sources": {

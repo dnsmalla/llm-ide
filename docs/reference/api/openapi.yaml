@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 132
+  x-api-version: 133
 servers:
   - url: "https://{host}"
     variables:
@@ -4358,6 +4358,36 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /bus/claimable:
+    get:
+      tags:
+        - "bus"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "items"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/BusClaimableCommand"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /bus/commands:
     get:
       tags:
@@ -4628,6 +4658,46 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /bus/commands/{id}/claim:
+    post:
+      tags:
+        - "bus"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "The command id."
+          schema:
+            type: "string"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                claimToken:
+                  type: "string"
+                  description: "Omit to take the lease; send the current token to renew it (the heartbeat)."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/BusClaimResponse"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /bus/commands/{id}/deny:
     post:
       tags:
@@ -4716,6 +4786,121 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "429":
           description: "Too Many Requests"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      tags:
+        - "bus"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "The command id."
+          schema:
+            type: "string"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "claimToken"
+                - "type"
+                - "payload"
+              properties:
+                claimToken:
+                  type: "string"
+                type:
+                  type: "string"
+                  enum:
+                    - "progress"
+                  description: "Only progress can be appended from the desktop (400 otherwise)."
+                payload:
+                  type: "object"
+                  additionalProperties: true
+                  description: "At most 4 KiB of JSON (413 otherwise); redacted before it is stored."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "event"
+                  - "leaseExpiresAt"
+                properties:
+                  event:
+                    "$ref": "#/components/schemas/BusAppendedEvent"
+                  leaseExpiresAt:
+                    type: "string"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /bus/commands/{id}/finish:
+    post:
+      tags:
+        - "bus"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "The command id."
+          schema:
+            type: "string"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "claimToken"
+                - "state"
+              properties:
+                claimToken:
+                  type: "string"
+                  description: "The token from the claim; a wrong token is 409 LEASE_LOST."
+                state:
+                  type: "string"
+                  enum:
+                    - "succeeded"
+                    - "failed"
+                    - "interrupted"
+                result:
+                  type: "object"
+                  additionalProperties: true
+                  description: "The bounded result of a succeeded command (16 KiB cap); issues.implement answers { readyToShip, shipped: false } — the phone never ships."
+                errorCode:
+                  type: "string"
+                  description: "A schema/bus/registry.json error code for a failed or interrupted command."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/BusCommandEnvelope"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
           content:
             application/json:
               schema:
@@ -18256,6 +18441,33 @@ components:
           type:
             - "string"
             - "null"
+    BusAppendedEvent:
+      type: "object"
+      required:
+        - "v"
+        - "cmd"
+        - "seq"
+        - "type"
+        - "payload"
+        - "terminal"
+        - "at"
+      properties:
+        v:
+          type: "integer"
+        cmd:
+          type: "string"
+        seq:
+          type: "integer"
+        type:
+          type: "string"
+          description: "Only `progress` can be appended from the desktop; the terminal event is written by finish."
+        payload:
+          type: "object"
+          additionalProperties: true
+        terminal:
+          type: "boolean"
+        at:
+          type: "number"
     BusApproval:
       type: "object"
       properties:
@@ -18300,6 +18512,62 @@ components:
         - "createdAt"
         - "expiresAt"
         - "nonce"
+    BusClaimResponse:
+      type: "object"
+      required:
+        - "command"
+        - "leaseExpiresAt"
+      properties:
+        command:
+          "$ref": "#/components/schemas/BusCommand"
+        claimToken:
+          type: "string"
+          description: "The single-claimer token, returned ONCE by a fresh claim; every progress report, heartbeat and finish must send it. Absent on a heartbeat renewal."
+        leaseExpiresAt:
+          type: "string"
+    BusClaimableCommand:
+      type: "object"
+      description: "One approved desktop-runner command no live lease holds. No nonce and no claim token ever appears here."
+      required:
+        - "id"
+        - "kind"
+        - "tier"
+        - "args"
+        - "createdAt"
+        - "expiresAt"
+        - "projectId"
+        - "projectRoot"
+      properties:
+        id:
+          type: "string"
+        kind:
+          type: "string"
+        tier:
+          type: "string"
+          enum:
+            - "R"
+            - "C"
+            - "T0"
+            - "T1"
+            - "T2"
+            - "D"
+        args:
+          type: "object"
+          additionalProperties: true
+          description: "Typed per kind in schema/bus/registry.json."
+        createdAt:
+          type: "string"
+        expiresAt:
+          type: "string"
+        projectId:
+          type:
+            - "string"
+            - "null"
+        projectRoot:
+          type:
+            - "string"
+            - "null"
+          description: "The project's registered folder; the desktop only runs a command whose folder is open."
     BusCommand:
       type: "object"
       properties:
@@ -18439,6 +18707,12 @@ components:
         unavailableReason:
           type: "string"
           description: "Why the kind is not available on this server (only when available is false)."
+        runner:
+          type: "string"
+          enum:
+            - "core"
+            - "desktop"
+          description: "Who runs it: the core's job runner (`core`) or the desktop's Factory poller, which claims it with a lease (`desktop`)."
       required:
         - "kind"
         - "tier"
@@ -18451,6 +18725,7 @@ components:
         - "enabled"
         - "allowed"
         - "needsApproval"
+        - "runner"
     BusSchedule:
       type: "object"
       properties:
