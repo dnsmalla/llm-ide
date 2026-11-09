@@ -18,6 +18,7 @@ import { redactSecrets } from '../core/redact-secrets.mjs';
 import { recordFinishedRun } from '../kb/agent-runs.mjs';
 import { randomUUID } from 'node:crypto';
 import { pickReviewPayload } from '../kb/review-payload.mjs';
+import { filteredRepoAllowlist } from '../kb/projects.mjs';
 import { logger } from '../core/logger.mjs';
 import {
   stripReviewSecrets, redactReviewItem, holdSecrets, takeHeldSecrets, dropHeldSecrets,
@@ -34,7 +35,8 @@ import {
 function withAuthoritativeData(userId, kind, payload) {
   const out = { ...payload };
   if (kind === 'codegen-apply') {
-    out.allowedRepos = kb.userRepoAllowlist(userId);
+    // R-034 #2: the authoritative list is project-scoped on a hub (an allow-list row cannot widen it).
+    out.allowedRepos = filteredRepoAllowlist(kb.getDb(), userId);
   } else if (kind === 'dispatch') {
     out.items = resolveDispatchItems(userId, { planId: out.planId, taskIds: out.taskIds });
   }
@@ -202,7 +204,8 @@ export async function handleReviewRoutes(req, res, ctx) {
           taskId: item.payload.taskId,
           files: item.payload.files,
           tests: item.payload.tests,
-          allowedRepos: kb.userRepoAllowlist(userId),
+          // R-034 #2: never re-read the raw allow-list at execution time.
+          allowedRepos: filteredRepoAllowlist(kb.getDb(), userId),
         });
         // Optional follow-on: open a draft PR with the just-applied
         // files committed onto a fresh branch. Triggered only when

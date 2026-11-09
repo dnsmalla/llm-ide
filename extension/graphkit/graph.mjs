@@ -5,14 +5,17 @@
 
 import path from 'node:path';
 import {
-  findContext, userRepoAllowlist, findCodeSymbolIds, expandSymbols, hydrateSymbols,
+  findContext, getDb, findCodeSymbolIds, expandSymbols, hydrateSymbols,
   searchCodeSymbols, searchCodeSymbolsByTerms, graphNeighbors, hasCodeGraph, CONTAINS_EDGE_KIND,
 } from '../kb/db.mjs';
+import { filteredRepoAllowlist } from '../kb/projects.mjs';
 
 /** Repo allow-list for a user, never throwing — graph queries must not
- *  crash if the allow-list read fails; they just lose absolute refs. */
+ *  crash if the allow-list read fails; they just lose absolute refs.
+ *  R-034 #2: on a hub, roots inside a project the caller has no grant on are dropped, so the
+ *  graph/plan context cannot surface another project's files. */
 function safeAllowlist(userId) {
-  try { return userRepoAllowlist(userId) || []; }
+  try { return filteredRepoAllowlist(getDb(), userId) || []; }
   catch { return []; }
 }
 

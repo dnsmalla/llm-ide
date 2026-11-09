@@ -30,7 +30,7 @@ import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { assertDeletable, consumeInvite, getMember, peekInvite, permittedClasses } from '../kb/members.mjs';
 import { persistTeamYaml } from '../kb/team-yaml.mjs';
-import { listProjectsForUser } from '../kb/projects.mjs';
+import { listProjectsForUser, repoRootRefusal } from '../kb/projects.mjs';
 import { enforceRouteAuthority } from './route-authority.mjs';
 
 // Errors surfaced by the MCP OAuth flow can carry the authorization server's
@@ -819,6 +819,13 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       try {
         if (typeof body.path !== 'string') {
           throw errValidation('path is required');
+        }
+        // R-034 #2: on a hub a member may not add another project's root (or an ancestor of it) to
+        // their allow-list. The check is on the resolved path, exactly what `addUserRepo` stores.
+        const foreign = repoRootRefusal(db, req.user.id, path.resolve(body.path));
+        if (foreign) {
+          send(res, 403, { error: { code: 'PROJECT_DENIED', message: 'That folder belongs to another project on this hub' } });
+          return;
         }
         const abs = addUserRepo(req.user.id, body.path, body.label);
         safeAudit(db, {

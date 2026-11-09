@@ -14,6 +14,7 @@
 
 import path from 'node:path';
 import * as kb from '../kb/db.mjs';
+import { filteredRepoAllowlist } from '../kb/projects.mjs';
 import { ingestStructureGraph } from '../connectors/structure-graph.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 
@@ -26,7 +27,8 @@ export async function handleCodeGraphRoutes(req, res, { userId, url }) {
     return true;
   }
   const normalized = path.resolve(body.repoPath);
-  const allowlist = kb.userRepoAllowlist(userId);
+  // R-034 #2: a hub caller cannot ingest another project's folder through the row.
+  const allowlist = filteredRepoAllowlist(kb.getDb(), userId);
   if (!allowlist.includes(normalized)) {
     sendJSON(res, 403, { error: { code: 'PATH_NOT_APPROVED', message: 'Repo path is not on your allow-list' } });
     return true;

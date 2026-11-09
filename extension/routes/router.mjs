@@ -9,7 +9,7 @@ import { indexScip } from '../connectors/scip.mjs';
 import { indexGithubIssues, indexTicketsJson } from '../connectors/issues.mjs';
 import { indexJUnit } from '../connectors/qa.mjs';
 import { indexBoxFolder, boxTest } from '../connectors/box.mjs';
-import { projectIdForFolder } from '../kb/projects.mjs';
+import { projectIdForFolder, filteredRepoAllowlist } from '../kb/projects.mjs';
 // generatePlan, analyzeRisks, codeSync, dispatchPlan, generateCodeForTask
 // moved into routes/planning.mjs.
 // applyCodegen + openPullRequest moved into routes/review.mjs.
@@ -593,7 +593,8 @@ export async function handleKB(req, res) {
       // crafted relative segment can't slip past.
       const path = await import('node:path');
       const normalized = path.resolve(body.path);
-      const allowlist = kb.userRepoAllowlist(userId);
+      // R-034 #2: on a hub this drops another project's folder even when it is on the row.
+      const allowlist = filteredRepoAllowlist(kb.getDb(), userId);
       if (!allowlist.includes(normalized)) {
         sendJSON(res, 403, { error: { code: 'PATH_NOT_APPROVED', message: 'Repo path is not on your allow-list' } });
         return true;
@@ -616,7 +617,8 @@ export async function handleKB(req, res) {
       }
       const nodePath = await import('node:path');
       const normalized = nodePath.resolve(body.repoPath);
-      const allowlist = kb.userRepoAllowlist(userId);
+      // R-034 #2: same project scoping as connect-git.
+      const allowlist = filteredRepoAllowlist(kb.getDb(), userId);
       if (!allowlist.includes(normalized)) {
         sendJSON(res, 403, { error: { code: 'PATH_NOT_APPROVED', message: 'Repo path is not on your allow-list' } });
         return true;

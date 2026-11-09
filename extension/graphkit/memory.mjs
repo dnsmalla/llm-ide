@@ -25,7 +25,8 @@
 import { readFileSync, statSync, readdirSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, isAbsolute, normalize, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { userRepoAllowlist } from '../kb/db.mjs';
+import { getDb } from '../kb/db.mjs';
+import { filteredRepoAllowlist } from '../kb/projects.mjs';
 import { config } from '../core/config.mjs';
 import { parseChatMemoryFacts } from './memory-writer.mjs';
 import { factStamp } from '../core/fact-key.mjs';
@@ -208,7 +209,8 @@ export function buildAllowedRoots(userId, workspaceRoot) {
   if (!userId) return null;
   const set = new Set();
   try {
-    for (const p of userRepoAllowlist(userId)) {
+    // R-034 #2: on a hub this drops another project's roots the caller has no grant on.
+    for (const p of filteredRepoAllowlist(getDb(), userId)) {
       // Expand tilde defensively in case a legacy allow-list entry is home-relative.
       if (typeof p === 'string' && p) set.add(normalizeForCompare(resolve(normalize(expandTilde(p)))));
     }

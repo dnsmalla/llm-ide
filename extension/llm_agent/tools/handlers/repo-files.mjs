@@ -19,7 +19,8 @@
 import { readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
 import { join, isAbsolute, resolve, sep, basename } from 'node:path';
 import { expandTilde } from '../../../graphkit/memory.mjs';
-import { userRepoAllowlist } from '../../../kb/user.mjs';
+import { getDb } from '../../../kb/db.mjs';
+import { filteredRepoAllowlist } from '../../../kb/projects.mjs';
 import { isTooBroadRoot } from '../../../core/broad-root.mjs';
 
 const CASE_INSENSITIVE = process.platform === 'darwin' || process.platform === 'win32';
@@ -84,8 +85,10 @@ export function buildReadableRoots({ userId, workspaceRoot } = {}) {
   };
   // DB allow-list (indexed repos) — trusted source, read from the DB, never the
   // client. allowBroad: these were deliberately registered, so honor them as-is.
+  // R-034 #2: on a hub the list is first scoped to the caller's project grants, so
+  // another project's folder can never be added as a broad read root.
   try {
-    if (userId) for (const p of userRepoAllowlist(userId)) add(resolve(expandTilde(p)), { allowBroad: true });
+    if (userId) for (const p of filteredRepoAllowlist(getDb(), userId)) add(resolve(expandTilde(p)), { allowBroad: true });
   } catch { /* DB hiccup — still allow the validated workspace root below */ }
   // Open workspace folder — client-supplied. The user explicitly opened it, but
   // it's not DB-trusted, so validate hard: absolute, no `..`, not too broad.
@@ -124,7 +127,8 @@ export function buildTrustedRoots(userId) {
   const out = [];
   if (!userId) return out;
   let paths;
-  try { paths = userRepoAllowlist(userId); } catch { return out; }
+  // R-034 #2: the same hub project scoping as the read roots (writes/Bash trust follow it).
+  try { paths = filteredRepoAllowlist(getDb(), userId); } catch { return out; }
   for (const p of paths) {
     const real = canon(resolve(expandTilde(p)));
     if (!real) continue;
