@@ -30,6 +30,7 @@ import { cronMatches, describeCron, validateCron } from "../../autotasks/native/
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, type LoopRunIndexEntry } from "./history.ts";
+import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import "./native-loop.css";
 
 /** The `/kb/loop/agent-run` answer fields the Loop reads. */
@@ -110,6 +111,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const cancelledRef = useRef(false);
   /** Aborts the active run's in-flight agent call (skill or repair stage); Stop and leaving the screen both use it. */
   const runAbortRef = useRef<AbortController | null>(null);
+  /** The isolated worktree of the run in progress; null for a main-tree run and between runs. */
+  const activeRunRef = useRef<RunInfo | null>(null);
+  /** True while a run is being set up (approval done, worktree being prepared); blocks a double start. */
+  const startingRef = useRef(false);
   /** Set when the screen unmounts, so a finishing run does not start the next queued one in a stale project. */
   const unmountedRef = useRef(false);
   const haltRef = useRef<string | null>(null);
@@ -429,14 +434,21 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     mutateStore((s) => { const target = s.loops.find((l) => l.id === loop.id); if (target) fn(target); });
   };
 
+  /** `{ runId }` for every Loop host call made during a worktree run. */
+  const hostRunArgs = () => stageHostArgs(activeRunRef.current?.runId ?? null);
+  /** Absolute folder the current run works in (its worktree, else the work root). */
+  const currentRunRoot = () => runRoot(projectRoot ?? "", activeRunRef.current, workRoot);
+  /** That folder relative to the project, for the project-scoped fs (artifact, test map, graph stages). */
+  const currentRepoPrefix = () => repoPrefixFor(projectRoot ?? "", currentRunRoot());
+
   /** Paths with uncommitted changes before an agent call. `null` = the snapshot failed, so nothing may be reverted. */
   const dirtyBefore = async (): Promise<Set<string> | null> => {
-    try { return new Set(await invokeHost<string[]>("loop_changed_paths")); } catch { return null; }
+    try { return new Set(await invokeHost<string[]>("loop_changed_paths", hostRunArgs())); } catch { return null; }
   };
 
   /** Paths git reports as changed right now; null when git cannot say (the post-throw check needs this). */
   const changedPathsNow = async (): Promise<string[] | null> => {
-    try { return await invokeHost<string[]>("loop_changed_paths"); } catch { return null; }
+    try { return await invokeHost<string[]>("loop_changed_paths", hostRunArgs()); } catch { return null; }
   };
 
   /**
@@ -450,7 +462,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       { policy: target.config.protectedPathPolicy, extraProtectedGlobs: target.config.extraProtectedGlobs, scopeGlobs: target.scopeGlobs },
       before,
       created,
-      async (p, c) => { await invokeHost("loop_revert_paths", { paths: p, created: c }); },
+      async (p, c) => { await invokeHost("loop_revert_paths", { paths: p, created: c, ...hostRunArgs() }); },
       (line) => setRunLog((l) => [...l, line]),
     );
 
@@ -465,13 +477,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runOneStage = async (s: LoopStage, target: LoopDefinition, prior: readonly { stage: LoopStage; ok: boolean; output: string }[] = [], approvalToken: string | null = null): Promise<{ ok: boolean; output: string }> => {
     if (s.kind === "shellCommand") {
-      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean }>("loop_run_stage", { stageId: s.id, loopId: target.id, approvalToken, timeoutSecs: s.timeoutSeconds });
+      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean }>("loop_run_stage", { stageId: s.id, loopId: target.id, approvalToken, timeoutSecs: s.timeoutSeconds, ...hostRunArgs() });
       if (r.cancelled) cancelledRef.current = true;
       return { ok: !r.timedOut && !r.cancelled && r.exitCode === 0, output: r.cancelled ? "Stage cancelled." : [r.stdout, r.stderr].filter(Boolean).join("\n") };
     }
     if (s.kind === "regressionSweep") {
-      const root = projectRoot ?? "";
-      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const repoPrefix = currentRepoPrefix();
       const faultsRoot = repoPrefix ? `${repoPrefix}/system/faults` : "system/faults";
       const r = await runRegression(fs, faultsRoot, {
         async verify(f) {
@@ -504,7 +515,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const g = await guardedAgentCall<AgentRunReply>({
         before,
         call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
-          method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: workRoot ?? projectRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
+          method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: currentRunRoot(), timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
           signal: runAbortRef.current?.signal,
         }),
         changedNow: changedPathsNow,
@@ -522,8 +533,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (!lastTest) return { ok: false, output: "the ledger stage needs a Test stage output earlier in this run" };
       const parsed = parseTestResults(lastTest.output);
       if (parsed.failing.length === 0 && parsed.passing.length === 0) return { ok: false, output: "no test results could be parsed from the Test stage output" };
-      const root = projectRoot ?? "";
-      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const repoPrefix = currentRepoPrefix();
       const path = `${repoPrefix ? `${repoPrefix}/` : ""}system/loop/test/ledger.json`;
       const previous = await readLedger(fs, path);
       const diff = ledgerDiff(previous, parsed, lastTest.ok);
@@ -534,8 +544,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
     if (s.kind === "testMap") {
       if (s.testOp !== "structure" && s.testOp !== "map") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
-      const root = projectRoot ?? "";
-      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const repoPrefix = currentRepoPrefix();
       const structure = await detectTestStructure(fs, repoPrefix);
       if (s.testOp === "structure") {
         const writes = await writeTestStructure(fs, repoPrefix, structure);
@@ -546,8 +555,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
     }
     if (s.kind === "testPrune") {
-      const root = projectRoot ?? "";
-      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const repoPrefix = currentRepoPrefix();
       const structure = await detectTestStructure(fs, repoPrefix);
       const findings = await scanTestPrune(fs, repoPrefix, structure);
       const path = await writeTestPrune(fs, repoPrefix, findings);
@@ -555,8 +563,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     }
     if (s.kind === "codeGraph") {
       if (s.graphOp !== "snapshot" && s.graphOp !== "verify") return { ok: false, output: "this graph stage has no operation chosen" };
-      const root = projectRoot ?? "";
-      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const repoPrefix = currentRepoPrefix();
       const before = `${repoPrefix ? `${repoPrefix}/` : ""}system/loop/refactor/graph/before.json`;
       const r = await runCodeGraph(fs, s.graphOp, "system/graph/graph.json", before, async () => {
         await invokeHost("graph_generate", { mode: "code", target: repoPrefix || undefined });
@@ -565,8 +572,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     }
     if (s.kind === "artifactCheck") {
       if (!s.check) return { ok: false, output: "This artifact stage has no check configuration." };
-      const root = projectRoot ?? "";
-      const repoPrefix = workRoot && root && workRoot.startsWith(`${root}/`) ? workRoot.slice(root.length + 1) : "";
+      const repoPrefix = currentRepoPrefix();
       const r = await evaluateArtifact(fs, s.check, target.config.stages, { repoPrefix, projectPrefix: "" });
       return { ok: r.passed, output: r.passed ? "Artifact check passed." : r.failures.join("\n") };
     }
@@ -579,7 +585,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     pausedRef.current = false;
     setPaused(false);
     runAbortRef.current?.abort();
-    void invokeHost("loop_cancel").catch(() => undefined);
+    void invokeHost("loop_cancel", hostRunArgs()).catch(() => undefined);
   };
 
   const stopRun = () => {
@@ -615,10 +621,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     return "ok";
   };
 
-  const executeLoop = async (target: LoopDefinition, scheduled = false) => {
+  const executeLoop = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string } | null = null) => {
     if (dirty) return;
     const unsupported = target.config.stages.find((s) => s.enabled && !isNativeRunnable(s));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
+    const useWorktree = target.config.alwaysUseWorktree;
+    const worktreeBlocked = useWorktree ? worktreeBlockedStage(target.config.stages) : null;
+    if (worktreeBlocked) { setNotice(`“${worktreeBlocked.name}” re-checks faults in the main working tree, so it cannot run in an isolated worktree. Turn that stage off or turn off “Always run in an isolated worktree”.`); return; }
     // A loop.json from a cloned repo can mark a code-applying loop runsOnSchedule; it still never runs unattended.
     if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
     const batchBlock = macBatchReason(target);
@@ -648,7 +657,40 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     // The approval dialog is modal and can outlive the screen: a leave while it was open must not start the loop
     // (the unmount cleanup only cancels a run whose runningRef is already set).
     if (unmountedRef.current) return;
+    // `runningRef` is set only after the awaits below; this flag stops a second click from starting a second run
+    // (and a second worktree) while the first is still being prepared. Every early `return` below clears it.
+    if (startingRef.current) return;
+    startingRef.current = true;
+    let prepared: RunInfo | null = null;
+    if (useWorktree) {
+      const root = projectRoot ?? "";
+      const workRel = workRoot === root ? "" : repoPrefixFor(root, workRoot ?? "");
+      if (!root || (!start && workRoot !== root && workRel === "")) {
+        setNotice("The repository for this run could not be resolved, so no worktree was created and the run did not start.");
+        startingRef.current = false;
+        return;
+      }
+      const task = start ? start.task : `# ${target.name}\n\nLoop run in an isolated worktree. No work item was picked; the loop's goal applies.\n`;
+      try {
+        prepared = await invokeHost<RunInfo>("loop_worktree_prepare", { repoRel: start ? start.repoRel : workRel, runId: newRunId(new Date(), Math.random), base: null, task });
+      } catch (e) {
+        setNotice(`The isolated worktree could not be created: ${e instanceof Error ? e.message : String(e)}. The run did not start.`);
+        startingRef.current = false;
+        return;
+      }
+      // Check stages read the worktree through the project-scoped fs; a worktree outside the expected folder would
+      // make the prefix "" and silently point them at the main tree.
+      if (repoPrefixFor(root, prepared.worktree) !== `system/loop-worktrees/${prepared.runId}`) {
+        setNotice(`The worktree ${prepared.worktree} is not under this project's system/loop-worktrees/ folder, so the run did not start. The worktree was kept.`);
+        startingRef.current = false;
+        return;
+      }
+      if (unmountedRef.current) { startingRef.current = false; return; }
+    }
+    const activeRun = prepared;
+    activeRunRef.current = activeRun;
     runningRef.current = true;
+    startingRef.current = false;
     cancelledRef.current = false;
     runAbortRef.current = new AbortController();
     haltRef.current = null;
@@ -659,7 +701,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setSelectedRun(null);
     setRunRecord(null);
     setRunningStage(true);
-    setRunLog((l) => [...l, `▶ ${target.name}`, ""]);
+    setRunLog((l) => [...l, `▶ ${target.name}`, ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`] : []), ""]);
     const started = Date.now();
     let summaryPath: string | null = null;
     try {
@@ -678,7 +720,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           const g = await guardedAgentCall<AgentRunReply>({
             before,
             call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
-              method: "POST", body: { message: message.join("\n\n"), repoRoot: workRoot ?? projectRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
+              method: "POST", body: { message: message.join("\n\n"), repoRoot: currentRunRoot(), timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
               signal: runAbortRef.current?.signal,
             }),
             changedNow: changedPathsNow,
@@ -695,8 +737,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         haltIsError() { return haltErrorRef.current; },
         holdWhilePaused,
       });
+      if (activeRun) setRunLog((l) => [...l, `worktree kept: system/loop-worktrees/${activeRun.runId} (branch ${activeRun.branch}); your main working tree was not touched`]);
       let changedPaths: string[] = [];
-      try { changedPaths = await invokeHost<string[]>("loop_changed_paths"); } catch { changedPaths = []; }
+      try { changedPaths = await invokeHost<string[]>("loop_changed_paths", hostRunArgs()); } catch { changedPaths = []; }
       if (changedPaths.length) setRunLog((l) => [...l, `changed paths: ${changedPaths.join(", ")}`]);
       setRunLog((l) => [...l, outcome.cancelled ? (cancelledRef.current ? "Loop cancelled." : `Loop aborted: ${outcome.statusSummary}`) : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
       if (!outcome.cancelled && !outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
@@ -715,7 +758,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const startedAt = new Date(started).toISOString();
       const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
-      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: workRoot ?? projectRoot, config: target.config, changedPaths, summaryPath, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
@@ -725,6 +768,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     } finally {
       runningRef.current = false;
       runAbortRef.current = null;
+      activeRunRef.current = null;
       pausedRef.current = false;
       setPaused(false);
       setLoopRunning(false);
@@ -962,7 +1006,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <ol>{loop.config.stages.filter((s) => s.enabled).map((s, i) => <li key={s.id}><span>{i + 1}</span> {s.name} <code>{s.severity === "blocking" ? "verify" : "advisory"}</code> <code>{stageCheck(s)}</code></li>)}</ol>
           </div>
           <dl className="loop-meta">
-            <dt>Runs in</dt><dd>{workRoot ?? projectRoot}</dd>
+            <dt>Runs in</dt><dd>{loop.config.alwaysUseWorktree ? "a new worktree under system/loop-worktrees/ for each run (your working tree is not touched)" : workRoot ?? projectRoot}</dd>
             <dt>Project root</dt><dd>{projectRoot}</dd>
             <dt>Bounded by</dt><dd>{loop.config.maxIterations} iterations · {loop.config.wallClockBudgetSeconds ? `${Math.round(loop.config.wallClockBudgetSeconds / 60)} min time limit` : "no time limit"} · stop after {loop.config.consecutiveFailureStop} non-improving · {loop.config.maxRepairsPerStage} repairs/stage</dd>
             <dt>Scheduled</dt><dd>{loop.runsOnSchedule ? "included in this page's cron schedule" : "no — run it from here"}</dd>
@@ -985,11 +1029,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <button type="button" className="loop-btn" onClick={() => { void revokeApprovals().then(() => { setApprovalState(null); if (loop) void refreshApproval(loop.id); setNotice("Revoked every host Loop command approval."); }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : "The approvals could not be revoked.")); }}>Revoke command approvals</button>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.openMergeRequest} onChange={() => undefined} /> Open a merge request after a successful run (not ported)</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
-            <label className="loop-check"><input type="checkbox" disabled checked={loop.config.alwaysUseWorktree} onChange={() => undefined} /> Always run in an isolated worktree (not ported)</label>
+            <label className="loop-check"><input type="checkbox" checked={loop.config.alwaysUseWorktree} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
           </details>
           <details className="loop-advanced">
             <summary>Desktop limits (explicit)</summary>
-            <p className="loop-native-hint">Not ported yet: incident-triage execution, worktrees, merge-request shipping and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
+            <p className="loop-native-hint">Not ported yet: incident-triage execution, merge-request shipping and closed-window/background scheduling. These controls are disabled or marked above; a stage that needs them is refused rather than faked.</p>
           </details>
         </section>
 
