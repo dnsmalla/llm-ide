@@ -97,8 +97,9 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   const fit = useMemo(() => (items.length ? estimateFit(items.map((i) => ({ name: i.name, chars: i.kind === "paste" ? i.bytes : estimateChars(i.bytes) }))) : null), [items]);
   const title = store.surface === "visual" ? "Visual" : "Doc Gen";
   const busy = run.phase === "reading" || run.phase === "generating";
-  const hasShape = useChat || Boolean(s.templateId || s.command.trim());
-  const missing = !hasShape ? "Choose a template or write a command." : s.selection.size + (chatItem ? 1 : 0) === 0 ? "Select at least one source." : null;
+  const hasShape = chatItem !== null || Boolean(s.templateId || s.command.trim());
+  // With Use chat on and no reply yet, the chat is what the user is waiting on; the template hint would mislead.
+  const missing = !hasShape ? (useChat && !chatItem ? "Waiting for a chat reply." : "Choose a template or write a command.") : s.selection.size + (chatItem ? 1 : 0) === 0 ? "Select at least one source." : null;
 
   let body: ReactNode;
   if (s.setup === "no_project") {
@@ -189,9 +190,9 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
           </div>
           <div role="tabpanel" id="dg-out-pane" aria-labelledby={view === "result" ? "dg-out-result" : "dg-out-history"} className="dg-pane dg-center-pane">
             {view === "result" ? (
-              <ResultPanel surface={store.surface} run={run} externalDestination={p.externalDestination ?? null} onCancel={() => store.run.cancel()} onRetry={() => void store.generate()} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onExport={p.onExport ? (name, text) => void p.onExport!(name, text) : undefined} onOpenSaved={p.onOpenFile} onReveal={p.onReveal} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
+              <ResultPanel surface={store.surface} run={run} externalDestination={p.externalDestination ?? null} onCancel={() => store.run.cancel()} onRetry={() => void store.generate(chatItem ? [chatItem] : [])} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onExport={p.onExport ? (name, text) => void p.onExport!(name, text) : undefined} onOpenSaved={p.onOpenFile} onReveal={p.onReveal} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
             ) : (
-              <HistoryPanel fs={p.env.fs} version={run.saved?.hash ?? ""} active={p.active} onOpen={p.onOpenFile} initialViewport={p.initialViewport} />
+              <HistoryPanel fs={p.env.fs} dir={s.destination} version={run.saved?.hash ?? ""} active={p.active} onOpen={p.onOpenFile} initialViewport={p.initialViewport} />
             )}
           </div>
         </main>

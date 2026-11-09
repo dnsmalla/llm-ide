@@ -34,6 +34,15 @@ function bytesOf(v: unknown): Uint8Array {
   throw new Error("unexpected attach_read answer");
 }
 
+/** Runs a picker; a host failure becomes an error result the dialog can show, not an unhandled rejection. */
+export async function settlePick(pick: () => Promise<PickedTemplateFile>): Promise<PickedTemplateFile> {
+  try {
+    return await pick();
+  } catch {
+    return { kind: "error", message: "The file picker could not be opened." };
+  }
+}
+
 export async function pickTemplateFile(invoke: Invoke): Promise<PickedTemplateFile> {
   const picked = await invoke<{ files?: unknown; rejected?: unknown }>("attach_pick_files");
   const files = Array.isArray(picked?.files) ? picked.files.map(asHandle).filter((f): f is PickedHandle => f !== null) : [];

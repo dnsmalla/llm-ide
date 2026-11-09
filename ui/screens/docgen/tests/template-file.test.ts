@@ -2,7 +2,7 @@
 // UTF-8 text under the size cap is accepted. The fake host records every call so release is checked, not assumed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pickTemplateFile, TEMPLATE_FILE_MAX_BYTES } from "../template-file.ts";
+import { pickTemplateFile, settlePick, TEMPLATE_FILE_MAX_BYTES } from "../template-file.ts";
 
 type Call = { cmd: string; args?: Record<string, unknown> };
 
@@ -90,3 +90,11 @@ test("a rejected pick reports a plain message with no host reason code", async (
   const r = await pickTemplateFile(h.invoke);
   assert.deepEqual(r, { kind: "error", message: "That file could not be opened." });
 });
+
+test("M7: a picker that throws becomes an error result, not an unhandled rejection", async () => {
+  const out = await settlePick(async () => { throw new Error("attach_pick_files: host unavailable"); });
+  assert.equal(out.kind, "error");
+  assert.match(out.kind === "error" ? out.message : "", /could not be opened/);
+  assert.deepEqual(await settlePick(async () => ({ kind: "cancelled" })), { kind: "cancelled" });
+});
+

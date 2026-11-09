@@ -35,6 +35,16 @@ function OpenPath({ onOpen }: { onOpen: (path: string) => boolean }) {
   );
 }
 
+export function CancelledState({ onReload }: { onReload: () => void }) {
+  return (
+    <div className="gr-state" role="status">
+      <h2 className="gr-state-title">Loading was cancelled</h2>
+      <p className="gr-muted">The graph was not loaded.</p>
+      <button type="button" className="gr-btn gr-btn-primary" onClick={onReload}>Reload</button>
+    </div>
+  );
+}
+
 export function EmptyState({ mode }: { mode: "code" | "memory" | "all" }) {
   const title = mode === "code" ? "No code graph yet" : mode === "memory" ? "No InfiniteBrain graph yet" : "No graph yet";
   const message = mode === "code"

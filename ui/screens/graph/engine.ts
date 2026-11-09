@@ -100,7 +100,8 @@ export class LayoutEngine {
           const model = m.model ?? previewModel;
           if (!model) return finish({ kind: "error", message: "The layout worker returned no graph." });
           const entry: CacheEntry = { model, layout: m.layout, notices: m.notices };
-          this.cache.set(key, entry);
+          // NOTE: a fallback layout means the WASM kernel did not run; caching it would hide the kernel for the session.
+          if (m.layout.engine !== "fallback") this.cache.set(key, entry);
           finish({ kind: "done", entry, cached: false });
         }
       };

@@ -3,7 +3,7 @@
 import { useMemo, type ReactNode } from "react";
 import { FolderIcon, Icon } from "@llmide/ui-kit";
 import { fileKind, fileKindIcon } from "../explorer/file-kind.ts";
-import { buildPathTree, fileCount, type FileNode } from "./path-tree";
+import { buildPathTree, fileCount, totalGraphFiles, type FileNode } from "./path-tree";
 
 export interface GraphFileTreeProps {
   paths: readonly (string | null)[];
@@ -15,22 +15,26 @@ export interface GraphFileTreeProps {
 
 export function GraphFileTree({ paths, selected, onSelect, onClear }: GraphFileTreeProps): ReactNode {
   const root = useMemo(() => buildPathTree(paths), [paths]);
-  const count = useMemo(() => fileCount(root), [root]);
+  const shown = useMemo(() => fileCount(root), [root]);
+  const total = useMemo(() => totalGraphFiles(paths), [paths]);
   return (
     <section className="gr-tree" aria-label="Files in this graph">
       <div className="gr-tree-head">
         <span className="gr-tree-title">Files in this graph</span>
-        <span className="gr-muted">{count.toLocaleString("en-US")}</span>
+        <span className="gr-muted">{total.toLocaleString("en-US")}</span>
         {selected ? (
           <button type="button" className="gr-link" onClick={onClear}>Clear</button>
         ) : null}
       </div>
-      {count === 0 ? (
+      {shown === 0 ? (
         <p className="gr-muted">No file paths in this graph.</p>
       ) : (
-        <div className="gr-tree-body" role="tree" aria-label="Graph files">
-          {root.children.map((c) => <Node key={c.path} node={c} depth={0} selected={selected} onSelect={onSelect} />)}
-        </div>
+        <>
+          {total > shown ? <p className="gr-muted" role="status">Showing the first {shown.toLocaleString("en-US")} of {total.toLocaleString("en-US")} files, in alphabetical order.</p> : null}
+          <div className="gr-tree-body" role="tree" aria-label="Graph files">
+            {root.children.map((c) => <Node key={c.path} node={c} depth={0} selected={selected} onSelect={onSelect} />)}
+          </div>
+        </>
       )}
     </section>
   );

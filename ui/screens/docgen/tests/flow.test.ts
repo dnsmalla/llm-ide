@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { GenerationRun, REVISION_SOURCE_NAME, type RunDeps } from "../run.ts";
 import { collectSources, fileItem, noteItem, SourceSelection, sendOrder, MAX_PASTE_CHARS } from "../sources.ts";
 import { walkFolder } from "../project-files.ts";
-import { loadHistory } from "../history.ts";
+import { HISTORY_MAX, loadHistory } from "../history.ts";
 import { saveNewDocument, saveNewExternal, saveRevision, saveRevisionExternal } from "../save.ts";
 import { MAX_BODY_CHARS, MAX_SELECTED_SOURCES, MAX_SOURCE_CONTENT, type DocTemplate } from "../model.ts";
 import { controllableApi, FsErr, MemFs, okResult, readersFrom, tick } from "./fakes.ts";
@@ -312,3 +312,37 @@ test("a run with an external destination saves there and hides the project path"
   assert.equal(run.getSnapshot().saved?.path, "external:document-20261031.md");
   assert.deepEqual(saved, [["document-20261031.md", "body\n"]]);
 });
+
+test("history of a custom output folder lists that folder; above the cap the NEWEST documents are kept", async () => {
+  const total = HISTORY_MAX + 2500;
+  const entries = Array.from({ length: total }, (_, i) => ({ name: `d-${i}.md`, path: `out/d-${i}.md`, kind: "file" as const, symlink: false, hidden: false, ignored: false, size: 1, mtime_ms: i + 1 }));
+  // Listing order is oldest first, so a cap that keeps the first N in listing order would keep the oldest.
+  const fs = {
+    async list(path: string, o: { offset?: number; limit?: number } = {}) {
+      if (path !== "out") throw Object.assign(new Error("not found"), { code: "not_found" });
+      const offset = o.offset ?? 0;
+      const slice = entries.slice(offset, offset + (o.limit ?? 1000));
+      const end = offset + slice.length;
+      return { path, entries: slice, total, next_offset: end < total ? end : null, skipped: 0 };
+    },
+  };
+  const signal = new AbortController().signal;
+  const r = await loadHistory(fs, signal, undefined, "out");
+  assert.equal(r.missing, false);
+  assert.equal(r.capped, true);
+  assert.equal(r.items.length, HISTORY_MAX);
+  assert.equal(r.items[0]!.mtimeMs, total, "the newest document is first");
+  assert.equal(r.items[r.items.length - 1]!.mtimeMs, total - HISTORY_MAX + 1, "the oldest kept is the 50,000th newest");
+  const none = await loadHistory(fs, signal);
+  assert.equal(none.missing, true, "the default folder is llm-doc/generated, not the custom one");
+});
+
+test("M4: an image source is never sent; it is reported as unreadable and the model gets only the text sources", async () => {
+  const log: string[] = [];
+  const r = await collectSources([fileItem("pics/chart.png", 10), fileItem("a.md", 5)], readersFrom({ "pics/chart.png": "\u0089PNG", "a.md": "alpha" }, {}, log), new AbortController().signal);
+  assert.deepEqual(r.sources.map((x) => x.name), ["a.md"]);
+  assert.deepEqual(r.skipped, ["chart.png"]);
+  assert.deepEqual(r.skippedKeys, ["file:pics/chart.png"]);
+  assert.ok(!log.includes("file:pics/chart.png"), "the image is not even read as text");
+});
+

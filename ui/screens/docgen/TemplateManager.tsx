@@ -3,7 +3,7 @@
 import { useId, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { Failure } from "./errors.ts";
-import type { PickedTemplateFile } from "./template-file.ts";
+import { settlePick, type PickedTemplateFile } from "./template-file.ts";
 import { MAX_SECTIONS, type DocTemplate } from "./model.ts";
 
 export interface TemplateManagerProps {
@@ -49,7 +49,7 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
   const importFile = async () => {
     if (!pickFile) return;
     setFileError(null);
-    const r = await pickFile();
+    const r = await settlePick(pickFile);
     if (r.kind === "cancelled") return;
     if (r.kind === "error") { setFileError(r.message); return; }
     const t = parseMarkdownTemplate(r.text);

@@ -3,7 +3,7 @@
 import { describeFailure, isCancel, type Failure } from "./errors.ts";
 import { FOLDER_RE, folderForName, projectIdFor, type DocsApi } from "./docs-api.ts";
 import { templateImportText } from "./template-file.ts";
-import type { DocCommand, DocTemplate, Surface } from "./model.ts";
+import { CHAT_ONLY_COMMAND, type DocCommand, type DocTemplate, type Surface } from "./model.ts";
 import { GenerationRun, type RunDeps } from "./run.ts";
 import { SourceSelection, type SourceItem } from "./sources.ts";
 import { GENERATED_DIR, normalizeDestination } from "./naming.ts";
@@ -361,10 +361,15 @@ export class DocGenStore {
     }
   }
 
-  /** Start a generation from the current choice and selection. */
+  /**
+   * Start a generation from the current choice and selection. `extra` is the chat reply (the only extra source).
+   * A chat-only run has no template or command, so it sends CHAT_ONLY_COMMAND; the core would refuse it otherwise.
+   */
   generate(extra: readonly SourceItem[] = []): Promise<void> {
     const s = this.state;
-    return this.run.generate({ template: this.template, command: s.command, prompt: s.prompt }, [...s.selection.items(), ...extra]);
+    const chatOnly = extra.length > 0 && !this.template && s.command.trim() === "";
+    const command = chatOnly ? CHAT_ONLY_COMMAND : s.command;
+    return this.run.generate({ template: this.template, command, prompt: s.prompt }, [...s.selection.items(), ...extra]);
   }
 
   dispose(): void {

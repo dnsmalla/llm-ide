@@ -15,7 +15,6 @@ import { hostMermaidRuntime } from "./mermaid/binding.ts";
 import { createDocsApi } from "./docs-api.ts";
 import { fileReader } from "./fs-reader.ts";
 import { notesReader } from "./notes-source.ts";
-import { imageReader } from "./image-reader.ts";
 import { DocGenStore } from "./store.ts";
 import type { Surface } from "./model.ts";
 import { safeRelativePath } from "../shell/bus";
@@ -31,7 +30,7 @@ function storeFor(surface: Surface, fs: ReturnType<typeof createHostFs>, notes: 
     s = new DocGenStore({
       surface,
       makeApi: (id, root) => createDocsApi(core, id, root),
-      run: { readers: { file: fileReader(fs), note: notesReader(notes), image: imageReader((cmd, args) => invokeHost(cmd, args)) }, fs, destination: (() => { try { return localStorage.getItem("llmide.docgen.destination") ?? undefined; } catch { return undefined; } })() },
+      run: { readers: { file: fileReader(fs), note: notesReader(notes) }, fs, destination: (() => { try { return localStorage.getItem("llmide.docgen.destination") ?? undefined; } catch { return undefined; } })() },
     });
     stores.set(surface, s);
     if (surface === "doc") {

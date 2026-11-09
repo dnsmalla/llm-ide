@@ -8,6 +8,7 @@ import { estimateFit, formatBytes, MAX_SELECTED_SOURCES } from "./model.ts";
 import { filterNotes, loadNotes, type NotesIndexState } from "./notes-source.ts";
 import { looksTextual, MAX_SOURCE_FILE_BYTES, walkFolder, type WalkProgress } from "./project-files.ts";
 import { estimateChars, fileItem, isImageFile, noteItem, sendOrder, type SourceItem, type SourceSelection } from "./sources.ts";
+import { FolderListing } from "./folder-listing.ts";
 import type { NotesHost } from "../library/host.ts";
 import { VirtualList } from "./VirtualList";
 import { shrinkDataUrl } from "./thumbnail.ts";
@@ -133,6 +134,8 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
   const wasOpen = useRef(false);
   const [walkNote, setWalkNote] = useState<string | null>(null);
   const walkCtl = useRef<AbortController | null>(null);
+  // Pages of the folder on screen; a folder change aborts the pages of the previous one (see FolderListing).
+  const listing = useRef(new FolderListing());
   const fs = env.fs;
 
   const load = useCallback(
@@ -162,13 +165,12 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
     [fs],
   );
   useEffect(() => {
-    const ctl = new AbortController();
+    const signal = listing.current.switchTo();
     setRows([]);
     setNext(null);
-    load(dir, 0, ctl.signal);
-    return () => ctl.abort();
+    load(dir, 0, signal);
   }, [dir, load]);
-  useEffect(() => () => walkCtl.current?.abort(), []);
+  useEffect(() => () => { walkCtl.current?.abort(); listing.current.dispose(); }, []);
 
   if (!fs) return <p className="dg-muted">Project files need the desktop app.</p>;
 
@@ -322,9 +324,11 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
             );
           }
           const image = IMAGE_EXT.test(r.name);
-          const previewable = isImageFile(r.name);
+          // Same size limit as the preview strip (siblingImages): a larger image has no preview to open.
+          const previewable = isImageFile(r.name) && r.size <= MAX_THUMB_BYTES;
+          // Images can be previewed but not sent: the core reads every source as text (see readOne in sources.ts).
           const reason = image
-            ? surface !== "visual" ? "image (Visual only)" : r.size > MAX_THUMB_BYTES ? "image over 5 MB" : null
+            ? "image (not sent to the model)"
             : !looksTextual(r.name) ? "binary" : r.size > MAX_SOURCE_FILE_BYTES ? "too large" : null;
           const key = `file:${r.path}`;
           const checked = selection.has(key);
@@ -334,7 +338,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
               <span className="dg-name">{r.name}</span>
               <UnreadMark sourceKey={key} unreadable={unreadable} />
               <span className="dg-muted">{reason ?? formatBytes(r.size)}</span>
-              {previewable && reason === null && env.readImage ? (
+              {previewable && env.readImage ? (
                 <button type="button" className="dg-link" ref={(el) => { if (el) viewRefs.current.set(r.path, el); else viewRefs.current.delete(r.path); }} onClick={(e) => { e.preventDefault(); void openPreview(r.path); }}>View</button>
               ) : null}
             </label>
@@ -342,7 +346,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
         }}
       />
       {next !== null && (
-        <button type="button" className="dg-btn" disabled={loading} onClick={() => load(dir, next, new AbortController().signal)}>
+        <button type="button" className="dg-btn" disabled={loading} onClick={() => load(dir, next, listing.current.signal)}>
           Load more
         </button>
       )}

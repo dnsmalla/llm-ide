@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { GraphStore, type StoreDeps } from "../store.ts";
 import { classifyReadError, customGraphPath, graphCandidates, joinRoot, readProjectGraph, GRAPH_CANDIDATES } from "../source.ts";
 import type { JobOutcome } from "../engine.ts";
+import type { CacheEntry } from "../cache.ts";
 import { runJob } from "../layout-job.ts";
 import { loadWasmBytes } from "./wasm-helper.ts";
 
@@ -144,15 +145,84 @@ test("store: openPath validates before reading; a newer load wins over a slower 
   assert.ok(d.engine.cancels >= 1);
 });
 
-test("store.cancel during loading returns to idle without an entry", async () => {
+test("store.cancel during loading goes to cancelled (not a spinner), and a later load recovers", async () => {
   let release!: (v: string) => void;
-  const st = new GraphStore({ engine: deps({}).engine, invoke: () => new Promise<string>((r) => { release = r; }) });
+  let reads = 0;
+  const st = new GraphStore({ engine: deps({}).engine, invoke: () => (reads++ === 0 ? new Promise<string>((r) => { release = r; }) : Promise.resolve(GOOD)) });
   const p = st.load("/p");
   st.cancel();
+  assert.equal(st.getSnapshot().phase, "cancelled");
   release(GOOD);
   await p;
-  assert.equal(st.getSnapshot().phase, "idle");
+  assert.equal(st.getSnapshot().phase, "cancelled", "a late read does not overwrite the cancelled state");
+  await st.reload();
+  assert.equal(st.getSnapshot().phase, "ready");
 });
+
+test("store.refresh: unchanged file does no work; changed file keeps the graph and view state on screen", async () => {
+  let engineCalls = 0;
+  let text = GOOD;
+  let release!: () => void;
+  let preview = true;
+  const engine = {
+    cancel() {},
+    async load(t: string, _p?: unknown, onPreview?: (p: unknown) => void): Promise<JobOutcome> {
+      engineCalls++;
+      const r = await runJob(t, { loadWasm: loadWasmBytes });
+      const entry = { model: r.model, layout: r.layout, notices: r.notices };
+      if (preview) onPreview?.(entry);
+      await new Promise<void>((res) => { release = res; });
+      return { kind: "done", entry, cached: false };
+    },
+  };
+  const s = new GraphStore({ invoke: async () => text, engine: engine as never });
+  const first = s.load("/p");
+  await new Promise((res) => setTimeout(res, 5));
+  release();
+  await first;
+  s.select(1);
+  s.setFilters({ minWeight: 0.7 });
+  s.setQuery("a");
+  const before = s.getSnapshot();
+  await s.refresh("/p");
+  assert.equal(engineCalls, 1, "same bytes: the layout is not asked again");
+  assert.equal(s.getSnapshot(), before, "same bytes: no state change at all");
+
+  text = JSON.stringify({ files: [{ path: "a.ts", imports: ["b.ts"] }, { path: "b.ts" }, { path: "c.ts" }] });
+  preview = false;
+  const refreshing = s.refresh("/p");
+  await new Promise((res) => setTimeout(res, 5));
+  assert.equal(s.getSnapshot().phase, "ready", "the old graph stays on screen while the new one loads");
+  assert.equal(s.getSnapshot().entry?.model.n, 2, "the old graph is still the one on screen");
+  assert.equal(s.getSnapshot().filters.minWeight, 0.7, "view state is kept during a refresh");
+  assert.equal(s.getSnapshot().query, "a");
+  release();
+  await refreshing;
+  assert.equal(s.getSnapshot().entry?.model.n, 3);
+  assert.equal(s.getSnapshot().filters.minWeight, 0.7);
+  assert.equal(s.getSnapshot().query, "a");
+  assert.equal(s.getSnapshot().selected, -1, "a changed graph clears the selection");
+});
+
+test("store.refresh with nothing on screen is an ordinary load; a failed refresh keeps the graph and says so", async () => {
+  const s = new GraphStore(deps({ "/p/system/graph/graph.json": GOOD }));
+  await s.refresh("/p");
+  assert.equal(s.getSnapshot().phase, "ready", "no entry yet: the refresh loads it");
+  const d = deps({ "/p/system/graph/graph.json": GOOD });
+  let fail = false;
+  const invoke: StoreDeps["invoke"] = async (c, a) => {
+    if (fail) throw new Error("Permission denied (os error 13)");
+    return d.invoke(c, a);
+  };
+  const flaky = new GraphStore({ engine: d.engine, invoke });
+  await flaky.load("/p");
+  fail = true;
+  await flaky.refresh("/p");
+  assert.equal(flaky.getSnapshot().phase, "ready");
+  assert.equal(flaky.getSnapshot().entry?.model.n, 2, "the graph on screen is kept");
+  assert.match(flaky.getSnapshot().error ?? "", /could not be refreshed/);
+});
+
 
 test("store: a preview shows the graph at once (refining), the final layout replaces it and keeps the user's view state", async () => {
   const r = await runJob(GOOD, { loadWasm: loadWasmBytes });
@@ -218,4 +288,101 @@ test("revealNode unhides a searched kind and clears a community/preset filter", 
   assert.equal(store.getSnapshot().filters.hiddenKinds.has(kind), false);
   assert.equal(store.getSnapshot().filters.preset, "all");
   assert.equal(store.getSnapshot().filters.community, null);
+});
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+async function waitFor(cond: () => boolean): Promise<boolean> {
+  for (let i = 0; i < 400; i++) {
+    if (cond()) return true;
+    await sleep(5);
+  }
+  return false;
+}
+
+async function previewOf(text: string): Promise<CacheEntry> {
+  const r = await runJob(text, { loadWasm: loadWasmBytes });
+  return { model: r.model, layout: r.layout, notices: r.notices };
+}
+
+/** A layout that keeps running until the test finishes it, as the worker does; cancel() settles it as cancelled. */
+function gatedEngine() {
+  const state = { loads: 0, pending: null as ((o: JobOutcome) => void) | null, lastText: "" };
+  const engine = {
+    cancel(): void {
+      const settle = state.pending;
+      state.pending = null;
+      settle?.({ kind: "cancelled" });
+    },
+    async load(text: string, _progress?: unknown, onPreview?: (p: CacheEntry) => void): Promise<JobOutcome> {
+      state.loads++;
+      state.lastText = text;
+      onPreview?.(await previewOf(text));
+      return new Promise<JobOutcome>((settle) => { state.pending = settle; });
+    },
+  };
+  const finish = async (): Promise<void> => {
+    const settle = state.pending;
+    state.pending = null;
+    settle?.({ kind: "done", entry: await previewOf(state.lastText), cached: false });
+  };
+  return { engine, state, finish };
+}
+
+test("store.refresh with identical bytes during a refining preview runs the layout again instead of stranding refining", async () => {
+  const g = gatedEngine();
+  const s = new GraphStore({ invoke: async () => GOOD, engine: g.engine as never });
+  const first = s.load("/p");
+  assert.ok(await waitFor(() => g.state.pending !== null), "the preview layout is running");
+  assert.equal(s.getSnapshot().refining, true);
+  const refreshing = s.refresh("/p");
+  assert.ok(await waitFor(() => g.state.pending !== null && g.state.loads === 2), "the refresh started a fresh layout");
+  assert.equal(s.getSnapshot().refining, true);
+  await g.finish();
+  await Promise.all([first, refreshing]);
+  assert.equal(s.getSnapshot().refining, false, "the final layout clears refining");
+  assert.equal(s.getSnapshot().phase, "ready");
+  assert.equal(s.getSnapshot().error, null);
+});
+
+test("store.refresh with unchanged bytes clears the error a failed refresh left behind", async () => {
+  const d = deps({ "/p/system/graph/graph.json": GOOD });
+  let fail = false;
+  const invoke: StoreDeps["invoke"] = async (c, a) => {
+    if (fail) throw new Error("Permission denied (os error 13)");
+    return d.invoke(c, a);
+  };
+  const s = new GraphStore({ engine: d.engine, invoke });
+  await s.load("/p");
+  fail = true;
+  await s.refresh("/p");
+  assert.match(s.getSnapshot().error ?? "", /could not be refreshed/);
+  fail = false;
+  await s.refresh("/p");
+  assert.equal(s.getSnapshot().error, null, "the file reads again, so the stale error goes");
+  assert.equal(s.getSnapshot().phase, "ready");
+  assert.equal(s.getSnapshot().entry?.model.n, 2);
+});
+
+test("store.refresh that changes the graph drops a community the new layout lacks and hides symbol kinds it gained while Symbols is off", async () => {
+  const doc = (kinds: string[]) => JSON.stringify({
+    nodes: [{ id: "n0", kind: "file", title: "f" }, ...kinds.map((k, i) => ({ id: `k${i}`, kind: k, title: k }))],
+    edges: [],
+  });
+  let text = doc(["symbol"]);
+  const s = new GraphStore({ invoke: async () => text, engine: deps({}).engine as never });
+  await s.load("/p");
+  assert.equal(s.getSnapshot().filters.hiddenKinds.has("symbol"), true, "Symbols is off on open");
+  s.setFilters({ community: 50 });
+  text = doc(["symbol", "function"]);
+  await s.refresh("/p");
+  const f = s.getSnapshot().filters;
+  assert.equal(s.getSnapshot().entry?.model.n, 3);
+  assert.equal(f.community, null, "a community the new layout does not have is cleared");
+  assert.equal(f.hiddenKinds.has("function"), true, "a symbol kind the graph gained stays hidden while Symbols is off");
+  assert.equal(f.hiddenKinds.has("symbol"), true);
+
+  s.setFilters({ hiddenKinds: new Set() });
+  text = doc(["symbol", "function", "classType"]);
+  await s.refresh("/p");
+  assert.equal(s.getSnapshot().filters.hiddenKinds.has("classType"), false, "with Symbols on, a kind the graph gained shows");
 });

@@ -8,7 +8,7 @@ import { NodeDetails } from "./Details.tsx";
 import { GraphCanvas } from "./GraphCanvas.tsx";
 import { GraphFileTree } from "./FileTree.tsx";
 import { NodeList } from "./NodeList.tsx";
-import { EmptyState, ErrorState, LoadingState, NoProjectState, TooLargeState } from "./States.tsx";
+import { CancelledState, EmptyState, ErrorState, LoadingState, NoProjectState, TooLargeState } from "./States.tsx";
 import { FullPageGraph } from "./FullPage.tsx";
 import { buildAdjacency, communitySummary, countOnes, docSplit, isDocKind, nodeMask, setSymbolsShown, symbolKinds, symbolsShown } from "./filters.ts";
 import { DOC_LEGEND, kindColor } from "./colors.ts";
@@ -67,23 +67,23 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     setFatal(null);
     void store.load(projectRoot, graphCandidates(mode));
   }, [active, projectRoot, mode, store]);
-  // The host timer writes graph-code.json in the background. Stay subscribed while hidden, remember the
-  // refresh, and reload when this section becomes visible again (the shell keeps sections mounted).
+  // The host timer writes graph-code.json in the background (code mode only). Stay subscribed while hidden, remember
+  // the refresh, and refresh quietly when this section becomes visible again (the shell keeps sections mounted).
   useEffect(() => {
+    if (mode !== "code") return;
     let live = true;
     let un: (() => void) | null = null;
     void import("@tauri-apps/api/event").then(({ listen }) => listen("graph-auto-updated", () => {
       if (!activeRef.current) { staleWhileHidden.current = true; return; }
-      loadedFor.current = null;
-      void store.load(projectRoot, graphCandidates(mode));
+      void store.refresh(projectRoot, graphCandidates(mode));
     })).then((fn) => { if (live) un = fn; else fn(); }).catch(() => undefined);
     return () => { live = false; un?.(); };
   }, [projectRoot, mode, store]);
   useEffect(() => {
     if (!active || !staleWhileHidden.current) return;
     staleWhileHidden.current = false;
-    loadedFor.current = null;
-    void store.load(projectRoot, graphCandidates(mode));
+    if (mode !== "code") return;
+    void store.refresh(projectRoot, graphCandidates(mode));
   }, [active, projectRoot, mode, store]);
   useEffect(() => () => store.cancel(), [store]);
   useEffect(() => {
@@ -114,6 +114,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const wrap = (child: React.ReactNode) => <div className="gr-root" data-active={active}>{child}</div>;
   if (s.phase === "no-project") return wrap(<NoProjectState />);
   const reloadCurrent = () => store.load(projectRoot, graphCandidates(mode));
+  if (s.phase === "cancelled") return wrap(<CancelledState onReload={() => void reloadCurrent()} />);
   const runGeneration = (targetPath: string, modeOverride: "code" | "memory" | "all" = mode) => {
     if (!onGenerate || generating) return;
     cancelRequested.current = false;
@@ -176,16 +177,17 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     </div>
   );
 
-  if (s.phase === "empty") {
-    return wrap(
-      <div className="gr-empty-shell">
-        <aside className="gr-run-panel" aria-label="Graph generation">{quickPick}{runFooter}</aside>
-        <main className="gr-empty-main"><EmptyState mode={mode} /></main>
-      </div>,
-    );
-  }
-  if (s.phase === "too-large") return wrap(<TooLargeState onOpen={(p) => store.openPath(p)} />);
-  if (s.phase === "error" || !entry || !adj) return wrap(<ErrorState message={s.error ?? "Unknown error."} onRetry={() => void reloadCurrent()} />);
+  // Empty, too-large and error states keep the generate and mode controls: a corrupt or oversized graph is fixed by
+  // regenerating it, and "Try again" alone cannot do that.
+  const withRunPanel = (main: React.ReactNode) => wrap(
+    <div className="gr-empty-shell">
+      <aside className="gr-run-panel" aria-label="Graph generation">{quickPick}{runFooter}</aside>
+      <main className="gr-empty-main">{main}</main>
+    </div>,
+  );
+  if (s.phase === "empty") return withRunPanel(<EmptyState mode={mode} />);
+  if (s.phase === "too-large") return withRunPanel(<TooLargeState onOpen={(p) => store.openPath(p)} />);
+  if (s.phase === "error" || !entry || !adj) return withRunPanel(<ErrorState message={s.error ?? "Unknown error."} onRetry={() => void reloadCurrent()} />);
 
   const { model, layout } = entry;
   const sel = s.selected;

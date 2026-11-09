@@ -214,3 +214,25 @@ test("a timeout with an intermediate layout renders it with the approximate noti
   assert.equal(out.cached, false);
   assert.equal(ws[0].terminated, true);
 });
+
+test("a fallback layout is shown but not cached, so the next load retries the WASM kernel", async () => {
+  const ws: FakeWorker[] = [];
+  const eng = mk(ws);
+  const e = await entry();
+  const p1 = eng.load("F");
+  await tick();
+  const j1 = ws[0].sent[0].job;
+  ws[0].emit({ type: "done", job: j1, model: e.model, layout: { ...e.layout, engine: "fallback" }, notices: [] });
+  assert.equal((await p1).kind, "done");
+  const p2 = eng.load("F");
+  await tick();
+  assert.equal(ws.length, 2, "the second load runs a worker again instead of a cache hit");
+  const j2 = ws[1].sent[0].job;
+  ws[1].emit({ type: "done", job: j2, model: e.model, layout: e.layout, notices: [] });
+  const out = await p2;
+  assert.equal(out.kind === "done" && out.cached, false);
+  const third = await eng.load("F");
+  assert.equal(third.kind === "done" && third.cached, true, "a real layout is cached");
+  assert.equal(ws.length, 2);
+});
+

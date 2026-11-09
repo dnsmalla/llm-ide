@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DocGenStore, type StoreDeps } from "../store.ts";
 import { fileItem } from "../sources.ts";
-import { MAX_SELECTED_SOURCES, type DocCommand, type DocTemplate } from "../model.ts";
+import { CHAT_ONLY_COMMAND, MAX_SELECTED_SOURCES, type DocCommand, type DocTemplate, type GenerateBody } from "../model.ts";
 import { MemFs, readersFrom, okResult, tick } from "./fakes.ts";
 
 const t = (name: string, surface: "doc" | "visual" = "doc", project = true): DocTemplate => ({ id: `id-${name}`, name, sections: ["A"], rawContent: "", isBuiltin: false, folderName: name.toLowerCase(), isProjectTemplate: project, surface });
@@ -142,4 +142,28 @@ test("generate uses the chosen template, command, prompt and the selected source
   await d.store.run.save();
   assert.match(d.store.run.getSnapshot().saved!.path, /^llm-doc\/generated\/retro-\d{8}\.md$/);
   assert.ok(d.fs.files.has(d.store.run.getSnapshot().saved!.path));
+});
+
+test("a chat-only run (no template, no command) sends CHAT_ONLY_COMMAND, so the core does not refuse it", async () => {
+  const bodies: GenerateBody[] = [];
+  const api = {
+    async register() { return { id: "p1" }; },
+    async templates() { return { items: [], truncated: false }; },
+    async commands() { return { items: [], truncated: false }; },
+    async seed() { return { written: 0 }; },
+    async generate(body: GenerateBody) { bodies.push(body); return okResult("doc"); },
+  };
+  const deps: StoreDeps = { surface: "doc", makeApi: () => api as never, run: { readers: readersFrom({}), fs: new MemFs() }, idFor: async () => "p1" };
+  const store = new DocGenStore(deps);
+  await store.setProject("/p");
+  const chat = { key: "chat:latest", kind: "paste" as const, rel: "", name: "Latest chat reply", bytes: 5, text: "hello" };
+  await store.generate([chat]);
+  assert.equal(store.run.getSnapshot().phase, "done");
+  assert.equal(bodies[0]!.command, CHAT_ONLY_COMMAND);
+  assert.equal(bodies[0]!.templateName, undefined);
+  assert.equal(bodies[0]!.sources.length, 1);
+  // A saved command or a template is still sent as chosen: the default only fills an empty shape.
+  store.setCommandText("Summarize briefly");
+  await store.generate([chat]);
+  assert.equal(bodies[1]!.command, "Summarize briefly");
 });

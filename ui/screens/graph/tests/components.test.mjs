@@ -142,6 +142,28 @@ test("screen states by phase: empty, no project, too large, error, loading", asy
   assert.match(render(mk(async () => "")), /Loading the code graph/);
 });
 
+test("a cancelled load offers Reload instead of a spinner; too-large and error keep the generate controls", async () => {
+  const mk = (invoke) => new G.GraphStore({ invoke, engine: { cancel() {}, async load() { return { kind: "error", message: "unused" }; } } });
+  const render = (store) => html(h(G.GraphScreen, { store, active: true, projectRoot: "/p", openFile: noop, onGenerate: async () => {} }));
+  const pending = mk(() => new Promise(() => {}));
+  void pending.load("/p");
+  pending.cancel();
+  const cancelled = render(pending);
+  assert.match(cancelled, /Loading was cancelled/);
+  assert.match(cancelled, />Reload</);
+  assert.doesNotMatch(cancelled, /Working/);
+  const t = mk(async () => { throw new Error("graph.json is not a regular file within the size limit"); }); await t.load("/p");
+  const tooLarge = render(t);
+  assert.match(tooLarge, /32 MB limit/);
+  assert.match(tooLarge, /Generate Code Graph/, "a too-large graph can be regenerated from here");
+  assert.match(tooLarge, /Open graph\.json/);
+  const bad = mk(async () => "{}"); await bad.load("/p");
+  const broken = render(bad);
+  assert.match(broken, /could not be shown/);
+  assert.match(broken, /Generate Code Graph/, "a corrupt graph can be regenerated from here");
+  assert.match(broken, /Try again/);
+});
+
 test("fallback layout is announced in the screen", async () => {
   const store = await ready(60);
   const entry = store.getSnapshot().entry;

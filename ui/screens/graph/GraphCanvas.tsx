@@ -70,6 +70,11 @@ export function GraphCanvas(p: GraphCanvasProps) {
       view.current = v;
       setBuilding(false);
       v?.update(latest.current.filters, latest.current.selected, latest.current.focused);
+    }).catch((e: unknown) => {
+      // A failed build must not leave the building overlay up forever; the Nodes tab still works.
+      if (cancelled) return;
+      setBuilding(false);
+      p.onFatal(e instanceof Error ? e.message : "The graph could not be drawn.");
     });
     return () => {
       cancelled = true;

@@ -17,6 +17,8 @@ export const MAX_SECTIONS = 30;
 export const MAX_BODY_CHARS = 5_000_000;
 /** Selection cap in the UI (ids only, no content): a guard against a runaway "select all". */
 export const MAX_SELECTED_SOURCES = 5_000;
+/** The command a chat-only run sends: the core rejects a request with neither a template nor a command. */
+export const CHAT_ONLY_COMMAND = "Write a document from the sources and the request.";
 
 export type Surface = "doc" | "visual";
 

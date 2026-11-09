@@ -55,6 +55,21 @@ export function setSymbolsShown(model: GraphModel, f: FilterState, on: boolean):
   return next;
 }
 
+/** Filters carried from the graph on screen (`prev`) to a refreshed one. A community the new layout does not have is
+ *  cleared, or the canvas would be empty. A kind the new graph gained is hidden when "Symbols" was off on the old one,
+ *  the same rule `defaultFilters` applies on open. */
+export function carryFilters(prev: GraphModel | null, f: FilterState, next: GraphModel, layout: LayoutResult): FilterState {
+  const communities = new Set(communitySummary(next, layout, Infinity).map((c) => c.id));
+  const community = f.community !== null && !communities.has(f.community) ? null : f.community;
+  let hiddenKinds = f.hiddenKinds;
+  if (prev && !symbolsShown(prev, f)) {
+    const known = new Set(prev.nodeKinds);
+    const fresh = symbolKinds(next).filter((k) => !known.has(k));
+    if (fresh.length > 0) hiddenKinds = new Set([...f.hiddenKinds, ...fresh]);
+  }
+  return { ...f, community, hiddenKinds };
+}
+
 /** InfiniteBrain (doc) kinds, the same set the Mac counts as "doc" in its code / doc split. */
 export const isDocKind = (kind: string): boolean => kind.startsWith("note") || kind === "memoryDoc" || kind === "memoryChunk" || kind === "docPage";
 
