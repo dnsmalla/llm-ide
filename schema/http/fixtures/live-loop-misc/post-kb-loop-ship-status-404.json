@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/loop/ship-status",
+  "status": 404,
+  "description": "Answers 404 feature_disabled when the core runs with auto_tasks off.",
+  "request": {
+    "body": {
+      "requests": [
+        {
+          "url": "https://github.com/o/r/pull/8",
+          "since": null
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": "feature_disabled",
+    "feature": "auto_tasks"
+  }
+}

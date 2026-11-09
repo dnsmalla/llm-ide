@@ -6374,6 +6374,40 @@ export type PostKbArchiveReceiptsResponse200 = {
 
 export type PostKbArchiveReceiptsResponse400 = CommonError;
 
+/** Request parts for `POST /kb/loop/ship-status` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLoopShipStatusRequest = {
+  body: {
+    /** At most 20; more is 400 VALIDATION_FAILED */
+    requests: ({
+      /** A github.com pull request or gitlab.com merge request web URL (at most 500 characters) */
+      url: string;
+      /** ISO date; only comments created after it are returned (null = all) */
+      since?: string | null;
+    })[];
+  };
+};
+
+/** One result per request, in order: a ShipStatus, or { url, error } when the URL is unsupported or the provider failed (no provider text, never a token). */
+export type PostKbLoopShipStatusResponse200 = {
+  results: ({
+    url: string;
+    error?: "provider_error" | "unauthorized" | "unsupported_url";
+    state?: "open" | "merged" | "closed";
+    ci?: "none" | "pending" | "success" | "failed";
+    ciSummary?: string | null;
+    /** Untrusted text: newest 20 comments after `since`, each body at most 4,000 characters */
+    comments?: {
+      author: string;
+      body: string;
+      at: string;
+    }[];
+  })[];
+};
+
+export type PostKbLoopShipStatusResponse400 = CommonError;
+
+export type PostKbLoopShipStatusResponse404 = FeatureDisabled;
+
 /** Request parts for `POST /kb/loop/agent-run` (schema/http/live-loop-misc.schema.json). */
 export type PostKbLoopAgentRunRequest = {
   body: {
@@ -10838,6 +10872,14 @@ export interface ApiEndpoints {
     responses: {
       200: PostKbArchiveReceiptsResponse200;
       400: PostKbArchiveReceiptsResponse400;
+    };
+  };
+  "POST /kb/loop/ship-status": {
+    request: PostKbLoopShipStatusRequest;
+    responses: {
+      200: PostKbLoopShipStatusResponse200;
+      400: PostKbLoopShipStatusResponse400;
+      404: PostKbLoopShipStatusResponse404;
     };
   };
   "POST /kb/loop/agent-run": {

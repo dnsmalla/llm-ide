@@ -22,6 +22,7 @@
 //   handleLoopAgentRoutes(req, res, { userId }, deps) → Promise<boolean>
 // `deps` ({ runAgent, validateRoot }) is the tests' seam for the engine.
 // Also POST /kb/loop/ship (handleLoopShip below): commit, scan, push and a draft PR/MR for a Factory worktree.
+// Also POST /kb/loop/ship-status: the Factory board's PR/MR status read (agents/factory-status.mjs).
 
 import { randomUUID } from 'node:crypto';
 // constants.mjs, not engine.mjs: a route must not load the chat engine for one string.
@@ -37,11 +38,12 @@ import { isPluginUpdating } from '../plugins/claude-update.mjs';
 import { authorizeAction, enforceRouteAuthority, hubFolderRefusal, projectScopeRefusal } from '../server/route-authority.mjs';
 import { projectIdForFolder } from '../kb/projects.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
-import { getSecret } from '../server/vault.mjs';
+import { getSecret, makeSecretReader } from '../server/vault.mjs';
 import { createDraftPr, assertSafeBaseBranch } from '../agents/github-pr.mjs';
 import {
   commitAndPush, createDraftMr, findOpenRequest, neutraliseMentions, parseShipBody, scanShipText, isFactoryWorktree, isProviderWebUrl, originMatchesRepo,
 } from '../agents/factory-ship.mjs';
+import { pollRequest, MAX_SHIP_STATUS_REQUESTS } from '../agents/factory-status.mjs';
 
 const MAX_SKILL_IDS = 5;
 // "custom:" + a 100-char id (server/tier-routing.mjs's provider shape) fits.
@@ -120,10 +122,47 @@ function loadLoopEngine() {
   return loopEnginePromise;
 }
 
+const SHIP_STATUS_ERRORS = new Set(['provider_error', 'unauthorized', 'unsupported_url']);
+const MAX_SHIP_STATUS_URL_CHARS = 500;
+
+// POST /kb/loop/ship-status { requests: [{ url, since }] } → { results }, one entry per request, in order.
+// The Factory board's PR/MR status read (agents/factory-status.mjs). The vault tokens are used, never returned;
+// a failure answers only its code, so no provider text or token reaches the client.
+async function handleShipStatus(req, res, userId) {
+  const body = parseJSON(await readBody(req, 64 * 1024));
+  if (!body || typeof body !== 'object' || !Array.isArray(body.requests)) return validationError(res, 'requests must be an array');
+  if (body.requests.length > MAX_SHIP_STATUS_REQUESTS) {
+    return validationError(res, `requests must hold at most ${MAX_SHIP_STATUS_REQUESTS} entries`);
+  }
+  for (const r of body.requests) {
+    if (!r || typeof r !== 'object' || typeof r.url !== 'string' || !r.url || r.url.length > MAX_SHIP_STATUS_URL_CHARS) {
+      return validationError(res, `each request needs a url of at most ${MAX_SHIP_STATUS_URL_CHARS} characters`);
+    }
+    if (r.since != null && (typeof r.since !== 'string' || !Number.isFinite(Date.parse(r.since)))) {
+      return validationError(res, 'since must be an ISO date string or null');
+    }
+  }
+  const secret = makeSecretReader(getDb(), userId);
+  const creds = { github: { token: secret('github.token') || undefined }, gitlab: { token: secret('gitlab.token') || undefined } };
+  const results = [];
+  // One request at a time: at most 20 PRs/MRs, and each one already runs its provider calls in parallel.
+  for (const r of body.requests) {
+    try {
+      results.push(await pollRequest(r.url, { since: r.since ?? null, creds }));
+    } catch (err) {
+      results.push({ url: r.url, error: SHIP_STATUS_ERRORS.has(err?.code) ? err.code : 'provider_error' });
+    }
+  }
+  sendJSON(res, 200, { results });
+  return true;
+}
+
 export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}) {
   const sdkUpdating = deps.isSdkUpdating ?? isSdkUpdating;
   const pluginUpdating = deps.isPluginUpdating ?? isPluginUpdating;
   if (req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/ship') return handleLoopShip(req, res, { userId }, deps);
+  const routePath = (req.url || '').split('?')[0];
+  if (req.method === 'POST' && routePath === '/kb/loop/ship-status') return handleShipStatus(req, res, userId);
   if (!(req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/agent-run')) return false;
 
   const body = parseJSON(await readBody(req, 2 * 1024 * 1024));
