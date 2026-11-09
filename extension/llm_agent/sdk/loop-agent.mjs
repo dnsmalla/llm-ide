@@ -271,13 +271,46 @@ export function withSecretExclusions(input) {
   return { ...(input || {}), glob: [own, ...LOOP_GREP_SECRET_EXCLUSIONS].filter(Boolean).join(' ') };
 }
 
+// The real path a write would land on: the nearest EXISTING ancestor's realpath plus the
+// part that does not exist yet (the same walk as tools/gates.mjs writePathGate), so a
+// symlink anywhere in the existing part is followed. null when it cannot be resolved.
+function resolveWriteTarget(filePath, base) {
+  if (typeof filePath !== 'string' || !filePath) return null;
+  const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(base, filePath);
+  let existing = abs;
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) return null;
+    existing = parent;
+  }
+  try {
+    const real = fs.realpathSync(existing);
+    const suffix = path.relative(existing, abs);
+    return suffix ? path.join(real, suffix) : real;
+  } catch {
+    return null;
+  }
+}
+
+// True when `filePath` lands strictly inside `<root>/<writeScope>/` (the scope directory
+// itself is not a file to write).
+function insideWriteScope(filePath, root, writeScope) {
+  let realRoot;
+  try { realRoot = fs.realpathSync(root); } catch { return false; }
+  const target = resolveWriteTarget(filePath, realRoot);
+  if (!target) return false;
+  const rel = path.relative(path.join(realRoot, writeScope), target);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 /**
  * Why `toolName(input)` may not run in a run confined to `roots` (the repo
  * root first, then any accepted extra roots; a single string is accepted),
  * or null when it may. The single confinement rule both the PreToolUse hook
- * and canUseTool apply.
+ * and canUseTool apply. `writeScope` (e.g. ".factory"): Edit/Write only under
+ * `<roots[0]>/<writeScope>/`; reads are unchanged.
  */
-export function loopToolRefusal(toolName, input, roots, { readOnly = false } = {}) {
+export function loopToolRefusal(toolName, input, roots, { readOnly = false, writeScope = null } = {}) {
   const allowed = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
   const where = allowed.join(', ');
   if (!LOOP_AGENT_TOOL_SET.has(toolName)) {
@@ -292,6 +325,10 @@ export function loopToolRefusal(toolName, input, roots, { readOnly = false } = {
   if (toolName === 'Read' || WRITE_TOOLS.has(toolName)) {
     if (!inside(input?.file_path)) {
       return `${toolName} refused: ${String(input?.file_path ?? '(no path)')} is outside the Loop's repository ${where} (or is a protected secret path).`;
+    }
+    // A scoped run (Factory Intake / Review) may write only its own reports under <git root>/<writeScope>/.
+    if (writeScope && WRITE_TOOLS.has(toolName) && !insideWriteScope(input?.file_path, allowed[0], writeScope)) {
+      return `${toolName} refused: this run may write only under ${writeScope}/ (${String(input?.file_path ?? '(no path)')} is outside it).`;
     }
     return null;
   }
@@ -508,7 +545,7 @@ const sdkQueryFactory = (prompt, options) => {
 export async function runLoopAgent(
   {
     message, skills, root, extraRoots = [], userId, language, model, provider, abortController,
-    authorityCheck = null, allowAmbientAuth = false, queryFactory = sdkQueryFactory, readOnly = false,
+    authorityCheck = null, allowAmbientAuth = false, queryFactory = sdkQueryFactory, readOnly = false, writeScope = null,
   } = {},
   { readSkill = readSkillInstructions } = {},
 ) {
@@ -585,7 +622,7 @@ export async function runLoopAgent(
   };
 
   const preToolUse = async (input) => {
-    const reason = loopToolRefusal(input?.tool_name, input?.tool_input, roots, { readOnly });
+    const reason = loopToolRefusal(input?.tool_name, input?.tool_input, roots, { readOnly, writeScope });
     // Refused calls never count as repeats (only on the error streak).
     const verdict = reason ? { action: 'ok' } : progress.onCall(input?.tool_name, input?.tool_input);
     if (verdict.action !== 'ok') {
@@ -644,7 +681,7 @@ export async function runLoopAgent(
       try { stepAc.abort(); } catch { /* already stopping */ }
       return { behavior: 'deny', message: current.message || 'Your team or project access changed; this run was stopped.' };
     }
-    const reason = loopToolRefusal(toolName, input, roots, { readOnly });
+    const reason = loopToolRefusal(toolName, input, roots, { readOnly, writeScope });
     if (reason) {
       refuse(toolName, reason);
       return { behavior: 'deny', message: reason };

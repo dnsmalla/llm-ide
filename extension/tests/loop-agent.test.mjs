@@ -1292,3 +1292,101 @@ test('route: a gateway step is metered under the provider that ran, not anthropi
     assert.deepEqual(rows, [{ provider: gateway, model: 'glm-4.6' }]);
   } finally { syncCustomProviders([], u.id); }
 });
+
+// --- .factory write scope (Software Factory Phase A Task 6) ------------------------
+
+const SCOPED = path.join(SANDBOX, 'scoped');
+fs.mkdirSync(path.join(SCOPED, '.factory'), { recursive: true });
+fs.mkdirSync(path.join(SCOPED, 'src'), { recursive: true });
+fs.writeFileSync(path.join(SCOPED, 'src', 'a.ts'), 'x\n');
+// A symlink INSIDE .factory pointing back out of it (still inside the repo).
+fs.symlinkSync(path.join(SCOPED, 'src'), path.join(SCOPED, '.factory', 'link'));
+const FACTORY = { writeScope: '.factory' };
+
+test('writeScope allows Write inside .factory', () => {
+  assert.equal(loopToolRefusal('Write', { file_path: path.join(SCOPED, '.factory', 'TASK.md') }, SCOPED, FACTORY), null);
+  assert.equal(loopToolRefusal('Edit', { file_path: path.join(SCOPED, '.factory', 'nested', 'PLAN.md') }, SCOPED, FACTORY), null);
+  assert.equal(loopToolRefusal('Write', { file_path: '.factory/REVIEW.md' }, SCOPED, FACTORY), null, 'relative to the first root');
+  assert.equal(loopToolRefusal('Write', { file_path: path.join(REPO, '.factory', 'READINESS.md') }, REPO, FACTORY), null,
+    '.factory does not have to exist yet');
+});
+
+test('writeScope refuses Edit outside .factory', () => {
+  const reason = loopToolRefusal('Edit', { file_path: path.join(SCOPED, 'src', 'a.ts') }, SCOPED, FACTORY);
+  assert.ok(reason, 'an edit outside the scope is refused');
+  assert.match(reason, /\.factory\//, 'the refusal names the scope');
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(SCOPED, 'README.md') }, SCOPED, FACTORY));
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(SCOPED, '.factory') }, SCOPED, FACTORY), 'the scope directory itself');
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(SCOPED, '.factory-other', 'x.md') }, SCOPED, FACTORY),
+    'a sibling that only shares the prefix');
+  // Reads and searches are unchanged by the scope.
+  assert.equal(loopToolRefusal('Read', { file_path: path.join(SCOPED, 'src', 'a.ts') }, SCOPED, FACTORY), null);
+  assert.equal(loopToolRefusal('Grep', { pattern: 'x' }, SCOPED, FACTORY), null);
+  assert.equal(loopToolRefusal('Glob', { pattern: 'src/**' }, SCOPED, FACTORY), null);
+  // Without a scope nothing changes.
+  assert.equal(loopToolRefusal('Edit', { file_path: path.join(SCOPED, 'src', 'a.ts') }, SCOPED), null);
+});
+
+test('writeScope refuses a ../ escape from .factory', () => {
+  // Template strings on purpose: path.join would normalise the `..` away before the call.
+  assert.ok(loopToolRefusal('Write', { file_path: `${SCOPED}/.factory/../src/a.ts` }, SCOPED, FACTORY), 'absolute .. climbs out');
+  assert.ok(loopToolRefusal('Write', { file_path: '.factory/../src/b.ts' }, SCOPED, FACTORY), 'relative .. climbs out');
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(SCOPED, '.factory', 'link', 'a.ts') }, SCOPED, FACTORY),
+    'a symlink inside .factory that points out of it');
+  assert.ok(loopToolRefusal('Write', { file_path: `${SCOPED}/.factory/../../outside/x` }, SCOPED, FACTORY), 'out of the repo too');
+});
+
+test('runLoopAgent writeScope: a Write under .factory lands, a Write elsewhere is refused and does not land', () => withKey(async () => {
+  const root = path.join(SANDBOX, 'scoped-run');
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  const inside = path.join(root, '.factory', 'PLAN.md');
+  const outside = path.join(root, 'src', 'b.ts');
+  const capture = {};
+  const out = await runLoopAgent({
+    message: 'plan', root, userId: user.id, writeScope: '.factory',
+    queryFactory: toolPlayingQuery(capture, [
+      { tool: 'Write', input: { file_path: inside, content: '# plan\n' }, run: (i) => { fs.mkdirSync(path.dirname(i.file_path), { recursive: true }); write(i); } },
+      { tool: 'Write', input: { file_path: outside, content: 'x' }, run: write },
+    ]),
+  }, noSkill);
+  assert.deepEqual(capture.verdicts.map((v) => v.allowed), [true, false]);
+  assert.equal(fs.readFileSync(inside, 'utf8'), '# plan\n');
+  assert.equal(fs.existsSync(outside), false);
+  assert.deepEqual(out.changedPaths, ['.factory/PLAN.md']);
+  assert.match(out.denied[0].reason, /\.factory\//);
+}));
+
+test('route rejects an unknown writeScope with 400', async () => {
+  for (const writeScope of ['src', '.factory/', '../.factory', '', 5, ['.factory']]) {
+    let ran = false;
+    const res = makeRes();
+    await handleLoopAgentRoutes(
+      makeReq({ body: { message: 'x', repoRoot: REPO, writeScope }, user }), res, { userId: user.id },
+      { runAgent: async () => { ran = true; return {}; } },
+    );
+    assert.equal(res.statusCode, 400, JSON.stringify(writeScope));
+    assert.equal(res.json().error.code, 'invalid_write_scope');
+    assert.equal(ran, false, 'nothing runs');
+  }
+});
+
+test('route passes writeScope ".factory" to the engine, and nothing when absent', async () => {
+  const fakeOut = {
+    reply: '', changedPaths: [], changedExtraPaths: [], createdPaths: [],
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, numTurns: 0 },
+    byModel: [], resolvedSkills: [], unresolvedSkills: [], truncatedSkills: [], ran: true,
+    resultSubtype: 'success', denied: [], toolEvents: [],
+  };
+  for (const [body, want] of [
+    [{ message: 'x', repoRoot: REPO, writeScope: '.factory' }, '.factory'],
+    [{ message: 'x', repoRoot: REPO }, undefined],
+  ]) {
+    let seen = null;
+    const res = makeRes();
+    await handleLoopAgentRoutes(makeReq({ body, user }), res, { userId: user.id }, {
+      runAgent: async (args) => { seen = args; return fakeOut; },
+    });
+    assert.equal(res.statusCode, 200, res._body);
+    assert.equal(seen.writeScope, want);
+  }
+});
