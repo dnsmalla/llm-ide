@@ -1,5 +1,6 @@
 // Deterministic artifact checks (LoopStage.Kind.artifactCheck). This port covers required paths, sibling-stage
-// Outputs, line caps, directory globs and section rules. Citation resolution is deliberately refused instead of
+// Outputs, line caps, directory globs, section rules and the verdict rule (one explicit file must hold one exact line).
+// Citation resolution is deliberately refused instead of
 // passing a check it did not perform.
 import type { FsApi } from "../../explorer/fs";
 import type { LoopStage } from "./model.ts";
@@ -71,6 +72,29 @@ async function lineCount(fs: ArtifactFs, path: string): Promise<number> {
   return r.text === null ? 0 : r.text.split("\n").length;
 }
 
+/**
+ * The `verdict` rule: read ONE explicit file and require one exact line. Unlike `expand()`, a dot-folder path such as
+ * `.factory/READINESS.md` is read, and a missing file or line fails, so a stage that never wrote its report cannot pass.
+ * `verdict` comes from loop.json, which the webview can write, so its shape and path are checked here.
+ */
+async function verdictFailures(fs: ArtifactFs, verdict: unknown, prefix: string): Promise<string[]> {
+  const v = typeof verdict === "object" && verdict !== null ? (verdict as { path?: unknown; line?: unknown }) : {};
+  if (typeof v.path !== "string" || typeof v.line !== "string" || !v.path.trim() || !v.line.trim()) return ["verdict check needs a path and a line"];
+  const path = trimPath(v.path);
+  if (path.startsWith("/") || path.split("/").includes("..")) return [`verdict path must stay inside the run root: ${v.path}`];
+  const want = v.line.trim();
+  let text: string | null = null;
+  try {
+    const r = await fs.read(`${prefix}${path}`, 8_000_000);
+    text = r.status === "ok" ? r.text : null;
+  } catch {
+    text = null;
+  }
+  if (text === null) return [`verdict file missing: ${path}`];
+  if (!text.split("\n").some((l) => l.trim() === want)) return [`verdict line missing: "${want}" in ${path}`];
+  return [];
+}
+
 export interface ArtifactRoots { repoPrefix: string; projectPrefix: string }
 export interface ArtifactResult { passed: boolean; failures: string[] }
 
@@ -109,6 +133,7 @@ export async function evaluateArtifact(fs: ArtifactFs, check: ArtifactCheck, sta
     const fallback = `${roots.projectPrefix ? `${roots.projectPrefix}/` : ""}${p}`;
     if (!(await exists(fs, rel)) && !(check.projectRootFallback && await exists(fs, fallback))) failures.push(`missing: ${p}`);
   }
+  if (check.verdict !== undefined) failures.push(...(await verdictFailures(fs, check.verdict, prefix)));
   for (const limit of limits) {
     const files = await expand(fs, roots.repoPrefix || ".", limit.glob);
     if (check.projectRootFallback && roots.projectPrefix !== roots.repoPrefix) {

@@ -51,3 +51,42 @@ test("projectRootFallback checks the project root when the repo path misses", as
   const noFallback = await evaluateArtifact(fs, { requiredPaths: ["llm-doc/plan.md"] }, [], { repoPrefix: "code/repo", projectPrefix: "" });
   assert.equal(noFallback.passed, false);
 });
+
+const VERDICT = { verdict: { path: ".factory/READINESS.md", line: "Verdict: ready" } };
+const ROOTS = { repoPrefix: "", projectPrefix: "" };
+
+test("verdict passes when the exact line is present", async () => {
+  const r = await evaluateArtifact(mem({ ".factory/READINESS.md": "## Result\nVerdict: ready\n" }), VERDICT, [], ROOTS);
+  assert.deepEqual(r, { passed: true, failures: [] });
+});
+
+test("verdict fails when the line differs", async () => {
+  const r = await evaluateArtifact(mem({ ".factory/READINESS.md": "## Result\nVerdict: needs-decision\n" }), VERDICT, [], ROOTS);
+  assert.equal(r.passed, false);
+  assert.deepEqual(r.failures, ['verdict line missing: "Verdict: ready" in .factory/READINESS.md']);
+});
+
+test("verdict fails when the file is missing", async () => {
+  const r = await evaluateArtifact(mem({}), VERDICT, [], ROOTS);
+  assert.equal(r.passed, false);
+  assert.deepEqual(r.failures, ["verdict file missing: .factory/READINESS.md"]);
+});
+
+test("verdict reads a dot-folder path under the run root prefix", async () => {
+  const fs = mem({ "system/loop-worktrees/r1/.factory/READINESS.md": "Verdict: ready\n" });
+  const r = await evaluateArtifact(fs, VERDICT, [], { repoPrefix: "system/loop-worktrees/r1", projectPrefix: "" });
+  assert.equal(r.passed, true, r.failures.join("\n"));
+});
+
+test("verdict needs the line on its own, not decorated", async () => {
+  const r = await evaluateArtifact(mem({ ".factory/READINESS.md": "**Verdict: ready**\n- Verdict: ready\n" }), VERDICT, [], ROOTS);
+  assert.equal(r.passed, false);
+});
+
+test("a malformed or escaping verdict check fails instead of passing", async () => {
+  const fs = mem({ ".factory/READINESS.md": "Verdict: ready\n", "secret.md": "Verdict: ready\n" });
+  const noLine = await evaluateArtifact(fs, { verdict: { path: ".factory/READINESS.md" } }, [], ROOTS);
+  assert.deepEqual(noLine.failures, ["verdict check needs a path and a line"]);
+  const escape = await evaluateArtifact(fs, { verdict: { path: "../secret.md", line: "Verdict: ready" } }, [], { repoPrefix: "code/app", projectPrefix: "" });
+  assert.deepEqual(escape.failures, ["verdict path must stay inside the run root: ../secret.md"]);
+});
