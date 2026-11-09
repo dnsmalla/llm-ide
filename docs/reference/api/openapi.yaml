@@ -19611,6 +19611,20 @@ components:
         hub:
           type: "boolean"
           description: "true when this core is a hub (LLMIDE_HUB=1); additive"
+        busy:
+          type: "object"
+          description: "Live work counts only (R-034 #17); no ids or content. Additive, so an older hub omits it."
+          required:
+            - "chatTurns"
+            - "loopRuns"
+            - "total"
+          properties:
+            chatTurns:
+              type: "integer"
+            loopRuns:
+              type: "integer"
+            total:
+              type: "integer"
         schemaVersion:
           type: "integer"
           description: "current migration number"
