@@ -1411,3 +1411,38 @@ test('C1: a symlink leaf (dangling or to an outside file) is refused for Edit/Wr
   // A regular file in the scope still works.
   assert.equal(loopToolRefusal('Write', { file_path: path.join(repo, '.factory', 'READINESS.md') }, [repo], { writeScope: '.factory' }), null);
 });
+
+test('C1b-1: a trailing separator cannot hide a symlink leaf (absolute and relative, scoped and unscoped)', () => {
+  const repo = path.join(SANDBOX, 'slashleaf');
+  fs.mkdirSync(path.join(repo, '.factory'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+  const dangling = path.join(SANDBOX, 'slash-outside.md');
+  fs.symlinkSync(dangling, path.join(repo, '.factory', 'PLAN.md'));
+  fs.symlinkSync(dangling, path.join(repo, 'src', 'doc.md'));
+  const forms = [path.join(repo, '.factory', 'PLAN.md') + '/', '.factory/PLAN.md/', '.factory/PLAN.md//'];
+  for (const file_path of forms) {
+    for (const tool of ['Write', 'Edit']) {
+      assert.ok(loopToolRefusal(tool, { file_path }, [repo], { writeScope: '.factory' }), `scoped ${tool} ${file_path}`);
+      assert.ok(loopToolRefusal(tool, { file_path }, [repo]), `unscoped ${tool} ${file_path}`);
+    }
+  }
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(repo, 'src', 'doc.md') + '/' }, [repo]), 'tracked dangling link, unscoped');
+  assert.equal(fs.existsSync(dangling), false, 'nothing written outside');
+});
+
+test('C1b-2: an in-root link is allowed, an escaping or scope-leaving link is refused', () => {
+  const repo = path.join(SANDBOX, 'inrootlink');
+  fs.mkdirSync(path.join(repo, '.factory'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'AGENTS.md'), 'a\n');
+  fs.writeFileSync(path.join(repo, 'other.md'), 'o\n');
+  fs.symlinkSync('AGENTS.md', path.join(repo, 'CLAUDE.md'));
+  fs.symlinkSync('missing-inside.md', path.join(repo, 'dangling-in.md'));
+  fs.symlinkSync(path.join(SANDBOX, 'nope-outside.md'), path.join(repo, 'dangling-out.md'));
+  fs.symlinkSync(path.join(repo, 'other.md'), path.join(repo, '.factory', 'REVIEW.md'));
+  for (const tool of ['Write', 'Edit']) {
+    assert.equal(loopToolRefusal(tool, { file_path: path.join(repo, 'CLAUDE.md') }, [repo]), null, `chat case ${tool}`);
+    assert.equal(loopToolRefusal(tool, { file_path: path.join(repo, 'dangling-in.md') }, [repo]), null, 'dangling inside');
+    assert.ok(loopToolRefusal(tool, { file_path: path.join(repo, 'dangling-out.md') }, [repo]), 'dangling outside');
+    assert.ok(loopToolRefusal(tool, { file_path: path.join(repo, '.factory', 'REVIEW.md') }, [repo], { writeScope: '.factory' }), 'link leaves the scope');
+  }
+});

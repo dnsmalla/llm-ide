@@ -42,7 +42,7 @@ import { resolveRepoScope } from '../../kb/db.mjs';
 import {
   AGENT_SDK_PROVIDER, resolveAgentEngineAuth, agentEngineHomeFor, agentEngineEnv, normalizeModelUsage,
 } from './engine.mjs';
-import { writePathGate } from '../tools/gates.mjs';
+import { resolveWriteLanding, writePathGate } from '../tools/gates.mjs';
 import {
   buildTrustedRoots, isDeniedPath, isTooBroadRoot, isWithinRoots,
 } from '../tools/handlers/repo-files.mjs';
@@ -275,25 +275,7 @@ export function withSecretExclusions(input) {
 // part that does not exist yet (the same walk as tools/gates.mjs writePathGate), so a
 // symlink anywhere in the existing part is followed. null when it cannot be resolved.
 function resolveWriteTarget(filePath, base) {
-  if (typeof filePath !== 'string' || !filePath) return null;
-  const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(base, filePath);
-  // A link as the leaf (dangling included) would redirect the write; a repo can commit one under .factory/.
-  try {
-    if (fs.lstatSync(abs).isSymbolicLink()) return null;
-  } catch { /* the leaf does not exist yet: fine */ }
-  let existing = abs;
-  while (!fs.existsSync(existing)) {
-    const parent = path.dirname(existing);
-    if (parent === existing) return null;
-    existing = parent;
-  }
-  try {
-    const real = fs.realpathSync(existing);
-    const suffix = path.relative(existing, abs);
-    return suffix ? path.join(real, suffix) : real;
-  } catch {
-    return null;
-  }
+  return resolveWriteLanding(filePath, base);
 }
 
 // True when `filePath` lands strictly inside `<root>/<writeScope>/` (the scope directory

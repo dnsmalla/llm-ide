@@ -79,3 +79,16 @@ test('a .env target directly inside the workspace is blocked (no file need exist
   const f = makeFixture();
   assert.equal(writePathGate(path.join(f.workspace, '.env'), [f.workspace]), 'blocked');
 });
+
+test('writePathGate: in-workspace link leaf allowed; escaping, dangling-outside and trailing-slash forms blocked', () => {
+  const f = makeFixture();
+  fs.writeFileSync(path.join(f.workspace, 'AGENTS.md'), 'a\n');
+  fs.symlinkSync('AGENTS.md', path.join(f.workspace, 'CLAUDE.md'));
+  fs.symlinkSync(path.join(f.outside, 'new.md'), path.join(f.workspace, 'dangling.md'));
+  fs.symlinkSync(path.join(f.outside, 'secret.md'), path.join(f.workspace, 'out.md'));
+  assert.equal(writePathGate(path.join(f.workspace, 'CLAUDE.md'), [f.workspace]), 'prompt');
+  assert.equal(writePathGate(path.join(f.workspace, 'dangling.md'), [f.workspace]), 'blocked');
+  assert.equal(writePathGate(path.join(f.workspace, 'dangling.md') + '/', [f.workspace]), 'blocked');
+  assert.equal(writePathGate('dangling.md/', [f.workspace]), 'blocked');
+  assert.equal(writePathGate(path.join(f.workspace, 'out.md'), [f.workspace]), 'blocked');
+});

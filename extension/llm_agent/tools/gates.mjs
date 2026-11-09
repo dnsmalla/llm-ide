@@ -232,36 +232,55 @@ export function autoGate() {
  * checked on the nearest EXISTING ancestor's realpath plus the remaining
  * lexical suffix — a symlink anywhere in the existing part cannot escape.
  */
-function isSymlinkLeaf(abs) {
-  try {
-    return fs.lstatSync(abs).isSymbolicLink();
-  } catch {
-    return false;
+// realpath of the nearest EXISTING ancestor plus the lexical rest. null when nothing resolves.
+function realpathNearest(abs) {
+  let existing = abs;
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) return null;
+    existing = parent;
   }
+  try {
+    const real = fs.realpathSync(existing);
+    const suffix = path.relative(existing, abs);
+    return suffix ? path.join(real, suffix) : real;
+  } catch {
+    return null;
+  }
+}
+
+const MAX_LINK_HOPS = 40;
+
+/**
+ * Where a write to `filePath` would really land: the parent's real path plus the leaf, with a link as the leaf
+ * (dangling ones included, which existsSync cannot see) followed hop by hop through readlink. `path.resolve` first,
+ * so a trailing separator cannot hide the link from lstat. null when it cannot be resolved (loop, too many hops).
+ */
+export function resolveWriteLanding(filePath, base) {
+  if (typeof filePath !== 'string' || !filePath) return null;
+  let cur = path.resolve(base, filePath);
+  for (let hop = 0; hop < MAX_LINK_HOPS; hop += 1) {
+    const parent = realpathNearest(path.dirname(cur));
+    if (parent === null) return null;
+    cur = path.join(parent, path.basename(cur));
+    let isLink = false;
+    try { isLink = fs.lstatSync(cur).isSymbolicLink(); } catch { /* not there yet */ }
+    if (!isLink) return realpathNearest(cur);
+    try { cur = path.resolve(parent, fs.readlinkSync(cur)); } catch { return null; }
+  }
+  return null;
 }
 
 export function writePathGate(filePath, roots, { allowLeafLink = false } = {}) {
   if (typeof filePath !== 'string' || !filePath) return 'blocked';
   if (!Array.isArray(roots) || roots.length === 0) return 'blocked';
   const primary = roots[0];
-  const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(primary, filePath);
-  // A link as the final component (dangling ones included, which existsSync cannot see) would make a write land
-  // wherever the link points, e.g. a repo-committed symlink. Writes refuse it; read callers opt out.
-  if (!allowLeafLink && isSymlinkLeaf(abs)) return 'blocked';
-  let existing = abs;
-  while (!fs.existsSync(existing)) {
-    const parent = path.dirname(existing);
-    if (parent === existing) return 'blocked';
-    existing = parent;
-  }
-  let resolved;
-  try {
-    const real = fs.realpathSync(existing);
-    const suffix = path.relative(existing, abs);
-    resolved = suffix ? path.join(real, suffix) : real;
-  } catch {
-    return 'blocked';
-  }
+  // Writes follow a link leaf (dangling included) to where it lands, so a repo-committed link cannot redirect them
+  // out of the roots, while a link that stays inside (CLAUDE.md -> AGENTS.md) is fine. Reads keep the older walk.
+  const resolved = allowLeafLink
+    ? realpathNearest(path.resolve(primary, filePath))
+    : resolveWriteLanding(filePath, primary);
+  if (resolved === null) return 'blocked';
   // A sensitive-path hit is final regardless of containment — the same
   // denylist the read path applies (repo-files.mjs's isDeniedPath), so an
   // approved (or always-allowed) Write/Edit can't reach .git/hooks, .env,
