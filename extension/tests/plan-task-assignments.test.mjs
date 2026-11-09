@@ -387,3 +387,19 @@ test('GET /kb/plan/:id and /kb/plan-task/update expose the assignee without chan
   assert.equal(older.tasks[0].owner, 'backend engineer');
   assert.equal(older.tasks[0].assignee, null);
 });
+
+test('a plan cannot be tagged with a project the author is not a member of', async () => {
+  const tag = (u, projectId) => callPlan({
+    user: { id: u }, method: 'POST', url: '/kb/plan/save',
+    body: { id: `plan-tag-${u}-${projectId}`, title: 'Tagged', meta: { projectId }, tasks: tasksFor(['x-1']) },
+  });
+  const denied = await tag(outsider, 'p-one');
+  assert.equal(denied.res.statusCode, 403);
+  assert.ok(!JSON.stringify(listProjectPlanTasks(db(), owner, 'p-one')).includes('plan-tag-'), 'nothing reached the board');
+  const ok = await tag(engineer, 'p-one');
+  assert.equal(ok.res.statusCode, 200);
+});
+
+test('the tagged plan of a member does reach the board (the refusal check above is not vacuous)', () => {
+  assert.ok(JSON.stringify(listProjectPlanTasks(db(), owner, 'p-one')).includes('plan-tag-'));
+});
