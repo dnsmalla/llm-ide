@@ -381,6 +381,8 @@ pub(crate) fn run_stage_gated(root: &Path, stage_id: &str, loop_id: Option<&str>
 pub(crate) fn run_stage_gated_at(root: &Path, run: Option<(&Path, &str)>, stage_id: &str, loop_id: Option<&str>, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<StageRun, String> {
     let spec = resolve_stage(root, stage_id, loop_id)?;
     match spec.kind.as_str() {
+        // NOTE: run_regression reads the MAIN project's system/faults, which a factory worktree run must never inspect.
+        "regressionSweep" if run.is_some() => Err("Regression stages cannot run in a factory worktree".into()),
         "regressionSweep" => run_regression(root),
         "shellCommand" => {
             if spec.command.is_empty() { return Err("this stage has no command".into()); }
@@ -1257,6 +1259,20 @@ mod tests {
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "user edit in main\n", "the same path in the main tree is unchanged");
         assert!(revert_paths_for(Some("../x"), &["a.txt".to_string()], &[]).is_err());
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "user edit in main\n");
+        crate::loop_worktree::remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regression_stage_refuses_in_a_worktree_run() {
+        let root = git_project("run-regression", "cat a.txt");
+        std::fs::write(root.join("system/loop.json"), r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"L","config":{"stages":[{"id":"r1","name":"Regression","kind":"regressionSweep","enabled":true,"severity":"blocking","order":0}]}}]}"#).unwrap();
+        let info = crate::loop_worktree::prepare_in(&root, &root, "t5-reg", None, "task").unwrap();
+        let work = PathBuf::from(&info.worktree);
+        let store = ApprovalStore::new();
+        let err = run_stage_gated_at(&root, Some((work.as_path(), "t5-reg")), "r1", Some("l1"), Some(10), &store, None).unwrap_err();
+        assert!(err.contains("cannot run in a factory worktree"), "{err}");
         crate::loop_worktree::remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
