@@ -152,7 +152,7 @@ Type=oneshot
 User=llmide
 Group=llmide
 EnvironmentFile=/etc/llmide/core.env
-ExecStart=/opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs
+ExecStart=/opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs --keep 7
 LLMIDE_BACKUP
     chmod 0644 "$BACKUP_UNIT"; chown root:root "$BACKUP_UNIT"
     cat > "$BACKUP_TIMER" <<'LLMIDE_BACKUP_TIMER'
@@ -229,6 +229,10 @@ LLMIDE_LOG
         mv "${tmp}.clean" "$tmp"
       fi
     done
+    # R-034 #16: the off-host backup target is operator-set by hand; a redeploy must not drop it.
+    if ! grep -q '^LLMIDE_BACKUP_REMOTE=' "$tmp" && [ -f "$CONF" ]; then
+      grep '^LLMIDE_BACKUP_REMOTE=' "$CONF" | head -1 >> "$tmp" || true
+    fi
     chown root:root "$tmp"; chmod 0600 "$tmp"
     mv "$tmp" "$CONF"
     if systemctl is-active --quiet llmide-core 2>/dev/null; then systemctl restart llmide-core; fi

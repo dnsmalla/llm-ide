@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createReadStream, existsSync } from 'node:fs';
-import { chmod, mkdir, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
@@ -28,6 +28,7 @@ function parseArgs(argv) {
   let agentDbPath = null;
   let includeAgent = true;
   let force = false;
+  let keep = null;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -44,6 +45,10 @@ function parseArgs(argv) {
       includeAgent = false;
     } else if (arg === '--force') {
       force = true;
+    } else if (arg === '--keep') {
+      keep = Number(args[i + 1]);
+      i += 1;
+      if (!Number.isInteger(keep) || keep < 1) throw new Error('--keep requires a whole number of at least 1');
     } else if (arg === '--help' || arg === '-h') {
       return { help: true };
     } else {
@@ -65,7 +70,29 @@ function parseArgs(argv) {
       : path.join(path.dirname(path.resolve(dbPath)), 'agent.db')),
     includeAgent,
     force,
+    keep,
   };
+}
+
+/**
+ * R-034 #16: keep the newest `keep` default-named backups of `dbPath` (`<db>.bak-<iso>.db` and its
+ * `.agent.db`) in the DB's own directory. ISO stamps sort by name; nothing else is touched.
+ */
+export async function pruneSiblingBackups(dbPath, keep) {
+  const dir = path.dirname(path.resolve(dbPath));
+  const prefix = `${path.basename(dbPath)}.bak-`;
+  const mains = (await readdir(dir))
+    .filter((n) => n.startsWith(prefix) && n.endsWith('.db') && !n.endsWith('.agent.db'))
+    .sort()
+    .reverse();
+  const deleted = [];
+  for (const name of mains.slice(keep)) {
+    for (const f of [name, `${name.slice(0, -3)}.agent.db`]) {
+      await rm(path.join(dir, f), { force: true });
+      deleted.push(f);
+    }
+  }
+  return deleted;
 }
 
 async function sha256File(filePath) {
@@ -199,11 +226,14 @@ if (isMain) {
       process.exit(0);
     }
     const result = await runBackup(parsed);
+    if (parsed.keep) await pruneSiblingBackups(parsed.dbPath, parsed.keep);
     process.stdout.write(
       `source=${result.dbPath} (location: ${result.location})\n`
       + `backup=${result.outPath}\nbytes=${result.bytes}\nsha256=${result.sha256}\n`
       + (result.offHost ? `offhost=${result.offHost.ok ? result.offHost.target : `FAILED ${result.offHost.error}`}\n` : ''),
     );
+    // The local copy is kept, but a failed off-host copy must fail the unit so the operator sees it.
+    if (result.offHost && !result.offHost.ok) process.exit(2);
   } catch (err) {
     process.stderr.write(`${err.message}\n`);
     process.exit(1);

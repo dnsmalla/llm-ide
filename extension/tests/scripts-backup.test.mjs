@@ -117,3 +117,23 @@ test('R-034 #16: an optional off-host copy is attempted and its failure never lo
     cleanupFixture(dir);
   }
 });
+
+test('R-034 #16: pruneSiblingBackups keeps the newest N pairs and nothing else', async () => {
+  const { pruneSiblingBackups } = await import('../scripts/backup.mjs');
+  const fsMod = await import('node:fs');
+  const osMod = await import('node:os');
+  const pathMod = await import('node:path');
+  const dir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'bak-prune-'));
+  const db = pathMod.join(dir, 'data.db');
+  const names = ['data.db', 'data.db.failed-x.db', 'other.txt'];
+  for (const d of ['2026-11-01', '2026-11-02', '2026-11-03']) {
+    names.push(`data.db.bak-${d}T03-00-00.000Z.db`, `data.db.bak-${d}T03-00-00.000Z.agent.db`);
+  }
+  for (const n of names) fsMod.writeFileSync(pathMod.join(dir, n), 'x');
+  await pruneSiblingBackups(db, 2);
+  const left = fsMod.readdirSync(dir).sort();
+  assert.ok(!left.some((n) => n.includes('2026-11-01')), 'the oldest pair is gone');
+  assert.ok(left.includes('data.db.bak-2026-11-03T03-00-00.000Z.agent.db'));
+  assert.ok(left.includes('data.db.bak-2026-11-02T03-00-00.000Z.db'));
+  for (const keep of ['data.db', 'data.db.failed-x.db', 'other.txt']) assert.ok(left.includes(keep), keep);
+});
