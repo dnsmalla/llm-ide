@@ -235,7 +235,7 @@ export interface SettingsHost {
   /** Phase 2: close registration after the owner exists. */
   remoteDeployLock?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
   /** Phase 2: restore the previous release. */
-  remoteDeployRollback?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
+  remoteDeployRollback?(target: { host: string; port: number; user: string; keyPath: string }, force?: boolean): Promise<void>;
   /** URL-first: reachability + TLS/health for a public hub URL, without credentials. */
   remoteHubCheck?(hubUrl: string): Promise<import("./remote-model.ts").HubCheck>;
   /** URL-first: log in at `/auth/login`; the host stores the refresh token in the OS keychain. */
@@ -252,7 +252,7 @@ export interface SettingsHost {
   switchSshServer?(): Promise<void>;
   /** Settings → Server & Backend → SSH server: the `remote_ssh_server_*` commands. Absent in a plain browser. */
   sshServer?: SshServerIo;
-  remoteUpdate?(target: { host: string; port: number; user: string; keyPath: string }, version: string, confirmation: string, hubUrl: string): Promise<void>;
+  remoteUpdate?(target: { host: string; port: number; user: string; keyPath: string }, version: string, confirmation: string, hubUrl: string, force?: boolean): Promise<void>;
   remoteBackupNow?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
   remoteLogs?(target: { host: string; port: number; user: string; keyPath: string }, lines: number): Promise<string>;
   remoteDiagnostics?(target: { host: string; port: number; user: string; keyPath: string }): Promise<{ service: string; diskFreeMb: number; version: string | null; lastBackup: string | null; lastBackupAgeSec?: number | null; health: string | null }>;

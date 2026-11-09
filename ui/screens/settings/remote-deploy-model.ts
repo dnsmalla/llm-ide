@@ -21,7 +21,7 @@ export interface DeployIo {
   bootstrap(target: DeployTarget): Promise<Bootstrap>;
   run(target: DeployTarget, planId: string, confirmation: string): Promise<DeployReport>;
   lock(target: DeployTarget): Promise<void>;
-  rollback(target: DeployTarget): Promise<void>;
+  rollback(target: DeployTarget, force?: boolean): Promise<void>;
 }
 
 export type DeployPhase = "idle" | "planning" | "bootstrapping" | "deploying" | "open" | "done" | "failed";
@@ -121,9 +121,9 @@ export class RemoteDeployModel extends Store<DeployState> {
     catch (e) { this.set({ phase: "failed", error: text(e) }); }
   }
 
-  async rollback(): Promise<void> {
+  async rollback(force = false): Promise<void> {
     this.set({ phase: "deploying", error: null });
-    try { await this.#io.rollback(targetOf(this.#config())); this.set({ phase: "idle", error: "Rolled back to the previous release." }); }
+    try { await this.#io.rollback(targetOf(this.#config()), force); this.set({ phase: "idle", error: "Rolled back to the previous release." }); }
     catch (e) { this.set({ phase: "failed", error: text(e) }); }
   }
 }

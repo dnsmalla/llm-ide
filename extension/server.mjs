@@ -12,6 +12,7 @@ import path from 'path';
 import fs from 'fs';
 import { handleKB, initFeatureRoutes } from './routes/router.mjs';
 import { pruneBackups } from './kb/backup-retention.mjs';
+import { agentBusySummary } from './core/agent-busy.mjs';
 import { prewarmAgentEngine, benchFakeEngineEnabled } from './routes/agent-v2.mjs';
 import { enabledEndpoints, featureDisabledFor, sendFeatureDisabled } from './routes/feature-routes.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
@@ -1456,6 +1457,7 @@ async function collectHealth() {
     skillsAvailable,
     features: config.features,
     hub: config.hub,
+    busy: agentBusySummary(),
     storage: {
       location: config.dataLocation,
       migration: dataDirMigration.status,

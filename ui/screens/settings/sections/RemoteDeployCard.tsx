@@ -6,9 +6,10 @@ import { useEnv, useModel, useStore } from "../context.tsx";
 import { Button, ErrorText } from "../ui.tsx";
 import type { RemoteServerConfig } from "../host.ts";
 import { canDeploy, deployReady, RemoteDeployModel, type DeployIo } from "../remote-deploy-model.ts";
+import { AgentSdkModel, busyNote } from "../app-model.ts";
 
 export default function RemoteDeployCard({ config }: { config: RemoteServerConfig }): ReactNode {
-  const { host } = useEnv();
+  const { host, client } = useEnv();
   const available = Boolean(host.remoteDeployPlan && host.remoteDeployBootstrap && host.remoteDeployRun && host.remoteDeployLock && host.remoteDeployRollback);
   const m = useModel(() => new RemoteDeployModel({
     plan: (t, d, a) => host.remoteDeployPlan!(t, d, a),
@@ -21,11 +22,24 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
   const [version, setVersion] = useState("");
   const [updateConfirm, setUpdateConfirm] = useState("");
   const [ops, setOps] = useState<{ busy: string | null; note: string | null; error: string | null; logs: string; diag: string }>({ busy: null, note: null, error: null, logs: "", diag: "" });
+  const [forceBusy, setForceBusy] = useState(false);
+  const sdk = useModel(() => new AgentSdkModel(client));
+  // R-034 #17: update/rollback restart the only core process; refuse while a turn or Loop is live
+  // unless the operator explicitly forces it. The busy counts come from GET /kb/agent-sdk.
+  const idleOrForced = async (): Promise<boolean> => {
+    if (forceBusy) return true;
+    const busy = await sdk.checkBusy();
+    if (busy && busy.total > 0) {
+      setOps({ busy: null, note: null, error: busyNote(busy), logs: ops.logs, diag: ops.diag });
+      return false;
+    }
+    return true;
+  };
   const target = { host: config.host.trim(), port: config.port, user: config.user.trim(), keyPath: config.keyPath.trim() };
   const run = async (what: "update" | "backup" | "logs" | "diag" | "uninstall", purge = false) => {
     setOps({ busy: what, note: null, error: null, logs: ops.logs, diag: ops.diag });
     try {
-      if (what === "update") { if (!host.remoteUpdate) throw new Error("Update needs the desktop host."); await host.remoteUpdate(target, version, updateConfirm, config.hubUrl); }
+      if (what === "update") { if (!host.remoteUpdate) throw new Error("Update needs the desktop host."); if (!(await idleOrForced())) return; await host.remoteUpdate(target, version, updateConfirm, config.hubUrl, forceBusy); }
       else if (what === "backup") { if (!host.remoteBackupNow) throw new Error("Backup needs the desktop host."); await host.remoteBackupNow(target); }
       else if (what === "diag") { if (!host.remoteDiagnostics) throw new Error("Diagnostics need the desktop host."); const d = await host.remoteDiagnostics(target); setOps({ busy: null, note: null, error: null, logs: ops.logs, diag: `service ${d.service}; disk ${d.diskFreeMb} MB; version ${d.version ?? "?"}; last backup ${d.lastBackup ?? "none"}${typeof d.lastBackupAgeSec === "number" ? ` (${Math.round(d.lastBackupAgeSec / 3600)} h ago)` : ""}; health ${d.health ?? "unreachable"}` }); return; }
       else if (what === "logs") { if (!host.remoteLogs) throw new Error("Logs need the desktop host."); setOps({ busy: null, note: null, error: null, logs: await host.remoteLogs(target, 200), diag: ops.diag }); return; }
@@ -71,7 +85,7 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
           </label>
           <div className="st-row">
             <Button tone="primary" disabled={!canDeploy(s)} onClick={() => void m.deploy()}>{s.phase === "deploying" ? "Deploying…" : "Deploy"}</Button>
-            <Button disabled={s.phase === "deploying"} onClick={() => void m.rollback()}>Roll back</Button>
+            <Button disabled={s.phase === "deploying"} onClick={() => void (async () => { if (await idleOrForced()) await m.rollback(forceBusy); })()}>Roll back</Button>
           </div>
         </div>
       ) : null}
@@ -100,6 +114,10 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
           <input className="st-input" value={updateConfirm} onChange={(e) => setUpdateConfirm(e.currentTarget.value)} placeholder={`Type ${config.host} to update`} />
           <Button disabled={ops.busy !== null || !version.trim() || updateConfirm !== config.host} onClick={() => void run("update")}>{ops.busy === "update" ? "Updating…" : "Update hub"}</Button>
         </div>
+        <label className="st-row">
+          <input type="checkbox" checked={forceBusy} onChange={(e) => setForceBusy(e.currentTarget.checked)} />
+          <span>Force the restart while chats or Loop runs are in progress</span>
+        </label>
         <div className="st-row">
           <Button disabled={ops.busy !== null} onClick={() => void run("backup")}>{ops.busy === "backup" ? "Backing up…" : "Backup now"}</Button>
           <Button disabled={ops.busy !== null} onClick={() => void run("logs")}>{ops.busy === "logs" ? "Reading…" : "Show logs"}</Button>

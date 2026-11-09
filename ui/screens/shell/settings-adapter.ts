@@ -183,7 +183,7 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           return r;
         },
         async remoteDeployLock(target) { await d.invoke("remote_deploy_lock", { target }); },
-        async remoteDeployRollback(target) { await d.invoke("remote_deploy_rollback", { target }); },
+        async remoteDeployRollback(target, force = false) { await d.invoke("remote_deploy_rollback", { target, force }); },
         async remoteTlsProbe(hubUrl) {
           const r = await d.invoke<{ fingerprint?: unknown; webPki?: unknown }>("remote_tls_probe", { hubUrl });
           if (!r || typeof r.fingerprint !== "string" || !/^sha256:[A-Za-z0-9_-]{43}$/.test(r.fingerprint)) throw new Error("the desktop host returned an invalid TLS fingerprint");
@@ -209,7 +209,7 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           await d.invoke("app_restart");
         },
         async remoteSessionClear() { await d.invoke("remote_session_clear"); },
-        async remoteUpdate(target, version, confirmation, hubUrl) { await d.invoke("remote_update", { target, version, confirmation, hubUrl }); },
+        async remoteUpdate(target, version, confirmation, hubUrl, force = false) { await d.invoke("remote_update", { target, version, confirmation, hubUrl, force }); },
         async remoteBackupNow(target) { await d.invoke("remote_backup_now", { target }); },
         async remoteLogs(target, lines) { const r = await d.invoke<unknown>("remote_logs", { target, lines }); return typeof r === "string" ? r : ""; },
         async remoteDiagnostics(target) { return await d.invoke("remote_diagnostics", { target }); },

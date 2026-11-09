@@ -9,12 +9,15 @@ export function buildHealthPayload({
   features = null,
   storage = null,
   hub = false,
+  busy = null,
 }) {
   return {
     status: dbOk && claude?.ok && skillsAvailable !== false ? 'ok' : 'degraded',
     apiVersion,
     // True when this core is a hub (LLMIDE_HUB=1); additive, so an older client ignores it.
     hub,
+    // R-034 #17: live turn/run counts only (no ids), so a restart can refuse while work is in flight.
+    ...(busy ? { busy } : {}),
     schemaVersion: migration?.current ?? 0,
     uptimeSec: Math.round((Date.now() - serverStartedAt) / 1000),
     endpoints,

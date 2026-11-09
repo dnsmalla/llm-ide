@@ -195,6 +195,9 @@ pub struct Health {
     pub db_ok: bool,
     pub hub: bool,
     pub api_version: u32,
+    /// R-034 #17: live chat turns and Loop runs (counts only; absent on an older hub = 0).
+    pub busy_chat: u64,
+    pub busy_loops: u64,
 }
 
 pub fn parse_health(text: &str) -> Option<Health> {
@@ -204,6 +207,8 @@ pub fn parse_health(text: &str) -> Option<Health> {
         db_ok: v.get("checks")?.get("db")?.as_bool()?,
         hub: v.get("hub").and_then(|x| x.as_bool()).unwrap_or(false),
         api_version: v.get("apiVersion")?.as_u64()? as u32,
+        busy_chat: v.get("busy").and_then(|b| b.get("chatTurns")).and_then(|x| x.as_u64()).unwrap_or(0),
+        busy_loops: v.get("busy").and_then(|b| b.get("loopRuns")).and_then(|x| x.as_u64()).unwrap_or(0),
     })
 }
 
@@ -220,6 +225,15 @@ impl HealthProbe for SystemHealth {
         let text = res.into_string().map_err(|e| herr("health_unreadable", format!("invalid /health body: {e}")))?;
         parse_health(&text).ok_or_else(|| herr("health_unreadable", "invalid /health JSON"))
     }
+}
+
+/** R-034 #17: a restart/update must refuse while the hub reports work in flight unless forced. */
+pub fn busy_refusal(h: &Health) -> Option<String> {
+    let total = h.busy_chat + h.busy_loops;
+    if total == 0 { return None; }
+    Some(format!(
+        "the hub is still running {total} chat/Loop job(s); wait for them to finish or pass force",
+    ))
 }
 
 pub fn valid_domain(domain: &str) -> bool {
@@ -718,11 +732,18 @@ pub async fn remote_diagnostics(target: SshTarget) -> Result<RemoteDiagnostics, 
 }
 
 #[tauri::command]
-pub async fn remote_update(target: SshTarget, version: String, confirmation: String, hub_url: String) -> Result<(), FsError> {
+pub async fn remote_update(target: SshTarget, version: String, confirmation: String, hub_url: String, force: bool) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         require_confirmed_host_key(&prepared)?;
         if confirmation != target.host { return Err(herr("confirmation_mismatch", "type the hostname exactly to update")); }
+        if !force {
+            if let Ok((host, _)) = crate::remote_tls::split_hub(hub_url.trim()) {
+                if let Ok(h) = SystemHealth.check(&format!("https://{host}/health")) {
+                    if let Some(reason) = busy_refusal(&h) { return Err(herr("hub_busy", reason)); }
+                }
+            }
+        }
         if !crate::confirm::ask("Update the LLM-IDE hub?", &format!("Update {} to {version}?", target.host), "Update hub", true) {
             return Err(herr("cancelled", "the update was cancelled at the host confirmation"));
         }
@@ -783,12 +804,20 @@ pub async fn remote_deploy_lock(target: SshTarget) -> Result<(), FsError> {
 }
 
 #[tauri::command]
-pub async fn remote_deploy_rollback(target: SshTarget) -> Result<(), FsError> {
+pub async fn remote_deploy_rollback(target: SshTarget, force: bool) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         require_confirmed_host_key(&prepared)?;
         if !crate::confirm::ask("Roll back the LLM-IDE hub?", &format!("Switch {} back to its previous release?", target.host), "Roll back", true) {
             return Err(herr("cancelled", "the rollback was cancelled at the host confirmation"));
+        }
+        if !force {
+            let hub = crate::prefs::launch().remote_server.hub_url;
+            if let Ok((host, _)) = crate::remote_tls::split_hub(hub.trim()) {
+                if let Ok(h) = SystemHealth.check(&format!("https://{host}/health")) {
+                    if let Some(reason) = busy_refusal(&h) { return Err(herr("hub_busy", reason)); }
+                }
+            }
         }
         let out = SystemDeploy.run(&prepared, &stage_command("rollback").unwrap(), None)?;
         if out.code != Some(0) { return Err(herr("rollback_failed", "there is no previous release to restore")); }
@@ -883,7 +912,7 @@ mod tests {
     }
     impl HealthProbe for Fake {
         fn check(&self, _url: &str) -> Result<Health, FsError> {
-            self.health.first().cloned().unwrap_or(Ok(Health { status: "ok".into(), db_ok: true, hub: true, api_version: 129 })).map_err(|m| herr("health_unreachable", m))
+            self.health.first().cloned().unwrap_or(Ok(Health { status: "ok".into(), db_ok: true, hub: true, api_version: 129, busy_chat: 0, busy_loops: 0 })).map_err(|m| herr("health_unreachable", m))
         }
     }
     fn target() -> PreparedTarget { PreparedTarget { host: "hub.example.com".into(), port: 22, user: "deploy".into(), key_path: "/k".into() } }
@@ -1160,6 +1189,19 @@ mod tests {
     }
 
     #[test]
+    fn r034_busy_health_refuses_a_restart_but_an_idle_or_older_hub_passes() {
+        let mut h = Health { status: "ok".into(), db_ok: true, hub: true, api_version: 130, busy_chat: 0, busy_loops: 0 };
+        assert_eq!(busy_refusal(&h), None);
+        h.busy_chat = 2;
+        assert!(busy_refusal(&h).unwrap().contains("2 chat/Loop"));
+        h.busy_chat = 0;
+        h.busy_loops = 1;
+        assert!(busy_refusal(&h).is_some());
+        let parsed = parse_health(r#"{"status":"ok","checks":{"db":true},"hub":true,"apiVersion":130}"#).unwrap();
+        assert_eq!((parsed.busy_chat, parsed.busy_loops), (0, 0), "an older hub has no busy field");
+    }
+
+    #[test]
     fn r034_a_sudoers_drop_in_that_does_not_parse_is_never_installed() {
         let fake = Fake::new();
         fake.helper("1"); // an old helper is on the server, so the bootstrap reinstalls it and its sudoers drop-in
@@ -1182,7 +1224,7 @@ mod tests {
 
     struct FakeHealth;
     impl HealthProbe for FakeHealth {
-        fn check(&self, _url: &str) -> Result<Health, FsError> { Ok(Health { status: "ok".into(), db_ok: true, hub: true, api_version: 129 }) }
+        fn check(&self, _url: &str) -> Result<Health, FsError> { Ok(Health { status: "ok".into(), db_ok: true, hub: true, api_version: 129, busy_chat: 0, busy_loops: 0 }) }
     }
 
     struct HealthFail;

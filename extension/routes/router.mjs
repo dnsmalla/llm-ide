@@ -205,7 +205,7 @@ export async function handleKB(req, res) {
     if (req.method === 'GET' && (url === '/kb/agent-sdk' || url.startsWith('/kb/agent-sdk?'))) {
       const force = new URL(url, 'http://127.0.0.1').searchParams.get('force') === '1';
       // busy: counts only (no ids). updateSdk refuses while either count is above 0.
-      sendJSON(res, 200, { ...(await sdkStatus({ force })), busy: agentBusySummary(activeTurnCount()) });
+      sendJSON(res, 200, { ...(await sdkStatus({ force })), busy: agentBusySummary() });
       return true;
     }
     if (req.method === 'POST' && url === '/kb/agent-sdk/update') {

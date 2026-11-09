@@ -4,6 +4,18 @@
 // the summary served by GET /kb/agent-sdk reveals nothing per user.
 
 let loopRuns = 0;
+let chatTurns = 0;
+
+/** Count one chat turn as started (HTTP or Host API); the returned function ends it once. */
+export function beginChatTurn() {
+  chatTurns += 1;
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    chatTurns -= 1;
+  };
+}
 
 /** Count one Loop run as started. The returned function ends it; calling it again is a no-op. */
 export function beginLoopRun() {
@@ -16,7 +28,7 @@ export function beginLoopRun() {
   };
 }
 
-/** `{ chatTurns, loopRuns, total }` for the given chat-turn count (the caller's). */
-export function agentBusySummary(chatTurns) {
-  return { chatTurns, loopRuns, total: chatTurns + loopRuns };
+/** `{ chatTurns, loopRuns, total }`; defaults to the process-wide chat counter. */
+export function agentBusySummary(chatTurnsOverride = chatTurns) {
+  return { chatTurns: chatTurnsOverride, loopRuns, total: chatTurnsOverride + loopRuns };
 }

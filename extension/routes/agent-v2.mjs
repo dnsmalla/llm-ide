@@ -25,6 +25,7 @@ import { restrictsTools } from '../llm_agent/modes/mode-personas.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
+import { beginChatTurn } from '../core/agent-busy.mjs';
 import { getMember, hubClampedMember } from '../kb/members.mjs';
 import { deleteContinuation } from '../kb/chat-continuations.mjs';
 import { deleteSessionMemory } from '../kb/session-memory.mjs';
@@ -720,16 +721,19 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
     return io.refuse({ code: 'BUSY', status: 429, message: 'The computer is busy with other turns — try again in a moment.' });
   }
   let holdsChat = false;
+  let endChatBusy = null;
   try {
     if (inFlightChatSessions.has(lockKey)) return io.refuse(turnInProgressRefusal());
     const updatingAfterQueue = updateRefusal();
     if (updatingAfterQueue) return io.refuse(updatingAfterQueue);
     inFlightChatSessions.add(lockKey);
     holdsChat = true;
+    endChatBusy = beginChatTurn();
     inFlightTurns.set(lockKey, { userId, chatSessionId, startedAt: turnStartedAt, mode });
     emitOsEvent(userId, 'turn-start');
     return await runV2Stream(io, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps, turnStartedAt);
   } finally {
+    if (typeof endChatBusy === 'function') endChatBusy();
     if (holdsChat) {
       inFlightChatSessions.delete(lockKey);
       inFlightAborts.delete(lockKey);
