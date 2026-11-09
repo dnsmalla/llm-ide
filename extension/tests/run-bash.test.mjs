@@ -479,3 +479,24 @@ test('registry.mjs hands a v2-shaped ctx.signal to run-bash too', async () => {
   ac.abort();
   assert.equal((await p).error, 'Command aborted.');
 });
+
+test('C1d: a link folder whose target ends in .. cannot relocate the command outside the workspace', () => {
+  const outA = path.join(outside, 'a');
+  fs.mkdirSync(outA, { recursive: true });
+  fs.mkdirSync(path.join(workspace, 'src'), { recursive: true });
+  fs.symlinkSync(outA, path.join(workspace, 'src', 'sub'));
+  fs.symlinkSync('sub/..', path.join(workspace, 'src', 'dirdd'));
+  const r = resolveBashCwd({ cwd: 'src/dirdd' }, { workspaceRoot: workspace });
+  const realRoot = fs.realpathSync.native(workspace);
+  if ('cwd' in r) {
+    const real = fs.realpathSync.native(r.cwd);
+    assert.ok(real === realRoot || real.startsWith(realRoot + path.sep), `ran outside: ${real}`);
+  } else {
+    assert.match(r.error, /inside the project workspace/);
+  }
+  // Ordinary in-root cwd and an in-root link cwd keep working.
+  assert.equal(resolveBashCwd({ cwd: 'src' }, { workspaceRoot: workspace }).cwd, path.join(workspace, 'src'));
+  fs.symlinkSync('sub', path.join(workspace, 'inlink'));
+  const inl = resolveBashCwd({ cwd: 'inlink' }, { workspaceRoot: workspace });
+  assert.equal(fs.realpathSync.native(inl.cwd), fs.realpathSync.native(path.join(workspace, 'sub')));
+});

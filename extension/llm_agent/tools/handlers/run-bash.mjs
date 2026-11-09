@@ -136,19 +136,20 @@ export function buildChildEnv(source = process.env) {
   return env;
 }
 
-// True when `target` is an existing directory at or below `root`, after
-// resolving symlinks on both sides.
-function isDirectoryWithinRoot(target, root) {
+// The real path of `target` when it is an existing directory at or below `root`, else null. `.native` (realpath(3))
+// applies `..` in a link target the way the kernel does; the JS realpath collapses it as text, so a link such as
+// `sub/..` (with `sub` pointing elsewhere) would pass the check but run outside.
+function realDirectoryWithinRoot(target, root) {
   let real;
   let realRoot;
   try {
-    real = fs.realpathSync(target);
-    realRoot = fs.realpathSync(root);
-    if (!fs.statSync(real).isDirectory()) return false;
+    real = fs.realpathSync.native(target);
+    realRoot = fs.realpathSync.native(root);
+    if (!fs.statSync(real).isDirectory()) return null;
   } catch {
-    return false;
+    return null;
   }
-  return real === realRoot || real.startsWith(realRoot + path.sep);
+  return real === realRoot || real.startsWith(realRoot + path.sep) ? real : null;
 }
 
 /**
@@ -174,10 +175,16 @@ export function resolveBashCwd(args, ctx = {}) {
     return { error: 'cwd requires an open project workspace; omit cwd or open a project folder first.' };
   }
   const cwd = path.resolve(workspaceRoot, args.cwd);
-  if (!isDirectoryWithinRoot(cwd, workspaceRoot)) {
+  const real = realDirectoryWithinRoot(cwd, workspaceRoot);
+  if (real === null) {
     return { error: `cwd must be an existing directory inside the project workspace (${workspaceRoot}).` };
   }
-  return { cwd };
+  // The command runs in the RESOLVED directory, so what was checked is what is entered. A spelling that is already
+  // the real location (no link redirect) keeps its lexical form.
+  let realRoot = workspaceRoot;
+  try { realRoot = fs.realpathSync.native(workspaceRoot); } catch { /* checked above */ }
+  const lexical = path.relative(workspaceRoot, cwd);
+  return { cwd: path.join(realRoot, lexical) === real ? cwd : real };
 }
 
 /**

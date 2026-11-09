@@ -39,7 +39,7 @@ const DENY_BASENAMES = new Set([
 ]);
 const DENY_EXT = new Set(['.pem', '.key', '.p12', '.pfx', '.keystore']);
 
-function canon(p) { try { return realpathSync(p); } catch { return null; } }
+function canon(p) { try { return realpathSync.native(p); } catch { return null; } }
 function cmp(p) { return CASE_INSENSITIVE ? p.toLowerCase() : p; }
 
 // True if `child` is the same as, or nested inside, `root` (both canonical).
