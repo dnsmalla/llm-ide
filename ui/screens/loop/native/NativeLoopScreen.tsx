@@ -16,30 +16,21 @@ import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProject
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
-import { evaluateArtifact } from "./artifact.ts";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
-import { faultPathsFromOutput, reopenFault, runRegression } from "./regression.ts";
-import { runCodeGraph } from "./codegraph.ts";
-import { scanTestPrune, writeTestPrune } from "./testprune.ts";
+import { faultPathsFromOutput, reopenFault } from "./regression.ts";
 import { writeSummaryNote } from "./summary.ts";
 import { clearQueue, loadQueue, saveQueue } from "./queue.ts";
-import { checkWrites } from "./protected.ts";
-import { guardedAgentCall, type AgentWrites } from "./agent-call.ts";
-import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
-import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
-import { FACTORY_DEFAULT_KEY, FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FACTORY_TEMPLATE, agentRunBody, factoryStartRefusal, guardedPaths, isFactoryLoop, needsDecisionSummary, reviewDiffSection, taskMarkdown, withSetupCommand, type WorkItem } from "./factory.ts";
+import { FACTORY_DEFAULT_KEY, FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, isFactoryLoop, needsDecisionSummary, taskMarkdown, withSetupCommand, type WorkItem } from "./factory.ts";
+import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { decodeWorktreeDiff, type WorktreeDiff } from "./ship-model.ts";
 import "./native-loop.css";
-
-/** The `/kb/loop/agent-run` answer fields the Loop reads. */
-type AgentRunReply = AgentWrites & { reply?: string; ran?: boolean; unresolvedSkills?: string[]; resultSubtype?: string | null };
 
 const stageKindLabel: Record<string, string> = {
   regressionSweep: "Regression sweep", shellCommand: "Shell command", skill: "Skill", artifactCheck: "Artifact check",
@@ -122,9 +113,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const startingRef = useRef(false);
   /** Set when the screen unmounts, so a finishing run does not start the next queued one in a stale project. */
   const unmountedRef = useRef(false);
-  const haltRef = useRef<string | null>(null);
-  /** The halt is a failed agent call with nothing out of scope (recorded as `error`, as the Mac does), not a block. */
-  const haltErrorRef = useRef(false);
   const pausedRef = useRef(false);
   const [paused, setPaused] = useState(false);
   const [loopRunning, setLoopRunning] = useState(false);
@@ -465,156 +453,16 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const hostRunArgs = () => stageHostArgs(activeRunRef.current?.runId ?? null);
   /** Absolute folder the current run works in (its worktree, else the work root). */
   const currentRunRoot = () => runRoot(projectRoot ?? "", activeRunRef.current, workRoot);
-  /** That folder relative to the project, for the project-scoped fs (artifact, test map, graph stages). */
-  const currentRepoPrefix = () => repoPrefixFor(projectRoot ?? "", currentRunRoot());
 
-  /** Paths with uncommitted changes before an agent call. `null` = the snapshot failed, so nothing may be reverted. */
-  const dirtyBefore = async (): Promise<Set<string> | null> => {
-    try { return new Set(await invokeHost<string[]>("loop_changed_paths", hostRunArgs())); } catch { return null; }
-  };
-
-  /** Paths git reports as changed right now; null when git cannot say (the post-throw check needs this). */
-  const changedPathsNow = async (): Promise<string[] | null> => {
-    try { return await invokeHost<string[]>("loop_changed_paths", hostRunArgs()); } catch { return null; }
-  };
-
-  /**
-   * Protected-path and scope guard for one agent call (the Mac's checkScope + policy). Shared logic is in
-   * protected.ts `checkWrites`; this only wires the Loop's policy, host revert and run log. A violation returns its
-   * message; the caller ends the run with it.
-   */
-  const guardProtected = (paths: readonly string[], target: LoopDefinition, before: ReadonlySet<string> | null, created: readonly string[] = []): Promise<string | null> =>
-    checkWrites(
-      paths,
-      { policy: target.config.protectedPathPolicy, extraProtectedGlobs: target.config.extraProtectedGlobs, scopeGlobs: target.scopeGlobs },
-      before,
-      created,
-      async (p, c) => { await invokeHost("loop_revert_paths", { paths: p, created: c, ...hostRunArgs() }); },
-      (line) => setRunLog((l) => [...l, line]),
-    );
-
-  /**
-   * Runs one agent call and checks what it wrote, also when the call throws (the Mac re-checks after a throw). Returns
-   * the reason the run must stop, or null when the call's writes were acceptable.
-   */
-  const stopReason = (g: { error: string | null; violation: string | null }): string | null => {
-    if (g.error !== null) return `the agent call failed (${g.error})${g.violation ? `; ${g.violation}` : ""}`;
-    return g.violation;
-  };
-
-  const runOneStage = async (s: LoopStage, target: LoopDefinition, prior: readonly { stage: LoopStage; ok: boolean; output: string }[] = [], approvalToken: string | null = null): Promise<{ ok: boolean; output: string }> => {
-    if (s.kind === "shellCommand") {
-      const r = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean }>("loop_run_stage", { stageId: s.id, loopId: target.id, approvalToken, timeoutSecs: s.timeoutSeconds, ...hostRunArgs() });
-      if (r.cancelled) cancelledRef.current = true;
-      return { ok: !r.timedOut && !r.cancelled && r.exitCode === 0, output: r.cancelled ? "Stage cancelled." : [r.stdout, r.stderr].filter(Boolean).join("\n") };
-    }
-    if (s.kind === "regressionSweep") {
-      const repoPrefix = currentRepoPrefix();
-      const faultsRoot = repoPrefix ? `${repoPrefix}/system/faults` : "system/faults";
-      const r = await runRegression(fs, faultsRoot, {
-        async verify(f) {
-          const v = await invokeHost<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>("loop_run_fault_verify", { rel: f.rel, approvalToken, timeoutSecs: s.timeoutSeconds });
-          return { ok: !v.timedOut && v.exitCode === 0, output: [v.stdout, v.stderr].filter(Boolean).join("\n") };
-        },
-        async ask(prompt) {
-          const a = await core.request<{ reply?: string }>("/kb/complete", { method: "POST", body: { prompt } });
-          return a.reply ?? "";
-        },
-        async judge(saved, fresh) {
-          const prompt = ["Compare two answers about a software fault.", "Are they the same meaning for the fault and its fix? Reply with JSON only: {\"same\":true} or {\"same\":false}.", `Saved answer:\n${saved.slice(0, 12_000)}`, `Fresh answer:\n${fresh.slice(0, 12_000)}`].join("\n\n");
-          const j = await core.request<{ reply?: string }>("/kb/complete", { method: "POST", body: { prompt } });
-          const text = j.reply ?? "";
-          const m = /\{[\s\S]*?\}/.exec(text);
-          if (!m) return false;
-          try { return (JSON.parse(m[0]) as { same?: unknown }).same === true; } catch { return false; }
-        },
-      });
-      return { ok: r.passed, output: r.checked === 0 ? "No fixed faults to re-check." : [...r.notes, ...r.failures].join("\n") };
-    }
-    if (s.kind === "skill") {
-      if (!s.skillId) return { ok: false, output: "This skill stage has no skill id." };
-      const parts = [s.prompt?.trim() || `Run the ${s.name} skill for this loop.`];
-      if (target.goal) parts.push(`Loop goal: ${target.goal}`);
-      if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
-      if (s.targetPath) parts.push(`Target path: ${s.targetPath}`);
-      if (s.outputPath) parts.push(`Output path: ${s.outputPath}`);
-      const run = activeRunRef.current;
-      if (run && s.skillId === FACTORY_REVIEW_SKILL) {
-        try {
-          const d = await invokeHost<{ text?: unknown; truncated?: unknown }>("loop_worktree_diff", { runId: run.runId });
-          parts.push(reviewDiffSection({ text: typeof d.text === "string" ? d.text : "", truncated: d.truncated === true }));
-        } catch (e) {
-          return { ok: false, output: `the worktree diff could not be read for the review (${e instanceof Error ? e.message : String(e)})` };
-        }
-      }
-      const before = await dirtyBefore();
-      const llmDocExists = s.skillId === FACTORY_INTAKE_SKILL && projectRoot ? await fs.list("llm-doc").then(() => true, () => false) : false;
-      const g = await guardedAgentCall<AgentRunReply>({
-        before,
-        call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
-          method: "POST", body: agentRunBody({ message: parts.join("\n\n"), stage: s, repoRoot: currentRunRoot(), timeoutMs: (s.timeoutSeconds ?? 1800) * 1000, projectRoot: projectRoot ?? "", llmDocExists }),
-          signal: runAbortRef.current?.signal,
-        }),
-        changedNow: changedPathsNow,
-        check: (paths, b, created) => guardProtected(guardedPaths(target, s, paths), target, b, created),
-      });
-      const stop = stopReason(g);
-      if (g.result === null || stop !== null) { if (g.violation === null && cancelledRef.current) return { ok: false, output: stop ?? "the agent call failed" }; haltErrorRef.current = g.violation === null; haltRef.current = `${stop ?? "the agent call failed"}; the run stopped`; return { ok: false, output: stop ?? "the agent call failed" }; }
-      const r = g.result;
-      const ok = agentRunSucceeded(r);
-      const why = ok ? [] : r.unresolvedSkills?.length ? ["the skill could not be found, so it did not run"] : r.ran === false ? ["the skill did not run"] : [`the agent run did not finish (${r.resultSubtype ?? "no result"})`];
-      return { ok, output: [...why, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
-    }
-    if (s.kind === "testMap" && s.testOp === "ledger") {
-      const lastTest = [...prior].reverse().find((o) => o.stage.kind === "shellCommand" && /test/i.test(o.stage.name));
-      if (!lastTest) return { ok: false, output: "the ledger stage needs a Test stage output earlier in this run" };
-      const parsed = parseTestResults(lastTest.output);
-      if (parsed.failing.length === 0 && parsed.passing.length === 0) return { ok: false, output: "no test results could be parsed from the Test stage output" };
-      const repoPrefix = currentRepoPrefix();
-      const path = `${repoPrefix ? `${repoPrefix}/` : ""}system/loop/test/ledger.json`;
-      const previous = await readLedger(fs, path);
-      const diff = ledgerDiff(previous, parsed, lastTest.ok);
-      const ledger = { runId: crypto.randomUUID(), recordedAt: new Date().toISOString(), failing: parsed.failing, passing: parsed.passing };
-      await writeLedger(fs, path, ledger);
-      return { ok: true, output: [`${ledger.failing.length} failing · ${ledger.passing.length} passing`, `new failures: ${diff.newFailures.length ? diff.newFailures.join(", ") : "none"}`, `still failing: ${diff.stillFailing.length ? diff.stillFailing.join(", ") : "none"}`, `fixed: ${diff.fixed.length ? diff.fixed.join(", ") : "none"}`, `wrote ${path}`].join("\n") };
-    }
-
-    if (s.kind === "testMap") {
-      if (s.testOp !== "structure" && s.testOp !== "map") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
-      const repoPrefix = currentRepoPrefix();
-      const structure = await detectTestStructure(fs, repoPrefix);
-      if (s.testOp === "structure") {
-        const writes = await writeTestStructure(fs, repoPrefix, structure);
-        return { ok: structure.status === "ok", output: [`${structure.roots.length} test root(s)`, ...structure.roots.map((r) => `${r.packageDir || "."}: ${r.runner} · ${r.command}`), ...structure.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
-      }
-      const map = await buildTestMap(fs, repoPrefix, structure, "system/graph/graph.json");
-      const writes = await writeTestMap(fs, repoPrefix, map);
-      return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
-    }
-    if (s.kind === "testPrune") {
-      const repoPrefix = currentRepoPrefix();
-      const structure = await detectTestStructure(fs, repoPrefix);
-      const findings = await scanTestPrune(fs, repoPrefix, structure);
-      const path = await writeTestPrune(fs, repoPrefix, findings);
-      return { ok: true, output: `${findings.length} finding(s); report only at ${path}` };
-    }
-    if (s.kind === "codeGraph") {
-      if (s.graphOp !== "snapshot" && s.graphOp !== "verify") return { ok: false, output: "this graph stage has no operation chosen" };
-      const repoPrefix = currentRepoPrefix();
-      const before = `${repoPrefix ? `${repoPrefix}/` : ""}system/loop/refactor/graph/before.json`;
-      const r = await runCodeGraph(fs, s.graphOp, "system/graph/graph.json", before, async () => {
-        await invokeHost("graph_generate", { mode: "code", target: repoPrefix || undefined });
-      });
-      return { ok: r.passed, output: r.output };
-    }
-    if (s.kind === "artifactCheck") {
-      if (!s.check) return { ok: false, output: "This artifact stage has no check configuration." };
-      const repoPrefix = currentRepoPrefix();
-      const r = await evaluateArtifact(fs, s.check, target.config.stages, { repoPrefix, projectPrefix: "" });
-      return { ok: r.passed, output: r.passed ? "Artifact check passed." : r.failures.join("\n") };
-    }
-    throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
-  };
+  /** The stage-execution context for one run (or one Run-stage click) in this screen. */
+  const stageContext = (runId: string | null, runRootPath: string, token: string | null): StageExecContext => ({
+    projectRoot: projectRoot ?? "", runId, runRoot: runRootPath, fs, host: invokeHost, core,
+    log: (line) => setRunLog((l) => [...l, line]),
+    approvalToken: async () => token,
+    signal: runAbortRef.current?.signal,
+    isCancelled: () => cancelledRef.current,
+    markCancelled: () => { cancelledRef.current = true; },
+  });
 
   /** Cancels the active run: shell and fault stages through loop_cancel, agent calls through their abort signal. */
   const cancelActiveRun = () => {
@@ -734,8 +582,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     startingRef.current = false;
     cancelledRef.current = false;
     runAbortRef.current = new AbortController();
-    haltRef.current = null;
-    haltErrorRef.current = false;
     pausedRef.current = false;
     setPaused(false);
     setLoopRunning(true);
@@ -748,36 +594,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     let summaryPath: string | null = null;
     try {
       const outcome = await runNativeLoop(target.config, {
+        ...createStageDeps(stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), target),
         isCancelled() { return cancelledRef.current; },
-        async runStage(s, prior) {
-          const r = await runOneStage(s, target, prior, approvalToken);
-          setRunLog((l) => [...l, `$ ${s.name}`, r.output, ""]);
-          return r;
-        },
-        async repair(s, output, attempt) {
-          const message = [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
-          if (target.goal) message.push(`Loop goal: ${target.goal}`);
-          if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
-          if (isFactoryLoop(target)) message.push(FACTORY_REPAIR_HINT);
-          const before = await dirtyBefore();
-          const g = await guardedAgentCall<AgentRunReply>({
-            before,
-            call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
-              method: "POST", body: { message: message.join("\n\n"), repoRoot: currentRunRoot(), timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
-              signal: runAbortRef.current?.signal,
-            }),
-            changedNow: changedPathsNow,
-            check: (paths, b, created) => guardProtected(guardedPaths(target, null, paths), target, b, created),
-          });
-          const r: AgentRunReply = g.result ?? {};
-          setRunLog((l) => [...l, `↻ repair ${s.name}`, r.reply ?? (g.error !== null ? `(agent call failed: ${g.error})` : "(no reply)"), ...(g.writes.length ? [`changed: ${g.writes.join(", ")}`] : []), ""]);
-          const stop = stopReason(g);
-          if (g.result === null || stop !== null) { if (g.violation === null && cancelledRef.current) return { ok: false, output: stop ?? "the agent call failed" }; haltErrorRef.current = g.violation === null; haltRef.current = `${stop ?? "the agent call failed"}; the run stopped`; return { ok: false, output: stop ?? "the agent call failed" }; }
-          return { ok: agentRunSucceeded(g.result), output: g.result.reply ?? "" };
-        },
         log(line) { setRunLog((l) => [...l, line]); },
-        halt() { return haltRef.current; },
-        haltIsError() { return haltErrorRef.current; },
         holdWhilePaused,
       });
       const needsDecision = isFactoryLoop(target) ? needsDecisionSummary(outcome) : null;
@@ -957,7 +776,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setRunningStage(true);
     setRunLog((l) => [...l, `$ ${stage.name}`, ""]);
     try {
-      const r = await runOneStage(stage, loop, [], approvalToken);
+      const r = await runOneStage(stageContext(null, workRoot ?? projectRoot ?? "", approvalToken), stage, loop, [], { reason: null, isError: false });
       setRunLog((l) => [...l, r.output, r.ok ? "Stage passed." : "Stage failed."]);
       setNotice(r.ok ? "The stage passed." : "The stage failed.");
     } catch (e) {

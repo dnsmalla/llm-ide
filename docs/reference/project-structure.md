@@ -33,7 +33,8 @@ llm-ide/
 │   └── scripts/         #   core staging, security checks, release helpers (+ tests)
 ├── ui/                  # React UI shared by desktop and web
 │   ├── kit/             #   @llmide/ui-kit: tokens CSS, components, icons
-│   └── screens/         #   One folder per section (shell, chat, library, explorer, graph, …)
+│   └── screens/         #   One folder per section (shell, chat, library, explorer, graph, …);
+│                        #   factory/ is the Factory board (section id `conflicts`; its Docs vs code tab embeds review/)
 ├── web/                 # Browser app: Host API v1 pairing, encrypted sync reader
 ├── ios_app/             # iPhone app (MyApp/) + SharedProtocol (wire types, sync envelope)
 ├── schema/              # Wire contracts: http, agent-v2, host-api, sync, relay (sync byte format), design tokens

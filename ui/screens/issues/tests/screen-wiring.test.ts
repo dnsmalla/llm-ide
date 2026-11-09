@@ -79,3 +79,19 @@ test("the board says it is per user, and project switches remount the section (s
   const shell = readFileSync(new URL("../../shell/Shell.tsx", import.meta.url), "utf8");
   assert.match(shell, /key=\{`\$\{def\.id\}:\$\{def\.id === "spike" \? "" : \(project\?\.root \?\? ""\)\}`\}/, "the shell keys section slots by project root");
 });
+
+test("Send to Factory: offered only when the entry provides it, single from the detail, batch from picked cards", () => {
+  const issues = read("../IssuesScreen.tsx");
+  assert.match(issues, /sendToFactory\?: \(issues: Issue\[\], runIntake: boolean\) => Promise<string>;/);
+  assert.match(issues, /const list = rows\.filter\(\(r\) => picked\.has\(r\.id\)\);/);
+  assert.match(issues, /onSendToFactory=\{deps\.sendToFactory \? \(\) => void sendIssues\(\[detailIssue\], false\) : undefined\}/);
+  const detail = read("../IssueDetail.tsx");
+  assert.match(detail, /\{onSendToFactory \? <button type="button" className="iss-btn" onClick=\{onSendToFactory\}>Send to Factory<\/button> : null\}/);
+  const entry = read("../index.tsx");
+  assert.match(entry, /features\.usable\.has\("auto_tasks"\)/);
+  assert.match(entry, /typeof __FEATURE_AUTO_TASKS__ === "undefined" \|\| __FEATURE_AUTO_TASKS__/);
+  assert.match(entry, /import\("\.\.\/loop\/native\/run-manager\.ts"\)/);
+  assert.match(entry, /import\("\.\.\/loop\/native\/run-manager-host\.ts"\)/);
+  assert.match(entry, /host\.installRunManagerHost\(\);/, "the run manager is wired before an intake run starts");
+  assert.match(entry, /shellBus\.publish\(\{ type: "goto-section", section: "conflicts", anchor: board\.factoryAnchor\(items\[0\]\.key\) \}\)/);
+});

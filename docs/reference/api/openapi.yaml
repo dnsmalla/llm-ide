@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 131
+  x-api-version: 132
 servers:
   - url: "https://{host}"
     variables:
@@ -12044,6 +12044,105 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/loop/ship-status:
+    post:
+      tags:
+        - "live-loop-misc"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "requests"
+              properties:
+                requests:
+                  type: "array"
+                  description: "At most 20; more is 400 VALIDATION_FAILED"
+                  items:
+                    type: "object"
+                    required:
+                      - "url"
+                    properties:
+                      url:
+                        type: "string"
+                        description: "A github.com pull request or gitlab.com merge request web URL (at most 500 characters)"
+                      since:
+                        type:
+                          - "string"
+                          - "null"
+                        description: "ISO date; only comments created after it are returned (null = all)"
+      responses:
+        "200":
+          description: "One result per request, in order: a ShipStatus, or { url, error } when the URL is unsupported or the provider failed (no provider text, never a token)."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "results"
+                properties:
+                  results:
+                    type: "array"
+                    items:
+                      type: "object"
+                      required:
+                        - "url"
+                      properties:
+                        url:
+                          type: "string"
+                        error:
+                          type: "string"
+                          enum:
+                            - "provider_error"
+                            - "unauthorized"
+                            - "unsupported_url"
+                        state:
+                          type: "string"
+                          enum:
+                            - "open"
+                            - "merged"
+                            - "closed"
+                        ci:
+                          type: "string"
+                          enum:
+                            - "none"
+                            - "pending"
+                            - "success"
+                            - "failed"
+                        ciSummary:
+                          type:
+                            - "string"
+                            - "null"
+                        comments:
+                          type: "array"
+                          description: "Untrusted text: newest 20 comments after `since`, each body at most 4,000 characters"
+                          items:
+                            type: "object"
+                            required:
+                              - "author"
+                              - "body"
+                              - "at"
+                            properties:
+                              author:
+                                type: "string"
+                              body:
+                                type: "string"
+                              at:
+                                type: "string"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/FeatureDisabled"
   /kb/mcp-connector/classify:
     post:
       summary: "Classify one ingested connector item and extract to-dos"

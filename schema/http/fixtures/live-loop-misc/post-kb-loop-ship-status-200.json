@@ -1,0 +1,31 @@
+{
+  "endpoint": "POST /kb/loop/ship-status",
+  "status": 200,
+  "description": "Both URLs are refused before any provider call (a self-hosted GitLab MR and a GitHub issue, not a PR), so the fixture replays with no network.",
+  "request": {
+    "body": {
+      "requests": [
+        {
+          "url": "https://gitlab.example.com/g/p/-/merge_requests/1",
+          "since": "2026-11-01T00:00:00Z"
+        },
+        {
+          "url": "https://github.com/o/r/issues/7",
+          "since": null
+        }
+      ]
+    }
+  },
+  "response": {
+    "results": [
+      {
+        "url": "https://gitlab.example.com/g/p/-/merge_requests/1",
+        "error": "unsupported_url"
+      },
+      {
+        "url": "https://github.com/o/r/issues/7",
+        "error": "unsupported_url"
+      }
+    ]
+  }
+}

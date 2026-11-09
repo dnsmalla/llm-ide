@@ -424,7 +424,14 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          (<project>/system/loop-worktrees/<run id>, branch factory/<run id>) without .factory/, refuses a
 //          secret-looking diff (422 secret_detected), pushes, and opens a draft PR/MR or reuses the open
 //          one → { url, commit, reused }. Errors: 400 invalid_worktree, 409 push_rejected, 502 provider_error.
-const SERVER_API_VERSION = 131;
+//   v132 — factory PR/MR status, additive (feature auto_tasks; contract schema/http/live-loop-misc.schema.json):
+//          POST /kb/loop/ship-status { requests: [{ url, since? }] } (at most 20, else 400 VALIDATION_FAILED) →
+//          { results: [ShipStatus | { url, error: 'provider_error' | 'unauthorized' | 'unsupported_url' }] }, one per
+//          request, in order. ShipStatus = { url, state: open|merged|closed, ci: none|pending|success|failed,
+//          ciSummary, comments: [{ author, body, at }] } (newer than `since`, the newest 20, bodies cut at 4,000
+//          characters). github.com PRs and gitlab.com MRs only; the vault github.token / gitlab.token is used and never
+//          returned. Rides the 'dispatch' bucket.
+const SERVER_API_VERSION = 132;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -455,6 +462,7 @@ const ALL_ENDPOINTS = [
   '/agent/v2/session/route/history',
   '/kb/loop/agent-run',
   '/kb/loop/ship',
+  '/kb/loop/ship-status',
   '/kb/complete',
   '/generate-questions',
   '/extract-entities',
@@ -756,6 +764,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/providers/turn')      return 'agentTurn';      // a multi-minute tool-capable chat turn
   if (url === '/kb/dispatch')            return 'dispatch';
   if (url === '/kb/repos/check-token')   return 'dispatch';   // one outbound provider /user call
+  if (url === '/kb/loop/ship-status')    return 'dispatch';   // reads GitHub / GitLab PR or MR status
   if (url === '/kb/issues/create' || url === '/kb/issues/comment' || url === '/kb/issues/close') return 'dispatch';   // one outbound GitHub/GitLab write
   if (url.startsWith('/bus/'))           return 'kbWrite';        // command bus: enqueue, cancel, approve, deny
   if (url === '/host-api/pin')           return 'kbWrite';        // Host API pairing PIN mint

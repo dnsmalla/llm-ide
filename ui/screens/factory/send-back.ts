@@ -1,0 +1,52 @@
+// Send back: CI failures and PR/MR review comments go to the same worktree as `.factory/FEEDBACK.md`, then a sendBack
+// run repairs, verifies and reviews. A button only; there is no automatic send-back.
+import type { FsApi } from "../explorer/fs";
+import { feedbackMarkdown } from "../loop/native/factory.ts";
+import type { RunMode } from "../loop/native/run-manager.ts";
+import type { ShipStatus } from "./columns.ts";
+import type { WorkItemRecord } from "./items.ts";
+
+export type StartRunFn = (projectRoot: string, item: WorkItemRecord, mode: RunMode, opts?: { runId?: string }) => string;
+export type SendBackFs = Pick<FsApi, "read" | "write" | "create">;
+
+const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const MAX_NOTE = 4000;
+function codeOf(e: unknown): string {
+  return typeof e === "object" && e !== null && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "";
+}
+
+/** Project-relative root of a run's worktree (Phase A: `<project>/system/loop-worktrees/<run_id>`). */
+export function worktreePrefix(runId: string): string {
+  if (!RUN_ID.test(runId)) throw new Error(`invalid run id: ${runId}`);
+  return `system/loop-worktrees/${runId}`;
+}
+
+/** The ShipStatus in the shape feedbackMarkdown takes. CI output is passed only when CI failed. */
+export function feedbackInput(status: ShipStatus): Parameters<typeof feedbackMarkdown>[0] {
+  return {
+    ci: status.ci === "failed" ? { state: status.ci, summary: status.ciSummary ?? "" } : null,
+    comments: status.comments.map((c) => ({ author: c.author, body: c.body, at: c.at })),
+  };
+}
+
+/** Writes `.factory/FEEDBACK.md` in the run's worktree: the user's note first, then the fenced provider data. */
+export async function prepareSendBack(fs: SendBackFs, runRootPrefix: string, status: ShipStatus, userNote: string): Promise<void> {
+  const dir = `${runRootPrefix}/.factory`;
+  const path = `${dir}/FEEDBACK.md`;
+  const note = userNote.trim().slice(0, MAX_NOTE);
+  // The user's own note is not untrusted data: it is placed first and not fenced. Provider text is fenced by feedbackMarkdown.
+  const head = note ? `# Feedback\n\n## Note from the user\n\n${note}\n\n` : "# Feedback\n\n";
+  const text = head + feedbackMarkdown(feedbackInput(status));
+  try { await fs.create(dir, "dir"); } catch (e) { if (codeOf(e) !== "exists") throw e; }
+  let hash: string | null = null;
+  try { hash = (await fs.read(path, 1_000_000)).hash; } catch (e) { if (codeOf(e) !== "not_found") throw e; }
+  await fs.write(path, text, { expected_hash: hash });
+}
+
+/** Writes the feedback, then starts a sendBack run in the card's own worktree (never a new one). */
+export async function sendBack(deps: { fs: SendBackFs; start: StartRunFn; projectRoot: string }, item: WorkItemRecord, status: ShipStatus, userNote: string): Promise<string> {
+  const runId = item.runIds.at(-1);
+  if (!runId) throw new Error("This card has no run to send back to.");
+  await prepareSendBack(deps.fs, worktreePrefix(runId), status, userNote);
+  return deps.start(deps.projectRoot, item, "sendBack", { runId });
+}

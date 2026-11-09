@@ -35,3 +35,5 @@
 .iss-write textarea { font: inherit; color: inherit; background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 6px 8px; resize: vertical; }
 .iss-btn.iss-danger { color: var(--tok-color-danger, #e5484d); }
 .iss-error { color: var(--tok-color-danger, #e5484d); font-size: var(--tok-type-caption-size); }
+.iss-check { display: inline-flex; align-items: center; gap: 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
+.iss-pick { margin: 0; }

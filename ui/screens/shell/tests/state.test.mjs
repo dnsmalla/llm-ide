@@ -152,7 +152,7 @@ test("navigation: select keeps visited sections, ignores disabled/unknown, steps
 test("section registry: toolbar sections first in the Mac's order; Settings last; Spike only with developer tools", () => {
   nav.setDevTools(false);
   const labels = nav.visibleSections().map((d) => d.label);
-  assert.deepEqual(labels, ["Home", "Explorer", "Graph", "Auto Tasks", "Review Conflicts", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Live", "Chat", "Settings"]);
+  assert.deepEqual(labels, ["Home", "Explorer", "Graph", "Auto Tasks", "Factory", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Live", "Chat", "Settings"]);
   assert.equal(nav.devToolsEnabled(), false);
   nav.setDevTools(true);
   assert.equal(nav.visibleSections().at(-1).id, "spike");
@@ -163,7 +163,7 @@ test("section registry: toolbar sections first in the Mac's order; Settings last
   nav.setDevTools(false);
   for (const id of ["autotasks", "loop"]) assert.equal(nav.SECTIONS.find((d) => d.id === id).enabled, true, `${id} is a real screen now`);
   assert.equal(nav.SECTIONS.find((d) => d.id === "issues").enabled, true, "Issues is a real screen now");
-  assert.equal(nav.SECTIONS.find((d) => d.id === "conflicts").enabled, true, "Review Conflicts is a real screen now");
+  assert.equal(nav.SECTIONS.find((d) => d.id === "conflicts").enabled, true, "Factory is a real screen now");
   assert.equal(nav.SECTIONS.find((d) => d.id === "gantt").enabled, true, "Gantt is a real screen now");
 });
 
