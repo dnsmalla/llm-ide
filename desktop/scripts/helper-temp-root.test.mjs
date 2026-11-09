@@ -17,6 +17,7 @@ const read = (name) => readFileSync(join(HUB, name), 'utf8').replaceAll('\r\n', 
 const helperSource = read('llmide-deploy');
 const unitSource = read('llmide-core.service');
 const backupUnitSource = read('llmide-backup.service');
+const backupTimerSource = read('llmide-backup.timer');
 const logrotateSource = read('logrotate');
 
 function has(command) {
@@ -120,9 +121,11 @@ const ENV2 = 'NODE_ENV=production\nLLMIDE_JWT_SECRET=cccc\nLLMIDE_VAULT_KEY=dddd
 test('the helper embeds the same unit, backup unit and logrotate as deploy/hub', () => {
   const unit = helperSource.match(/cat > "\$UNIT" <<'LLMIDE_UNIT'\n([\s\S]*?)\nLLMIDE_UNIT\n/)[1] + '\n';
   const backup = helperSource.match(/cat > "\$BACKUP_UNIT" <<'LLMIDE_BACKUP'\n([\s\S]*?)\nLLMIDE_BACKUP\n/)[1] + '\n';
+  const timer = helperSource.match(/cat > "\$BACKUP_TIMER" <<'LLMIDE_BACKUP_TIMER'\n([\s\S]*?)\nLLMIDE_BACKUP_TIMER\n/)[1] + '\n';
   const logrotate = helperSource.match(/cat > \/etc\/logrotate.d\/llmide <<'LLMIDE_LOG'\n([\s\S]*?)\nLLMIDE_LOG\n/)[1] + '\n';
   assert.equal(unit, unitSource, 'the helper must install the hardened unit, not a stale copy');
   assert.equal(backup, backupUnitSource);
+  assert.equal(timer, backupTimerSource, 'the helper installs the daily backup timer too');
   assert.equal(logrotate, logrotateSource);
   assert.match(unit, /^\[Install\]\nWantedBy=multi-user\.target$/m, 'the unit must be enable-able');
 });
@@ -133,6 +136,7 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     h.run('base', `${h.stage}\n`);
     assert.ok(existsSync(join(h.root, 'var/lib/llmide-deploy/staging')), 'base creates the root-owned staging directory');
     assert.ok(existsSync(h.unit));
+    assert.ok(existsSync(join(h.root, 'etc/systemd/system/llmide-backup.timer')));
     const emitted = readFileSync(h.unit, 'utf8');
     assert.match(emitted, /UMask=0077/);
     assert.match(emitted, /\[Install\]\nWantedBy=multi-user\.target/);
@@ -161,13 +165,14 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     assert.ok(existsSync(h.releaseNode), 'the release has core/node/node');
     assert.notEqual(statSync(h.releaseNode).mode & 0o005, 0, 'node must be executable by the service user');
     assert.ok(existsSync(join(h.root, 'var/www/llmide-web/index.html')), 'the PWA is copied after the release switch');
-    assert.match(h.run('check'), /helper=3/, "check reports the helper version");
+    assert.match(h.run('check'), /helper=4/, "check reports the helper version");
     h.run('upload', 'VERSION\n1.2.4\n');
     assert.notEqual(h.runFail('update').status, 0, 'a same-version update is refused');
 
     h.run('start');
     const calls = readFileSync(h.systemctlLog, 'utf8');
     assert.match(calls, /^enable llmide-core$/m);
+    assert.match(calls, /^enable --now llmide-backup.timer$/m);
     assert.match(calls, /^restart llmide-core$/m);
   } finally { h.cleanup(); }
 });

@@ -1,0 +1,12 @@
+[Unit]
+Description=LLM-IDE hub daily backup
+
+[Timer]
+# R-034 #16: one daily run with jitter, and catch up after the hub was off.
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=1800
+Persistent=true
+Unit=llmide-backup.service
+
+[Install]
+WantedBy=timers.target

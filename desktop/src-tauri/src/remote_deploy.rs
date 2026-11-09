@@ -36,13 +36,14 @@ pub const STAGES: &[&str] = &[
 pub const HELPER: &str = include_str!("../../../deploy/hub/llmide-deploy");
 pub const UNIT: &str = include_str!("../../../deploy/hub/llmide-core.service");
 pub const BACKUP_UNIT: &str = include_str!("../../../deploy/hub/llmide-backup.service");
+pub const BACKUP_TIMER: &str = include_str!("../../../deploy/hub/llmide-backup.timer");
 pub const LOGROTATE: &str = include_str!("../../../deploy/hub/logrotate");
 pub const VHOST_TEMPLATE: &str = include_str!("../../../deploy/hub/llm-ide-hub.nginx.template");
 pub const SETUP_HTML: &str = include_str!("../../../deploy/hub/setup.html");
 
 pub const MIN_DISK_MB: u64 = 2048;
 /// Bumped when the helper's stage set/semantics changes; a mismatch reinstalls it.
-pub const HELPER_VERSION: &str = "3";
+pub const HELPER_VERSION: &str = "4";
 const MAX_DOMAIN: usize = 253;
 const PLAN_TTL_MS: u64 = 30 * 60 * 1000;
 
@@ -331,7 +332,7 @@ pub fn generate_secrets() -> Result<DeploySecrets, FsError> {
 
 pub fn env_bytes(s: &DeploySecrets, domain: &str, version: &str) -> Vec<u8> {
     format!(
-        "NODE_ENV=production\nPATH=/usr/local/bin:/usr/bin:/bin\nLLMIDE_HOST=127.0.0.1\nLLMIDE_PORT=3457\nLLMIDE_HUB=1\nLLMIDE_TLS_TERMINATED=1\nLLMIDE_HUB_DOMAIN={domain}\nLLMIDE_HUB_VERSION={version}\nLLMIDE_DATA_DIR=/var/lib/llmide\nLLMIDE_DB_PATH=/var/lib/llmide/data.db\nLLMIDE_PROJECTS_ROOT=/srv/llmide/projects\nLLMIDE_BACKUP_DIR=/var/lib/llmide/backups\nLLMIDE_BACKUP_KEEP=7\nLLMIDE_DISABLE_REGISTRATION=1\nLLMIDE_TRUST_PROXY=1\nLLMIDE_LOG_JSON=1\nLLMIDE_LOG_LEVEL=info\nLLMIDE_MAX_TURNS=8\nLLMIDE_HOST_API_HUB=1\nLLMIDE_HOST_API_WEB_ORIGINS=https://{domain}\nLLMIDE_HOST_API_FINGERPRINT_FILE=/etc/llmide/host-api-fingerprint\nLLMIDE_HUB_PUBLIC_URL=wss://{domain}/host-api/v1\nLLMIDE_JWT_SECRET={}\nLLMIDE_VAULT_KEY={}\n",
+        "NODE_ENV=production\nPATH=/usr/local/bin:/usr/bin:/bin\nLLMIDE_HOST=127.0.0.1\nLLMIDE_PORT=3457\nLLMIDE_HUB=1\nLLMIDE_TLS_TERMINATED=1\nLLMIDE_HUB_DOMAIN={domain}\nLLMIDE_HUB_VERSION={version}\nLLMIDE_DATA_DIR=/var/lib/llmide\nLLMIDE_DB_PATH=/var/lib/llmide/data.db\nLLMIDE_PROJECTS_ROOT=/srv/llmide/projects\nLLMIDE_BACKUP_DIR=/var/lib/llmide/backups\nLLMIDE_BACKUP_KEEP=7\nLLMIDE_DISABLE_REGISTRATION=1\nLLMIDE_TRUST_PROXY=1\nLLMIDE_LOG_JSON=1\nLLMIDE_LOG_LEVEL=info\nLLMIDE_LOG_ROTATE=external\nLLMIDE_MAX_TURNS=8\nLLMIDE_HOST_API_HUB=1\nLLMIDE_HOST_API_WEB_ORIGINS=https://{domain}\nLLMIDE_HOST_API_FINGERPRINT_FILE=/etc/llmide/host-api-fingerprint\nLLMIDE_HUB_PUBLIC_URL=wss://{domain}/host-api/v1\nLLMIDE_JWT_SECRET={}\nLLMIDE_VAULT_KEY={}\n",
         s.jwt, s.vault
     ).into_bytes()
 }
@@ -340,7 +341,7 @@ const ENV_KEYS: &[&str] = &[
     "NODE_ENV", "PATH", "LLMIDE_HOST", "LLMIDE_PORT", "LLMIDE_HUB", "LLMIDE_TLS_TERMINATED",
     "LLMIDE_HUB_DOMAIN", "LLMIDE_HUB_VERSION", "LLMIDE_DATA_DIR", "LLMIDE_DB_PATH", "LLMIDE_PROJECTS_ROOT",
     "LLMIDE_BACKUP_DIR", "LLMIDE_BACKUP_KEEP", "LLMIDE_DISABLE_REGISTRATION", "LLMIDE_TRUST_PROXY",
-    "LLMIDE_LOG_JSON", "LLMIDE_LOG_LEVEL", "LLMIDE_MAX_TURNS", "LLMIDE_HOST_API_HUB",
+    "LLMIDE_LOG_JSON", "LLMIDE_LOG_LEVEL", "LLMIDE_LOG_ROTATE", "LLMIDE_BACKUP_REMOTE", "LLMIDE_MAX_TURNS", "LLMIDE_HOST_API_HUB",
     "LLMIDE_HOST_API_WEB_ORIGINS", "LLMIDE_HOST_API_FINGERPRINT_FILE", "LLMIDE_HUB_PUBLIC_URL",
     "LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY",
 ];
@@ -655,6 +656,8 @@ pub struct RemoteDiagnostics {
     pub disk_free_mb: u64,
     pub version: Option<String>,
     pub last_backup: Option<String>,
+    /// Seconds since the newest backup file was written; None when no backup exists.
+    pub last_backup_age_sec: Option<u64>,
     pub health: Option<String>,
 }
 
@@ -665,6 +668,7 @@ pub fn parse_diagnostics(text: &str) -> RemoteDiagnostics {
         disk_free_mb: line("DISK_MB=").and_then(|v| v.parse().ok()).unwrap_or(0),
         version: line("VERSION=").filter(|v| !v.is_empty()),
         last_backup: line("BACKUP=").filter(|v| !v.is_empty()),
+        last_backup_age_sec: line("BACKUP_AGE_SEC=").and_then(|v| v.parse().ok()),
         health: line("HEALTH=").filter(|v| !v.is_empty()),
     }
 }
@@ -672,7 +676,11 @@ pub fn parse_diagnostics(text: &str) -> RemoteDiagnostics {
 pub const DIAGNOSTICS_SCRIPT: &str = r#"printf 'SERVICE=%s\n' "$(systemctl is-active llmide-core 2>/dev/null || true)"
 printf 'DISK_MB=%s\n' "$(df -Pk /var/lib/llmide 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024}')"
 printf 'VERSION=%s\n' "$(cat /opt/llmide/current/VERSION 2>/dev/null | tr -cd 'A-Za-z0-9._-' | head -c 40)"
-printf 'BACKUP=%s\n' "$(ls -t /var/lib/llmide/backups/data-*.db 2>/dev/null | head -1 | xargs -r basename)"
+backup=$(ls -t /var/lib/llmide/data.db.bak-*.db 2>/dev/null | grep -v '\.agent\.db$' | head -1 || true)
+printf 'BACKUP=%s\n' "$(printf '%s' "$backup" | xargs -r basename)"
+if [ -n "$backup" ]; then
+  printf 'BACKUP_AGE_SEC=%s\n' "$(( $(date +%s) - $(stat -c %Y "$backup" 2>/dev/null || echo 0) ))"
+fi
 printf 'HEALTH=%s\n' "$(curl -fsS --max-time 5 http://127.0.0.1:3457/health 2>/dev/null | head -c 300 | tr -d '\n')"
 "#;
 
@@ -1037,6 +1045,8 @@ mod tests {
         assert!(HELPER.contains("case \"$node_version\" in v22.*)"));
         assert!(UNIT.contains("ReadWritePaths=/var/lib/llmide /srv/llmide/projects"));
         assert!(UNIT.contains("EnvironmentFile=-/etc/llmide/bootstrap.env"));
+        assert!(BACKUP_TIMER.contains("OnCalendar="), "the daily backup timer ships with the helper");
+        assert!(BACKUP_TIMER.contains("WantedBy=timers.target"));
     }
 
     #[test]

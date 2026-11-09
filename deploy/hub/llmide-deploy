@@ -23,6 +23,7 @@ say() { echo "llmide-deploy: $stage: $*" >&2; }
 CONF=/etc/llmide/core.env
 UNIT=/etc/systemd/system/llmide-core.service
 BACKUP_UNIT=/etc/systemd/system/llmide-backup.service
+BACKUP_TIMER=/etc/systemd/system/llmide-backup.timer
 SITE=/etc/nginx/sites-enabled/llm-ide-hub
 # R-034 #8: the pre-deploy snapshot and its migration head, written by predeploy-backup and used by
 # rollback's restore-db when a forward migration raised the head.
@@ -64,7 +65,7 @@ case "$stage" in
     [ -r "$CONF" ] || { echo "llmide-deploy: check: no env file yet" >&2; }
     systemctl is-active --quiet llmide-core 2>/dev/null && echo "service=active" || echo "service=inactive"
     printf 'version=%s\n' "$(cat /opt/llmide/current/VERSION 2>/dev/null || true)"
-    echo "helper=3"
+    echo "helper=4"
     echo "ok"
     ;;
 
@@ -154,6 +155,22 @@ EnvironmentFile=/etc/llmide/core.env
 ExecStart=/opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/scripts/backup.mjs
 LLMIDE_BACKUP
     chmod 0644 "$BACKUP_UNIT"; chown root:root "$BACKUP_UNIT"
+    cat > "$BACKUP_TIMER" <<'LLMIDE_BACKUP_TIMER'
+[Unit]
+Description=LLM-IDE hub daily backup
+
+[Timer]
+# R-034 #16: one daily run with jitter, and catch up after the hub was off.
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=1800
+Persistent=true
+Unit=llmide-backup.service
+
+[Install]
+WantedBy=timers.target
+LLMIDE_BACKUP_TIMER
+    chmod 0644 "$BACKUP_TIMER"; chown root:root "$BACKUP_TIMER"
+    systemctl enable --now llmide-backup.timer 2>/dev/null || true
     cat > /etc/logrotate.d/llmide <<'LLMIDE_LOG'
 /var/lib/llmide/*.log {
   weekly
@@ -177,7 +194,7 @@ LLMIDE_LOG
     while IFS= read -r line || [ -n "$line" ]; do
       key=${line%%=*}
       case "$key" in
-        NODE_ENV|PATH|LLMIDE_HOST|LLMIDE_PORT|LLMIDE_HUB|LLMIDE_TLS_TERMINATED|LLMIDE_HUB_DOMAIN|LLMIDE_HUB_VERSION|LLMIDE_DATA_DIR|LLMIDE_DB_PATH|LLMIDE_PROJECTS_ROOT|LLMIDE_BACKUP_DIR|LLMIDE_BACKUP_KEEP|LLMIDE_DISABLE_REGISTRATION|LLMIDE_TRUST_PROXY|LLMIDE_LOG_JSON|LLMIDE_LOG_LEVEL|LLMIDE_MAX_TURNS|LLMIDE_HOST_API_HUB|LLMIDE_HOST_API_WEB_ORIGINS|LLMIDE_HOST_API_FINGERPRINT_FILE|LLMIDE_HUB_PUBLIC_URL|LLMIDE_JWT_SECRET|LLMIDE_VAULT_KEY) ;;
+        NODE_ENV|PATH|LLMIDE_HOST|LLMIDE_PORT|LLMIDE_HUB|LLMIDE_TLS_TERMINATED|LLMIDE_HUB_DOMAIN|LLMIDE_HUB_VERSION|LLMIDE_DATA_DIR|LLMIDE_DB_PATH|LLMIDE_PROJECTS_ROOT|LLMIDE_BACKUP_DIR|LLMIDE_BACKUP_KEEP|LLMIDE_DISABLE_REGISTRATION|LLMIDE_TRUST_PROXY|LLMIDE_LOG_JSON|LLMIDE_LOG_LEVEL|LLMIDE_LOG_ROTATE|LLMIDE_BACKUP_REMOTE|LLMIDE_MAX_TURNS|LLMIDE_HOST_API_HUB|LLMIDE_HOST_API_WEB_ORIGINS|LLMIDE_HOST_API_FINGERPRINT_FILE|LLMIDE_HUB_PUBLIC_URL|LLMIDE_JWT_SECRET|LLMIDE_VAULT_KEY) ;;
         *) rm -f "$tmp"; die "the env key $key is outside the allowed set" ;;
       esac
     done < "$tmp"

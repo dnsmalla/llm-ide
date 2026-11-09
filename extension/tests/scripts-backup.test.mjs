@@ -91,3 +91,29 @@ test('backup script includes the sibling agent.db as a pair', async () => {
     cleanupFixture(dir);
   }
 });
+
+test('R-034 #16: an optional off-host copy is attempted and its failure never loses the local backup', async () => {
+  const { dir, dbPath } = makeDbFixture();
+  try {
+    const outPath = path.join(dir, 'backup.db');
+    const seen = [];
+    const ok = await runBackup({
+      dbPath, outPath, offHostTarget: 'backup.example.com:/srv/llmide',
+      offHostCopy: async (files, target) => { seen.push({ files, target }); },
+    });
+    assert.deepEqual(seen, [{ files: [outPath], target: 'backup.example.com:/srv/llmide' }]);
+    assert.equal(ok.offHost.ok, true);
+    assert.ok(fs.existsSync(outPath));
+
+    const outPath2 = path.join(dir, 'backup2.db');
+    const failed = await runBackup({
+      dbPath, outPath: outPath2, offHostTarget: 'backup.example.com:/srv/llmide',
+      offHostCopy: async () => { throw new Error('rsync exited 23'); },
+    });
+    assert.equal(failed.offHost.ok, false);
+    assert.match(failed.offHost.error, /rsync exited 23/);
+    assert.ok(fs.existsSync(outPath2), 'the local backup still exists');
+  } finally {
+    cleanupFixture(dir);
+  }
+});

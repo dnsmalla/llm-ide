@@ -27,7 +27,7 @@ export default function RemoteDeployCard({ config }: { config: RemoteServerConfi
     try {
       if (what === "update") { if (!host.remoteUpdate) throw new Error("Update needs the desktop host."); await host.remoteUpdate(target, version, updateConfirm, config.hubUrl); }
       else if (what === "backup") { if (!host.remoteBackupNow) throw new Error("Backup needs the desktop host."); await host.remoteBackupNow(target); }
-      else if (what === "diag") { if (!host.remoteDiagnostics) throw new Error("Diagnostics need the desktop host."); const d = await host.remoteDiagnostics(target); setOps({ busy: null, note: null, error: null, logs: ops.logs, diag: `service ${d.service}; disk ${d.diskFreeMb} MB; version ${d.version ?? "?"}; last backup ${d.lastBackup ?? "none"}; health ${d.health ?? "unreachable"}` }); return; }
+      else if (what === "diag") { if (!host.remoteDiagnostics) throw new Error("Diagnostics need the desktop host."); const d = await host.remoteDiagnostics(target); setOps({ busy: null, note: null, error: null, logs: ops.logs, diag: `service ${d.service}; disk ${d.diskFreeMb} MB; version ${d.version ?? "?"}; last backup ${d.lastBackup ?? "none"}${typeof d.lastBackupAgeSec === "number" ? ` (${Math.round(d.lastBackupAgeSec / 3600)} h ago)` : ""}; health ${d.health ?? "unreachable"}` }); return; }
       else if (what === "logs") { if (!host.remoteLogs) throw new Error("Logs need the desktop host."); setOps({ busy: null, note: null, error: null, logs: await host.remoteLogs(target, 200), diag: ops.diag }); return; }
       else {
         if (!host.remoteUninstall) throw new Error("Uninstall needs the desktop host.");

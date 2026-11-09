@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { createReadStream, existsSync } from 'node:fs';
 import { chmod, mkdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -78,9 +79,24 @@ async function sha256File(filePath) {
   return hash.digest('hex');
 }
 
+/**
+ * R-034 #16: optional off-host copy. `LLMIDE_BACKUP_REMOTE` is an rsync destination
+ * (`user@host:/path` or a mounted path), configured by the operator; no shell is involved.
+ * A failed off-host copy is reported but never loses the local backup.
+ */
+async function defaultOffHostCopy(files, target) {
+  await new Promise((resolve, reject) => {
+    const child = spawn('rsync', ['-a', '--', ...files, target], { stdio: 'ignore' });
+    child.once('error', reject);
+    child.once('close', (code) => (code === 0 ? resolve() : reject(new Error(`rsync exited ${code}`))));
+  });
+}
+
 export async function runBackup({
   dbPath = config.dbPath, outPath = defaultBackupPath(dbPath), agentDbPath = null,
   includeAgent = true, force = false,
+  offHostTarget = process.env.LLMIDE_BACKUP_REMOTE || null,
+  offHostCopy = defaultOffHostCopy,
 } = {}) {
   const resolvedDb = path.resolve(dbPath);
   const resolvedOut = path.resolve(outPath);
@@ -139,6 +155,15 @@ export async function runBackup({
 
   const info = await stat(resolvedOut);
   const sha256 = await sha256File(resolvedOut);
+  let offHost = null;
+  if (offHostTarget) {
+    try {
+      await offHostCopy([resolvedOut, resolvedAgentOut].filter(Boolean), offHostTarget);
+      offHost = { target: offHostTarget, ok: true };
+    } catch (err) {
+      offHost = { target: offHostTarget, ok: false, error: String(err?.message ?? err).slice(0, 200) };
+    }
+  }
   return {
     dbPath: resolvedDb,
     // Which data location the DB came from: 'system' (LLMIDE_DATA_DIR),
@@ -150,6 +175,7 @@ export async function runBackup({
     agentPath: agentEnabled ? resolvedAgentOut : null,
     agentBytes,
     agentSha256,
+    offHost,
   };
 }
 
@@ -175,7 +201,8 @@ if (isMain) {
     const result = await runBackup(parsed);
     process.stdout.write(
       `source=${result.dbPath} (location: ${result.location})\n`
-      + `backup=${result.outPath}\nbytes=${result.bytes}\nsha256=${result.sha256}\n`,
+      + `backup=${result.outPath}\nbytes=${result.bytes}\nsha256=${result.sha256}\n`
+      + (result.offHost ? `offhost=${result.offHost.ok ? result.offHost.target : `FAILED ${result.offHost.error}`}\n` : ''),
     );
   } catch (err) {
     process.stderr.write(`${err.message}\n`);

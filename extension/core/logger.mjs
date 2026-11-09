@@ -31,6 +31,9 @@ const minLevel = LEVELS[(process.env.LLMIDE_LOG_LEVEL || 'info').toLowerCase()] 
 // LLMIDE_LOG_FILE=<path>, or LLMIDE_LOG_FILE='' / 'none' to disable.
 const MAX_LOG_BYTES = 2 * 1024 * 1024; // rotate (single .old) past 2 MB
 const FILE_MIN_LEVEL = LEVELS.warn;    // only persist warn + error
+// R-034 #16: a hub has logrotate (deploy/hub/logrotate) as its ONE rotator. Setting
+// LLMIDE_LOG_ROTATE=external stops this sink's own size/startup rotation so the two never race.
+const EXTERNAL_ROTATE = process.env.LLMIDE_LOG_ROTATE === 'external';
 const logFilePath = resolveLogFile();
 let _fileBytes = initialLogSize(logFilePath);
 
@@ -40,7 +43,7 @@ let _fileBytes = initialLogSize(logFilePath);
 // as the size cap below), so a crash from the last run stays diagnosable.
 // Best-effort — a failure here must never block startup.
 function rotateOnStartup() {
-  if (!logFilePath || _fileBytes === 0) return; // nothing to roll over
+  if (EXTERNAL_ROTATE || !logFilePath || _fileBytes === 0) return; // nothing to roll over
   try { renameSync(logFilePath, `${logFilePath}.old`); } catch { /* ignore */ }
   _fileBytes = 0;
 }
@@ -76,7 +79,7 @@ function initialLogSize(file) {
 function writeToFile(line) {
   if (!logFilePath) return;
   try {
-    if (_fileBytes > MAX_LOG_BYTES) {
+    if (!EXTERNAL_ROTATE && _fileBytes > MAX_LOG_BYTES) {
       try { renameSync(logFilePath, `${logFilePath}.old`); } catch { /* ignore */ }
       _fileBytes = 0;
     }

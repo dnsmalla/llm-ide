@@ -261,7 +261,7 @@ export interface SettingsHost {
   remoteUpdate?(target: { host: string; port: number; user: string; keyPath: string }, version: string, confirmation: string, hubUrl: string): Promise<void>;
   remoteBackupNow?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
   remoteLogs?(target: { host: string; port: number; user: string; keyPath: string }, lines: number): Promise<string>;
-  remoteDiagnostics?(target: { host: string; port: number; user: string; keyPath: string }): Promise<{ service: string; diskFreeMb: number; version: string | null; lastBackup: string | null; health: string | null }>;
+  remoteDiagnostics?(target: { host: string; port: number; user: string; keyPath: string }): Promise<{ service: string; diskFreeMb: number; version: string | null; lastBackup: string | null; lastBackupAgeSec?: number | null; health: string | null }>;
   remoteUninstall?(target: { host: string; port: number; user: string; keyPath: string }, confirmation: string, purge: boolean): Promise<void>;
   /** Stop/start the app-managed core from Settings (and the core-down panel for Start). */
   coreStop?(): Promise<void>;
