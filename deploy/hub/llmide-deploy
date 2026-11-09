@@ -33,7 +33,9 @@ staging() {
 
 conf() {
   [ -r "$CONF" ] || die "the env file is missing (run env first)"
-  # Only non-secret values are sourced for paths/domain. The secrets stay in the service's environment.
+  # Only non-secret values are sourced for paths/domain. The two secrets live in root-owned
+  # credential files (/etc/llmide/jwt.secret, /etc/llmide/vault.key) and reach the core through
+  # systemd LoadCredential, never through the service environment (R-034 #1).
   DOMAIN=$(sed -n 's/^LLMIDE_HUB_DOMAIN=//p' "$CONF" | head -1)
   VERSION=$(sed -n 's/^LLMIDE_HUB_VERSION=//p' "$CONF" | head -1)
   [ -n "$DOMAIN" ] || die "LLMIDE_HUB_DOMAIN is missing"
@@ -91,6 +93,13 @@ Group=llmide
 WorkingDirectory=/opt/llmide/current/core/root/extension
 EnvironmentFile=/etc/llmide/core.env
 EnvironmentFile=-/etc/llmide/bootstrap.env
+# R-034 #1 defence in depth: the core's JWT/vault secrets arrive as systemd credentials, not as
+# EnvironmentFile values, so an agent Bash child running as the same uid cannot read them from
+# /proc/<core>/environ. The real fix is the hub authority clamp (only a team owner/admin may execute).
+LoadCredential=jwt-secret:/etc/llmide/jwt.secret
+LoadCredential=vault-key:/etc/llmide/vault.key
+ProtectProc=invisible
+ProcSubset=pid
 ExecStart=/opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/server.mjs
 Restart=on-failure
 RestartSec=3
@@ -162,17 +171,30 @@ LLMIDE_LOG
     if [ "$(tr -d '\r' < "$tmp" | wc -c)" -ne "$(wc -c < "$tmp")" ]; then
       rm -f "$tmp"; die "the env contains a carriage return"
     fi
-    # Re-deploy must never rotate the JWT/vault keys: keep the existing values and back up the old env.
-    if [ -f "$CONF" ]; then
-      for key in LLMIDE_JWT_SECRET LLMIDE_VAULT_KEY; do
-        old=$(sed -n "s/^${key}=//p" "$CONF" | head -1)
-        case "$old" in
-          ''|*[!A-Fa-f0-9]*) ;;
-          *) replace_line "$tmp" "$key" "$old" ;;
-        esac
-      done
-      cp -p "$CONF" "$CONF.prev"
-    fi
+    # Re-deploy must never rotate the JWT/vault keys. R-034 #1: split both out of the environment
+    # into root-owned credential files; the unit's LoadCredential= reads them, so the core's
+    # /proc/<pid>/environ never carries a secret a same-uid agent Bash could read.
+    if [ -f "$CONF" ]; then cp -p "$CONF" "$CONF.prev"; fi
+    for spec in jwt-secret:LLMIDE_JWT_SECRET:/etc/llmide/jwt.secret vault-key:LLMIDE_VAULT_KEY:/etc/llmide/vault.key; do
+      key=${spec#*:}; key=${key%%:*}
+      file=${spec##*:}
+      value=$(sed -n "s/^${key}=//p" "$tmp" | head -1)
+      if [ -n "$value" ]; then
+        case "$value" in *[!A-Fa-f0-9]*) rm -f "$tmp"; die "the $key value is not hex" ;; esac
+      fi
+      old=""
+      if [ -f "$file" ]; then old=$(cat "$file"); fi
+      if [ -z "$old" ] && [ -f "$CONF" ]; then old=$(sed -n "s/^${key}=//p" "$CONF" | head -1); fi
+      case "$old" in ''|*[!A-Fa-f0-9]*) ;; *) value=$old ;; esac
+      if [ -n "$value" ]; then
+        t=$(mktemp "${file}.XXXXXX")
+        printf '%s' "$value" > "$t"
+        chown root:root "$t"; chmod 0600 "$t"; mv "$t" "$file"
+        # Strip the key from the environment file (the value now lives only in the credential file).
+        sed "/^${key}=/d" "$tmp" > "${tmp}.clean"
+        mv "${tmp}.clean" "$tmp"
+      fi
+    done
     chown root:root "$tmp"; chmod 0600 "$tmp"
     mv "$tmp" "$CONF"
     if systemctl is-active --quiet llmide-core 2>/dev/null; then systemctl restart llmide-core; fi

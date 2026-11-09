@@ -25,7 +25,7 @@ import { restrictsTools } from '../llm_agent/modes/mode-personas.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
-import { getMember } from '../kb/members.mjs';
+import { getMember, hubClampedMember } from '../kb/members.mjs';
 import { deleteContinuation } from '../kb/chat-continuations.mjs';
 import { deleteSessionMemory } from '../kb/session-memory.mjs';
 import { clearChatMessages } from '../kb/chat-sessions.mjs';
@@ -496,7 +496,7 @@ async function handleV2Stream(req, res, userId, deps) {
   // The extension side panel has no project folder and sends no paths: its
   // turns run in a server-owned scratch directory (core/extension-chat-workspace.mjs).
   if (agentContext.surface === 'extension' && !agentContext.workspaceRoot) {
-    agentContext = { ...agentContext, workspaceRoot: extensionChatWorkspace() };
+    agentContext = { ...agentContext, workspaceRoot: extensionChatWorkspace(config.dataDir, userId) };
   }
   const workspaceRoot = typeof agentContext.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
   if (!workspaceRoot) {
@@ -581,8 +581,13 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   if (requestedProjectId && folderProjectId && requestedProjectId !== folderProjectId) {
     return io.refuse({ code: 'PROJECT_MISMATCH', status: 403, message: 'That project does not own this folder' });
   }
-  // R-022 #1: on a hub a folder inside no project cannot borrow a named project.
-  if (config.hub && folder && !folderProjectId) {
+  // R-022 #1: on a hub a folder inside no project cannot borrow a named project. R-034 #4: the two
+  // server-owned chat surfaces (the extension side panel and a phone/browser Host API turn) do not
+  // name a user folder at all — their scratch workspace belongs to no project by design. They are
+  // exempt from the FOLDER rule, never from the project grant: a hub turn still needs a real project
+  // the caller may use (the check below), it just no longer needs the scratch folder to be in one.
+  const scratchSurface = agentContext?.surface === 'extension' || agentContext?.surface === 'host-api';
+  if (config.hub && folder && !folderProjectId && !scratchSurface) {
     return io.refuse({ code: 'PROJECT_DENIED', status: 403, message: 'This folder is not in a project on this hub' });
   }
   const turnProjectId = folderProjectId || requestedProjectId || null;
@@ -595,7 +600,8 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   const projectMember = turnProjectId ? getProjectMember(getDb(), userId, turnProjectId) : null;
   const authority = projectGrant
     ? { teamRole: projectGrant.role, maxMode: projectGrant.maxMode, usdCapMonth: projectGrant.usdCapMonth }
-    : member;
+    // R-034 #1 / D1: a projectless turn is still clamped on a hub (a solo install is unchanged).
+    : hubClampedMember(member, config.hub);
   const readOnly = requestedMode === AUTO_READ_ONLY;
   let mode;
   if (authority?.teamRole === 'viewer') {
@@ -1280,7 +1286,9 @@ export const HOST_TURN_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_pla
  * ROUTE_UNAVAILABLE) rejects with an Error carrying that `code`.
  */
 export async function startHostTurn({ userId, chatSessionId, message, files = [], mode = 'auto', model = null, projectId = null, onEvent, deps = {} }) {
-  const agentContext = { chatSessionId, workspaceRoot: extensionChatWorkspace(), surface: 'host-api' };
+  // One scratch folder per member (R-034 #4): two people's phone/browser chats must not share a
+  // workspace, and the folder is server-owned so it can never name another project's files.
+  const agentContext = { chatSessionId, workspaceRoot: extensionChatWorkspace(config.dataDir, userId), surface: 'host-api' };
   const hostMode = mode !== 'auto' && HOST_TURN_MODES.includes(mode) ? clampToReadOnly(mode) : AUTO_READ_ONLY;
   const body = {
     message, mode: hostMode, agentContext, attachments: files,

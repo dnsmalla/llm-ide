@@ -10,6 +10,13 @@ Group=llmide
 WorkingDirectory=/opt/llmide/current/core/root/extension
 EnvironmentFile=/etc/llmide/core.env
 EnvironmentFile=-/etc/llmide/bootstrap.env
+# R-034 #1 defence in depth: the core's JWT/vault secrets arrive as systemd credentials, not as
+# EnvironmentFile values, so an agent Bash child running as the same uid cannot read them from
+# /proc/<core>/environ. The real fix is the hub authority clamp (only a team owner/admin may execute).
+LoadCredential=jwt-secret:/etc/llmide/jwt.secret
+LoadCredential=vault-key:/etc/llmide/vault.key
+ProtectProc=invisible
+ProcSubset=pid
 ExecStart=/opt/llmide/current/core/node/node /opt/llmide/current/core/root/extension/server.mjs
 Restart=on-failure
 RestartSec=3

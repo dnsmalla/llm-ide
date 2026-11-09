@@ -121,3 +121,24 @@ nothing else decides who may do what. `cap` = the member's monthly USD cap is ch
 **Rule:** a new route without a class is refused 404 and fails `extension/tests/route-policy-coverage.test.mjs`.
 The Host API (`COMMAND_CLASS`) and the background jobs (bus executor, meeting agent, outcome poller)
 re-check the class at the moment they act, so a demotion applies on the next frame or tick.
+
+## Amendment: R-034 #1 / D1 — execute is owner/admin only on a hub (2026-11-09)
+
+**User decision (D1, system re-review 2026-11-09):** on a hub, `execute` is a **team owner/admin** capability
+only. Every other member is read-only (Ask) there, whatever their `members.max_mode` or project row says.
+A local/solo install is unchanged.
+
+Why now: an execute turn runs agent Bash as the core's own service user, and the core's `/proc/<pid>/environ`
+held `LLMIDE_JWT_SECRET` and `LLMIDE_VAULT_KEY`. One Bash command could forge the owner's JWT and decrypt the
+vault. The clamp is the fix; the unit also moves both secrets to systemd `LoadCredential=` files and adds
+`ProtectProc=invisible` as defence in depth. Offering execute to hub members again requires running agent
+commands under a separate OS user first.
+
+- The clamp lives in `authorizeAction` (the route policy) and in the one turn clamp (`runV2Turn`, HTTP and
+  Host API alike), both through `hubClampedMode` in `kb/members.mjs`; the effective project grant is clamped
+  in `computeProjectGrant` too, so a UI/list reports the mode it will actually get.
+- A **project** owner/admin who is only a team member is clamped as well: project management
+  (`project.admin`) is not `execute`, and ADR 0022 says a project admin is not a team admin.
+- `max_mode: none` still refuses turns; `read_only` still keeps tools off.
+- Test: `extension/tests/hub-member-clamp.test.mjs` (engineer read-only, owner/admin execute, project owner
+  read-only); `project-roles.test.mjs` pins local execute unchanged.

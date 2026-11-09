@@ -7,15 +7,18 @@
 //   - a global viewer is never raised above viewer by a project row (H1.2 is not weakened);
 //   - a global member/engineer gets the project row's role, or viewer when there is no row;
 //   - the run mode is the tighter of the global and project modes;
-//   - the USD cap is the tighter positive cap (0 = no cap).
+//   - the USD cap is the tighter positive cap (0 = no cap);
+//   - on a HUB, a non-owner/admin is clamped to read_only (R-034 #1 / D1) — a project admin included.
 //
 // Every helper takes the db handle first (kb convention); every multi-step write is one transaction.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { AppError } from '../core/errors.mjs';
+import { config } from '../core/config.mjs';
+import { userRepoAllowlist } from './user.mjs';
 import {
-  MAX_USD_CAP_MONTH, ROLE_ORDER, atLeast, classRefusal, getMember, permittedClasses,
+  MAX_USD_CAP_MONTH, ROLE_ORDER, atLeast, classRefusal, getMember, hubClampedMode, permittedClasses,
 } from './members.mjs';
 
 /** Project roles use the same order as team roles: viewer < member < admin < owner. */
@@ -59,9 +62,10 @@ export function tighterUsdCap(a, b) {
 /**
  * Pure effective project grant. `member` is the caller's `members` row (or null); `projectMember` is
  * their `project_members` row (or null). Returns the role/mode/cap plus the source that won, so a UI
- * can explain it and the tests can pin the matrix.
+ * can explain it and the tests can pin the matrix. `hub` applies the R-034 #1 clamp: only a global team
+ * owner/admin keeps `execute`; a project admin or owner who is a team member is read-only on a hub.
  */
-export function computeProjectGrant(member, projectMember) {
+export function computeProjectGrant(member, projectMember, { hub = false } = {}) {
   const globalRole = member?.teamRole ?? 'viewer';
   const globalMax = member?.maxMode ?? 'read_only';
   const globalCap = Number(member?.usdCapMonth ?? 0);
@@ -70,7 +74,7 @@ export function computeProjectGrant(member, projectMember) {
   if (globalRole === 'owner' || globalRole === 'admin') {
     return {
       role: globalRole,
-      maxMode: globalMax,
+      maxMode: hubClampedMode(globalRole, globalMax, hub),
       usdCapMonth: Number.isFinite(globalCap) ? globalCap : 0,
       source: 'team',
       projectRole,
@@ -91,7 +95,7 @@ export function computeProjectGrant(member, projectMember) {
   const projectMax = projectMember ? projectMember.maxMode : 'read_only';
   return {
     role: projectRole ?? 'viewer',
-    maxMode: tighterMode(globalMax, projectMax),
+    maxMode: hubClampedMode(globalRole, tighterMode(globalMax, projectMax), hub),
     usdCapMonth: tighterUsdCap(globalCap, projectMember?.usdCapMonth ?? 0),
     source: projectMember ? 'project' : 'implicit',
     projectRole,
@@ -203,6 +207,50 @@ export function projectIdForRoot(db, root) {
   return null;
 }
 
+/** True when two canonical paths are equal or one contains the other (path-segment safe). */
+function pathsOverlap(a, b) {
+  const sep = path.sep;
+  return a === b || a.startsWith(b + sep) || b.startsWith(a + sep);
+}
+
+/**
+ * R-034 #2: an allow-list root must not widen a hub caller past the project grants.
+ *
+ * Returns `{ projectId }` when `folder` is a registered project root, lies inside one, or ENCLOSES one,
+ * and the caller has no explicit grant on that project (a project row; a global team owner/admin overrides
+ * every project). Ancestors count too: allowing `/srv` would expose every project below it. Off a hub this
+ * is always null (local solo mode is unchanged).
+ */
+export function repoRootRefusal(db, userId, folder, { hub = config.hub } = {}) {
+  if (!hub) return null;
+  const key = canonicalRoot(folder);
+  if (!key) return null;
+  const member = getMember(db, userId);
+  if (member && (member.teamRole === 'owner' || member.teamRole === 'admin')) return null;
+  const rows = db.prepare('SELECT id, root FROM projects WHERE root IS NOT NULL').all();
+  for (const row of rows) {
+    const root = canonicalRoot(row.root);
+    if (!root || !pathsOverlap(key, root)) continue;
+    // A project row is the grant. No row = implicit viewer for turn purposes, but NOT a grant that
+    // widens a filesystem allow-list across projects.
+    if (getProjectMember(db, userId, row.id)) continue;
+    return { projectId: row.id };
+  }
+  return null;
+}
+
+/**
+ * The per-user repo allow-list with R-034 #2 applied: on a hub, roots that overlap a registered project
+ * the caller has no grant on are dropped for every read AND write (chat tools, codegen, review, SCIP,
+ * connect-git, code graph). Always a fresh DB read — never a client payload.
+ */
+export function filteredRepoAllowlist(db, userId, { hub = config.hub } = {}) {
+  let paths;
+  try { paths = userRepoAllowlist(userId) || []; } catch { return []; }
+  if (!hub) return paths;
+  return paths.filter((p) => !repoRootRefusal(db, userId, p, { hub }));
+}
+
 
 function validName(name) {
   if (typeof name !== 'string') return null;
@@ -305,12 +353,12 @@ export function getProjectMember(db, userId, projectId) {
 }
 
 /** The effective project grant for a caller. Missing project or account fails closed to viewer. */
-export function effectiveProjectGrant(db, userId, projectId) {
+export function effectiveProjectGrant(db, userId, projectId, { hub = config.hub } = {}) {
   const member = getMember(db, userId);
   if (!getProject(db, projectId)) {
-    return computeProjectGrant(member, null);
+    return computeProjectGrant(member, null, { hub });
   }
-  return computeProjectGrant(member, getProjectMember(db, userId, projectId));
+  return computeProjectGrant(member, getProjectMember(db, userId, projectId), { hub });
 }
 
 export function canManageProject(db, userId, projectId) {
@@ -319,7 +367,7 @@ export function canManageProject(db, userId, projectId) {
 }
 
 /** The project list a client shows: id, name, the caller's effective role and permissions. */
-export function listProjectsForUser(db, userId) {
+export function listProjectsForUser(db, userId, { hub = config.hub } = {}) {
   const member = getMember(db, userId);
   const rows = db.prepare('SELECT id, name, created_at FROM projects ORDER BY name, id').all();
   const membership = new Map(
@@ -330,7 +378,7 @@ export function listProjectsForUser(db, userId) {
     }]),
   );
   return rows.map((row) => {
-    const grant = computeProjectGrant(member, membership.get(row.id) ?? null);
+    const grant = computeProjectGrant(member, membership.get(row.id) ?? null, { hub });
     return {
       id: row.id,
       name: row.name,

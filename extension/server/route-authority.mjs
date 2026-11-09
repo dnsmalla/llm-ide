@@ -24,7 +24,7 @@ import { usedUsdMonthForProject } from '../kb/project-usage.mjs';
 import { canManageProjectGrant, effectiveProjectGrant, getProject, getProjectMember, projectGrantAsMember } from '../kb/projects.mjs';
 import { recordAudit } from './audit.mjs';
 import { sendJSON } from '../core/utils.mjs';
-import { getMember, classRefusal, CLASS_GRANTS } from '../kb/members.mjs';
+import { getMember, classRefusal, CLASS_GRANTS, hubClampedMember } from '../kb/members.mjs';
 import { config } from '../core/config.mjs';
 
 const REFUSALS = Object.freeze({
@@ -109,11 +109,13 @@ export function projectIdForRequest(method, url) {
  */
 export function authorizeAction(db, userId, cls, { req = null, projectId = null } = {}) {
   if (!userId) return refuse(db, null, 'role_denied', cls);
-  const member = getMember(db, userId);
+  const member = hubClampedMember(getMember(db, userId), config.hub);
   const pid = projectId ?? projectIdForRequest(req?.method, req?.url);
   let grant = null;
   let projectMember = null;
   if (pid) {
+    // effectiveProjectGrant applies the same hub clamp, so a project owner/admin who is only a team
+    // member cannot execute either (R-034 #1; D1 says owner/admin = TEAM owner/admin).
     grant = effectiveProjectGrant(db, userId, pid);
     projectMember = getProjectMember(db, userId, pid);
   }

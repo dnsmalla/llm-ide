@@ -138,12 +138,22 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     assert.match(emitted, /\[Install\]\nWantedBy=multi-user\.target/);
 
     h.run('env', ENV1);
-    assert.ok(readFileSync(h.envPath, 'utf8').includes('LLMIDE_JWT_SECRET=aaaa'));
+    // R-034 #1: the secrets are credential files, not environment values. The unit passes them
+    // through LoadCredential, so the core process environment never carries them.
+    assert.ok(!readFileSync(h.envPath, 'utf8').includes('LLMIDE_JWT_SECRET='), 'core.env must not hold the JWT secret');
+    assert.ok(!readFileSync(h.envPath, 'utf8').includes('LLMIDE_VAULT_KEY='), 'core.env must not hold the vault key');
+    assert.equal(readFileSync(join(h.root, 'etc/llmide/jwt.secret'), 'utf8'), 'aaaa');
+    assert.equal(readFileSync(join(h.root, 'etc/llmide/vault.key'), 'utf8'), 'bbbb');
+    assert.equal(statSync(join(h.root, 'etc/llmide/jwt.secret')).mode & 0o777, 0o600);
     assert.equal(statSync(h.envPath).mode & 0o777, 0o600);
+    assert.match(emitted, /^LoadCredential=jwt-secret:.*jwt\.secret$/m);
+    assert.match(emitted, /^LoadCredential=vault-key:.*vault\.key$/m);
+    assert.match(emitted, /^ProtectProc=invisible$/m);
     h.run('env', ENV2);
     const redeployed = readFileSync(h.envPath, 'utf8');
-    assert.ok(redeployed.includes('LLMIDE_JWT_SECRET=aaaa'), 'a re-deploy keeps the old JWT secret');
-    assert.ok(redeployed.includes('LLMIDE_VAULT_KEY=bbbb'), 'a re-deploy keeps the old vault key');
+    assert.equal(readFileSync(join(h.root, 'etc/llmide/jwt.secret'), 'utf8'), 'aaaa', 'a re-deploy keeps the old JWT secret');
+    assert.equal(readFileSync(join(h.root, 'etc/llmide/vault.key'), 'utf8'), 'bbbb', 'a re-deploy keeps the old vault key');
+    assert.ok(!redeployed.includes('LLMIDE_JWT_SECRET='));
     assert.ok(existsSync(`${h.envPath}.prev`), 'the previous env is backed up');
 
     fakeBundle(h);

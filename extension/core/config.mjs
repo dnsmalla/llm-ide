@@ -219,13 +219,29 @@ export function backupPrunePolicy({ location, backupDirSet, keepSet }) {
 
 const isProd = (envStr('NODE_ENV', 'development') === 'production');
 
-let _jwtSecret = envStr('LLMIDE_JWT_SECRET');
-let _vaultKey  = envStr('LLMIDE_VAULT_KEY');
+/**
+ * A secret systemd exposes as a credential instead of an environment variable (R-034 #1):
+ * `LoadCredential=name:/path` makes it readable at `$CREDENTIALS_DIRECTORY/name`, not in
+ * `/proc/<pid>/environ`. Missing/invalid files fall through to the env/dev path.
+ */
+function credentialSecret(name) {
+  const dir = envStr('CREDENTIALS_DIRECTORY');
+  if (!dir) return null;
+  try {
+    const v = fs.readFileSync(path.join(dir, name), 'utf8').trim();
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+let _jwtSecret = envStr('LLMIDE_JWT_SECRET') || credentialSecret('jwt-secret');
+let _vaultKey  = envStr('LLMIDE_VAULT_KEY') || credentialSecret('vault-key');
 
 if (!_jwtSecret || !_vaultKey) {
   if (isProd) {
     throw new Error(
-      'LLMIDE_JWT_SECRET and LLMIDE_VAULT_KEY must be set in production. ' +
+      'LLMIDE_JWT_SECRET and LLMIDE_VAULT_KEY must be set in production (or loaded as systemd credentials). ' +
       'Generate with `node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'base64url\'))"`.'
     );
   }

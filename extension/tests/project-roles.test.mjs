@@ -366,6 +366,16 @@ test('#3 a project role can never pass a team-level class (admin stays team-only
   assert.equal(authorizeAction(db(), viewer, 'model.exec', { projectId: 'p-view' }).ok, false);
 });
 
+test('R-034 #1: a LOCAL install keeps execute for an engineer (the hub clamp does not leak)', () => {
+  const owner = user('local-exec-owner@example.com', 'owner', 'execute', 0);
+  const eng = user('local-exec-eng@example.com', 'member', 'execute', 0);
+  registerProject(db(), owner, { id: 'p-local-exec', root: '/r/local-exec' });
+  setProjectMember(db(), owner, 'p-local-exec', eng, { role: 'member', maxMode: 'execute', usdCapMonth: 0 });
+  assert.equal(effectiveProjectGrant(db(), eng, 'p-local-exec').maxMode, 'execute');
+  assert.equal(authorizeAction(db(), eng, 'model.exec', { projectId: 'p-local-exec' }).ok, true);
+  assert.equal(authorizeAction(db(), eng, 'fs.write', { projectId: 'p-local-exec' }).ok, true);
+});
+
 // ── R-020 #4/#5: one canonical root per project ───────────────────────────
 test('#5 a root is looked up canonically (trailing slash, dot segments, realpath, case on mac/windows)', () => {
   const owner = user('canon-owner@example.com', 'owner', 'execute', 0);

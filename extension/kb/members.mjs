@@ -339,6 +339,28 @@ export const CLASS_GRANTS = Object.freeze({
 const MODE_RANK = Object.freeze({ none: 0, read_only: 1, execute: 2 });
 
 /**
+ * R-034 #1 / user decision D1: on a HUB only a team owner or admin may run an execute-class action; every
+ * other member is read-only (Ask only). Agent Bash runs as the core's own uid there, and the core's
+ * process environment holds the JWT secret and vault key, so an execute turn would be able to forge the
+ * owner's token or decrypt every provider key. A local/solo install is unchanged.
+ *
+ * This is an AUTHORISATION clamp, not a display preference: `authorizeAction`, the turn clamp and the
+ * Host API capability filter all read through it.
+ */
+export function hubClampedMode(teamRole, maxMode, hub) {
+  if (!hub) return maxMode;
+  if (teamRole === 'owner' || teamRole === 'admin') return maxMode;
+  return maxMode === 'execute' ? 'read_only' : maxMode;
+}
+
+/** A member-shaped row with its run mode clamped for a hub (same object when nothing changes). */
+export function hubClampedMember(member, hub) {
+  if (!member || !hub) return member;
+  const maxMode = hubClampedMode(member.teamRole, member.maxMode, hub);
+  return maxMode === member.maxMode ? member : { ...member, maxMode };
+}
+
+/**
  * Why `member` may not perform an action of class `cls`, or null when it may. Pure. `usedUsd` is a
  * function returning the member's USD spend this month (called only for a capped class with a
  * non-zero cap); pass null to leave the cap to the caller.
