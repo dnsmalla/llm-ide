@@ -809,6 +809,16 @@ function applyProjectAssignments(db, blocks, { usersByEmail, emailByUserId, audi
         detail: { email: change.email, projectId: project.id, from: change.from, to: change.to },
       });
     }
+    // R-034 #14: the API refuses to remove a project's last owner; the file cannot be refused at boot
+    // without locking the hub, and a team owner/admin still manages the project, so say it loudly.
+    const hadOwner = [...existing.values()].some((row) => row.role === 'owner');
+    const hasOwner = [...desired.values()].some((member) => member.role === 'owner');
+    if (hadOwner && !hasOwner && logger) {
+      logger.warn('team_yaml_project_no_owner', {
+        projectId: project.id,
+        message: 'team.yaml left this project with no project owner; only a team owner/admin can manage it now.',
+      });
+    }
   }
   return changes;
 }
