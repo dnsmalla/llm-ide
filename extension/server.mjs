@@ -12,6 +12,7 @@ import path from 'path';
 import fs from 'fs';
 import { handleKB, initFeatureRoutes } from './routes/router.mjs';
 import { pruneBackups } from './kb/backup-retention.mjs';
+import { clientIp } from './server/route-http.mjs';
 import { agentBusySummary } from './core/agent-busy.mjs';
 import { prewarmAgentEngine, benchFakeEngineEnabled } from './routes/agent-v2.mjs';
 import { enabledEndpoints, featureDisabledFor, sendFeatureDisabled } from './routes/feature-routes.mjs';
@@ -1031,7 +1032,8 @@ const server = http.createServer(async (req, res) => {
   // hit this branch because they have no profile.
   const profile = rateLimitProfile(req.url || '', req.method || 'GET');
   if (profile) {
-    const scope = req.user?.id || (req.socket?.remoteAddress || 'anon');
+    // R-034 #19: behind the hub proxy the socket is always 127.0.0.1; use the one trusted XFF hop.
+    const scope = req.user?.id || clientIp(req) || 'anon';
     const r = tryConsume(profile, scope);
     if (!r.ok) {
       recordRateLimitDeny(profile);
@@ -1361,7 +1363,7 @@ const server = http.createServer(async (req, res) => {
         recordAudit(getDb({ logger }), {
           userId: req.user.id,  // actor = admin
           requestId,
-          ip: req.socket?.remoteAddress || 'unknown',
+          ip: clientIp(req),
           userAgent: req.headers['user-agent'] || '',
           action: 'admin.user_deleted',
           resource: targetId,

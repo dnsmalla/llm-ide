@@ -97,3 +97,23 @@ ACME issuance (the test domain was `hub.llmide.test` with a self-signed EC certi
 review. Treat this as deploy-path evidence, not a production sign-off. The CI regression for the
 helper is `desktop/scripts/helper-temp-root.test.mjs` (base/env/bundle/start, env edge cases,
 uninstall, and vhost rejection).
+
+## Client IPs, NAT and rate limits (R-034 #19)
+
+The hub core binds `127.0.0.1` and nginx is the only public listener. On every proxied request the
+socket peer is therefore nginx (`127.0.0.1`); the real client is the **rightmost** `X-Forwarded-For`
+entry — the one our own proxy appended. `LLMIDE_TRUST_PROXY=1` (set by the deploy) makes
+`clientIp()` read that hop, and the rightmost rule is deliberate: the leftmost entry is whatever the
+client claimed. The global rate-limit bucket and the audit log use the same value.
+
+- **Authenticated requests** are limited per `userId`, not per IP, so members behind one office NAT
+  do not share the turn/KB buckets.
+- **Unauthenticated** auth routes (`authPublic`, `authRegister`, the per-email failed-login buckets)
+  stay per IP. Many unrelated members behind one NAT therefore share one login/registration bucket;
+  a large office can see `429` on a burst of first-time sign-ins. That is the documented NAT limit,
+  not a bug — stagger first sign-ins, or give the hub its own public address/one account per person.
+- **Never** enable `LLMIDE_TRUST_PROXY` without a single trusted reverse proxy in front of the core:
+  a direct client could then choose the `X-Forwarded-For` value the core believes.
+- The global per-IP bucket measures the **last hop**, so a proxy that does not append the client
+  address collapses every request into one bucket. The bundled nginx config appends
+  `$proxy_add_x_forwarded_for`, which is the supported shape.

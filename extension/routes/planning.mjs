@@ -459,7 +459,7 @@ export async function handlePlanningRoutes(req, res, ctx) {
     const scope = projectScopeRefusal(kb.getDb(), userId, projectId);
     if (scope) { sendJSON(res, scope.status, { error: { code: scope.code, message: scope.message } }); return true; }
     if (projectId) {
-      const decision = authorizeAction(kb.getDb(), userId, 'model.ask', { projectId, req });
+      const decision = authorizeAction(kb.getDb(), userId, 'model.read', { projectId, req });
       if (!decision.ok) { sendJSON(res, decision.status, { error: { code: decision.code, message: decision.message } }); return true; }
     }
     try {
