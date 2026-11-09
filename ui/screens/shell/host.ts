@@ -8,7 +8,7 @@
 //  - Other slices import `host` (and `invokeHost` for commands of their own) from here instead
 //    of importing `@tauri-apps/api` themselves, so tests can swap one bridge.
 
-import { decodePrefsView } from "./host-prefs";
+import { decodePrefsView } from "./host-prefs.ts";
 
 export type CoreState = "starting" | "ready" | "restarting" | "failed" | "stopped" | "remote";
 export type CoreTrust = "pending" | "spawned" | "adopted_unverified" | "remote_pinned";
@@ -146,9 +146,13 @@ const REMOTE_SAFE_PREFIXES = ["remote_", "update_", "notify_", "tray_"];
 
 export class RemoteModeError extends Error {
   readonly code = "remote_mode";
-  constructor(readonly command: string) {
+  // NOTE: an explicit field, not a constructor parameter property: node tests load this file with
+  // --experimental-strip-types, which cannot run parameter properties (ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX).
+  readonly command: string;
+  constructor(command: string) {
     super("This action uses the local computer and is unavailable in remote mode.");
     this.name = "RemoteModeError";
+    this.command = command;
   }
 }
 
