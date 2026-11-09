@@ -10,7 +10,7 @@
 import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings/core-api";
 import { decodeComponentStatus, decodeCoreLog, decodeRtkStatus } from "../settings/components-model";
 import { decodeMemory, decodePaths } from "../settings/project-model";
-import { decodeRemoteServerConfig, decodeRemoteSshResult } from "../settings/remote-model";
+import { decodeHubCheck, decodeHubLogin, decodeRemoteServerConfig, decodeRemoteSshResult } from "../settings/remote-model";
 import { decodeBootstrap, decodeDeployPlan, decodeDeployReport } from "../settings/remote-deploy-model";
 import { decodeLegacyImportReport, decodeLegacyImportStatus } from "../settings/legacy-import-model";
 import { decodeTrayStatus } from "../settings/misc-model";
@@ -166,12 +166,24 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         async remoteDeployLock(target) { await d.invoke("remote_deploy_lock", { target }); },
         async remoteDeployRollback(target) { await d.invoke("remote_deploy_rollback", { target }); },
         async remoteTlsProbe(hubUrl) {
-          const r = await d.invoke<{ fingerprint?: unknown }>("remote_tls_probe", { hubUrl });
+          const r = await d.invoke<{ fingerprint?: unknown; webPki?: unknown }>("remote_tls_probe", { hubUrl });
           if (!r || typeof r.fingerprint !== "string" || !/^sha256:[A-Za-z0-9_-]{43}$/.test(r.fingerprint)) throw new Error("the desktop host returned an invalid TLS fingerprint");
-          return { fingerprint: r.fingerprint };
+          return { fingerprint: r.fingerprint, webPki: r.webPki === true };
         },
         async remoteTlsPin(hubUrl, fingerprint) { await d.invoke("remote_tls_pin", { hubUrl, fingerprint }); },
+        async remoteTlsUnpin(hubUrl) { await d.invoke("remote_tls_unpin", { hubUrl }); },
+        async remoteHubCheck(hubUrl) {
+          const c = decodeHubCheck(await d.invoke<unknown>("remote_hub_check", { hubUrl }));
+          if (!c) throw new Error("the desktop host returned a hub check this app cannot read");
+          return c;
+        },
+        async remoteHubLogin(hubUrl, email, password) {
+          const l = decodeHubLogin(await d.invoke<unknown>("remote_hub_login", { hubUrl, email, password }));
+          if (!l) throw new Error("the desktop host returned a hub session this app cannot read");
+          return l;
+        },
         async restartApp() { await d.invoke("app_restart"); },
+        async remoteSessionClear() { await d.invoke("remote_session_clear"); },
         async remoteUpdate(target, version, confirmation, hubUrl) { await d.invoke("remote_update", { target, version, confirmation, hubUrl }); },
         async remoteBackupNow(target) { await d.invoke("remote_backup_now", { target }); },
         async remoteLogs(target, lines) { const r = await d.invoke<unknown>("remote_logs", { target, lines }); return typeof r === "string" ? r : ""; },

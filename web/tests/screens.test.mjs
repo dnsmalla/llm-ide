@@ -14,7 +14,7 @@ const ev = (command, payload, replyTo = "c-1") => ({ type: "event", event: { com
 
 test("pairing: labelled address and PIN inputs, the origin hint, no stored PIN", () => {
   const out = html(h(UI.PairingScreen, { initialUrl: "ws://127.0.0.1:3016/host-api/v1", busy: false, error: null, revokedNotice: null, onSubmit: noop }));
-  assert.match(out, /<label[^>]*>[^<]*Host address/);
+  assert.match(out, /<label[^>]*>[^<]*Hub or desktop address/);
   assert.match(out, /inputMode="numeric"|inputmode="numeric"/);
   assert.match(out, /autoComplete="one-time-code"|autocomplete="one-time-code"/);
   assert.match(out, /LLMIDE_HOST_API_WEB_ORIGINS/);

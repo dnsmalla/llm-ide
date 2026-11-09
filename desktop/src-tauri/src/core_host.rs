@@ -552,8 +552,8 @@ impl CoreHost {
         let t = &self.inner.tuning;
         if self.mode() == ServerMode::Remote {
             let cfg = crate::prefs::launch().remote_server;
-            let result = if cfg.hub_url.trim().is_empty() || cfg.tls_pin.trim().is_empty() {
-                Err(crate::fs_ops::FsError { code: "REMOTE_NOT_CONFIGURED", message: "probe and trust the hub certificate before switching to remote mode".into() })
+            let result = if cfg.hub_url.trim().is_empty() {
+                Err(crate::fs_ops::FsError { code: "REMOTE_NOT_CONFIGURED", message: "connect to a hub URL before switching to remote mode".into() })
             } else {
                 crate::remote_proxy::start(&cfg.hub_url, &cfg.tls_pin)
             };

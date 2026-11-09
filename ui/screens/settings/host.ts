@@ -252,10 +252,16 @@ export interface SettingsHost {
   remoteDeployLock?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
   /** Phase 2: restore the previous release. */
   remoteDeployRollback?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
+  /** URL-first: reachability + TLS/health for a public hub URL, without credentials. */
+  remoteHubCheck?(hubUrl: string): Promise<import("./remote-model.ts").HubCheck>;
+  /** URL-first: log in at `/auth/login`; the host stores the refresh token in the OS keychain. */
+  remoteHubLogin?(hubUrl: string, email: string, password: string): Promise<import("./remote-model.ts").HubLogin>;
   /** Probe the hub's leaf SPKI (normal chain validation) and return the fingerprint to show. */
-  remoteTlsProbe?(hubUrl: string): Promise<{ fingerprint: string }>;
+  remoteTlsProbe?(hubUrl: string): Promise<{ fingerprint: string; webPki?: boolean }>;
   /** Store hub URL + confirmed leaf SPKI pin (only after the user trusts it). */
   remoteTlsPin?(hubUrl: string, fingerprint: string): Promise<void>;
+  /** Remove the optional pin and return to public-CA trust. */
+  remoteTlsUnpin?(hubUrl: string): Promise<void>;
   /** Restart the app so a saved mode change takes effect. */
   restartApp?(): Promise<void>;
   remoteUpdate?(target: { host: string; port: number; user: string; keyPath: string }, version: string, confirmation: string, hubUrl: string): Promise<void>;
@@ -333,6 +339,8 @@ export interface SettingsHost {
   /** Sign-in/out through the shell's core client, which owns the tokens. */
   signIn?(email: string, password: string): Promise<void>;
   signOut?(): Promise<void>;
+  /** Clear the hub refresh token held in the OS keychain (remote mode). */
+  remoteSessionClear?(): Promise<void>;
 }
 
 export interface SettingsEnv {

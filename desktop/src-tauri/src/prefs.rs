@@ -97,8 +97,9 @@ impl RemoteServerPrefs {
         self.hub_url = cap(self.hub_url, 300);
         self.tls_pin = cap(self.tls_pin, 80);
         // Hand-edited prefs or a webview call must not downgrade the hub to plaintext.
-        if crate::remote_tls::split_hub(&self.hub_url).is_err() { self.hub_url.clear(); }
-        if !crate::remote_tls::valid_pin(&self.tls_pin) { self.tls_pin.clear(); }
+        if crate::remote_tls::validate_hub_url(&self.hub_url, cfg!(debug_assertions)).is_err() { self.hub_url.clear(); }
+        // Empty is the normal WebPKI case; a non-empty pin must still have the exact shape.
+        if !self.tls_pin.is_empty() && !crate::remote_tls::valid_pin(&self.tls_pin) { self.tls_pin.clear(); }
         if self.port == 0 {
             self.port = 22;
         }
@@ -360,6 +361,10 @@ pub fn parse(text: &str) -> Prefs {
         });
         out.backend_node = p.backend_node.trim().to_string();
         out.backend_dir = p.backend_dir.trim().to_string();
+        // `patched` deliberately keeps the host-verified hub URL/pin across a WEBVIEW patch. On a
+        // file read there is no earlier verified value, so the file's own block must win or remote
+        // mode would lose its URL (and the keychain binding) on every restart.
+        out.remote_server = p.remote_server.clone().normalized();
         out
     }).unwrap_or_default()
 }
@@ -511,11 +516,38 @@ fn apply(patch: PrefsPatch) -> Result<PrefsView, FsError> {
 
 /// Host-side writer for the verified hub URL + pin only (never callable from the webview).
 pub fn set_remote_pin(hub_url: String, tls_pin: String) -> Result<PrefsView, FsError> {
+    let (canonical, _host, _port) = crate::remote_tls::validate_hub_url(&hub_url, cfg!(debug_assertions))?;
+    let pin = tls_pin.trim().to_string();
+    if !pin.is_empty() && !crate::remote_tls::valid_pin(&pin) {
+        return Err(herr("invalid_pin", "the TLS pin is not a sha256 SPKI pin"));
+    }
     let mut g = state();
     let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
     let mut next = st.stored.clone();
-    next.remote_server.hub_url = hub_url.trim().to_string();
-    next.remote_server.tls_pin = tls_pin.trim().to_string();
+    next.remote_server.hub_url = canonical;
+    next.remote_server.tls_pin = pin;
+    let next = next;
+    if let Some(dir) = &st.dir { save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?; }
+    st.stored = next.clone();
+    let persisted = st.dir.is_some();
+    drop(g);
+    Ok(view(next, persisted))
+}
+
+/// Host-side writer for the URL-first connection: canonical hub URL, optional pin and mode.
+/// The webview cannot call this directly; `remote_hub_login` is the only caller.
+pub fn set_remote_hub(hub_url: String, tls_pin: String, mode: ServerMode) -> Result<PrefsView, FsError> {
+    let (canonical, _host, _port) = crate::remote_tls::validate_hub_url(&hub_url, cfg!(debug_assertions))?;
+    let pin = tls_pin.trim().to_string();
+    if !pin.is_empty() && !crate::remote_tls::valid_pin(&pin) {
+        return Err(herr("invalid_pin", "the TLS pin is not a sha256 SPKI pin"));
+    }
+    let mut g = state();
+    let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
+    let mut next = st.stored.clone();
+    next.remote_server.hub_url = canonical;
+    next.remote_server.tls_pin = pin;
+    next.remote_server.mode = mode;
     let next = next;
     if let Some(dir) = &st.dir { save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?; }
     st.stored = next.clone();
@@ -628,6 +660,29 @@ mod tests {
         let back = parse(&serde_json::to_string(&patched).unwrap());
         assert_eq!(back.remote_server, patched.remote_server);
         assert_eq!(parse(r#"{"ltaMode":"off"}"#).remote_server, RemoteServerPrefs::default(), "an older file is local");
+    }
+
+    #[test]
+    fn a_prefs_file_keeps_the_saved_hub_url_and_pin_across_a_restart() {
+        let file = r#"{"ltaMode":"off","remoteServer":{"mode":"remote","host":"ssh.example.com","port":22,"user":"deploy","keyPath":"/k","label":"prod","hubUrl":"https://hub.example.com","tlsPin":""}}"#;
+        let loaded = parse(file);
+        assert_eq!(loaded.remote_server.mode, ServerMode::Remote);
+        assert_eq!(loaded.remote_server.hub_url, "https://hub.example.com");
+        assert_eq!(loaded.remote_server.tls_pin, "", "public-CA trust keeps an empty pin");
+        let pinned = parse(&file.replace(r#""tlsPin":"""#, r#""tlsPin":"sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA""#));
+        assert_eq!(pinned.remote_server.tls_pin, "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    }
+
+    #[test]
+    fn a_webpki_hub_keeps_an_empty_pin_and_a_bad_url_is_cleared() {
+        let empty = RemoteServerPrefs { hub_url: "https://hub.example.com".into(), tls_pin: String::new(), ..RemoteServerPrefs::default() }.normalized();
+        assert_eq!(empty.hub_url, "https://hub.example.com");
+        assert_eq!(empty.tls_pin, "", "public-CA trust needs no pin");
+        let bad = RemoteServerPrefs { hub_url: "http://hub.example.com".into(), tls_pin: "sha256:short".into(), ..RemoteServerPrefs::default() }.normalized();
+        assert_eq!(bad.hub_url, "");
+        assert_eq!(bad.tls_pin, "");
+        let local = RemoteServerPrefs { hub_url: "https://localhost:3457".into(), ..RemoteServerPrefs::default() }.normalized();
+        if cfg!(debug_assertions) { assert_eq!(local.hub_url, "https://localhost:3457"); } else { assert_eq!(local.hub_url, ""); }
     }
 
     #[test]

@@ -192,3 +192,138 @@ test("the host result decoder refuses invented or malformed answers", () => {
   assert.equal(decodeRemoteSshResult({ ...result, fingerprint: "" }), null);
   assert.equal(decodeRemoteSshResult(null), null);
 });
+
+// ---- URL-first flow (option A) -------------------------------------------------------------
+
+import { decodeHubCheck, decodeHubLogin, hubErrorText, validateHubUrl, type HubLogin } from "../remote-model.ts";
+
+const login: HubLogin = {
+  hubUrl: "https://hub.example.com",
+  user: { id: "u1", email: "owner@example.com", displayName: "Owner", role: "admin" },
+  role: "admin",
+  projects: [{ id: "p1", name: "Alpha", role: "owner" }],
+  webPki: true,
+  pin: "",
+};
+
+function hubIo(over: Partial<RemoteServerIo> = {}) {
+  const calls: string[] = [];
+  return {
+    calls,
+    io: {
+      ...io(),
+      async check(url: string) {
+        calls.push(`check:${url}`);
+        return { hubUrl: url, webPki: true, pin: "", status: "ok", apiVersion: 130, hub: true, dbOk: true };
+      },
+      async login(url: string, email: string, password: string) {
+        calls.push(`login:${url}:${email}:${password}`);
+        return login;
+      },
+      async signOut() { calls.push("signOut"); },
+      async logoutCore() { calls.push("logoutCore"); },
+      async restart() { calls.push("restart"); },
+      async unpin(url: string) { calls.push(`unpin:${url}`); },
+      ...over,
+    } as RemoteServerIo,
+  };
+}
+
+test("the hub URL validator trims, requires https, a public domain, and localhost only in dev", () => {
+  assert.deepEqual(validateHubUrl("  https://Hub.Example.com  "), { ok: true, url: "https://hub.example.com", host: "hub.example.com", port: 443 });
+  assert.deepEqual(validateHubUrl("https://hub.example.com:8443", { allowLocalhost: false }), { ok: true, url: "https://hub.example.com:8443", host: "hub.example.com", port: 8443 });
+  for (const bad of ["", "http://hub.example.com", "https://8.8.8.8", "https://hub", "https://hub.local", "https://hub.example.com/path", "https://user@hub.example.com", "https://hub.example.com?x", "https://hub.example.com:0"]) {
+    assert.equal(validateHubUrl(bad).ok, false, bad);
+  }
+  assert.equal(validateHubUrl("https://localhost").ok, false);
+  assert.deepEqual(validateHubUrl("https://localhost:3457", { allowLocalhost: true }), { ok: true, url: "https://localhost:3457", host: "localhost", port: 3457 });
+});
+
+test("Connect logs in with the trimmed URL/email, keeps the password out of state, and restarts", async () => {
+  const h = hubIo();
+  const m = new RemoteServerModel(h.io);
+  await m.load();
+  m.setHubUrl("  https://hub.example.com  ");
+  const result = await m.connect(" owner@example.com ", "secret", false);
+  assert.equal(result?.role, "admin");
+  assert.equal(h.calls[0], "login:https://hub.example.com:owner@example.com:secret");
+  assert.equal(h.calls[1], "restart");
+  assert.equal(m.getState().mode, "remote");
+  assert.equal(m.getState().hubLogin?.projects.length, 1);
+  assert.equal(m.getState().hubBusy, null);
+  assert.equal(JSON.stringify(m.getState()).includes("secret"), false, "the password is never retained");
+});
+
+test("a wrong password or unreachable hub is a clear error, not a mode change", async () => {
+  for (const [error, text] of [
+    [{ code: "invalid_credentials" }, /incorrect/i],
+    [{ code: "unreachable" }, /did not answer/i],
+    [{ code: "tls_pin_mismatch" }, /certificate changed/i],
+    [{ code: "project_access_denied" }, /project access/i],
+  ] as const) {
+    const h = hubIo({ async login() { throw error; } });
+    const m = new RemoteServerModel(h.io);
+    await m.load();
+    m.setHubUrl("https://hub.example.com");
+    assert.equal(await m.connect("owner@example.com", "wrong", false), null);
+    assert.match(m.getState().hubError ?? "", text);
+    assert.equal(m.getState().mode, "remote", "the loaded mode is unchanged; no save/restart happened");
+    assert.ok(!h.calls.some((c) => c.startsWith("restart")));
+  }
+});
+
+test("Test connection reports public-CA trust without a pin and does not sign in", async () => {
+  const h = hubIo();
+  const m = new RemoteServerModel(h.io);
+  await m.load();
+  m.setHubUrl("https://hub.example.com");
+  const check = await m.checkConnection(false);
+  assert.equal(check?.webPki, true);
+  assert.equal(m.getState().hubCheck?.dbOk, true);
+  assert.equal(m.getState().tlsPin, "");
+  assert.ok(!h.calls.some((c) => c.startsWith("login")));
+});
+
+test("a saved pin is shown as the optional fallback, and can be removed for public-CA trust", async () => {
+  const h = hubIo({ async check(url) { return { hubUrl: url, webPki: false, pin: `sha256:${"A".repeat(43)}`, status: "ok", apiVersion: 130, hub: true, dbOk: true }; } });
+  const m = new RemoteServerModel(h.io);
+  await m.load();
+  m.setHubUrl("https://hub.example.com");
+  await m.checkConnection(false);
+  assert.equal(m.getState().hubCheck?.webPki, false);
+  assert.match(m.getState().tlsPin, /^sha256:/);
+  await m.unpin(false);
+  assert.equal(m.getState().tlsPin, "");
+  assert.equal(h.calls.at(-1), "unpin:https://hub.example.com");
+});
+
+test("switching back to Local is explicit, saves local mode and restarts", async () => {
+  const h = hubIo();
+  const m = new RemoteServerModel(h.io);
+  await m.load();
+  m.setMode("remote");
+  const ok = await m.switchToLocal();
+  assert.equal(ok, true);
+  assert.equal(m.getState().mode, "local");
+  assert.equal(h.calls.at(-1), "restart");
+});
+
+test("Sign out clears the keychain session and the in-memory core session", async () => {
+  const h = hubIo();
+  const m = new RemoteServerModel(h.io);
+  await m.load();
+  await m.signOut();
+  assert.deepEqual(h.calls, ["signOut", "logoutCore"]);
+  assert.equal(m.getState().hubLogin, null);
+});
+
+test("the hub decoders refuse invented answers and map every clear error code", () => {
+  assert.deepEqual(decodeHubLogin(login), login);
+  assert.equal(decodeHubLogin({ ...login, user: { id: "u" } }), null);
+  assert.equal(decodeHubLogin({ ...login, webPki: "yes" }), null);
+  assert.equal(decodeHubCheck({ hubUrl: "https://h.example.com", webPki: true, pin: "", status: "ok", apiVersion: 1, hub: true, dbOk: true })?.dbOk, true);
+  assert.equal(decodeHubCheck({ hubUrl: "https://h.example.com" }), null);
+  for (const code of ["invalid_credentials", "unreachable", "tls_untrusted", "tls_pin_mismatch", "project_access_denied", "keychain_unavailable"]) {
+    assert.ok(hubErrorText({ code }).length > 10, code);
+  }
+});
