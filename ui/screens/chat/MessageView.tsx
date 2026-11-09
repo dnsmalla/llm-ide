@@ -95,10 +95,14 @@ function prettyArgs(args: string): string {
   try { return JSON.stringify(JSON.parse(args), null, 2); } catch { return args; }
 }
 
-export function ToolCard({ tool, files }: { tool: ToolPart; files?: FileRefs }) {
+/**
+ * `settled` is set once the reply it belongs to has ended without this tool's result: a stopped or failed turn must not
+ * leave its tool step spinning as "running".
+ */
+export function ToolCard({ tool, files, settled }: { tool: ToolPart; files?: FileRefs; settled?: "stopped" | "failed" }) {
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(TOOL_PREVIEW_CHARS);
-  const state = tool.result === null ? "running" : tool.result.isError ? "failed" : "done";
+  const state = tool.result === null ? (settled ?? "running") : tool.result.isError ? "failed" : "done";
   const bodyId = `tool-${tool.id || tool.index}`;
   const res = tool.result ? clipPreview(tool.result.text, shown) : null;
   const fileRaw = files && !tool.argsTruncated ? fileArgOf(tool.args) : null;
@@ -152,6 +156,7 @@ export function replyPreview(markdown: string, limit = 160): string {
 
 function Assistant({ m, host, collapsed, collapsible, onToggle }: { m: AssistantMessage; host: MessageHost } & CollapseProps) {
   const live = m.status === "streaming";
+  const settled = live ? undefined : m.status === "error" ? "failed" : "stopped";
   const lastIdx = m.parts.length - 1;
   const text = m.parts.map((p) => (p.kind === "text" ? textOf(p) : "")).join("").trim();
   // The Mac folds only the reply text: tool steps, notices and the stopped/failed status stay visible, and a reply
@@ -165,7 +170,7 @@ function Assistant({ m, host, collapsed, collapsible, onToggle }: { m: Assistant
       <div className="chat-assistant-body">
         {fold
           ? <>
-              {m.parts.map((p, i) => p.kind === "tool" ? <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} /> : null)}
+              {m.parts.map((p, i) => p.kind === "tool" ? <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} settled={settled} /> : null)}
               <button type="button" className="chat-collapsed" title="Show full reply" aria-label="Show full reply" aria-expanded={false} onClick={() => onToggle?.(m.id, true)}>
                 <span className="chat-muted">{replyPreview(text)}</span>
                 <span aria-hidden="true" className="chat-muted"> {"\u25BE"}</span>
@@ -173,7 +178,7 @@ function Assistant({ m, host, collapsed, collapsible, onToggle }: { m: Assistant
             </>
           : m.parts.map((p, i) => p.kind === "text"
             ? <StreamingText key={i} part={p} host={host} live={live && i === lastIdx} />
-            : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} />)}
+            : <ToolCard key={p.id || `i${p.index}-${i}`} tool={p} files={host.files} settled={settled} />)}
         {live && m.parts.length === 0 && <p className="chat-muted" role="status">Thinking…</p>}
         {m.notices.filter((n) => n.visible).map((n, i) => <NoticeLine key={i} n={n} host={host} />)}
         {m.interrupted && <p className="chat-muted" role="status">Interrupted.</p>}

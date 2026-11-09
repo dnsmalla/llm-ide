@@ -67,6 +67,14 @@ export function shouldLoadOlder(scrollTop: number, slack = 160): boolean {
   return scrollTop <= slack;
 }
 
+/**
+ * Whether the list should page older history in by itself. A failed page is not retried on every scroll: it waits for
+ * the reader's Retry (the failure stays visible until then).
+ */
+export function shouldAutoLoadOlder(scrollTop: number, hasMoreOlder: boolean, inFlight: boolean, failed: boolean): boolean {
+  return hasMoreOlder && !inFlight && !failed && shouldLoadOlder(scrollTop);
+}
+
 /** Items per page when paging older messages. */
 export const HISTORY_PAGE = 100;
 

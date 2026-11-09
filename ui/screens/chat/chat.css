@@ -111,6 +111,7 @@
 .chat-dock-head { position: relative; }
 .chat-dock-history { display: inline-flex; align-items: center; gap: 4px; max-width: 220px; min-width: 0; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); color: inherit; font: inherit; font-size: 12px; padding: 3px 6px; cursor: pointer; }
 .chat-dock-history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-dock-attn { flex: none; font-size: 11px; font-weight: 600; color: var(--tok-color-warning); white-space: nowrap; }
 .chat-session-picker-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
 .chat-session-picker-row { width: 100%; text-align: left; border: 0; border-radius: var(--tok-radius-sm); background: none; color: inherit; font: inherit; font-size: 12px; padding: 6px 8px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-session-picker-row:hover, .chat-session-picker-row[data-on] { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }

@@ -72,3 +72,11 @@ test("session groups: labels by age, headers only on change, fixed heights", () 
   assert.deepEqual(rows.map((r) => r.kind), ["header", "item", "item", "header", "item"]);
   assert.deepEqual(c.rowHeights(rows), [28, 44, 44, 28, 44]);
 });
+
+test("older history pages in by itself only near the top, once, and never again after a failure", () => {
+  assert.equal(c.shouldAutoLoadOlder(10, true, false, false), true);
+  assert.equal(c.shouldAutoLoadOlder(10, false, false, false), false, "nothing older");
+  assert.equal(c.shouldAutoLoadOlder(10, true, true, false), false, "a page is already in flight");
+  assert.equal(c.shouldAutoLoadOlder(10, true, false, true), false, "a failed page waits for Retry, not every scroll");
+  assert.equal(c.shouldAutoLoadOlder(1000, true, false, false), false, "not near the top");
+});

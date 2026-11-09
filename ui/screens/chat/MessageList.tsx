@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MessageView, type CollapseProps, type MessageHost } from "./MessageView";
 import type { Message } from "./state";
-import { prependScrollAdjust, shouldLoadOlder, showJumpToLatest } from "./virtual";
+import { prependScrollAdjust, shouldAutoLoadOlder, showJumpToLatest } from "./virtual";
 import { useVirtualList } from "./hooks";
+import { describeError } from "./transport";
 
 export const MESSAGE_ESTIMATE_PX = 120;
 
@@ -45,6 +46,8 @@ export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScroll
   const { scrollRef, range, measure, offsets, scrollTop, viewport } = useVirtualList(messages.length, keyOf, MESSAGE_ESTIMATE_PX);
   const stick = useRef(initialScrollTop === null);
   const loading = useRef(false);
+  // A failed older page stays a visible error with a Retry; scrolling alone does not hammer the core again.
+  const [olderError, setOlderError] = useState<string | null>(null);
   const firstId = useRef<string | null>(null);
   const lastCount = useRef(0);
   const host = useMemo<MessageHost>(() => ({ onOpenLink, onCopy, files, onFullHistoryNext }), [onOpenLink, onCopy, files, onFullHistoryNext]);
@@ -95,17 +98,25 @@ export function MessageList({ messages, hasMoreOlder, onLoadOlder, initialScroll
   }, [messages, offsets, scrollRef]);
 
   // Load older history when scrolled near the top.
-  useEffect(() => {
-    if (!hasMoreOlder || loading.current || !shouldLoadOlder(scrollTop)) return;
+  const loadOlderPage = useCallback(() => {
+    if (loading.current) return;
     loading.current = true;
-    void onLoadOlder().finally(() => { loading.current = false; });
-  }, [scrollTop, hasMoreOlder, onLoadOlder]);
+    setOlderError(null);
+    onLoadOlder()
+      .catch((e: unknown) => setOlderError(describeError(e).message))
+      .finally(() => { loading.current = false; });
+  }, [onLoadOlder]);
+  useEffect(() => {
+    if (shouldAutoLoadOlder(scrollTop, hasMoreOlder, loading.current, olderError !== null)) loadOlderPage();
+  }, [scrollTop, hasMoreOlder, olderError, loadOlderPage]);
 
   return (
     <div ref={scrollRef} className="chat-scroll" role="log" aria-label="Conversation" aria-live="off" tabIndex={0}>
       {messages.length === 0 ? (empty ?? null) : (
         <>
-        {hasMoreOlder && <p className="chat-muted chat-older" role="status">Loading earlier messages…</p>}
+        {hasMoreOlder && (olderError !== null
+          ? <p className="chat-muted chat-older" role="alert">Earlier messages could not be loaded: {olderError} <button type="button" className="chat-link-btn" onClick={loadOlderPage}>Retry</button></p>
+          : <p className="chat-muted chat-older" role="status">Loading earlier messages…</p>)}
         <div role="list" className="chat-list" style={{ paddingTop: range.padTop, paddingBottom: range.padBottom }}>
           {messages.slice(range.start, range.end).map((m, k) => (
             <Row key={m.id} index={range.start + k} message={m} host={host} measure={measure}

@@ -275,6 +275,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [store, reportStoreError, bumpSessions]);
 
   const busy = state.phase === "streaming" || state.phase === "aborting";
+  const persistFailure = controller.getPersistFailure();
   // The chat whose plan card started the current plan run (the Mac's PlanExecutionTracker); a new ordinary message ends it.
   const [planRunChat, setPlanRunChat] = useState<string | null>(null);
   // A turn ended: re-read the route so a pending model switch (and the meter) reflect what the core applied.
@@ -292,9 +293,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const sessionTotal = useMemo(() => chatTotalLabel(state.messages, state.hasMoreOlder), [state.messages, state.hasMoreOlder]);
   const turnCount = useMemo(() => state.messages.filter((m) => m.role === "user").length, [state.messages]);
   const busyIds = useMemo(() => new Set(controller.busyIds()), [controller, state]);
+  // Re-read on every controller change (useControllerVersion above), so a background chat's approval shows up at once.
+  const approvalIds = new Set(controller.approvalChatIds());
   const plain = plainChatReason(current.provider ?? "", current.model ?? "", current.mode, groups, toolsEnabled);
   const effortLevels = effortLevelsFor(groups, current.provider, current.model);
   const remoteBusy = activeId ? controller.isRemoteBusy(activeId) : false;
+  const sendBlock = chatBlockReason(perms) ?? (isEndedChat(sessions.find((s) => s.id === activeId)) ? ENDED_REASON : noProject ? "Open a project to send messages." : null);
   const allowProviderTools = useCallback(async () => {
     setModelNotice(null);
     try {
@@ -358,7 +362,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     <div className={dock ? "chat-screen chat-dock-mode" : "chat-screen"} data-dock={dock ? "" : undefined}>
       <section className="chat-main" aria-label={dock ? "Code Assistant" : "Chat"}>
         <DockHeader
-          sessions={sessions} activeId={activeId} busyIds={busyIds} route={route} routeDisabled={busy || !activeId}
+          sessions={sessions} activeId={activeId} busyIds={busyIds} approvalIds={approvalIds} route={route} routeDisabled={busy || !activeId}
           meta={`${turnCount} turn${turnCount === 1 ? "" : "s"}${sessionTotal ? ` · ${sessionTotal.text}` : ""}`}
           onSelect={setActiveId} onNew={() => void newChat()} onCollapse={dock ? onCollapse : undefined}
           onRename={(title) => activeId && renameSession(activeId, title)}
@@ -367,6 +371,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
         />
         {notice && <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} />}
         {listError && <StatusBanner severity="error" message={listError} onDismiss={() => setListError(null)} />}
+        {persistFailure && <StatusBanner severity="error" message={persistFailure} onDismiss={() => controller.dismissPersistFailure()} />}
         <ModeBanner mode={permission} bypassLive={permission !== "bypass" || !gate || bypassLive} />
         {typeof banner === "function" ? banner(state) : banner}
         {!activeId ? (
@@ -380,6 +385,9 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                   <ProjectMemoryView client={memoryCore} repos={[]} workspaceRoot={host.projectRoot?.() ?? null} sessionId={activeId} onClose={closeProjectMemory} />
                 </div>
               </div>
+            )}
+            {state.loadError && (
+              <StatusBanner severity="error" message={<>{state.loadError.message} <button type="button" className="chat-link-btn" onClick={() => void controller.open(activeId)}>Retry</button></>} />
             )}
             {remoteBusy && <StatusBanner severity="info" message="A turn is running for this chat on the core. Its live output cannot be shown here yet." />}
             {state.phase === "error" && state.error && (
@@ -402,6 +410,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               chatId={activeId} state={state} mode={current.mode} plans={plans} onOpenLink={host.openLink} onCopy={host.copy} onOpenFile={host.files?.open}
               onRefine={(title) => { controller.setView(activeId, { draft: refineSeed(title) }); setRefineNonce((n) => n + 1); }}
               onExecute={(turn) => {
+                if (sendBlock) return; // the same reason the composer shows (no project, ended chat, no permission)
                 setCurrent({ mode: "execute" });
                 setPlanRunChat(activeId);
                 controller.send(activeId, turn.text, { ...turn.options, model: current.model, provider: current.provider, permissionMode: permission, effort: turnEffort(effortPick, effortLevels) });
@@ -436,7 +445,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                 {memoryOpen ? <div role="dialog" aria-label="Session memory" className="chat-popover chat-memory-popover" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setMemoryOpen(false); } }}>{state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}<button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button></div> : null}
               </>}
               onSend={(text, extra) => { if (!busy) setPlanRunChat(null); controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments, effort: turnEffort(effortPick, effortLevels) }); touchSession(activeId); }}
-              onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={chatBlockReason(perms) ?? (isEndedChat(sessions.find((s) => s.id === activeId)) ? ENDED_REASON : noProject ? "Open a project to send messages." : null)}
+              onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={sendBlock}
             />
           </>
         )}

@@ -11,18 +11,21 @@ import type { SessionSummary } from "./store";
 export const DOCK_HISTORY_MAX = 50;
 export const DOCK_TITLE = "CODE ASSISTANT";
 
-const label = (s: SessionSummary, busy: boolean): string => {
+/** A chat waiting for an approval says so: it is the one the user has to act on, ahead of a plain running turn. */
+const label = (s: SessionSummary, busy: boolean, approval: boolean): string => {
   const t = Array.from((s.title || "Untitled chat").replace(/[\u0000-\u001f\u007f‪-‮⁦-⁩]/g, " ")).slice(0, 60).join("");
+  if (approval) return `${t} (needs approval)`;
   return busy ? `${t} (running)` : t;
 };
 
 /** The options of the history menu: the open chat is always present, even beyond the cap. Pure. */
-export function historyOptions(sessions: readonly SessionSummary[], activeId: string | null, busyIds: ReadonlySet<string>): { id: string; text: string }[] {
+export function historyOptions(sessions: readonly SessionSummary[], activeId: string | null, busyIds: ReadonlySet<string>, approvalIds: ReadonlySet<string> = new Set()): { id: string; text: string }[] {
   const head = sessions.slice(0, DOCK_HISTORY_MAX);
-  const rows = head.map((s) => ({ id: s.id, text: label(s, busyIds.has(s.id)) }));
+  const text = (s: SessionSummary) => label(s, busyIds.has(s.id), approvalIds.has(s.id));
+  const rows = head.map((s) => ({ id: s.id, text: text(s) }));
   if (activeId && !head.some((s) => s.id === activeId)) {
     const open = sessions.find((s) => s.id === activeId);
-    if (open) rows.unshift({ id: open.id, text: label(open, busyIds.has(open.id)) });
+    if (open) rows.unshift({ id: open.id, text: text(open) });
   }
   return rows;
 }
@@ -31,6 +34,8 @@ export interface DockHeaderProps {
   sessions: readonly SessionSummary[];
   activeId: string | null;
   busyIds: ReadonlySet<string>;
+  /** Chats (open or in the background) waiting for an approval or question answer. */
+  approvalIds?: ReadonlySet<string>;
   route: RouteView | null;
   routeDisabled: boolean;
   /** The same compact turn/token line as the section header; omitted at very narrow widths. */
@@ -48,8 +53,10 @@ export interface DockHeaderProps {
 /** What the header trash does (ChatSessionHeader.clearChatButton): an empty chat has nothing to lose. Pure. */
 export const deleteChatAction = (hasMessages: boolean): "confirm" | "delete" => (hasMessages ? "confirm" : "delete");
 
-export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, meta, onSelect, onNew, onCollapse, onSetLimit, onRename, onDelete, hasMessages = false }: DockHeaderProps) {
-  const options = historyOptions(sessions, activeId, busyIds);
+export function DockHeader({ sessions, activeId, busyIds, approvalIds = new Set(), route, routeDisabled, meta, onSelect, onNew, onCollapse, onSetLimit, onRename, onDelete, hasMessages = false }: DockHeaderProps) {
+  const options = historyOptions(sessions, activeId, busyIds, approvalIds);
+  // A background chat needs an answer: the header says so while the history menu is closed.
+  const backgroundApprovals = [...approvalIds].filter((id) => id !== activeId).length;
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
   const historyButton = useRef<HTMLButtonElement>(null);
@@ -65,6 +72,7 @@ export function DockHeader({ sessions, activeId, busyIds, route, routeDisabled, 
       <span className="chat-spacer" />
       <button ref={historyButton} type="button" className="chat-dock-history" aria-label="Chat history" aria-haspopup="dialog" aria-expanded={historyOpen} onClick={() => setHistoryOpen((v) => !v)}>
         <span className="chat-dock-history-title">{sessions.find((s) => s.id === activeId)?.title || "Chat history"}</span>
+        {backgroundApprovals > 0 && <span className="chat-dock-attn" role="status">{backgroundApprovals === 1 ? "1 chat needs approval" : `${backgroundApprovals} chats need approval`}</span>}
         <span aria-hidden="true">▾</span>
       </button>
       {historyOpen ? (

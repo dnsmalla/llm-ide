@@ -28,3 +28,14 @@ test("the chat screen passes the pickers to the composer and keeps only the noti
   for (const picker of ["<ModePicker", "<ModelPicker", "<EffortPicker", "<PermissionChip"]) assert.ok(controls.includes(picker), `${picker} is in the composer bar`);
   assert.match(screen, /<div className="chat-notes">[\s\S]*<PendingSwitchNote/);
 });
+
+test("a full queue turns Send off and keeps the draft: the composer never clears what it cannot queue", () => {
+  const queue = Array.from({ length: c.MAX_QUEUE }, (_, i) => `q${i}`);
+  const full = html(h(c.Composer, { ...base, draft: "next one", queue }));
+  const sendOf = (out) => out.slice(out.lastIndexOf("<button type=\"submit\""), out.indexOf("</button>", out.lastIndexOf("<button type=\"submit\"")));
+  assert.match(sendOf(full), /disabled=""/, "Send is disabled");
+  assert.match(full, /Queue full/);
+  const room = html(h(c.Composer, { ...base, draft: "next one", queue: queue.slice(1) }));
+  assert.doesNotMatch(sendOf(room), /disabled=""/, "one slot free: Send is on");
+  assert.doesNotMatch(room, /Queue full/);
+});

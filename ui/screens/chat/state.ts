@@ -96,6 +96,8 @@ export interface ChatState {
   oldestSeq: number | null;
   phase: Phase;
   error: ChatError | null;
+  /** The history could not be loaded: a separate error with its own Retry (never the turn's error). */
+  loadError: { code: string; message: string } | null;
   /** Mode the server resolved for the running/last turn (`mode_set`). */
   resolvedMode: string | null;
   model: string | null;
@@ -121,7 +123,7 @@ export interface ChatState {
 
 export function initialState(sessionId: string): ChatState {
   return {
-    sessionId, messages: [], hasMoreOlder: false, oldestSeq: null, phase: "idle", error: null, resolvedMode: null, model: null,
+    sessionId, messages: [], hasMoreOlder: false, oldestSeq: null, phase: "idle", error: null, loadError: null, resolvedMode: null, model: null,
     context: null, memory: null, usage: null, tasks: [], pendingApprovals: [], sdkSessionId: null, workspaceTrust: null, budget: null, queue: [], turnSeq: 0, turnWorkspaceRoot: null, applied: 0, ignored: 0,
   };
 }
@@ -129,6 +131,7 @@ export function initialState(sessionId: string): ChatState {
 export type Action =
   | { type: "load"; messages: Message[]; hasMoreOlder: boolean }
   | { type: "prepend"; messages: Message[]; hasMoreOlder: boolean }
+  | { type: "load_failed"; code: string; message: string }
   | { type: "reattach"; id: string }
   | { type: "reattach_cancel" }
   | { type: "marker"; kind: string; level: "info" | "warning" | "error"; text: string }
@@ -138,6 +141,8 @@ export type Action =
   | { type: "stream_end" }
   | { type: "abort_requested" }
   | { type: "aborted" }
+  /** This client stopped reading a running turn (dispose): the half reply it showed is dropped, the turn keeps running. */
+  | { type: "detach" }
   | { type: "transport_error"; code: string; message: string; retryable: boolean }
   /** The stream died mid-reply: the text so far stays, labelled Interrupted. */
   | { type: "interrupted" }
@@ -273,8 +278,10 @@ export function reduce(state: ChatState, action: Action): ChatState {
   switch (action.type) {
     case "load": {
       const oldest = action.messages.find((m) => m.seq !== undefined)?.seq ?? null;
-      return { ...state, messages: action.messages, hasMoreOlder: action.hasMoreOlder, oldestSeq: oldest };
+      return { ...state, messages: action.messages, hasMoreOlder: action.hasMoreOlder, oldestSeq: oldest, loadError: null };
     }
+    case "load_failed":
+      return { ...state, loadError: { code: action.code, message: action.message } };
     case "prepend": {
       if (action.messages.length === 0) return { ...state, hasMoreOlder: action.hasMoreOlder };
       const merged = [...action.messages, ...state.messages];
@@ -335,6 +342,13 @@ export function reduce(state: ChatState, action: Action): ChatState {
       return state.phase === "streaming" ? { ...state, phase: "aborting" } : state;
     case "aborted":
       return { ...state, phase: "idle", messages: finishLast(state.messages, "aborted"), pendingApprovals: [], queue: [] };
+    case "detach": {
+      if (state.phase !== "streaming" && state.phase !== "aborting") return state;
+      // The streaming bubble goes: a later re-attach replays the turn from its first event into a fresh bubble.
+      const last = state.messages[state.messages.length - 1];
+      const dropLast = last?.role === "assistant" && last.status === "streaming" && last.seq === undefined;
+      return { ...state, messages: dropLast ? state.messages.slice(0, -1) : state.messages, phase: "idle", error: null, pendingApprovals: [] };
+    }
     case "transport_error":
       return {
         ...state, phase: "error", messages: finishLast(state.messages, "error"), pendingApprovals: [],

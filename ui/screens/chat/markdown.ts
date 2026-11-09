@@ -14,7 +14,8 @@ export type Inline =
 export type Block =
   | { kind: "p"; inlines: Inline[] }
   | { kind: "h"; level: number; inlines: Inline[] }
-  | { kind: "ul" | "ol"; items: Inline[][] }
+  /** `start` is the number the first item was written with (ordered lists only): a list split by a blank line keeps counting. */
+  | { kind: "ul" | "ol"; items: Inline[][]; start?: number }
   | { kind: "code"; lang: string; text: string }
   | { kind: "quote"; inlines: Inline[] }
   | { kind: "table"; head: Inline[][]; rows: Inline[][][] }
@@ -94,6 +95,7 @@ const FENCE_CLOSE = /^\s{0,3}```\s*$/;
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const ORDERED = /^\s*\d{1,9}[.)]\s+(.*)$/;
+const ORDERED_NUMBER = /^\s*(\d{1,9})[.)]\s/;
 const QUOTE = /^\s{0,3}>\s?(.*)$/;
 const RULE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
 /** Lines longer than this are never block syntax (fence, rule, table): the patterns below only see short lines. */
@@ -170,9 +172,10 @@ export function parseBlocks(src: string): Block[] {
     if (BULLET.test(line) || ORDERED.test(line)) {
       const ordered = !BULLET.test(line);
       const re = ordered ? ORDERED : BULLET;
+      const start = ordered ? Number(ORDERED_NUMBER.exec(line)?.[1] ?? 1) : undefined;
       const items: Inline[][] = [];
       while (i < lines.length && re.test(lines[i])) { items.push(inl(re.exec(lines[i])?.[1] ?? "")); i += 1; }
-      blocks.push({ kind: ordered ? "ol" : "ul", items });
+      blocks.push(ordered ? { kind: "ol", items, start } : { kind: "ul", items });
       continue;
     }
     const para: string[] = [];

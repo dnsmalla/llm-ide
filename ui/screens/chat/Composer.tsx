@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ImeGuard } from "./ime";
 import type { ComposerExtras, SendExtra } from "./slash/extras";
 import type { ReactNode } from "react";
+import { MAX_QUEUE } from "./state";
 
 export interface ComposerProps {
   draft: string;
@@ -173,7 +174,9 @@ export function Composer(p: ComposerProps) {
   const guard = ime.current;
   const tooLong = p.draft.length > MAX_MESSAGE_CHARS;
   const blocked = p.extras?.blockedReason ?? null;
-  const canSend = p.draft.trim().length > 0 && !tooLong && !p.disabledReason && !blocked;
+  // A full queue refuses the message: Send stays off so the draft and attachments are kept for later, never cleared.
+  const queueFull = p.queue.length >= MAX_QUEUE;
+  const canSend = p.draft.trim().length > 0 && !tooLong && !p.disabledReason && !blocked && !queueFull;
   const send = () => {
     if (!canSend) return;
     recall.current = null;
@@ -225,6 +228,7 @@ export function Composer(p: ComposerProps) {
         {(!p.collapsible || optionsOpen) && p.memory}
         {tooLong && <span role="alert" className="chat-error">Message is too long ({p.draft.length.toLocaleString("en-US")} of {MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters).</span>}
         {p.disabledReason && <span className="chat-muted">{p.disabledReason}</span>}
+        {queueFull && <span className="chat-muted" role="status">Queue full ({MAX_QUEUE} waiting). Your draft is kept.</span>}
         {blocked && <span className="chat-muted" role="status">{blocked}</span>}
         <span className="chat-spacer" />
         {p.meter}

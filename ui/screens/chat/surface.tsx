@@ -20,8 +20,10 @@ import { createNotesHost } from "../library/host.ts";
 import { createHostProjectFs } from "./mentions/project-fs";
 import { createMentionSearch } from "./mentions";
 import type { ComposeServices } from "./slash/extras";
-import type { CoreTransport } from "./transport";
+import { describeError, type CoreTransport } from "./transport";
 import { createChatUiStore, type ChatUiStore } from "./ui-state";
+import { sessionVisible } from "./surface-sessions";
+import { reportUiIncident } from "../shell/self-heal";
 
 /** Opens an allowlisted URL. The host command is not in the Rust host yet (blocked-by, see the checklist): until it
  *  lands the desktop app ignores the click rather than navigating the webview; a plain browser opens a new tab. */
@@ -69,7 +71,13 @@ export function chatRuntime(surface = "chat"): ChatRuntime {
     ? createBypassGate({ confirmSigned: (chatId, summary) => invokeHost<string | null>("bypass_confirm_signed", { chatId, summary }).then((t) => (typeof t === "string" ? t : null), () => null) })
     : null;
   const root: { current: string | null } = { current: null };
-  const controller = new ChatController({ core: transport, store, workspaceRoot: () => root.current ?? "", ...(bypass ? { bypass } : {}) });
+  const controller = new ChatController({
+    core: transport, store, workspaceRoot: () => root.current ?? "", ...(bypass ? { bypass } : {}),
+    // Each surface follows only its own chats after a re-attach (the other surface's controller would save the reply too).
+    canFollow: (id) => sessionVisible(surface, id),
+    // A message that could not be saved is a bug report for the self-heal channel (debug builds) as well as a notice.
+    onPersistError: (_id, err) => reportUiIncident("chat", `could not save a chat message: ${describeError(err).message}`),
+  });
   const ui = createChatUiStore(null);
   let noted: string | null | undefined;
   // Sign-out ends every Bypass grant.
@@ -112,6 +120,10 @@ export function useChatSurface(projectRoot: string | null, active: boolean, init
   const { controller, transport, bypass } = rt;
   useEffect(() => rt.noteProject(projectRoot), [rt, projectRoot]);
   useEffect(() => { if (active) void controller.refreshRemoteBusy(); }, [active, controller]);
+  // Unmount: stop reading streams. Turns sent detached keep running on the core and are picked up on the next load.
+  // The controller counts mounts, so the Chat section and the dock can both be mounted. This runs before the re-attach
+  // below: a remount clears the controller's disposed flag, and re-attach does nothing while it is set.
+  useEffect(() => controller.mount(), [controller]);
   // Webview load/reload and every return to the surface: pick up turns still running on the core (replay re-attach).
   useEffect(() => {
     if (!active) return undefined;
@@ -119,9 +131,6 @@ export function useChatSurface(projectRoot: string | null, active: boolean, init
     void controller.reattachRunning(ac.signal);
     return () => ac.abort();
   }, [active, controller]);
-  // Unmount: stop reading streams. Turns sent detached keep running on the core and are picked up on the next load.
-  // The controller counts mounts, so the Chat section and the dock can both be mounted.
-  useEffect(() => controller.mount(), [controller]);
 
   // Slash menu, @ mentions, attachments, plan saving: host-backed only inside the desktop app, and the project fs
   // only while a project is open (the host confines every path to its root; the webview never sends an absolute one).

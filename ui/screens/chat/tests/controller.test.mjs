@@ -424,3 +424,82 @@ test("retry drops only THIS turn's partial: an older interrupted partial and oth
   assert.equal(view.some((m) => m.role === "assistant" && m.interrupted && c.assistantText(m) === "half a repl"), false);
 });
 
+
+test("a failed history load is a load error with its own state, never a turn error; a later open() clears it", async () => {
+  const core = fakeCore();
+  const { ctl, store } = make(core);
+  const real = store.loadMessages.bind(store);
+  let down = true;
+  store.loadMessages = async (...args) => { if (down) throw Object.assign(new Error("core down"), { status: 0, code: "NETWORK" }); return real(...args); };
+  await ctl.open("a");
+  const failed = ctl.getState("a");
+  assert.equal(failed.phase, "idle", "no turn error: the Retry banner is not a dead button");
+  assert.equal(failed.error, null);
+  assert.ok(failed.loadError, "the load error is kept apart");
+  down = false;
+  await ctl.open("a");
+  assert.equal(ctl.getState("a").loadError, null);
+  assert.equal(ctl.getState("a").phase, "idle");
+});
+
+test("a message that cannot be saved is reported to the screen (and onPersistError), and the notice stays until dismissed", async () => {
+  const core = fakeCore({ streams: [turn()] });
+  const { ctl, store, persistErrors } = make(core);
+  store.appendMessage = async () => { throw Object.assign(new Error("disk full"), { status: 500, code: "DISK" }); };
+  ctl.send("a", "hi", { mode: "ask" });
+  await until(() => ctl.getState("a").messages.at(-1)?.status === "done");
+  await tick(5);
+  assert.ok(persistErrors.length >= 1, "onPersistError is passed");
+  assert.match(ctl.getPersistFailure() ?? "", /could not be saved/);
+  ctl.dismissPersistFailure();
+  assert.equal(ctl.getPersistFailure(), null);
+});
+
+test("a message sent while the queue is full is not dropped: its text goes back to the composer", async () => {
+  const core = fakeCore({ streams: [hangingStream(sse(FX.init))] });
+  const { ctl } = make(core);
+  ctl.send("a", "long task", { mode: "ask" });
+  await until(() => ctl.getState("a").phase === "streaming");
+  for (let i = 0; i < c.MAX_QUEUE; i++) ctl.send("a", `queued ${i}`, { mode: "ask" });
+  assert.equal(ctl.getState("a").queue.length, c.MAX_QUEUE);
+  ctl.send("a", "one too many", { mode: "ask" });
+  assert.equal(ctl.getState("a").queue.length, c.MAX_QUEUE, "the reducer still caps the queue");
+  assert.equal(ctl.getView("a").draft, "one too many", "the refused text is kept in the composer");
+  ctl.abort("a");
+  await until(() => ctl.getState("a").phase === "idle");
+});
+
+test("a chat waiting for an approval is listed by the controller, even when it is not the open chat", async () => {
+  const core = fakeCore({
+    streams: [hangingStream(sse(FX.init), sse(FX.approval_request_tool))],
+  });
+  const { ctl } = make(core);
+  ctl.send("b", "edit it", { mode: "ask" });
+  await until(() => ctl.getState("b").pendingApprovals.length === 1);
+  assert.deepEqual(ctl.approvalChatIds(), ["b"]);
+  ctl.abort("b");
+  await until(() => ctl.getState("b").phase === "idle");
+  assert.deepEqual(ctl.approvalChatIds(), []);
+});
+
+test("a question asked again while the history loads is kept; a live copy claims only a trailing saved row", async () => {
+  const core = fakeCore({ streams: [[sse(FX.init, FX.result)], [sse(FX.init, FX.result)]] });
+  const store = new c.MemoryChatStore();
+  store.seed("a", "Chat A", [{ role: "user", content: "continue" }, { role: "assistant", content: "Sure." }]);
+  store.seed("b", "Chat B", [{ role: "user", content: "q" }, { role: "assistant", content: "a" }, { role: "user", content: "go" }]);
+  let release = () => {};
+  const gate = new Promise((r) => { release = r; });
+  const load = store.loadMessages.bind(store);
+  store.loadMessages = async (...args) => { const page = await load(...args); await gate; return page; };
+  const ctl = new c.ChatController({ core, store, workspaceRoot: () => "/proj", newId: () => "t1", sleep: () => tick(1) });
+  const openA = ctl.open("a");
+  const openB = ctl.open("b");
+  ctl.send("a", "continue", { mode: "ask" }); // answered earlier: a repeated question, not a copy
+  ctl.send("b", "go", { mode: "ask" }); // still unanswered in the page: this live message is the saved copy
+  release();
+  await Promise.all([openA, openB]);
+  await until(() => ctl.getState("a").phase === "idle" && ctl.getState("b").phase === "idle");
+  const count = (id, content) => ctl.getState(id).messages.filter((m) => m.role === "user" && m.text === content).length;
+  assert.equal(count("a", "continue"), 2, "the repeated question is shown after the earlier answered one");
+  assert.equal(count("b", "go"), 1, "the saved copy of a live message is not shown twice");
+});

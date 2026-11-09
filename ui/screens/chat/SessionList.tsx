@@ -11,6 +11,8 @@ export interface SessionListProps {
   activeId: string | null;
   /** Chats with a turn running in this app. */
   busyIds: ReadonlySet<string>;
+  /** Chats waiting for an approval or question answer (open or in the background). */
+  approvalIds?: ReadonlySet<string>;
   /** More sessions exist on the core than are loaded. */
   hasMore: boolean;
   onLoadMore: () => void;
@@ -30,7 +32,7 @@ export function filterSessions(sessions: readonly SessionSummary[], q: string): 
 }
 
 export function SessionList(props: SessionListProps) {
-  const { sessions, activeId, busyIds, hasMore, onLoadMore, onSelect, onNew, onRename, onDelete } = props;
+  const { sessions, activeId, busyIds, approvalIds, hasMore, onLoadMore, onSelect, onNew, onRename, onDelete } = props;
   const [query, setQuery] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -72,6 +74,7 @@ export function SessionList(props: SessionListProps) {
             const s = r.item;
             const active = s.id === activeId;
             const busy = busyIds.has(s.id);
+            const needsApproval = approvalIds?.has(s.id) === true;
             const title = s.title || "Untitled chat";
             return (
               <div key={r.key} role="listitem" className="chat-session" data-active={active} style={{ height: ITEM_HEIGHT }}>
@@ -82,7 +85,7 @@ export function SessionList(props: SessionListProps) {
                 ) : (
                   <button type="button" className="chat-session-main" aria-current={active ? "true" : undefined} onClick={() => onSelect(s.id)}>
                     <span className="chat-session-title">{title}</span>
-                    {busy && <Chip label="Running" compact />}
+                    {needsApproval ? <Chip label="Needs approval" compact /> : busy && <Chip label="Running" compact />}
                   </button>
                 )}
                 {renaming !== s.id && (confirming === s.id ? (

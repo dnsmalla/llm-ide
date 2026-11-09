@@ -225,3 +225,16 @@ test("MessageView: a chat_continued notice offers the full history only when the
   assert.match(plain, /Continued from a summary/);
   assert.ok(!plain.includes("Send the full history"));
 });
+
+test("a tool step of a stopped or failed reply is settled, not left running", () => {
+  const tool = { kind: "tool", index: 0, id: "t1", name: "Bash", args: "{}", argsTruncated: false, result: null };
+  assert.match(html(h(c.ToolCard, { tool })), /data-state="running"/);
+  assert.match(html(h(c.ToolCard, { tool, settled: "stopped" })), /data-state="stopped"/);
+  assert.match(html(h(c.ToolCard, { tool, settled: "failed" })), /data-state="failed"/);
+  const done = { ...tool, result: { text: "ok", isError: false, truncated: false, totalChars: 2 } };
+  assert.match(html(h(c.ToolCard, { tool: done, settled: "stopped" })), /data-state="done"/, "a finished step keeps its result");
+  const reply = (status) => ({ role: "assistant", id: "m1", parts: [tool], notices: [], status });
+  assert.match(html(h(c.MessageView, { m: reply("aborted"), host: {} })), /data-state="stopped"/);
+  assert.match(html(h(c.MessageView, { m: reply("error"), host: {} })), /data-state="failed"/);
+  assert.match(html(h(c.MessageView, { m: reply("streaming"), host: {} })), /data-state="running"/);
+});

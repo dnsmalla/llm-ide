@@ -216,3 +216,131 @@ test("the schema fixtures of the new routes decode: running turns, the replay st
   assert.equal(fx("get-agent-v2-turns-stream-429.json").response.error.code, "TOO_MANY_READERS");
   assert.equal(fx("get-agent-v2-turns-stream-400.json").response.error.code, "VALIDATION_FAILED");
 });
+
+test("dispose mid-turn, then remount: no dead reader is left streaming, and the turn is replayed once from its first event", async () => {
+  const core = fakeCore({
+    streams: [hangingStream(sse(FX.init), sse(delta("Hello ")))],
+    json: { "GET /agent/v2/turns": { turns: [{ sessionId: "a", startedAt: "t0", mode: "ask" }] } },
+    attaches: [[frame(1, FX.init), frame(2, delta("Hello ")), frame(3, delta("world")), frame(4, FX.result)]],
+  });
+  const { ctl, store } = make(core);
+  const off = ctl.mount();
+  ctl.send("a", "hi", { mode: "ask" });
+  await until(() => ctl.getState("a").applied >= 2);
+  off(); // the dock collapses mid-turn
+  await until(() => ctl.getState("a").phase === "idle");
+  assert.equal(ctl.getState("a").messages.some((m) => m.role === "assistant" && m.status === "streaming"), false, "the dead bubble is gone");
+  ctl.mount(); // the dock comes back
+  assert.deepEqual(await ctl.reattachRunning(), ["a"], "a remount re-attaches; the disposed flag no longer blocks it");
+  await until(() => ctl.getState("a").messages.at(-1)?.status === "done");
+  assert.equal(text(ctl.getState("a")), "Hello world", "the reply is shown once, not appended to the half reply");
+  const st = ctl.getState("a");
+  assert.equal(st.messages.filter((m) => m.role === "assistant").length, 1);
+  assert.equal(st.messages.filter((m) => m.role === "user" && m.text === "hi").length, 1);
+  await tick(5);
+  assert.equal((await store.loadMessages("a", { limit: 50 })).messages.at(-1).content, "Hello world", "the finished reply is saved once");
+});
+
+test("a turn that ended while this client was away is still followed on the next mount, and its reply is saved", async () => {
+  const core = fakeCore({
+    streams: [hangingStream(sse(FX.init), sse(delta("Hi")))],
+    json: { "GET /agent/v2/turns": { turns: [] } }, // the turn is no longer running when the view comes back
+    attaches: [[frame(1, FX.init), frame(2, delta("Hi")), frame(3, delta(" there")), frame(4, FX.result)]],
+  });
+  const { ctl, store } = make(core);
+  const off = ctl.mount();
+  ctl.send("a", "hi", { mode: "ask" });
+  await until(() => ctl.getState("a").applied >= 2);
+  off();
+  await until(() => ctl.getState("a").phase === "idle");
+  ctl.mount();
+  assert.deepEqual(await ctl.reattachRunning(), ["a"]);
+  await until(() => ctl.getState("a").messages.at(-1)?.status === "done");
+  assert.equal(text(ctl.getState("a")), "Hi there");
+  await tick(5);
+  assert.equal((await store.loadMessages("a", { limit: 50 })).messages.at(-1).content, "Hi there");
+});
+
+test("reducer: detach drops the streaming bubble and goes idle; on an idle chat it changes nothing", () => {
+  const streaming = c.reduce(c.initialState("a"), { type: "send", id: "t1", text: "hi" });
+  const detached = c.reduce(streaming, { type: "detach" });
+  assert.equal(detached.phase, "idle");
+  assert.deepEqual(detached.messages.map((m) => m.role), ["user"]);
+  assert.equal(c.reduce(detached, { type: "detach" }), detached);
+});
+
+test("re-attach follows only the chats this surface may follow (the other surface saves its own)", async () => {
+  const core = fakeCore({
+    json: { "GET /agent/v2/turns": { turns: [{ sessionId: "a", startedAt: "t0", mode: "ask" }, { sessionId: "b", startedAt: "t0", mode: "ask" }] } },
+    attaches: [[frame(1, FX.init), frame(2, FX.result)]],
+  });
+  const store = new c.MemoryChatStore();
+  store.seed("a", "Chat A");
+  store.seed("b", "Chat B");
+  const ctl = new c.ChatController({ core, store, workspaceRoot: () => "/proj", sleep: () => tick(1), canFollow: (id) => id === "b" });
+  assert.deepEqual(await ctl.reattachRunning(), ["b"]);
+  await until(() => core.calls.some((x) => x.method === "ATTACH"));
+  assert.match(core.calls.find((x) => x.method === "ATTACH").path, /sessionId=b&after=0$/);
+  assert.equal(ctl.getState("a").phase, "idle");
+});
+
+test("a turn that ended and whose buffer expired while detached: the history reloads with the question once, not twice", async () => {
+  const core = fakeCore({
+    streams: [hangingStream(sse(FX.init), sse(delta("Hi")))],
+    json: { "GET /agent/v2/turns": { turns: [] } },
+    attaches: [httpErr(404, "NO_TURN")],
+  });
+  const { ctl, store } = make(core);
+  const off = ctl.mount();
+  ctl.send("a", "question", { mode: "ask" });
+  await until(() => ctl.getState("a").applied >= 2);
+  off();
+  await until(() => ctl.getState("a").phase === "idle");
+  ctl.mount();
+  await ctl.reattachRunning();
+  await until(() => ctl.getState("a").messages.some((m) => m.role === "user" && m.text === "question"));
+  await tick(10);
+  const users = ctl.getState("a").messages.filter((m) => m.role === "user" && m.text === "question");
+  assert.equal(users.length, 1, "the saved question is not duplicated by the reload");
+  assert.equal(ctl.getState("a").phase, "idle");
+});
+
+test("two dispose/remount cycles of a still-running turn: the second replay starts at event 1, with text, tool cards and the pending approval", async () => {
+  // A server-like replay: frames after the client's cursor only, then the turn keeps running (no terminal event).
+  const replay = (frames) => (signal, path) => {
+    const after = Number(/after=(\d+)$/.exec(path)[1]);
+    return (async function* () {
+      for (const f of frames) if (Number(f.id) > after) yield f;
+      await new Promise((_, rej) => signal.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" }))));
+    })();
+  };
+  const first = [frame(1, FX.init), frame(2, delta("Hello ")), frame(3, FX.tool_use_start), frame(4, FX.tool_result), frame(5, FX.approval_request_tool)];
+  const full = [...first, frame(6, delta("world"))];
+  const core = fakeCore({
+    streams: [hangingStream(sse(FX.init), sse(delta("Hello ")))],
+    json: { "GET /agent/v2/turns": { turns: [{ sessionId: "a", startedAt: "t0", mode: "ask" }] } },
+    attaches: [replay(first), replay(full)],
+  });
+  const { ctl } = make(core);
+  const off = ctl.mount();
+  ctl.send("a", "hi", { mode: "ask" });
+  await until(() => ctl.getState("a").applied >= 2);
+  off(); // first dispose: the dock collapses mid-turn
+  await until(() => ctl.getState("a").phase === "idle");
+
+  const remount1 = ctl.mount();
+  assert.deepEqual(await ctl.reattachRunning(), ["a"]);
+  await until(() => ctl.getState("a").pendingApprovals.length === 1);
+  remount1(); // second dispose: the dock collapses again while the turn still runs
+  await until(() => ctl.getState("a").phase === "idle");
+
+  ctl.mount();
+  assert.deepEqual(await ctl.reattachRunning(), ["a"]);
+  assert.match(core.calls.filter((x) => x.method === "ATTACH").at(-1).path, /after=0$/, "the second remount replays from event 1");
+  await until(() => ctl.getState("a").pendingApprovals.length === 1 && text(ctl.getState("a")) === "Hello world");
+  const st = ctl.getState("a");
+  const bubbles = st.messages.filter((m) => m.role === "assistant");
+  assert.equal(bubbles.length, 1, "one fresh bubble, not the tail of the reply");
+  assert.ok(bubbles[0].parts.some((p) => p.kind === "tool" && p.name === "Read" && p.result !== null), "the tool card is replayed with its result");
+  assert.equal(st.pendingApprovals[0].requestId, FX.approval_request_tool.requestId, "the parked approval is re-surfaced");
+});

@@ -56,7 +56,7 @@ function BlockView({ b, onOpenLink, onCopy }: { b: Block } & Omit<MarkdownProps,
       return <Tag><Inlines nodes={b.inlines} onOpenLink={onOpenLink} /></Tag>;
     }
     case "ul": return <ul>{b.items.map((it, j) => <li key={j}><Inlines nodes={it} onOpenLink={onOpenLink} /></li>)}</ul>;
-    case "ol": return <ol>{b.items.map((it, j) => <li key={j}><Inlines nodes={it} onOpenLink={onOpenLink} /></li>)}</ol>;
+    case "ol": return <ol start={b.start === 1 ? undefined : b.start}>{b.items.map((it, j) => <li key={j}><Inlines nodes={it} onOpenLink={onOpenLink} /></li>)}</ol>;
     case "quote": return <blockquote><Inlines nodes={b.inlines} onOpenLink={onOpenLink} /></blockquote>;
     case "hr": return <hr />;
     case "code": return <CodeBlock lang={b.lang} text={b.text} onCopy={onCopy} />;

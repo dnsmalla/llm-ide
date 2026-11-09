@@ -102,3 +102,17 @@ test("hostile input stays correct: normal markdown after the budget is spent is 
   const small = c.parseBlocks("[ok](https://example.com) **b** *i* `c`");
   assert.deepEqual(small[0].inlines.map((x) => x.kind), ["link", "text", "strong", "text", "em", "text", "code"]);
 });
+
+test("ordered lists keep the number they were written with: a blank line or a streamed seal does not restart them at 1", () => {
+  const kinds = (src) => c.parseBlocks(src).map((b) => [b.kind, b.start]);
+  assert.deepEqual(kinds("4. four\n5. five"), [["ol", 4]]);
+  assert.deepEqual(kinds("1. a\n2. b\n\n3. c\n4. d"), [["ol", 1], ["ol", 3]]);
+  assert.deepEqual(kinds("- x\n- y"), [["ul", undefined]]);
+  assert.match(render("1. a\n\n3. c"), /<ol>[\s\S]*<\/ol>[\s\S]*<ol start="3">/);
+  // Streaming: a blank line seals the earlier items; the sealed chunk that starts at 3 renders with start 3.
+  let part = c.emptyText();
+  part = c.appendText(part, "1. one\n2. two\n\n3. three\n4. four\n\n");
+  assert.ok(part.sealed.length >= 2, "the blank lines sealed the list parts");
+  assert.match(render(part.sealed[1]), /<ol start="3">/);
+  assert.equal(c.textOf(part), "1. one\n2. two\n\n3. three\n4. four\n\n", "sealing never changes the text");
+});

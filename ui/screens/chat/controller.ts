@@ -46,6 +46,11 @@ export interface ControllerDeps {
   sleep?: (ms: number) => Promise<void>;
   onPersistError?: (sessionId: string, err: unknown) => void;
   /**
+   * Which chats this surface may follow when it re-attaches. Two surfaces (Chat section, dock) each have a controller;
+   * a turn belongs to the surface that started its chat, so the other one must not run its afterTurn and save it again.
+   */
+  canFollow?: (sessionId: string) => boolean;
+  /**
    * Bypass approval (bypass.ts). Without it a requested Bypass is sent as Ask: the approval token only exists in the
    * desktop app, and nothing else may turn a chat's tools loose.
    */
@@ -90,6 +95,8 @@ interface Runtime {
   fullHistoryNext: boolean;
   /** The dead turn's partial reply was already written once, so a later path cannot duplicate it. */
   partialPersisted: boolean;
+  /** dispose() stopped reading this running turn; the next re-attach replays it from its first event. */
+  detached: boolean;
 }
 
 /** Micro-batching of stream events. */
@@ -108,6 +115,8 @@ export class ChatController {
   private remoteBusy: ReadonlySet<string> = new Set();
   private version = 0;
   private disposed = false;
+  /** A persist (append or drop) failed: the message is on screen but not in the saved history. Shown until dismissed. */
+  private persistFailure: string | null = null;
   /** Set by the screen: the core refused a Bypass turn of this chat (the picker drops back to Ask). */
   onBypassRejected: ((id: string) => void) | null = null;
 
@@ -123,7 +132,7 @@ export class ChatController {
   private rt(id: string): Runtime {
     let r = this.runtimes.get(id);
     if (!r) {
-      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true, draftRev: 0 }, ac: null, lastSend: null, queued: [], loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null, fullHistoryNext: false, partialPersisted: false };
+      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true, draftRev: 0 }, ac: null, lastSend: null, queued: [], loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null, fullHistoryNext: false, partialPersisted: false, detached: false };
       this.runtimes.set(id, r);
     }
     return r;
@@ -133,6 +142,10 @@ export class ChatController {
   setView(id: string, patch: Partial<ChatView>): void { Object.assign(this.rt(id).view, patch); }
   /** Chats with a turn running here (not removed by switching). */
   busyIds(): string[] { return [...this.runtimes].filter(([, r]) => r.state.phase === "streaming" || r.state.phase === "aborting").map(([id]) => id); }
+  /** Chats (of any open state here) waiting for an approval or question answer: a background chat needs attention too. */
+  approvalChatIds(): string[] { return [...this.runtimes].filter(([, r]) => r.state.pendingApprovals.length > 0).map(([id]) => id); }
+  getPersistFailure(): string | null { return this.persistFailure; }
+  dismissPersistFailure(): void { if (this.persistFailure !== null) { this.persistFailure = null; this.emit(); } }
   isRemoteBusy(id: string): boolean { return this.remoteBusy.has(id) && !this.busyIds().includes(id); }
 
   private dispatch(id: string, action: Action): void {
@@ -163,14 +176,30 @@ export class ChatController {
     try {
       const page = await this.deps.store.loadMessages(id, { limit: HISTORY_PAGE }, signal);
       if (signal?.aborted) return;
-      // A turn may have started while the page was loading: keep its messages after the history.
-      const live = r.state.messages.filter((m) => m.seq === undefined);
+      // A turn may have started while the page was loading: keep its messages after the history. A live user message
+      // this session already saved is in the page, so it is not shown twice (it has no seq until the history is
+      // reloaded). Only the page's trailing user rows (after its last assistant reply) can be such a copy, and each
+      // saved row claims at most one live message, so a question asked again after an answered one is kept.
+      const unclaimed = new Map<string, number>();
+      for (let i = page.messages.length - 1; i >= 0 && page.messages[i].role === "user"; i--) {
+        const content = page.messages[i].content;
+        unclaimed.set(content, (unclaimed.get(content) ?? 0) + 1);
+      }
+      const live = r.state.messages.filter((m) => {
+        if (m.seq !== undefined) return false;
+        if (m.role !== "user") return true;
+        const left = unclaimed.get(m.text) ?? 0;
+        if (left === 0) return true;
+        unclaimed.set(m.text, left - 1);
+        return false;
+      });
       this.dispatch(id, { type: "load", messages: [...toMessages(page.messages), ...live], hasMoreOlder: page.hasMore });
       r.loaded = true;
     } catch (e) {
       if (signal?.aborted) return;
+      // Not a turn error: nothing is being sent. A separate load error with its own Retry (the screen calls open()).
       const d = describeError(e);
-      this.dispatch(id, { type: "transport_error", code: d.code, message: d.message, retryable: true });
+      this.dispatch(id, { type: "load_failed", code: d.code, message: d.message });
     }
   }
 
@@ -201,16 +230,22 @@ export class ChatController {
    */
   async reattachRunning(signal?: AbortSignal): Promise<string[]> {
     if (!this.deps.core.attach || this.disposed) return [];
-    let turns: Array<{ sessionId: string; startedAt: string }>;
+    let listed: Array<{ sessionId: string; startedAt: string }>;
     try {
-      turns = decodeRunningTurns(await this.deps.core.json<unknown>("GET", "/agent/v2/turns", undefined, signal));
+      listed = decodeRunningTurns(await this.deps.core.json<unknown>("GET", "/agent/v2/turns", undefined, signal));
     } catch { return []; } // optional: an older core has no route, an offline core has no turns to show
     if (signal?.aborted || this.disposed) return [];
+    // A turn this client stopped reading may have ended since: it is still followed (the replay ends with its result,
+    // or 404 NO_TURN when the buffer expired and the saved history is the truth).
+    const turns = [...listed];
+    for (const [id, r] of this.runtimes) if (r.detached && !turns.some((t) => t.sessionId === id)) turns.push({ sessionId: id, startedAt: "" });
     const started: string[] = [];
     for (const t of turns) {
+      if (this.deps.canFollow && !this.deps.canFollow(t.sessionId)) continue;
       const r = this.rt(t.sessionId);
       if (r.ac || r.state.phase === "streaming" || r.state.phase === "aborting") continue;
-      if (r.attachedTurn !== t.startedAt || t.startedAt === "") { r.seq = 0; r.gap = false; }
+      // A detached runtime dropped its bubble, so its replay starts at 0 even for the same turn (attachedTurn matches).
+      if (r.detached || r.attachedTurn !== t.startedAt || t.startedAt === "") { r.seq = 0; r.gap = false; }
       r.attachedTurn = t.startedAt;
       started.push(t.sessionId);
       void this.runAttached(t.sessionId);
@@ -236,10 +271,21 @@ export class ChatController {
     };
   }
 
-  /** Stops reading every stream (unmount). Turns sent detached keep running on the core; nothing is cancelled there. */
+  /**
+   * Stops reading every stream (unmount). Turns sent detached keep running on the core; nothing is cancelled there.
+   * The half reply shown here is dropped and the runtime goes idle (not "streaming" with a dead reader, which would
+   * block re-attach): the next mount re-attaches and replays the turn from its first event into a fresh bubble.
+   */
   dispose(): void {
     this.disposed = true;
-    for (const r of this.runtimes.values()) r.ac?.abort();
+    for (const [id, r] of this.runtimes) {
+      const ac = r.ac;
+      if (!ac) continue;
+      r.ac = null;
+      r.detached = true;
+      ac.abort();
+      this.dispatch(id, { type: "detach" });
+    }
   }
 
   /** Drops a chat's runtime (after delete or when closing an idle chat). A running chat is kept. */
@@ -264,6 +310,7 @@ export class ChatController {
     if (wasBusy) {
       // Snapshot everything now: the entry is sent later with ITS OWN options and project, never the next message's.
       if (r.state.queue.length > before) r.queued.push({ text: trimmed, opts: { ...opts }, workspaceRoot });
+      else this.restoreDraft(id, trimmed); // queue full: the reducer refused it, so the text goes back to the composer
       return;
     }
     void this.runTurn(id, trimmed, opts, workspaceRoot, !isRetry);
@@ -288,7 +335,7 @@ export class ChatController {
     // store only ever drops the newest row and only when it is an interrupted assistant reply, so an older
     // interrupted partial (and every other turn) is untouched; a failure here is reported and never blocks the
     // retry (the old behaviour: the partial stays).
-    if (partial) void this.deps.store.dropInterruptedMessage(id).catch((e) => this.deps.onPersistError?.(id, e));
+    if (partial) void this.deps.store.dropInterruptedMessage(id).catch((e) => this.persistFailed(id, e));
     this.send(id, text, { ...opts, fresh: unresumable || opts.fresh }, true);
   }
 
@@ -366,7 +413,7 @@ export class ChatController {
   private async runAttached(id: string): Promise<void> {
     const r = this.rt(id);
     const ac = new AbortController();
-    r.ac = ac; r.userAborted = false; r.reattached = true; r.partialPersisted = false;
+    r.ac = ac; r.userAborted = false; r.reattached = true; r.partialPersisted = false; r.detached = false;
     this.dispatch(id, { type: "reattach", id: (this.deps.newId ?? defaultId)() });
     try {
       await this.follow(id, ac, true);
@@ -506,6 +553,9 @@ export class ChatController {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
       if (timer) { clearTimeout(timer); timer = null; }
+      // A stream this controller no longer owns (disposed, or superseded by a re-attach) must not write into the
+      // current bubble: its abort lands asynchronously, so its last batch can reach here after the remount.
+      if (r.ac !== ac) { pending = []; malformed = 0; return; }
       if (pending.length === 0 && malformed === 0) return;
       const events = pending, bad = malformed;
       pending = []; malformed = 0;
@@ -593,6 +643,12 @@ export class ChatController {
   }
 
   private persist(id: string, msg: { role: "user" | "assistant"; content: string; meta?: Record<string, unknown> | null }): void {
-    this.deps.store.appendMessage(id, msg).catch((e) => this.deps.onPersistError?.(id, e));
+    this.deps.store.appendMessage(id, msg).catch((e) => this.persistFailed(id, e));
+  }
+
+  private persistFailed(id: string, e: unknown): void {
+    this.deps.onPersistError?.(id, e);
+    this.persistFailure = `A message in this chat could not be saved (${describeError(e).message}). It is on screen but not in the saved history.`;
+    this.emit();
   }
 }
