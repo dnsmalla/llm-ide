@@ -14,12 +14,16 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
-use crate::remote::{prepare, ssh_args_with, PreparedTarget, RawOutput, SshTarget};
+use crate::remote::{
+    prepare, require_confirmed_host_key, ssh_args_known, temp_ssh_dir, write_known_hosts,
+    ConfirmedHostKey, PreparedTarget, RawOutput, SshTarget,
+};
 
 /// The complete helper stage list. The sudoers file is generated from this list, one exact command
 /// per stage; there is no wildcard and no free-form argument.
@@ -45,32 +49,78 @@ pub trait DeployRunner: Send + Sync {
     fn run(&self, target: &PreparedTarget, command: &str, stdin: Option<&[u8]>) -> Result<RawOutput, FsError>;
 }
 
-/// The real transport: system `ssh` with the Phase-1 argv, stdin piped only when a stage needs it.
+/// The known_hosts spelling of a target: bare host on 22, `[host]:port` otherwise (OpenSSH rule).
+pub fn known_host_name(target: &PreparedTarget) -> String {
+    if target.port == 22 { target.host.clone() } else { format!("[{}]:{}", target.host, target.port) }
+}
+
+/// OpenSSH SHA256 fingerprint of a base64 key blob: `SHA256:` + unpadded base64url.
+pub fn fingerprint_for_key_b64(key_b64: &str) -> Option<String> {
+    let bytes = base64::engine::general_purpose::STANDARD.decode(key_b64.trim()).ok()?;
+    let digest = Sha256::digest(&bytes);
+    Some(format!("SHA256:{}", base64::engine::general_purpose::STANDARD_NO_PAD.encode(digest)))
+}
+
+/// One known_hosts line from `ssh-keyscan` output, kept only when its key hashes to the fingerprint the
+/// user confirmed. The scan's own host column is ignored (it is untrusted), and the line is re-spelled
+/// from the validated target, so a scan answer cannot inject another host pattern.
+pub fn verified_known_host_line(scan: &str, target: &PreparedTarget, key: &ConfirmedHostKey) -> Option<String> {
+    for raw in scan.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        let mut parts = line.split_whitespace();
+        let _scanned_host = parts.next()?;
+        let key_type = parts.next()?;
+        let key_b64 = parts.next()?;
+        if key_type != key.key_type { continue; }
+        if fingerprint_for_key_b64(key_b64).as_deref() != Some(key.fingerprint.as_str()) { continue; }
+        return Some(format!("{} {} {}", known_host_name(target), key_type, key_b64));
+    }
+    None
+}
+
+/// The real transport: system `ssh` with a ONE-KEY temporary known_hosts (R-034 #7). The user confirmed
+/// the host key earlier in this session; the keyscan answer is accepted only if it hashes to that exact
+/// fingerprint, and `StrictHostKeyChecking=yes` then refuses any other key at connect time.
 pub struct SystemDeploy;
 
 impl DeployRunner for SystemDeploy {
     fn run(&self, target: &PreparedTarget, command: &str, stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
-        let mut cmd = Command::new("ssh");
-        cmd.args(ssh_args_with(target, command))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if stdin.is_some() {
-            cmd.stdin(Stdio::piped());
-        } else {
-            cmd.stdin(Stdio::null());
-        }
-        let mut child = cmd.spawn().map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")))?;
-        if let Some(bytes) = stdin {
-            let mut pipe = child.stdin.take().ok_or_else(|| herr("ssh_failed", "the ssh input pipe is unavailable"))?;
-            pipe.write_all(bytes).map_err(|e| herr("ssh_failed", format!("could not send the stage input: {e}")))?;
-            drop(pipe);
-        }
-        let out = child.wait_with_output().map_err(|e| herr("ssh_failed", format!("could not read the ssh result: {e}")))?;
-        Ok(RawOutput {
-            code: out.status.code(),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        })
+        let key = require_confirmed_host_key(target)?;
+        let dir = temp_ssh_dir("ssh-deploy")?;
+        let run = (|| {
+            let scan = Command::new("ssh-keyscan")
+                .args(["-T", "10", "-p", &target.port.to_string(), "-t", &key.key_type, &target.host])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .map_err(|e| herr("host_key_unavailable", format!("could not run ssh-keyscan: {e}")))?;
+            let scan_text = String::from_utf8_lossy(&scan.stdout);
+            let line = verified_known_host_line(&scan_text, target, &key).ok_or_else(|| {
+                herr("host_key_changed", "the server's host key does not match the fingerprint you confirmed; test again and compare it")
+            })?;
+            let known = write_known_hosts(&dir, &line)?;
+            let mut cmd = Command::new("ssh");
+            cmd.args(ssh_args_known(target, command, &known, false))
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            if stdin.is_some() { cmd.stdin(Stdio::piped()); } else { cmd.stdin(Stdio::null()); }
+            let mut child = cmd.spawn().map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")))?;
+            if let Some(bytes) = stdin {
+                let mut pipe = child.stdin.take().ok_or_else(|| herr("ssh_failed", "the ssh input pipe is unavailable"))?;
+                pipe.write_all(bytes).map_err(|e| herr("ssh_failed", format!("could not send the stage input: {e}")))?;
+                drop(pipe);
+            }
+            let out = child.wait_with_output().map_err(|e| herr("ssh_failed", format!("could not read the ssh result: {e}")))?;
+            Ok(RawOutput {
+                code: out.status.code(),
+                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            })
+        })();
+        let _ = std::fs::remove_dir_all(&dir);
+        run
     }
 }
 
@@ -532,6 +582,7 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
 pub async fn remote_deploy_plan(target: SshTarget, domain: String, review_ack: bool) -> Result<DeployPlan, FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        require_confirmed_host_key(&prepared)?;
         let p = run_preflight(&SystemDeploy, &prepared)?;
         let version = env!("CARGO_PKG_VERSION").to_string();
         let bundle = bundle_path(&version).unwrap_or_default();
@@ -545,6 +596,7 @@ pub async fn remote_deploy_plan(target: SshTarget, domain: String, review_ack: b
 pub async fn remote_deploy_bootstrap(target: SshTarget) -> Result<Bootstrap, FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        require_confirmed_host_key(&prepared)?;
         bootstrap_with(&SystemDeploy, &prepared)
     }).await.map_err(|e| herr("internal", format!("the bootstrap did not finish: {e}")))?
 }
@@ -553,6 +605,7 @@ pub async fn remote_deploy_bootstrap(target: SshTarget) -> Result<Bootstrap, FsE
 pub async fn remote_deploy_run(target: SshTarget, plan_id: String, confirmation: String) -> Result<DeployReport, FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        require_confirmed_host_key(&prepared)?;
         let plan = confirm_plan(&plan_id, &confirmation, crate::confirm::now_ms())?;
         if !crate::confirm::ask("Deploy the LLM-IDE hub?", &format!("Install the hub for {} and start its service?", plan.domain), "Deploy hub", true) {
             return Err(herr("cancelled", "the deploy was cancelled at the host confirmation"));
@@ -568,6 +621,7 @@ pub async fn remote_deploy_run(target: SshTarget, plan_id: String, confirmation:
 pub async fn remote_backup_now(target: SshTarget) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        require_confirmed_host_key(&prepared)?;
         let out = SystemDeploy.run(&prepared, &stage_command("backup").unwrap(), None)?;
         if out.code != Some(0) { return Err(herr("backup_failed", "the hub backup did not finish")); }
         Ok(())
@@ -579,6 +633,7 @@ pub async fn remote_backup_now(target: SshTarget) -> Result<(), FsError> {
 pub async fn remote_logs(target: SshTarget, lines: u16) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target).map_err(|e| e.message)?;
+        require_confirmed_host_key(&prepared).map_err(|e| e.message)?;
         let n = lines.clamp(1, 2000);
         let cmd = format!("journalctl -u llmide-core -n {n} --no-pager -o short-iso");
         let out = SystemDeploy.run(&prepared, &cmd, None).map_err(|e| e.message)?;
@@ -620,6 +675,7 @@ printf 'HEALTH=%s\n' "$(curl -fsS --max-time 5 http://127.0.0.1:3457/health 2>/d
 pub async fn remote_diagnostics(target: SshTarget) -> Result<RemoteDiagnostics, FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        require_confirmed_host_key(&prepared)?;
         let out = SystemDeploy.run(&prepared, DIAGNOSTICS_SCRIPT, None)?;
         if out.code != Some(0) { return Err(herr("diagnostics_failed", "the hub diagnostics probe did not finish")); }
         Ok(parse_diagnostics(&out.stdout))
@@ -630,6 +686,7 @@ pub async fn remote_diagnostics(target: SshTarget) -> Result<RemoteDiagnostics, 
 pub async fn remote_update(target: SshTarget, version: String, confirmation: String, hub_url: String) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        require_confirmed_host_key(&prepared)?;
         if confirmation != target.host { return Err(herr("confirmation_mismatch", "type the hostname exactly to update")); }
         if !crate::confirm::ask("Update the LLM-IDE hub?", &format!("Update {} to {version}?", target.host), "Update hub", true) {
             return Err(herr("cancelled", "the update was cancelled at the host confirmation"));
@@ -667,6 +724,7 @@ pub async fn remote_update(target: SshTarget, version: String, confirmation: Str
 pub async fn remote_uninstall(target: SshTarget, confirmation: String, purge: bool) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        require_confirmed_host_key(&prepared)?;
         let what = if purge { "Uninstall the hub AND DELETE its data?" } else { "Uninstall the hub? Data is kept." };
         if !crate::confirm::ask(what, &format!("Remove the service and vhost on {}?", target.host), "Uninstall hub", true) {
             return Err(herr("cancelled", "the uninstall was cancelled at the host confirmation"));
@@ -679,6 +737,7 @@ pub async fn remote_uninstall(target: SshTarget, confirmation: String, purge: bo
 pub async fn remote_deploy_lock(target: SshTarget) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        require_confirmed_host_key(&prepared)?;
         let out = SystemDeploy.run(&prepared, &stage_command("lock-registration").unwrap(), None)?;
         if out.code != Some(0) { return Err(herr("lock_failed", "could not close registration")); }
         Ok(())
@@ -689,6 +748,7 @@ pub async fn remote_deploy_lock(target: SshTarget) -> Result<(), FsError> {
 pub async fn remote_deploy_rollback(target: SshTarget) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
+        require_confirmed_host_key(&prepared)?;
         let out = SystemDeploy.run(&prepared, &stage_command("rollback").unwrap(), None)?;
         if out.code != Some(0) { return Err(herr("rollback_failed", "there is no previous release to restore")); }
         Ok(())
@@ -778,6 +838,33 @@ mod tests {
         }
     }
     fn target() -> PreparedTarget { PreparedTarget { host: "hub.example.com".into(), port: 22, user: "deploy".into(), key_path: "/k".into() } }
+
+    #[test]
+    fn r034_a_keyscan_line_is_kept_only_when_it_matches_the_confirmed_fingerprint() {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(b"a host key blob");
+        let fingerprint = fingerprint_for_key_b64(&b64).unwrap();
+        let key = ConfirmedHostKey { key_type: "ssh-ed25519".into(), fingerprint: fingerprint.clone() };
+        let t = PreparedTarget { host: "hub.example.com".into(), port: 2222, user: "deploy".into(), key_path: "/k".into() };
+        let scan = format!("# hub.example.com:2222 SSH-2.0-OpenSSH_9.6\n[hub.example.com]:2222 ssh-ed25519 {b64}\n");
+        assert_eq!(
+            verified_known_host_line(&scan, &t, &key).as_deref(),
+            Some(format!("[hub.example.com]:2222 ssh-ed25519 {b64}").as_str()),
+        );
+        // A different key (the MITM case) is refused even when the scan labels it with our host.
+        let wrong = ConfirmedHostKey { key_type: "ssh-ed25519".into(), fingerprint: "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into() };
+        assert_eq!(verified_known_host_line(&scan, &t, &wrong), None);
+        // A different key type is not this host key.
+        let other_type = ConfirmedHostKey { key_type: "ssh-rsa".into(), fingerprint };
+        assert_eq!(verified_known_host_line(&scan, &t, &other_type), None);
+    }
+
+    #[test]
+    fn r034_port_22_uses_a_bare_host_and_other_ports_bracket_it() {
+        let mut t = target();
+        assert_eq!(known_host_name(&t), "hub.example.com");
+        t.port = 2222;
+        assert_eq!(known_host_name(&t), "[hub.example.com]:2222");
+    }
 
     #[test]
     fn preflight_refuses_arm_password_sudo_and_missing_nginx() {

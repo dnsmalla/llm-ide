@@ -131,6 +131,9 @@ export function remoteSshErrorText(e: unknown): string {
     case "ssh_missing": return "The system ssh command is not available on this computer.";
     case "no_host_key": return "SSH connected but did not report the server's host key fingerprint, so the server was not accepted.";
     case "no_uname": return "SSH connected but the remote shell did not answer with its uname.";
+    case "host_key_unconfirmed": return "Confirm the server's host-key fingerprint with Test SSH before deploying.";
+    case "host_key_changed": return "The server's host key no longer matches the fingerprint you confirmed. Test SSH again and compare it before deploying.";
+    case "host_key_unavailable": return "The host key could not be read for verification, so nothing was changed.";
     case "ssh_failed": return message.length > 0 ? message : "SSH could not connect. Check the host, port, user and private key.";
     default:
       if (message.length > 0) return message;
@@ -142,6 +145,8 @@ export interface RemoteServerIo {
   load(): Promise<RemoteServerConfig>;
   save(config: RemoteServerConfig): Promise<RemoteServerConfig>;
   test(config: RemoteServerConfig): Promise<RemoteSshResult>;
+  /** R-034 #7: remember the fingerprint for this app session; absent on a host without the command. */
+  confirm?(config: RemoteServerConfig, hostKeyType: string, fingerprint: string): Promise<void>;
 }
 
 export interface RemoteServerState {
@@ -159,6 +164,9 @@ export interface RemoteServerState {
   saved: boolean;
   testing: boolean;
   result: RemoteSshResult | null;
+  /** The fingerprint was confirmed with the host in this session. */
+  confirmed: boolean;
+  confirming: boolean;
   fieldErrors: RemoteFieldErrors;
   error: string | null;
 }
@@ -178,6 +186,8 @@ export const REMOTE_SERVER_INITIAL: RemoteServerState = {
   saved: false,
   testing: false,
   result: null,
+  confirmed: false,
+  confirming: false,
   fieldErrors: {},
   error: null,
 };
@@ -201,14 +211,14 @@ export class RemoteServerModel extends Store<RemoteServerState> {
 
   setMode(mode: ServerMode): void {
     if (mode === this.getState().mode) return;
-    this.set({ mode, result: null, error: null, saved: false, fieldErrors: {} });
+    this.set({ mode, result: null, confirmed: false, error: null, saved: false, fieldErrors: {} });
   }
 
   setField(field: RemoteField, value: string): void {
     const state = this.getState();
     const fieldErrors = { ...state.fieldErrors };
     delete fieldErrors[field];
-    const patch: Partial<RemoteServerState> = { fieldErrors, result: null, error: null, saved: false };
+    const patch: Partial<RemoteServerState> = { fieldErrors, result: null, confirmed: false, error: null, saved: false };
     if (field === "host") patch.host = value;
     else if (field === "port") patch.port = value;
     else if (field === "user") patch.user = value;
@@ -253,11 +263,25 @@ export class RemoteServerModel extends Store<RemoteServerState> {
     this.set({ testing: true, error: null, result: null, fieldErrors: {} });
     try {
       const result = await this.#io.test(config);
-      this.set({ result, error: null });
+      this.set({ result, confirmed: false, error: null });
     } catch (e) {
       this.set({ result: null, error: remoteSshErrorText(e) });
     } finally {
       this.set({ testing: false });
+    }
+  }
+
+  /** R-034 #7: confirm the fingerprint the Test SSH just showed. Deploy/update/uninstall need this. */
+  async confirm(): Promise<void> {
+    const state = this.getState();
+    const result = state.result;
+    if (state.confirming || !result || !this.#io.confirm) return;
+    this.set({ confirming: true, error: null });
+    try {
+      await this.#io.confirm(this.config(), result.hostKeyType, result.fingerprint);
+      this.set({ confirmed: true, confirming: false });
+    } catch (e) {
+      this.set({ confirmed: false, confirming: false, error: remoteSshErrorText(e) });
     }
   }
 
@@ -295,6 +319,8 @@ export class RemoteServerModel extends Store<RemoteServerState> {
       hubUrl: config.hubUrl,
       tlsPin: config.tlsPin,
       result: null,
+      confirmed: false,
+      confirming: false,
       saved: false,
       fieldErrors: {},
     });

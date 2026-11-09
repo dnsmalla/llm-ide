@@ -13,9 +13,15 @@
 //!   keys; `StrictHostKeyChecking=accept-new` learns a new host key but refuses one that changed;
 //! - only the key PATH is handled. The file is checked for existence/regular-file shape, never read,
 //!   and neither its contents nor the ssh argv/stderr are logged.
+//!
+//! R-034 #7: a test only REPORTS the host key. Deploy, update and uninstall refuse until the user has
+//! confirmed that fingerprint for this app session; they then connect with `StrictHostKeyChecking=yes`
+//! and a temporary known_hosts holding only that key (never the user's ~/.ssh/known_hosts).
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -75,6 +81,71 @@ pub struct RawOutput {
     pub code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
+}
+
+/// The host key the user confirmed in THIS app session (R-034 #7). Keyed by `host:port`; never written
+/// to disk. A new app session starts empty, so a deploy after a restart needs a fresh Test + confirm.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmedHostKey {
+    pub key_type: String,
+    pub fingerprint: String,
+}
+
+fn confirmations() -> &'static Mutex<HashMap<String, ConfirmedHostKey>> {
+    static CONFIRMED: OnceLock<Mutex<HashMap<String, ConfirmedHostKey>>> = OnceLock::new();
+    CONFIRMED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn confirm_key(target: &PreparedTarget) -> String {
+    format!("{}:{}", target.host.to_ascii_lowercase(), target.port)
+}
+
+/// True for the OpenSSH SHA256 fingerprint shape this app shows: `SHA256:` + base64url-ish, no padding.
+pub fn valid_fingerprint(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix("SHA256:") else { return false; };
+    !rest.is_empty()
+        && rest.len() <= 128
+        && rest.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '-' | '_' | '='))
+}
+
+/// True for an ssh host-key algorithm name; it becomes an `ssh-keyscan -t` argument, so it is a shape
+/// check, never free text.
+pub fn valid_host_key_type(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && (value.starts_with("ssh-") || value.starts_with("ecdsa-"))
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '@' | '.'))
+}
+
+/// Record the fingerprint the user confirmed. The host command is the authority on what the host
+/// offered; this only remembers the choice for the session.
+pub fn confirm_host_key(target: &PreparedTarget, key_type: &str, fingerprint: &str) -> Result<ConfirmedHostKey, FsError> {
+    if !valid_host_key_type(key_type) {
+        return Err(herr("invalid_host_key", "the host key type is not a known SSH key type"));
+    }
+    if !valid_fingerprint(fingerprint) {
+        return Err(herr("invalid_fingerprint", "the fingerprint is not an SSH SHA256 fingerprint"));
+    }
+    let key = ConfirmedHostKey { key_type: key_type.to_string(), fingerprint: fingerprint.to_string() };
+    confirmations().lock().unwrap_or_else(|e| e.into_inner()).insert(confirm_key(target), key.clone());
+    Ok(key)
+}
+
+/// The confirmed key for this host:port, or a refusal. Every mutating remote command calls this.
+pub fn require_confirmed_host_key(target: &PreparedTarget) -> Result<ConfirmedHostKey, FsError> {
+    confirmations()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&confirm_key(target))
+        .cloned()
+        .ok_or_else(|| herr("host_key_unconfirmed", "Test SSH and confirm the server's host-key fingerprint before deploying"))
+}
+
+/// Drop one confirmation (tests and a changed target use this; production clears at app exit).
+#[cfg(test)]
+pub fn forget_confirmation(target: &PreparedTarget) {
+    confirmations().lock().unwrap_or_else(|e| e.into_inner()).remove(&confirm_key(target));
 }
 
 pub trait Runner {
@@ -214,6 +285,64 @@ pub fn ssh_args(target: &PreparedTarget) -> Vec<String> {
     ssh_args_with(target, REMOTE_COMMAND)
 }
 
+/// The deploy/update/uninstall argv (R-034 #7): `StrictHostKeyChecking=yes` against ONE temporary
+/// known_hosts file that holds only the confirmed key. `GlobalKnownHostsFile` is neutralised so a
+/// system-wide entry cannot broaden what is trusted. `accept_new` is only for the initial Test SSH,
+/// which never sends a secret.
+pub fn ssh_args_known(target: &PreparedTarget, command: &str, known_hosts: &Path, accept_new: bool) -> Vec<String> {
+    vec![
+        "-v".to_string(),
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "-o".to_string(),
+        format!("ConnectTimeout={CONNECT_TIMEOUT_SECS}"),
+        "-o".to_string(),
+        if accept_new { "StrictHostKeyChecking=accept-new".to_string() } else { "StrictHostKeyChecking=yes".to_string() },
+        "-o".to_string(),
+        format!("UserKnownHostsFile={}", known_hosts.display()),
+        "-o".to_string(),
+        format!("GlobalKnownHostsFile={}", if cfg!(windows) { "NUL" } else { "/dev/null" }),
+        "-o".to_string(),
+        "IdentitiesOnly=yes".to_string(),
+        "-p".to_string(),
+        target.port.to_string(),
+        "-i".to_string(),
+        target.key_path.clone(),
+        format!("{}@{}", target.user, target.host),
+        command.to_string(),
+    ]
+}
+
+/// A private temp directory for one SSH child (a known_hosts file, never secrets). Best effort mode
+/// 0700 on Unix; the file itself carries no secret (it is a public host key).
+pub fn temp_ssh_dir(label: &str) -> Result<PathBuf, FsError> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!("llmide-{label}-{}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(&dir).map_err(|e| herr("temp_dir_failed", format!("could not create a temporary SSH directory: {e}")))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    Ok(dir)
+}
+
+/// Write a one-line known_hosts file (0600) for the confirmed host key.
+pub fn write_known_hosts(dir: &Path, line: &str) -> Result<PathBuf, FsError> {
+    let path = dir.join("known_hosts");
+    std::fs::write(&path, format!("{line}\n"))
+        .map_err(|e| herr("known_hosts_failed", format!("could not write the temporary known_hosts: {e}")))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(path)
+}
+
 /// Checks the user-supplied key path without reading the file. A directory, FIFO or missing path is refused
 /// with a clear error before ssh runs; ssh itself still enforces its own key/permission rules.
 pub fn check_key_file(path: &str) -> Result<(), FsError> {
@@ -226,10 +355,15 @@ pub fn check_key_file(path: &str) -> Result<(), FsError> {
 
 /// Runs the test through an injected runner. Tests use a fake; production uses `SystemSsh`.
 pub fn execute<R: Runner>(target: &PreparedTarget, runner: &R) -> Result<SshTestResult, FsError> {
-    let args = ssh_args(target);
+    // R-034 #7: accept-new writes only into a throwaway known_hosts, never the user's ~/.ssh file.
+    let dir = temp_ssh_dir("ssh-test")?;
+    let known = dir.join("known_hosts");
+    let args = ssh_args_known(target, REMOTE_COMMAND, &known, true);
     let output = runner
         .run(&args)
-        .map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")))?;
+        .map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")));
+    let _ = std::fs::remove_dir_all(&dir);
+    let output = output?;
     if output.code != Some(0) {
         return Err(herr("ssh_failed", failure_message(&output)));
     }
@@ -325,6 +459,14 @@ pub async fn remote_ssh_test(target: SshTarget) -> Result<SshTestResult, FsError
     .map_err(|e| herr("internal", format!("the SSH test did not finish: {e}")))?
 }
 
+/// R-034 #7: remember the host-key fingerprint the user confirmed after a Test SSH. Deploy, update and
+/// uninstall refuse until this is called for the same host:port in this app session.
+#[tauri::command]
+pub async fn remote_ssh_confirm(target: SshTarget, host_key_type: String, fingerprint: String) -> Result<ConfirmedHostKey, FsError> {
+    let prepared = prepare(&target)?;
+    confirm_host_key(&prepared, &host_key_type, &fingerprint)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,6 +560,34 @@ mod tests {
         assert!(args.windows(2).any(|w| w[0] == "-i" && w[1] == "/home/alice/.ssh/id_ed25519"));
         assert!(args.contains(&"alice@example.com".to_string()));
         assert_eq!(args.last().map(String::as_str), Some(REMOTE_COMMAND));
+    }
+
+    #[test]
+    fn r034_a_confirmed_fingerprint_is_required_and_session_scoped() {
+        let prepared = prepare(&target("example.com", "alice", "/home/alice/.ssh/id_ed25519")).unwrap();
+        forget_confirmation(&prepared);
+        assert_eq!(require_confirmed_host_key(&prepared).unwrap_err().code, "host_key_unconfirmed");
+        assert!(!valid_fingerprint("SHA256:"));
+        assert!(!valid_fingerprint("MD5:aa:bb"));
+        assert!(!valid_fingerprint("SHA256:bad space"));
+        assert!(!valid_host_key_type("-oProxyCommand=x"));
+        confirm_host_key(&prepared, "ssh-ed25519", "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff").unwrap();
+        assert_eq!(require_confirmed_host_key(&prepared).unwrap().key_type, "ssh-ed25519");
+        // Same host on another port is a different key entry.
+        let other = prepare(&SshTarget { port: 2222, ..target("example.com", "alice", "/home/alice/.ssh/id_ed25519") }).unwrap();
+        assert_eq!(require_confirmed_host_key(&other).unwrap_err().code, "host_key_unconfirmed");
+        forget_confirmation(&prepared);
+        assert_eq!(require_confirmed_host_key(&prepared).unwrap_err().code, "host_key_unconfirmed");
+    }
+
+    #[test]
+    fn r034_the_test_argv_uses_a_throwaway_known_hosts_file() {
+        let prepared = prepare(&target("example.com", "alice", "/home/alice/.ssh/id_ed25519")).unwrap();
+        let path = std::path::Path::new("/tmp/llmide-known-hosts-test");
+        let args = ssh_args_known(&prepared, REMOTE_COMMAND, path, false);
+        assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == "StrictHostKeyChecking=yes"));
+        assert!(args.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("UserKnownHostsFile=/tmp/llmide-known-hosts-test")));
+        assert!(args.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("GlobalKnownHostsFile=")));
     }
 
     #[test]

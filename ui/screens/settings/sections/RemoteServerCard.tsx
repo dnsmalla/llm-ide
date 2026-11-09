@@ -41,7 +41,7 @@ function RemoteFields({ m, s }: { m: RemoteServerModel; s: RemoteServerState }):
   );
 }
 
-function TestResult({ s }: { s: RemoteServerState }): ReactNode {
+function TestResult({ m, s }: { m: RemoteServerModel; s: RemoteServerState }): ReactNode {
   if (s.testing) return <p className="st-hint" role="status">Testing SSH…</p>;
   if (!s.result) return null;
   const r = s.result;
@@ -58,6 +58,12 @@ function TestResult({ s }: { s: RemoteServerState }): ReactNode {
         </div>
       </dl>
       {!r.node ? <p className="st-hint">Node is not on the remote host's PATH. Phase 2 deploy needs Node 20+ there.</p> : null}
+      <div className="st-row">
+        <button type="button" className="st-btn" data-tone={s.confirmed ? undefined : "primary"} disabled={s.confirming || s.confirmed} onClick={() => void m.confirm()}>
+          {s.confirmed ? "Fingerprint confirmed" : s.confirming ? "Confirming…" : "Confirm fingerprint"}
+        </button>
+        <span className="st-hint">{s.confirmed ? "This app session may now deploy, update or uninstall on this host." : "Compare it with the server operator's fingerprint before confirming."}</span>
+      </div>
       <p className="st-hint">{REMOTE_TEXT.testHint}</p>
     </div>
   );
@@ -120,7 +126,7 @@ export default function RemoteServerCard(): ReactNode {
             </button>
             <span className="st-hint">The first connection learns the host key and shows its fingerprint.</span>
           </div>
-          <TestResult s={s} />
+          <TestResult m={m} s={s} />
           <div className="st-note">
             <span className="st-label">Hub certificate</span>
             <p className="st-hint">{s.tlsPin ? `Pinned: ${s.tlsPin}` : "Not pinned yet. Probe the hub, compare the fingerprint, then trust it."}</p>

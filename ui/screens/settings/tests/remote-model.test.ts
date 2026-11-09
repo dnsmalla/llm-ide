@@ -130,6 +130,25 @@ test("an invalid key path reports no key file, and a missing ssh is named", () =
   assert.match(remoteSshErrorText({ code: "no_host_key" }), /fingerprint/);
 });
 
+test("R-034 #7: confirm records the tested fingerprint, and a field change clears it", async () => {
+  const confirmed: Array<{ type: string; fingerprint: string }> = [];
+  const fake = io({ async confirm(_config, type, fingerprint) { confirmed.push({ type, fingerprint }); } });
+  const m = new RemoteServerModel(fake);
+  await m.load();
+  await m.test();
+  assert.ok(m.getState().result);
+  await m.confirm();
+  assert.deepEqual(confirmed, [{ type: "ssh-ed25519", fingerprint: result.fingerprint }]);
+  assert.equal(m.getState().confirmed, true);
+  m.setField("host", "other.example.com");
+  assert.equal(m.getState().confirmed, false, "a fingerprint cannot describe a different target");
+});
+
+test("R-034 #7: the deploy refusal codes read as plain sentences", () => {
+  assert.match(remoteSshErrorText({ code: "host_key_unconfirmed" }), /Confirm the server's host-key fingerprint/);
+  assert.match(remoteSshErrorText({ code: "host_key_changed" }), /no longer matches the fingerprint/);
+});
+
 test("save trims and sends only the non-secret fields in remote mode", async () => {
   const fake = io();
   const m = new RemoteServerModel(fake);

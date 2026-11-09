@@ -154,6 +154,10 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           if (!b) throw new Error("the desktop host returned a bootstrap result this app cannot read");
           return b;
         },
+        async confirmRemoteSshHostKey(config, hostKeyType, fingerprint) {
+          const target = { host: config.host.trim(), port: config.port, user: config.user.trim(), keyPath: config.keyPath.trim() };
+          await d.invoke("remote_ssh_confirm", { target, hostKeyType, fingerprint });
+        },
         async remoteDeployRun(target, planId, confirmation) {
           const r = decodeDeployReport(await d.invoke<unknown>("remote_deploy_run", { target, planId, confirmation }));
           if (!r) throw new Error("the desktop host returned a deploy report this app cannot read");

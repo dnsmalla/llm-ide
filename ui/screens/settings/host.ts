@@ -240,6 +240,8 @@ export interface SettingsHost {
   setRemoteServer?(config: RemoteServerConfig): Promise<RemoteServerConfig>;
   /** Host command `remote_ssh_test`: starts system ssh with a fixed argv and returns the fingerprint/uname/node. */
   testRemoteSsh?(config: RemoteServerConfig): Promise<RemoteSshResult>;
+  /** R-034 #7: confirm the host-key fingerprint for this app session; deploy/update/uninstall refuse until then. */
+  confirmRemoteSshHostKey?(config: RemoteServerConfig, hostKeyType: string, fingerprint: string): Promise<void>;
   /** Phase 2: read-only SSH preflight; the host returns a plan with blockers, warnings and a typed confirmation. */
   remoteDeployPlan?(target: { host: string; port: number; user: string; keyPath: string }, domain: string, reviewAck: boolean): Promise<unknown>;
   /** Phase 2: upload the fixed helper and install its exact sudoers line. */
