@@ -137,7 +137,7 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
   return (
     <div className="rv-root" data-active={active}>
       <header className="rv-head">
-        <h2 className="rv-title">Review Conflicts</h2>
+        <h2 className="rv-title">Docs vs code</h2>
         <span className="rv-path" title={selected?.path}>{selected?.path ?? "No file selected"}</span>
         <span className="rv-spacer" />
         <button type="button" className="rv-btn" onClick={() => void loadRoots()} disabled={busy}>Refresh</button>

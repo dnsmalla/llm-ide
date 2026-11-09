@@ -1,4 +1,4 @@
-// Review Conflicts entry: the shell lazy-loads this module (default export, SectionProps). Host seams are injected
+// Docs vs code (formerly the Review Conflicts section): embedded by ui/screens/factory/FactoryScreen.tsx as a tab. Host seams are injected
 // so the screen renders in tests without Tauri.
 import type { SectionProps } from "@llmide/screens/shell";
 import { invokeHost } from "../shell/host";

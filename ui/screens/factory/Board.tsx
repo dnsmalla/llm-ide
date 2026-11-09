@@ -1,0 +1,278 @@
+// The Factory board: one card per work item. A card's column is derived from facts every time the board is read
+// (run records, live runs, worktrees, PR/MR status) and is never stored. Runs live in the module-level run manager,
+// so they survive section and project switches; this view reads and starts them.
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { StatusBanner } from "@llmide/ui-kit";
+import { createHostFs } from "../explorer/fs";
+import { invokeHost } from "../shell/host";
+import { core } from "../shell/runtime";
+import { setRunRecordShip } from "../loop/native/history.ts";
+import { cancelRun, concurrency, liveRuns, setConcurrency, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
+import { installRunManagerHost } from "../loop/native/run-manager-host.ts";
+import { ShipPanel } from "../loop/native/ShipPanel.tsx";
+import { repoPrefixFor } from "../loop/native/worktree-run.ts";
+import "../loop/native/native-loop.css";
+import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
+import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
+import { STATUS_REFRESH_MS, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { Card } from "./Card.tsx";
+
+// Wire the run manager to the real host once, when this chunk loads: startRun throws without it, and runs must
+// outlive this component (the Issues entry installs it the same way before it starts an intake run).
+installRunManagerHost();
+
+/** The status route rides the core's `dispatch` rate-limit bucket (burst 4, one more per 10 s): never refresh more often. */
+const STATUS_MIN_GAP_MS = 10_000;
+
+export interface BoardProps {
+  /** True only while the section is shown AND the Board tab is selected. */
+  active: boolean;
+  projectRoot: string | null;
+  /** A "focus this card" request from the shell bus; `n` changes on every request. */
+  focus: { key: string | null; n: number };
+}
+
+export default function Board({ active, projectRoot, focus }: BoardProps): ReactNode {
+  const fs = useMemo(() => createHostFs(), []);
+  const [items, setItems] = useState<WorkItemRecord[]>([]);
+  const [records, setRecords] = useState<Map<string, RunRecordFacts>>(() => new Map());
+  const [worktrees, setWorktrees] = useState<Map<string, WorktreeInfo>>(() => new Map());
+  const [ship, setShip] = useState<Map<string, ShipStatus | "error">>(() => new Map());
+  const [live, setLive] = useState<readonly LiveRun[]>(() => liveRuns());
+  const [cap, setCap] = useState(() => concurrency());
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Refs so the 5-minute timer reads the latest facts without being re-created on every load.
+  const itemsRef = useRef<WorkItemRecord[]>([]);
+  const recordsRef = useRef<Map<string, RunRecordFacts>>(new Map());
+  // The last column each card had (memory only, never written): kept while the PR/MR status is unavailable.
+  const lastKnown = useRef<Map<string, Column>>(new Map());
+  const liveIds = useRef("");
+  const lastStatusAt = useRef(0);
+
+  // Another project: nothing of the previous one (items, facts, last known columns) may leak into this board.
+  useEffect(() => {
+    lastKnown.current = new Map();
+    itemsRef.current = [];
+    recordsRef.current = new Map();
+    lastStatusAt.current = 0;
+    setItems([]);
+    setRecords(new Map());
+    setWorktrees(new Map());
+    setShip(new Map());
+    setSelectedKey(null);
+  }, [projectRoot]);
+
+  const loadFacts = useCallback(async () => {
+    if (!projectRoot) return;
+    try {
+      const next = await readItems(fs);
+      const runIds = new Set(next.flatMap((i) => i.runIds.slice(-1)));
+      const [recs, wts] = await Promise.all([
+        latestRecords(fs, runIds),
+        invokeHost<unknown>("loop_worktree_list").then(decodeWorktreeList, () => new Map<string, WorktreeInfo>()),
+      ]);
+      itemsRef.current = next;
+      recordsRef.current = recs;
+      setItems(next);
+      setRecords(recs);
+      setWorktrees(wts);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The Factory items could not be read.");
+    }
+  }, [fs, projectRoot]);
+
+  // `force` (the Refresh button, right after a Ship) skips the minimum gap.
+  const refreshStatus = useCallback(async (force = false) => {
+    const requests = shipRequestsFor(itemsRef.current, recordsRef.current);
+    if (requests.length === 0) return;
+    const now = Date.now();
+    if (!force && now - lastStatusAt.current < STATUS_MIN_GAP_MS) return;
+    lastStatusAt.current = now;
+    const next = new Map<string, ShipStatus | "error">();
+    let rateLimited = false;
+    for (const chunk of chunkShipRequests(requests)) {
+      try {
+        const r = await core.requestRaw("/kb/loop/ship-status", { method: "POST", body: { requests: chunk } });
+        if (r.status === 429) { rateLimited = true; break; }
+        if (r.status === 200) for (const [url, s] of decodeShipResults(r.body)) next.set(url, s);
+      } catch {
+        // Core unreachable: these cards keep their last known column (columnFor), never Inbox.
+      }
+      for (const q of chunk) if (!next.has(q.url)) next.set(q.url, "error");
+    }
+    // Rate limited: keep the statuses already shown instead of marking every card "status unavailable".
+    if (!rateLimited) setShip(next);
+  }, []);
+
+  // Shown: read the facts, then the PR/MR status, and again every 5 minutes while shown. Hidden or unmounted: no timer.
+  useEffect(() => {
+    if (!active) return;
+    void loadFacts().then(() => refreshStatus());
+    const timer = setInterval(() => void refreshStatus(), STATUS_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [active, loadFacts, refreshStatus]);
+
+  // The run manager notifies on every log line; facts are re-read only when the set of runs or a run's state changes.
+  useEffect(() => subscribeRuns(() => {
+    const now = liveRuns();
+    setLive(now);
+    const why = takeRunNotice();
+    if (why) setNotice(why);
+    const ids = now.map((r) => `${r.runId}:${r.state}`).join(",");
+    if (ids !== liveIds.current) {
+      liveIds.current = ids;
+      void loadFacts();
+    }
+  }), [loadFacts]);
+
+  useEffect(() => {
+    if (focus.key) setSelectedKey(focus.key);
+  }, [focus.key, focus.n]);
+
+  useEffect(() => {
+    if (!selectedKey) return;
+    document.querySelector(`[data-key="${CSS.escape(selectedKey)}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [selectedKey]);
+
+  const facts = useMemo(() => {
+    const m = new Map<string, ItemFacts>();
+    for (const item of items) m.set(item.key, assembleFacts(item, { projectRoot: projectRoot ?? "", live, records, worktrees, ship, lastKnown: lastKnown.current }));
+    return m;
+  }, [items, live, records, worktrees, ship, projectRoot]);
+  const board = useMemo(() => buildBoard(items, facts), [items, facts]);
+  useEffect(() => {
+    lastKnown.current = lastKnownFrom(board);
+  }, [board]);
+  const byKey = useMemo(() => new Map(items.map((i) => [i.key, i])), [items]);
+  const elsewhere = otherProjectsNote(live, projectRoot);
+
+  const act = async (fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      void loadFacts();
+    }
+  };
+
+  const onAction = (item: WorkItemRecord, action: CardAction) => {
+    if (!projectRoot) return;
+    const root = projectRoot;
+    const lastRunId = item.runIds.at(-1) ?? null;
+    switch (action) {
+      case "start":
+        void act(async () => { const runId = startRun(root, item, "full"); await attachRun(fs, item.key, runId); });
+        return;
+      case "intake":
+        void act(async () => { const runId = startRun(root, item, "intakeOnly"); await attachRun(fs, item.key, runId); });
+        return;
+      case "resume":
+        void act(async () => { if (lastRunId) startRun(root, item, "full", { runId: lastRunId }); });
+        return;
+      case "openDiff":
+      case "ship":
+        setSelectedKey(item.key);
+        return;
+      case "openRequest": {
+        const url = safeRequestUrl(facts.get(item.key)?.lastRecord?.ship?.url ?? null);
+        if (url) void invokeHost("open_external_url", { url }).catch(() => setError("The PR/MR link could not be opened."));
+        return;
+      }
+      case "discard":
+        void act(async () => {
+          for (const runId of item.runIds) if (worktrees.has(runId)) await invokeHost("loop_worktree_remove", { runId });
+          await removeItem(fs, item.key);
+          setSelectedKey((k) => (k === item.key ? null : k));
+        });
+        return;
+      case "sendBack":
+        setError("Send back is not available yet.");
+        return;
+    }
+  };
+
+  if (!projectRoot) return <p className="fx-empty">Open a project to use the Factory.</p>;
+  const selected = selectedKey ? byKey.get(selectedKey) ?? null : null;
+  const selFacts = selected ? facts.get(selected.key) ?? null : null;
+  const selLive = selFacts?.live ?? null;
+  const selRunId = selected?.runIds.at(-1) ?? null;
+  const selInfo = selRunId ? worktrees.get(selRunId) ?? null : null;
+
+  return (
+    <div className="fx-board-root">
+      <header className="fx-head">
+        <label className="fx-field">
+          <span>Parallel runs</span>
+          <select value={cap} onChange={(e) => { setConcurrency(Number(e.target.value)); setCap(concurrency()); }}>
+            {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+        {elsewhere ? <span className="fx-hint" role="status">{elsewhere}</span> : null}
+        <span className="fx-spacer" />
+        <button type="button" className="fx-btn" onClick={() => void loadFacts().then(() => refreshStatus(true))}>Refresh</button>
+      </header>
+      {error ? <StatusBanner severity="error" message={error} onDismiss={() => setError(null)} /> : null}
+      {notice ? <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} /> : null}
+      <div className="fx-body">
+        <div className="fx-board" role="list" aria-label="Factory board">
+          {COLUMNS.map((col) => (
+            <section key={col} className="fx-col" aria-label={`${COLUMN_LABELS[col]} (${board[col].length})`}>
+              <h3 className="fx-col-title">{COLUMN_LABELS[col]} <span>{board[col].length}</span></h3>
+              <ul className="fx-cards">
+                {board[col].map((view) => (
+                  <Card key={view.key} view={view} selected={view.key === selectedKey} onOpen={() => setSelectedKey(view.key)} onAction={(a) => { const it = byKey.get(view.key); if (it) onAction(it, a); }} />
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+        {selected ? (
+          <aside className="fx-panel" aria-label={`Details for ${selected.title}`}>
+            <header className="fx-panel-head">
+              <h3 className="fx-panel-title">{selected.title}</h3>
+              <button type="button" className="fx-btn" onClick={() => setSelectedKey(null)}>Close</button>
+            </header>
+            {selLive ? (
+              <>
+                <p className="fx-hint">Run {selLive.runId} · {selLive.state}</p>
+                <button type="button" className="fx-btn" onClick={() => cancelRun(selLive.runId)}>Stop run</button>
+                <pre className="fx-log">{selLive.log.slice(-200).join("\n")}</pre>
+              </>
+            ) : selFacts?.lastRecord ? (
+              <p className="fx-hint">Last run {selFacts.lastRecord.runId}: {selFacts.lastRecord.statusCode}{selFacts.lastRecord.needsDecision ? ` — ${selFacts.lastRecord.needsDecision}` : ""}</p>
+            ) : (
+              <p className="fx-hint">No run yet.</p>
+            )}
+            {selInfo && !selLive ? (
+              <ShipPanel
+                key={selInfo.runId}
+                info={selInfo}
+                item={toWorkItem(selected)}
+                passed={selFacts?.lastRecord?.statusCode === "success"}
+                fs={fs}
+                runPrefix={repoPrefixFor(projectRoot, selInfo.worktree)}
+                onShipped={(r) => {
+                  // Ship does not touch the run record; without this the card would stay in Ready to ship.
+                  const entry = selFacts?.lastRecord?.entry ?? null;
+                  void (entry ? setRunRecordShip(fs, entry, r) : Promise.resolve(false))
+                    .catch(() => false)
+                    .then((ok) => { if (!ok) setError("Shipped, but the run record could not be updated, so the card may not move."); })
+                    .then(() => loadFacts())
+                    .then(() => refreshStatus(true));
+                }}
+                onDiscarded={() => { void act(async () => { await removeItem(fs, selected.key); setSelectedKey(null); }); }}
+                onClose={() => setSelectedKey(null)}
+              />
+            ) : null}
+            {selFacts?.lastRecord?.ship ? <button type="button" className="fx-btn" onClick={() => onAction(selected, "openRequest")}>Open PR/MR</button> : null}
+          </aside>
+        ) : null}
+      </div>
+      {items.length === 0 ? <p className="fx-hint fx-foot">No work items yet. Send issues here from the Issues section.</p> : null}
+    </div>
+  );
+}
