@@ -1,0 +1,43 @@
+{
+  "endpoint": "GET /projects/:id/plan-tasks",
+  "status": 200,
+  "description": "A project member's plan-task board (API 130): every plan task tagged with the project, with its assignee (null when unassigned).",
+  "request": {
+    "params": {
+      "id": "p-one"
+    }
+  },
+  "response": {
+    "project": { "id": "p-one", "name": "One" },
+    "tasks": [
+      {
+        "taskId": "task-mvov8l8f-aaa",
+        "planId": "plan-mvov8l8f-aaa",
+        "projectId": "p-one",
+        "planTitle": "Release plan",
+        "title": "Ship the API",
+        "status": "planned",
+        "due": "2026-11-20",
+        "milestone": "M1",
+        "owner": "backend",
+        "assignee": { "userId": "user-eng", "displayName": "Engineer", "email": "eng@example.com" },
+        "assignedBy": { "userId": "user-owner", "displayName": "Owner", "email": "owner@example.com" },
+        "assignedAt": "2026-11-09 01:00:00"
+      },
+      {
+        "taskId": "task-mvov8l8f-bbb",
+        "planId": "plan-mvov8l8f-aaa",
+        "projectId": "p-one",
+        "planTitle": "Release plan",
+        "title": "Write the guide",
+        "status": "planned",
+        "due": null,
+        "milestone": null,
+        "owner": "docs",
+        "assignee": null,
+        "assignedBy": null,
+        "assignedAt": null
+      }
+    ]
+  }
+}

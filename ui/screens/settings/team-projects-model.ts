@@ -287,3 +287,178 @@ export const removeProjectMember = async (
   decodeProjectRemoved(await call(
     client, "DELETE", `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`, undefined, signal,
   ));
+
+// ---- plan-task assignments (API 130) ----------------------------------------------------------------
+// `plan_tasks.owner` is planner-authored text; the real assignment is the `assignee` record below.
+// A task is assigned only to a member of the task's project, and only a project admin/owner may
+// assign someone else. The core re-checks every rule; these helpers only decide what to render.
+
+export interface PlanTaskAssignee {
+  userId: string;
+  displayName: string;
+  email: string;
+}
+
+export interface TaskAssignment {
+  taskId: string;
+  planId: string;
+  projectId: string;
+  assignee: PlanTaskAssignee;
+  assignedBy: PlanTaskAssignee | null;
+  assignedAt: string | null;
+}
+
+export interface PlanTaskRow {
+  taskId: string;
+  planId: string;
+  projectId: string;
+  /** Null on a project's task board for an unassigned task; the cross-project list has no null rows. */
+  assignee: PlanTaskAssignee | null;
+  assignedBy: PlanTaskAssignee | null;
+  assignedAt: string | null;
+  title: string;
+  status: string;
+  due: string | null;
+  milestone: string | null;
+  owner: string | null;
+  /** Only the cross-project list carries the project name; a project's own task list already knows it. */
+  projectName: string | null;
+  planTitle: string;
+}
+
+export type AssignmentControl = "manage" | "claim" | "release" | "readonly";
+
+const optStr = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+export function decodePlanTaskAssignee(v: unknown): PlanTaskAssignee | null {
+  if (v === null || v === undefined) return null;
+  if (!isRec(v) || typeof v.userId !== "string" || !v.userId) return badResponse();
+  return {
+    userId: v.userId,
+    displayName: typeof v.displayName === "string" ? v.displayName : "",
+    email: typeof v.email === "string" ? v.email : "",
+  };
+}
+
+export function decodeTaskAssignment(v: unknown): TaskAssignment {
+  if (!isRec(v)) return badResponse();
+  const assignee = decodePlanTaskAssignee(v.assignee);
+  if (assignee === null) return badResponse();
+  if (typeof v.taskId !== "string" || typeof v.planId !== "string" || typeof v.projectId !== "string") return badResponse();
+  return {
+    taskId: v.taskId,
+    planId: v.planId,
+    projectId: v.projectId,
+    assignee,
+    assignedBy: decodePlanTaskAssignee(v.assignedBy),
+    assignedAt: optStr(v.assignedAt),
+  };
+}
+
+function decodePlanTaskRow(v: unknown): PlanTaskRow {
+  if (!isRec(v)) return badResponse();
+  if (typeof v.taskId !== "string" || typeof v.planId !== "string" || typeof v.projectId !== "string") return badResponse();
+  if (typeof v.title !== "string" || typeof v.status !== "string" || typeof v.planTitle !== "string") return badResponse();
+  return {
+    taskId: v.taskId,
+    planId: v.planId,
+    projectId: v.projectId,
+    assignee: decodePlanTaskAssignee(v.assignee),
+    assignedBy: decodePlanTaskAssignee(v.assignedBy),
+    assignedAt: optStr(v.assignedAt),
+    title: v.title,
+    status: v.status,
+    due: optStr(v.due),
+    milestone: optStr(v.milestone),
+    owner: optStr(v.owner),
+    projectName: optStr(v.projectName),
+    planTitle: v.planTitle,
+  };
+}
+
+export function decodeMyAssignments(v: unknown): PlanTaskRow[] {
+  if (!isRec(v) || !Array.isArray(v.assignments)) return badResponse();
+  const rows = v.assignments.map(decodePlanTaskRow);
+  // The cross-project list is by definition assigned rows; a null assignee there is a bad response.
+  if (rows.some((r) => r.assignee === null)) return badResponse();
+  return rows;
+}
+
+export function decodeProjectPlanTasks(v: unknown): { project: { id: string; name: string }; tasks: PlanTaskRow[] } {
+  if (!isRec(v) || !isRec(v.project) || !Array.isArray(v.tasks)) return badResponse();
+  if (!isProjectId(v.project.id) || typeof v.project.name !== "string") return badResponse();
+  return { project: { id: v.project.id, name: v.project.name }, tasks: v.tasks.map(decodePlanTaskRow) };
+}
+
+export function decodeAssignTaskResponse(v: unknown): { assignment: TaskAssignment; changed: boolean; action: string | null } {
+  if (!isRec(v) || typeof v.changed !== "boolean") return badResponse();
+  return {
+    assignment: decodeTaskAssignment(v.assignment),
+    changed: v.changed,
+    action: optStr(v.action),
+  };
+}
+
+export function decodeUnassignTaskResponse(v: unknown): boolean {
+  if (!isRec(v) || typeof v.unassigned !== "boolean") return badResponse();
+  return v.unassigned;
+}
+
+/** Project tasks are a member view; a viewer sees the membership notice instead. */
+export function canViewProjectTasks(role: TeamRole | null | undefined): boolean {
+  return role !== null && role !== undefined && roleAtLeast(role, "member");
+}
+
+/**
+ * What the row may do in the UI. A project admin/owner gets the member picker; a member can claim
+ * an unassigned task or release their own; someone else's task is read-only for a non-manager.
+ */
+export function assignmentControl(row: Pick<PlanTaskRow, "assignee">, role: TeamRole | null | undefined, selfId: string): AssignmentControl {
+  if (canManageProject(role)) return "manage";
+  if (row.assignee === null) return "claim";
+  return row.assignee.userId === selfId ? "release" : "readonly";
+}
+
+/** Picker options: Unassigned, the explicit project members, and the current assignee when they are not a row. */
+export function assigneeChoices(
+  members: readonly ProjectMember[],
+  current: PlanTaskAssignee | null,
+): Array<{ userId: string; label: string }> {
+  const out = [{ userId: "", label: "Unassigned" }];
+  const seen = new Set<string>();
+  for (const m of members) {
+    if (seen.has(m.userId)) continue;
+    seen.add(m.userId);
+    out.push({ userId: m.userId, label: m.displayName || m.email || m.userId });
+  }
+  if (current && !seen.has(current.userId)) {
+    out.push({ userId: current.userId, label: current.displayName || current.email || current.userId });
+  }
+  return out;
+}
+
+export const listMyAssignments = async (client: CoreClient, signal?: AbortSignal): Promise<PlanTaskRow[]> =>
+  decodeMyAssignments(await call(client, "GET", "/kb/plan-task/assignments", undefined, signal));
+
+export const listProjectPlanTasks = async (
+  client: CoreClient,
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<{ project: { id: string; name: string }; tasks: PlanTaskRow[] }> =>
+  decodeProjectPlanTasks(await call(client, "GET", `/projects/${encodeURIComponent(projectId)}/plan-tasks`, undefined, signal));
+
+export const assignPlanTask = async (
+  client: CoreClient,
+  taskId: string,
+  userId: string | null,
+  signal?: AbortSignal,
+): Promise<{ assignment: TaskAssignment; changed: boolean; action: string | null }> =>
+  decodeAssignTaskResponse(await call(client, "POST", "/kb/plan-task/assign", { taskId, userId }, signal));
+
+export const unassignPlanTask = async (
+  client: CoreClient,
+  taskId: string,
+  signal?: AbortSignal,
+): Promise<boolean> =>
+  decodeUnassignTaskResponse(await call(client, "POST", "/kb/plan-task/unassign", { taskId }, signal));
+

@@ -556,6 +556,52 @@ picker changes. Tests: `extension/tests/host-api-project-chat.test.mjs`,
 `extension/tests/migration-0074-chat-project.test.mjs`, `extension/tests/chat-sessions.test.mjs`,
 `web/tests/read-controller.test.mjs`, `ios_app/SharedProtocol/Tests/SharedProtocolTests/HostApiReadsTests.swift`.
 
+## 7s. Plan-task assignment (API 130)
+
+Migration 0075 adds `plan_task_assignments` (one current row per task: `task_id` PK, `plan_id`,
+`project_id`, `assignee_user_id`, `assigned_by`, `assigned_at`, `updated_at`, all real FKs) and the
+append-only `plan_task_assignment_log` (`action` = `assign` | `reassign` | `unassign`, from/to/actor).
+`plan_tasks.owner` stays planner-authored TEXT and is never read as an account. A task's project is
+`plans.meta.projectId`; a plan without one cannot be assigned (`400 PROJECT_REQUIRED`).
+
+Rules (one home: `kb/plan-assignments.mjs`):
+
+- The assignee must have effective project role `member` or higher — an explicit `project_members`
+  row, or a global team owner/admin. An implicit viewer, a project `viewer` row and a global team
+  viewer answer `403 NOT_PROJECT_MEMBER` (a team viewer is not lifted by a project row, H1.2).
+  Cross-project ids are refused by the same check.
+- Assigning another account needs project admin/owner (or a global team admin/owner); otherwise
+  `403 ROLE_DENIED`. A project member may self-assign an unassigned task (`userId` omitted or
+  `null`) and may release their own task; taking a task from another member answers
+  `403 SELF_CLAIM_DENIED`.
+- Assigning the current assignee again is idempotent (`changed: false, action: null`).
+  Unassign is idempotent (`unassigned: false`).
+
+Routes:
+
+- `GET /kb/plan-task/assignments[?projectId=][&limit=]` → `{ assignments, count }`. Only the
+  caller's own rows, and only for projects they still belong to (an explicit project row, or a
+  global team owner/admin); `limit` is 1-200 (default 100). Each row carries `taskId`, `planId`,
+  `projectId`, `projectName`, `planTitle`, `title`, `status`, `due`, `milestone`, `owner`,
+  `assignee { userId, displayName, email }`, `assignedBy` (nullable), `assignedAt`.
+- `GET /projects/:id/plan-tasks` → `{ project: { id, name }, tasks }`. Every plan task tagged with
+  the project, newest plan first, with `assignee` (`null` when unassigned). Requires project
+  membership (`role >= member`); a viewer answers `403 ROLE_DENIED`.
+- `POST /kb/plan-task/assign { taskId, userId? }` → `{ assignment, changed, action }`. `userId`
+  omitted or `null` means the caller. `action` is `assign`, `reassign`, or `null` when unchanged.
+- `POST /kb/plan-task/unassign { taskId }` → `{ unassigned, taskId }`.
+
+Every change writes one `plan_task_assignment_log` row and one `audit_log` row
+(`plan.task.assign` / `plan.task.unassign`; detail `{ planId, projectId, fromUserId, toUserId,
+reassigned, self }`, never a title or body). Assigning another account also writes one in-app
+`task_assigned` activity row (no email, no push). `GET /kb/plan/:id` gains `projectId`; stored plan
+tasks gain `assignee` (`{ userId, displayName, email, assignedAt }` or `null`). A re-plan keeps an
+assignment only when the task id survives and the plan's project is unchanged.
+
+Contract: `schema/http/planning.schema.json`, `schema/http/projects.schema.json`. Test:
+`extension/tests/plan-task-assignments.test.mjs`; UI `ui/screens/settings/tests/team-projects.test.mjs`.
+External GitHub/GitLab issue assignees are **not** implemented (they need provider write APIs).
+
 ## 8. See also
 
 - [`../explanation/server-internals.md`](../explanation/server-internals.md) — narrative explanation of request flow, shutdown, and background tasks

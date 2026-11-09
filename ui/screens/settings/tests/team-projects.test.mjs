@@ -246,3 +246,112 @@ test('R-020 #9: project list and member requests carry an AbortSignal', async ()
   assert.equal(seen.length, 2);
   assert.ok(seen.every((s) => s.signal === ac.signal), 'the signal reaches every request');
 });
+
+// ---- plan-task assignments (API 130) ---------------------------------------------------------------
+
+const ASSIGNEE = { userId: "u-eng", displayName: "Engineer", email: "eng@example.com" };
+const ASSIGNED_TASK = {
+  taskId: "t-1", planId: "plan-1", projectId: "p-one", projectName: "One", planTitle: "Plan One",
+  title: "Task A", status: "planned", due: "2026-11-20", milestone: "M1", owner: "planner",
+  assignee: ASSIGNEE, assignedBy: OWNER_MEMBER, assignedAt: "2026-11-09 00:00:00",
+};
+const UNASSIGNED_TASK = {
+  ...ASSIGNED_TASK, taskId: "t-2", title: "Task B", projectName: null,
+  assignee: null, assignedBy: null, assignedAt: null,
+};
+
+test("assignment decoders accept the API 130 rows and reject a missing assignee record", () => {
+  const rows = m.model.decodeMyAssignments({ assignments: [ASSIGNED_TASK] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].assignee.userId, "u-eng");
+  assert.equal(rows[0].projectName, "One");
+  const board = m.model.decodeProjectPlanTasks({ project: { id: "p-one", name: "One" }, tasks: [ASSIGNED_TASK, UNASSIGNED_TASK] });
+  assert.equal(board.tasks.length, 2);
+  assert.equal(board.tasks[1].assignee, null, "an unassigned board row decodes to null");
+  assert.throws(() => m.model.decodeMyAssignments({ assignments: [{ ...ASSIGNED_TASK, assignee: null }] }));
+  assert.throws(() => m.model.decodeProjectPlanTasks({ project: { id: "../x", name: "One" }, tasks: [] }));
+  assert.equal(m.model.decodeAssignTaskResponse({
+    assignment: { taskId: "t-1", planId: "p", projectId: "p-one", assignee: ASSIGNEE, assignedBy: null, assignedAt: null },
+    changed: true, action: "assign",
+  }).assignment.assignee.userId, "u-eng");
+  assert.equal(m.model.decodeUnassignTaskResponse({ unassigned: true }), true);
+});
+
+test("assignment controls mirror the core: admin picks, a member claims/releases, someone else's is read-only", () => {
+  assert.equal(m.model.canViewProjectTasks("member"), true);
+  assert.equal(m.model.canViewProjectTasks("admin"), true);
+  assert.equal(m.model.canViewProjectTasks("viewer"), false);
+  assert.equal(m.model.assignmentControl(UNASSIGNED_TASK, "admin", "u-owner"), "manage");
+  assert.equal(m.model.assignmentControl(ASSIGNED_TASK, "admin", "u-owner"), "manage");
+  assert.equal(m.model.assignmentControl(UNASSIGNED_TASK, "member", "u-eng"), "claim");
+  assert.equal(m.model.assignmentControl(ASSIGNED_TASK, "member", "u-eng"), "release");
+  assert.equal(m.model.assignmentControl(ASSIGNED_TASK, "member", "u-other"), "readonly");
+  // A downgraded team viewer can still release a task that is already theirs (the core allows the assignee).
+  assert.equal(m.model.assignmentControl(ASSIGNED_TASK, "viewer", "u-eng"), "release");
+  assert.equal(m.model.assignmentControl(ASSIGNED_TASK, "viewer", "u-other"), "readonly");
+
+  const choices = m.model.assigneeChoices([OWNER_MEMBER, ENGINEER_MEMBER], { ...ASSIGNEE, userId: "u-team-admin", displayName: "Team Admin" });
+  assert.deepEqual(choices.map((c) => c.label), ["Unassigned", "Owner", "Engineer", "Team Admin"]);
+});
+
+test("Assigned to me: count badge, project/plan context and the empty state", () => {
+  const out = html(h(m.view.MyAssignmentsView, { rows: [ASSIGNED_TASK, UNASSIGNED_TASK], loaded: true, error: null }));
+  assert.match(out, /Assigned to me/);
+  assert.match(out, /aria-label="2 assignments"/);
+  assert.match(out, /Task A/);
+  assert.match(out, /One · Plan One/);
+  assert.match(out, /planned · due 2026-11-20 · M1 · plan owner: planner/);
+
+  const empty = html(h(m.view.MyAssignmentsView, { rows: [], loaded: true, error: null }));
+  assert.match(empty, /No plan tasks are assigned to you\./);
+  const failed = html(h(m.view.MyAssignmentsView, { rows: [], loaded: false, error: "Unavailable", onRetry() {} }));
+  assert.match(failed, /role="alert"[^>]*>Unavailable/);
+  assert.match(failed, /<button[^>]*>Retry<\/button>/);
+});
+
+test("project plan tasks: an admin sees the member picker and the current assignee", () => {
+  const out = html(h(m.view.ProjectPlanTasksView, {
+    tasks: [ASSIGNED_TASK, UNASSIGNED_TASK], members: [OWNER_MEMBER, ENGINEER_MEMBER],
+    role: "admin", selfId: OWNER_MEMBER.userId, busy: false, error: null,
+    onAssign() {}, onUnassign() {},
+  }));
+  assert.match(out, /aria-label="Assignee for Task A"/);
+  assert.match(out, /Assignee: Engineer/);
+  assert.match(out, /Assignee: Unassigned/);
+  for (const label of ["Unassigned", "Owner", "Engineer"]) assert.match(out, new RegExp(`>${label}<`));
+});
+
+test("project plan tasks: a member can claim an unassigned task or release their own, never take another's", () => {
+  const claim = html(h(m.view.ProjectPlanTasksView, {
+    tasks: [UNASSIGNED_TASK], members: [], role: "member", selfId: ENGINEER_MEMBER.userId,
+    busy: false, error: null, onAssign() {}, onUnassign() {},
+  }));
+  assert.match(buttonTag(claim, "Assign to me"), /aria-label="Assign Task B to me"/);
+
+  const release = html(h(m.view.ProjectPlanTasksView, {
+    tasks: [ASSIGNED_TASK], members: [], role: "member", selfId: ENGINEER_MEMBER.userId,
+    busy: false, error: null, onAssign() {}, onUnassign() {},
+  }));
+  assert.match(buttonTag(release, "Release"), /aria-label="Release Task A"/);
+
+  const readonly = html(h(m.view.ProjectPlanTasksView, {
+    tasks: [ASSIGNED_TASK], members: [], role: "member", selfId: OWNER_MEMBER.userId,
+    busy: false, error: null, onAssign() {}, onUnassign() {},
+  }));
+  assert.match(readonly, /Only a project owner or admin can change this assignment/);
+  assert.equal(buttonTag(readonly, "Assign to me"), "");
+  assert.equal(buttonTag(readonly, "Release"), "");
+});
+
+test("project plan tasks: empty and loading states are honest", () => {
+  const loading = html(h(m.view.ProjectPlanTasksView, {
+    tasks: null, members: [], role: "member", selfId: ENGINEER_MEMBER.userId,
+    busy: false, error: null, onAssign() {}, onUnassign() {},
+  }));
+  assert.match(loading, /Loading plan tasks…/);
+  const empty = html(h(m.view.ProjectPlanTasksView, {
+    tasks: [], members: [], role: "member", selfId: ENGINEER_MEMBER.userId,
+    busy: false, error: null, onAssign() {}, onUnassign() {},
+  }));
+  assert.match(empty, /No plan tasks are tagged with this project yet/);
+});

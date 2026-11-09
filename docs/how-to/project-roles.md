@@ -117,3 +117,9 @@ Each project has its own chat history. `chat.new` starts a fresh chat in the sel
 project's list never shows another project's chats, and `chat.history` for a chat from another project is
 refused (`denied` with `PROJECT_MISMATCH`, the frame's 403 class). On a hub every project-scoped frame
 must name a project (`PROJECT_REQUIRED`). See [chat history per project](project-chat-history.md).
+
+## Assigning plan tasks
+
+A project member can be assigned to a plan task tagged with that project; the assignee gets an
+**Assigned to me** list in Settings → Team and one in-app activity row. See
+[assign plan tasks to project members](assign-plan-tasks.md).

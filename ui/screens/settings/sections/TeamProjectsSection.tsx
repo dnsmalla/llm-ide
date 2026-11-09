@@ -7,14 +7,15 @@ import { describeError } from "../errors.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { Button, ErrorText } from "../ui.tsx";
 import {
-  canManageProject, decodeTeamIdentity, defaultProjectMemberDraft, addProjectMemberProblem,
-  buildAddProjectMemberBody, buildProjectMemberPatch, listProjectMemberRows, listProjects,
+  assignPlanTask, canManageProject, canViewProjectTasks, decodeTeamIdentity, defaultProjectMemberDraft,
+  addProjectMemberProblem, buildAddProjectMemberBody, buildProjectMemberPatch, listMyAssignments,
+  listProjectMemberRows, listProjectPlanTasks, listProjects, unassignPlanTask,
   projectMemberDraftProblem, addProjectMember, patchProjectMember, removeProjectMember,
-  type ProjectMember, type ProjectMemberDraft, type ProjectSummary, type TeamRole,
+  type PlanTaskRow, type ProjectMember, type ProjectMemberDraft, type ProjectSummary, type TeamRole,
 } from "../team-projects-model.ts";
 import {
-  ProjectAccessNotice, ProjectAddMemberView, ProjectMemberEditorView, ProjectMemberRowView,
-  ProjectPickerView, ProjectRoleNotice,
+  MyAssignmentsView, ProjectAccessNotice, ProjectAddMemberView, ProjectMemberEditorView,
+  ProjectMemberRowView, ProjectPickerView, ProjectPlanTasksView, ProjectRoleNotice,
 } from "./team-projects-view.tsx";
 
 type Gate =
@@ -43,11 +44,18 @@ export default function TeamProjectsSection() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProjectMemberDraft | null>(null);
   const [add, setAdd] = useState<AddDraft>(emptyAdd);
+  const [myAssignments, setMyAssignments] = useState<PlanTaskRow[] | null>(null);
+  const [assignmentsError, setAssignmentsError] = useState<string | null>(null);
+  const [planTasks, setPlanTasks] = useState<PlanTaskRow[] | null>(null);
+  const [planTasksError, setPlanTasksError] = useState<string | null>(null);
   // R-020 #9: every request gets a signal; a slow earlier load can never write another project's members.
   const membersAc = useRef<AbortController | null>(null);
   const loadAc = useRef<AbortController | null>(null);
   const mutateAc = useRef<AbortController | null>(null);
+  const planTasksAc = useRef<AbortController | null>(null);
+  const taskMutateAc = useRef<AbortController | null>(null);
   const loadToken = useRef(0);
+  const planTasksToken = useRef(0);
 
   const selected = projects?.find((p) => p.id === selectedId) ?? null;
 
@@ -55,7 +63,38 @@ export default function TeamProjectsSection() {
     membersAc.current?.abort();
     loadAc.current?.abort();
     mutateAc.current?.abort();
+    planTasksAc.current?.abort();
+    taskMutateAc.current?.abort();
   }, []);
+
+  const loadMyAssignments = async (): Promise<void> => {
+    try {
+      const rows = await listMyAssignments(client);
+      setMyAssignments(rows);
+      setAssignmentsError(null);
+    } catch (e) {
+      setMyAssignments(null);
+      setAssignmentsError(describeError(e));
+    }
+  };
+
+  const loadPlanTasks = async (projectId: string): Promise<void> => {
+    const token = ++planTasksToken.current;
+    planTasksAc.current?.abort();
+    const controller = new AbortController();
+    planTasksAc.current = controller;
+    setPlanTasks(null);
+    setPlanTasksError(null);
+    try {
+      const out = await listProjectPlanTasks(client, projectId, controller.signal);
+      if (token !== planTasksToken.current || controller.signal.aborted) return;
+      setPlanTasks(out.tasks);
+    } catch (e) {
+      if (token !== planTasksToken.current || controller.signal.aborted) return;
+      setPlanTasks(null);
+      setPlanTasksError(describeError(e));
+    }
+  };
 
   const loadMembers = async (projectId: string): Promise<void> => {
     const token = ++loadToken.current;
@@ -97,6 +136,7 @@ export default function TeamProjectsSection() {
     }
     setGate({ kind: "ready", selfId: identity.id, teamRole: identity.teamRole });
     setProjects(list);
+    void loadMyAssignments();
     const keep = selectedId && list.some((p) => p.id === selectedId) ? selectedId : (list[0]?.id ?? null);
     setSelectedId(keep);
     const project = list.find((p) => p.id === keep) ?? null;
@@ -104,6 +144,11 @@ export default function TeamProjectsSection() {
     else {
       setMembers(null);
       setMemberError(null);
+    }
+    if (project && canViewProjectTasks(project.role)) await loadPlanTasks(project.id);
+    else {
+      setPlanTasks(null);
+      setPlanTasksError(null);
     }
   };
 
@@ -114,14 +159,19 @@ export default function TeamProjectsSection() {
   const selectProject = (id: string): void => {
     loadToken.current += 1;
     membersAc.current?.abort();
+    planTasksToken.current += 1;
+    planTasksAc.current?.abort();
     setSelectedId(id);
     setEditingId(null);
     setDraft(null);
     setActionError(null);
     setMembers(null);
     setMemberError(null);
+    setPlanTasks(null);
+    setPlanTasksError(null);
     const project = projects?.find((p) => p.id === id);
     if (project && canManageProject(project.role)) void loadMembers(id);
+    if (project && canViewProjectTasks(project.role)) void loadPlanTasks(id);
   };
 
   const startEdit = (member: ProjectMember): void => {
@@ -203,6 +253,28 @@ export default function TeamProjectsSection() {
     }
   };
 
+  // One mutation for assign, reassign and unassign. `userId === null` on an assign means "me";
+  // `clear` (the picker's Unassigned option, or Release) removes the row instead.
+  const applyAssignment = async (taskId: string, userId: string | null, clear = false): Promise<void> => {
+    if (gate.kind !== "ready" || !selected || busy) return;
+    setBusy(true);
+    setPlanTasksError(null);
+    taskMutateAc.current?.abort();
+    const controller = new AbortController();
+    taskMutateAc.current = controller;
+    try {
+      if (clear) await unassignPlanTask(client, taskId, controller.signal);
+      else await assignPlanTask(client, taskId, userId, controller.signal);
+      if (controller.signal.aborted) return;
+      void loadMyAssignments();
+      await loadPlanTasks(selected.id);
+    } catch (e) {
+      if (!controller.signal.aborted) setPlanTasksError(describeError(e));
+    } finally {
+      if (!controller.signal.aborted) setBusy(false);
+    }
+  };
+
   if (gate.kind === "checking") return <p className="st-hint" role="status">Checking your projects…</p>;
   if (gate.kind === "error") {
     return (
@@ -216,6 +288,12 @@ export default function TeamProjectsSection() {
   const canManage = selected !== null && canManageProject(selected.role);
   return (
     <section className="st-stack" aria-label="Project team">
+      <MyAssignmentsView
+        rows={myAssignments ?? []}
+        loaded={myAssignments !== null}
+        error={assignmentsError}
+        onRetry={() => void loadMyAssignments()}
+      />
       <ProjectPickerView
         projects={projects ?? []}
         selectedId={selectedId}
@@ -277,6 +355,18 @@ export default function TeamProjectsSection() {
           ) : (
             <ProjectAccessNotice role={selected.role} />
           )}
+          {selected !== null && canViewProjectTasks(selected.role) ? (
+            <ProjectPlanTasksView
+              tasks={planTasks}
+              members={members ?? []}
+              role={selected.role}
+              selfId={gate.selfId}
+              busy={busy}
+              error={planTasksError}
+              onAssign={(taskId, userId) => void applyAssignment(taskId, userId, false)}
+              onUnassign={(taskId) => void applyAssignment(taskId, null, true)}
+            />
+          ) : null}
         </>
       )}
     </section>

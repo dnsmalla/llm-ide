@@ -21,10 +21,37 @@ import { generateCodeForTask } from '../agents/codegen.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { authorizeAction, hubFolderRefusal, projectScopeRefusal } from '../server/route-authority.mjs';
 import { projectIdForFolder, getProject } from '../kb/projects.mjs';
+import {
+  assignPlanTask, getTaskAssignment, getTaskContext, listMyAssignments, unassignPlanTask,
+} from '../kb/plan-assignments.mjs';
+import { recordActivity } from '../kb/activity.mjs';
+import { clientIp, safeAudit } from '../server/route-http.mjs';
 
 // Config keys that name WHERE a dispatch lands (github repo; backlog space +
 // project; linear team + project). Pinned to the approved review.
 const DISPATCH_DESTINATION_KEYS = ['repo', 'owner', 'space', 'teamId', 'projectId'];
+const ASSIGN_KEYS = ['taskId', 'userId'];
+const UNASSIGN_KEYS = ['taskId'];
+
+/** An AppError from the assignment store is a client answer, not a 500. */
+function sendStoreError(res, err) {
+  if (err && err.name === 'AppError') {
+    const code = err.code === 'VALIDATION' ? 'VALIDATION_FAILED' : (err.code || 'VALIDATION_FAILED');
+    sendJSON(res, err.status || 400, { error: { code, message: err.message } });
+    return true;
+  }
+  throw err;
+}
+
+function closedBody(body, allowed) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(body)) {
+    if (!allowed.includes(k)) return null;
+    out[k] = v;
+  }
+  return out;
+}
 
 export async function handlePlanningRoutes(req, res, ctx) {
   const { userId, url } = ctx;
@@ -177,6 +204,116 @@ export async function handlePlanningRoutes(req, res, ctx) {
       return true;
     }
     sendJSON(res, 200, updated);
+    return true;
+  }
+
+  // ── Plan task assignment (migration 0075) ───────────────────
+  //
+  //   GET  /kb/plan-task/assignments[?projectId=&limit=]  my assignments across projects
+  //   POST /kb/plan-task/assign     { taskId, userId? }   assign/reassign (omitted userId = me)
+  //   POST /kb/plan-task/unassign   { taskId }            clear the assignment
+  //
+  // The store enforces the project rules (assignee must be a project member, assigning someone
+  // else needs project admin/owner, a member may claim an unassigned task). The route only parses
+  // the body, audits the change and sends the in-app notification for a reassignment to someone else.
+
+  if (req.method === 'GET' && url.startsWith('/kb/plan-task/assignments')) {
+    const u = new URL(url, 'http://127.0.0.1');
+    const limit = Number(u.searchParams.get('limit') || 100);
+    const projectId = u.searchParams.get('projectId') || null;
+    try {
+      const assignments = listMyAssignments(kb.getDb(), userId, { limit, projectId });
+      sendJSON(res, 200, { assignments, count: assignments.length });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+    return true;
+  }
+
+  if (req.method === 'POST' && url === '/kb/plan-task/assign') {
+    const body = parseJSON(await readBody(req));
+    const input = closedBody(body, ASSIGN_KEYS);
+    if (!input || typeof input.taskId !== 'string' || !input.taskId) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'taskId is required' } });
+      return true;
+    }
+    if (input.userId !== undefined && input.userId !== null && typeof input.userId !== 'string') {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'userId must be a string or null' } });
+      return true;
+    }
+    const target = input.userId == null || input.userId === '' ? String(userId) : input.userId;
+    const db = kb.getDb();
+    const before = getTaskAssignment(db, input.taskId);
+    try {
+      const result = assignPlanTask(db, userId, input.taskId, target);
+      const assignment = result.assignment;
+      safeAudit(db, {
+        userId,
+        ip: clientIp(req),
+        userAgent: req.headers?.['user-agent'] || '',
+        action: 'plan.task.assign',
+        resource: input.taskId,
+        outcome: 'success',
+        detail: {
+          planId: assignment?.planId ?? before?.planId ?? null,
+          projectId: assignment?.projectId ?? before?.projectId ?? null,
+          fromUserId: before?.assignee?.userId ?? null,
+          toUserId: target,
+          reassigned: result.action === 'reassign',
+          self: target === String(userId),
+        },
+      });
+      if (result.changed && target !== String(userId)) {
+        const task = getTaskContext(db, input.taskId);
+        recordActivity({
+          userId: target,
+          kind: 'task_assigned',
+          title: `Assigned to you: ${String(task?.title || 'a plan task').slice(0, 160)}`,
+          detail: {
+            taskId: input.taskId,
+            planId: assignment?.planId ?? null,
+            projectId: assignment?.projectId ?? null,
+            assignedBy: userId,
+          },
+        });
+      }
+      sendJSON(res, 200, result);
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+    return true;
+  }
+
+  if (req.method === 'POST' && url === '/kb/plan-task/unassign') {
+    const body = parseJSON(await readBody(req));
+    const input = closedBody(body, UNASSIGN_KEYS);
+    if (!input || typeof input.taskId !== 'string' || !input.taskId) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'taskId is required' } });
+      return true;
+    }
+    const db = kb.getDb();
+    const before = getTaskAssignment(db, input.taskId);
+    try {
+      const result = unassignPlanTask(db, userId, input.taskId);
+      if (result.unassigned) {
+        safeAudit(db, {
+          userId,
+          ip: clientIp(req),
+          userAgent: req.headers?.['user-agent'] || '',
+          action: 'plan.task.unassign',
+          resource: input.taskId,
+          outcome: 'success',
+          detail: {
+            planId: before?.planId ?? null,
+            projectId: before?.projectId ?? null,
+            fromUserId: before?.assignee?.userId ?? null,
+          },
+        });
+      }
+      sendJSON(res, 200, result);
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
     return true;
   }
 

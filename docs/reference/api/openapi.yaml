@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 129
+  x-api-version: 130
 servers:
   - url: "https://{host}"
     variables:
@@ -7376,6 +7376,11 @@ paths:
                     type:
                       - "string"
                       - "null"
+                  projectId:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
                   meta:
                     type: "object"
                     additionalProperties: true
@@ -8350,6 +8355,11 @@ paths:
                     type:
                       - "string"
                       - "null"
+                  projectId:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
                   meta:
                     type: "object"
                     additionalProperties: true
@@ -9660,6 +9670,11 @@ paths:
                     type:
                       - "string"
                       - "null"
+                  projectId:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
                   meta:
                     type: "object"
                     additionalProperties: true
@@ -12970,6 +12985,114 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/plan-task/assign:
+    post:
+      tags:
+        - "planning"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "taskId"
+              description: "Assign or reassign a plan task to a project member. Omitted or null userId means the caller (a self-claim). The assignee must be an effective project member; assigning someone else needs project admin/owner."
+              properties:
+                taskId:
+                  type: "string"
+                userId:
+                  type:
+                    - "string"
+                    - "null"
+      responses:
+        "200":
+          description: "changed is false and action is null when the task was already assigned to that member. action is assign or reassign when changed."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "assignment"
+                  - "changed"
+                  - "action"
+                properties:
+                  assignment:
+                    "$ref": "#/components/schemas/TaskAssignment"
+                  changed:
+                    type: "boolean"
+                  action:
+                    type:
+                      - "string"
+                      - "null"
+                    enum:
+                      - "assign"
+                      - "reassign"
+                      - null
+  /kb/plan-task/assignments:
+    get:
+      tags:
+        - "planning"
+      parameters:
+        - name: "limit"
+          in: "query"
+          required: false
+          description: "1-200, default 100."
+          schema:
+            type: "string"
+        - name: "projectId"
+          in: "query"
+          required: false
+          description: "One project's assignments only."
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "The caller's own assignments, across every project they still belong to. A row from a project they were removed from is not listed."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "assignments"
+                  - "count"
+                properties:
+                  assignments:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/AssignmentRow"
+                  count:
+                    type: "integer"
+  /kb/plan-task/unassign:
+    post:
+      tags:
+        - "planning"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "taskId"
+              properties:
+                taskId:
+                  type: "string"
+      responses:
+        "200":
+          description: "Idempotent: unassigned is false when the task had no assignment."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "unassigned"
+                  - "taskId"
+                properties:
+                  unassigned:
+                    type: "boolean"
+                  taskId:
+                    type: "string"
   /kb/plan-task/update:
     post:
       summary: "Patch a single plan task (status, owner, due, risk, etc.)"
@@ -13316,6 +13439,11 @@ paths:
                     type:
                       - "string"
                       - "null"
+                  projectId:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
                   meta:
                     type: "object"
                     additionalProperties: true
@@ -13388,6 +13516,11 @@ paths:
                     type:
                       - "string"
                       - "null"
+                  projectId:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
                   meta:
                     type: "object"
                     additionalProperties: true
@@ -16814,6 +16947,42 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /projects/{id}/plan-tasks:
+    get:
+      tags:
+        - "projects"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "Project id"
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "Every plan task tagged with this project (plans.meta.projectId), newest plan first, with its assignee. Requires project membership (role >= member); a viewer answers 403 ROLE_DENIED."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "project"
+                  - "tasks"
+                properties:
+                  project:
+                    type: "object"
+                    required:
+                      - "id"
+                      - "name"
+                    properties:
+                      id:
+                        type: "string"
+                      name:
+                        type: "string"
+                  tasks:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ProjectPlanTask"
 components:
   securitySchemes:
     bearerAuth:
@@ -17771,6 +17940,67 @@ components:
         created_at:
           type: "number"
           description: "epoch seconds with a fraction"
+    AssignmentRow:
+      type: "object"
+      required:
+        - "taskId"
+        - "planId"
+        - "projectId"
+        - "assignee"
+        - "assignedBy"
+        - "assignedAt"
+        - "title"
+        - "status"
+        - "due"
+        - "milestone"
+        - "owner"
+        - "planTitle"
+        - "projectName"
+      properties:
+        taskId:
+          type: "string"
+        planId:
+          type: "string"
+        projectId:
+          type: "string"
+        assignee:
+          "$ref": "#/components/schemas/TaskAssignee"
+        assignedBy:
+          type:
+            - "object"
+            - "null"
+          properties:
+            userId:
+              type: "string"
+            displayName:
+              type: "string"
+            email:
+              type: "string"
+        assignedAt:
+          type:
+            - "string"
+            - "null"
+        title:
+          type: "string"
+        status:
+          type: "string"
+        due:
+          type:
+            - "string"
+            - "null"
+        milestone:
+          type:
+            - "string"
+            - "null"
+        owner:
+          type:
+            - "string"
+            - "null"
+          description: "The planner-authored owner text, never the assignee."
+        planTitle:
+          type: "string"
+        projectName:
+          type: "string"
     Attachment:
       type: "object"
       description: "One file attached to a Code Assistant turn. A content starting with '[binary:<media type>]' followed by a newline marks a binary file; an image media type is replaced by a one-line note on the legacy engine."
@@ -21185,6 +21415,26 @@ components:
           type: "array"
           items:
             type: "string"
+        assignee:
+          type:
+            - "object"
+            - "null"
+          required:
+            - "userId"
+            - "displayName"
+            - "email"
+          properties:
+            userId:
+              type: "string"
+            displayName:
+              type: "string"
+            email:
+              type: "string"
+            assignedAt:
+              type:
+                - "string"
+                - "null"
+          description: "The project-member assignment (API 130), or null. Optional on the wire for a core older than 130; a current core always sends it."
         status:
           enum:
             - "planned"
@@ -21416,6 +21666,77 @@ components:
           description: "Monthly project USD cap; 0 = no cap"
         updatedAt:
           type: "string"
+    ProjectPlanTask:
+      type: "object"
+      required:
+        - "taskId"
+        - "planId"
+        - "projectId"
+        - "planTitle"
+        - "title"
+        - "status"
+        - "due"
+        - "milestone"
+        - "owner"
+        - "assignee"
+        - "assignedBy"
+        - "assignedAt"
+      description: "A plan task tagged with this project, with its current project-member assignment (API 130). owner is the planner-authored text, never the assignee."
+      properties:
+        taskId:
+          type: "string"
+        planId:
+          type: "string"
+        projectId:
+          type: "string"
+        planTitle:
+          type: "string"
+        title:
+          type: "string"
+        status:
+          type: "string"
+        due:
+          type:
+            - "string"
+            - "null"
+        milestone:
+          type:
+            - "string"
+            - "null"
+        owner:
+          type:
+            - "string"
+            - "null"
+        assignee:
+          type:
+            - "object"
+            - "null"
+          required:
+            - "userId"
+            - "displayName"
+            - "email"
+          properties:
+            userId:
+              type: "string"
+            displayName:
+              type: "string"
+            email:
+              type: "string"
+        assignedBy:
+          type:
+            - "object"
+            - "null"
+          properties:
+            userId:
+              type: "string"
+            displayName:
+              type: "string"
+            email:
+              type: "string"
+        assignedAt:
+          type:
+            - "string"
+            - "null"
     ProjectQuery:
       type: "object"
       properties:
@@ -22228,6 +22549,54 @@ components:
                     description: "one pending review item; not pinned, none was pending when captured"
             outcomes:
               "$ref": "#/components/schemas/Outcomes"
+    TaskAssignee:
+      type: "object"
+      required:
+        - "userId"
+        - "displayName"
+        - "email"
+      description: "The account a plan task is assigned to (API 130). Never derived from plan_tasks.owner, which is planner-authored text."
+      properties:
+        userId:
+          type: "string"
+        displayName:
+          type: "string"
+        email:
+          type: "string"
+    TaskAssignment:
+      type: "object"
+      required:
+        - "taskId"
+        - "planId"
+        - "projectId"
+        - "assignee"
+        - "assignedBy"
+        - "assignedAt"
+      description: "The current assignment of one plan task. assignedBy is null when the assigner's account was deleted; assignedAt is the last change."
+      properties:
+        taskId:
+          type: "string"
+        planId:
+          type: "string"
+        projectId:
+          type: "string"
+        assignee:
+          "$ref": "#/components/schemas/TaskAssignee"
+        assignedBy:
+          type:
+            - "object"
+            - "null"
+          properties:
+            userId:
+              type: "string"
+            displayName:
+              type: "string"
+            email:
+              type: "string"
+        assignedAt:
+          type:
+            - "string"
+            - "null"
     TaskFeedback:
       type: "object"
       required:

@@ -1861,6 +1861,13 @@ export type PlanTask = {
   due?: string | null;
   estimateDays?: number | null;
   dependsOn: string[];
+  /** The project-member assignment (API 130), or null. Optional on the wire for a core older than 130; a current core always sends it. */
+  assignee?: {
+    userId: string;
+    displayName: string;
+    email: string;
+    assignedAt?: string | null;
+  } | null;
   status: "planned" | "in_progress" | "done" | "blocked" | "cancelled";
   risk: "low" | "med" | "high" | null;
   riskReason?: string | null;
@@ -1880,6 +1887,48 @@ export type PlanTask = {
   }[];
   /** Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots), or null. */
   meta?: Record<string, unknown> | null;
+};
+
+/** The account a plan task is assigned to (API 130). Never derived from plan_tasks.owner, which is planner-authored text. */
+export type TaskAssignee = {
+  userId: string;
+  displayName: string;
+  email: string;
+};
+
+/** The current assignment of one plan task. assignedBy is null when the assigner's account was deleted; assignedAt is the last change. */
+export type TaskAssignment = {
+  taskId: string;
+  planId: string;
+  projectId: string;
+  assignee: TaskAssignee;
+  assignedBy: {
+    userId?: string;
+    displayName?: string;
+    email?: string;
+  } | null;
+  assignedAt: string | null;
+};
+
+export type AssignmentRow = {
+  taskId: string;
+  planId: string;
+  projectId: string;
+  assignee: TaskAssignee;
+  assignedBy: {
+    userId?: string;
+    displayName?: string;
+    email?: string;
+  } | null;
+  assignedAt: string | null;
+  title: string;
+  status: string;
+  due: string | null;
+  milestone: string | null;
+  /** The planner-authored owner text, never the assignee. */
+  owner: string | null;
+  planTitle: string;
+  projectName: string;
 };
 
 export type ProjectSummary = {
@@ -1908,6 +1957,30 @@ export type ProjectMember = {
   /** Monthly project USD cap; 0 = no cap */
   usdCapMonth: number;
   updatedAt: string;
+};
+
+/** A plan task tagged with this project, with its current project-member assignment (API 130). owner is the planner-authored text, never the assignee. */
+export type ProjectPlanTask = {
+  taskId: string;
+  planId: string;
+  projectId: string;
+  planTitle: string;
+  title: string;
+  status: string;
+  due: string | null;
+  milestone: string | null;
+  owner: string | null;
+  assignee: {
+    userId: string;
+    displayName: string;
+    email: string;
+  } | null;
+  assignedBy: {
+    userId?: string;
+    displayName?: string;
+    email?: string;
+  } | null;
+  assignedAt: string | null;
 };
 
 export type Connection = {
@@ -7109,6 +7182,8 @@ export type PostKbGeneratePlanResponse200 = {
   title: string;
   goal?: string | null;
   language?: string | null;
+  /** The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none. */
+  projectId?: string | null;
   /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
   meta: Record<string, unknown>;
   createdAt: string;
@@ -7155,6 +7230,8 @@ export type PostKbAnalyzeRisksResponse200 = {
   title?: string;
   goal?: string | null;
   language?: string | null;
+  /** The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none. */
+  projectId?: string | null;
   /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
   meta?: Record<string, unknown>;
   createdAt?: string;
@@ -7203,6 +7280,8 @@ export type PostKbCodeSyncResponse200 = {
   title?: string;
   goal?: string | null;
   language?: string | null;
+  /** The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none. */
+  projectId?: string | null;
   /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
   meta?: Record<string, unknown>;
   createdAt?: string;
@@ -7252,6 +7331,8 @@ export type GetKbPlanIdResponse200 = {
   title: string;
   goal?: string | null;
   language?: string | null;
+  /** The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none. */
+  projectId?: string | null;
   /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
   meta: Record<string, unknown>;
   createdAt: string;
@@ -7313,6 +7394,8 @@ export type PostKbPlanSaveResponse200 = {
   title: string;
   goal?: string | null;
   language?: string | null;
+  /** The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none. */
+  projectId?: string | null;
   /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
   meta: Record<string, unknown>;
   createdAt: string;
@@ -7650,6 +7733,50 @@ export type GetKbOutcomesStatsResponse200 = {
 
 export type GetKbOutcomesStatsResponse401 = CommonError;
 
+/** Request parts for `GET /kb/plan-task/assignments` (schema/http/planning.schema.json). */
+export type GetKbPlanTaskAssignmentsRequest = {
+  query: {
+    /** 1-200, default 100. */
+    limit?: string;
+    /** One project's assignments only. */
+    projectId?: string;
+  };
+};
+
+/** The caller's own assignments, across every project they still belong to. A row from a project they were removed from is not listed. */
+export type GetKbPlanTaskAssignmentsResponse200 = {
+  assignments: AssignmentRow[];
+  count: number;
+};
+
+/** Request parts for `POST /kb/plan-task/assign` (schema/http/planning.schema.json). */
+export type PostKbPlanTaskAssignRequest = {
+  body: {
+    taskId: string;
+    userId?: string | null;
+  };
+};
+
+/** changed is false and action is null when the task was already assigned to that member. action is assign or reassign when changed. */
+export type PostKbPlanTaskAssignResponse200 = {
+  assignment: TaskAssignment;
+  changed: boolean;
+  action: "assign" | "reassign" | null;
+};
+
+/** Request parts for `POST /kb/plan-task/unassign` (schema/http/planning.schema.json). */
+export type PostKbPlanTaskUnassignRequest = {
+  body: {
+    taskId: string;
+  };
+};
+
+/** Idempotent: unassigned is false when the task had no assignment. */
+export type PostKbPlanTaskUnassignResponse200 = {
+  unassigned: boolean;
+  taskId: string;
+};
+
 /** Request parts for `GET /projects` (schema/http/projects.schema.json). */
 export type GetProjectsRequest = Record<string, never>;
 
@@ -7756,6 +7883,23 @@ export type DeleteProjectsIdMembersUserIdResponse401 = CommonError;
 export type DeleteProjectsIdMembersUserIdResponse403 = CommonError;
 
 export type DeleteProjectsIdMembersUserIdResponse404 = CommonError;
+
+/** Request parts for `GET /projects/:id/plan-tasks` (schema/http/projects.schema.json). */
+export type GetProjectsIdPlanTasksRequest = {
+  params: {
+    /** Project id */
+    id: string;
+  };
+};
+
+/** Every plan task tagged with this project (plans.meta.projectId), newest plan first, with its assignee. Requires project membership (role >= member); a viewer answers 403 ROLE_DENIED. */
+export type GetProjectsIdPlanTasksResponse200 = {
+  project: {
+    id: string;
+    name: string;
+  };
+  tasks: ProjectPlanTask[];
+};
 
 /** Request parts for `GET /kb/providers/catalog` (schema/http/provider-catalog.schema.json). */
 export type GetKbProvidersCatalogRequest = Record<string, never>;
@@ -11040,6 +11184,24 @@ export interface ApiEndpoints {
       401: GetKbOutcomesStatsResponse401;
     };
   };
+  "GET /kb/plan-task/assignments": {
+    request: GetKbPlanTaskAssignmentsRequest;
+    responses: {
+      200: GetKbPlanTaskAssignmentsResponse200;
+    };
+  };
+  "POST /kb/plan-task/assign": {
+    request: PostKbPlanTaskAssignRequest;
+    responses: {
+      200: PostKbPlanTaskAssignResponse200;
+    };
+  };
+  "POST /kb/plan-task/unassign": {
+    request: PostKbPlanTaskUnassignRequest;
+    responses: {
+      200: PostKbPlanTaskUnassignResponse200;
+    };
+  };
   "GET /projects": {
     request: GetProjectsRequest;
     responses: {
@@ -11083,6 +11245,12 @@ export interface ApiEndpoints {
       401: DeleteProjectsIdMembersUserIdResponse401;
       403: DeleteProjectsIdMembersUserIdResponse403;
       404: DeleteProjectsIdMembersUserIdResponse404;
+    };
+  };
+  "GET /projects/:id/plan-tasks": {
+    request: GetProjectsIdPlanTasksRequest;
+    responses: {
+      200: GetProjectsIdPlanTasksResponse200;
     };
   };
   "GET /kb/providers/catalog": {

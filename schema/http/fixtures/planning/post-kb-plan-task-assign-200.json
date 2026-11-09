@@ -1,0 +1,23 @@
+{
+  "endpoint": "POST /kb/plan-task/assign",
+  "status": 200,
+  "description": "A project owner assigns a plan task to a project member (API 130). action is assign for a first assignment, reassign when replacing someone, and null with changed:false when the task already belongs to that member.",
+  "request": {
+    "body": {
+      "taskId": "task-mvov8l8f-aaa",
+      "userId": "user-eng"
+    }
+  },
+  "response": {
+    "assignment": {
+      "taskId": "task-mvov8l8f-aaa",
+      "planId": "plan-mvov8l8f-aaa",
+      "projectId": "p-one",
+      "assignee": { "userId": "user-eng", "displayName": "Engineer", "email": "eng@example.com" },
+      "assignedBy": { "userId": "user-owner", "displayName": "Owner", "email": "owner@example.com" },
+      "assignedAt": "2026-11-09 01:00:00"
+    },
+    "changed": true,
+    "action": "assign"
+  }
+}

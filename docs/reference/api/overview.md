@@ -89,6 +89,10 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 | `POST` | `/kb/analyze-risks` | Annotate plan tasks with risk scores |
 | `POST` | `/kb/code-sync` | FTS5 lookup of touched files per task |
 | `GET` | `/kb/plans` | List saved plans |
+| `GET` | `/kb/plan-task/assignments` | The caller's plan-task assignments across projects (API 130) |
+| `POST` | `/kb/plan-task/assign` | Assign/reassign a task to a project member (omitted `userId` = me) |
+| `POST` | `/kb/plan-task/unassign` | Clear a task's assignment |
+| `GET` | `/projects/:id/plan-tasks` | One project's plan tasks with assignees (project member) |
 
 ### Action
 

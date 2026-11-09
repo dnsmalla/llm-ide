@@ -136,6 +136,7 @@
 .st-team-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .st-team-row { display: flex; align-items: center; gap: var(--tok-space-md); flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: color-mix(in srgb, var(--tok-color-surface2) 58%, transparent); }
 .st-team-row .st-item-text { flex: 1 1 220px; }
+.st-badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 6px; border-radius: 999px; background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); font-size: 11px; text-align: center; color: var(--tok-color-text-muted); }
 .st-team-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .st-token { display: block; padding: var(--tok-space-sm); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); overflow-wrap: anywhere; }
 @media (max-width: 720px) { .st-team-fields { grid-template-columns: 1fr; } }

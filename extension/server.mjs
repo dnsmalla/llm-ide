@@ -404,7 +404,20 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          POST /host-api/pin returns port 443, `url` (wss://<hub>/host-api/v1), the front certificate's leaf
 //          SPKI `fingerprint`, and the hub hostname in `addresses`; a missing pin file/URL is 503
 //          HUB_PIN_UNAVAILABLE. Outside hub mode the answer is unchanged.
-const SERVER_API_VERSION = 129;
+//   v130 — plan-task assignment, additive (migration 0075; contract schema/http/planning.schema.json and
+//          schema/http/projects.schema.json): POST /kb/plan-task/assign { taskId, userId? } assigns a task
+//          (omitted/null userId = me) and POST /kb/plan-task/unassign { taskId } clears it. The assignee
+//          must be an effective member (role >= member) of the task's project (`plans.meta.projectId`);
+//          assigning another account needs project admin/owner, while a member may claim an unassigned
+//          task for themselves or release their own. Cross-project and non-member ids answer 403
+//          NOT_PROJECT_MEMBER, and a plan with no project answers 400 PROJECT_REQUIRED. GET
+//          /kb/plan-task/assignments lists the caller's assignments across projects (only projects they
+//          still belong to). GET /projects/:id/plan-tasks lists a project's plan tasks with assignees
+//          (project member). Assign/reassign/unassign are audited (`plan.task.assign` /
+//          `plan.task.unassign`) and recorded in plan_task_assignment_log; assigning someone else also
+//          writes one in-app `task_assigned` activity row. Plan responses gain `projectId` and each
+//          task's `assignee`; `owner` stays planner-authored text.
+const SERVER_API_VERSION = 130;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -420,6 +433,7 @@ const ALL_ENDPOINTS = [
   '/projects',
   '/projects/:id/members',
   '/projects/:id/members/:userId',
+  '/projects/:id/plan-tasks',
   '/chat',
   '/code-assist',
   '/code-assist/decision',
@@ -520,6 +534,9 @@ const ALL_ENDPOINTS = [
   '/kb/plan/:id',
   '/kb/plan/save',
   '/kb/plan-task/update',
+  '/kb/plan-task/assign',
+  '/kb/plan-task/unassign',
+  '/kb/plan-task/assignments',
   '/kb/plan/delete',
   '/kb/dispatch',
   '/kb/generate-code',

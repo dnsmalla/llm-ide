@@ -30,6 +30,40 @@
         "usdCapMonth": { "type": "number", "description": "Monthly project USD cap; 0 = no cap" },
         "updatedAt": { "type": "string" }
       }
+    },
+    "ProjectPlanTask": {
+      "type": "object",
+      "required": ["taskId", "planId", "projectId", "planTitle", "title", "status", "due", "milestone", "owner", "assignee", "assignedBy", "assignedAt"],
+      "description": "A plan task tagged with this project, with its current project-member assignment (API 130). owner is the planner-authored text, never the assignee.",
+      "properties": {
+        "taskId": { "type": "string" },
+        "planId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "planTitle": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string" },
+        "due": { "type": ["string", "null"] },
+        "milestone": { "type": ["string", "null"] },
+        "owner": { "type": ["string", "null"] },
+        "assignee": {
+          "type": ["object", "null"],
+          "required": ["userId", "displayName", "email"],
+          "properties": {
+            "userId": { "type": "string" },
+            "displayName": { "type": "string" },
+            "email": { "type": "string" }
+          }
+        },
+        "assignedBy": {
+          "type": ["object", "null"],
+          "properties": {
+            "userId": { "type": "string" },
+            "displayName": { "type": "string" },
+            "email": { "type": "string" }
+          }
+        },
+        "assignedAt": { "type": ["string", "null"] }
+      }
     }
   },
   "endpoints": {
@@ -167,6 +201,38 @@
         "401": { "$ref": "_common#/$defs/Error" },
         "403": { "$ref": "_common#/$defs/Error" },
         "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "GET /projects/:id/plan-tasks": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "description": "Project id" }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["project", "tasks"],
+          "description": "Every plan task tagged with this project (plans.meta.projectId), newest plan first, with its assignee. Requires project membership (role >= member); a viewer answers 403 ROLE_DENIED.",
+          "properties": {
+            "project": {
+              "type": "object",
+              "required": ["id", "name"],
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" }
+              }
+            },
+            "tasks": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ProjectPlanTask" }
+            }
+          }
+        }
       }
     }
   }

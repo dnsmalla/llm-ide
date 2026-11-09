@@ -23,6 +23,7 @@ export const ACTIVITY_KINDS = new Set([
   'model_fallback',
   'sync_device_removed',
   'sync_attention',
+  'task_assigned',
 ]);
 
 const TITLE_CAP = 200;

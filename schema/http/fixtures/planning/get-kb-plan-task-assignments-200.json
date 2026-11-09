@@ -1,0 +1,31 @@
+{
+  "endpoint": "GET /kb/plan-task/assignments",
+  "status": 200,
+  "description": "The caller's own plan-task assignments across projects (API 130). Captured against a temp DB seeded through the API; the row carries the project/plan context and the assignee, never the planner-authored owner text as an account.",
+  "request": {
+    "query": {
+      "limit": "100",
+      "projectId": "p-one"
+    }
+  },
+  "response": {
+    "assignments": [
+      {
+        "taskId": "task-mvov8l8f-aaa",
+        "planId": "plan-mvov8l8f-aaa",
+        "projectId": "p-one",
+        "assignee": { "userId": "user-eng", "displayName": "Engineer", "email": "eng@example.com" },
+        "assignedBy": { "userId": "user-owner", "displayName": "Owner", "email": "owner@example.com" },
+        "assignedAt": "2026-11-09 01:00:00",
+        "title": "Ship the API",
+        "status": "planned",
+        "due": "2026-11-20",
+        "milestone": "M1",
+        "owner": "backend",
+        "planTitle": "Release plan",
+        "projectName": "One"
+      }
+    ],
+    "count": 1
+  }
+}

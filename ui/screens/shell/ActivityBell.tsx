@@ -11,6 +11,7 @@ import { useActivityFeed, useCoreSession } from "./use-shell";
 /** The popover body: pure of the store so it renders (and is tested) from plain props. */
 const sectionFor = (it: { kind: string | null; link: string | null }): SectionId | null => {
   const hay = `${it.kind ?? ""} ${it.link ?? ""}`.toLowerCase();
+  if (/task.?assign|assigned/.test(hay)) return "settings";
   if (/loop/.test(hay)) return "loop";
   if (/auto.?task|autotask/.test(hay)) return "autotasks";
   if (/issue|ticket/.test(hay)) return "issues";

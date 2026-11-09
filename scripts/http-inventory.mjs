@@ -73,6 +73,7 @@ const ALLOWLIST = {
     '/kb/self-heal/incidents/:id/ignore': 'dispatched by IGNORE_RE in extension/routes/self-heal.mjs (/^\\/kb\\/self-heal\\/incidents\\/([0-9a-f]{16})\\/ignore$/)',
     '/kb/self-heal/runs/:id/outcome': 'dispatched by RUN_RE in extension/routes/self-heal.mjs (/^\\/kb\\/self-heal\\/runs\\/(<uuid>)\\/(outcome|resolve)$/)',
     '/kb/self-heal/runs/:id/resolve': 'dispatched by RUN_RE in extension/routes/self-heal.mjs (/^\\/kb\\/self-heal\\/runs\\/(<uuid>)\\/(outcome|resolve)$/)',
+    '/projects/:id/plan-tasks': 'dispatched by PROJECT_PLAN_TASKS in extension/routes/project-routes.mjs (/^\\/projects\\/([A-Za-z0-9_-]{1,128})\\/plan-tasks$/), which the literal scanner cannot see',
   },
   clientNotInRoster: {
     '/auth/me/extensions': 'the BASE prefix ui/screens/library/extensions/api.ts builds its /auth/me/extensions/* calls from, not a call',

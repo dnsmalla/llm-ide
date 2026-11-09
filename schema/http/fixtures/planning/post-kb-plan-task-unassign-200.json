@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /kb/plan-task/unassign",
+  "status": 200,
+  "description": "A project admin (or the current assignee) clears a plan task's assignment (API 130). The call is idempotent: unassigned is false when there was nothing to clear.",
+  "request": {
+    "body": {
+      "taskId": "task-mvov8l8f-aaa"
+    }
+  },
+  "response": {
+    "unassigned": true,
+    "taskId": "task-mvov8l8f-aaa"
+  }
+}

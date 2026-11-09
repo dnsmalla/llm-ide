@@ -8,6 +8,7 @@
 // working unchanged.
 
 import { getDb, genId, safeJSONStringify, safeParseMeta, lazyPrepare, requireUser } from './db.mjs';
+import { restoreAssignmentsForPlan } from './plan-assignments.mjs';
 
 const ALLOWED_TASK_STATUS = new Set(['planned', 'in_progress', 'done', 'blocked', 'cancelled']);
 const ALLOWED_RISK = new Set(['low', 'med', 'high']);
@@ -79,6 +80,16 @@ export function savePlan(userId, plan) {
     // Replace tasks wholesale — the planner re-emits the full list on
     // every run, and we want stale tasks (removed during a re-plan) to
     // disappear instead of accumulating.
+    //
+    // Assignments are project grants, not planner output: capture them before the
+    // delete and restore those whose task id survives AND whose project is unchanged
+    // (a plan moved to another project cannot keep the old project's grant).
+    const previousAssignments = db.prepare(
+      'SELECT * FROM plan_task_assignments WHERE plan_id = ?',
+    ).all(id);
+    const projectId = db.prepare(
+      "SELECT json_extract(meta, '$.projectId') AS project_id FROM plans WHERE id = ?",
+    ).get(id)?.project_id ?? null;
     db.prepare('DELETE FROM plan_tasks WHERE plan_id = ? AND user_id = ?').run(id, userId);
 
     const insTask = db.prepare(`
@@ -90,8 +101,10 @@ export function savePlan(userId, plan) {
         @estimate_days, @depends_on, @status, @risk, @risk_reason, @files, @symbols, @meta
       )
     `);
+    const insertedTaskIds = [];
     tasks.forEach((t, idx) => {
       const taskId = String(t.id || genId('t'));
+      insertedTaskIds.push(taskId);
       const status = ALLOWED_TASK_STATUS.has(t.status) ? t.status : 'planned';
       const risk = t.risk && ALLOWED_RISK.has(t.risk) ? t.risk : null;
       const due = typeof t.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.due) ? t.due : null;
@@ -115,6 +128,12 @@ export function savePlan(userId, plan) {
         meta: safeJSONStringify(t.meta || {}),
       });
     });
+
+    restoreAssignmentsForPlan(db, id, {
+      taskIds: insertedTaskIds,
+      projectId,
+      previous: previousAssignments,
+    });
   });
 
   tx();
@@ -129,7 +148,13 @@ export function getPlan(userId, planId) {
   ).get(String(planId), userId);
   if (!p) return null;
   const tasks = db.prepare(`
-    SELECT * FROM plan_tasks WHERE plan_id = ? AND user_id = ? ORDER BY position, milestone
+    SELECT t.*, a.assignee_user_id, a.assigned_at,
+           au.display_name AS assignee_name, au.email AS assignee_email
+      FROM plan_tasks t
+      LEFT JOIN plan_task_assignments a ON a.task_id = t.id
+      LEFT JOIN users au ON au.id = a.assignee_user_id
+     WHERE t.plan_id = ? AND t.user_id = ?
+     ORDER BY t.position, t.milestone
   `).all(p.id, userId).map((t) => ({
     id: t.id,
     planId: t.plan_id,
@@ -146,15 +171,23 @@ export function getPlan(userId, planId) {
     riskReason: t.risk_reason,
     files: safeParseMeta(t.files) || [],
     symbols: safeParseMeta(t.symbols) || [],
+    assignee: t.assignee_user_id ? {
+      userId: t.assignee_user_id,
+      displayName: t.assignee_name ?? '',
+      email: t.assignee_email ?? '',
+      assignedAt: t.assigned_at,
+    } : null,
     meta: safeParseMeta(t.meta),
   }));
+  const meta = safeParseMeta(p.meta);
   return {
     id: p.id,
     meetingId: p.meeting_id,
     title: p.title,
     goal: p.goal,
     language: p.language,
-    meta: safeParseMeta(p.meta),
+    projectId: typeof meta?.projectId === 'string' ? meta.projectId : null,
+    meta,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
     tasks,
@@ -326,9 +359,14 @@ export function releaseTaskDispatchClaim(userId, taskId, sentinel) {
 export function getTaskById(userId, taskId) {
   requireUser(userId);
   const db = getDb();
-  const t = lazyPrepare(db,
-    'SELECT * FROM plan_tasks WHERE id = ? AND user_id = ?'
-  ).get(String(taskId), userId);
+  const t = lazyPrepare(db, `
+    SELECT t.*, a.assignee_user_id, a.assigned_at,
+           au.display_name AS assignee_name, au.email AS assignee_email
+      FROM plan_tasks t
+      LEFT JOIN plan_task_assignments a ON a.task_id = t.id
+      LEFT JOIN users au ON au.id = a.assignee_user_id
+     WHERE t.id = ? AND t.user_id = ?
+  `).get(String(taskId), userId);
   if (!t) return null;
   return {
     id: t.id,
@@ -346,6 +384,12 @@ export function getTaskById(userId, taskId) {
     riskReason: t.risk_reason,
     files: safeParseMeta(t.files) || [],
     symbols: safeParseMeta(t.symbols) || [],
+    assignee: t.assignee_user_id ? {
+      userId: t.assignee_user_id,
+      displayName: t.assignee_name ?? '',
+      email: t.assignee_email ?? '',
+      assignedAt: t.assigned_at,
+    } : null,
     meta: safeParseMeta(t.meta),
   };
 }

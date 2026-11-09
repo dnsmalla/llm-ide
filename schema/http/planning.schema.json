@@ -227,6 +227,36 @@
             "type": "string"
           }
         },
+        "assignee": {
+          "x-optional": true,
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "userId",
+            "displayName",
+            "email"
+          ],
+          "properties": {
+            "userId": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "assignedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "description": "The project-member assignment (API 130), or null. Optional on the wire for a core older than 130; a current core always sends it."
+        },
         "status": {
           "enum": [
             "planned",
@@ -317,6 +347,161 @@
           "description": "Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots), or null."
         }
       }
+    },
+    "TaskAssignee": {
+      "type": "object",
+      "required": [
+        "userId",
+        "displayName",
+        "email"
+      ],
+      "description": "The account a plan task is assigned to (API 130). Never derived from plan_tasks.owner, which is planner-authored text.",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        }
+      }
+    },
+    "TaskAssignment": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "planId",
+        "projectId",
+        "assignee",
+        "assignedBy",
+        "assignedAt"
+      ],
+      "description": "The current assignment of one plan task. assignedBy is null when the assigner's account was deleted; assignedAt is the last change.",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "planId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "assignee": {
+          "$ref": "#/$defs/TaskAssignee"
+        },
+        "assignedBy": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "userId": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          }
+        },
+        "assignedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "AssignmentRow": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "planId",
+        "projectId",
+        "assignee",
+        "assignedBy",
+        "assignedAt",
+        "title",
+        "status",
+        "due",
+        "milestone",
+        "owner",
+        "planTitle",
+        "projectName"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "planId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "assignee": {
+          "$ref": "#/$defs/TaskAssignee"
+        },
+        "assignedBy": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "userId": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          }
+        },
+        "assignedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "due": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "milestone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The planner-authored owner text, never the assignee."
+        },
+        "planTitle": {
+          "type": "string"
+        },
+        "projectName": {
+          "type": "string"
+        }
+      }
     }
   },
   "endpoints": {
@@ -382,6 +567,14 @@
                 "string",
                 "null"
               ]
+            },
+            "projectId": {
+              "x-optional": true,
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
             },
             "meta": {
               "type": "object",
@@ -513,6 +706,14 @@
                 "null"
               ]
             },
+            "projectId": {
+              "x-optional": true,
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
+            },
             "meta": {
               "type": "object",
               "additionalProperties": true,
@@ -643,6 +844,14 @@
                 "string",
                 "null"
               ]
+            },
+            "projectId": {
+              "x-optional": true,
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
             },
             "meta": {
               "type": "object",
@@ -784,6 +993,14 @@
                 "string",
                 "null"
               ]
+            },
+            "projectId": {
+              "x-optional": true,
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
             },
             "meta": {
               "type": "object",
@@ -985,6 +1202,14 @@
                 "string",
                 "null"
               ]
+            },
+            "projectId": {
+              "x-optional": true,
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The project the plan is tagged with (plans.meta.projectId, API 130); null when it has none."
             },
             "meta": {
               "type": "object",
@@ -1897,6 +2122,129 @@
         },
         "401": {
           "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/plan-task/assignments": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "string",
+              "description": "1-200, default 100."
+            },
+            "projectId": {
+              "type": "string",
+              "description": "One project's assignments only."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "assignments",
+            "count"
+          ],
+          "description": "The caller's own assignments, across every project they still belong to. A row from a project they were removed from is not listed.",
+          "properties": {
+            "assignments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AssignmentRow"
+              }
+            },
+            "count": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/plan-task/assign": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "taskId"
+          ],
+          "description": "Assign or reassign a plan task to a project member. Omitted or null userId means the caller (a self-claim). The assignee must be an effective project member; assigning someone else needs project admin/owner.",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "userId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "assignment",
+            "changed",
+            "action"
+          ],
+          "description": "changed is false and action is null when the task was already assigned to that member. action is assign or reassign when changed.",
+          "properties": {
+            "assignment": {
+              "$ref": "#/$defs/TaskAssignment"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "action": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "assign",
+                "reassign",
+                null
+              ]
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/plan-task/unassign": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "taskId"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "unassigned",
+            "taskId"
+          ],
+          "description": "Idempotent: unassigned is false when the task had no assignment.",
+          "properties": {
+            "unassigned": {
+              "type": "boolean"
+            },
+            "taskId": {
+              "type": "string"
+            }
+          }
         }
       }
     }

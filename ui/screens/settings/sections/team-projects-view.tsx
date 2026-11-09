@@ -6,8 +6,9 @@ import {
   MAX_MODES, MAX_USD_CAP_MONTH, formatUsdCap, maxModeLabel, roleLabel, roleAtLeast, statusLabel,
 } from "../team-model.ts";
 import {
-  addProjectMemberProblem, canManageProject, grantableProjectRoles, projectMemberDraftProblem,
-  projectMemberEditBlock, type ProjectMember, type ProjectMemberDraft, type ProjectSummary, type TeamRole,
+  addProjectMemberProblem, assignmentControl, assigneeChoices, canManageProject, grantableProjectRoles,
+  projectMemberDraftProblem, projectMemberEditBlock, type AssignmentControl, type PlanTaskAssignee,
+  type PlanTaskRow, type ProjectMember, type ProjectMemberDraft, type ProjectSummary, type TeamRole,
 } from "../team-projects-model.ts";
 
 export function ProjectPickerView({
@@ -232,5 +233,122 @@ export function ProjectAddMemberView({
         <Button tone="primary" disabled={busy || problem !== null} onClick={onSubmit}>Add to project</Button>
       </div>
     </form>
+  );
+}
+
+// ---- plan-task assignments -------------------------------------------------------------------------
+
+const assigneeName = (a: PlanTaskAssignee | null): string => {
+  if (!a) return "Unassigned";
+  return a.displayName || a.email || "A team member";
+};
+
+/** The cross-project "Assigned to me" list with a count badge. Read-only: a task is reassigned on its project board. */
+export function MyAssignmentsView({
+  rows, loaded, error, onRetry,
+}: {
+  rows: readonly PlanTaskRow[];
+  loaded: boolean;
+  error: string | null;
+  onRetry?: () => void;
+}) {
+  return (
+    <section className="st-stack" aria-label="Assigned to me">
+      <p className="st-label">
+        Assigned to me <span className="st-badge" aria-label={`${rows.length} assignments`}>{rows.length}</span>
+      </p>
+      <p className="st-hint">Plan tasks across every project you belong to. Change an assignee on the project board below.</p>
+      {error ? (
+        <div className="st-stack">
+          <p className="st-error" role="alert">{error}</p>
+          {onRetry ? <div className="st-row"><Button onClick={onRetry}>Retry</Button></div> : null}
+        </div>
+      ) : !loaded ? (
+        <p className="st-hint" role="status">Loading your assignments…</p>
+      ) : rows.length === 0 ? (
+        <p className="st-hint">No plan tasks are assigned to you.</p>
+      ) : (
+        <ul className="st-team-list" aria-label="My plan tasks">
+          {rows.map((row) => (
+            <li className="st-team-row" key={row.taskId} role="listitem">
+              <div className="st-item-text">
+                <strong>{row.title}</strong>
+                <span className="st-hint">{row.projectName ?? row.projectId} · {row.planTitle}</span>
+                <span className="st-hint">
+                  {row.status}{row.due ? ` · due ${row.due}` : ""}{row.milestone ? ` · ${row.milestone}` : ""}
+                  {row.owner ? ` · plan owner: ${row.owner}` : ""}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** One project's plan tasks: assignee, and the control the caller may use on it. */
+export function ProjectPlanTasksView({
+  tasks, members, role, selfId, busy, error, onAssign, onUnassign,
+}: {
+  tasks: readonly PlanTaskRow[] | null;
+  members: readonly ProjectMember[];
+  role: TeamRole;
+  selfId: string;
+  busy: boolean;
+  error: string | null;
+  onAssign: (taskId: string, userId: string | null) => void;
+  onUnassign: (taskId: string) => void;
+}) {
+  return (
+    <section className="st-stack" aria-label="Project plan tasks">
+      <p className="st-label">Plan tasks</p>
+      {error ? <p className="st-error" role="alert">{error}</p> : null}
+      {tasks === null ? (
+        <p className="st-hint" role="status">Loading plan tasks…</p>
+      ) : tasks.length === 0 ? (
+        <p className="st-hint">No plan tasks are tagged with this project yet. A plan with <code>meta.projectId</code> set appears here.</p>
+      ) : (
+        <ul className="st-team-list" aria-label="Plan tasks">
+          {tasks.map((row) => {
+            const control: AssignmentControl = assignmentControl(row, role, selfId);
+            const label = `Assignee for ${row.title}`;
+            return (
+              <li className="st-team-row" key={row.taskId} role="listitem">
+                <div className="st-item-text">
+                  <strong>{row.title}</strong>
+                  <span className="st-hint">{row.planTitle} · {row.status}{row.due ? ` · due ${row.due}` : ""}{row.milestone ? ` · ${row.milestone}` : ""}</span>
+                  <span className="st-hint" data-testid={`assignee-${row.taskId}`}>Assignee: {assigneeName(row.assignee)}</span>
+                  {control === "readonly" && row.assignee ? (
+                    <span className="st-hint">Only a project owner or admin can change this assignment.</span>
+                  ) : null}
+                </div>
+                {control === "manage" ? (
+                  <select
+                    className="st-select"
+                    aria-label={label}
+                    value={row.assignee?.userId ?? ""}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value) onAssign(row.taskId, value);
+                      else onUnassign(row.taskId);
+                    }}
+                  >
+                    {assigneeChoices(members, row.assignee).map((c) => (
+                      <option key={c.userId || "none"} value={c.userId}>{c.label}</option>
+                    ))}
+                  </select>
+                ) : control === "claim" ? (
+                  <Button disabled={busy} onClick={() => onAssign(row.taskId, null)} label={`Assign ${row.title} to me`}>Assign to me</Button>
+                ) : control === "release" ? (
+                  <Button disabled={busy} onClick={() => onUnassign(row.taskId)} label={`Release ${row.title}`}>Release</Button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }

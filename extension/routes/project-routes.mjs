@@ -5,6 +5,7 @@
 //   POST   /projects/:id/members              add an existing team member by email (project admin)
 //   PATCH  /projects/:id/members/:userId      change role/max_mode/usd_cap_month (project admin)
 //   DELETE /projects/:id/members/:userId      remove the row → implicit viewer (project admin)
+//   GET    /projects/:id/plan-tasks           plan tasks tagged with the project + assignee (project member)
 //
 // The route policy (`extension/server/route-authority.mjs`) gates these with the project-effective
 // authority; this handler re-checks the same grant so the module is safe when called directly by tests.
@@ -15,6 +16,7 @@ import { getDb } from '../kb/db.mjs';
 import { config } from '../core/config.mjs';
 import { send, readJson, clientIp, safeAudit } from '../server/route-http.mjs';
 import { persistTeamYaml } from '../kb/team-yaml.mjs';
+import { listProjectPlanTasks } from '../kb/plan-assignments.mjs';
 import {
   addProjectMemberByEmail, canManageProjectGrant, deleteProjectMemberRow,
   effectiveProjectGrant, getProject, getProjectMemberSnapshot, listProjectMembers, listProjectsForUser,
@@ -24,6 +26,7 @@ import {
 const BODY_MAX = 64 * 1024;
 const PROJECT_MEMBERS = /^\/projects\/([A-Za-z0-9_-]{1,128})\/members$/;
 const PROJECT_MEMBER = /^\/projects\/([A-Za-z0-9_-]{1,128})\/members\/([A-Za-z0-9_-]{1,64})$/;
+const PROJECT_PLAN_TASKS = /^\/projects\/([A-Za-z0-9_-]{1,128})\/plan-tasks$/;
 const MEMBERS_SUFFIX = '/members';
 const PATCH_KEYS = ['role', 'maxMode', 'usdCapMonth'];
 const ADD_KEYS = ['email', 'role', 'maxMode', 'usdCapMonth'];
@@ -32,6 +35,7 @@ export function isProjectRoute(url) {
   const p = String(url || '').split('?')[0];
   if (p === '/projects') return true;
   if (!p.startsWith('/projects/')) return false;
+  if (PROJECT_PLAN_TASKS.test(p)) return true;
   return p.endsWith(MEMBERS_SUFFIX) || p.includes(`${MEMBERS_SUFFIX}/`);
 }
 
@@ -97,6 +101,18 @@ export async function handleProjectRoute(req, res, { db = getDb(), logger, reque
     if (method === 'GET' && url === '/projects') {
       send(res, 200, { projects: listProjectsForUser(db, req.user.id) });
       return true;
+    }
+
+    const planTasksMatch = PROJECT_PLAN_TASKS.exec(url);
+    if (planTasksMatch) {
+      const projectId = planTasksMatch[1];
+      requireProject(db, projectId);
+      if (method === 'GET') {
+        // The helper re-checks project membership (role >= member), so a viewer gets 403.
+        send(res, 200, listProjectPlanTasks(db, req.user.id, projectId));
+        return true;
+      }
+      return fail(res, 404, 'NOT_FOUND', `No project route for ${method} ${url}`);
     }
 
     const membersMatch = PROJECT_MEMBERS.exec(url);

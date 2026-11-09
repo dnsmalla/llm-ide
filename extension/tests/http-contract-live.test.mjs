@@ -95,6 +95,13 @@ const SKIP_RULES = [
     when: (fx) => /^(GET|POST|PATCH|DELETE) \/projects\//.test(fx.endpoint),
   },
   {
+    // Plan-task assignment (API 130): the replay user owns no registered project and no seeded plan task, so
+    // the assignment routes answer 403/404 before their success path. The rule, audit and notification are
+    // covered end to end by tests/plan-task-assignments.test.mjs (a temp DB with projects and plans).
+    why: 'plan-task assignment: needs a project and a seeded plan task; covered by tests/plan-task-assignments.test.mjs',
+    when: (fx) => /^(GET \/kb\/plan-task\/assignments|POST \/kb\/plan-task\/(assign|unassign))$/.test(fx.endpoint),
+  },
+  {
     // Command bus: the replay sends no x-llmide-client header, so the host resolves the class `extension` (the cap for an
     // unproven caller). What that class can reproduce is replayed: validation, auth, TIER_DENIED, the read routes and the
     // unknown-id 404s. Everything else needs the desktop class (host nonce), a command seeded through POST /bus/commands, or an
