@@ -206,13 +206,68 @@ test('write-through adds/refreshes the projects section from the DB', () => {
   projects.setProjectMember(db(), owner, 'p-write', engineer, { role: 'admin', maxMode: 'execute', usdCapMonth: 9 });
   write(dir, fileText(['  p-write:\n    engineer@example.com:\n      role: viewer\n      max_mode: read_only\n      usd_cap_month: 1'].join('\n')));
   const res = persistTeamYaml(db(), dir, { trigger: 'project.member.patch', audit: teamAudit });
-  assert.equal(res.projects, 1);
+  assert.ok(res.projects >= 1, 'the written file still carries the project section');
+  assert.ok(listTeamProjectAssignments(db()).some((p) => p.projectId === 'p-write'));
   const parsed = parseTeamYamlFile(fs.readFileSync(path.join(dir, 'team.yaml'), 'utf8'));
   const block = parsed.projects.find((p) => p.projectId === 'p-write');
   assert.equal(block.members.find((m) => m.email === 'engineer@example.com').role, 'admin');
   assert.equal(block.members.find((m) => m.email === 'engineer@example.com').usdCapMonth, 9);
   const audit = db().prepare("SELECT detail FROM audit_log WHERE action = 'team.yaml.write' ORDER BY id DESC LIMIT 1").get();
   assert.equal(JSON.parse(audit.detail).trigger, 'project.member.patch');
+});
+
+test('R-034 #14: a block for one project leaves every other project rows alone', () => {
+  const dir = d();
+  projects.registerProject(db(), owner, { id: 'p-keep-a', name: 'Keep A', root: '/work/keep-a' });
+  projects.registerProject(db(), owner, { id: 'p-keep-b', name: 'Keep B', root: '/work/keep-b' });
+  projects.setProjectMember(db(), owner, 'p-keep-a', engineer, { role: 'admin', maxMode: 'execute', usdCapMonth: 3 });
+  projects.setProjectMember(db(), owner, 'p-keep-b', viewer, { role: 'member', maxMode: 'execute', usdCapMonth: 2 });
+  write(dir, fileText([
+    '  p-keep-a:',
+    '    engineer@example.com:',
+    '      role: member',
+    '      max_mode: execute',
+    '      usd_cap_month: 1',
+  ].join('\n')));
+  applyTeamYaml(db(), dir, { logger: noopLogger, audit: teamAudit });
+  assert.equal(projects.getProjectMember(db(), engineer, 'p-keep-a').maxMode, 'execute');
+  assert.equal(projects.getProjectMember(db(), engineer, 'p-keep-a').usdCapMonth, 1);
+  assert.equal(projects.getProjectMember(db(), viewer, 'p-keep-b').role, 'member', 'an absent block is not authoritative');
+});
+
+test('R-034 #14: write-through preserves a project entry for an email with no account', () => {
+  const dir = d();
+  projects.registerProject(db(), owner, { id: 'p-merge', name: 'Merge', root: '/work/merge' });
+  projects.setProjectMember(db(), owner, 'p-merge', engineer, { role: 'admin', maxMode: 'execute', usdCapMonth: 7 });
+  write(dir, fileText([
+    '  p-merge:',
+    '    not-yet-registered@example.com:',
+    '      role: member',
+    '      max_mode: read_only',
+    '      usd_cap_month: 2',
+  ].join('\n')));
+  persistTeamYaml(db(), dir, { trigger: 'project.member.patch', audit: teamAudit });
+  const parsed = parseTeamYamlFile(fs.readFileSync(path.join(dir, 'team.yaml'), 'utf8'));
+  const block = parsed.projects.find((p) => p.projectId === 'p-merge');
+  assert.equal(block.members.find((m) => m.email === 'engineer@example.com').role, 'admin');
+  assert.ok(block.members.some((m) => m.email === 'not-yet-registered@example.com'), 'the unknown-email grant survives the write-through');
+});
+
+test('R-034 #14: a project downgrade at boot logs a warning', () => {
+  const dir = d();
+  projects.registerProject(db(), owner, { id: 'p-warn', name: 'Warn', root: '/work/warn' });
+  projects.setProjectMember(db(), owner, 'p-warn', engineer, { role: 'admin', maxMode: 'execute', usdCapMonth: 5 });
+  const warnings = [];
+  const logger = { info() {}, warn(action, detail) { warnings.push([action, detail]); }, error() {} };
+  write(dir, fileText([
+    '  p-warn:',
+    '    engineer@example.com:',
+    '      role: viewer',
+    '      max_mode: read_only',
+    '      usd_cap_month: 1',
+  ].join('\n')));
+  applyTeamYaml(db(), dir, { logger, audit: teamAudit });
+  assert.ok(warnings.some(([action]) => action === 'team_yaml_project_downgrade'), 'the narrowing is visible');
 });
 
 test('an invalid projects section refuses the boot and changes nothing', () => {

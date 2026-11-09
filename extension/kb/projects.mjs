@@ -131,6 +131,13 @@ export function canManageProjectGrant(grant) {
   return atLeast(grant.role, 'admin');
 }
 
+/** How many project owners a project has (the last one is protected, like the team owner). */
+export function projectOwnerCount(db, projectId) {
+  return db.prepare(
+    "SELECT COUNT(*) AS n FROM project_members WHERE project_id = ? AND role = 'owner'",
+  ).get(String(projectId)).n;
+}
+
 // ── registry ───────────────────────────────────────────────────────────────
 
 export function getProject(db, projectId) {
@@ -466,12 +473,17 @@ export function setProjectMember(db, actorId, projectId, userId, patch = {}) {
 
   const targetUser = db.prepare('SELECT id, email FROM users WHERE id = ?').get(String(userId));
   if (!targetUser) throw err('NOT_FOUND', 'Member not found', 404);
-  if (String(actorId) === String(userId)) throw err('SELF_GRANT', 'You cannot change your own project role', 403);
-
   const target = getProjectMember(db, userId, projectId);
   if (target && !atLeast(grant.role, target.role)) {
     throw err('ROLE_DENIED', 'You cannot change a project role above your own', 403);
   }
+  // R-034 #14: mirror the team LAST_OWNER guard — a project cannot be left without an owner. Checked
+  // before SELF_GRANT so a sole owner demoting themselves gets the actionable answer.
+  if (target?.role === 'owner' && next.role !== undefined && next.role !== 'owner'
+      && projectOwnerCount(db, projectId) === 1) {
+    throw err('LAST_PROJECT_OWNER', 'The last project owner cannot be demoted', 409);
+  }
+  if (String(actorId) === String(userId)) throw err('SELF_GRANT', 'You cannot change your own project role', 403);
   if (next.role !== undefined && !atLeast(grant.role, next.role)) {
     throw err('ROLE_DENIED', 'You cannot grant a project role above your own', 403);
   }
@@ -521,6 +533,13 @@ export function removeProjectMember(db, actorId, projectId, userId) {
   if (!target) return false;
   if (!atLeast(grant.role, target.role)) {
     throw err('ROLE_DENIED', 'You cannot remove a project role above your own', 403);
+  }
+  // R-034 #14: the same two guards the team member path has.
+  if (target.role === 'owner' && projectOwnerCount(db, projectId) === 1) {
+    throw err('LAST_PROJECT_OWNER', 'The last project owner cannot be removed', 409);
+  }
+  if (String(actorId) === String(userId)) {
+    throw err('SELF_GRANT', 'You cannot remove your own project role', 403);
   }
   return db.prepare(
     'DELETE FROM project_members WHERE user_id = ? AND project_id = ?',

@@ -687,6 +687,21 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
       });
     }
   }
+  // R-034 #14: project narrowing/deletion was silent. One warning per project change, same fields.
+  for (const change of projectChanges) {
+    if (!change.to) {
+      if (logger) logger.warn('team_yaml_project_downgrade', {
+        email: change.email, projectId: change.projectId, from: change.from, to: null,
+        message: 'team.yaml removed this project role at boot.',
+      });
+      continue;
+    }
+    if (!isProjectDowngrade(change.from, change.to)) continue;
+    if (logger) logger.warn('team_yaml_project_downgrade', {
+      email: change.email, projectId: change.projectId, from: change.from, to: change.to,
+      message: 'team.yaml is authoritative at every boot: this project role was reset to the narrower grant in the file.',
+    });
+  }
 
   return {
     path: file,
@@ -704,9 +719,10 @@ export function applyTeamYaml(db, dir, { logger = null, audit = null } = {}) {
 
 /**
  * Apply the file's `projects:` section in the caller's transaction. The DB registry is the project
- * list; an unknown project id in the file is ignored and audited (never creates a project). For every
- * registered project the section is authoritative: a missing account row is deleted, so the member
- * falls back to the implicit viewer default.
+ * list; an unknown project id in the file is ignored and audited (never creates a project). A project
+ * that HAS a block is authoritative for that project (a missing account row is deleted, so the member
+ * falls back to the implicit viewer default). R-034 #14: a registered project with NO block is left
+ * untouched — an edit that only adds one project must not silently wipe every other project's rows.
  */
 function applyProjectAssignments(db, blocks, { usersByEmail, emailByUserId, audit, logger }) {
   const projects = db.prepare('SELECT id, name FROM projects ORDER BY id').all();
@@ -726,6 +742,7 @@ function applyProjectAssignments(db, blocks, { usersByEmail, emailByUserId, audi
 
   for (const project of projects) {
     const block = blockByProject.get(project.id);
+    if (!block) continue;
     const desired = new Map();
     for (const member of block?.members ?? []) {
       const user = usersByEmail.get(member.email);
@@ -833,6 +850,40 @@ export function mergeTeamYamlAssignments(existingText, current) {
 }
 
 /**
+ * R-034 #14: merge the DB's current project assignments over an existing file's `projects:` blocks.
+ * The DB wins for an account it lists; an entry whose email has no account is preserved (a grant the
+ * user prepared for someone who has not registered yet). `knownEmails` is the users table, lower-cased.
+ * A project with no current rows is left as-is so a file-only entry is not dropped.
+ */
+export function mergeTeamYamlProjects(existingText, currentProjects, knownEmails = null) {
+  const known = knownEmails == null ? null : new Set([...knownEmails].map((e) => String(e).trim().toLowerCase()));
+  const byProject = new Map((currentProjects ?? []).map((block) => [block.projectId, {
+    projectId: block.projectId,
+    members: block.members.map((member) => ({ ...member })),
+  }]));
+  if (existingText == null) return [...byProject.values()].sort((a, b) => (a.projectId < b.projectId ? -1 : a.projectId > b.projectId ? 1 : 0));
+  const existing = parseTeamYamlFile(existingText).projects ?? [];
+  for (const block of existing) {
+    let current = byProject.get(block.projectId);
+    if (!current) {
+      current = { projectId: block.projectId, members: [] };
+      byProject.set(block.projectId, current);
+    }
+    const present = new Set(current.members.map((member) => member.email));
+    for (const member of block.members) {
+      // Preserve only an entry whose email has no account; a known account the DB no longer lists is
+      // an intentional removal and must not come back from the file.
+      if (present.has(member.email)) continue;
+      if (known != null && known.has(member.email)) continue;
+      current.members.push({ email: member.email, role: member.role, maxMode: member.maxMode, usdCapMonth: member.usdCapMonth });
+    }
+  }
+  return [...byProject.values()]
+    .filter((block) => block.members.length > 0)
+    .sort((a, b) => (a.projectId < b.projectId ? -1 : a.projectId > b.projectId ? 1 : 0));
+}
+
+/**
  * Rewrite `<dir>/team.yaml` from the current `members` rows — the write-through
  * after an admin grant (`PATCH /admin/members`) or an invited registration.
  * Atomic (temp file, 0600, rename), same generation path as the boot file.
@@ -851,6 +902,7 @@ export function persistTeamYaml(db, dir, { logger = null, audit = null, trigger 
   const file = path.join(dir, TEAM_YAML_FILENAME);
   const current = listTeamAssignments(db).map(({ userId: _userId, ...assignment }) => assignment);
   const currentProjects = listTeamProjectAssignments(db);
+  const knownEmails = new Set(db.prepare('SELECT email FROM users').all().map((r) => String(r.email).trim().toLowerCase()));
   let existingText = null;
   if (fs.existsSync(file)) {
     try {
@@ -898,9 +950,11 @@ export function persistTeamYaml(db, dir, { logger = null, audit = null, trigger 
     throw err;
   }
 
+  // R-034 #14: keep file-only project entries for emails without an account, like the global list.
+  const mergedProjects = mergeTeamYamlProjects(existingText, currentProjects, knownEmails);
   const text = serializeTeamYaml(merged.assignments, {
     comments: existingText == null ? [] : fullLineComments(existingText),
-    projects: currentProjects,
+    projects: mergedProjects,
   });
   try {
     writeFileAtomic(file, text);
@@ -918,14 +972,14 @@ export function persistTeamYaml(db, dir, { logger = null, audit = null, trigger 
   });
   if (logger) {
     logger.info('team_yaml_written', {
-      path: file, trigger, users: current.length, projects: currentProjects.length, preserved: merged.preserved.length,
+      path: file, trigger, users: current.length, projects: mergedProjects.length, preserved: merged.preserved.length,
     });
   }
   return {
     path: file,
     deferred: false,
     users: current.length,
-    projects: currentProjects.length,
+    projects: mergedProjects.length,
     preserved: merged.preserved.length,
     assignments: merged.assignments.length,
   };
@@ -935,6 +989,14 @@ export function persistTeamYaml(db, dir, { logger = null, audit = null, trigger 
 function isDowngrade(from, to) {
   if (!from || !to) return false; // a row created now is not a downgrade
   if (ROLE_ORDER[to.teamRole] < ROLE_ORDER[from.teamRole]) return true;
+  if (MODE_ORDER[to.maxMode] < MODE_ORDER[from.maxMode]) return true;
+  return capIsTighter(from.usdCapMonth, to.usdCapMonth);
+}
+
+/** The same comparison for a project grant (`role` instead of `teamRole`). */
+function isProjectDowngrade(from, to) {
+  if (!from || !to) return false;
+  if (ROLE_ORDER[to.role] < ROLE_ORDER[from.role]) return true;
   if (MODE_ORDER[to.maxMode] < MODE_ORDER[from.maxMode]) return true;
   return capIsTighter(from.usdCapMonth, to.usdCapMonth);
 }

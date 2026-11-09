@@ -377,6 +377,21 @@ test('R-034 #1: a LOCAL install keeps execute for an engineer (the hub clamp doe
 });
 
 // ── R-020 #4/#5: one canonical root per project ───────────────────────────
+test('R-034 #14: a project cannot lose its last owner, and nobody removes or demotes themselves', () => {
+  const owner = user('guard-owner@example.com', 'owner', 'execute', 0);
+  const second = user('guard-second@example.com', 'member', 'execute', 0);
+  registerProject(db(), owner, { id: 'p-guard', root: '/r/guard' });
+  addProjectMemberByEmail(db(), owner, 'p-guard', { email: 'guard-second@example.com', role: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+
+  // Two owners: self-removal is SELF_GRANT, and one owner may remove the other.
+  assert.throws(() => removeProjectMember(db(), owner, 'p-guard', owner), code('SELF_GRANT'));
+  assert.equal(removeProjectMember(db(), owner, 'p-guard', second), true);
+  // One owner left: neither a self-demotion nor a removal can leave the project ownerless.
+  assert.throws(() => setProjectMember(db(), owner, 'p-guard', owner, { role: 'member' }), code('LAST_PROJECT_OWNER'));
+  assert.throws(() => removeProjectMember(db(), owner, 'p-guard', owner), code('LAST_PROJECT_OWNER'));
+  assert.equal(getProjectMember(db(), owner, 'p-guard').role, 'owner');
+});
+
 test('#5 a root is looked up canonically (trailing slash, dot segments, realpath, case on mac/windows)', () => {
   const owner = user('canon-owner@example.com', 'owner', 'execute', 0);
   const dir = fs.mkdtempSync(path.join(root, 'real-'));
