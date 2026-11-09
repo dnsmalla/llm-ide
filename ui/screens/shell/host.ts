@@ -8,6 +8,8 @@
 //  - Other slices import `host` (and `invokeHost` for commands of their own) from here instead
 //    of importing `@tauri-apps/api` themselves, so tests can swap one bridge.
 
+import { decodePrefsView } from "./host-prefs";
+
 export type CoreState = "starting" | "ready" | "restarting" | "failed" | "stopped" | "remote";
 export type CoreTrust = "pending" | "spawned" | "adopted_unverified" | "remote_pinned";
 export type ClaudeState = "unknown" | "found" | "missing";
@@ -258,5 +260,30 @@ export const host = {
   async projectReveal(): Promise<void> {
     if (!isHostAvailable()) return;
     await invokeHost<unknown>("reveal_in_os", { relPath: "" });
+  },
+
+  /** R-034 #10: the saved hub URL and TLS pin, or null when remote mode has not been configured. */
+  async remoteServerTarget(): Promise<{ hubUrl: string; pin: string } | null> {
+    if (!isHostAvailable()) return null;
+    const v = decodePrefsView(await invokeHost<unknown>("get_prefs"));
+    const r = v?.stored.remoteServer;
+    return r && r.hubUrl && r.tlsPin ? { hubUrl: r.hubUrl, pin: r.tlsPin } : null;
+  },
+
+  /** The stored hub refresh token, only when the hub URL and TLS pin still match. */
+  async remoteSessionLoad(hubUrl: string, pin: string): Promise<string | null> {
+    if (!isHostAvailable()) return null;
+    const t = await invokeHost<unknown>("remote_session_load", { hub: hubUrl, pin });
+    return typeof t === "string" && t.length > 0 ? t : null;
+  },
+
+  async remoteSessionStore(hubUrl: string, pin: string, refresh: string): Promise<void> {
+    if (!isHostAvailable()) return;
+    await invokeHost<unknown>("remote_session_store", { hub: hubUrl, pin, refresh });
+  },
+
+  async remoteSessionClear(): Promise<void> {
+    if (!isHostAvailable()) return;
+    await invokeHost<unknown>("remote_session_clear");
   },
 };

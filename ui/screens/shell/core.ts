@@ -231,6 +231,10 @@ export interface CoreClient {
   login(email: string, password: string, signal?: AbortSignal): Promise<SessionSnapshot>;
   /** `invite` is a hub's single-use team invite (POST /auth/register accepts it while registration is closed). */
   register(email: string, password: string, displayName?: string, signal?: AbortSignal, invite?: string): Promise<void>;
+  /** R-034 #10: adopt a stored hub refresh token at start-up (POST /auth/refresh, no password). */
+  restoreSession(refreshToken: string, signal?: AbortSignal): Promise<SessionSnapshot>;
+  /** Called with the current refresh token on sign-in/refresh, and `null` on sign-out/401. */
+  subscribeRefreshToken(listener: (token: string | null) => void): () => void;
   /** `registrationOpen` from GET /auth/well-known (false when it cannot be read). */
   registrationOpen(signal?: AbortSignal): Promise<boolean>;
   logout(): Promise<void>;
@@ -259,6 +263,12 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
   };
   const listeners = new Set<Listener>();
   const tokenListeners = new Set<AccessTokenListener>();
+  const refreshListeners = new Set<(t: string | null) => void>();
+  const emitRefresh = (t: string | null) => {
+    for (const l of [...refreshListeners]) {
+      try { l(t); } catch { /* a listener must not break the client */ }
+    }
+  };
   const emitToken = (t: string | null) => {
     if (t !== null && !trusted()) return; // never hand a token to the host for an unverified core
     for (const l of [...tokenListeners]) {
@@ -308,6 +318,7 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     // Older servers omit `user` on refresh: keep the one we have.
     emit({ signedIn: true, user: user ?? snapshot.user });
     emitToken(t.access);
+    emitRefresh(t.refresh);
   };
 
   const drop = () => {
@@ -316,6 +327,7 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
     tokens = null;
     emit(SIGNED_OUT);
     if (had) emitToken(null);
+    emitRefresh(null);
   };
 
   const rawFetch = async (path: string, init: RequestInit, timeoutMs: number, parent: AbortSignal | undefined): Promise<Response> => {
@@ -560,6 +572,38 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
       } catch {
         return false;
       }
+    },
+
+    async restoreSession(refreshToken, signal) {
+      requireTrusted();
+      const refresh = typeof refreshToken === "string" ? refreshToken.trim() : "";
+      if (!refresh) throw new CoreError(401, "NO_SESSION", "No stored session to restore.");
+      const startEpoch = ++epoch;
+      const res = await rawFetch(
+        "/auth/refresh",
+        { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ refreshToken: refresh }) },
+        defaultTimeout,
+        signal,
+      );
+      if (!res.ok) throw await errorFromResponse(res);
+      let parsed;
+      try {
+        parsed = parseSession(await res.json());
+      } catch (e) {
+        if (e instanceof CoreError) throw e;
+        throw new CoreError(502, "BAD_RESPONSE", "The core returned an invalid session.");
+      }
+      if (epoch !== startEpoch) throw new CoreError(0, "ABORTED", "Session restore was cancelled.");
+      setTokens(parsed.tokens, parsed.user);
+      return snapshot;
+    },
+
+    subscribeRefreshToken(listener) {
+      refreshListeners.add(listener);
+      if (tokens) {
+        try { listener(tokens.refresh); } catch { /* ignore */ }
+      }
+      return () => { refreshListeners.delete(listener); };
     },
 
     async logout() {

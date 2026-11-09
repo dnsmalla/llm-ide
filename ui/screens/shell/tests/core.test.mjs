@@ -56,6 +56,18 @@ test("R-034 #5: register sends a hub invite token, and omits the field when empt
   assert.ok(!("invite" in JSON.parse(plain.calls[0].init.body)));
 });
 
+test("R-034 #10: restoreSession exchanges a stored refresh token and publishes the rotation", async () => {
+  const { client, calls } = setup((url) => (url.endsWith("/auth/refresh") ? json(200, session(2)) : json(200, {})));
+  const seen = [];
+  client.subscribeRefreshToken((t) => seen.push(t));
+  const snap = await client.restoreSession("ref-stored");
+  assert.equal(snap.signedIn, true);
+  assert.equal(JSON.parse(calls[0].init.body).refreshToken, "ref-stored");
+  assert.deepEqual(seen, ["ref2"], "the rotated refresh token reaches the remote-session binder");
+  await client.logout();
+  assert.deepEqual(seen, ["ref2", null], "sign-out clears the stored session");
+});
+
 test("request without a session fails closed with NO_SESSION", async () => {
   const { client, calls } = setup(() => json(200, {}));
   await assert.rejects(client.request("/kb/x"), (e) => e.code === "NO_SESSION" && e.status === 401);
