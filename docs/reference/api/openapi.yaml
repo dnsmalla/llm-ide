@@ -18653,6 +18653,18 @@ components:
           type: "array"
           items:
             type: "string"
+        env:
+          type: "object"
+          additionalProperties:
+            type: "string"
+          description: "values redacted to bullets"
+        url:
+          type: "string"
+        headers:
+          type: "object"
+          additionalProperties:
+            type: "string"
+          description: "values redacted to bullets"
     Command:
       type: "object"
       required:

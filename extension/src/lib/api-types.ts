@@ -1059,6 +1059,11 @@ export type CodexSource = {
   transport?: string;
   command?: string;
   args?: string[];
+  /** values redacted to bullets */
+  env?: Record<string, string>;
+  url?: string;
+  /** values redacted to bullets */
+  headers?: Record<string, string>;
 };
 
 export type McpUpdate = {
