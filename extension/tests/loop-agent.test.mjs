@@ -28,6 +28,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const { registerUser } = await import('../server/users.mjs');
 const { getDb, addUserRepo, writeCodeGraph } = await import('../kb/db.mjs');
 const { grant } = await import('./helpers/grant.mjs');
+const { registerProject, setProjectMember } = await import('../kb/projects.mjs');
 const agentStoreRead = await import('../kb/agent-db.mjs');
 // Tool events live in agent.db (Stage 1b): flush the queue, then read.
 const agentReadDb = () => { agentStoreRead.flushAgentQueue(); return agentStoreRead.getAgentDb(); };
@@ -515,8 +516,9 @@ test('route: a refused extra root answers 400 EXTRA_ROOT_NOT_ALLOWED before anyt
 });
 
 test('route: an accepted extra root reaches the engine', async () => {
-  const { repo, llmDoc } = splitProject('split-route-ok');
+  const { project, repo, llmDoc } = splitProject('split-route-ok');
   addUserRepo(user.id, repo);
+  registerProject(getDb(), user.id, { id: 'p-split-ok', root: project, name: 'Split OK' });
   let seen = null;
   const res = makeRes();
   await handleLoopAgentRoutes(
@@ -526,6 +528,28 @@ test('route: an accepted extra root reaches the engine', async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(seen.extraRoots, [llmDoc]);
   assert.deepEqual(res.json().changedExtraPaths, [path.join(llmDoc, 'p.md')]);
+});
+
+test('R-034 #9: an extra root in a project the caller has no grant on is refused before the engine', async () => {
+  const { project, repo, llmDoc } = splitProject('split-route-denied');
+  addUserRepo(user.id, repo);
+  // The enclosing project and the nested one the run actually edits.
+  registerProject(getDb(), user.id, { id: 'p-split-outer', root: project, name: 'Outer' });
+  registerProject(getDb(), user.id, { id: 'p-split-inner', root: repo, name: 'Inner' });
+  const outsider = registerUser(getDb(), { email: `loop-outsider-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 'o' });
+  grant(getDb(), outsider.id, { teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 });
+  // Admin of the nested project only; the enclosing project's llm-doc is not theirs.
+  setProjectMember(getDb(), user.id, 'p-split-inner', outsider.id, { role: 'admin', maxMode: 'execute', usdCapMonth: 0 });
+  addUserRepo(outsider.id, repo);
+  let ran = false;
+  const res = makeRes();
+  await handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: repo, extraRoots: [llmDoc] }, user: outsider }), res, { userId: outsider.id },
+    { runAgent: async () => { ran = true; } },
+  );
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.json().error.code, 'EXTRA_ROOT_NOT_ALLOWED');
+  assert.equal(ran, false, 'the engine never starts');
 });
 
 test('runLoopAgent: a write into an accepted extra root lands; outside both stays refused', () => withKey(async () => {

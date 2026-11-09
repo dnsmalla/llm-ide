@@ -188,6 +188,20 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   if (!rootCheck.ok) return validationError(res, rootCheck.reason, 'REPO_ROOT_NOT_ALLOWED');
   const extraCheck = engine.validateLoopExtraRoots(body.extraRoots, rootCheck.root);
   if (!extraCheck.ok) return validationError(res, extraCheck.reason, 'EXTRA_ROOT_NOT_ALLOWED');
+  // R-034 #9: every extra root is project work too. It must resolve to a registered project, and the
+  // caller needs `model.exec` THERE — a nested project's admin cannot write the enclosing project's docs.
+  for (const extraRoot of extraCheck.roots) {
+    const extraProjectId = projectIdForFolder(getDb(), extraRoot);
+    if (!extraProjectId) {
+      sendJSON(res, 403, { error: { code: 'EXTRA_ROOT_NOT_ALLOWED', message: 'That extra root is not in a registered project' } });
+      return true;
+    }
+    const decision = authorizeAction(getDb(), userId, 'model.exec', { projectId: extraProjectId, req });
+    if (!decision.ok) {
+      sendJSON(res, decision.status, { error: { code: 'EXTRA_ROOT_NOT_ALLOWED', message: 'That extra root is in a project you cannot edit' } });
+      return true;
+    }
+  }
 
   // One controller for both ways a run ends early: the timeout, and the
   // client going away (Loop Stop / app quit). `abortController` is the shape
