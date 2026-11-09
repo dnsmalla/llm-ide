@@ -13,7 +13,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const vhost = readFileSync(join(REPO, 'deploy/hub/llm-ide-hub.nginx.template'), 'utf8');
+// A Windows checkout may use CRLF; normalise before matching (the deployed file is LF).
+const vhost = readFileSync(join(REPO, 'deploy/hub/llm-ide-hub.nginx.template'), 'utf8').replaceAll('\r\n', '\n');
 
 function parseLocations(text) {
   const lines = text.split('\n');
