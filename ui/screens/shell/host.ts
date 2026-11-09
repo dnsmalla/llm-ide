@@ -132,10 +132,41 @@ export function isHostAvailable(): boolean {
   return injected !== null;
 }
 
+/**
+ * R-034 #12: the commands a remote-mode webview may still call. Everything else touches THIS computer
+ * (files, git, projects, terminals, local chat archives) and must never run against the wrong machine.
+ * The list is one place; `invokeHost` is the one wrapper every slice uses.
+ */
+const REMOTE_SAFE_COMMANDS = new Set([
+  "core_status", "core_start", "core_stop", "core_restart",
+  "get_prefs", "set_prefs", "app_restart", "host_platform", "ping",
+  "open_external_url", "trust_confirm",
+]);
+const REMOTE_SAFE_PREFIXES = ["remote_", "update_", "notify_", "tray_"];
+
+export class RemoteModeError extends Error {
+  readonly code = "remote_mode";
+  constructor(readonly command: string) {
+    super("This action uses the local computer and is unavailable in remote mode.");
+    this.name = "RemoteModeError";
+  }
+}
+
+let remoteModeProvider: () => boolean = () => false;
+/** Wired by `runtime.ts` to the live core status; a plain browser/test leaves it local. */
+export function setRemoteModeProvider(provider: () => boolean): void {
+  remoteModeProvider = provider;
+}
+
+function remoteSafe(command: string): boolean {
+  return REMOTE_SAFE_COMMANDS.has(command) || REMOTE_SAFE_PREFIXES.some((p) => command.startsWith(p));
+}
+
 /** Generic typed call for commands a slice owns. Prefer adding a wrapper to `host` for shared ones. */
 export async function invokeHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const bridge = injected;
   if (!bridge) throw new HostUnavailableError(command);
+  if (remoteModeProvider() && !remoteSafe(command)) throw new RemoteModeError(command);
   return bridge.invoke<T>(command, args);
 }
 
