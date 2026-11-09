@@ -143,6 +143,24 @@ commands under a separate OS user first.
 - Test: `extension/tests/hub-member-clamp.test.mjs` (engineer read-only, owner/admin execute, project owner
   read-only); `project-roles.test.mjs` pins local execute unchanged.
 
+## Amendment: D2/B6 and D3 — metering and the operator trust boundary (2026-11-09)
+
+**D2 / B6 (email classify).** Accepted per-call metering; no batch wire. `/kb/email/classify` is one
+`model.read` call per message, counted on `usage_ledger` and bounded by the caller's monthly member/project
+cap and the `llmFast` rate-limit bucket. A batch endpoint would be a new API surface whose only benefit is
+fewer round trips for a UI that already sends one classifier call per opened message; it is not needed to
+close the cap blindness (R-034 #6 now also estimates cost for every token-bearing row). If a bulk importer
+ever needs thousands of classifications, add a batch contract then, with its own API version and tests.
+
+**D3 (operator trust boundary).** A hub operator with root on the VPS is inside the trust boundary of
+every account on that hub. They can read the SQLite files (bcrypt hashes, the AES-GCM vault ciphertext),
+the JWT/vault secrets, the service environment and the backups; they can also replace the binary. The core's
+roles, project grants, caps and pins protect members from EACH OTHER and from a stolen browser/phone token;
+they do not protect members from the operator. Encrypting the vault does not change that: the operator holds
+the vault key. Treat a hub as the team's private server run by someone the team trusts, and keep the
+off-host backup target in the same trust domain as the operator (or encrypt it independently). Moving the
+vault master and JWT secret off the database host is a hardening step, not a boundary change.
+
 ## Amendment: hub serves Host API `read` (2026-11-12)
 
 A hub now sets `LLMIDE_HOST_API_READ=1` (installer env, `remote_deploy.rs` env template, and the `llmide-deploy env`
