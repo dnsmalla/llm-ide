@@ -10,6 +10,7 @@ import { usedUsdMonth } from '../../kb/usage.mjs';
 import {
   createCommand, getCommand, getCommandArgs, approveCommand, denyCommand, cancelPending, expireStale, expireStaleAllSystem,
   ensureTerminal, appendEvent, terminalFor, backfillTerminalsSystem, purgeOldCommandsSystem, isKindEnabled, ERROR_CODES,
+  expireDesktopLeasesSystem,
 } from '../../kb/bus-store.mjs';
 import { reapOrphanedRunningSystem } from '../../kb/job-queue.mjs';
 import { resolveProjectRoot } from '../../kb/project-roots.mjs';
@@ -27,8 +28,9 @@ import { engineIdFor, engineStatus, ENGINE_NOT_SANDBOXED } from './engines.mjs';
 export const busEnabled = () => String(process.env.LLMIDE_BUS || '').toLowerCase() !== 'off';
 
 // Plan H1.2: the action class of each kind, re-checked when the job RUNS (a member demoted after
-// enqueueing is refused). Reuses the existing tier_denied code: no new wire value.
-const KIND_CLASS = Object.freeze({ review: 'model.read', 'sources.update': 'external.read' });
+// enqueueing is refused) and on every desktop claim/renew of a desktop-runner kind. Reuses the existing
+// tier_denied code: no new wire value.
+export const KIND_CLASS = Object.freeze({ review: 'model.read', 'sources.update': 'external.read', 'issues.implement': 'model.exec' });
 
 export class BusError extends Error {
   constructor(status, code, message, details) { super(message); this.status = status; this.code = code; if (details !== undefined) this.details = details; }
@@ -157,9 +159,11 @@ export function createBus({
     }
   }
 
+  // A desktop-runner kind is created on approval but never run here: the desktop claims it with a lease. Giving it a
+  // handler would hold a runner slot and the write lane and then time out (the Phase B plan, B5).
   const handlers = {};
   for (const [kind, info] of Object.entries(REGISTRY.kinds)) {
-    if (info.available) handlers[kind] = { run: (ctx) => execute(kind, ctx), resumable: false, timeoutMs: 20 * 60 * 1000 };
+    if (info.available && (info.runner ?? 'core') !== 'desktop') handlers[kind] = { run: (ctx) => execute(kind, ctx), resumable: false, timeoutMs: 20 * 60 * 1000 };
   }
   Object.assign(handlers, deps.handlers || {});
 
@@ -187,7 +191,7 @@ export function createBus({
     return reaped;
   }
   const sweep = () => {
-    try { sweepOrphans(); expireStaleAllSystem(); purgeOldCommandsSystem(); backfillTerminalsSystem(); }
+    try { sweepOrphans(); expireStaleAllSystem(); expireDesktopLeasesSystem(); purgeOldCommandsSystem(); backfillTerminalsSystem(); }
     catch (e) { log('warn', 'bus_sweep_failed', { error: String(e?.message || e) }); }
   };
 
@@ -256,7 +260,8 @@ export function createBus({
       throw new BusError(400, 'CONFIRM_MISMATCH', 'confirm must repeat the exact ids this command will act on');
     }
     let command;
-    try { command = approveCommand(userId, id, { approvedBy: client, lane: laneFor(info, cmd.kind, args), jobPayload: { args }, scheduleId: viaSchedule }); }
+    const runnerKind = (info.runner ?? 'core') === 'desktop' ? 'desktop' : 'core';
+    try { command = approveCommand(userId, id, { approvedBy: client, lane: laneFor(info, cmd.kind, args), jobPayload: { args }, scheduleId: viaSchedule, runner: runnerKind }); }
     catch (e) {
       if (e.code === 'NOT_FOUND') throw new BusError(404, 'NOT_FOUND', 'command not found');
       if (e.code === 'NOT_PENDING') throw new BusError(409, 'NOT_PENDING', e.message, e.details);
@@ -295,6 +300,8 @@ export function createBus({
   return {
     runner,
     receive, approve, deny, cancel, sweepOrphans,
+    /** The registered folder of a project id (the claimable list reports it so the desktop can match its open project). */
+    projectRootFor,
     start() {
       const swept = runner.start();
       sweep();

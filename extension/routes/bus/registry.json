@@ -103,9 +103,10 @@
       "tier": "T2",
       "lane": "write",
       "write": true,
-      "available": false,
-      "unavailableReason": "No Node worktree runner or write-mode engine yet. codex and gemini write mode needs an explicit design and user decision (Swift runs them with --yolo, which disables their sandbox); never copied here.",
-      "description": "Run an engine on approved issues in a worktree on a fix branch; optional ship (push, open MR/PR).",
+      "available": true,
+      "engineless": true,
+      "runner": "desktop",
+      "description": "Run the Factory on approved issues, one card per issue in its own worktree. The desktop claims the approved command, runs it under its concurrency cap and reports progress; `ship` never ships (the run stops at Ready to ship and a desktop click is still the only Ship).",
       "engines": [],
       "args": {
         "type": "object",

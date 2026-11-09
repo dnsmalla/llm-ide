@@ -15,15 +15,23 @@
 //   DELETE /bus/schedules/:id              desktop-class only: delete, which also revokes its standing approval
 //   GET  /bus/kinds                         the registry as this caller sees it
 //   PUT  /bus/kinds/:kind                   desktop-class only: the user's enable flag for a kind
+//   GET  /bus/claimable                    desktop + host proof: approved desktop-runner commands no lease holds
+//   POST /bus/commands/:id/claim           desktop + host proof: take the single-claimer lease (or renew it)
+//   POST /bus/commands/:id/events          desktop + host proof: append one progress event (never a terminal)
+//   POST /bus/commands/:id/finish          desktop + host proof: the one terminal event (succeeded|failed|interrupted)
 import { send, readJson } from '../../server/route-http.mjs';
 import {
   getCommand, listCommands, listEvents, lastSeq, ensureTerminal, expireStale, hasTerminal, terminalEvent, listPendingApprovals,
-  setKindEnabled, listKindFlags,
+  setKindEnabled, listKindFlags, appendEvent, claimDesktopCommand, renewDesktopLease, finishClaimedCommand, expireDesktopLeasesSystem,
+  listClaimableCommands,
 } from '../../kb/bus-store.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { REGISTRY, LIMITS, kindInfo, classInfo, decideReceipt, mayApprove } from './registry.mjs';
 import { resolveClient } from './client.mjs';
-import { BusError, approvalNonce, busEnabled } from './executor.mjs';
+import { BusError, approvalNonce, busEnabled, KIND_CLASS } from './executor.mjs';
+import { verifyBusHostProof } from '../../core/host-approval.mjs';
+import { classRefusal, getMember } from '../../kb/members.mjs';
+import { usedUsdMonth } from '../../kb/usage.mjs';
 import { engineStatusList } from './engines.mjs';
 import { recordAudit } from '../../server/audit.mjs';
 import { createSchedule, listSchedules, deleteSchedule } from '../../kb/bus-schedules.mjs';
@@ -55,6 +63,51 @@ function auditBus(req, userId, action, resource, outcome, detail) {
   } catch { /* an audit failure must never fail the call */ }
 }
 const outcomeOf = (e) => (e.status === 403 || e.status === 401 ? 'denied' : 'failure');
+
+// ---- desktop-claimed Factory commands (B5) ----
+// Only the desktop host that spawned this core may claim, report on or finish one: the client class must be the
+// desktop's AND the per-launch host proof must be present (the same proof the approve routes trust).
+const MAX_PROGRESS_BYTES = 4 * 1024;
+const MAX_FINISH_RESULT_BYTES = 16 * 1024;
+const DESKTOP_KINDS = Object.entries(REGISTRY.kinds).filter(([, k]) => k.available && (k.runner ?? 'core') === 'desktop').map(([kind]) => kind);
+
+function desktopOnly(req, res, client) {
+  if (!mayApprove(client)) {
+    fail(res, 403, 'TIER_DENIED', 'only the desktop can claim or finish a Factory command', { client });
+    return false;
+  }
+  if (!verifyBusHostProof(req)) {
+    fail(res, 403, 'HOST_PROOF_REQUIRED', 'this route is for the desktop host that spawned this core');
+    return false;
+  }
+  return true;
+}
+
+/** The execution-time permission re-check for a desktop kind: done on every claim and on every claimable read. */
+function claimRefusal(userId, kind) {
+  const cls = KIND_CLASS[kind];
+  if (!cls) return 'kind_not_available';
+  return classRefusal(getMember(getDb(), userId), cls, () => usedUsdMonth(getDb(), userId));
+}
+
+/** The store's lease errors as bus errors (the wire keeps the three codes the desktop already handles). */
+function leaseError(e) {
+  if (e instanceof BusError) return e;
+  if (e?.code === 'NOT_FOUND') return new BusError(404, 'NOT_FOUND', 'command not found');
+  if (e?.code === 'LEASE_HELD') return new BusError(409, 'LEASE_HELD', 'another desktop holds this command');
+  if (e?.code === 'LEASE_LOST') return new BusError(409, 'LEASE_LOST', 'the claim is no longer valid');
+  if (e?.code === 'invalid_args') return new BusError(400, 'VALIDATION_FAILED', e.message);
+  return e;
+}
+
+async function readOptionalJson(req, max) {
+  try {
+    return (await readJson(req, max)) ?? {};
+  } catch (err) {
+    if (err?.status === 413) throw new BusError(413, 'PAYLOAD_TOO_LARGE', 'the body is too large');
+    throw new BusError(400, 'VALIDATION_FAILED', 'Body must be valid JSON');
+  }
+}
 
 const shapeSchedule = (s) => ({
   id: s.id, kind: s.kind, args: s.args, intervalHours: s.intervalMs / 3_600_000, standing: s.standing,
@@ -130,7 +183,7 @@ function describeKind(userId, client, flags, kind, info) {
   // (codex and gemini: available false, reason ENGINE_NOT_SANDBOXED, until an OS sandbox exists).
   const engineStatus = engineStatusList(info.engines);
   const out = {
-    kind, tier: info.tier, lane: info.lane, write: info.write, available: info.available, description: info.description,
+    kind, tier: info.tier, lane: info.lane, write: info.write, available: info.available, runner: info.runner ?? 'core', description: info.description,
     engines: engineStatus.filter((e) => e.available).map((e) => e.id), engineStatus, args: info.args, enabled: !!flags[kind],
     allowed: gate.outcome !== 'tier_denied' && gate.outcome !== 'kind_not_allowed' && gate.outcome !== 'unknown_kind',
     needsApproval: gate.outcome === 'needs_approval',
@@ -239,6 +292,24 @@ export async function handleBusRoute(req, res, { bus } = {}) {
       return;
     }
 
+    // ---- desktop-claimed Factory commands (B5) ----
+    if (path === '/bus/claimable' && req.method === 'GET') {
+      if (!desktopOnly(req, res, client)) return;
+      expireStale(userId);
+      expireDesktopLeasesSystem();
+      const items = listClaimableCommands(userId, DESKTOP_KINDS)
+        .filter((c) => claimRefusal(userId, c.kind) === null)
+        .map((c) => {
+          // The desktop's Factory works in folders: report the project's registered folder (null when it has none).
+          let projectRoot = null;
+          try { projectRoot = c.args.projectId ? bus.projectRootFor?.(userId, c.args.projectId) ?? null : null; } catch { projectRoot = null; }
+          return { id: c.id, kind: c.kind, tier: c.tier, args: c.args, createdAt: c.createdAt, expiresAt: c.ttlAt, projectId: c.args.projectId ?? null, projectRoot: typeof projectRoot === 'string' ? projectRoot : projectRoot?.root ?? null };
+        });
+      send(res, 200, { items });
+      return;
+    }
+    if (path === '/bus/claimable') { fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET only'); return; }
+
     // ---- one command: /bus/commands/<id>[/events|/cancel|/approve|/deny] ----
     if (path.startsWith('/bus/commands/')) {
       const rest = path.slice('/bus/commands/'.length);
@@ -260,6 +331,79 @@ export async function handleBusRoute(req, res, { bus } = {}) {
         if (!Number.isInteger(after) || after < 0 || after > 1e9) { fail(res, 400, 'VALIDATION_FAILED', 'after must be an integer >= 0'); return; }
         if (!canRead(client, getCommand(userId, id))) { fail(res, 404, 'NOT_FOUND', 'command not found'); return; }
         streamEvents(req, res, userId, id, after);
+        return;
+      }
+      if (tail === '/claim' && req.method === 'POST') {
+        if (!desktopOnly(req, res, client)) return;
+        const before = getCommand(userId, id);
+        if (!canRead(client, before)) { fail(res, 404, 'NOT_FOUND', 'command not found'); return; }
+        if (!DESKTOP_KINDS.includes(before.kind)) { fail(res, 400, 'VALIDATION_FAILED', 'this command is not a desktop-runner kind'); return; }
+        const refusal = claimRefusal(userId, before.kind);
+        if (refusal) {
+          auditBus(req, userId, 'bus.claim', id, 'denied', { kind: before.kind, client, reason: refusal });
+          fail(res, 403, 'TIER_DENIED', 'your access no longer allows this command', { reason: refusal });
+          return;
+        }
+        const body = await readOptionalJson(req, 4096).catch((e) => { throw e; });
+        try {
+          if (typeof body.claimToken === 'string') {
+            // Heartbeat: the same route renews the lease; only the current token may do it.
+            renewDesktopLease(userId, id, { token: body.claimToken });
+            const renewed = getCommand(userId, id);
+            auditBus(req, userId, 'bus.claim', id, 'success', { kind: before.kind, client, renewed: true });
+            send(res, 200, { command: shapeCommand(userId, renewed), leaseExpiresAt: renewed.leaseExpiresAt });
+            return;
+          }
+          const out = claimDesktopCommand(userId, id, { claimedBy: client });
+          auditBus(req, userId, 'bus.claim', id, 'success', { kind: before.kind, client });
+          send(res, 200, { command: shapeCommand(userId, out.command), claimToken: out.token, leaseExpiresAt: out.command.leaseExpiresAt });
+        } catch (e) {
+          if (e instanceof BusError) throw e;
+          if (e?.code === 'LEASE_HELD' || e?.code === 'LEASE_LOST' || e?.code === 'NOT_FOUND') {
+            auditBus(req, userId, 'bus.claim', id, outcomeOf({ status: e.code === 'NOT_FOUND' ? 404 : 409 }), { kind: before.kind, client, reason: e.code });
+          }
+          throw leaseError(e);
+        }
+        return;
+      }
+      if (tail === '/events' && req.method === 'POST') {
+        if (!desktopOnly(req, res, client)) return;
+        if (!canRead(client, getCommand(userId, id))) { fail(res, 404, 'NOT_FOUND', 'command not found'); return; }
+        const body = await readOptionalJson(req, 8 * 1024);
+        if (body.type !== 'progress') { fail(res, 400, 'VALIDATION_FAILED', 'only progress events can be appended from the desktop'); return; }
+        const payload = body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload) ? body.payload : null;
+        if (!payload) { fail(res, 400, 'VALIDATION_FAILED', 'payload must be an object'); return; }
+        if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > MAX_PROGRESS_BYTES) { fail(res, 413, 'PAYLOAD_TOO_LARGE', `payload must be at most ${MAX_PROGRESS_BYTES} bytes`); return; }
+        try {
+          // A progress report is also the heartbeat: the token must still be the current one.
+          renewDesktopLease(userId, id, { token: body.claimToken });
+        } catch (e) { throw leaseError(e); }
+        let ev;
+        try { ev = appendEvent(userId, id, { type: 'progress', payload }); } catch (e) { throw leaseError(e); }
+        if (!ev) { fail(res, 409, 'ALREADY_FINISHED', 'this command has already finished'); return; }
+        send(res, 200, { event: ev, leaseExpiresAt: getCommand(userId, id).leaseExpiresAt });
+        return;
+      }
+      if (tail === '/finish' && req.method === 'POST') {
+        if (!desktopOnly(req, res, client)) return;
+        if (!canRead(client, getCommand(userId, id))) { fail(res, 404, 'NOT_FOUND', 'command not found'); return; }
+        const body = await readOptionalJson(req, 64 * 1024);
+        if (body.state !== 'succeeded' && body.state !== 'failed' && body.state !== 'interrupted') {
+          fail(res, 400, 'VALIDATION_FAILED', 'state must be succeeded, failed or interrupted');
+          return;
+        }
+        if (body.result !== undefined && Buffer.byteLength(JSON.stringify(body.result), 'utf8') > MAX_FINISH_RESULT_BYTES) {
+          fail(res, 413, 'PAYLOAD_TOO_LARGE', `result must be at most ${MAX_FINISH_RESULT_BYTES} bytes`);
+          return;
+        }
+        try {
+          const cmd = finishClaimedCommand(userId, id, { token: body.claimToken, state: body.state, result: body.result, errorCode: body.errorCode });
+          auditBus(req, userId, 'bus.finish', id, 'success', { kind: cmd.kind, client, state: body.state });
+          send(res, 200, { command: shapeCommand(userId, cmd, { withResult: true }) });
+        } catch (e) {
+          if (!(e instanceof BusError) && e?.code === 'LEASE_LOST') auditBus(req, userId, 'bus.finish', id, 'failure', { kind: getCommand(userId, id)?.kind, client, reason: e.code });
+          throw leaseError(e);
+        }
         return;
       }
       if (tail === '/cancel' && req.method === 'POST') {

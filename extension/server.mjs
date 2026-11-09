@@ -431,7 +431,18 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          ciSummary, comments: [{ author, body, at }] } (newer than `since`, the newest 20, bodies cut at 4,000
 //          characters). github.com PRs and gitlab.com MRs only; the vault github.token / gitlab.token is used and never
 //          returned. Rides the 'dispatch' bucket.
-const SERVER_API_VERSION = 132;
+//   v133 — desktop-claimed Factory commands (feature auto_tasks; contract schema/http/bus.schema.json):
+//          the command bus gains a `runner: "desktop"` kind (`issues.implement`, now available and engineless).
+//          The core creates the job on the T2 desktop approval and never runs it; the desktop host claims it with
+//          a single-claimer lease renewed by heartbeat: GET /bus/claimable (approved, unheld, this user, with the
+//          project folder), POST /bus/commands/:id/claim { claimToken? } → { command, claimToken, leaseExpiresAt }
+//          (409 LEASE_HELD while a live lease holds it; the token is returned once), POST /bus/commands/:id/events
+//          { claimToken, type: "progress", payload } (progress only, 4 KiB cap, also the heartbeat) and
+//          POST /bus/commands/:id/finish { claimToken, state, result?, errorCode? } (one terminal event; a replay
+//          is idempotent, a wrong token is 409 LEASE_LOST). All four need the desktop class AND the bus host proof
+//          (403 HOST_PROOF_REQUIRED). An expired lease becomes `interrupted` in the minute sweep. `ship` never
+//          ships: a passed run answers { readyToShip: true, shipped: false } and a desktop click is still the only Ship.
+const SERVER_API_VERSION = 133;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -620,7 +631,10 @@ const ALL_ENDPOINTS = [
   '/bus/commands/:id/cancel',
   '/bus/commands/:id/approve',
   '/bus/commands/:id/deny',
+  '/bus/commands/:id/claim',
+  '/bus/commands/:id/finish',
   '/bus/approvals',
+  '/bus/claimable',
   '/bus/kinds',
   '/bus/kinds/:kind',
   '/bus/schedules',

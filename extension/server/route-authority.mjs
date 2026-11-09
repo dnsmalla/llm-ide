@@ -526,6 +526,7 @@ export const ROUTE_POLICY = Object.freeze([
   ]),
   ...rules('host', 'GET', [
     '/bus/approvals',
+    '/bus/claimable',
     '/host-api/devices',
     '/host-api/push/status',
     '/kb/self-heal/incidents',
@@ -533,6 +534,9 @@ export const ROUTE_POLICY = Object.freeze([
   ]),
   ...rules('host', 'POST', [
     '/bus/commands/:id/approve',
+    '/bus/commands/:id/claim',
+    '/bus/commands/:id/events',
+    '/bus/commands/:id/finish',
     '/bus/commands/:id/deny',
     '/bus/schedules',
     '/host-api/pin',
