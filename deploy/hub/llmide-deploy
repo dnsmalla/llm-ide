@@ -65,7 +65,7 @@ case "$stage" in
     [ -r "$CONF" ] || { echo "llmide-deploy: check: no env file yet" >&2; }
     systemctl is-active --quiet llmide-core 2>/dev/null && echo "service=active" || echo "service=inactive"
     printf 'version=%s\n' "$(cat /opt/llmide/current/VERSION 2>/dev/null || true)"
-    echo "helper=4"
+    echo "helper=5"
     echo "ok"
     ;;
 
@@ -194,7 +194,7 @@ LLMIDE_LOG
     while IFS= read -r line || [ -n "$line" ]; do
       key=${line%%=*}
       case "$key" in
-        NODE_ENV|PATH|LLMIDE_HOST|LLMIDE_PORT|LLMIDE_HUB|LLMIDE_TLS_TERMINATED|LLMIDE_HUB_DOMAIN|LLMIDE_HUB_VERSION|LLMIDE_DATA_DIR|LLMIDE_DB_PATH|LLMIDE_PROJECTS_ROOT|LLMIDE_BACKUP_DIR|LLMIDE_BACKUP_KEEP|LLMIDE_DISABLE_REGISTRATION|LLMIDE_TRUST_PROXY|LLMIDE_LOG_JSON|LLMIDE_LOG_LEVEL|LLMIDE_LOG_ROTATE|LLMIDE_BACKUP_REMOTE|LLMIDE_MAX_TURNS|LLMIDE_HOST_API_HUB|LLMIDE_HOST_API_WEB_ORIGINS|LLMIDE_HOST_API_FINGERPRINT_FILE|LLMIDE_HUB_PUBLIC_URL|LLMIDE_JWT_SECRET|LLMIDE_VAULT_KEY) ;;
+        NODE_ENV|PATH|LLMIDE_HOST|LLMIDE_PORT|LLMIDE_HUB|LLMIDE_TLS_TERMINATED|LLMIDE_HUB_DOMAIN|LLMIDE_HUB_VERSION|LLMIDE_DATA_DIR|LLMIDE_DB_PATH|LLMIDE_PROJECTS_ROOT|LLMIDE_BACKUP_DIR|LLMIDE_BACKUP_KEEP|LLMIDE_DISABLE_REGISTRATION|LLMIDE_TRUST_PROXY|LLMIDE_LOG_JSON|LLMIDE_LOG_LEVEL|LLMIDE_LOG_ROTATE|LLMIDE_BACKUP_REMOTE|LLMIDE_MAX_TURNS|LLMIDE_HOST_API_HUB|LLMIDE_HOST_API_WEB_ORIGINS|LLMIDE_HOST_API_FINGERPRINT_FILE|LLMIDE_HUB_PUBLIC_URL|LLMIDE_JWT_SECRET|LLMIDE_VAULT_KEY|ANTHROPIC_API_KEY) ;;
         *) rm -f "$tmp"; die "the env key $key is outside the allowed set" ;;
       esac
     done < "$tmp"
@@ -232,6 +232,10 @@ LLMIDE_LOG
     # R-034 #16: the off-host backup target is operator-set by hand; a redeploy must not drop it.
     if ! grep -q '^LLMIDE_BACKUP_REMOTE=' "$tmp" && [ -f "$CONF" ]; then
       grep '^LLMIDE_BACKUP_REMOTE=' "$CONF" | head -1 >> "$tmp" || true
+    fi
+    # The one-command installer stores the model key here; a later desktop update must not drop it.
+    if ! grep -q '^ANTHROPIC_API_KEY=' "$tmp" && [ -f "$CONF" ]; then
+      grep '^ANTHROPIC_API_KEY=' "$CONF" | head -1 >> "$tmp" || true
     fi
     chown root:root "$tmp"; chmod 0600 "$tmp"
     mv "$tmp" "$CONF"
