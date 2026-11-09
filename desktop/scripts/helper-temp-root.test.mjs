@@ -185,8 +185,8 @@ test('R-034 #8: restore-db puts the recorded pre-deploy snapshot and its agent d
     mkdirSync(live, { recursive: true });
     const db = join(live, 'data.db');
     writeFileSync(db, 'new-schema-data');
-    writeFileSync(`${db}-wal`, 'wal');
-    writeFileSync(`${db}-shm`, 'shm');
+    writeFileSync(join(live, 'data.db-wal'), 'wal');
+    writeFileSync(join(live, 'data.db-shm'), 'shm');
     writeFileSync(join(live, 'agent.db'), 'new-agent');
     const bak = join(live, 'data.db.bak-2026-01-01T00-00-00-000Z.db');
     writeFileSync(bak, 'old-schema-data');
