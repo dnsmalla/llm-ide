@@ -23,7 +23,7 @@ export interface IssueDetailDeps {
   openExternal: (url: string) => Promise<void>;
 }
 
-export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged, onChanged }: {
+export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged, onChanged, onSendToFactory }: {
   issue: Issue;
   deps: IssueDetailDeps;
   onClose: () => void;
@@ -31,6 +31,8 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
   onScheduleChanged?: () => void;
   /** Reload the board after a successful comment/close. */
   onChanged?: () => void;
+  /** Present when the Factory is usable (the Issues board passes it, the Gantt does not): adds this issue to the Factory. */
+  onSendToFactory?: () => void;
 }): ReactNode {
   // The overlay keys GitHub owner/name and GitLab paths up to the core's limits; a key it refuses gets the hint, no dates.
   const view = issueDatesView(issue);
@@ -141,7 +143,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
         ) : null}
 
         <div className="iss-detail-actions">
-          <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
+          <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>{onSendToFactory ? <button type="button" className="iss-btn" onClick={onSendToFactory}>Send to Factory</button> : null}
         </div>
         {writeError ? <p className="iss-error" role="alert">{writeError}</p> : null}
         {issue.state !== "closed" ? (

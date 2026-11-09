@@ -33,6 +33,8 @@ export interface IssuesReply {
 
 export interface IssuesDeps extends IssueDetailDeps {
   request: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => Promise<IssuesReply>;
+  /** Present only when the Factory is usable here (a project open, Loop on). Resolves to the notice to show. */
+  sendToFactory?: (issues: Issue[], runIntake: boolean) => Promise<string>;
 }
 
 type Phase = "idle" | "loading" | "ready" | "error";
@@ -56,6 +58,28 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const [repoDraft, setRepoDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Issue | null>(null);
+  // Cards picked for "Send to Factory" (by id); rows that leave the list are simply not sent.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [pickIntake, setPickIntake] = useState(true);
+  const togglePick = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const sendIssues = async (list: Issue[], runIntake: boolean) => {
+    if (!deps.sendToFactory || list.length === 0) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      setNotice(await deps.sendToFactory(list, runIntake));
+      setPicked(new Set());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The issues could not be sent to the Factory.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sendPicked = () => {
+    const list = rows.filter((r) => picked.has(r.id));
+    void sendIssues(list, pickIntake);
+  };
   // The last finished walk (its total and stop reason drive the count note) and the walk in flight.
   const [paging, setPaging] = useState<PagingResult | null>(null);
   const [progress, setProgress] = useState<PagingProgress | null>(null);
@@ -260,6 +284,14 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
 
       {error ? <StatusBanner severity="error" message={error} /> : null}
       {notice ? <StatusBanner severity="info" message={notice} /> : null}
+      {deps.sendToFactory && picked.size > 0 ? (
+        <div className="iss-import" role="region" aria-label="Selected issues">
+          <span className="iss-count">{picked.size} selected</span>
+          <label className="iss-check"><input type="checkbox" checked={pickIntake} onChange={(e) => setPickIntake(e.target.checked)} /> Run intake now</label>
+          <button type="button" className="iss-btn iss-primary" onClick={sendPicked} disabled={busy}>Send to Factory</button>
+          <button type="button" className="iss-btn" onClick={() => setPicked(new Set())} disabled={busy}>Clear</button>
+        </div>
+      ) : null}
 
       {phase === "loading" && rows.length === 0 ? (
         <p className="iss-empty" role="status">Loading issues…</p>
@@ -286,6 +318,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
               <ul className="iss-cards">
                 {col.issues.map((i) => (
                   <li key={i.id} className="iss-card">
+                    {deps.sendToFactory ? <label className="iss-check"><input type="checkbox" className="iss-pick" checked={picked.has(i.id)} onChange={() => togglePick(i.id)} aria-label={`Select ${i.title} for the Factory`} /> Select</label> : null}
                     <button type="button" className="iss-card-title" onClick={() => setSelected(i)} title="Open issue details">
                       {i.title}
                     </button>
@@ -305,7 +338,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
       )}
 
       {detailIssue ? (
-        <IssueDetail issue={detailIssue} deps={deps} onClose={closeDetail} onNotice={setNotice} onScheduleChanged={() => void load()} onChanged={() => void load()} />
+        <IssueDetail issue={detailIssue} deps={deps} onClose={closeDetail} onNotice={setNotice} onScheduleChanged={() => void load()} onChanged={() => void load()} onSendToFactory={deps.sendToFactory ? () => void sendIssues([detailIssue], false) : undefined} />
       ) : null}
 
       <p className="iss-hint iss-foot">

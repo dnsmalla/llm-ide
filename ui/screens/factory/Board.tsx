@@ -14,7 +14,8 @@ import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { STATUS_REFRESH_MS, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
 import { sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
 
@@ -42,6 +43,13 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [live, setLive] = useState<readonly LiveRun[]>(() => liveRuns());
   const [cap, setCap] = useState(() => concurrency());
   const [error, setError] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addKind, setAddKind] = useState<"spec" | "text">("spec");
+  const [specFiles, setSpecFiles] = useState<string[]>([]);
+  const [specPath, setSpecPath] = useState("");
+  const [textTitle, setTextTitle] = useState("");
+  const [textBody, setTextBody] = useState("");
+  const [addIntake, setAddIntake] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   // Refs so the 5-minute timer reads the latest facts without being re-created on every load.
@@ -134,6 +142,10 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   }, [focus.key, focus.n]);
 
   useEffect(() => {
+    if (addOpen && addKind === "spec") void listSpecFiles(fs).then(setSpecFiles);
+  }, [addOpen, addKind, fs]);
+
+  useEffect(() => {
     if (!selectedKey) return;
     document.querySelector(`[data-key="${CSS.escape(selectedKey)}"]`)?.scrollIntoView({ block: "nearest" });
   }, [selectedKey]);
@@ -160,20 +172,40 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     }
   };
 
+  const submitAdd = () => void act(async () => {
+    if (!projectRoot) return;
+    let item: WorkItemRecord;
+    if (addKind === "spec") {
+      const r = await fs.read(specPath, 200_000);
+      if (r.status !== "ok" || r.text === null) throw new Error(`${specPath} is not readable text.`);
+      item = workItemFromSpec(specPath, r.text);
+    } else {
+      item = workItemFromText(textTitle, textBody);
+    }
+    const res = await sendToFactory(fs, [item], { runIntake: addIntake, projectRoot, start: startRun });
+    setNotice(sendSummary(res.added, res.existing.length));
+    setSelectedKey(item.key);
+    setAddOpen(false);
+    setSpecPath("");
+    setTextTitle("");
+    setTextBody("");
+  });
+
   const onAction = (item: WorkItemRecord, action: CardAction, note?: string) => {
     if (!projectRoot) return;
     const root = projectRoot;
-    const lastRunId = item.runIds.at(-1) ?? null;
     switch (action) {
       case "start":
-        void act(async () => { const runId = startRun(root, item, "full"); await attachRun(fs, item.key, runId); });
-        return;
       case "intake":
-        void act(async () => { const runId = startRun(root, item, "intakeOnly"); await attachRun(fs, item.key, runId); });
+      case "resume": {
+        const plan = runPlanFor(action, item, facts.get(item.key) ?? EMPTY_FACTS);
+        void act(async () => {
+          const runId = startRun(root, item, plan.mode, plan.runId ? { runId: plan.runId } : undefined);
+          // A reused run id is already on the item; only a new run is attached.
+          if (!plan.runId) await attachRun(fs, item.key, runId);
+        });
         return;
-      case "resume":
-        void act(async () => { if (lastRunId) startRun(root, item, "full", { runId: lastRunId }); });
-        return;
+      }
       case "openDiff":
       case "ship":
         setSelectedKey(item.key);
@@ -221,10 +253,37 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         </label>
         {elsewhere ? <span className="fx-hint" role="status">{elsewhere}</span> : null}
         <span className="fx-spacer" />
+        <button type="button" className="fx-btn fx-primary" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>Add</button>
         <button type="button" className="fx-btn" onClick={() => void loadFacts().then(() => refreshStatus(true))}>Refresh</button>
       </header>
       {error ? <StatusBanner severity="error" message={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} /> : null}
+      {addOpen ? (
+        <form className="fx-form" aria-label="Add a work item" onSubmit={(e) => { e.preventDefault(); submitAdd(); }}>
+          <label className="fx-field"><span>From</span>
+            <select value={addKind} onChange={(e) => setAddKind(e.target.value as "spec" | "text")}>
+              <option value="spec">Spec from llm-doc/</option>
+              <option value="text">Free text</option>
+            </select>
+          </label>
+          {addKind === "spec" ? (
+            <label className="fx-field fx-grow"><span>Spec file</span>
+              <select value={specPath} onChange={(e) => setSpecPath(e.target.value)}>
+                <option value="">{specFiles.length ? "Choose a spec…" : "No .md files under llm-doc/"}</option>
+                {specFiles.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+          ) : (
+            <>
+              <label className="fx-field fx-grow"><span>Title</span><input value={textTitle} maxLength={500} onChange={(e) => setTextTitle(e.target.value)} /></label>
+              <label className="fx-field fx-grow"><span>Description</span><textarea rows={3} value={textBody} onChange={(e) => setTextBody(e.target.value)} /></label>
+            </>
+          )}
+          <label className="fx-check"><input type="checkbox" checked={addIntake} onChange={(e) => setAddIntake(e.target.checked)} /> Run intake now</label>
+          <button type="submit" className="fx-btn fx-primary" disabled={addKind === "spec" ? specPath === "" : textTitle.trim() === ""}>Add to Factory</button>
+          <button type="button" className="fx-btn" onClick={() => setAddOpen(false)}>Cancel</button>
+        </form>
+      ) : null}
       <div className="fx-body">
         <div className="fx-board" role="list" aria-label="Factory board">
           {COLUMNS.map((col) => (
@@ -280,7 +339,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           </aside>
         ) : null}
       </div>
-      {items.length === 0 ? <p className="fx-hint fx-foot">No work items yet. Send issues here from the Issues section.</p> : null}
+      {items.length === 0 ? <p className="fx-hint fx-foot">No work items yet. Send issues here from the Issues section, or use Add for a spec or free text.</p> : null}
     </div>
   );
 }
