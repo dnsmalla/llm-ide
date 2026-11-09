@@ -565,6 +565,17 @@ Pinned by the tests in `desktop/src-tauri/src/loop_worktree.rs` and `loop_runner
 - **Do NOT delete a worktree** when a run ends, fails or is stopped, or when the app starts.
 - **Do NOT implement a verdict gate with `expand()`** (it skips dot-folders) **or a section rule** (it passes when the header is missing).
 
+### Phase B: the Factory board (`ui/screens/factory/`, `ui/screens/loop/native/run-manager.ts`, `extension/agents/factory-status.mjs`)
+
+- **Factory runs live in the module-level run manager, never in a screen.** `ui/screens/loop/native/run-manager.ts` (`startRun`, `cancelRun`, `liveRuns`, `subscribe`) owns every live run, so switching section or project never stops or orphans one. A run stays bound to the project and `run_id` it started with; every host call carries the `run_id`, never `active_root()`.
+- **Concurrency cap: default 2, clamped to 1–4** (`setConcurrency`), stored per viewer in localStorage key `llmide.factory.concurrency` with every read and write in try/catch. Runs over the cap wait in a FIFO queue.
+- **Board columns are derived, never stored.** `columnFor` (`ui/screens/factory/columns.ts`) computes Inbox, Needs decision, Working, Needs you, Ready to ship, Shipped and Done from facts each time the board is read. `<project>/system/factory/items.json` (`schemaVersion: 1`, tolerant decode) holds work items and their run ids only, never a status. Items are de-duplicated by `(source, id)`.
+- **A failed status refresh keeps the last known column** with the note `status unavailable`; it never falls back to Inbox or Ready to ship. A worktree with no live run and no finished record is shown as `Interrupted` (Resume, Discard) and is never deleted without a click.
+- **PR/MR comments, check names and CI text are untrusted data.** `prepareSendBack` (`ui/screens/factory/send-back.ts`) writes them to `.factory/FEEDBACK.md` through `feedbackMarkdown`, fenced with the same sanitizer as `taskMarkdown`: one open and one close fence per item, even when the text contains fence markers. Only the user's own note is unfenced. Send back is a button; there is no automatic send-back.
+- **`POST /kb/loop/ship-status` reads fixed hosts only.** `extension/agents/factory-status.mjs` accepts github.com pull request and gitlab.com merge request URLs (anything else is `unsupported_url`), calls only `api.github.com` and `gitlab.com/api/v4` with redirects refused, and answers per request with a code only (`provider_error`, `unauthorized`, `unsupported_url`), never provider text or a token. The board polls it when shown and every 5 minutes while visible; the core runs no timer.
+- **Factory stages are identified by role, never by key.** `factoryRole` (`ui/screens/loop/native/factory.ts`) derives the role from the skill id, the verdict file or the shell kind, because `applyTemplate` resets stage ids and keys; `configFor` narrows a run to the stages of its mode by role.
+- **Do NOT** store a column on a work item, auto-delete an interrupted worktree, auto-send CI failures back, pass PR/MR text to the agent unfenced, or let a run follow the active project after a switch.
+
 ## Agent-engine prompt cache + metering (`extension/llm_agent/sdk/{engine,turn-context}.mjs`, `routes/agent-v2.mjs`)
 
 ### ✅ MUST preserve
