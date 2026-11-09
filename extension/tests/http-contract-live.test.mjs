@@ -138,6 +138,12 @@ const SKIP_RULES = [
     when: (fx) => /^POST \/kb\/issues\/(create|comment|close)$/.test(fx.endpoint) && fx.response?.error?.code !== 'HOST_PROOF_REQUIRED',
   },
   {
+    // Factory Ship checks the bus host proof first; the replay server has no LLMIDE_HOST_APPROVAL_KEY, so only the
+    // HOST_PROOF_REQUIRED row replays. The rest need a Factory worktree, a bare origin and a faked provider.
+    why: 'Factory Ship: needs the bus host proof, a Factory worktree and a faked provider; covered by tests/factory-ship.test.mjs',
+    when: (fx) => fx.endpoint === 'POST /kb/loop/ship' && fx.response?.error?.code !== 'HOST_PROOF_REQUIRED',
+  },
+  {
     // Host API pairing routes check the bus host proof first; the replay server has no LLMIDE_HOST_APPROVAL_KEY and sends
     // no proof, so only the 403 rows replay live. The rest were transcribed from the handler (tests/host-api-routes.test.mjs,
     // and for the push routes tests/host-api-push-routes.test.mjs).

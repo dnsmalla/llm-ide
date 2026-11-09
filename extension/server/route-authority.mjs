@@ -457,6 +457,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/issues/close',
     '/kb/issues/comment',
     '/kb/issues/create',
+    '/kb/loop/ship',
     '/kb/dispatch',
     '/kb/notify/slack',
     '/kb/outcomes/retry-failed',

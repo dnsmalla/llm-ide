@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/loop/ship",
+  "status": 200,
+  "description": "Recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin, faked provider). Not replayed live: the replay server has no host approval key, so it answers 403.",
+  "request": {
+    "body": {
+      "worktree": "/example/proj/system/loop-worktrees/run1",
+      "branch": "factory/run1",
+      "provider": "github",
+      "repo": "octo/repo",
+      "base": "main",
+      "title": "Fix the widget",
+      "body": "Closes #12"
+    }
+  },
+  "response": {
+    "url": "https://github.com/octo/repo/pull/5",
+    "commit": "2c79847947b96c1b4c988333f897cab3482a812a",
+    "reused": false
+  }
+}

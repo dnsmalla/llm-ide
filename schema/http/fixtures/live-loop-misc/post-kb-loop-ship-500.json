@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/loop/ship",
+  "status": 500,
+  "description": "git commit failed (for example a signing failure); the index is reset.",
+  "request": {
+    "body": {
+      "worktree": "/example/proj/system/loop-worktrees/run1",
+      "branch": "factory/run1",
+      "provider": "github",
+      "repo": "octo/repo",
+      "base": "main",
+      "title": "Fix the widget",
+      "body": "Closes #12"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "commit_failed",
+      "message": "git commit failed."
+    }
+  }
+}

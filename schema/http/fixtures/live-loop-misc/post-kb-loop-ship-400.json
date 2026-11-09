@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/loop/ship",
+  "status": 400,
+  "description": "The worktree is not under system/loop-worktrees/. Recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin, faked provider). Not replayed live: the replay server has no host approval key, so it answers 403.",
+  "request": {
+    "body": {
+      "worktree": "/example/repo",
+      "branch": "factory/run1",
+      "provider": "github",
+      "repo": "octo/repo",
+      "base": "main",
+      "title": "Fix the widget",
+      "body": "Closes #12"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "invalid_worktree",
+      "message": "This is not a Factory run worktree of a repository on your allow-list."
+    }
+  }
+}

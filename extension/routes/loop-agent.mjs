@@ -21,6 +21,7 @@
 // Contract (mirrors the sibling route modules):
 //   handleLoopAgentRoutes(req, res, { userId }, deps) → Promise<boolean>
 // `deps` ({ runAgent, validateRoot }) is the tests' seam for the engine.
+// Also POST /kb/loop/ship (handleLoopShip below): commit, scan, push and a draft PR/MR for a Factory worktree.
 
 import { randomUUID } from 'node:crypto';
 // constants.mjs, not engine.mjs: a route must not load the chat engine for one string.
@@ -35,6 +36,12 @@ import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { isPluginUpdating } from '../plugins/claude-update.mjs';
 import { authorizeAction, enforceRouteAuthority, hubFolderRefusal, projectScopeRefusal } from '../server/route-authority.mjs';
 import { projectIdForFolder } from '../kb/projects.mjs';
+import { verifyBusHostProof } from '../core/host-approval.mjs';
+import { getSecret } from '../server/vault.mjs';
+import { createDraftPr, assertSafeBaseBranch } from '../agents/github-pr.mjs';
+import {
+  commitAndPush, createDraftMr, findOpenRequest, parseShipBody, isFactoryWorktree, isProviderWebUrl, originMatchesRepo,
+} from '../agents/factory-ship.mjs';
 
 const MAX_SKILL_IDS = 5;
 // "custom:" + a 100-char id (server/tier-routing.mjs's provider shape) fits.
@@ -116,6 +123,7 @@ function loadLoopEngine() {
 export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}) {
   const sdkUpdating = deps.isSdkUpdating ?? isSdkUpdating;
   const pluginUpdating = deps.isPluginUpdating ?? isPluginUpdating;
+  if (req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/ship') return handleLoopShip(req, res, { userId }, deps);
   if (!(req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/agent-run')) return false;
 
   const body = parseJSON(await readBody(req, 2 * 1024 * 1024));
@@ -323,5 +331,75 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       errorCode: runStatus === 'error' ? runErrorCode : null,
     });
   }
+  return true;
+}
+
+// POST /kb/loop/ship: the Factory's only push, from a user click in the desktop Loop screen.
+// Body { worktree, branch, provider: 'github'|'gitlab', repo, base, title, body? }
+// → { url, commit, reused }. Commit + secret scan + push happen BEFORE any provider call, so a
+// refused scan or push never opens a PR/MR. A second ship reuses the open PR/MR.
+const SHIP_BODY_LIMIT = 64 * 1024;
+const SHIP_STATUS = Object.freeze({
+  invalid_worktree: 400, secret_detected: 422, push_rejected: 409, commit_failed: 500, provider_error: 502,
+});
+const SHIP_PROVIDER_NAME = Object.freeze({ github: 'GitHub', gitlab: 'GitLab' });
+
+function shipFail(res, status, code, message) {
+  sendJSON(res, status, { error: { code, message } });
+  return true;
+}
+
+async function handleLoopShip(req, res, { userId } = {}, deps = {}) {
+  // Desktop only (bus host proof), like routes/issue-writes.mjs: this route uses the vaulted token.
+  if (!verifyBusHostProof(req)) return shipFail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
+  const v = parseShipBody(parseJSON(await readBody(req, SHIP_BODY_LIMIT)));
+  if (v.error) return shipFail(res, 400, 'VALIDATION_FAILED', v.error);
+  const projectId = projectIdForFolder(getDb(), v.worktree);
+  const hubRefusal = hubFolderRefusal(v.worktree, projectId);
+  if (hubRefusal) return shipFail(res, hubRefusal.status, hubRefusal.code, hubRefusal.message);
+  if (enforceRouteAuthority(getDb(), req, res)) return true;
+  if (projectId) {
+    const decision = authorizeAction(getDb(), userId, 'external.write', { projectId, req });
+    if (!decision.ok) return shipFail(res, decision.status, decision.code, decision.message);
+  }
+  let engine;
+  try { engine = await loadLoopEngine(); } catch { return shipFail(res, 502, 'INTERNAL_ERROR', 'The Loop engine could not be loaded'); }
+  const validateRoot = deps.validateRoot ?? engine.validateLoopRepoRoot;
+  const rootCheck = validateRoot(userId, v.worktree);
+  if (!rootCheck.ok || !isFactoryWorktree(rootCheck.root, v.branch)) {
+    return shipFail(res, 400, 'invalid_worktree', 'This is not a Factory run worktree of a repository on your allow-list.');
+  }
+  try { await assertSafeBaseBranch(rootCheck.root, v.base); } catch { return shipFail(res, 400, 'VALIDATION_FAILED', 'base is not a valid branch name'); }
+  // The push goes to the worktree repo's `origin`; the PR/MR goes to `v.repo`. They must be the same repository.
+  const originOk = await (deps.originMatchesRepo ?? originMatchesRepo)(rootCheck.root, v.provider, v.repo);
+  if (!originOk) return shipFail(res, 400, 'VALIDATION_FAILED', 'The repository origin does not match the target repo on the chosen provider.');
+  const name = SHIP_PROVIDER_NAME[v.provider];
+  const token = getSecret(getDb(), userId, `${v.provider}.token`);
+  if (!token) return shipFail(res, 400, `${v.provider.toUpperCase()}_TOKEN_MISSING`, `Add a ${name} token in Settings → Built-in keys first.`);
+  let commit;
+  try {
+    ({ commit } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title }));
+  } catch (err) {
+    const known = Object.hasOwn(SHIP_STATUS, err?.code);
+    return shipFail(res, known ? SHIP_STATUS[err.code] : 500, known ? err.code : 'commit_failed', known ? err.message : 'The commit could not be made.');
+  }
+  let url = null;
+  let reused = false;
+  try {
+    url = await findOpenRequest(v.provider, v.repo, v.branch, token);
+    reused = Boolean(url);
+    if (!url && v.provider === 'github') {
+      url = (await createDraftPr({ ghRepo: v.repo, ghToken: token, title: v.title, head: v.branch, base: v.base, body: v.body }))?.html_url;
+    } else if (!url) {
+      url = (await createDraftMr({ glProject: v.repo, glToken: token, title: v.title, source: v.branch, target: v.base, body: v.body })).url;
+    }
+  } catch {
+    url = null;
+  }
+  if (!isProviderWebUrl(v.provider, url)) {
+    // Fixed text: createDraftPr's error carries (redacted) provider text, which never reaches the client.
+    return shipFail(res, 502, 'provider_error', `The branch was pushed, but ${name} did not open the request. Check the token and the base branch, then Ship again.`);
+  }
+  sendJSON(res, 200, { url, commit, reused });
   return true;
 }

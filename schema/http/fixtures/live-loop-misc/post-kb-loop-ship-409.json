@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/loop/ship",
+  "status": 409,
+  "description": "The remote rejected the push; no provider call. Recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin, faked provider). Not replayed live: the replay server has no host approval key, so it answers 403.",
+  "request": {
+    "body": {
+      "worktree": "/example/proj/system/loop-worktrees/run1",
+      "branch": "factory/run1",
+      "provider": "github",
+      "repo": "octo/repo",
+      "base": "main",
+      "title": "Fix the widget",
+      "body": "Closes #12"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "push_rejected",
+      "message": "The remote refused the push. No pull or merge request was opened."
+    }
+  }
+}

@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 130
+  x-api-version: 131
 servers:
   - url: "https://{host}"
     variables:
@@ -11822,6 +11822,11 @@ paths:
                   description: "\"anthropic\" or an Anthropic-compatible \"custom:<id>\" (one with an anthropicBaseURL). Absent = first-party Anthropic"
                 timeoutMs:
                   type: "number"
+                writeScope:
+                  type: "string"
+                  enum:
+                    - ".factory"
+                  description: "Edit/Write only under <repoRoot>/.factory/ (Factory Intake and Review); any other value is 400 invalid_write_scope (API 131)"
       responses:
         "200":
           description: "The run finished (or did not start because a skill is missing — see `ran`)"
@@ -11929,6 +11934,112 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "504":
           description: "AGENT_RUN_TIMEOUT — timeoutMs elapsed"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/loop/ship:
+    post:
+      summary: "Commit, push and open a draft PR/MR for a Factory run worktree"
+      description: "The Software Factory's only push, sent by the desktop Loop screen after a user click (bus host proof required). `worktree` must be a linked git worktree of an allow-listed repo at `<project>/system/loop-worktrees/<run id>` on branch `factory/<run id>`. Every change except `.factory/` is committed, the staged diff is scanned for token-shaped secrets (422 `secret_detected`, nothing committed), the branch is pushed to `origin` (409 `push_rejected`, no PR/MR), and a DRAFT pull request (api.github.com) or merge request (gitlab.com) is opened with the vaulted `github.token` / `gitlab.token`; an open one for the branch is reused (`reused: true`). Provider text and tokens never appear in an error. Rate-limited on the `dispatch` bucket. Server API v131."
+      tags:
+        - "live-loop-misc"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "worktree"
+                - "branch"
+                - "provider"
+                - "repo"
+                - "base"
+                - "title"
+              properties:
+                worktree:
+                  type: "string"
+                  description: "Absolute path of the Factory worktree, <project>/system/loop-worktrees/<run id>, of an allow-listed repo"
+                branch:
+                  type: "string"
+                  description: "factory/<run id>, the worktree's checked-out branch"
+                provider:
+                  type: "string"
+                  enum:
+                    - "github"
+                    - "gitlab"
+                repo:
+                  type: "string"
+                  description: "GitHub owner/name or a gitlab.com project path"
+                base:
+                  type: "string"
+                  description: "Target branch of the draft PR/MR"
+                title:
+                  type: "string"
+                  description: "PR/MR title and commit subject (one line, at most 200 characters)"
+                body:
+                  type: "string"
+                  description: "PR/MR description (at most 20000 characters; absent = empty)"
+      responses:
+        "200":
+          description: "Committed (without .factory/), pushed, and a draft PR/MR opened, or the open one reused. The 200 fixture is recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin, faked provider)."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "url"
+                  - "commit"
+                  - "reused"
+                properties:
+                  url:
+                    type: "string"
+                    description: "The PR/MR web URL on github.com or gitlab.com"
+                  commit:
+                    type: "string"
+                    description: "The pushed HEAD commit"
+                  reused:
+                    type: "boolean"
+                    description: "true when an open PR/MR for the branch already existed (a re-ship)"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/FeatureDisabled"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "422":
+          description: "Unprocessable Entity"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "500":
+          description: "Internal Server Error"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "502":
+          description: "Bad Gateway"
           content:
             application/json:
               schema:

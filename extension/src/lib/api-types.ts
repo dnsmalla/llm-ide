@@ -6390,6 +6390,8 @@ export type PostKbLoopAgentRunRequest = {
     /** "anthropic" or an Anthropic-compatible "custom:<id>" (one with an anthropicBaseURL). Absent = first-party Anthropic */
     provider?: string;
     timeoutMs?: number;
+    /** Edit/Write only under <repoRoot>/.factory/ (Factory Intake and Review); any other value is 400 invalid_write_scope (API 131) */
+    writeScope?: ".factory";
   };
 };
 
@@ -6430,6 +6432,49 @@ export type PostKbLoopAgentRunResponse502 = CommonError;
 export type PostKbLoopAgentRunResponse503 = CommonError;
 
 export type PostKbLoopAgentRunResponse504 = CommonError;
+
+/** Request parts for `POST /kb/loop/ship` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLoopShipRequest = {
+  body: {
+    /** Absolute path of the Factory worktree, <project>/system/loop-worktrees/<run id>, of an allow-listed repo */
+    worktree: string;
+    /** factory/<run id>, the worktree's checked-out branch */
+    branch: string;
+    provider: "github" | "gitlab";
+    /** GitHub owner/name or a gitlab.com project path */
+    repo: string;
+    /** Target branch of the draft PR/MR */
+    base: string;
+    /** PR/MR title and commit subject (one line, at most 200 characters) */
+    title: string;
+    /** PR/MR description (at most 20000 characters; absent = empty) */
+    body?: string;
+  };
+};
+
+/** Committed (without .factory/), pushed, and a draft PR/MR opened, or the open one reused. The 200 fixture is recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin, faked provider). */
+export type PostKbLoopShipResponse200 = {
+  /** The PR/MR web URL on github.com or gitlab.com */
+  url: string;
+  /** The pushed HEAD commit */
+  commit: string;
+  /** true when an open PR/MR for the branch already existed (a re-ship) */
+  reused: boolean;
+};
+
+export type PostKbLoopShipResponse400 = CommonError;
+
+export type PostKbLoopShipResponse403 = CommonError;
+
+export type PostKbLoopShipResponse404 = FeatureDisabled;
+
+export type PostKbLoopShipResponse409 = CommonError;
+
+export type PostKbLoopShipResponse422 = CommonError;
+
+export type PostKbLoopShipResponse500 = CommonError;
+
+export type PostKbLoopShipResponse502 = CommonError;
 
 /** Request parts for `POST /kb/ingest-code-graph` (schema/http/live-loop-misc.schema.json). */
 export type PostKbIngestCodeGraphRequest = {
@@ -10805,6 +10850,19 @@ export interface ApiEndpoints {
       502: PostKbLoopAgentRunResponse502;
       503: PostKbLoopAgentRunResponse503;
       504: PostKbLoopAgentRunResponse504;
+    };
+  };
+  "POST /kb/loop/ship": {
+    request: PostKbLoopShipRequest;
+    responses: {
+      200: PostKbLoopShipResponse200;
+      400: PostKbLoopShipResponse400;
+      403: PostKbLoopShipResponse403;
+      404: PostKbLoopShipResponse404;
+      409: PostKbLoopShipResponse409;
+      422: PostKbLoopShipResponse422;
+      500: PostKbLoopShipResponse500;
+      502: PostKbLoopShipResponse502;
     };
   };
   "POST /kb/ingest-code-graph": {

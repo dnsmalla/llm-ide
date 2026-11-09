@@ -417,7 +417,14 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          `plan.task.unassign`) and recorded in plan_task_assignment_log; assigning someone else also
 //          writes one in-app `task_assigned` activity row. Plan responses gain `projectId` and each
 //          task's `assignee`; `owner` stays planner-authored text.
-const SERVER_API_VERSION = 130;
+//   v131 — Software Factory Phase A, additive: POST /kb/loop/agent-run accepts `writeScope: ".factory"`
+//          (Edit/Write only under <repoRoot>/.factory/; any other value is 400 invalid_write_scope).
+//          New POST /kb/loop/ship { worktree, branch, provider: github|gitlab, repo, base, title, body? }
+//          (feature auto_tasks, desktop host proof, class external.write) commits a Factory worktree
+//          (<project>/system/loop-worktrees/<run id>, branch factory/<run id>) without .factory/, refuses a
+//          secret-looking diff (422 secret_detected), pushes, and opens a draft PR/MR or reuses the open
+//          one → { url, commit, reused }. Errors: 400 invalid_worktree, 409 push_rejected, 502 provider_error.
+const SERVER_API_VERSION = 131;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -447,6 +454,7 @@ const ALL_ENDPOINTS = [
   '/agent/v2/session/route',
   '/agent/v2/session/route/history',
   '/kb/loop/agent-run',
+  '/kb/loop/ship',
   '/kb/complete',
   '/generate-questions',
   '/extract-entities',
@@ -734,6 +742,7 @@ function rateLimitProfile(url, method) {
   if (url === '/agent/v2/stream')        return 'agentTurn';
   // The Loop's headless agent step — the same multi-minute agent-turn cost.
   if (url === '/kb/loop/agent-run')      return 'agentTurn';
+  if (url === '/kb/loop/ship')           return 'dispatch';   // one push + up to two outbound GitHub/GitLab calls
   if (url === '/kb/generate-plan')       return 'llm';
   if (url === '/kb/analyze-risks')       return 'llm';
   if (url === '/kb/generate-code')       return 'llm';
