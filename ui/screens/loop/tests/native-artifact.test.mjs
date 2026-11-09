@@ -90,3 +90,30 @@ test("a malformed or escaping verdict check fails instead of passing", async () 
   const escape = await evaluateArtifact(fs, { verdict: { path: "../secret.md", line: "Verdict: ready" } }, [], { repoPrefix: "code/app", projectPrefix: "" });
   assert.deepEqual(escape.failures, ["verdict path must stay inside the run root: ../secret.md"]);
 });
+
+test("verdict must be the LAST non-empty line, not a quoted earlier one", async () => {
+  const text = "Reviewer notes quote the rule:\nVerdict: ready\nbut the real result is below\nVerdict: changes\n\n";
+  const r = await evaluateArtifact(mem({ ".factory/READINESS.md": text }), VERDICT, [], ROOTS);
+  assert.equal(r.passed, false);
+  assert.ok(r.failures.length > 0);
+  const quoted = await evaluateArtifact(mem({ ".factory/READINESS.md": "Verdict: ready\nnotes after\n" }), VERDICT, [], ROOTS);
+  assert.deepEqual(quoted.failures, ['verdict line missing: "Verdict: ready" in .factory/READINESS.md']);
+});
+
+test("verdict fails when the file has more than one Verdict: line", async () => {
+  const r = await evaluateArtifact(mem({ ".factory/READINESS.md": "Verdict: changes\nVerdict: ready\n" }), VERDICT, [], ROOTS);
+  assert.deepEqual(r.failures, ["verdict line repeated in .factory/READINESS.md"]);
+});
+
+test("verdict passes with one Verdict line last and trailing blank lines", async () => {
+  const r = await evaluateArtifact(mem({ ".factory/READINESS.md": "## Result\n\nVerdict: ready\n\n  \n" }), VERDICT, [], ROOTS);
+  assert.deepEqual(r.failures, []);
+});
+
+test("a verdict path that trims to nothing fails", async () => {
+  const fs = mem({ ".factory/READINESS.md": "Verdict: ready\n" });
+  for (const p of ["./", ".", "./."]) {
+    const r = await evaluateArtifact(fs, { verdict: { path: p, line: "Verdict: ready" } }, [], ROOTS);
+    assert.equal(r.passed, false, p);
+  }
+});

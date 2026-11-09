@@ -81,6 +81,7 @@ async function verdictFailures(fs: ArtifactFs, verdict: unknown, prefix: string)
   const v = typeof verdict === "object" && verdict !== null ? (verdict as { path?: unknown; line?: unknown }) : {};
   if (typeof v.path !== "string" || typeof v.line !== "string" || !v.path.trim() || !v.line.trim()) return ["verdict check needs a path and a line"];
   const path = trimPath(v.path);
+  if (!path) return [`verdict path must name a file: ${v.path}`];
   if (path.startsWith("/") || path.split("/").includes("..")) return [`verdict path must stay inside the run root: ${v.path}`];
   const want = v.line.trim();
   let text: string | null = null;
@@ -91,7 +92,11 @@ async function verdictFailures(fs: ArtifactFs, verdict: unknown, prefix: string)
     text = null;
   }
   if (text === null) return [`verdict file missing: ${path}`];
-  if (!text.split("\n").some((l) => l.trim() === want)) return [`verdict line missing: "${want}" in ${path}`];
+  // The report's own result is its LAST non-empty line, and there is exactly one `Verdict:` line: a line quoted
+  // earlier in the report (or planted in it) must not pass the gate.
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  if (lines.filter((l) => l.startsWith("Verdict:")).length > 1) return [`verdict line repeated in ${path}`];
+  if (lines[lines.length - 1] !== want) return [`verdict line missing: "${want}" in ${path}`];
   return [];
 }
 
