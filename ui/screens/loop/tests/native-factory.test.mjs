@@ -8,6 +8,15 @@ import { DETECTED_TEST } from "../native/environment.ts";
 import { decodeRepoConfig } from "../../settings/repo-config.ts";
 import { DEFAULT_LOOP_SPECS } from "../native/defaults.ts";
 
+test("the Factory asks once for a test command when none was detected", () => {
+  const asked = [];
+  const custom = f.factoryTestCommand(null, (message, fallback) => { asked.push([message, fallback]); return "  ./scripts/test.sh  "; });
+  assert.equal(custom, "./scripts/test.sh");
+  assert.equal(asked.length, 1);
+  assert.equal(f.factoryTestCommand("npm test", () => { throw new Error("must not ask when detected"); }), "npm test");
+  assert.equal(f.factoryTestCommand(null, () => null), null);
+});
+
 test("the factory is not one of the starter loops seeded into every project", () => {
   assert.doesNotMatch(JSON.stringify(DEFAULT_LOOP_SPECS), /factory/i);
 });

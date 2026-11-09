@@ -24,7 +24,7 @@ import { cronMatches, describeCron, validateCron } from "../../autotasks/native/
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
-import { FACTORY_DEFAULT_KEY, FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, isFactoryLoop, needsDecisionSummary, taskMarkdown, withSetupCommand, type WorkItem } from "./factory.ts";
+import { FACTORY_DEFAULT_KEY, FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, factoryTestCommand, isFactoryLoop, needsDecisionSummary, taskMarkdown, withSetupCommand, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
@@ -350,13 +350,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const addLoopFromTemplate = (t: LoopTemplate) => {
     const factory = t.id === FACTORY_TEMPLATE.id;
-    if (factory && !testCommand) { setNotice("The Factory needs a detected test command for its Verify stage; none was found. See the ENVIRONMENT card."); return; }
+    const command = factory ? factoryTestCommand(testCommand, (m, d) => window.prompt(m, d)) : testCommand;
+    if (factory && !command) { setNotice("The Factory needs a test command for its Verify stage."); return; }
     const id = crypto.randomUUID();
     mutateStore((s) => {
       s.loops.push({
         id, name: t.name, isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [],
         defaultKey: factory ? FACTORY_DEFAULT_KEY : null, runsOnSchedule: false,
-        config: factory ? withSetupCommand(applyTemplate(t, testCommand), testCommand) : applyTemplate(t, testCommand),
+        config: factory ? withSetupCommand(applyTemplate(t, command), command) : applyTemplate(t, command),
       });
     });
     setSelectedLoopId(id);

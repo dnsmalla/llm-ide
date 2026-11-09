@@ -60,6 +60,14 @@ export const FACTORY_TEMPLATE: LoopTemplate = {
   },
 };
 
+
+/** The Factory needs a Verify command. Use the detected one, or ask once for a custom runner. */
+export function factoryTestCommand(detected: string | null, ask: (message: string, fallback: string) => string | null): string | null {
+  if (detected) return detected;
+  const entered = ask("The Factory needs a test command for its Verify stage. Enter one:", "npm test");
+  return entered?.trim() || null;
+}
+
 export function isFactoryLoop(loop: LoopDefinition): boolean {
   return loop.defaultKey === FACTORY_DEFAULT_KEY;
 }
