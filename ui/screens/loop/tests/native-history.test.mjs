@@ -41,3 +41,56 @@ test("a run record path is the month bucket its index entry names", async () => 
   const { runRecordPath } = await import("../native/history.ts");
   assert.equal(runRecordPath("abc", "2026-03-15T12:00:00Z"), "system/loop-runs/2026-03/abc.json");
 });
+
+function journalFs() {
+  const files = new Map();
+  const writes = [];
+  return {
+    files, writes,
+    async create() { return "dir"; },
+    async read(path) {
+      if (!files.has(path)) throw Object.assign(new Error("missing"), { code: "not_found" });
+      return { status: "ok", text: files.get(path), hash: `h-${path}` };
+    },
+    async write(path, text, opts) { writes.push({ path, opts }); files.set(path, text); return { path, hash: "h2" }; },
+  };
+}
+
+const factoryEntry = { id: "r1", loopId: "l", loopName: "Factory", startedAt: "2026-11-09T10:00:00Z", durationSeconds: 5, iterationsUsed: 1, statusCode: "failed", statusSummary: "needs decision: see .factory/READINESS.md", trigger: "manual" };
+
+test("run record keeps factory fields through the journal round trip", async () => {
+  const fs = journalFs();
+  const fields = {
+    workItem: { source: "issue", id: "12", title: "Fix login" },
+    worktree: { runId: "20261109-100000-abc123", branch: "factory/20261109-100000-abc123", baseCommit: "0123456789abcdef", repo: "/p/code/web" },
+    ship: null,
+    needsDecision: "needs decision: see .factory/READINESS.md",
+    diffSummary: { files: ["src/a.ts"], truncated: false },
+  };
+  await h.appendRunRecord(fs, factoryEntry, { ...factoryEntry, ...fields });
+  assert.deepEqual(h.decodeFactoryFields(await h.loadRunRecord(fs, "r1", factoryEntry.startedAt)), fields);
+
+  const ship = { provider: "gitlab", url: "https://gitlab.com/g/p/-/merge_requests/3", commit: "abc123", reused: false };
+  assert.equal(await h.setRunRecordShip(fs, factoryEntry, ship), true);
+  const path = h.runRecordPath("r1", factoryEntry.startedAt);
+  assert.equal(fs.writes.at(-1).path, path);
+  assert.equal(fs.writes.at(-1).opts.expected_hash, `h-${path}`, "the update is a compare-and-set on the read hash");
+  const after = h.decodeFactoryFields(await h.loadRunRecord(fs, "r1", factoryEntry.startedAt));
+  assert.deepEqual(after.ship, ship);
+  assert.deepEqual(after.workItem, fields.workItem, "the other fields survive the ship update");
+});
+
+test("factory fields decode to null for a plain run and for malformed values", async () => {
+  const empty = { workItem: null, worktree: null, ship: null, needsDecision: null, diffSummary: null };
+  assert.deepEqual(h.decodeFactoryFields(null), empty);
+  assert.deepEqual(h.decodeFactoryFields({ id: "r9", statusCode: "success" }), empty);
+  assert.deepEqual(h.decodeFactoryFields({
+    workItem: { source: "evil", title: "x" },
+    worktree: { runId: "r", branch: 3 },
+    ship: { provider: "bitbucket", url: "u", commit: "c" },
+    needsDecision: 7,
+    diffSummary: { files: "nope" },
+  }), empty);
+  assert.deepEqual(h.decodeFactoryFields({ diffSummary: { files: ["a", 2], truncated: "yes" } }).diffSummary, { files: ["a"], truncated: false });
+  assert.equal(await h.setRunRecordShip(journalFs(), factoryEntry, { provider: "github", url: "u", commit: "c", reused: false }), false, "a missing record is not created");
+});

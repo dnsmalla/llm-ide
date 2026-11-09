@@ -29,11 +29,13 @@ import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
-import { appendRunRecord, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, type LoopRunIndexEntry } from "./history.ts";
+import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
-import { FACTORY_DEFAULT_KEY, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, guardedPaths, isFactoryLoop, needsDecisionSummary, reviewDiffSection, taskMarkdown, withSetupCommand, writeScopeFor, type WorkItem } from "./factory.ts";
+import { FACTORY_DEFAULT_KEY, FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, guardedPaths, isFactoryLoop, needsDecisionSummary, reviewDiffSection, taskMarkdown, withSetupCommand, writeScopeFor, type WorkItem } from "./factory.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
+import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
+import { decodeWorktreeDiff } from "./ship-model.ts";
 import "./native-loop.css";
 
 /** The `/kb/loop/agent-run` answer fields the Loop reads. */
@@ -265,6 +267,19 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setSelectedRun(null);
     setRunRecord(null);
     setRunRecordLoaded(false);
+  };
+
+  /** Opens Review and Ship for a past run whose worktree still exists (Discard is always offered, Ship only after a pass). */
+  const reopenWorktree = async (entry: LoopRunIndexEntry, fields: FactoryRunFields) => {
+    if (!fields.worktree) return;
+    const runId = fields.worktree.runId;
+    let list: RunInfo[];
+    try { list = await invokeHost<RunInfo[]>("loop_worktree_list"); } catch (e) { setNotice(e instanceof Error ? e.message : "The worktrees could not be listed."); return; }
+    const info = list.find((r) => r.runId === runId);
+    if (!info) { setNotice("This run's worktree was removed; only its record is left."); return; }
+    const w = fields.workItem;
+    const item: WorkItem = w ? { source: w.source, id: w.id, title: w.title, body: "", repo: null } : { source: "text", id: null, title: entry.loopName, body: "", repo: null };
+    setShipRun({ info, item, entry, passed: entry.statusCode === "success" });
   };
 
   const revealRunRecord = (entry: LoopRunIndexEntry) => {
@@ -779,6 +794,16 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         for (const rel of faultPaths) if (await reopenFault(fs, rel)) reopened += 1;
         if (reopened > 0) setRunLog((l) => [...l, `reopened ${reopened} fixed fault(s).`]);
       }
+      // Intake ran in this run, so the readiness report is copied to llm-doc/factory/ (the Review Conflicts tree).
+      if (activeRun && outcome.stages.some((o) => o.stage.skillId === FACTORY_INTAKE_SKILL)) {
+        const copyAt = new Date(started);
+        try {
+          const copied = await copyReadiness(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree), activeRun.runId, copyAt);
+          setRunLog((l) => [...l, copied ? `readiness report copied to ${readinessCopyPath(activeRun.runId, copyAt)}` : "no .factory/READINESS.md to copy"]);
+        } catch (e) {
+          setRunLog((l) => [...l, `readiness copy failed: ${e instanceof Error ? e.message : String(e)}`]);
+        }
+      }
       if (target.config.writeSummaryNote) {
         try { summaryPath = await writeSummaryNote(fs, target, outcome); setRunLog((l) => [...l, `summary note: ${summaryPath}`]); }
         catch (e) { setRunLog((l) => [...l, `summary note failed: ${e instanceof Error ? e.message : String(e)}`]); }
@@ -788,8 +813,18 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const startedAt = new Date(started).toISOString();
       const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
       if (isFactoryLoop(target) && activeRun && start && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) setShipRun({ info: activeRun, item: start.item, entry, passed: true });
+      const diffSummary = activeRun
+        ? await invokeHost<unknown>("loop_worktree_diff", { runId: activeRun.runId }).then((raw) => { const d = decodeWorktreeDiff(raw); return { files: d.files, truncated: d.truncated }; }).catch(() => null)
+        : null;
+      const factoryFields: FactoryRunFields = {
+        workItem: start ? { source: start.item.source, id: start.item.id, title: start.item.title } : null,
+        worktree: activeRun ? { runId: activeRun.runId, branch: activeRun.branch, baseCommit: activeRun.baseCommit, repo: activeRun.repo } : null,
+        ship: null,
+        needsDecision,
+        diffSummary,
+      };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
-      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
@@ -967,6 +1002,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   if (!store || !loop) return <div className="loop-native-empty"><p>This project has no loops yet.</p></div>;
 
   const enabledGates = loop.config.stages.filter((s) => s.enabled && s.severity === "blocking");
+  const pastFactory = runRecord ? decodeFactoryFields(runRecord) : null;
   return (
     <div className="loop-native" data-active={active}>
       <aside className="loop-pane loop-loops" aria-label="Loops">
@@ -1030,7 +1066,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       <main className="loop-run" aria-label="Run">
         <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
-        {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} item={shipRun.item} passed={shipRun.passed} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => setRunLog((l) => [...l, `shipped: ${r.url}`])} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
+        {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} item={shipRun.item} passed={shipRun.passed} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
@@ -1195,6 +1231,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <p>{selectedRun.statusSummary}</p>
             {!runRecordLoaded ? <p className="loop-native-hint" role="status">Loading the run record…</p> : runRecord === null ? <p className="loop-native-hint">Could not load this run&apos;s record. It may have been removed or edited by hand.</p> : <>
               <p className="loop-native-hint">{budgetsLine(runRecord.config)}</p>
+              {pastFactory?.workItem ? <p className="loop-native-hint">Work item: {pastFactory.workItem.title}{pastFactory.workItem.id ? ` (${pastFactory.workItem.source} ${pastFactory.workItem.id})` : ""}</p> : null}
+              {pastFactory?.needsDecision ? <p className="loop-warn">{pastFactory.needsDecision}</p> : null}
+              {pastFactory?.worktree ? <p className="loop-native-hint">Worktree branch <code>{pastFactory.worktree.branch}</code> · started from <code>{pastFactory.worktree.baseCommit.slice(0, 7)}</code></p> : null}
+              {pastFactory?.diffSummary ? <p className="loop-native-hint">Diff: {pastFactory.diffSummary.files.length} file(s){pastFactory.diffSummary.truncated ? " (list cut)" : ""}{pastFactory.diffSummary.files.length ? ` · ${pastFactory.diffSummary.files.slice(0, 20).join(", ")}` : ""}</p> : null}
+              {pastFactory?.ship ? <p className="loop-native-hint">Shipped to {pastFactory.ship.provider}{pastFactory.ship.reused ? " (updated)" : ""}: {pastFactory.ship.url}</p> : null}
+              {pastFactory?.worktree ? <button type="button" className="loop-btn" onClick={() => void reopenWorktree(selectedRun, pastFactory)}>Review worktree…</button> : null}
               {Array.isArray(runRecord.changedPaths) && runRecord.changedPaths.length > 0 ? <p className="loop-native-hint">Changed: {runRecord.changedPaths.map(String).join(", ")}</p> : null}
               {typeof runRecord.summaryPath === "string" && runRecord.summaryPath ? <button type="button" className="loop-btn" onClick={() => shellBus.publish({ type: "open-file", path: runRecord.summaryPath as string })}>Open summary note</button> : null}
               {Array.isArray(runRecord.stages) && runRecord.stages.length > 0 ? (

@@ -136,3 +136,52 @@ export function iterationRecordsWithScores(iterations: readonly LoopIterationOut
     })),
   }));
 }
+
+/** Factory fields of a run record (spec A5). Null when the run had none (every non-Factory run). */
+export interface FactoryRunFields {
+  workItem: { source: "issue" | "spec" | "text"; id: string | null; title: string } | null;
+  worktree: { runId: string; branch: string; baseCommit: string; repo: string } | null;
+  ship: { provider: "github" | "gitlab"; url: string; commit: string; reused: boolean } | null;
+  needsDecision: string | null;
+  diffSummary: { files: string[]; truncated: boolean } | null;
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Tolerant read of the Factory fields: anything malformed reads as null, never as a wrong value. */
+export function decodeFactoryFields(record: Record<string, unknown> | null): FactoryRunFields {
+  const r = record ?? {};
+  const w = isRecord(r.workItem) ? r.workItem : null;
+  const src = w?.source;
+  const source = src === "issue" || src === "spec" || src === "text" ? src : null;
+  const workItem: FactoryRunFields["workItem"] = w && source && typeof w.title === "string" ? { source, id: typeof w.id === "string" ? w.id : null, title: w.title } : null;
+  const t = isRecord(r.worktree) ? r.worktree : null;
+  const worktree = t && typeof t.runId === "string" && typeof t.branch === "string" && typeof t.baseCommit === "string" && typeof t.repo === "string"
+    ? { runId: t.runId, branch: t.branch, baseCommit: t.baseCommit, repo: t.repo } : null;
+  const s = isRecord(r.ship) ? r.ship : null;
+  const provider = s?.provider;
+  const ship: FactoryRunFields["ship"] = s && (provider === "github" || provider === "gitlab") && typeof s.url === "string" && typeof s.commit === "string"
+    ? { provider, url: s.url, commit: s.commit, reused: s.reused === true } : null;
+  const d = isRecord(r.diffSummary) ? r.diffSummary : null;
+  const diffSummary = d && Array.isArray(d.files) ? { files: d.files.filter((f): f is string => typeof f === "string"), truncated: d.truncated === true } : null;
+  return { workItem, worktree, ship, needsDecision: typeof r.needsDecision === "string" ? r.needsDecision : null, diffSummary };
+}
+
+/** Records a Ship result on an existing run record. False when the record is missing or unreadable (nothing is created). */
+export async function setRunRecordShip(fs: Pick<FsApi, "read" | "write">, entry: Pick<LoopRunIndexEntry, "id" | "startedAt">, ship: NonNullable<FactoryRunFields["ship"]>): Promise<boolean> {
+  const path = runRecordPath(entry.id, entry.startedAt);
+  let text: string;
+  let hash: string;
+  try {
+    const r = await fs.read(path, 4_000_000);
+    if (r.status !== "ok" || r.text === null || r.hash === null) return false;
+    text = r.text;
+    hash = r.hash;
+  } catch { return false; }
+  let record: unknown;
+  try { record = JSON.parse(text); } catch { return false; }
+  if (!isRecord(record)) return false;
+  // Compare-and-set on the hash just read: a concurrent edit makes the write fail instead of being overwritten.
+  await fs.write(path, JSON.stringify({ ...record, ship }, null, 2) + "\n", { expected_hash: hash });
+  return true;
+}
