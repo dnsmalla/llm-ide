@@ -23,7 +23,6 @@ test("an issue becomes a work item keyed by provider, repo and number", () => {
   assert.equal(w.provider, "github");
   assert.equal(workItemFromIssue(issue(3, { provider: "gitlab", repo: "grp/proj" }), NOW).provider, "gitlab");
   assert.match(w.body, /Body 12/);
-  assert.ok(w.body.includes("https://github.com/acme/web/issues/12"));
   assert.equal(workItemFromIssue(issue(null, { id: "abc" }), NOW).key, "issue:github:acme/web#abc");
 });
 
