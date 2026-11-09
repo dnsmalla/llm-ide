@@ -127,8 +127,18 @@ test('R-034 #4: an EXTENSION turn with a project runs on a hub in the per-user s
   assert.ok(args.agentContext.workspaceRoot.endsWith(path.join('extension-chat', 'hub-u1')));
 });
 
-test('R-034 #4: an extension surface with NO project is still refused (the grant check stays)', async () => {
+test('R-034 #4: a projectless EXTENSION surface runs read-only on a hub', async () => {
+  const before = turnArgs.length;
   const res = await run({ agentContext: { chatSessionId: 'chat-ext-noproj', surface: 'extension' } });
+  assert.equal(res.statusCode, 200, res._body.slice(0, 200));
+  assert.equal(turns, before + 1);
+  const args = turnArgs[turnArgs.length - 1];
+  assert.equal(args.mode, 'ask', 'the hub team clamp keeps a projectless extension turn read-only');
+  assert.equal(args.agentContext.workspaceRoot, extensionChatWorkspace(undefined, 'hub-u1'));
+});
+
+test('R-034 #4: a non-extension folder in no project is still refused on a hub', async () => {
+  const res = await run({ agentContext: { chatSessionId: 'chat-plain-noproj', workspaceRoot: WS } });
   assert.equal(res.statusCode, 403);
   assert.equal(res.json().error.code, 'PROJECT_DENIED');
 });

@@ -592,8 +592,17 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   }
   const turnProjectId = folderProjectId || requestedProjectId || null;
   if (config.hub) {
-    if (!turnProjectId) return io.refuse({ code: 'PROJECT_DENIED', status: 403, message: 'This folder is not in a project on this hub' });
-    if (!getProject(getDb(), turnProjectId)) return io.refuse({ code: 'PROJECT_DENIED', status: 403, message: 'That project is not available' });
+    if (!turnProjectId) {
+      // R-034 #4: the extension side panel has no project picker, so a projectless extension turn
+      // runs in its empty, per-user scratch folder under the team authority (read-only on a hub).
+      // The Host API still needs a project on a hub (the gateway enforces it; this is the same rule
+      // one layer down, so a direct startHostTurn cannot borrow a projectless turn either).
+      if (agentContext?.surface !== 'extension') {
+        return io.refuse({ code: 'PROJECT_DENIED', status: 403, message: 'This folder is not in a project on this hub' });
+      }
+    } else if (!getProject(getDb(), turnProjectId)) {
+      return io.refuse({ code: 'PROJECT_DENIED', status: 403, message: 'That project is not available' });
+    }
   }
   if (turnProjectId) body.projectId = turnProjectId;
   const projectGrant = turnProjectId ? effectiveProjectGrant(getDb(), userId, turnProjectId) : null;
