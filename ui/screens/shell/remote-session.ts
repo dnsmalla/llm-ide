@@ -2,8 +2,16 @@
 // the OS keychain, bound to the saved hub URL + TLS pin (remote_session.rs). On mount in remote mode
 // this binder loads it, exchanges it at /auth/refresh, and stores the rotated token after every
 // refresh. A sign-out or a 401 clears it; a network failure keeps it for the next launch.
-import { host, isHostAvailable } from "./host";
+import { host, isHostAvailable, type CoreStatus } from "./host";
 import { core } from "./runtime";
+
+/**
+ * True once a remote core can take the session exchange. It reads the RAW `core_status` state: the derived
+ * StatusView has no `state`, and waiting for remote/ready avoids a first attempt against a null base URL.
+ */
+export function isRemoteSessionReady(status: Pick<CoreStatus, "mode" | "state"> | null | undefined): boolean {
+  return status?.mode === "remote" && (status.state === "remote" || status.state === "ready");
+}
 
 export interface RemoteSessionHost {
   remoteServerTarget(): Promise<{ hubUrl: string; pin: string } | null>;

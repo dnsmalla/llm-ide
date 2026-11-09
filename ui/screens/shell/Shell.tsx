@@ -25,7 +25,7 @@ import { MissingScreen, screenFor } from "./screens";
 import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type SectionDef, type SectionId } from "./sections";
 import { RemoteProjectBar } from "./RemoteProjectBar";
 import { remoteBanner } from "./remote-status";
-import { bindRemoteSession } from "./remote-session";
+import { bindRemoteSession, isRemoteSessionReady } from "./remote-session";
 import { landingFor, readHome, selectHome } from "./landing";
 import { activityStore, core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
@@ -102,9 +102,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     setCrash(null);
     void dismissCrashNotice().catch(() => undefined);
   }, []);
-  // R-034 #10: once the remote core is reachable, restore the keychain-held hub session and keep it
-  // in step. Waiting for the ready/remote state avoids a first attempt against a null base URL.
-  const remoteSessionReady = remoteMode && (view.state === "remote" || view.state === "ready");
+  // R-034 #10: once the remote core is reachable, restore the keychain-held hub session and keep it in step.
+  const remoteSessionReady = isRemoteSessionReady(coreStatusStore.getSnapshot().status);
   useEffect(() => {
     if (!remoteSessionReady) return undefined;
     return bindRemoteSession();
