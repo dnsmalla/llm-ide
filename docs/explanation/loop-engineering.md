@@ -167,7 +167,7 @@ repair). Set up, Intake, Intake gate, Plan and Implement are `runOnce`; Verify,
 Review and Review gate run every iteration. The template forces
 `alwaysUseWorktree`. After a passed run the Loop screen shows the diff with Ship
 (a draft PR/MR through `POST /kb/loop/ship`) and Discard (removes the worktree
-and branch). The worktree is never removed any other way.
+and branch). The worktree is never removed any other way. A loop that runs in a worktree cannot carry a Regression stage; the host refuses it.
 
 ## Loops
 

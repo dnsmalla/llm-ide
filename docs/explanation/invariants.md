@@ -547,6 +547,8 @@ A Factory run takes one work item through intake → plan → implement → veri
 - **Run ids are validated before any git call.** `^[A-Za-z0-9_-]{1,64}$` through `loop_worktree::valid_run_id`. The webview passes only a `run_id`, never a path, and the host re-checks that the worktree belongs to the run's repo.
 - **A run stays bound to its own project.** A Loop host command called with a `run_id` uses that run's `RunInfo.project` and worktree, never `active_root()`; `loop_cancel` with a `run_id` cancels only that run.
 - **`.factory/` is excluded** from the worktree diff, from Ship's commit and from the protected-path revert.
+- **A worktree run refuses Regression stages.** The host returns `Regression stages cannot run in a factory worktree` for a `regressionSweep` stage called with a `run_id` (`loop_runner.rs`), because fault verification has no `run_id` and would read the main tree.
+- **A repo that ships its own `.factory` entry is refused.** `loop_worktree::prepare_in` refuses when the checked-out `.factory` is a symlink or not a directory, or `.factory/TASK.md` already exists, and removes the new worktree; `TASK.md` is created with `create_new`, so it is never written through a link.
 - **Intake and Review write only under `.factory/`.** Their agent runs send `writeScope: ".factory"` to `/kb/loop/agent-run`; any other `writeScope` value is a 400 `invalid_write_scope`.
 - **Claude only.** Agent stages go through `POST /kb/loop/agent-run`; there is no Codex or Gemini write mode.
 - **Gates read an explicit verdict line.** The `verdict` artifact rule reads one named file (dot-folders allowed) and fails when the file or the exact line is missing. The `factory-intake` and `factory-review` skills end their reports with exactly one `Verdict: …` line.
