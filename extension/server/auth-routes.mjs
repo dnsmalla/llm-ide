@@ -200,11 +200,13 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
-    // R-026 #7 / R-032 X1: a failed-login bucket keyed by normalized email, charged only on a
-    // FAILED password. Rotating IPs cannot hold a correct login out; a spray is limited to ~3k/day.
+    // R-026 #7 / R-032 X1 / R-033: failed-login buckets. The hard block is per (email, IP), so a
+    // spray from one address cannot lock the account out from another. The looser per-email bucket
+    // is checked only after a WRONG password, so a correct password is never pre-blocked and the
+    // 401-vs-429 difference never reveals which guess was right.
     const emailKey = typeof body.email === 'string' ? body.email.trim().toLowerCase().slice(0, 254) : '';
     if (emailKey) {
-      const peek = tryPeek('authEmailFail', emailKey);
+      const peek = tryPeek('authEmailIpFail', `${emailKey}|${ip}`);
       if (!peek.ok) {
         res.setHeader('Retry-After', String(peek.retryAfterSec));
         send(res, 429, { error: { code: 'RATE_LIMITED', message: 'Too many failed sign-in attempts' } });
@@ -216,8 +218,21 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       safeAudit(db, { userId: session.user.id, requestId, ip, userAgent: ua, action: 'auth.login', outcome: 'success' });
       send(res, 200, session);
     } catch (err) {
-      if (emailKey) tryConsume('authEmailFail', emailKey);
+      let limited = null;
+      if (emailKey) {
+        // Peek BEFORE charging: 10 failures answer 401, the 11th answers 429. The password has
+        // already been checked, so a correct password still succeeds while the bucket is empty.
+        const before = tryPeek('authEmailFail', emailKey);
+        tryConsume('authEmailIpFail', `${emailKey}|${ip}`);
+        tryConsume('authEmailFail', emailKey);
+        if (!before.ok) limited = before;
+      }
       safeAudit(db, { userId: null, requestId, ip, userAgent: ua, action: 'auth.login', outcome: 'failure', detail: { error: err.code || err.message } });
+      if (limited) {
+        res.setHeader('Retry-After', String(limited.retryAfterSec));
+        send(res, 429, { error: { code: 'RATE_LIMITED', message: 'Too many failed sign-in attempts' } });
+        return;
+      }
       send(res, err.status || 401, { error: { code: err.code || 'AUTH_REQUIRED', message: err.message } });
     }
     return;

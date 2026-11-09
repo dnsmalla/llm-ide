@@ -173,6 +173,9 @@ PROFILES.authPublic = { capacity: 10, refillRate: 1 };
 // correct login is not held at zero by someone else's spray; 10 burst, then one guess per 30 s
 // (~3k/day). The per-IP authPublic bucket still applies on top.
 PROFILES.authEmailFail = { capacity: 10, refillRate: 1 / 30 };
+// Hard block for one email from one IP. A spray from one address cannot lock the account out
+// from another address, and a correct password is never pre-blocked by the looser email bucket.
+PROFILES.authEmailIpFail = { capacity: 10, refillRate: 1 / 30 };
 
 // Tighter dedicated bucket for account registration.
 // 3 burst (covers a mistype/retry flow) then 1 per 60 s per IP.

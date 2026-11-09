@@ -8,8 +8,8 @@ export function finalizeBytes(captions) {
 }
 
 /** null = fits; 'per_user' | 'total' = refused. */
-export function byteCapRefusal(used, add, perUser, total) {
-  if (used + add > perUser) return 'per_user';
-  if (used + add > total) return 'total';
+export function byteCapRefusal(userUsed, totalUsed, add) {
+  if (userUsed + add > MAX_PENDING_FINALIZE_BYTES_PER_USER) return 'per_user';
+  if (totalUsed + add > MAX_PENDING_FINALIZE_BYTES_TOTAL) return 'total';
   return null;
 }

@@ -18,7 +18,7 @@ import {
 } from '../agents/live-sessions.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect, readJsonBody, decodeParam } from '../core/utils.mjs';
 import { tryConsume } from '../server/rate-limit.mjs';
-import { MAX_PENDING_FINALIZE_BYTES_PER_USER, MAX_PENDING_FINALIZE_BYTES_TOTAL, finalizeBytes, byteCapRefusal } from '../server/finalize-budget.mjs';
+import { finalizeBytes, byteCapRefusal } from '../server/finalize-budget.mjs';
 
 // Per-user cap on concurrent SSE streams. A hostile or buggy client
 // opening N streams pins N idle timers + listener pairs; we cap so a
@@ -78,8 +78,7 @@ export function takeFinalizeParts(userId, sessionId, body) {
   const oldBytes = entry.sizes.get(part) || 0;
   const userBytes = userPendingBytes(userId) - oldBytes;
   const totalBytes = totalPendingBytes() - oldBytes;
-  const refusal = byteCapRefusal(userBytes, addBytes, MAX_PENDING_FINALIZE_BYTES_PER_USER, MAX_PENDING_FINALIZE_BYTES_TOTAL)
-    || byteCapRefusal(totalBytes, addBytes, MAX_PENDING_FINALIZE_BYTES_TOTAL, MAX_PENDING_FINALIZE_BYTES_TOTAL);
+  const refusal = byteCapRefusal(userBytes, totalBytes, addBytes);
   if (refusal) return { tooLarge: true, scope: refusal };
   entry.at = now;
   entry.parts.set(part, body.captions);

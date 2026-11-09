@@ -217,21 +217,32 @@ test('POST /auth/register rejects invalid JSON body with 400', async () => {
   assert.equal(res.json().error.code, 'VALIDATION_FAILED');
 });
 
-test('failed logins are throttled per email without locking out a correct password forever', async () => {
+test('failed logins are throttled per email without locking out a correct password', async () => {
   const { email } = await registerAndLogin();
   for (let i = 1; i <= 10; i++) {
     const r = await callAuth({ method: 'POST', url: '/auth/login', ip: `10.9.0.${i}`, body: { email, password: 'wrong-password' } });
     assert.equal(r.statusCode, 401, `attempt ${i}: ${r._body}`);
   }
-  const blocked = await callAuth({ method: 'POST', url: '/auth/login', ip: '10.9.1.1', body: { email, password: PASSWORD } });
-  assert.equal(blocked.statusCode, 429, 'a correct password is refused while the failed-login bucket is empty');
-  assert.equal(blocked.json().error.code, 'RATE_LIMITED');
-  const realNow = Date.now;
-  try {
-    Date.now = () => realNow() + 31_000;
-    const after = await callAuth({ method: 'POST', url: '/auth/login', ip: '10.9.1.2', body: { email, password: PASSWORD } });
-    assert.equal(after.statusCode, 200, 'one refill lets the correct password through');
-  } finally { Date.now = realNow; }
+  // The 11th wrong guess from a fresh IP is refused by the looser email bucket...
+  const blockedWrong = await callAuth({ method: 'POST', url: '/auth/login', ip: '10.9.1.1', body: { email, password: 'wrong-password' } });
+  assert.equal(blockedWrong.statusCode, 429);
+  assert.equal(blockedWrong.json().error.code, 'RATE_LIMITED');
+  // ...but the correct password from a fresh IP still works: no account lockout.
+  const correct = await callAuth({ method: 'POST', url: '/auth/login', ip: '10.9.1.2', body: { email, password: PASSWORD } });
+  assert.equal(correct.statusCode, 200, correct._body);
+});
+
+test('a spray from one IP is hard-blocked for that email and IP only', async () => {
+  const { email } = await registerAndLogin();
+  const ip = '10.9.2.1';
+  for (let i = 1; i <= 10; i++) {
+    const r = await callAuth({ method: 'POST', url: '/auth/login', ip, body: { email, password: 'wrong-password' } });
+    assert.equal(r.statusCode, 401, `attempt ${i}: ${r._body}`);
+  }
+  const sameIp = await callAuth({ method: 'POST', url: '/auth/login', ip, body: { email, password: PASSWORD } });
+  assert.equal(sameIp.statusCode, 429, 'the offending address is blocked');
+  const otherIp = await callAuth({ method: 'POST', url: '/auth/login', ip: '10.9.2.2', body: { email, password: PASSWORD } });
+  assert.equal(otherIp.statusCode, 200, 'another address can still sign in');
 });
 
 test('POST /auth/login returns a session; wrong password → 401', async () => {
