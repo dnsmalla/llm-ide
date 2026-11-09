@@ -933,6 +933,12 @@ export type Health = {
   apiVersion: number;
   /** true when this core is a hub (LLMIDE_HUB=1); additive */
   hub?: boolean;
+  /** Live work counts only (R-034 #17); no ids or content. Additive, so an older hub omits it. */
+  busy?: {
+    chatTurns: number;
+    loopRuns: number;
+    total: number;
+  };
   /** current migration number */
   schemaVersion: number;
   uptimeSec: number;
