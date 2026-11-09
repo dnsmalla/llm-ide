@@ -174,6 +174,31 @@ fn exclude_worktrees(project: &Path) -> Result<(), String> {
     f.write_all(format!("{sep}{EXCLUDE_LINE}\n").as_bytes()).map_err(|e| format!("cannot update .git/info/exclude: {e}"))
 }
 
+/// Writes the work item into the fresh worktree without following a link the repo itself committed at `.factory`
+/// or `.factory/TASK.md`: a symlink there would redirect the write outside the worktree. `symlink_metadata` does not
+/// follow links, and `create_new` fails on any existing path, including a dangling symlink.
+fn write_task_file(wt: &Path, task: &str) -> Result<(), String> {
+    const FOREIGN: &str = "the repository ships its own .factory/ entry; refusing to write TASK.md through it";
+    let dir = wt.join(FACTORY_DIR);
+    match std::fs::symlink_metadata(&dir) {
+        // A symlink reports `is_dir() == false` here, so a linked `.factory` is refused too.
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Err(FOREIGN.into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(&dir).map_err(|e| format!("cannot write {TASK_REL}: {e}"))?;
+        }
+        Err(e) => return Err(format!("cannot write {TASK_REL}: {e}")),
+    }
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(wt.join(TASK_REL)).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            FOREIGN.to_string()
+        } else {
+            format!("cannot write {TASK_REL}: {e}")
+        }
+    })?;
+    file.write_all(task.as_bytes()).map_err(|e| format!("cannot write {TASK_REL}: {e}"))
+}
+
 pub fn prepare_in(project: &Path, repo: &Path, run_id: &str, base: Option<&str>, task: &str) -> Result<RunInfo, String> {
     // Every check that needs no git and no folder comes first: a refused call leaves no trace.
     if !valid_run_id(run_id) {
@@ -199,10 +224,9 @@ pub fn prepare_in(project: &Path, repo: &Path, run_id: &str, base: Option<&str>,
     let wt_s = lossy(&wt);
     git(&repo, &["worktree", "add", "--quiet", "-b", &branch, &wt_s, &base_commit])?;
     let info = RunInfo { run_id: run_id.to_string(), project: lossy(&project), repo: lossy(&repo), worktree: wt_s, branch, base_commit };
-    let written = std::fs::create_dir_all(wt.join(FACTORY_DIR)).and_then(|_| std::fs::write(wt.join(TASK_REL), task));
-    if let Err(e) = written {
+    if let Err(e) = write_task_file(&wt, task) {
         let _ = remove_in(&info);
-        return Err(format!("cannot write {TASK_REL}: {e}"));
+        return Err(e);
     }
     register(info.clone());
     Ok(info)
@@ -497,6 +521,44 @@ mod tests {
         assert_eq!(sh_git(&p, &["branch", "--list", "factory/*"]).trim(), "", "and no branch");
         assert!(valid_run_id(&"a".repeat(64)) && valid_run_id("20261109-101500-a1b2c3") && valid_run_id("R_1-x"));
         let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_refuses_repo_committed_factory_symlink() {
+        // Case 1: `.factory` itself is committed as a symlink to a folder outside the repo.
+        let p = project_repo("symlink-dir");
+        let outside = temp("symlink-dir-outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside = outside.canonicalize().unwrap();
+        std::os::unix::fs::symlink(&outside, p.join(".factory")).unwrap();
+        sh_git(&p, &["add", ".factory"]);
+        sh_git(&p, &["commit", "-q", "-m", "link"]);
+        let err = prepare_in(&p, &p, "sym1", None, "task").unwrap_err();
+        assert!(err.contains("refusing to write TASK.md"), "{err}");
+        assert!(!outside.join("TASK.md").exists(), "nothing written outside the worktree");
+        assert!(!p.join("system/loop-worktrees/sym1").exists(), "the refused worktree is removed");
+        assert_eq!(sh_git(&p, &["branch", "--list", "factory/*"]).trim(), "", "and its branch");
+        let _ = std::fs::remove_dir_all(&p);
+        let _ = std::fs::remove_dir_all(&outside);
+
+        // Case 2: `.factory/TASK.md` is committed as a symlink to a file outside the repo.
+        let q = project_repo("symlink-file");
+        let outside_file = temp("symlink-file-outside");
+        std::fs::create_dir_all(&outside_file).unwrap();
+        let outside_file = outside_file.canonicalize().unwrap().join("keep.txt");
+        std::fs::write(&outside_file, "keep\n").unwrap();
+        std::fs::create_dir_all(q.join(".factory")).unwrap();
+        std::os::unix::fs::symlink(&outside_file, q.join(TASK_REL)).unwrap();
+        sh_git(&q, &["add", "-f", TASK_REL]);
+        sh_git(&q, &["commit", "-q", "-m", "link"]);
+        let err = prepare_in(&q, &q, "sym2", None, "task").unwrap_err();
+        assert!(err.contains("refusing to write TASK.md"), "{err}");
+        assert_eq!(std::fs::read_to_string(&outside_file).unwrap(), "keep\n", "the outside file is untouched");
+        assert!(!q.join("system/loop-worktrees/sym2").exists(), "the refused worktree is removed");
+        assert_eq!(sh_git(&q, &["branch", "--list", "factory/*"]).trim(), "", "and its branch");
+        let _ = std::fs::remove_dir_all(&q);
+        let _ = std::fs::remove_dir_all(outside_file.parent().unwrap());
     }
 
     #[cfg(unix)]
