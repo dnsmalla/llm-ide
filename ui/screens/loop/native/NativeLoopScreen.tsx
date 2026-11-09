@@ -35,7 +35,7 @@ import { FACTORY_DEFAULT_KEY, FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
-import { decodeWorktreeDiff } from "./ship-model.ts";
+import { decodeWorktreeDiff, type WorktreeDiff } from "./ship-model.ts";
 import "./native-loop.css";
 
 /** The `/kb/loop/agent-run` answer fields the Loop reads. */
@@ -143,7 +143,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runRecord, setRunRecord] = useState<Record<string, unknown> | null>(null);
   const [runRecordLoaded, setRunRecordLoaded] = useState(false);
   /** The run whose worktree is open in the Review and Ship panel. */
-  const [shipRun, setShipRun] = useState<{ info: RunInfo; item: WorkItem; entry: LoopRunIndexEntry; passed: boolean } | null>(null);
+  const [shipRun, setShipRun] = useState<{ info: RunInfo; item: WorkItem; entry: LoopRunIndexEntry; passed: boolean; diff?: WorktreeDiff } | null>(null);
   /** The Factory loop waiting for its work item; the picker is shown while this is set. */
   const [pickerLoop, setPickerLoop] = useState<LoopDefinition | null>(null);
   // A picker card for a loop the user has since left must not start that loop over the one now shown.
@@ -812,10 +812,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (!outcome.cancelled) void notifyTask("loop", outcome.passed);
       const startedAt = new Date(started).toISOString();
       const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
-      if (isFactoryLoop(target) && activeRun && start && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) setShipRun({ info: activeRun, item: start.item, entry, passed: true });
-      const diffSummary = activeRun
-        ? await invokeHost<unknown>("loop_worktree_diff", { runId: activeRun.runId }).then((raw) => { const d = decodeWorktreeDiff(raw); return { files: d.files, truncated: d.truncated }; }).catch(() => null)
+      // One diff read per run end: ShipPanel gets it as a prop instead of re-reading (two parallel reads race on the
+      // worktree's index.lock).
+      const worktreeDiff = activeRun
+        ? await invokeHost<unknown>("loop_worktree_diff", { runId: activeRun.runId }).then(decodeWorktreeDiff).catch(() => null)
         : null;
+      const diffSummary = worktreeDiff ? { files: worktreeDiff.files, truncated: worktreeDiff.truncated } : null;
       const factoryFields: FactoryRunFields = {
         workItem: start ? { source: start.item.source, id: start.item.id, title: start.item.title } : null,
         worktree: activeRun ? { runId: activeRun.runId, branch: activeRun.branch, baseCommit: activeRun.baseCommit, repo: activeRun.repo } : null,
@@ -824,7 +826,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         diffSummary,
       };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
-      void appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      // Awaited: Ship's record update (setRunRecordShip) needs the record on disk, so the panel opens only after it.
+      await appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      if (isFactoryLoop(target) && activeRun && start && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) setShipRun({ info: activeRun, item: start.item, entry, passed: true, ...(worktreeDiff ? { diff: worktreeDiff } : {}) });
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
@@ -1066,7 +1070,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       <main className="loop-run" aria-label="Run">
         <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
-        {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} item={shipRun.item} passed={shipRun.passed} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
+        {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>

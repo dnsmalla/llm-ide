@@ -17,6 +17,8 @@ const PREVIEW_LINES = 400;
 export interface ShipPanelProps {
   info: RunInfo;
   item: WorkItem;
+  /** The diff the run end already read; when set the panel does not re-read on mount (the past-run path omits it). */
+  initialDiff?: WorktreeDiff;
   /** Ship is offered only after a passed run; Discard always. */
   passed: boolean;
   fs: Pick<FsApi, "read" | "gitStatus">;
@@ -27,8 +29,8 @@ export interface ShipPanelProps {
   onClose(): void;
 }
 
-export function ShipPanel({ info, item, passed, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
-  const [diff, setDiff] = useState<WorktreeDiff | null>(null);
+export function ShipPanel({ info, item, initialDiff, passed, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
+  const [diff, setDiff] = useState<WorktreeDiff | null>(initialDiff ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [review, setReview] = useState("");
   const [base, setBase] = useState("main");
@@ -44,16 +46,18 @@ export function ShipPanel({ info, item, passed, fs, runPrefix, onShipped, onDisc
 
   useEffect(() => {
     let live = true;
-    void invokeHost<unknown>("loop_worktree_diff", { runId: info.runId })
-      .then((raw) => { if (live) setDiff(decodeWorktreeDiff(raw)); })
-      .catch((e: unknown) => { if (live) setDiffError(e instanceof Error ? e.message : String(e)); });
+    if (!initialDiff) {
+      void invokeHost<unknown>("loop_worktree_diff", { runId: info.runId })
+        .then((raw) => { if (live) setDiff(decodeWorktreeDiff(raw)); })
+        .catch((e: unknown) => { if (live) setDiffError(e instanceof Error ? e.message : String(e)); });
+    }
     void fs.read(`${runPrefix}/.factory/REVIEW.md`, 200_000)
       .then((r) => { if (live && r.status === "ok" && r.text) setReview(r.text); })
       .catch(() => undefined);
     // The project's own branch is the natural target only when the project root is the run's repo.
     if (info.repo === info.project) void fs.gitStatus().then((s) => { if (live && s.branch) setBase(s.branch); }).catch(() => undefined);
     return () => { live = false; };
-  }, [fs, info.runId, info.repo, info.project, runPrefix]);
+  }, [fs, info.runId, info.repo, info.project, runPrefix, initialDiff]);
 
   const ship = async () => {
     if (!target || blocked || busy || !passed) return;
