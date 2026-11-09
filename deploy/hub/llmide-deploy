@@ -423,6 +423,11 @@ HOOK
     esac
     [ -f "$db" ] || die "the recorded pre-deploy database is missing"
     systemctl stop llmide-core 2>/dev/null || true
+    # Keep the failed release's database beside it: anything written since the snapshot is still
+    # recoverable by hand (the restore itself is the spec; losing those rows silently is not).
+    if [ -f /var/lib/llmide/data.db ]; then
+      cp -p /var/lib/llmide/data.db "/var/lib/llmide/data.db.failed-$(date -u +%Y%m%dT%H%M%SZ).db"
+    fi
     cp -p "$db" /var/lib/llmide/data.db
     rm -f /var/lib/llmide/data.db-wal /var/lib/llmide/data.db-shm
     chown llmide:llmide /var/lib/llmide/data.db; chmod 0600 /var/lib/llmide/data.db
@@ -437,15 +442,17 @@ HOOK
   rollback)
     if [ ! -L /opt/llmide/previous ]; then die "no previous release to roll back to"; fi
     # R-034 #8: rollback restores the database when the failed release migrated it forward. The head
-    # is read from the still-current (new) release before the symlink switches; an unreadable head
-    # (old release without the helper script) skips the restore rather than guessing.
+    # is read from the still-current (new) release before the symlink switches; an unreadable live
+    # head restores too (fail closed). No recorded pre-deploy head (no DB before) skips it.
     restored=0
     if [ -f "$RESTORE" ]; then
       pre=$(sed -n 's/^HEAD=//p' "$RESTORE" | head -1)
       cur=$(schema_head)
       case "$pre" in ''|*[!0-9]*) pre="" ;; esac
       case "$cur" in ''|*[!0-9]*) cur="" ;; esac
-      if [ -n "$pre" ] && [ -n "$cur" ] && [ "$cur" -gt "$pre" ]; then
+      # Fail closed: a known pre-deploy head with an unreadable live head cannot prove the failed
+      # release left the schema alone, and the older target may not refuse an ahead database.
+      if [ -n "$pre" ] && { [ -z "$cur" ] || [ "$cur" -gt "$pre" ]; }; then
         "$0" restore-db || die "the database restore failed; the previous release was not started"
         restored=1
       fi

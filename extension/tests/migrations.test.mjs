@@ -28,6 +28,16 @@ test('R-034 #8: a database ahead of this build is refused, never opened', () => 
   assert.throws(() => applyMigrations(db), /ahead of this build/);
 });
 
+test('R-034 #8: an empty migration set is not "ahead" of an applied database', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const db = fresh();
+  applyMigrations(db);
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'mig-empty-'));
+  assert.doesNotThrow(() => applyMigrations(db, { dir: empty }));
+});
+
 test('second run is a no-op', () => {
   const db = fresh();
   applyMigrations(db);
