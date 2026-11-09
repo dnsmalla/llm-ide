@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -20,7 +21,25 @@ use sha2::{Digest, Sha256};
 use crate::loop_approval::ApprovalStore;
 use crate::proc_tree::ManagedChild;
 
-static CANCEL: AtomicBool = AtomicBool::new(false);
+/// Cancel requests keyed by run id; `""` is the legacy run that has no id. Stop on one run never stops another.
+static CANCEL: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn cancel_set() -> MutexGuard<'static, HashSet<String>> {
+    CANCEL.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+pub(crate) fn is_cancelled(key: &str) -> bool {
+    cancel_set().contains(key)
+}
+
+/// A run (or its next stage) starts uncancelled: a Stop pressed while idle must not abort it.
+pub(crate) fn clear_cancel(key: &str) {
+    cancel_set().remove(key);
+}
+
+pub(crate) fn request_cancel(key: &str) {
+    cancel_set().insert(key.to_string());
+}
 
 use serde::Serialize;
 
@@ -296,6 +315,24 @@ pub(crate) fn canonical_roots(root: &Path) -> Result<(PathBuf, PathBuf), String>
     Ok((project, work))
 }
 
+/// (project, work) for a Loop host command. `None`: the active project and its `work_root`, exactly as before.
+/// `Some(run_id)`: the run's own project and worktree from `loop_worktree::resolve` (registry first, ownership
+/// re-checked), never `active_root()`, so switching project mid-run cannot move a run.
+pub(crate) fn root_for(run_id: Option<&str>) -> Result<(PathBuf, PathBuf), String> {
+    match run_id {
+        None => {
+            let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
+            crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
+            let work = work_root(&root);
+            Ok((root, work))
+        }
+        Some(id) => {
+            let info = crate::loop_worktree::resolve(id)?;
+            Ok((PathBuf::from(info.project), PathBuf::from(info.worktree)))
+        }
+    }
+}
+
 /// True when any `system/faults/**/*.md` is still marked `status: fixed`. The desktop's deterministic slice cannot
 /// re-ask the agent those questions, so it refuses rather than reporting a green sweep it never performed.
 fn has_fixed_faults(dir: &Path) -> bool {
@@ -335,6 +372,13 @@ pub(crate) fn run_fault_verify_gated(root: &Path, rel: &str, timeout_secs: Optio
 /// Runs one already-saved stage. A shell stage requires a native host approval pinned to its exact command; a
 /// Regression stage runs its deterministic slice without shell. Nothing is spawned until the approval checks pass.
 pub(crate) fn run_stage_gated(root: &Path, stage_id: &str, loop_id: Option<&str>, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<StageRun, String> {
+    run_stage_gated_at(root, None, stage_id, loop_id, timeout_secs, store, token)
+}
+
+/// `run_stage_gated` for a factory run. `run` is `Some((worktree, run_id))`: the approval is still checked against
+/// the PROJECT's canonical roots (the hash-pinned grant the Loop page minted for `root`), then the approved command
+/// starts in the run's worktree and stops only on that run's cancel. `None` is the legacy path, unchanged.
+pub(crate) fn run_stage_gated_at(root: &Path, run: Option<(&Path, &str)>, stage_id: &str, loop_id: Option<&str>, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<StageRun, String> {
     let spec = resolve_stage(root, stage_id, loop_id)?;
     match spec.kind.as_str() {
         "regressionSweep" => run_regression(root),
@@ -343,7 +387,10 @@ pub(crate) fn run_stage_gated(root: &Path, stage_id: &str, loop_id: Option<&str>
             let (project, work) = canonical_roots(root)?;
             let token = token.ok_or_else(|| "this shell stage needs a native host approval before it can run".to_string())?;
             store.authorize_stage_at(token, &project, &work, &spec.loop_id, &spec.stage_id, &spec.command, crate::confirm::now_ms())?;
-            run_command_at(&work, &spec.command, timeout_secs)
+            match run {
+                Some((worktree, run_id)) => run_command_keyed(worktree, &spec.command, timeout_secs, run_id),
+                None => run_command_at(&work, &spec.command, timeout_secs),
+            }
         }
         _ => Err("only shellCommand and regressionSweep stages can run in this slice".into()),
     }
@@ -351,7 +398,12 @@ pub(crate) fn run_stage_gated(root: &Path, stage_id: &str, loop_id: Option<&str>
 
 /// The shell command actually runs in `work` (the approved working folder), never in a folder re-derived later.
 fn run_command_at(work: &Path, command: &str, timeout_secs: Option<u64>) -> Result<StageRun, String> {
-    run_command_at_cancellable(work, command, timeout_secs, None, &CANCEL)
+    run_command_keyed(work, command, timeout_secs, "")
+}
+
+/// `run_command_at`, stopped only by a cancel for `key` (a run id, or `""` for the legacy run).
+fn run_command_keyed(work: &Path, command: &str, timeout_secs: Option<u64>, key: &str) -> Result<StageRun, String> {
+    run_command_at_cancellable(work, command, timeout_secs, None, &|| is_cancelled(key))
 }
 
 /// The shell a saved stage command runs in: `/bin/sh -lc`, like the Mac app's Loop. Windows has no `/bin/sh`, so
@@ -397,13 +449,13 @@ pub fn git_command() -> Command {
 /// The host-controlled shell helper for Self-Heal's fixed `scripts/self-heal-verify.sh` run. It is NOT a Loop entry
 /// point: every Loop shell command goes through `run_stage_gated` / `run_loop_gated` / `run_fault_verify_gated`.
 pub(crate) fn run_command_cancellable(root: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, cancel: &AtomicBool) -> Result<StageRun, String> {
-    run_command_at_cancellable(&work_root(root), command, timeout_secs, sink, cancel)
+    run_command_at_cancellable(&work_root(root), command, timeout_secs, sink, &|| cancel.load(Ordering::SeqCst))
 }
 
-fn run_command_at_cancellable(work: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, cancel: &AtomicBool) -> Result<StageRun, String> {
+fn run_command_at_cancellable(work: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, stop_requested: &dyn Fn() -> bool) -> Result<StageRun, String> {
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, 86_400));
     let started = Instant::now();
-    if cancel.load(Ordering::SeqCst) {
+    if stop_requested() {
         return Ok(StageRun { exit_code: None, stdout: String::new(), stderr: String::new(), timed_out: false, cancelled: true, duration_ms: 0 });
     }
     let mut cmd = stage_shell(command);
@@ -424,7 +476,7 @@ fn run_command_at_cancellable(work: &Path, command: &str, timeout_secs: Option<u
     let status = loop {
         match child.try_wait().map_err(|e| format!("cannot wait for the stage: {e}"))? {
             Some(s) => break Some(s),
-            None if cancel.load(Ordering::SeqCst) => {
+            None if stop_requested() => {
                 cancelled = true;
                 child.terminate(grace);
                 break None;
@@ -518,18 +570,27 @@ pub(crate) fn run_loop_gated(root: &Path, loop_id: &str, timeout_secs: Option<u6
 /// Tauri command. The stage id is resolved against the active project's loop.json; no command crosses IPC. A shell
 /// stage must carry the host-minted approval token for its exact command.
 #[tauri::command]
-pub async fn loop_run_stage(stage_id: String, loop_id: Option<String>, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<StageRun, String> {
-    CANCEL.store(false, Ordering::SeqCst);
+pub async fn loop_run_stage(stage_id: String, loop_id: Option<String>, approval_token: Option<String>, timeout_secs: Option<u64>, run_id: Option<String>) -> Result<StageRun, String> {
+    clear_cancel(run_id.as_deref().unwrap_or(""));
     tauri::async_runtime::spawn_blocking(move || {
-        let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop stage".to_string())?;
-        crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        run_stage_gated(&root, &stage_id, loop_id.as_deref(), timeout_secs, crate::loop_approval::store(), approval_token.as_deref())
+        let Some(id) = run_id.as_deref() else {
+            let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop stage".to_string())?;
+            crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
+            return run_stage_gated(&root, &stage_id, loop_id.as_deref(), timeout_secs, crate::loop_approval::store(), approval_token.as_deref());
+        };
+        let (project, work) = root_for(Some(id))?;
+        run_stage_gated_at(&project, Some((work.as_path(), id)), &stage_id, loop_id.as_deref(), timeout_secs, crate::loop_approval::store(), approval_token.as_deref())
     }).await.map_err(|e| format!("Loop stage task failed: {e}"))?
 }
 
+/// Stops one run: `None` is the legacy run (key ""), `Some(run_id)` only that run. A malformed id is ignored.
 #[tauri::command]
-pub fn loop_cancel() {
-    CANCEL.store(true, Ordering::SeqCst);
+pub fn loop_cancel(run_id: Option<String>) {
+    match run_id.as_deref() {
+        None => request_cancel(""),
+        Some(id) if crate::loop_worktree::valid_run_id(id) => request_cancel(id),
+        Some(_) => {}
+    }
 }
 
 #[tauri::command]
@@ -542,7 +603,7 @@ pub fn loop_work_root() -> Result<String, String> {
 #[tauri::command]
 pub async fn loop_run_loop(loop_id: String, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<LoopRunResult, String> {
     // A cancel pressed while idle must not stick and abort the next run before it starts.
-    CANCEL.store(false, Ordering::SeqCst);
+    clear_cancel("");
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
@@ -619,13 +680,16 @@ pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Res
     Ok(())
 }
 
+/// `loop_revert_paths` without Tauri: the legacy work root, or the run's worktree when `run_id` is given.
+pub(crate) fn revert_paths_for(run_id: Option<&str>, paths: &[String], created: &[String]) -> Result<(), String> {
+    let (_, work) = root_for(run_id)?;
+    revert_paths_in(&work, paths, created)
+}
+
 #[tauri::command]
-pub async fn loop_revert_paths(paths: Vec<String>, created: Option<Vec<String>>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
-        crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        revert_paths_in(&work_root(&root), &paths, &created.unwrap_or_default())
-    }).await.map_err(|e| format!("revert task failed: {e}"))?
+pub async fn loop_revert_paths(paths: Vec<String>, created: Option<Vec<String>>, run_id: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || revert_paths_for(run_id.as_deref(), &paths, &created.unwrap_or_default()))
+        .await.map_err(|e| format!("revert task failed: {e}"))?
 }
 
 /// Most paths the snapshot reads. Over this it errors rather than truncating: a cut-off list would make a dirty path
@@ -663,13 +727,16 @@ fn parse_porcelain_z(text: &str) -> Result<Vec<String>, String> {
     Ok(paths)
 }
 
+/// `loop_changed_paths` without Tauri: the legacy work root, or the run's worktree when `run_id` is given.
+pub(crate) fn changed_paths_for(run_id: Option<&str>) -> Result<Vec<String>, String> {
+    let (_, work) = root_for(run_id)?;
+    changed_paths_in(&work)
+}
+
 #[tauri::command]
-pub async fn loop_changed_paths() -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
-        crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
-        changed_paths_in(&work_root(&root))
-    }).await.map_err(|e| format!("changed paths task failed: {e}"))?
+pub async fn loop_changed_paths(run_id: Option<String>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || changed_paths_for(run_id.as_deref()))
+        .await.map_err(|e| format!("changed paths task failed: {e}"))?
 }
 
 
@@ -688,7 +755,7 @@ pub async fn loop_environment_check() -> Result<EnvironmentStatus, String> {
 
 #[tauri::command]
 pub async fn loop_run_fault_verify(rel: String, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<StageRun, String> {
-    CANCEL.store(false, Ordering::SeqCst);
+    clear_cancel("");
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
@@ -1103,5 +1170,94 @@ mod tests {
         let go = AtomicBool::new(false);
         let r = run_command_cancellable(&std::env::temp_dir(), &cmd("printf ran"), Some(5), None, &go).unwrap();
         assert_eq!(r.stdout.trim_end(), "ran");
+    }
+
+    /// A project that is itself a git repo (`a.txt` = "committed\n") with one saved shell stage `l1/s1`. Canonical.
+    fn git_project(name: &str, command: &str) -> PathBuf {
+        let root = project(name, command);
+        git(&root, &["init", "-q"]);
+        std::fs::write(root.join("a.txt"), "committed\n").unwrap();
+        git(&root, &["add", "a.txt"]);
+        git(&root, &["commit", "-q", "-m", "init"]);
+        root.canonicalize().unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn work_root_for_run_uses_worktree_not_active_root() {
+        let root = git_project("run-root", "cat a.txt");
+        let info = crate::loop_worktree::prepare_in(&root, &root, "t5-root", None, "task").unwrap();
+        let (project, work) = root_for(Some("t5-root")).unwrap();
+        assert_eq!(project, root, "the run's own project, whatever project is active");
+        assert_eq!(work, PathBuf::from(&info.worktree));
+        assert_ne!(work, work_root(&root), "not the project's main work root");
+        // The main tree is edited; the run's stage and changed paths see only the worktree.
+        std::fs::write(root.join("a.txt"), "main edit\n").unwrap();
+        assert_eq!(changed_paths_for(Some("t5-root")).unwrap(), vec![".factory/".to_string()]);
+        let store = ApprovalStore::new();
+        let token = approve_stage(&store, &root, "s1"); // minted for the project, as the Loop page does today
+        let r = run_stage_gated_at(&project, Some((work.as_path(), "t5-root")), "s1", Some("l1"), Some(10), &store, Some(&token)).unwrap();
+        assert_eq!(r.stdout.trim_end(), "committed", "the approved command ran in the worktree");
+        let legacy = run_stage_gated(&root, "s1", Some("l1"), Some(10), &store, Some(&token)).unwrap();
+        assert_eq!(legacy.stdout.trim_end(), "main edit", "no run id: the main work root, unchanged");
+        // A run still needs the approval: no token, nothing runs.
+        assert!(run_stage_gated_at(&project, Some((work.as_path(), "t5-root")), "s1", Some("l1"), Some(10), &store, None).unwrap_err().contains("native host approval"));
+        assert!(root_for(Some("../x")).is_err());
+        crate::loop_worktree::remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_one_run_leaves_other_running() {
+        // Unique keys only: "" is the legacy key other tests run under, so this test never cancels it.
+        for k in ["t5-cancel-a", "t5-cancel-b", "t5-cancel-c"] {
+            clear_cancel(k);
+        }
+        loop_cancel(Some("t5-cancel-a".to_string()));
+        assert!(is_cancelled("t5-cancel-a"));
+        assert!(!is_cancelled("t5-cancel-b"), "Stop on one run never stops another");
+        let dir = std::env::temp_dir();
+        let a = run_command_keyed(&dir, "printf a", Some(5), "t5-cancel-a").unwrap();
+        assert!(a.cancelled && a.exit_code.is_none(), "{a:?}");
+        let b = run_command_keyed(&dir, "printf b", Some(5), "t5-cancel-b").unwrap();
+        assert_eq!(b.stdout.trim_end(), "b");
+        assert!(!b.cancelled);
+        // Mid-run: cancelling run c stops c, and a run on b started at the same time finishes.
+        let slow_b = std::thread::spawn(|| run_command_keyed(&std::env::temp_dir(), "sleep 1; printf done", Some(10), "t5-cancel-b").unwrap());
+        let slow_c = std::thread::spawn(|| run_command_keyed(&std::env::temp_dir(), "sleep 5", Some(10), "t5-cancel-c").unwrap());
+        std::thread::sleep(Duration::from_millis(300));
+        let started = Instant::now();
+        loop_cancel(Some("t5-cancel-c".to_string()));
+        let c = slow_c.join().unwrap();
+        assert!(c.cancelled && started.elapsed() < Duration::from_secs(4), "{c:?}");
+        let b = slow_b.join().unwrap();
+        assert!(!b.cancelled && b.stdout.trim_end() == "done", "{b:?}");
+        // An id that is not a run id is ignored, never stored.
+        loop_cancel(Some("../bad id".to_string()));
+        assert!(!is_cancelled("../bad id"));
+        for k in ["t5-cancel-a", "t5-cancel-b", "t5-cancel-c"] {
+            clear_cancel(k);
+        }
+        assert!(!is_cancelled("t5-cancel-a"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn revert_with_run_id_touches_only_worktree() {
+        let root = git_project("run-revert", "printf ok");
+        let info = crate::loop_worktree::prepare_in(&root, &root, "t5-revert", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(root.join("a.txt"), "user edit in main\n").unwrap();
+        std::fs::write(wt.join("a.txt"), "agent edit in worktree\n").unwrap();
+        std::fs::write(wt.join("new.txt"), "agent new\n").unwrap();
+        revert_paths_for(Some("t5-revert"), &["a.txt".to_string(), "new.txt".to_string()], &["new.txt".to_string()]).unwrap();
+        assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "committed\n");
+        assert!(!wt.join("new.txt").exists());
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "user edit in main\n", "the same path in the main tree is unchanged");
+        assert!(revert_paths_for(Some("../x"), &["a.txt".to_string()], &[]).is_err());
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "user edit in main\n");
+        crate::loop_worktree::remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
