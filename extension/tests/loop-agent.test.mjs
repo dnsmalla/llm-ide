@@ -1292,3 +1292,17 @@ test('route: a gateway step is metered under the provider that ran, not anthropi
     assert.deepEqual(rows, [{ provider: gateway, model: 'glm-4.6' }]);
   } finally { syncCustomProviders([], u.id); }
 });
+
+test('runLoopAgent: R-034 #6 the run carries the same USD budget as a chat turn, project included', () => withKey(async () => {
+  const capture = {};
+  const seen = [];
+  const budget = (uid, model, opts) => { seen.push([uid, opts.projectId]); return 0.5; };
+  await runLoopAgent({
+    message: 'x', root: REPO, userId: user.id, projectId: 'p-loop', budget, queryFactory: toolPlayingQuery(capture, []),
+  }, noSkill);
+  assert.equal(capture.options.maxBudgetUsd, 0.5);
+  assert.deepEqual(seen, [[user.id, 'p-loop']]);
+  const none = {};
+  await runLoopAgent({ message: 'x', root: REPO, userId: user.id, budget: () => null, queryFactory: toolPlayingQuery(none, []) }, noSkill);
+  assert.equal('maxBudgetUsd' in none.options, false, 'no cap → no budget option');
+}));

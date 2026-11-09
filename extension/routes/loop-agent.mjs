@@ -250,6 +250,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       model,
       provider,
       authorityCheck,
+      projectId,
       abortController: ac,
       // The same auth ladder as /agent/v2/stream: vault key → env key →
       // the operator's ambient `claude login`.

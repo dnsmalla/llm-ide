@@ -41,6 +41,7 @@ import { handleFindCode, STALE_HINT } from '../tools/handlers/find-code.mjs';
 import { resolveRepoScope } from '../../kb/db.mjs';
 import {
   AGENT_SDK_PROVIDER, resolveAgentEngineAuth, agentEngineHomeFor, agentEngineEnv, normalizeModelUsage,
+  resolveMaxBudgetUsd,
 } from './engine.mjs';
 import { writePathGate } from '../tools/gates.mjs';
 import {
@@ -509,6 +510,7 @@ export async function runLoopAgent(
   {
     message, skills, root, extraRoots = [], userId, language, model, provider, abortController,
     authorityCheck = null, allowAmbientAuth = false, queryFactory = sdkQueryFactory, readOnly = false,
+    projectId = null, budget = resolveMaxBudgetUsd,
   } = {},
   { readSkill = readSkillInstructions } = {},
 ) {
@@ -653,6 +655,10 @@ export async function runLoopAgent(
   };
 
   const safeMessage = neutralizePromptFences(String(message ?? '')).slice(0, MAX_LOOP_MESSAGE_CHARS);
+  // R-034 #6: the same spend bound as a chat turn (per-model cap, member month, project month). The
+  // ledger row is written after the run, so without this a Loop could spend past every cap in one run.
+  let maxBudgetUsd = null;
+  try { maxBudgetUsd = userId ? budget(userId, model, { provider: provider || AGENT_SDK_PROVIDER, projectId }) : null; } catch { maxBudgetUsd = null; }
   const q = queryFactory(safeMessage, {
     cwd: root,
     additionalDirectories: roots.slice(1),
@@ -682,6 +688,7 @@ export async function runLoopAgent(
       root, model, append: headlessSystemAppend(root, roots.slice(1), languageLine, skillsText),
     }),
     maxTurns: MAX_TURNS,
+    ...(maxBudgetUsd != null ? { maxBudgetUsd } : {}),
     // A one-shot step: nothing resumes it, so nothing is written to disk.
     persistSession: false,
     ...(typeof model === 'string' && model ? { model } : {}),
