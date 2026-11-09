@@ -55,9 +55,44 @@ server {
         try_files $uri $uri/ /app/index.html;
     }
     location = /metrics { return 404; }
-    # R-026 #8: the owner console is reached through the desktop, never the public hub edge.
+    # R-034 #5: the desktop proxy forwards to this same vhost, so the team console's member and
+    # invite routes must reach the core here. ONLY these three shapes pass — the core gates them by
+    # JWT and team role (`/admin/*` is the `admin` action class). Every other /admin path stays 404
+    # at the edge, including the bare /admin and /admin/ itself.
     location = /admin { return 404; }
-    location ^~ /admin/ { return 404; }
+    location = /admin/members {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+    location /admin/members/ {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+    location = /admin/invites {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+    location /admin/invites/ {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+    location /admin/ { return 404; }
 
     location / {
         proxy_pass http://127.0.0.1:3457;

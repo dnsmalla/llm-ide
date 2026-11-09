@@ -46,6 +46,16 @@ test("login keeps tokens out of the snapshot, then requests carry the bearer", a
   assert.equal(calls[1].init.credentials, "omit");
 });
 
+test("R-034 #5: register sends a hub invite token, and omits the field when empty", async () => {
+  const { client, calls } = setup(() => json(201, { user: { id: "u1" } }));
+  await client.register("a@b.c", "pw", "Name", undefined, "inv-123");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { email: "a@b.c", password: "pw", displayName: "Name", invite: "inv-123" });
+  const plain = setup(() => json(201, { user: { id: "u1" } }));
+  await plain.client.register("a@b.c", "pw");
+  assert.deepEqual(JSON.parse(plain.calls[0].init.body), { email: "a@b.c", password: "pw" });
+  assert.ok(!("invite" in JSON.parse(plain.calls[0].init.body)));
+});
+
 test("request without a session fails closed with NO_SESSION", async () => {
   const { client, calls } = setup(() => json(200, {}));
   await assert.rejects(client.request("/kb/x"), (e) => e.code === "NO_SESSION" && e.status === 401);

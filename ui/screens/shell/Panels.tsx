@@ -135,6 +135,7 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
     const email = String(data.get("email") ?? "").trim();
     const password = String(data.get("password") ?? "");
     const displayName = String(data.get("displayName") ?? "").trim();
+    const invite = String(data.get("invite") ?? "").trim();
     if (!email || !password) {
       setError("Enter an email and a password.");
       return;
@@ -146,7 +147,7 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
     setNotice(null);
     try {
       if (mode === "create") {
-        await client.register(email, password, displayName || undefined, ctl.signal);
+        await client.register(email, password, displayName || undefined, ctl.signal, invite || undefined);
         setNotice("Account created. Signing in…");
       }
       await client.login(email, password, ctl.signal);
@@ -165,7 +166,7 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
   return (
     <div className="sh-panel">
       <h2 className="sh-panel-title">{create ? "Create your account" : "Sign in to LLM-IDE"}</h2>
-      <p className="sh-panel-text sh-muted">The account lives only on this computer. You sign in again each time the app starts.</p>
+      <p className="sh-panel-text sh-muted">The account lives on the LLM-IDE core you connect to. You sign in again each time the app starts.</p>
       {getStatus?.()?.url ? <p className="sh-panel-text sh-muted">Server: <code>{getStatus()!.url}</code></p> : null}
       {trust?.needsConfirm && gate && <UntrustedCoreNotice url={trust.url} onConfirm={() => gate.confirm()} />}
       <form className="sh-form" onSubmit={submit} aria-busy={pending}>
@@ -177,6 +178,14 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
           <label className="sh-field">
             <span>Display name (optional)</span>
             <input name="displayName" type="text" autoComplete="name" disabled={pending} maxLength={80} />
+          </label>
+        )}
+        {create && (
+          <label className="sh-field">
+            <span>Invite token (hub members only)</span>
+            <input name="invite" type="text" autoComplete="off" spellCheck={false} disabled={pending} maxLength={512}
+              placeholder="Paste the token from Settings → Team" />
+            <span className="sh-muted">Not needed on a solo install or when the core allows open registration.</span>
           </label>
         )}
         <label className="sh-field">
@@ -198,19 +207,17 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
           <button type="submit" className="sh-button sh-button-primary" disabled={pending || blocked}>
             {pending ? "Please wait…" : create ? "Create account" : "Sign in"}
           </button>
-          {(canRegister || create) && (
-            <button
-              type="button"
-              className="sh-button"
-              disabled={pending}
-              onClick={() => {
-                setMode(create ? "signin" : "create");
-                setError(null);
-              }}
-            >
-              {create ? "I have an account" : "Create account"}
-            </button>
-          )}
+          <button
+            type="button"
+            className="sh-button"
+            disabled={pending}
+            onClick={() => {
+              setMode(create ? "signin" : "create");
+              setError(null);
+            }}
+          >
+            {create ? "I have an account" : canRegister ? "Create account" : "I have an invite"}
+          </button>
         </div>
       </form>
     </div>

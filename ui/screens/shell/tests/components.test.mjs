@@ -67,6 +67,8 @@ test("LoginPanel: labelled fields, password autocomplete, no token or storage us
   assert.match(out, /<label class="sh-field"><span>Email<\/span><input name="email" type="email" autoComplete="username"|autocomplete="username"/i);
   assert.match(out, /type="password"[^>]*autoComplete="current-password"|autocomplete="current-password"/i);
   assert.match(out, /Sign in/);
+  // R-034 #5: a hub with registration closed still offers the invite path.
+  assert.match(out, /I have an invite/);
 });
 
 test("SectionErrorBoundary: contains a crash and renders text-only recovery UI", () => {

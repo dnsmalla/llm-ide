@@ -14,8 +14,8 @@
   </style>
 </head>
 <body>
-  <h1>Create the hub owner</h1>
-  <p class="hint">This page works once, with the setup token from the LLM-IDE deploy. The first account becomes the owner.</p>
+  <h1>Create a hub account</h1>
+  <p class="hint">The first account becomes the owner: open this page from the LLM-IDE deploy's setup link (the setup token is in the URL fragment). A later team member joins with the single-use invite token from Settings → Team instead.</p>
   <form id="f">
     <label for="email">Email</label>
     <input id="email" type="email" autocomplete="username" required>
@@ -23,7 +23,9 @@
     <input id="name" type="text" autocomplete="name">
     <label for="password">Password</label>
     <input id="password" type="password" autocomplete="new-password" minlength="12" required>
-    <button type="submit">Create owner account</button>
+    <label for="invite">Invite token (team members only)</label>
+    <input id="invite" type="text" autocomplete="off" spellcheck="false" placeholder="Paste the token from Settings → Team">
+    <button type="submit">Create account</button>
   </form>
   <p id="s" class="status" role="status"></p>
   <script>
@@ -36,6 +38,7 @@
         var s = document.getElementById("s");
         s.textContent = "Creating…";
         try {
+          var invite = document.getElementById("invite").value.trim();
           var r = await fetch("/auth/register", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -43,12 +46,13 @@
               email: document.getElementById("email").value,
               displayName: document.getElementById("name").value || undefined,
               password: document.getElementById("password").value,
-              bootstrap: token
+              bootstrap: token || undefined,
+              invite: invite || undefined
             })
           });
           var b = await r.json().catch(function () { return {}; });
-          if (r.ok) { s.textContent = "Owner created. Return to LLM-IDE and press \"I created the owner account\"."; document.getElementById("f").hidden = true; }
-          else { s.textContent = (b.error && b.error.message) || ("Could not create the owner (" + r.status + ")."); }
+          if (r.ok) { s.textContent = "Account created. Return to LLM-IDE and sign in."; document.getElementById("f").hidden = true; }
+          else { s.textContent = (b.error && b.error.message) || ("Could not create the account (" + r.status + ")."); }
         } catch (err) { s.textContent = "Could not reach the hub."; }
       });
     })();

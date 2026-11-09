@@ -229,7 +229,8 @@ export interface CoreClient {
   /** Async iterable of SSE events; ends when the server closes, throws `CoreError` on failure/abort. */
   stream(path: string, opts?: StreamOptions): AsyncGenerator<SseEvent, void, void>;
   login(email: string, password: string, signal?: AbortSignal): Promise<SessionSnapshot>;
-  register(email: string, password: string, displayName?: string, signal?: AbortSignal): Promise<void>;
+  /** `invite` is a hub's single-use team invite (POST /auth/register accepts it while registration is closed). */
+  register(email: string, password: string, displayName?: string, signal?: AbortSignal, invite?: string): Promise<void>;
   /** `registrationOpen` from GET /auth/well-known (false when it cannot be read). */
   registrationOpen(signal?: AbortSignal): Promise<boolean>;
   logout(): Promise<void>;
@@ -533,11 +534,16 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
       return snapshot;
     },
 
-    async register(email, password, displayName, signal) {
+    async register(email, password, displayName, signal, invite) {
       requireTrusted();
+      const token = typeof invite === "string" ? invite.trim() : "";
       const res = await rawFetch(
         "/auth/register",
-        { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ email, password, displayName }) },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ email, password, displayName, ...(token ? { invite: token } : {}) }),
+        },
         defaultTimeout,
         signal,
       );
