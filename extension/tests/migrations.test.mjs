@@ -21,6 +21,13 @@ test('first run applies all on-disk migrations', () => {
   assert.ok(status.current >= 2, `current version >= 2, got ${status.current}`);
 });
 
+test('R-034 #8: a database ahead of this build is refused, never opened', () => {
+  const db = fresh();
+  applyMigrations(db);
+  db.prepare("INSERT INTO schema_migrations (version, name) VALUES (9999, 'from-a-newer-release')").run();
+  assert.throws(() => applyMigrations(db), /ahead of this build/);
+});
+
 test('second run is a no-op', () => {
   const db = fresh();
   applyMigrations(db);

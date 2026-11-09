@@ -107,6 +107,17 @@ export function applyMigrations(db, { logger, dir = MIGRATIONS_DIR, table = 'sch
       .map((r) => [r.version, r.checksum]),
   );
   const files = listMigrationFiles(dir);
+  // R-034 #8: an older release must never open a database a newer release migrated. The forward
+  // migration cannot be reversed by swapping the code back; refusing here is the fail-closed half of
+  // the hub rollback's restore-db. A database with no files shipped (a test subset) is not "ahead".
+  const appliedMax = Math.max(0, ...applied.keys());
+  const fileMax = files.length ? files[files.length - 1].version : 0;
+  if (appliedMax > fileMax) {
+    throw new Error(
+      `Database schema is at v${appliedMax}, ahead of this build (v${fileMax}). ` +
+      'Run the newer release, or restore the pre-deploy database backup before starting this one.',
+    );
+  }
   let ranCount = 0;
   for (const { file, version, name } of files) {
     const sql = fs.readFileSync(path.join(dir, file), 'utf8');

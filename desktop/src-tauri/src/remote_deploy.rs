@@ -29,7 +29,8 @@ use crate::remote::{
 /// per stage; there is no wildcard and no free-form argument.
 pub const STAGES: &[&str] = &[
     "check", "upload", "predeploy-backup", "base", "env", "bundle", "nginx", "start",
-    "open-registration", "lock-registration", "backup", "rollback", "update", "uninstall", "uninstall-purge",
+    "open-registration", "lock-registration", "backup", "restore-db", "rollback", "update", "uninstall",
+    "uninstall-purge",
 ];
 
 pub const HELPER: &str = include_str!("../../../deploy/hub/llmide-deploy");
@@ -41,7 +42,7 @@ pub const SETUP_HTML: &str = include_str!("../../../deploy/hub/setup.html");
 
 pub const MIN_DISK_MB: u64 = 2048;
 /// Bumped when the helper's stage set/semantics changes; a mismatch reinstalls it.
-pub const HELPER_VERSION: &str = "1";
+pub const HELPER_VERSION: &str = "2";
 const MAX_DOMAIN: usize = 253;
 const PLAN_TTL_MS: u64 = 30 * 60 * 1000;
 

@@ -161,7 +161,7 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     assert.ok(existsSync(h.releaseNode), 'the release has core/node/node');
     assert.notEqual(statSync(h.releaseNode).mode & 0o005, 0, 'node must be executable by the service user');
     assert.ok(existsSync(join(h.root, 'var/www/llmide-web/index.html')), 'the PWA is copied after the release switch');
-    assert.match(h.run('check'), /helper=1/, 'check reports the helper version');
+    assert.match(h.run('check'), /helper=2/, 'check reports the helper version');
     h.run('upload', 'VERSION\n1.2.4\n');
     assert.notEqual(h.runFail('update').status, 0, 'a same-version update is refused');
 
@@ -169,6 +169,31 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     const calls = readFileSync(h.systemctlLog, 'utf8');
     assert.match(calls, /^enable llmide-core$/m);
     assert.match(calls, /^restart llmide-core$/m);
+  } finally { h.cleanup(); }
+});
+
+test('R-034 #8: restore-db puts the recorded pre-deploy snapshot and its agent db back', { skip }, () => {
+  const h = harness();
+  try {
+    h.run('base', `${h.stage}\n`);
+    const live = join(h.root, 'var/lib/llmide');
+    mkdirSync(live, { recursive: true });
+    const db = join(live, 'data.db');
+    writeFileSync(db, 'new-schema-data');
+    writeFileSync(`${db}-wal`, 'wal');
+    writeFileSync(`${db}-shm`, 'shm');
+    writeFileSync(join(live, 'agent.db'), 'new-agent');
+    const bak = join(live, 'data.db.bak-2026-01-01T00-00-00-000Z.db');
+    writeFileSync(bak, 'old-schema-data');
+    const agentBak = `${bak.slice(0, -3)}.agent.db`;
+    writeFileSync(agentBak, 'old-agent');
+    writeFileSync(join(live, 'predeploy-restore.env'), `HEAD=74\nDB=${bak}\nAGENT=${agentBak}\n`);
+
+    h.run('restore-db');
+    assert.equal(readFileSync(db, 'utf8'), 'old-schema-data');
+    assert.equal(readFileSync(join(live, 'agent.db'), 'utf8'), 'old-agent');
+    assert.ok(!existsSync(`${db}-wal`) && !existsSync(`${db}-shm`), 'stale WAL/SHM are removed');
+    assert.match(readFileSync(h.systemctlLog, 'utf8'), /^stop llmide-core$/m);
   } finally { h.cleanup(); }
 });
 

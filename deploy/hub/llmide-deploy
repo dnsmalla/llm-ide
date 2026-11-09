@@ -24,6 +24,19 @@ CONF=/etc/llmide/core.env
 UNIT=/etc/systemd/system/llmide-core.service
 BACKUP_UNIT=/etc/systemd/system/llmide-backup.service
 SITE=/etc/nginx/sites-enabled/llm-ide-hub
+# R-034 #8: the pre-deploy snapshot and its migration head, written by predeploy-backup and used by
+# rollback's restore-db when a forward migration raised the head.
+RESTORE=/var/lib/llmide/predeploy-restore.env
+CORE_EXT=/opt/llmide/current/core/root/extension
+NODE=/opt/llmide/current/core/node/node
+
+schema_head() {
+  # Highest applied migration version in the LIVE data.db, or empty when it cannot be read. Runs as
+  # llmide (the DB is 0600 llmide), read-only; the helper itself never opens SQLite.
+  [ -f /var/lib/llmide/data.db ] || return 0
+  [ -x "$NODE" ] && [ -f "$CORE_EXT/scripts/schema-head.mjs" ] || return 0
+  runuser -u llmide -- "$NODE" "$CORE_EXT/scripts/schema-head.mjs" /var/lib/llmide/data.db 2>/dev/null || true
+}
 
 staging() {
   # Root-owned, fixed path: the SSH user cannot swap files under it.
@@ -51,7 +64,7 @@ case "$stage" in
     [ -r "$CONF" ] || { echo "llmide-deploy: check: no env file yet" >&2; }
     systemctl is-active --quiet llmide-core 2>/dev/null && echo "service=active" || echo "service=inactive"
     printf 'version=%s\n' "$(cat /opt/llmide/current/VERSION 2>/dev/null || true)"
-    echo "helper=1"
+    echo "helper=2"
     echo "ok"
     ;;
 
@@ -346,15 +359,63 @@ HOOK
     was_active=0
     systemctl is-active --quiet llmide-core 2>/dev/null && was_active=1 || true
     [ "$was_active" -eq 1 ] && systemctl stop llmide-core || true
+    head_before=$(schema_head)
     if [ -f /var/lib/llmide/data.db ]; then
       systemctl start llmide-backup.service || { [ "$was_active" -eq 1 ] && systemctl start llmide-core || true; die "the pre-deploy backup failed"; }
     fi
+    # Remember the snapshot the backup service just wrote (data.db.bak-<stamp>.db + its .agent.db).
+    db=$(ls -t /var/lib/llmide/data.db.bak-*.db 2>/dev/null | grep -v '\.agent\.db$' | head -1 || true)
+    agent=""
+    if [ -n "$db" ]; then agent="${db%.db}.agent.db"; fi
+    {
+      printf 'HEAD=%s\n' "$head_before"
+      printf 'DB=%s\n' "$db"
+      printf 'AGENT=%s\n' "$agent"
+    } > "$RESTORE"
+    chown root:root "$RESTORE"; chmod 0600 "$RESTORE"
     [ "$was_active" -eq 1 ] && systemctl start llmide-core || true
+    say "ok"
+    ;;
+
+  restore-db)
+    # R-034 #8: put the pre-deploy database back, for a rollback whose forward migration cannot be
+    # reversed. The service is stopped here; rollback restarts it after the release switch.
+    [ -f "$RESTORE" ] || die "no pre-deploy snapshot is recorded"
+    db=$(sed -n 's/^DB=//p' "$RESTORE" | head -1)
+    agent=$(sed -n 's/^AGENT=//p' "$RESTORE" | head -1)
+    case "$db" in
+      /var/lib/llmide/data.db.bak-*.db) ;;
+      *) die "the recorded database path is not a pre-deploy backup" ;;
+    esac
+    [ -f "$db" ] || die "the recorded pre-deploy database is missing"
+    systemctl stop llmide-core 2>/dev/null || true
+    cp -p "$db" /var/lib/llmide/data.db
+    rm -f /var/lib/llmide/data.db-wal /var/lib/llmide/data.db-shm
+    chown llmide:llmide /var/lib/llmide/data.db; chmod 0600 /var/lib/llmide/data.db
+    if [ -n "$agent" ] && [ -f "$agent" ]; then
+      cp -p "$agent" /var/lib/llmide/agent.db
+      rm -f /var/lib/llmide/agent.db-wal /var/lib/llmide/agent.db-shm
+      chown llmide:llmide /var/lib/llmide/agent.db; chmod 0600 /var/lib/llmide/agent.db
+    fi
     say "ok"
     ;;
 
   rollback)
     if [ ! -L /opt/llmide/previous ]; then die "no previous release to roll back to"; fi
+    # R-034 #8: rollback restores the database when the failed release migrated it forward. The head
+    # is read from the still-current (new) release before the symlink switches; an unreadable head
+    # (old release without the helper script) skips the restore rather than guessing.
+    restored=0
+    if [ -f "$RESTORE" ]; then
+      pre=$(sed -n 's/^HEAD=//p' "$RESTORE" | head -1)
+      cur=$(schema_head)
+      case "$pre" in ''|*[!0-9]*) pre="" ;; esac
+      case "$cur" in ''|*[!0-9]*) cur="" ;; esac
+      if [ -n "$pre" ] && [ -n "$cur" ] && [ "$cur" -gt "$pre" ]; then
+        "$0" restore-db || die "the database restore failed; the previous release was not started"
+        restored=1
+      fi
+    fi
     target=$(readlink -f /opt/llmide/previous) || die "the previous release is missing"
     [ -d "$target" ] || die "the previous release is missing"
     old=$(readlink -f /opt/llmide/current) || old=""
@@ -371,6 +432,7 @@ HOOK
     if [ -n "$old" ] && [ "$old" != "$target" ]; then ln -sfn "$old" /opt/llmide/previous; fi
     ln -sfn "$target" /opt/llmide/current
     systemctl restart llmide-core
+    [ "$restored" -eq 1 ] && rm -f "$RESTORE" || true
     say "ok ($ver)"
     ;;
 
