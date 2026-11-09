@@ -14,6 +14,13 @@ process.env.LLMIDE_DB_PATH = path.join(os.tmpdir(), `chat-removed-${process.pid}
 const { handleAIRoutes, chatRemovedBody } = await import('../server/ai-routes.mjs');
 const { handleAgentV2Routes } = await import('../routes/agent-v2.mjs');
 const { extensionChatWorkspace } = await import('../core/extension-chat-workspace.mjs');
+const { getDb } = await import('../kb/db.mjs');
+const { grant } = await import('./helpers/grant.mjs');
+// R-034 #18: a turn now needs a members row; this test is about the extension surface, not authority.
+if (getDb().prepare("SELECT id FROM users WHERE id = 'u-410'").get() === undefined) {
+  getDb().prepare("INSERT INTO users (id, email, display_name, password_hash, role, status) VALUES ('u-410','u410@example.com','U','x','user','active')").run();
+  grant(getDb(), 'u-410', { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
+}
 
 function makeReq({ method = 'POST', url, body, user = { id: 'u-410' } }) {
   const chunks = body === undefined ? [] : [Buffer.from(JSON.stringify(body))];
