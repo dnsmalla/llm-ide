@@ -111,8 +111,8 @@ def test_real_source_extracts_all_profiles() -> None:
     if not real_src.exists():
         pytest.skip("real source not found")
     rows = extract(real_src)
-    # 9 in PROFILES block + 2 appended (authPublic, authRegister) = 11
-    assert len(rows) == 11
+    # 9 in PROFILES block + 4 appended (authPublic, authEmailFail, authEmailIpFail, authRegister) = 13
+    assert len(rows) == 13
     names = {r["name"] for r in rows}
     assert "agentTurn" in names
     assert "llm" in names
@@ -123,5 +123,7 @@ def test_real_source_extracts_all_profiles() -> None:
     assert "liveAppend" in names
     assert "kbExport" in names
     assert "authPublic" in names
+    assert "authEmailFail" in names
+    assert "authEmailIpFail" in names
     assert "authRegister" in names
     assert "unknownFallback" in names

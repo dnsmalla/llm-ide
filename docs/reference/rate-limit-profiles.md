@@ -12,6 +12,8 @@ Token-bucket per `(profile, scope)`. Scope is `userId` for authenticated routes,
 | Profile | Burst | Refill window | Notes |
 |---|---|---|---|
 | `agentTurn` | 12 | 5 s / token | ~1 every 5s, burst 12 |
+| `authEmailFail` | 10 | 30 s / token | Failed-login bucket, keyed by normalized email. Charged ONLY on a failed password, so a correct login is not held at zero by someone else's spray; 10 burst, then one guess per 30 s (~3k/day). The per-IP authPublic bucket still applies on top. |
+| `authEmailIpFail` | 10 | 30 s / token | Hard block for one email from one IP. A spray from one address cannot lock the account out from another address, and a correct password is never pre-blocked by the looser email bucket. |
 | `authPublic` | 10 | 1 s / token | Shared bucket for login + refresh — keyed by remote IP. 10-burst then 1/sec to absorb a password-manager fill without blocking the UI, but still stop credential-stuffing loops. |
 | `authRegister` | 3 | 60 s / token | Tighter dedicated bucket for account registration. 3 burst (covers a mistype/retry flow) then 1 per 60 s per IP. Registration is infrequent by design; spam registrations create real DB rows so the cost of being too permissive is higher here. |
 | `dispatch` | 4 | 10 s / token | ~1 every 10s, burst 4 |
