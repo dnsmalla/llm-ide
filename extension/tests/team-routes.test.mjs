@@ -197,7 +197,7 @@ test('a team.yaml write failure answers 500 and restores the previous grant exac
   fs.writeFileSync(blocker, 'not a directory');
   const res = await call({
     method: 'PATCH', url: `/admin/members/${target}`, user: as(owner),
-    body: { teamRole: 'admin', maxMode: 'execute', usdCapMonth: 0 },
+    body: { teamRole: 'admin', maxMode: 'execute', usdCapMonth: 0, unlimited: true },
   }, path.join(blocker, 'sub'));
 
   assert.equal(res.statusCode, 500);
@@ -324,7 +324,7 @@ test('POST /admin/invites validates ttl, email, enums and the closed object', as
     assert.equal(res.json().error.code, 'VALIDATION_FAILED');
   }
   // The boundaries are accepted.
-  for (const body of [{ ttlHours: 1 }, { ttlHours: 168 }, { usdCapMonth: 0 }, { usdCapMonth: 100_000 }]) {
+  for (const body of [{ ttlHours: 1 }, { ttlHours: 168 }, { usdCapMonth: 0, unlimited: true }, { usdCapMonth: 100_000 }]) {
     const res = await call({ method: 'POST', url: '/admin/invites', user: as(owner), body });
     assert.equal(res.statusCode, 200, JSON.stringify(body));
   }

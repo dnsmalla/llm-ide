@@ -27,8 +27,12 @@ export class Semaphore {
     this.queue = [];
   }
 
-  /** Resolves once a slot is held. Pair every acquire with exactly one release. */
-  acquire() {
+  /**
+   * Resolves once a slot is held. Pair every acquire with exactly one release.
+   * `timeoutMs` bounds the wait: a timed-out waiter is REMOVED from the queue
+   * (R-034 #18), so it cannot take a slot later and leak a holder.
+   */
+  acquire(timeoutMs = Infinity) {
     if (this.active < this.max) {
       this.active++;
       return Promise.resolve();
@@ -38,7 +42,17 @@ export class Semaphore {
       // other transient failure (surfaced as a 503/"busy" upstream).
       return Promise.reject(new Error('Semaphore: queue full (server busy)'));
     }
-    return new Promise((resolve) => this.queue.push(resolve));
+    return new Promise((resolve, reject) => {
+      const waiter = { resolve, timer: null };
+      if (Number.isFinite(timeoutMs) && timeoutMs >= 0) {
+        waiter.timer = setTimeout(() => {
+          const i = this.queue.indexOf(waiter);
+          if (i >= 0) this.queue.splice(i, 1);
+          reject(new Error('Semaphore: timeout waiting for a slot'));
+        }, timeoutMs);
+      }
+      this.queue.push(waiter);
+    });
   }
 
   /** Hand the slot to the next waiter, or free it if none are waiting. */
@@ -47,7 +61,8 @@ export class Semaphore {
     if (next) {
       // Transfer this holder's slot straight to the next waiter: `active`
       // was counting us, now it counts them — net unchanged, so leave it.
-      next();
+      if (next.timer) clearTimeout(next.timer);
+      next.resolve();
     } else {
       this.active = Math.max(0, this.active - 1);
     }

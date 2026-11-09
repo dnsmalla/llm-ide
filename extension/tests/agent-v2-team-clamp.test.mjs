@@ -104,6 +104,34 @@ const auditRows = (userId) => getDb().prepare(
   "SELECT action, outcome, detail FROM audit_log WHERE user_id = ? AND action = 'team.deny' ORDER BY id DESC",
 ).all(userId);
 
+// --- R-034 #18: caps and missing authority before any model call -------------
+
+test('R-034 #18: an over-cap member is refused before the classifier runs', async () => {
+  const u = member('member', 'execute');
+  grant(getDb(), u.id, { teamRole: 'member', maxMode: 'execute', usdCapMonth: 5 });
+  spend(u.id, 5);
+  let classified = 0;
+  const turn = fakeTurn();
+  const { res } = await stream(u, { message: 'classify me', mode: 'auto' }, {
+    runTurn: turn.runTurn,
+    classifyMode: async () => { classified += 1; return { mode: 'ask' }; },
+  });
+  assert.equal(res.statusCode, 429);
+  assert.equal(res.json().error.code, 'USD_CAP');
+  assert.equal(classified, 0, 'no classifier model call for an over-cap turn');
+  assert.equal(turn.calls.length, 0);
+});
+
+test('R-034 #18: a caller with no members row is refused, never run uncapped', async () => {
+  const u = member('member', 'execute');
+  getDb().prepare('DELETE FROM members WHERE user_id = ?').run(u.id);
+  const turn = fakeTurn();
+  const { res } = await stream(u, { message: 'hi', mode: 'ask' }, { runTurn: turn.runTurn });
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.json().error.code, 'ROLE_DENIED');
+  assert.equal(turn.calls.length, 0);
+});
+
 // --- max_mode none ---------------------------------------------------------
 
 test('a max_mode none member is refused before the engine runs (403 ROLE_DENIED), with a content-free audit row', async () => {
@@ -196,7 +224,7 @@ test('an admin and an owner run execute turns like anyone else', async () => {
 
 // --- no members row fails closed (R-007#3) --------------------------------
 
-test('a user with no members row is treated as read-only, like the Host API gateway', async () => {
+test('R-034 #18: a user with no members row is refused, never run uncapped', async () => {
   // Plan H1.2: registerUser now writes a members row, so this account is inserted raw to keep
   // exercising the no-authority-row path.
   const userId = `clamp-norow-${++seq}`;
@@ -206,8 +234,9 @@ test('a user with no members row is treated as read-only, like the Host API gate
   const user = { id: userId };
   const turn = fakeTurn();
   const { res } = await stream(user, { message: 'go', mode: 'execute' }, { runTurn: turn.runTurn });
-  assert.equal(res.statusCode, 200);
-  assert.equal(turn.calls[0].mode, 'ask', 'no authority row = the least privilege');
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.json().error.code, 'ROLE_DENIED');
+  assert.equal(turn.calls.length, 0, 'no authority row = no turn');
 });
 
 // --- the monthly USD cap (R-007#1) ----------------------------------------

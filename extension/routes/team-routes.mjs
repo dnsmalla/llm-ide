@@ -31,8 +31,8 @@ import { persistTeamYaml } from '../kb/team-yaml.mjs';
 const BODY_MAX = 64 * 1024;
 const MEMBER_PATH = /^\/admin\/members\/([A-Za-z0-9_-]{1,64})$/;
 const INVITE_PATH = /^\/admin\/invites\/([0-9a-f]{16})$/;
-const PATCH_KEYS = ['teamRole', 'maxMode', 'usdCapMonth'];
-const INVITE_KEYS = ['email', 'teamRole', 'maxMode', 'usdCapMonth', 'ttlHours'];
+const PATCH_KEYS = ['teamRole', 'maxMode', 'usdCapMonth', 'unlimited'];
+const INVITE_KEYS = ['email', 'teamRole', 'maxMode', 'usdCapMonth', 'ttlHours', 'unlimited'];
 
 export function isTeamRoute(url) {
   const p = String(url || '').split('?')[0];
@@ -114,7 +114,10 @@ export async function handleTeamRoute(req, res, { db = getDb(), logger, requestI
     if (patch.usdCapMonth !== undefined) {
       const n = Number(patch.usdCapMonth);
       if (!Number.isFinite(n) || n < 0 || n > MAX_USD_CAP_MONTH) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid USD cap');
+      // R-034 #18: 0 means UNLIMITED. Make that an explicit request, never a typo/default.
+      if (n === 0 && patch.unlimited !== true) return fail(res, 400, 'VALIDATION_FAILED', 'usdCapMonth 0 means unlimited; send unlimited: true to confirm');
     }
+    delete patch.unlimited;
     // Write-through ordering: DB transaction first, then the authoritative file. A file failure restores
     // the exact previous row, so a completed request never leaves the DB and team.yaml disagreeing.
     const before = getMemberSnapshot(db, memberMatch[1]);
@@ -147,6 +150,11 @@ export async function handleTeamRoute(req, res, { db = getDb(), logger, requestI
         && (typeof input.email !== 'string' || input.email.length > 254)) {
       return fail(res, 400, 'VALIDATION_FAILED', 'Invalid email');
     }
+    if (input.usdCapMonth !== undefined) {
+      const n = Number(input.usdCapMonth);
+      if (n === 0 && input.unlimited !== true) return fail(res, 400, 'VALIDATION_FAILED', 'usdCapMonth 0 means unlimited; send unlimited: true to confirm');
+    }
+    delete input.unlimited;
     const out = createInvite(db, req.user.id, input);
     // The token is returned once and never logged or stored in plaintext.
     audit('team.invite', {

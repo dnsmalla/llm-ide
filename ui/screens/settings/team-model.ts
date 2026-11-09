@@ -72,6 +72,8 @@ export interface MemberPatch {
   teamRole?: TeamRole;
   maxMode?: MaxMode;
   usdCapMonth?: number;
+  /** R-034 #18: required when usdCapMonth is 0 (unlimited). */
+  unlimited?: boolean;
 }
 
 export interface InviteBody {
@@ -80,6 +82,8 @@ export interface InviteBody {
   usdCapMonth: number;
   ttlHours: number;
   email?: string;
+  /** R-034 #18: required when usdCapMonth is 0 (unlimited). */
+  unlimited?: boolean;
 }
 
 export interface TeamIdentity {
@@ -281,6 +285,7 @@ export function buildMemberPatch(member: TeamMember, draft: MemberDraft): Member
   if (draft.maxMode !== member.maxMode) patch.maxMode = draft.maxMode;
   const cap = Number(draft.usdCapMonth.trim());
   if (cap !== member.usdCapMonth) patch.usdCapMonth = cap;
+  if (patch.usdCapMonth === 0) patch.unlimited = true;
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
@@ -291,6 +296,7 @@ export function buildInviteBody(draft: InviteDraft, actorRole: TeamRole | null):
     teamRole: draft.teamRole,
     maxMode: draft.maxMode,
     usdCapMonth: Number(draft.usdCapMonth.trim()),
+    ...(Number(draft.usdCapMonth.trim()) === 0 ? { unlimited: true } : {}),
     ttlHours: Number(draft.ttlHours.trim()),
     ...(email === "" ? {} : { email }),
   };

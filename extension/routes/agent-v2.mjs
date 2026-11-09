@@ -187,24 +187,10 @@ function chatSessionLockKey(userId, chatSessionId) {
 // that cannot get a slot within TURN_QUEUE_MS is refused 429 BUSY before the engine starts, so it never
 // writes a usage row. A queued acquire that arrives after the refusal hands its slot straight back.
 const TURN_QUEUE_MS = 30_000;
-const turnSlots = new Semaphore(config.maxConcurrentTurns);
+const turnSlots = new Semaphore(config.maxConcurrentTurns, { maxQueue: Math.max(16, config.maxConcurrentTurns * 2) });
 
 function acquireTurnSlot(queueMs) {
-  const slot = turnSlots.acquire();
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      resolve(false);
-    }, queueMs);
-    slot.then(() => {
-      if (settled) { turnSlots.release(); return; }
-      settled = true;
-      clearTimeout(timer);
-      resolve(true);
-    });
-  });
+  return turnSlots.acquire(queueMs).then(() => true, () => false);
 }
 
 // The abort controller of each chat's in-flight turn, by the same lock key —
@@ -572,6 +558,11 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
   // that asked for read-only must not get the full agentic mode because the
   // classifier had a bad day.
   const member = getMember(getDb(), userId);
+  // R-034 #18: a caller with no authority row has no cap and no role; fail closed rather than run.
+  if (!member) {
+    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'no_member' } });
+    return io.refuse({ code: 'ROLE_DENIED', status: 403, message: 'No team authority row for this account' });
+  }
   // ADR 0022: a turn that names a project (or runs in a registered project folder) is clamped by the
   // PROJECT grant — the project role, the tighter run mode, the tighter cap. A team owner/admin
   // overrides every project; a team viewer stays a viewer. A frame with no project keeps today's team
@@ -617,6 +608,25 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
     ? { teamRole: projectGrant.role, maxMode: projectGrant.maxMode, usdCapMonth: projectGrant.usdCapMonth }
     // R-034 #1 / D1: a projectless turn is still clamped on a hub (a solo install is unchanged).
     : hubClampedMember(member, config.hub);
+  // R-034 #18: the authority and cap checks run BEFORE the classifier, so an over-cap or no-run
+  // member never pays for a classification model call. The clamp still applies after the mode is final.
+  const maxMode = authority?.maxMode ?? 'read_only';
+  if (maxMode === 'none') {
+    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'max_mode_none' } });
+    return io.refuse({ code: 'ROLE_DENIED', status: 403, message: 'Your team role cannot run turns' });
+  }
+  const usdCap = Number(member?.usdCapMonth ?? 0);
+  if (usdCap > 0 && usedUsdMonth(getDb(), userId) >= usdCap) {
+    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'usd_cap' } });
+    return io.refuse({ code: 'USD_CAP', status: 429, message: 'Monthly USD cap reached' });
+  }
+  const projectCap = Number(projectMember?.usdCapMonth ?? 0);
+  const globalCap = Number(member?.usdCapMonth ?? 0);
+  if (turnProjectId && projectCap > 0 && (globalCap === 0 || projectCap <= globalCap)
+      && usedUsdMonthForProject(getDb(), userId, turnProjectId) >= projectCap) {
+    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'usd_cap' } });
+    return io.refuse({ code: 'USD_CAP', status: 429, message: 'Monthly USD cap reached' });
+  }
   const readOnly = requestedMode === AUTO_READ_ONLY;
   let mode;
   if (authority?.teamRole === 'viewer') {
@@ -650,35 +660,6 @@ async function runV2Turn({ userId, chatSessionId, agentContext, message, body, d
     mode = requestedMode && MODES.has(requestedMode) ? requestedMode : DEFAULT_MODE;
   }
 
-  // ADR 0021: the member's highest run mode caps whatever the client or classifier chose. One place,
-  // after `mode` is final and before the lock, for the HTTP stream and startHostTurn alike (a phone
-  // turn runs through this same function). No members row = an unregistered caller: execute, as today.
-  // No members row fails closed: read-only, like the Host API gateway (a registration always writes one).
-  const maxMode = authority?.maxMode ?? 'read_only';
-  if (maxMode === 'none') {
-    // The reason only — never the message, the chat id or any prompt text.
-    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'max_mode_none' } });
-    return io.refuse({ code: 'ROLE_DENIED', status: 403, message: 'Your team role cannot run turns' });
-  }
-  // The member's USD cap is MONTHLY: refuse once the month's ledger sum reaches it (never a per-turn
-  // budget). 0 = no cap. Audited with the reason only, like the max_mode refusal.
-  // Known limit (R-012#3): the in-flight lock is per CHAT, not per user, so concurrent turns of one
-  // member can each pass this check and overshoot the cap by up to (chats-1) × the remaining budget.
-  // Closing it needs a per-user in-flight USD reservation; until then the check is per turn start.
-  const usdCap = Number(member?.usdCapMonth ?? 0);
-  if (usdCap > 0 && usedUsdMonth(getDb(), userId) >= usdCap) {
-    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'usd_cap' } });
-    return io.refuse({ code: 'USD_CAP', status: 429, message: 'Monthly USD cap reached' });
-  }
-  // A project cap sums that project's month only, and applies when it is the tighter cap (or the
-  // global one is absent). A project admin with no project row has no project cap.
-  const projectCap = Number(projectMember?.usdCapMonth ?? 0);
-  const globalCap = Number(member?.usdCapMonth ?? 0);
-  if (turnProjectId && projectCap > 0 && (globalCap === 0 || projectCap <= globalCap)
-      && usedUsdMonthForProject(getDb(), userId, turnProjectId) >= projectCap) {
-    recordAudit(getDb(), { userId, action: 'team.deny', outcome: 'denied', detail: { reason: 'usd_cap' } });
-    return io.refuse({ code: 'USD_CAP', status: 429, message: 'Monthly USD cap reached' });
-  }
   if (maxMode === 'read_only' && !restrictsTools(mode)) {
     mode = clampToReadOnly(mode);
     body.permissionMode = null;
