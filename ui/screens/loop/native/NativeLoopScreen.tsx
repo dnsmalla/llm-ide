@@ -31,6 +31,8 @@ import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, type LoopRunIndexEntry } from "./history.ts";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
+import { FACTORY_DEFAULT_KEY, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FACTORY_TEMPLATE, guardedPaths, isFactoryLoop, needsDecisionSummary, reviewDiffSection, taskMarkdown, withSetupCommand, writeScopeFor, type WorkItem } from "./factory.ts";
+import { FactoryPicker } from "./FactoryPicker.tsx";
 import "./native-loop.css";
 
 /** The `/kb/loop/agent-run` answer fields the Loop reads. */
@@ -137,6 +139,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
   const [runRecord, setRunRecord] = useState<Record<string, unknown> | null>(null);
   const [runRecordLoaded, setRunRecordLoaded] = useState(false);
+  /** The Factory loop waiting for its work item; the picker is shown while this is set. */
+  const [pickerLoop, setPickerLoop] = useState<LoopDefinition | null>(null);
   const openSeq = useRef(0);
   const [customLoad, setCustomLoad] = useState(() => loadCustomTemplatesState());
   const customTemplates = customLoad.templates;
@@ -337,11 +341,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   };
 
   const addLoopFromTemplate = (t: LoopTemplate) => {
+    const factory = t.id === FACTORY_TEMPLATE.id;
+    if (factory && !testCommand) { setNotice("The Factory needs a detected test command for its Verify stage; none was found. See the ENVIRONMENT card."); return; }
     const id = crypto.randomUUID();
     mutateStore((s) => {
       s.loops.push({
         id, name: t.name, isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [],
-        defaultKey: null, runsOnSchedule: false, config: applyTemplate(t, testCommand),
+        defaultKey: factory ? FACTORY_DEFAULT_KEY : null, runsOnSchedule: false,
+        config: factory ? withSetupCommand(applyTemplate(t, testCommand), testCommand) : applyTemplate(t, testCommand),
       });
     });
     setSelectedLoopId(id);
@@ -361,7 +368,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   };
 
   const deleteLoop = () => {
-    if (!store || !loop || loop.defaultKey !== null || store.loops.length <= 1) return;
+    if (!store || !loop || (loop.defaultKey !== null && !isFactoryLoop(loop)) || store.loops.length <= 1) return;
     if (!window.confirm(`Delete “${loop.name}”? Its stages stay in loop.json but the loop disappears from this project.`)) return;
     mutateStore((s) => {
       s.loops = s.loops.filter((l) => l.id !== loop.id);
@@ -511,15 +518,25 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
       if (s.targetPath) parts.push(`Target path: ${s.targetPath}`);
       if (s.outputPath) parts.push(`Output path: ${s.outputPath}`);
+      const scope = writeScopeFor(s);
+      const run = activeRunRef.current;
+      if (run && s.skillId === FACTORY_REVIEW_SKILL) {
+        try {
+          const d = await invokeHost<{ text?: unknown; truncated?: unknown }>("loop_worktree_diff", { runId: run.runId });
+          parts.push(reviewDiffSection({ text: typeof d.text === "string" ? d.text : "", truncated: d.truncated === true }));
+        } catch (e) {
+          return { ok: false, output: `the worktree diff could not be read for the review (${e instanceof Error ? e.message : String(e)})` };
+        }
+      }
       const before = await dirtyBefore();
       const g = await guardedAgentCall<AgentRunReply>({
         before,
         call: () => core.request<AgentRunReply>("/kb/loop/agent-run", {
-          method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: currentRunRoot(), timeoutMs: (s.timeoutSeconds ?? 1800) * 1000 },
+          method: "POST", body: { message: parts.join("\n\n"), skills: [s.skillId], repoRoot: currentRunRoot(), timeoutMs: (s.timeoutSeconds ?? 1800) * 1000, ...(scope ? { writeScope: scope } : {}) },
           signal: runAbortRef.current?.signal,
         }),
         changedNow: changedPathsNow,
-        check: (paths, b, created) => guardProtected(paths, target, b, created),
+        check: (paths, b, created) => guardProtected(guardedPaths(target, s, paths), target, b, created),
       });
       const stop = stopReason(g);
       if (g.result === null || stop !== null) { if (g.violation === null && cancelledRef.current) return { ok: false, output: stop ?? "the agent call failed" }; haltErrorRef.current = g.violation === null; haltRef.current = `${stop ?? "the agent call failed"}; the run stopped`; return { ok: false, output: stop ?? "the agent call failed" }; }
@@ -621,14 +638,16 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     return "ok";
   };
 
-  const executeLoop = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string } | null = null) => {
+  const executeLoop = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null) => {
     if (dirty) return;
     const unsupported = target.config.stages.find((s) => s.enabled && !isNativeRunnable(s));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
-    const useWorktree = target.config.alwaysUseWorktree;
+    const useWorktree = target.config.alwaysUseWorktree || isFactoryLoop(target);
     const worktreeBlocked = useWorktree ? worktreeBlockedStage(target.config.stages) : null;
     if (worktreeBlocked) { setNotice(`“${worktreeBlocked.name}” re-checks faults in the main working tree, so it cannot run in an isolated worktree. Turn that stage off or turn off “Always run in an isolated worktree”.`); return; }
     // A loop.json from a cloned repo can mark a code-applying loop runsOnSchedule; it still never runs unattended.
+    // A Factory run needs a picked work item; the schedule and the queue never have one.
+    if (isFactoryLoop(target) && !start) { setNotice(`“${target.name}” is a Factory loop: start it with ▶ Run and pick a work item.`); return; }
     if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
     const batchBlock = macBatchReason(target);
     if (batchBlock) { setNotice(batchBlock); return; }
@@ -716,6 +735,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           const message = [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
           if (target.goal) message.push(`Loop goal: ${target.goal}`);
           if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
+          if (isFactoryLoop(target)) message.push(FACTORY_REPAIR_HINT);
           const before = await dirtyBefore();
           const g = await guardedAgentCall<AgentRunReply>({
             before,
@@ -724,7 +744,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
               signal: runAbortRef.current?.signal,
             }),
             changedNow: changedPathsNow,
-            check: (paths, b, created) => guardProtected(paths, target, b, created),
+            check: (paths, b, created) => guardProtected(guardedPaths(target, null, paths), target, b, created),
           });
           const r: AgentRunReply = g.result ?? {};
           setRunLog((l) => [...l, `↻ repair ${s.name}`, r.reply ?? (g.error !== null ? `(agent call failed: ${g.error})` : "(no reply)"), ...(g.writes.length ? [`changed: ${g.writes.join(", ")}`] : []), ""]);
@@ -737,6 +757,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         haltIsError() { return haltErrorRef.current; },
         holdWhilePaused,
       });
+      const needsDecision = isFactoryLoop(target) ? needsDecisionSummary(outcome) : null;
+      if (needsDecision) outcome.statusSummary = needsDecision;
       if (activeRun) setRunLog((l) => [...l, `worktree kept: system/loop-worktrees/${activeRun.runId} (branch ${activeRun.branch}); your main working tree was not touched`]);
       let changedPaths: string[] = [];
       try { changedPaths = await invokeHost<string[]>("loop_changed_paths", hostRunArgs()); } catch { changedPaths = []; }
@@ -784,6 +806,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const runLoop = (target: LoopDefinition | null = loop, scheduled = false) => {
     if (!target) return;
+    if (isFactoryLoop(target) && !scheduled) {
+      if (runningRef.current) { setNotice("A Factory run needs its own work item; wait for the current run to finish."); return; }
+      setPickerLoop(target);
+      return;
+    }
     if (runningRef.current) {
       if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled });
       setQueued(queueRef.current.length);
@@ -944,14 +971,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <button type="button" className="loop-btn" disabled={loop.isPrimary} onClick={setPrimary}>★ Primary</button>
           <button type="button" className="loop-btn" disabled={isManualOnly(loop)} title={isManualOnly(loop) ? "Manual-only: it applies code" : "Include in the scheduled run"} onClick={() => patchLoop((l) => { l.runsOnSchedule = !l.runsOnSchedule; })}>{loop.runsOnSchedule ? "◷ Scheduled" : "◷ Schedule"}</button>
           <button type="button" className="loop-btn" onClick={duplicateLoop}>Duplicate</button>
-          {loop.defaultKey === null && store.loops.length > 1 ? <button type="button" className="loop-btn" onClick={deleteLoop}>Delete</button> : null}
+          {(loop.defaultKey === null || isFactoryLoop(loop)) && store.loops.length > 1 ? <button type="button" className="loop-btn" onClick={deleteLoop}>Delete</button> : null}
         </div>
         <ul className="loop-list">
           {store.loops.map((l) => (
             <li key={l.id}>
               <button type="button" className="loop-row" data-on={l.id === loop.id || undefined} onClick={() => selectLoop(l)}>
                 <span className="loop-row-name">{l.name}</span>
-                <span className="loop-row-icons">{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}{l.defaultKey !== null ? <span className="loop-lock" title="Built-in loop: it can't be deleted">{LOCK_ICON}</span> : null}</span>
+                <span className="loop-row-icons">{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}{l.defaultKey !== null && !isFactoryLoop(l) ? <span className="loop-lock" title="Built-in loop: it can't be deleted">{LOCK_ICON}</span> : null}</span>
                 <span className="loop-row-menu" aria-hidden="true">⋯</span>
               </button>
             </li>
@@ -994,6 +1021,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       <main className="loop-run" aria-label="Run">
         <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
+        {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const target = pickerLoop; setPickerLoop(null); void executeLoop(target, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
           <label className="loop-field"><span>Name</span><input value={loop.name} onChange={(e) => patchLoop((l) => { l.name = e.target.value; })} /></label>
@@ -1029,7 +1057,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <button type="button" className="loop-btn" onClick={() => { void revokeApprovals().then(() => { setApprovalState(null); if (loop) void refreshApproval(loop.id); setNotice("Revoked every host Loop command approval."); }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : "The approvals could not be revoked.")); }}>Revoke command approvals</button>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.openMergeRequest} onChange={() => undefined} /> Open a merge request after a successful run (not ported)</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
-            <label className="loop-check"><input type="checkbox" checked={loop.config.alwaysUseWorktree} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
+            <label className="loop-check"><input type="checkbox" checked={loop.config.alwaysUseWorktree || isFactoryLoop(loop)} disabled={isFactoryLoop(loop)} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
           </details>
           <details className="loop-advanced">
             <summary>Desktop limits (explicit)</summary>
@@ -1075,6 +1103,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <button type="button" className="loop-btn" onClick={() => {
               const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === templateId);
               if (!t) return;
+              if (t.id === FACTORY_TEMPLATE.id) { setNotice("Add the Factory as a new loop from “＋ New loop…”; it cannot be applied over an existing loop."); return; }
               const config = applyTemplate(t, testCommand);
               if (config.stages.length === 0) { setNotice("This recipe needs a detected test command; none was found."); return; }
               patchLoop((l) => { l.config = config; });

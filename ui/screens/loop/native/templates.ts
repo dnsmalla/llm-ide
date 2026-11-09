@@ -4,6 +4,7 @@ import type { LoopDefinition, LoopEngineConfig, LoopProjectStore, LoopStage } fr
 import type { LoopDefaults } from "../../shell/host-prefs.ts";
 import { DETECTED_TEST } from "./environment.ts";
 import { DEFAULT_LOOP_SPECS } from "./defaults.ts";
+import { FACTORY_TEMPLATE } from "./factory.ts";
 
 export interface LoopTemplate {
   id: string;
@@ -66,6 +67,7 @@ BUILT_IN_TEMPLATES.push(
   { id: "refactoring", name: "Refactoring", summary: "Structure, graph, test map, plan, apply and verify a refactor batch.", config: defaultConfig("refactor") },
   { id: "doc-optimization", name: "Doc Optimization", summary: "Index docs, rewrite them, then run the artifact check.", config: defaultConfig("docs") },
   { id: "test-growth", name: "Test Growth", summary: "Test structure, map, writer and ledger in one loop.", config: defaultConfig("test") },
+  FACTORY_TEMPLATE,
 );
 
 /** Apply a recipe to a repo: new stage ids, resolved test commands, and no Mac "default" identities. */
