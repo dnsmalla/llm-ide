@@ -1,5 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,11 +13,14 @@ import { formatCliSpawnError } from '../providers/providers.mjs';
 const KEYS = ['PATH', 'HOME', 'LLMIDE_CLAUDE_PATH', 'LLMIDE_CLAUDE_BIN_DISABLED'];
 let saved; let tmp;
 
-function fake(dir, { name = 'claude', body = 'echo "2.0.0 (Claude Code)"', mode = 0o755 } = {}) {
+function fake(dir, { name = 'claude', body = 'echo "2.0.0 (Claude Code)"', mode = 0o755, warm = true } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, name);
   fs.writeFileSync(f, `#!/bin/sh\n${body}\n`, { mode });
   fs.chmodSync(f, mode);
+  // NOTE: macOS checks a freshly written executable on its FIRST run (measured ~180 ms, seconds under a loaded
+  // gate), which pushed the code's 3 s --version timeout over the edge. Pay that cost here, untimed.
+  if (warm && process.platform !== 'win32') spawnSync(f, ['--version'], { stdio: 'ignore', timeout: 60_000 });
   return f;
 }
 
@@ -78,7 +82,7 @@ test('candidates failing --version, non-executable, or in a world-writable dir a
 });
 
 test('a hanging --version is cut off by the timeout', { skip: process.platform === 'win32', timeout: 10_000 }, () => {
-  const slow = fake(path.join(tmp, 'slow'), { body: 'sleep 30' });
+  const slow = fake(path.join(tmp, 'slow'), { body: 'sleep 30', warm: false });
   const t0 = Date.now();
   assert.equal(validateClaudeExecutable(slow), false);
   assert.ok(Date.now() - t0 < 6000);
