@@ -36,6 +36,7 @@ mod menu;
 mod legacy_import;
 mod loop_approval;
 mod loop_runner;
+mod loop_worktree;
 mod notes_fs;
 mod notes_write;
 mod os_open;
@@ -328,6 +329,10 @@ macro_rules! product_handlers {
                 loop_runner::loop_cancel,
                 loop_runner::loop_changed_paths,
                 loop_runner::loop_revert_paths,
+                loop_worktree::loop_worktree_prepare,
+                loop_worktree::loop_worktree_diff,
+                loop_worktree::loop_worktree_remove,
+                loop_worktree::loop_worktree_list,
                 repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,
