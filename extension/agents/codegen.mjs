@@ -10,13 +10,65 @@ import fs from 'fs';
 import path from 'path';
 import { runClaude, tryParseJSON, languageDirective } from '../providers/runtime.mjs';
 import { routeOpts } from '../providers/tier-routing.mjs';
-import { getTaskById, getPlan, mergeTaskMeta, userRepoAllowlist } from '../kb/db.mjs';
+import { getTaskById, getPlan, mergeTaskMeta, getDb } from '../kb/db.mjs';
+import { filteredRepoAllowlist, canonicalRoot } from '../kb/projects.mjs';
+import { expandTilde } from '../graphkit/memory.mjs';
 
 const MAX_FILES = 8;
 export const MAX_FILE_BYTES = 25 * 1024;
 // Full-file JSON for up to MAX_FILES × MAX_FILE_BYTES does not fit 4096 output
 // tokens; the old cap produced truncated JSON and a same-cost retry.
 export const MAX_OUTPUT_TOKENS = 16_000;
+
+function isWithinPath(child, root) {
+  if (!child || !root) return false;
+  return child === root || child.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
+}
+
+/**
+ * R-034 #3: the roots codegen may READ file context from: the caller's allow-list (already project
+ * scoped on a hub by R-034 #2), narrowed to the plan project's root when the caller named one.
+ * Canonical, real, deduped. Empty means "no file context" — never "read anything".
+ */
+export function codegenContextRoots(userId, projectRoot = null) {
+  const project = projectRoot ? canonicalRoot(projectRoot) : null;
+  const out = [];
+  const seen = new Set();
+  let paths = [];
+  try { paths = filteredRepoAllowlist(getDb(), userId) || []; } catch { paths = []; }
+  for (const p of paths) {
+    const real = canonicalRoot(path.resolve(expandTilde(p)));
+    if (!real) continue;
+    if (project && !isWithinPath(real, project)) continue;
+    if (seen.has(real)) continue;
+    seen.add(real);
+    out.push(real);
+  }
+  return out;
+}
+
+/**
+ * The real file a plan's `ref` may name, or null. Absolute refs must land inside a root; a relative
+ * ref is resolved under the project root (or under each root) — never against the process cwd. `..`,
+ * symlinks that escape a root, and any ref outside the roots are refused before any read.
+ */
+export function containedCodegenRef(ref, roots, projectRoot = null) {
+  if (typeof ref !== 'string' || !ref || !Array.isArray(roots) || roots.length === 0) return null;
+  const exp = expandTilde(ref);
+  if (exp.split(/[/\\]/).includes('..')) return null;
+  const project = projectRoot ? canonicalRoot(projectRoot) : null;
+  const candidates = path.isAbsolute(exp)
+    ? [exp]
+    : (project ? [path.join(project, exp)] : roots.map((r) => path.join(r, exp)));
+  for (const cand of candidates) {
+    const real = canonicalRoot(cand);
+    if (!real) continue;
+    if (!roots.some((r) => isWithinPath(real, r))) continue;
+    try { if (!fs.lstatSync(real).isFile()) continue; } catch { continue; }
+    return real;
+  }
+  return null;
+}
 
 function sanitizePath(p) {
   if (typeof p !== 'string') return null;
@@ -198,7 +250,7 @@ export function validate(raw, { modifiable = null } = {}) {
 }
 
 // `_runClaude` is a test seam (as in summarize.mjs); callers never pass it.
-export async function generateCodeForTask(userId, { taskId, language, includeFileContext = true, _runClaude = runClaude }) {
+export async function generateCodeForTask(userId, { taskId, language, includeFileContext = true, projectRoot = null, _runClaude = runClaude }) {
   const task = getTaskById(userId, taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
   const plan = getPlan(userId, task.planId);
@@ -207,19 +259,21 @@ export async function generateCodeForTask(userId, { taskId, language, includeFil
   // Pull the actual file content of each code-sync ref (capped) so the
   // model can produce a faithful "modify" patch.  When includeFileContext
   // is false (huge plans, slow networks), we just pass the title list.
+  // R-034 #3: a ref is only readable when it lands inside the caller's allow-list AND the plan
+  // project's root. A plan row can carry any absolute path it likes (`/etc/hosts`, another
+  // project, `~/.ssh/id_rsa`), so the ref is checked before readFileSafely ever sees it.
   const filesCtx = [];
   if (includeFileContext) {
-    const roots = (() => { try { return userRepoAllowlist(userId); } catch { return []; } })();
+    const roots = codegenContextRoots(userId, projectRoot);
     const candidateFiles = selectRelevantFiles(task.files, task.symbols);
     for (const f of candidateFiles.slice(0, 5)) {
       if (!f?.ref) continue;
-      const read = readFileSafely(f.ref);
+      const real = containedCodegenRef(f.ref, roots, projectRoot);
+      if (!real) continue;
+      const read = readFileSafely(real);
       if (!read) continue;
-      // Repo-relative via the user's allowed roots; the old regex fallback
-      // only for a ref outside every root.
-      const rel = repoRelative(f.ref, roots)
-        || f.ref.replace(/^.*?\/(src|app|lib|server)\//, (m, dir) => `${dir}/`);
-      filesCtx.push({ relPath: rel || path.basename(f.ref), content: read.content, truncated: read.truncated });
+      const rel = repoRelative(real, roots);
+      filesCtx.push({ relPath: rel || path.basename(real), content: read.content, truncated: read.truncated });
     }
   }
   const modifiable = new Set(filesCtx.filter((f) => !f.truncated).map((f) => f.relPath));

@@ -20,7 +20,7 @@ import { nudgeOutcomePoller } from '../agents/outcome-watcher.mjs';
 import { generateCodeForTask } from '../agents/codegen.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { authorizeAction, hubFolderRefusal, projectScopeRefusal } from '../server/route-authority.mjs';
-import { projectIdForFolder } from '../kb/projects.mjs';
+import { projectIdForFolder, getProject } from '../kb/projects.mjs';
 
 // Config keys that name WHERE a dispatch lands (github repo; backlog space +
 // project; linear team + project). Pinned to the approved review.
@@ -352,10 +352,13 @@ export async function handlePlanningRoutes(req, res, ctx) {
       if (!decision.ok) { sendJSON(res, decision.status, { error: { code: decision.code, message: decision.message } }); return true; }
     }
     try {
+      // R-034 #3: the plan project's root is the containment boundary for every file ref codegen reads.
+      const project = projectId ? getProject(kb.getDb(), projectId) : null;
       const result = await generateCodeForTask(userId, {
         taskId: body.taskId,
         language: body.language,
         includeFileContext: body.includeFileContext !== false,
+        projectRoot: project?.root ?? null,
       });
       sendJSON(res, 200, result);
     } catch (err) {
