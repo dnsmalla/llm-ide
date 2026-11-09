@@ -107,6 +107,19 @@ test('usedUsdMonth sums only this month and only this user', () => {
   assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE user_id = ?').get(b).cost_usd, 7);
 });
 
+test('R-034 #6: recordUsage estimates a cost from tokens when the engine reported none', () => {
+  const u = member(0);
+  // Sonnet rates: 3 USD/M input + 15 USD/M output → 1M + 1M = 18 USD.
+  const id = recordUsage(getDb(), { userId: u, provider: 'anthropic', model: MODEL, inputTokens: 1_000_000, outputTokens: 1_000_000 });
+  assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE id = ?').get(id).cost_usd, 18);
+  // A reported cost still wins over the estimate.
+  const reported = recordUsage(getDb(), { userId: u, provider: 'anthropic', model: MODEL, inputTokens: 1_000_000, outputTokens: 1_000_000, costUsd: 0.5 });
+  assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE id = ?').get(reported).cost_usd, 0.5);
+  // No tokens and no cost is still unknown.
+  const none = recordUsage(getDb(), { userId: u, provider: 'anthropic', model: MODEL });
+  assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE id = ?').get(none).cost_usd, null);
+});
+
 test('recordUsage stores an unknown cost as NULL, never zero or a guess', () => {
   const u = member(0);
   const id = recordUsage(getDb(), { userId: u, provider: 'anthropic', model: MODEL });

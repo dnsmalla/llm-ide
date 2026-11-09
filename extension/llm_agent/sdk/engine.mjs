@@ -63,6 +63,7 @@ import { neutralizePromptFences } from '../../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel, remainingMonthlyUsd, getLimits } from '../../kb/usage.mjs';
+import { remainingMonthlyUsdForProject } from '../../kb/project-usage.mjs';
 import { config } from '../../core/config.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
@@ -1174,15 +1175,28 @@ export function normalizeModelUsage(modelUsage) {
 // over the cap.
 const TURN_BUDGET_FLOOR_USD = 0.01;
 
-export function resolveMaxBudgetUsd(userId, model, { usdCap = usdCapForModel, remaining = remainingMonthlyUsd, provider = AGENT_SDK_PROVIDER } = {}) {
+export function resolveMaxBudgetUsd(userId, model, {
+  usdCap = usdCapForModel,
+  remaining = remainingMonthlyUsd,
+  remainingForProject = remainingMonthlyUsdForProject,
+  provider = AGENT_SDK_PROVIDER,
+  projectId = null,
+} = {}) {
   // `provider` is the id the turn actually runs on: first-party Anthropic by
   // default, or an Anthropic-compatible `custom:<uuid>` (whose limits chain is
   // empty today, so usdCapForModel answers null and only the member month caps it).
+  // `projectId` adds the project's remaining cap (R-034 #6): the turn may spend
+  // only the smallest of the per-model cap, the member's month and the project's month.
   const db = getDb();
   const perQuery = usdCap(db, userId, provider, typeof model === 'string' && model ? model : null);
   const leftThisMonth = remaining(db, userId);
-  if (perQuery == null && leftThisMonth == null) return null; // no cap at all
-  const bounded = Math.min(perQuery ?? Number.POSITIVE_INFINITY, leftThisMonth ?? Number.POSITIVE_INFINITY);
+  const leftProject = projectId ? remainingForProject(db, userId, projectId) : null;
+  if (perQuery == null && leftThisMonth == null && leftProject == null) return null; // no cap at all
+  const bounded = Math.min(
+    perQuery ?? Number.POSITIVE_INFINITY,
+    leftThisMonth ?? Number.POSITIVE_INFINITY,
+    leftProject ?? Number.POSITIVE_INFINITY,
+  );
   return Math.max(TURN_BUDGET_FLOOR_USD, bounded);
 }
 
@@ -1288,6 +1302,9 @@ export function strictMcpForTurn(wsTrust, hub = config.hub) {
 export async function runAgentV2Turn(
   {
     message, userId, mode, model, language, skills, agentContext, attachments, effort,
+    // R-034 #6: the project this turn was clamped to (if any), so the USD budget also respects the
+    // project's remaining monthly cap, not only the member's.
+    projectId = null,
     // The app's record of the chat, only on a fresh turn (routes/agent-v2.mjs
     // freshTurnHistory) — see buildEngineOptions.
     history,
@@ -1713,7 +1730,7 @@ export async function runAgentV2Turn(
   // resolved by the SDK itself at init, after composition — capping against a
   // guess would cap the wrong budget. See resolveMaxBudgetUsd for exactly
   // what the limits system stores and why runs/tokens caps don't map here.
-  const maxBudgetUsd = resolveBudget(userId, model, { provider: auth.provider });
+  const maxBudgetUsd = resolveBudget(userId, model, { provider: auth.provider, ...(projectId ? { projectId } : {}) });
 
   // Per-user plugin view (spec parity with the legacy loop's route.mjs):
   // cheap enough to build per turn so a user toggling a plugin in Settings

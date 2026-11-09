@@ -365,6 +365,27 @@ test('route: validation — message, skills and timeoutMs', async () => {
   assert.equal(resolveTimeoutMs(undefined), 30 * 60 * 1000);
 });
 
+test('R-034 #6: a Loop run stores its project and a cost; a zero reported cost is estimated from tokens', async () => {
+  const res = makeRes();
+  await handleLoopAgentRoutes(
+    makeReq({ body: { message: 'meter me', repoRoot: REPO, projectId: 'p-meter-loop' }, user }), res, { userId: user.id },
+    {
+      runAgent: async () => ({
+        reply: '', changedPaths: [], changedExtraPaths: [], createdPaths: [],
+        usage: { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, numTurns: 1 },
+        byModel: [{ model: 'claude-sonnet-5', inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 0, cacheCreationTokens: 0 }],
+        resolvedSkills: [], unresolvedSkills: [], truncatedSkills: [], ran: true, resultSubtype: 'success', denied: [], toolEvents: [],
+      }),
+    },
+  );
+  assert.equal(res.statusCode, 200, res._body);
+  const row = getDb().prepare(
+    "SELECT cost_usd, project_id FROM usage_ledger WHERE user_id = ? AND endpoint = '/kb/loop/agent-run' ORDER BY id DESC LIMIT 1",
+  ).get(user.id);
+  assert.equal(row.project_id, 'p-meter-loop');
+  assert.equal(row.cost_usd, 18, 'an unreported cost is estimated from the tokens, not NULL');
+});
+
 test('route: other paths fall through', async () => {
   assert.equal(await handleLoopAgentRoutes(makeReq({ body: {}, url: '/kb/other' }), makeRes(), { userId: user.id }), false);
 });

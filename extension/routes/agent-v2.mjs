@@ -785,7 +785,15 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
   // The USD ceiling this turn may spend — the same remaining monthly budget the engine resolves for the
   // SDK's `maxBudgetUsd`. Captured before the turn so a cancelled/failed turn, whose cost never comes back
   // from the engine, can be charged conservatively instead of skipping the ledger (R-012#1).
-  const turnBudgetUsd = usdCapForModel(db, userId, provider, model);
+  // R-034 #6: the project's remaining cap is part of the minimum, so a 5 USD project cannot spend 100
+  // because the member's month is 100.
+  const memberBudget = usdCapForModel(db, userId, provider, model);
+  const ledgerProjectCap = Number(ledgerProjectId ? getProjectMember(db, userId, ledgerProjectId)?.usdCapMonth : 0);
+  const projectBudget = ledgerProjectId && ledgerProjectCap > 0
+    ? Math.max(0, ledgerProjectCap - usedUsdMonthForProject(getDb(), userId, ledgerProjectId))
+    : null;
+  const budgets = [memberBudget, projectBudget].filter((v) => v != null);
+  const turnBudgetUsd = budgets.length ? Math.min(...budgets) : null;
 
   io.start();
   const ac = new AbortController();
@@ -973,6 +981,9 @@ async function runV2Stream(io, userId, chatSessionId, agentContext, mode, reques
         mode,
         model,
         provider,
+        // R-034 #6: the project the turn was clamped to, so the engine's USD budget also respects the
+        // project's remaining monthly cap.
+        projectId: ledgerProjectId ?? undefined,
         language: body.language,
         // The composer's effort pick (a level string, or "auto"); the engine
         // checks it against the model's own levels. Older clients send none.

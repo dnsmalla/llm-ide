@@ -47,6 +47,7 @@ const {
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
+const { registerProject } = await import('../kb/projects.mjs');
 const { persistTurnMemory } = await import('../llm_agent/memory/memory-persist.mjs');
 const { listSessionMemory } = await import('../kb/session-memory.mjs');
 const { hasAlwaysAllow, setAlwaysAllow } = await import('../kb/tool-approvals.mjs');
@@ -1728,6 +1729,31 @@ test('resolveMaxBudgetUsd: the month\'s remaining member budget bounds the turn,
   // 0 = no cap: the per-model value is unchanged.
   db.prepare('UPDATE members SET usd_cap_month = 0 WHERE user_id = ?').run(user.id);
   assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5'), 0.25);
+});
+
+test('R-034 #6: the project remaining cap bounds the turn budget (project 5 / member 100 → 5)', () => {
+  const db = getDb();
+  const user = registerUser(db, {
+    email: `v2projectbudget-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 't',
+  });
+  db.prepare('UPDATE members SET usd_cap_month = 100 WHERE user_id = ?').run(user.id);
+  const pid = `p-budget-${Date.now()}`;
+  registerProject(db, user.id, { id: pid, root: path.join(WS, pid), name: 'Budget' });
+  db.prepare(
+    "UPDATE project_members SET role = 'member', max_mode = 'execute', usd_cap_month = 5 WHERE user_id = ? AND project_id = ?",
+  ).run(user.id, pid);
+  // No per-model row: usdCapForModel returns the member's remaining 100. The project's 5 must win.
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5', { projectId: pid }), 5);
+  const spend = (usd) => db.prepare(
+    `INSERT INTO usage_ledger (user_id, provider, model, source, runs, cost_usd, project_id) VALUES (?, 'anthropic', 'claude-sonnet-5', 'turn', 1, ?, ?)`,
+  ).run(user.id, usd, pid);
+  spend(3);
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5', { projectId: pid }), 2, 'only 2 of the project cap is left');
+  // No project cap → the member's month is the ceiling again.
+  db.prepare('UPDATE project_members SET usd_cap_month = 0 WHERE user_id = ? AND project_id = ?').run(user.id, pid);
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5', { projectId: pid }), 97);
+  // A projectless call has no project cap, but the same spend still counts against the member month.
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5'), 97);
 });
 
 test('auth: no key throws the spike error unless allowAmbientAuth',

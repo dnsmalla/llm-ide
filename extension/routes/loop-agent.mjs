@@ -67,10 +67,15 @@ export function resolveTimeoutMs(raw) {
 // `provider` is the one the run was started with: the engine refuses an
 // unusable one before spawning, so a run that reaches here really ran on it
 // (the same rule /agent/v2/stream meters by).
-function meterRun(userId, out, requestedModel, turnId, provider = AGENT_SDK_PROVIDER) {
+// R-034 #6: the run's own `costUsd` and the resolved `projectId` ride along. The run total is put on
+// the primary model's row only (like `turns`) so a helper model cannot multiply it; a 0/absent cost
+// leaves the column NULL and `recordUsage` estimates from the tokens.
+function meterRun(userId, out, requestedModel, turnId, provider = AGENT_SDK_PROVIDER, projectId = null) {
   if (!out) return;
   recordToolEvents(userId, { turnId, engine: 'loop', events: out.toolEvents });
   const meteredModel = out.model ?? requestedModel;
+  const runCost = Number(out.usage?.costUsd);
+  const costUsd = Number.isFinite(runCost) && runCost > 0 ? runCost : null;
   try {
     const db = getDb();
     const rows = Array.isArray(out.byModel) && out.byModel.length
@@ -88,7 +93,8 @@ function meterRun(userId, out, requestedModel, turnId, provider = AGENT_SDK_PROV
         userId, provider, model: row.model, endpoint: '/kb/loop/agent-run', requestId: turnId,
         inputTokens: row.inputTokens, outputTokens: row.outputTokens,
         cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
-        ...(index === primaryIndex ? { turns, stopReason: out.resultSubtype ?? null } : {}),
+        projectId: projectId || null,
+        ...(index === primaryIndex ? { turns, stopReason: out.resultSubtype ?? null, costUsd } : {}),
       });
     });
   } catch { /* metering is best-effort */ }
@@ -232,7 +238,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     meterRun(userId, {
       ...out,
       resultSubtype: out.resultSubtype ?? (timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : null)),
-    }, model, turnId, meteredProvider);
+    }, model, turnId, meteredProvider, projectId);
     runOut = out;
     runStatus = timedOut ? 'aborted' : (ac.signal.aborted ? 'cancelled' : 'ok');
     if (ac.signal.aborted && !timedOut) return true; // client gone — nobody to answer
@@ -259,7 +265,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     // A cut-off run still reports what it spent before it was stopped.
     // Why it was cut off, so "hit the cap" and "timed out" can be told apart later.
     const cutOffReason = timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : 'error');
-    if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true, resultSubtype: cutOffReason }, model, turnId, meteredProvider);
+    if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true, resultSubtype: cutOffReason }, model, turnId, meteredProvider, projectId);
     runOut = err?.partialUsage ? { usage: err.partialUsage } : null;
     runStatus = timedOut ? 'aborted' : (ac.signal.aborted ? 'cancelled' : 'error');
     runErrorCode = err?.code || 'ENGINE_ERROR';

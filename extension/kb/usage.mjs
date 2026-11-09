@@ -399,6 +399,16 @@ export function recordUsage(db, {
 } = {}) {
   addToTurnTotals({ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens });
   if (!userId || !provider || !model) return null;
+  // R-034 #6: provider turns, Loop runs and one-shot CLI calls report tokens but no USD. Estimate the
+  // cost here (once, for every writer) when the caller has no engine-reported cost, so the monthly and
+  // project caps see those rows instead of summing NULLs. A caller that reports a cost (including 0)
+  // keeps it.
+  const reportedCost = costOrNull(costUsd);
+  const hasTokens = [inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens]
+    .some((n) => Number.isFinite(Number(n)) && Number(n) > 0);
+  const ledgerCost = reportedCost == null && hasTokens
+    ? estimateTurnCostUsd(model, { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens })
+    : reportedCost;
   try {
     // The values as stored. The shadow (Stage 2a) mirrors exactly these, so it
     // never needs to read the ledger back.
@@ -416,7 +426,7 @@ export function recordUsage(db, {
       request_id: clampStr(requestId, 128),
       turns: turns == null ? null : tokenCountOrNull(turns),
       stop_reason: clampStr(stopReason, 40),
-      cost_usd: costOrNull(costUsd),
+      cost_usd: ledgerCost,
       project_id: clampStr(projectId, 128),
     };
     // `ts` comes back from the insert itself, so the mirror carries the exact
