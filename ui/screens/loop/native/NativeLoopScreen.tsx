@@ -31,7 +31,7 @@ import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { appendRunRecord, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, type LoopRunIndexEntry } from "./history.ts";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
-import { FACTORY_DEFAULT_KEY, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FACTORY_TEMPLATE, guardedPaths, isFactoryLoop, needsDecisionSummary, reviewDiffSection, taskMarkdown, withSetupCommand, writeScopeFor, type WorkItem } from "./factory.ts";
+import { FACTORY_DEFAULT_KEY, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, guardedPaths, isFactoryLoop, needsDecisionSummary, reviewDiffSection, taskMarkdown, withSetupCommand, writeScopeFor, type WorkItem } from "./factory.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import "./native-loop.css";
 
@@ -141,6 +141,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runRecordLoaded, setRunRecordLoaded] = useState(false);
   /** The Factory loop waiting for its work item; the picker is shown while this is set. */
   const [pickerLoop, setPickerLoop] = useState<LoopDefinition | null>(null);
+  // A picker card for a loop the user has since left must not start that loop over the one now shown.
+  useEffect(() => { setPickerLoop(null); }, [selectedLoopId]);
   const openSeq = useRef(0);
   const [customLoad, setCustomLoad] = useState(() => loadCustomTemplatesState());
   const customTemplates = customLoad.templates;
@@ -680,6 +682,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     // (and a second worktree) while the first is still being prepared. Every early `return` below clears it.
     if (startingRef.current) return;
     startingRef.current = true;
+    // Any run start (Run, queue, schedule, picker) closes the picker so a stale card cannot linger over it.
+    setPickerLoop(null);
     let prepared: RunInfo | null = null;
     if (useWorktree) {
       const root = projectRoot ?? "";
@@ -1021,7 +1025,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       <main className="loop-run" aria-label="Run">
         <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
-        {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const target = pickerLoop; setPickerLoop(null); void executeLoop(target, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
+        {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
           <label className="loop-field"><span>Name</span><input value={loop.name} onChange={(e) => patchLoop((l) => { l.name = e.target.value; })} /></label>

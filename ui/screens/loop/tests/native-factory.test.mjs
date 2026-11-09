@@ -143,3 +143,12 @@ test("the review stage gets the worktree diff as data", () => {
   assert.match(f.reviewDiffSection({ text: "x", truncated: true }), /cut to fit/);
   assert.match(f.reviewDiffSection({ text: "y".repeat(200_000), truncated: false }), /cut to fit/);
 });
+
+test("the picker's Start refuses while a run is active, when the loop is gone, or with unsaved edits", () => {
+  const ok = { running: false, starting: false, dirty: false, loopExists: true };
+  assert.equal(f.factoryStartRefusal(ok), null);
+  assert.equal(f.factoryStartRefusal({ ...ok, running: true }), "Another run is in progress; wait for it to finish.");
+  assert.equal(f.factoryStartRefusal({ ...ok, starting: true }), "Another run is in progress; wait for it to finish.");
+  assert.equal(f.factoryStartRefusal({ ...ok, dirty: true }), "Save or discard your edits before starting the Factory run.");
+  assert.equal(f.factoryStartRefusal({ ...ok, loopExists: false }), "That Factory loop no longer exists.");
+});

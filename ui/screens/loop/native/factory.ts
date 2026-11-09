@@ -221,3 +221,11 @@ export async function listSpecFiles(fs: Pick<FsApi, "list">, limit = 200): Promi
   }
   return out.sort().slice(0, limit);
 }
+
+/** Why the picker's Start must not launch a run now, else null. Checked against the loop as it is at Start, not as it was opened. */
+export function factoryStartRefusal(state: { running: boolean; starting: boolean; dirty: boolean; loopExists: boolean }): string | null {
+  if (!state.loopExists) return "That Factory loop no longer exists.";
+  if (state.running || state.starting) return "Another run is in progress; wait for it to finish.";
+  if (state.dirty) return "Save or discard your edits before starting the Factory run.";
+  return null;
+}
