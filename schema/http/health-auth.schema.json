@@ -111,9 +111,9 @@
           "description": "Live work counts only (R-034 #17); no ids or content. Additive, so an older hub omits it.",
           "required": ["chatTurns", "loopRuns", "total"],
           "properties": {
-            "chatTurns": { "type": "integer", "minimum": 0 },
-            "loopRuns": { "type": "integer", "minimum": 0 },
-            "total": { "type": "integer", "minimum": 0 }
+            "chatTurns": { "type": "integer" },
+            "loopRuns": { "type": "integer" },
+            "total": { "type": "integer" }
           }
         },
         "schemaVersion": {
