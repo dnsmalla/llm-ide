@@ -113,7 +113,7 @@ export function validateLoopRepoRoot(userId, repoRoot, { trustedRoots = buildTru
   if (!path.isAbsolute(repoRoot)) return { ok: false, reason: 'repoRoot must be an absolute path' };
   if (repoRoot.split(/[/\\]/).includes('..')) return { ok: false, reason: 'repoRoot must not contain ".."' };
   let real;
-  try { real = fs.realpathSync(repoRoot); } catch { return { ok: false, reason: 'repoRoot does not exist' }; }
+  try { real = fs.realpathSync.native(repoRoot); } catch { return { ok: false, reason: 'repoRoot does not exist' }; }
   try {
     if (!fs.statSync(real).isDirectory()) return { ok: false, reason: 'repoRoot is not a directory' };
   } catch { return { ok: false, reason: 'repoRoot does not exist' }; }
@@ -142,10 +142,10 @@ function isLoopWorktreeOf(real, trusted) {
   // under a trusted repo's worktrees directory.
   const worktreesDirs = trusted.map((t) => path.join(t, '.git', 'worktrees'));
   let entryReal;
-  try { entryReal = fs.realpathSync(entry); } catch { return false; }
+  try { entryReal = fs.realpathSync.native(entry); } catch { return false; }
   const parentOk = worktreesDirs.some((dir) => {
     let dirReal;
-    try { dirReal = fs.realpathSync(dir); } catch { return false; }
+    try { dirReal = fs.realpathSync.native(dir); } catch { return false; }
     return samePath(path.dirname(entryReal), dirReal);
   });
   if (!parentOk) return false;
@@ -155,8 +155,8 @@ function isLoopWorktreeOf(real, trusted) {
   if (!back) return false;
   const backAbs = path.isAbsolute(back) ? back : path.resolve(entryReal, back);
   let backReal;
-  try { backReal = fs.realpathSync(backAbs); } catch { return false; }
-  return samePath(backReal, fs.realpathSync(dotGit));
+  try { backReal = fs.realpathSync.native(backAbs); } catch { return false; }
+  return samePath(backReal, fs.realpathSync.native(dotGit));
 }
 
 // A project's notes directory. In the split project layout it sits at
@@ -189,7 +189,7 @@ export function validateLoopExtraRoots(extraRoots, repoRoot) {
       return { ok: false, reason: `extra root ${label} must be an absolute path without ".."` };
     }
     let real;
-    try { real = fs.realpathSync(raw); } catch { return { ok: false, reason: `extra root ${label} does not exist` }; }
+    try { real = fs.realpathSync.native(raw); } catch { return { ok: false, reason: `extra root ${label} does not exist` }; }
     try {
       if (!fs.statSync(real).isDirectory()) return { ok: false, reason: `extra root ${label} is not a directory` };
     } catch { return { ok: false, reason: `extra root ${label} does not exist` }; }
@@ -282,7 +282,7 @@ function resolveWriteTarget(filePath, base) {
 // itself is not a file to write).
 function insideWriteScope(filePath, root, writeScope) {
   let realRoot;
-  try { realRoot = fs.realpathSync(root); } catch { return false; }
+  try { realRoot = fs.realpathSync.native(root); } catch { return false; }
   const target = resolveWriteTarget(filePath, realRoot);
   if (!target) return false;
   const rel = path.relative(path.join(realRoot, writeScope), target);
@@ -340,7 +340,7 @@ export function loopToolRefusal(toolName, input, roots, { readOnly = false, writ
 function extraRootPath(extraRoots, filePath) {
   if (!extraRoots.length || typeof filePath !== 'string' || !path.isAbsolute(filePath)) return null;
   let resolved = path.normalize(filePath);
-  try { resolved = fs.realpathSync(resolved); } catch { /* judge the spelling */ }
+  try { resolved = fs.realpathSync.native(resolved); } catch { /* judge the spelling */ }
   return extraRoots.some((r) => resolved === r || resolved.startsWith(r + path.sep)) ? resolved : null;
 }
 
@@ -348,7 +348,7 @@ function repoRelative(root, filePath) {
   if (typeof filePath !== 'string' || !filePath) return null;
   const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(root, filePath);
   let resolved = abs;
-  try { resolved = fs.realpathSync(abs); } catch { /* deleted/renamed — judge the spelling */ }
+  try { resolved = fs.realpathSync.native(abs); } catch { /* deleted/renamed — judge the spelling */ }
   const rel = path.relative(root, resolved);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
   return rel.split(path.sep).join('/');
@@ -367,7 +367,7 @@ export function graphScopeRoot(root) {
     if (!fs.lstatSync(dotGit).isFile()) return root;
     const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGit, 'utf8'));
     if (!m) return root;
-    const entry = fs.realpathSync(path.isAbsolute(m[1]) ? m[1] : path.resolve(root, m[1]));
+    const entry = fs.realpathSync.native(path.isAbsolute(m[1]) ? m[1] : path.resolve(root, m[1]));
     const worktrees = path.dirname(entry);
     const gitDir = path.dirname(worktrees);
     if (path.basename(worktrees) !== 'worktrees' || path.basename(gitDir) !== '.git') return root;

@@ -241,7 +241,7 @@ function realpathNearest(abs) {
     existing = parent;
   }
   try {
-    const real = fs.realpathSync(existing);
+    const real = fs.realpathSync.native(existing);
     const suffix = path.relative(existing, abs);
     return suffix ? path.join(real, suffix) : real;
   } catch {
@@ -250,6 +250,30 @@ function realpathNearest(abs) {
 }
 
 const MAX_LINK_HOPS = 40;
+
+/**
+ * The path a link at `parent/<leaf>` points to, with `..` applied the way the KERNEL applies it: after the links
+ * before it have been followed. `path.resolve` would collapse `sub/../x` as text even when `sub` is a link to
+ * elsewhere, so the target's directory part goes through realpath(3) and only the last name is joined on. When that
+ * directory does not exist and the target still contains a `..` segment, the landing cannot be known: null (refuse).
+ */
+function linkTargetPath(parent, target) {
+  const full = path.isAbsolute(target) ? target : `${parent}${path.sep}${target}`;
+  const trimmed = full.replace(/[\\/]+$/, '') || path.sep;
+  const base = path.basename(trimmed);
+  const hasDotDot = trimmed.split(/[\\/]/).includes('..');
+  if (base === '..' || base === '.') {
+    try { return fs.realpathSync.native(trimmed); } catch { return null; }
+  }
+  const dir = trimmed.slice(0, trimmed.length - base.length) || path.sep;
+  try {
+    return path.join(fs.realpathSync.native(dir), base);
+  } catch {
+    if (hasDotDot) return null;
+    const near = realpathNearest(path.resolve(dir));
+    return near === null ? null : path.join(near, base);
+  }
+}
 
 /**
  * Where a write to `filePath` would really land: the parent's real path plus the leaf, with a link as the leaf
@@ -266,7 +290,10 @@ export function resolveWriteLanding(filePath, base) {
     let isLink = false;
     try { isLink = fs.lstatSync(cur).isSymbolicLink(); } catch { /* not there yet */ }
     if (!isLink) return realpathNearest(cur);
-    try { cur = path.resolve(parent, fs.readlinkSync(cur)); } catch { return null; }
+    let target;
+    try { target = fs.readlinkSync(cur); } catch { return null; }
+    cur = linkTargetPath(parent, target);
+    if (cur === null) return null;
   }
   return null;
 }
@@ -289,7 +316,7 @@ export function writePathGate(filePath, roots, { allowLeafLink = false } = {}) {
   if (isDeniedPath(resolved)) return 'blocked';
   const inside = (root) => {
     let realRoot;
-    try { realRoot = fs.realpathSync(root); } catch { return false; }
+    try { realRoot = fs.realpathSync.native(root); } catch { return false; }
     return resolved === realRoot || resolved.startsWith(realRoot + path.sep);
   };
   return roots.some(inside) ? 'prompt' : 'blocked';

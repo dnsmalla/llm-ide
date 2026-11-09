@@ -1446,3 +1446,22 @@ test('C1b-2: an in-root link is allowed, an escaping or scope-leaving link is re
     assert.ok(loopToolRefusal(tool, { file_path: path.join(repo, '.factory', 'REVIEW.md') }, [repo], { writeScope: '.factory' }), 'link leaves the scope');
   }
 });
+
+test('C1c: link targets with .. cannot make a Loop Write land outside the repo (unscoped)', () => {
+  const repo = path.join(SANDBOX, 'dotdot');
+  const outA = path.join(SANDBOX, 'dotdot-outside', 'a');
+  fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'pkg', 'inner'), { recursive: true });
+  fs.mkdirSync(outA, { recursive: true });
+  fs.writeFileSync(path.join(repo, 'AGENTS.md'), 'a\n');
+  fs.symlinkSync(outA, path.join(repo, 'src', 'sub'));
+  fs.symlinkSync('sub/../leafpwn.md', path.join(repo, 'src', 'leaf.md'));
+  fs.symlinkSync('sub/..', path.join(repo, 'src', 'd2'));
+  fs.symlinkSync('../../AGENTS.md', path.join(repo, 'pkg', 'inner', 'CLAUDE.md'));
+  for (const tool of ['Write', 'Edit']) {
+    assert.ok(loopToolRefusal(tool, { file_path: path.join(repo, 'src', 'leaf.md') }, [repo]), `leaf ${tool}`);
+    assert.ok(loopToolRefusal(tool, { file_path: path.join(repo, 'src', 'd2', 'pwn.md') }, [repo]), `d2 ${tool}`);
+    assert.equal(loopToolRefusal(tool, { file_path: path.join(repo, 'pkg', 'inner', 'CLAUDE.md') }, [repo]), null, `in-root ${tool}`);
+  }
+  assert.ok(loopToolRefusal('Read', { file_path: path.join(repo, 'src', 'd2', 'x.md') }, [repo]), 'read through d2');
+});

@@ -92,3 +92,37 @@ test('writePathGate: in-workspace link leaf allowed; escaping, dangling-outside 
   assert.equal(writePathGate('dangling.md/', [f.workspace]), 'blocked');
   assert.equal(writePathGate(path.join(f.workspace, 'out.md'), [f.workspace]), 'blocked');
 });
+
+function dotdotFixture() {
+  const f = makeFixture();
+  const real = fs.realpathSync(f.base);
+  const outA = path.join(real, 'outside', 'a');
+  fs.mkdirSync(outA, { recursive: true });
+  fs.writeFileSync(path.join(outA, 'secret.md'), 'outside\n');
+  const ws = fs.realpathSync(f.workspace);
+  fs.symlinkSync(outA, path.join(ws, 'src', 'sub'));
+  fs.symlinkSync('sub/../leafpwn.md', path.join(ws, 'src', 'leaf.md'));
+  fs.symlinkSync('sub/..', path.join(ws, 'src', 'd2'));
+  fs.writeFileSync(path.join(ws, 'AGENTS.md'), 'agents\n');
+  fs.mkdirSync(path.join(ws, 'pkg', 'inner'), { recursive: true });
+  fs.symlinkSync('../../AGENTS.md', path.join(ws, 'pkg', 'inner', 'CLAUDE.md'));
+  fs.symlinkSync('AGENTS.md', path.join(ws, 'CLAUDE.md'));
+  return { ws, outside: path.join(real, 'outside') };
+}
+
+test('C1c-1: a link target with .. after a symlinked folder is judged where the kernel lands it', () => {
+  const { ws } = dotdotFixture();
+  assert.equal(writePathGate(path.join(ws, 'src', 'leaf.md'), [ws]), 'blocked');
+});
+
+test('C1c-2: a link folder whose target ends in .. cannot reach outside (write and read)', () => {
+  const { ws } = dotdotFixture();
+  assert.equal(writePathGate(path.join(ws, 'src', 'd2', 'pwn.md'), [ws]), 'blocked');
+  assert.equal(writePathGate(path.join(ws, 'src', 'd2', 'secret.md'), [ws], { allowLeafLink: true }), 'blocked');
+});
+
+test('C1c: in-root links, including ../../ targets, stay allowed', () => {
+  const { ws } = dotdotFixture();
+  assert.equal(writePathGate(path.join(ws, 'CLAUDE.md'), [ws]), 'prompt');
+  assert.equal(writePathGate(path.join(ws, 'pkg', 'inner', 'CLAUDE.md'), [ws]), 'prompt');
+});
