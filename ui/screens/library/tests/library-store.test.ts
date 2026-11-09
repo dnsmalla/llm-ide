@@ -134,6 +134,25 @@ test("errors: a failed batch keeps path facts; a list failure surfaces a code; n
   assert.equal(s3.getSnapshot().rootStatus, "none");
 });
 
+test("init on a different folder drops the old records and selection; the same folder keeps them", async () => {
+  const host = new FakeHost();
+  host.add("a.md", meetingText(1));
+  const s = mk(host);
+  await s.init();
+  await settle(s);
+  s.select("a.md");
+  await s.init();
+  await settle(s);
+  assert.equal(s.getSnapshot().selectedRel, "a.md", "the same folder keeps its selection");
+  host.root = { name: "other", root: "/Users/x/other" };
+  host.files.clear();
+  host.add("z.md", meetingText(9));
+  await s.init();
+  await settle(s);
+  assert.equal(s.getSnapshot().selectedRel, null);
+  assert.deepEqual(s.getSnapshot().records.map((r) => r.rel), ["z.md"]);
+});
+
 test("chooseRoot replaces the data; cancel keeps it; clearRoot empties", async () => {
   const host = new FakeHost();
   host.add("a.md", meetingText(1));

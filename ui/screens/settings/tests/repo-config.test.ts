@@ -8,6 +8,8 @@ import {
   normalizeBase,
   readRepoConfig,
   removeSavedRepo,
+  repoSlugOf,
+  shouldProvision,
   repoTitle,
   setActiveRepo,
   setAllowedOps,
@@ -103,4 +105,24 @@ test("repo title: display name, else owner/repo from the URL, else a placeholder
 test("normalizeBase keeps a GitLab subpath and drops trailing slashes", () => {
   assert.equal(normalizeBase("https://host/gitlab///"), "https://host/gitlab");
   assert.equal(normalizeBase("  "), "https://gitlab.com");
+});
+
+test("repoSlugOf reads owner/repo from a URL, a .git URL or a slug, and never from a bare owner", () => {
+  assert.equal(repoSlugOf("https://github.com/owner/repo"), "owner/repo");
+  assert.equal(repoSlugOf("https://github.com/owner/repo.git/"), "owner/repo");
+  assert.equal(repoSlugOf("owner/repo"), "owner/repo");
+  assert.equal(repoSlugOf("https://github.com/owner"), null);
+  assert.equal(repoSlugOf("owner"), null);
+  assert.equal(repoSlugOf(""), null);
+});
+
+test("shouldProvision: only a finished, valid, not-yet-cloned repository is provisioned on blur", () => {
+  const fresh = { url: "https://github.com/owner/repo", clonePath: "" };
+  assert.equal(shouldProvision(fresh), true);
+  assert.equal(shouldProvision({ url: "owner/repo", clonePath: "" }), true);
+  assert.equal(shouldProvision({ url: "https://github.com/owner/repo", clonePath: "/code/repo" }), false, "an already-cloned repository is never re-attempted");
+  assert.equal(shouldProvision({ url: "owner/re", clonePath: "" }), true, "a valid slug is provisioned; the caller only blurs a finished field");
+  assert.equal(shouldProvision({ url: "https://github.com/owner", clonePath: "" }), false, "a bare owner has no repository to clone");
+  assert.equal(shouldProvision({ url: "owner/has space", clonePath: "" }), false);
+  assert.equal(shouldProvision({ url: "", clonePath: "" }), false);
 });

@@ -6,7 +6,7 @@ import type { SettingsRegistry, Loader } from "./registry.ts";
 import { settingsRegistry, type SectionComponent } from "./registry-default.ts";
 import { SettingsEnvProvider } from "./context.tsx";
 import type { SettingsEnv } from "./host.ts";
-import { APP_GROUPS, ExpandedGroups, REMOTE_GROUP_HIDDEN, resolveAnchor } from "./groups.ts";
+import { APP_GROUPS, ExpandedGroups, NO_SEARCH_TOGGLES, REMOTE_GROUP_HIDDEN, keepMounted, resolveAnchor, toggleSearchMatch, type SearchToggles } from "./groups.ts";
 import { SettingsGroup } from "./SettingsGroup.tsx";
 import { selfHealEnabled, subscribeSelfHeal } from "../shell/self-heal.ts";
 
@@ -67,7 +67,20 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
   const q = query.trim().toLowerCase();
   const matches = (title: string) => q.length === 0 || title.toLowerCase().includes(q);
   const [, bump] = useState(0);
+  // While a search is on, every match is shown open; a click then collapses (or reopens) just that match.
+  const [search, setSearch] = useState<SearchToggles>(NO_SEARCH_TOGGLES);
+  // Groups the user has opened: their bodies stay mounted (hidden) after closing. Search-shown matches are not kept.
+  const keptMounted = useRef(new Set<string>());
+  // Each query is a fresh search: earlier clicks on matches do not carry over.
+  const changeQuery = (value: string) => {
+    setQuery(value);
+    setSearch(NO_SEARCH_TOGGLES);
+  };
   const toggle = (id: string) => {
+    if (q.length > 0) {
+      setSearch((t) => toggleSearchMatch(t, id));
+      return;
+    }
     const opening = !store.current!.isOpen(id);
     // One section at a time: opening a group closes the others, so the page never becomes a long stack.
     if (opening) for (const s of [...registry.sectionsIn("app"), ...registry.sectionsIn("project")]) if (s.id !== id) store.current!.set(s.id, false);
@@ -91,12 +104,14 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
   const app = registry.sectionsIn("app").filter((s) => !dead.has(s.id) && matches(s.title));
   const project = hasProject ? registry.sectionsIn("project").filter((s) => matches(s.title)) : [];
   const row = (s: ReturnType<SettingsRegistry<SectionComponent>["sections"]>[number]) => {
-    const open = store.current!.isOpen(s.id) || q.length > 0;
+    const open = q.length > 0 ? !search.collapsed.has(s.id) : store.current!.isOpen(s.id);
+    const userOpened = q.length > 0 ? search.reopened.has(s.id) : open;
+    const mounted = keepMounted(keptMounted.current, s.id, open, userOpened);
     const Body = lazyOf(s.load);
     const cards = registry.cardsFor(s.id);
     return (
       <li key={s.id}>
-        <SettingsGroup id={s.id} title={s.title} icon={s.icon} open={open} onToggle={() => toggle(s.id)}>
+        <SettingsGroup id={s.id} title={s.title} icon={s.icon} open={open} mounted={mounted} onToggle={() => toggle(s.id)}>
           <Boundary>
             <Suspense fallback={<p className="st-hint" role="status">Loading...</p>}>
               <div className="st-stack">
@@ -125,7 +140,7 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
             <h1 id="st-title" className="st-h1">Settings</h1>
             <button type="button" className="st-help-toggle" aria-pressed={showHelp} onClick={() => setShowHelp((v) => !v)}>{showHelp ? "Hide help" : "Show help"}</button>
           </div>
-          <div className="st-search"><input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search settings…" aria-label="Search settings" autoComplete="off" spellCheck={false} /></div>
+          <div className="st-search"><input type="search" value={query} onChange={(e) => changeQuery(e.target.value)} placeholder="Search settings…" aria-label="Search settings" autoComplete="off" spellCheck={false} /></div>
           {app.length > 0 ? <ul className="st-groups" aria-label="Settings groups">{app.map(row)}</ul> : <p className="st-empty" role="status">No settings match “{query.trim()}”.</p>}
           {project.length > 0 ? (
             <div role="group" aria-labelledby="st-band-project" className="st-band-wrap">

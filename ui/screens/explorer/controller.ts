@@ -793,7 +793,8 @@ export class ExplorerController {
     const moved: string[] = [];
     const conflicts: string[] = [];
     const missing: string[] = [];
-    for (const src of clip.paths) {
+    // Top-level only: a cut folder moves with its children, so a child listed too must not be reported as gone.
+    for (const src of topLevel(clip.paths)) {
       const base = baseName(src);
       const to = joinPath(destDir, base);
       try {
@@ -803,8 +804,10 @@ export class ExplorerController {
           // Cut into the folder it already lives in: nothing to do, and nothing to report.
           continue;
         } else {
-          await this.fs.rename(src, to);
-          moved.push(to);
+          const dest = await this.fs.rename(src, to);
+          // A cut is a move: open tabs, docs, the editor model and tree state must follow it, as on drag-move.
+          this.afterMove(src, dest);
+          moved.push(dest);
         }
       } catch (e) {
         const code = toFsError(e).code;

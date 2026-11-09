@@ -75,7 +75,9 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
   }, [deps]);
 
   const reload = useCallback(() => {
+    // Children are dropped, so an expanded folder would show an open caret over nothing; collapse them too.
     setChildren(new Map());
+    setExpanded(new Set());
     setClosedRoots(new Set(["code", "data"]));
     void loadRoot("code");
     void loadRoot("data");
@@ -150,7 +152,7 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
       const picks = await mutate.pick();
       if (picks.files.length === 0 && picks.rejected.length === 0) return; // the dialog was cancelled
       const res = await addFilesToFolder(mutate, target, picks.files);
-      setNotice(addSummary(res.added, [...picks.rejected.map((r) => ({ name: r.name, reason: pickReason(r.reason) })), ...res.skipped]));
+      setNotice(addSummary(res.added, [...picks.rejected.map((r) => ({ name: r.name, reason: pickReason(r.reason) })), ...res.skipped], res.notes));
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "The files could not be added.");
     }

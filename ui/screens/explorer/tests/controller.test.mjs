@@ -417,6 +417,21 @@ test("cut pasted into the folder it already lives in is a no-op and is consumed"
   assert.equal(c.getClipboard(), null);
 });
 
+test("a cut moves open tabs, docs and the editor model with the file (no stale path left behind)", async () => {
+  const { c, editor, fs } = await setup({ "a.txt": "a", "d/x.txt": "x" });
+  await c.openFile("a.txt", false);
+  editor.type("a.txt", "dirty");
+  c.select("a.txt", { shift: false, toggle: false });
+  c.setClipboard("cut");
+  await c.paste("d");
+  assert.equal(fs.files.get("d/a.txt"), "a", "the file moved on disk; the unsaved text is still in the editor");
+  assert.deepEqual(c.getSnapshot().tabs.tabs.map((t) => t.id), ["d/a.txt"]);
+  assert.ok(c.getSnapshot().docs.has("d/a.txt"));
+  assert.ok(!c.getSnapshot().docs.has("a.txt"));
+  assert.equal(editor.getText("d/a.txt"), "dirty");
+  assert.equal(editor.getText("a.txt"), null);
+});
+
 test("a cut blocked by a collision stays armed; a source that vanished is reported and not kept armed", async () => {
   const { c, fs } = await setup({ "a.txt": "a", "b.txt": "b", "d/a.txt": "other" });
   c.select("a.txt", { shift: false, toggle: false });
@@ -429,6 +444,18 @@ test("a cut blocked by a collision stays armed; a source that vanished is report
   assert.ok(c.getClipboard(), "a real collision keeps the cut armed for a retry");
   assert.equal(c.getSnapshot().notice.severity, "warning");
   assert.match(c.getSnapshot().notice.message, /no longer exist/);
+});
+
+test("a cut folder and its cut child move as one: the child is not reported as gone", async () => {
+  const { c, fs } = await setup({ "src/a.txt": "a", "d/x.txt": "x" });
+  c.select("src", { shift: false, toggle: false });
+  c.select("src/a.txt", { shift: false, toggle: true });
+  c.setClipboard("cut");
+  await c.paste("d");
+  assert.equal(fs.files.get("d/src/a.txt"), "a", "the folder moved with its child");
+  assert.equal(c.getSnapshot().notice.severity, "info");
+  assert.match(c.getSnapshot().notice.message, /^1 item pasted\.$/, "the child is not counted as missing");
+  assert.equal(c.getClipboard(), null, "the cut is consumed");
 });
 
 test("copyInto (alt-drag) copies files and folders beside the originals under free names", async () => {

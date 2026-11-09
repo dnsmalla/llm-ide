@@ -258,7 +258,14 @@ function CommitBox({ controller, snap, busy }: { controller: ScmController; snap
   const [amend, setAmend] = useState(false);
   const c = snap.counts;
   const check = amend ? validateAmend(snap.message, c.staged, c.conflicts) : validateCommit(snap.message, c.staged, c.conflicts);
-  const submit = () => (amend ? controller.amend(snap.message) : controller.commit());
+  // An amend that landed leaves the box in its normal mode, so the next commit is not amended by accident.
+  const submit = async () => {
+    if (amend) {
+      if (await controller.amend(snap.message)) setAmend(false);
+    } else {
+      await controller.commit();
+    }
+  };
   return (
     <form
       className="scm-commit"

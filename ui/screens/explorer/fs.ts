@@ -193,3 +193,15 @@ export function baseName(path: string): string {
   const i = path.lastIndexOf("/");
   return i < 0 ? path : path.slice(i + 1);
 }
+
+/** Last segment of a native OS path. Project roots are not `/`-only: on Windows the root is `C:\...`. */
+export function nativeBaseName(path: string): string {
+  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
+}
+
+/** The native absolute path of a project-relative path, joined with the root's own separator. */
+export function absolutePathUnder(root: string, rel: string): string {
+  const sep = root.includes("\\") && !root.includes("/") ? "\\" : "/";
+  const base = root.replace(/[\\/]+$/, "");
+  return rel === "" ? base : `${base}${sep}${rel.split("/").join(sep)}`;
+}

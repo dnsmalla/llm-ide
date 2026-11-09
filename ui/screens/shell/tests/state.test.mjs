@@ -106,6 +106,25 @@ test("status store: a failing host call is reported, then recovers; start/stop a
   store.stop();
 });
 
+test("status store: stop then start while a poll is in flight leaves exactly one loop", async () => {
+  let release;
+  let calls = 0;
+  const pending = [];
+  const store = createStatusStore({
+    fetchStatus: () => { calls += 1; return new Promise((resolve) => { release = () => resolve(status()); }); },
+    setTimer: (fn) => { pending.push(fn); return pending.length; },
+    clearTimer: () => {},
+  });
+  store.start();
+  store.stop();
+  store.start();
+  release();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(pending.length, 1, "only the current generation schedules the next poll");
+  assert.equal(calls, 1, "the in-flight poll is shared, not repeated");
+  store.stop();
+});
+
 test("navigation: select keeps visited sections, ignores disabled/unknown, steps wrap", () => {
   nav.setDevTools(false);
   let s = nav.initialNav(null);

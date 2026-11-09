@@ -10,7 +10,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { EditorPane } from "./EditorPane";
 import type { EditorHost } from "./editor-types";
 import { FileTree } from "./FileTree";
-import { createHostFs, baseName, parentOf, toFsError, type Encoding, type FsApi, type WatchBatch } from "./fs";
+import { absolutePathUnder, createHostFs, baseName, nativeBaseName, parentOf, toFsError, type Encoding, type FsApi, type WatchBatch } from "./fs";
 import { defaultKv, type KV } from "./session";
 import { ChatDockSlot } from "../shell/chat-dock";
 import { host as shellHost, invokeHost } from "../shell/host";
@@ -273,7 +273,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     else if (id === "rename" && path) setDialog({ type: "prompt", kind: "rename", path });
     else if (id === "delete" && sel.length) setDialog({ type: "delete", paths: sel });
     else if (id === "copy-path" && sel.length) copy(sel.join("\n"));
-    else if (id === "copy-abs" && sel.length && projectRoot) copy(sel.map((p) => `${projectRoot.replace(/\/+$/, "")}/${p}`).join("\n"));
+    else if (id === "copy-abs" && sel.length && projectRoot) copy(sel.map((p) => absolutePathUnder(projectRoot, p)).join("\n"));
     // One reveal only: the host rate-limits reveal_in_os (300 ms gap), so a loop would open the first item and
     // silently drop the rest. Revealing several items in one Finder window needs a host command that takes a list.
     else if (id === "reveal" && sel.length) void invokeHost("reveal_in_os", { relPath: path && sel.includes(path) ? path : sel[0] }).catch(() => undefined);
@@ -366,7 +366,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     );
   }
 
-  const name = baseName(projectRoot.replace(/[\\/]+$/, "")) || projectRoot;
+  const name = nativeBaseName(projectRoot) || projectRoot;
   const chatFits = dockFits(viewportW, width);
   const chatVisible = chatDock.open && chatFits;
   useEffect(() => {

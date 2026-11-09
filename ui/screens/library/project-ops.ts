@@ -111,12 +111,19 @@ export async function runRemove(plan: RemovePlan, trash: (path: string) => Promi
 export interface AddResult {
   added: string[];
   skipped: { name: string; reason: string }[];
+  /** Added files whose bytes were not UTF-8 and were converted; the user is told, since the content changed encoding. */
+  notes: { name: string; note: string }[];
 }
 
-/** One line for the screen: what was added, then what was skipped and why. */
-export function addSummary(added: readonly string[], skipped: readonly { name: string; reason: string }[]): string {
+/** One line for the screen: what was added, what was converted, then what was skipped and why. */
+export function addSummary(
+  added: readonly string[],
+  skipped: readonly { name: string; reason: string }[],
+  notes: readonly { name: string; note: string }[] = [],
+): string {
   const head = added.length === 0 ? "No files were added." : `Added ${added.length} ${added.length === 1 ? "file" : "files"}${added.length === 1 ? `: ${added[0]}` : ""}.`;
-  return skipped.length === 0 ? head : `${head} Skipped ${skipped.length}: ${skipped.map((s) => `${s.name} (${s.reason}).`).join(" ")}`;
+  const converted = notes.length === 0 ? "" : ` ${notes.map((n) => `${n.name}: ${n.note}.`).join(" ")}`;
+  return skipped.length === 0 ? `${head}${converted}` : `${head}${converted} Skipped ${skipped.length}: ${skipped.map((s) => `${s.name} (${s.reason}).`).join(" ")}`;
 }
 
 const PICK_REASONS: Record<string, string> = {
@@ -143,37 +150,67 @@ export async function addFilesToFolder(m: Mutations, folder: string, files: Pick
   if (problem) throw new AddError(problem);
   const added: string[] = [];
   const skipped: { name: string; reason: string }[] = [];
+  const notes: { name: string; note: string }[] = [];
   for (const f of files) {
     try {
-      added.push(await addOne(m, folder, f));
+      const done = await addOne(m, folder, f);
+      added.push(done.path);
+      if (done.note) notes.push({ name: f.name, note: done.note });
     } catch (e) {
       skipped.push({ name: f.name, reason: e instanceof AddError ? e.message : "The file could not be added." });
     }
   }
-  return { added, skipped };
+  return { added, skipped, notes };
 }
 
-async function addOne(m: Mutations, folder: string, f: PickedFile): Promise<string> {
+async function addOne(m: Mutations, folder: string, f: PickedFile): Promise<{ path: string; note?: string }> {
   try {
     const nameProblem = validateEntryName(f.name);
     if (nameProblem) throw new AddError(nameProblem);
     if (f.size > MAX_ADD_BYTES) throw new AddError("This file is larger than 25 MB.");
-    const text = decodeText(await readAll(m, f));
-    return await writeFree(m, folder, f.name, text);
+    const decoded = decodeText(await readAll(m, f));
+    const path = await writeFree(m, folder, f.name, decoded.text);
+    return decoded.note ? { path, note: decoded.note } : { path };
   } finally {
     await m.release(f.handle).catch(() => undefined);
   }
 }
 
-function decodeText(bytes: Uint8Array): string {
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-  } catch {
-    throw new AddError("Only text files can be added here yet.");
+function decodeStrict(bytes: Uint8Array, encoding: string): string {
+  return new TextDecoder(encoding, { fatal: true, ignoreBOM: true }).decode(bytes);
+}
+
+/**
+ * Hiragana, Katakana, CJK Unified Ideographs and half-width Katakana. Shift-JIS decodes almost any high-byte pair, so
+ * Latin-1 text such as "café" decodes "successfully" as Shift-JIS; only text with real Japanese characters is accepted.
+ */
+const JAPANESE_CHAR = /[\u3040-\u30ff\u4e00-\u9fff\uff66-\uff9f]/;
+
+/**
+ * Text only. UTF-8 first; then Shift-JIS (CP932), because Japanese spreadsheets are often saved that way. Fatal decoding
+ * in both keeps most binaries out, and a NUL byte is refused as before. A CP932 file is stored as UTF-8 and the
+ * returned note says so. Shift-JIS is accepted only when the result holds Japanese text, since a Latin-1 file would
+ * otherwise be stored as mojibake without any notice.
+ */
+function decodeText(bytes: Uint8Array): { text: string; note?: string } {
+  const refuse = () => new AddError("Only text files can be added here yet.");
+  const utf8 = tryDecode(bytes, "utf-8");
+  if (utf8 !== null) {
+    if (utf8.includes("\u0000")) throw refuse();
+    return { text: utf8 };
   }
-  if (text.includes("\u0000")) throw new AddError("Only text files can be added here yet.");
-  return text;
+  const sjis = tryDecode(bytes, "shift_jis");
+  if (sjis === null || sjis.includes("\u0000") || !JAPANESE_CHAR.test(sjis)) throw refuse();
+  return { text: sjis, note: "converted from Shift-JIS to UTF-8" };
+}
+
+/** The decoded text, or null when the bytes are not valid in `encoding` (fatal decoding). */
+function tryDecode(bytes: Uint8Array, encoding: string): string | null {
+  try {
+    return decodeStrict(bytes, encoding);
+  } catch {
+    return null;
+  }
 }
 
 async function readAll(m: Mutations, f: PickedFile): Promise<Uint8Array> {

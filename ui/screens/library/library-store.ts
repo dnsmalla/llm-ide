@@ -175,7 +175,10 @@ export class LibraryStore {
         this.patch({ rootStatus: "none", root: null });
         return;
       }
-      this.patch({ rootStatus: "ready", root });
+      // A different folder than the one loaded: its records and selection belong to the old folder, so drop them.
+      const rootChanged = this.state.root !== null && this.state.root.root !== root.root;
+      if (rootChanged) this.resetRecords();
+      this.patch({ rootStatus: "ready", root, ...(rootChanged ? { selectedRel: null } : {}) });
       this.loadHiddenFor(root.root);
       await this.scan();
     } catch (e) {

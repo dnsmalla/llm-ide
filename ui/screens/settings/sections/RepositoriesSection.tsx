@@ -13,8 +13,10 @@ import {
   repoTitle,
   setActiveRepo,
   setPrimary,
+  shouldProvision,
   toggleAllowedOp,
   updateSavedRepo,
+  repoSlugOf,
   validateRepoUrl,
   writeRepoConfig,
   type RepoConfig,
@@ -50,8 +52,8 @@ export default function RepositoriesSection() {
   const [cloneToken, setCloneToken] = useState("");
   const [cloning, setCloning] = useState<string | null>(null);
   const [cloneNotice, setCloneNotice] = useState<string | null>(null);
+  // Keyed by owner/repo, not by saved-repo id: a corrected URL is a new repository and must still import.
   const imported = useRef(new Set<string>());
-  const autoTimer = useRef<number | null>(null);
 
   // The project's own code/ path (Settings → Paths); saved repos default their clone destination here.
   const [codeDir, setCodeDir] = useState<string | null>(null);
@@ -172,16 +174,11 @@ export default function RepositoriesSection() {
   };
   const addRepo = () => edit((c) => addSavedRepo(c, provider.id));
 
-  const repoSlug = (raw: string): string | null => {
-    const m = /^(?:https?:\/\/[^/]+\/)?([^/]+)\/([^/?#]+?)(?:\.git)?\/?$/i.exec(raw.trim());
-    return m ? `${m[1]}/${m[2]}` : null;
-  };
   /** Import the cached GitHub issues a repository clone should make visible in Issues and Gantt. */
   const importIssuesFor = async (r: SavedRepo, quiet: boolean): Promise<number | null> => {
-    if (provider.id !== "github" || imported.current.has(r.id) || !connected) return null;
-    const slug = repoSlug(r.url);
-    if (!slug) return null;
-    imported.current.add(r.id);
+    const slug = repoSlugOf(r.url);
+    if (provider.id !== "github" || !slug || imported.current.has(slug) || !connected) return null;
+    imported.current.add(slug);
     try {
       const body = await call(client, "POST", "/kb/connect-github-issues", { repo: slug, state: "open" });
       const n = body && typeof body === "object" && typeof (body as { imported?: unknown }).imported === "number" ? (body as { imported: number }).imported : null;
@@ -189,13 +186,17 @@ export default function RepositoriesSection() {
       if (!quiet) setStatus(n === null ? `Imported ${slug} issues.` : `Imported ${n} issue${n === 1 ? "" : "s"} from ${slug}.`);
       return n;
     } catch (e) {
-      imported.current.delete(r.id);
+      imported.current.delete(slug);
       if (!quiet) setError(sourcesError(e));
       return null;
     }
   };
 
-  const doClone = async (r: SavedRepo, token: string, quiet = false): Promise<boolean> => {
+  /**
+   * Clones one repository. `quiet`: an existing folder counts as success. `silent`: a failure is not shown in the banner
+   * (an automatic attempt on blur); the explicit Clone action still reports it.
+   */
+  const doClone = async (r: SavedRepo, token: string, opts: { quiet?: boolean; silent?: boolean } = {}): Promise<boolean> => {
     if (!host.cloneRepository) return false;
     const dest = cloneDestination(r);
     if (!dest) {
@@ -219,34 +220,30 @@ export default function RepositoriesSection() {
       return true;
     } catch (e) {
       const msg = sourcesError(e);
-      if (quiet && /already exists/i.test(msg)) return true;
-      setError(msg);
+      if (opts.quiet && /already exists/i.test(msg)) return true;
+      if (!opts.silent) setError(msg);
       return false;
     } finally {
       setCloning(null);
     }
   };
 
-  /** Adding a repository URL provisions it shortly after typing stops, not only on blur. */
-  const scheduleProvision = (r: SavedRepo) => {
-    if (autoTimer.current !== null) window.clearTimeout(autoTimer.current);
-    autoTimer.current = window.setTimeout(() => {
-      autoTimer.current = null;
-      if (repoSlug(r.url)) autoProvision(r);
-    }, 900);
-  };
-
-  /** Adding/finishing a repository URL should make its code and issues appear without another trip to Settings. */
+  /**
+   * Adding/finishing a repository URL makes its code and issues appear without another trip to Settings. Only a
+   * finished, valid URL triggers it (on blur): while typing, "owner/re" is a valid-looking partial name.
+   */
   const autoProvision = (r: SavedRepo) => {
     void importIssuesFor(r, true);
     // Attempt the clone even without a session token: public repositories clone that way; a private one
     // reports the auth failure and the explicit Clone prompt still accepts a token.
-    if (host.cloneRepository && codeDir && !cloning) void doClone(r, memoryTokens[provider.id] ?? "", true);
+    if (host.cloneRepository && codeDir && !cloning) void doClone(r, memoryTokens[provider.id] ?? "", { quiet: true, silent: true });
   };
   const startClone = (r: SavedRepo) => {
+    // A clone already running (blur-triggered, or a double click) owns the attempt; a second one would race it.
+    if (cloning) return;
     setError(null);
     // Public repositories clone on the first click; only an auth failure reveals the token prompt.
-    void doClone(r, memoryTokens[provider.id] ?? "", true).then((ok) => {
+    void doClone(r, memoryTokens[provider.id] ?? "", { quiet: true }).then((ok) => {
       if (!ok) { setCloneFor(r.id); setCloneToken(""); }
     });
   };
@@ -394,8 +391,8 @@ export default function RepositoriesSection() {
                       placeholder={provider.id === "gitlab" ? "https://gitlab.com/owner/repo" : "https://github.com/owner/repo"}
                       spellCheck={false}
                       aria-invalid={urlError(r) !== null}
-                      onChange={(e) => { patchRepo(r, { url: e.target.value }); scheduleProvision({ ...r, url: e.target.value }); }}
-                      onBlur={() => autoProvision(r)}
+                      onChange={(e) => patchRepo(r, { url: e.target.value })}
+                      onBlur={() => { if (shouldProvision(r)) autoProvision(r); }}
                     />
                     {urlError(r) ? <span className="st-hint" role="alert">{urlError(r)}</span> : null}
                   </label>

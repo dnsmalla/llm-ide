@@ -50,14 +50,16 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
     return () => { live = false; };
   }, [preview, activeId]);
 
-  // Load and mount Monaco the first time a tab exists.
+  // Load and mount Monaco the first time a tab exists. No per-run cancel flag: the effect re-runs when the tab
+  // count changes, and a run-scoped flag would dispose the load that the first run already started. Unmount is
+  // detected through mountEl (React nulls the ref), which is the only case where the editor must be thrown away.
+  const hasTabs = snap.tabs.tabs.length > 0;
   useEffect(() => {
-    if (started.current || snap.tabs.tabs.length === 0) return;
+    if (started.current || !hasTabs) return;
     started.current = true;
-    let cancelled = false;
     loadEditor().then(
       (ed) => {
-        if (cancelled || !mountEl.current) {
+        if (!mountEl.current) {
           ed.dispose();
           return;
         }
@@ -71,10 +73,7 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
       },
       (e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)),
     );
-    return () => {
-      cancelled = true;
-    };
-  }, [snap.tabs.tabs.length, loadEditor, controller, editorRef]);
+  }, [hasTabs, loadEditor, controller, editorRef]);
 
   // Dispose with the screen.
   useEffect(

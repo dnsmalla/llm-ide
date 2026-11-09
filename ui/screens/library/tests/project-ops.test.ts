@@ -193,11 +193,47 @@ test("add file: a file that changed size after the pick (short read) is refused,
 });
 
 test("add file: BOM, CRLF and non-ASCII text are passed through unchanged; invalid UTF-8 is refused", async () => {
-  const p = fakeProject({ bytes: { h1: new Uint8Array([0xef, 0xbb, 0xbf, 0x61, 0x0d, 0x0a, 0xc3, 0xa9]), h2: new Uint8Array([0x61, 0xc3]) } });
+  const p = fakeProject({ bytes: { h1: new Uint8Array([0xef, 0xbb, 0xbf, 0x61, 0x0d, 0x0a, 0xc3, 0xa9]), h2: new Uint8Array([0x61, 0x81]) } });
   const r = await addFilesToFolder(p.m, "code", [picked("h1", "a.txt", 8), picked("h2", "b.txt", 2)]);
   assert.deepEqual(r.added, ["code/a.txt"]);
   assert.deepEqual([...new TextEncoder().encode(p.files.get("code/a.txt")!)], [0xef, 0xbb, 0xbf, 0x61, 0x0d, 0x0a, 0xc3, 0xa9]);
+  // 0x81 at the end is an incomplete sequence in both UTF-8 and Shift-JIS, so the file is still refused.
   assert.match(r.skipped[0]!.reason, /Only text files/);
+});
+
+test("add file: a Shift-JIS (CP932) CSV is accepted and stored as UTF-8; binary bytes are still refused", async () => {
+  // "名" + ideographic space + "日本語" + LF, in Shift-JIS.
+  const sjis = new Uint8Array([0x96, 0xbc, 0x81, 0x40, 0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, 0x0a]);
+  const p = fakeProject({ bytes: { h1: sjis, h2: new Uint8Array([0xff, 0xfe, 0x00, 0x01]) } });
+  const r = await addFilesToFolder(p.m, "code", [picked("h1", "list.csv", sjis.length), picked("h2", "x.bin", 4)]);
+  assert.deepEqual(r.added, ["code/list.csv"]);
+  assert.equal(p.files.get("code/list.csv"), "名　日本語\n");
+  assert.deepEqual(r.notes, [{ name: "list.csv", note: "converted from Shift-JIS to UTF-8" }]);
+  assert.match(r.skipped[0]!.reason, /Only text files/);
+});
+
+test("add file: a Latin-1 file that Shift-JIS would decode ('café au lait') is refused, not stored as mojibake", async () => {
+  // 0xE9 followed by a space is not a valid Shift-JIS pair, so the file fails in both decoders.
+  const latin1 = new Uint8Array([...utf8("caf"), 0xe9, ...utf8(" au lait")]);
+  const p = fakeProject({ bytes: { h1: latin1 } });
+  const r = await addFilesToFolder(p.m, "code", [picked("h1", "cafe.txt", latin1.length)]);
+  assert.deepEqual(r.added, []);
+  assert.deepEqual(r.notes, []);
+  assert.equal(p.files.size, 0);
+  assert.match(r.skipped[0]!.reason, /Only text files/);
+});
+
+test("add file: plain UTF-8 adds no conversion note", async () => {
+  const p = fakeProject({ bytes: { h1: utf8("日本語 text") } });
+  const r = await addFilesToFolder(p.m, "code", [picked("h1", "memo.txt", 14)]);
+  assert.deepEqual(r.added, ["code/memo.txt"]);
+  assert.deepEqual(r.notes, []);
+});
+
+test("the add summary mentions a conversion note alongside the added and skipped files", () => {
+  const text = addSummary(["code/list.csv"], [], [{ name: "list.csv", note: "converted from Shift-JIS to UTF-8" }]);
+  assert.equal(text, "Added 1 file: code/list.csv. list.csv: converted from Shift-JIS to UTF-8.");
+  assert.equal(addSummary(["code/list.csv"], [{ name: "x.png", reason: "r" }], []), "Added 1 file: code/list.csv. Skipped 1: x.png (r).");
 });
 
 test("add file: the free-name search is bounded", async () => {

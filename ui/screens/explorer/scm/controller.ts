@@ -471,8 +471,13 @@ export class ScmController {
       this.set({ notice: { kind: "error", info: describeError("invalid_ref", bad), text: bad } });
       return;
     }
-    await this.run("Switching branch", () => this.api.checkout(name));
-    this.set({ history: { entries: [], hasMore: false, loading: false, error: null, open: null }, hunks: null });
+    let switched = false;
+    await this.run("Switching branch", async () => {
+      await this.api.checkout(name);
+      switched = true;
+    });
+    // Only a switch that happened changes what history and the open hunks show; a refused one leaves them alone.
+    if (switched) this.set({ history: { entries: [], hasMore: false, loading: false, error: null, open: null }, hunks: null });
     await this.loadBranches();
     this.opts.onFilesChanged?.();
   }

@@ -173,6 +173,21 @@ export function validateRepoUrl(raw: string): string | null {
   return "Use https://host/owner/repo or owner/repo.";
 }
 
+/** The `owner/repo` a URL or slug names; null when there is no owner and repo pair to import from. */
+export function repoSlugOf(raw: string): string | null {
+  const m = /^(?:https?:\/\/[^/]+\/)?([^/]+)\/([^/?#]+?)(?:\.git)?\/?$/i.exec(raw.trim());
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/**
+ * Whether a repository should be cloned (and its issues imported) when its URL field loses focus: a finished, valid
+ * owner/repo that is not cloned yet. A repository that already has a clone path is never re-attempted on blur.
+ */
+export function shouldProvision(repo: Pick<SavedRepo, "url" | "clonePath">): boolean {
+  if (repo.clonePath.trim() !== "") return false;
+  return validateRepoUrl(repo.url) === null && repoSlugOf(repo.url) !== null;
+}
+
 export function newId(): string {
   try {
     return globalThis.crypto?.randomUUID?.() ?? `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;

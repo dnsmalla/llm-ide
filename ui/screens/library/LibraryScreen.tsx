@@ -121,10 +121,12 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
     const ac = new AbortController();
     rebuildAbort.current = ac;
     setRebuild({ ...IDLE_REBUILD, phase: "reading" });
-    void runRebuild(store.getSnapshot().records, setRebuild, ac.signal).then((final) => {
-      setRebuild(final);
-      rebuildAbort.current = null;
-    });
+    // A rejected run must still release the guard, or the next Rebuild click would do nothing.
+    void runRebuild(store.getSnapshot().records, setRebuild, ac.signal)
+      .then((final) => setRebuild(final), () => setRebuild(IDLE_REBUILD))
+      .finally(() => {
+        rebuildAbort.current = null;
+      });
   }, [runRebuild, store]);
 
   const cancelRebuild = useCallback(() => rebuildAbort.current?.abort(), []);

@@ -193,6 +193,19 @@ test("branches: invalid names never reach the host; checkout reloads", async () 
   assert.equal(snap().notice.info.code, "dirty_conflict");
 });
 
+test("a refused checkout keeps the open hunks; a successful one clears them", async () => {
+  const { c, api, snap } = await ctl({ entries: [entry("a", ".", "M")] });
+  await c.openHunks("a", false);
+  const open = snap().hunks;
+  assert.equal(open.status, "ready");
+  api.checkout = async () => { throw new ScmErr("dirty_conflict"); };
+  await c.checkout("other");
+  assert.equal(snap().hunks, open, "a refused switch does not touch the hunks");
+  api.checkout = async () => {};
+  await c.checkout("other");
+  assert.equal(snap().hunks, null, "a switch that happened clears them");
+});
+
 test("history pages and lazy commit detail with sanitized diff", async () => {
   const log = Array.from({ length: 250 }, (_, i) => ({ hash: "h".repeat(40) + i, short: "abc" + i, author: "A", time: 1, subject: `s${i}`, parents: 1 }));
   const { c, api, snap } = await ctl({ entries: [], log });

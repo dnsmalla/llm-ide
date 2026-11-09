@@ -66,6 +66,8 @@ export function createStatusStore(opts: StatusStoreOptions): StatusStore {
   let state = INITIAL_STATUS_STATE;
   let timer: unknown = null;
   let running = false;
+  // Bumped by every start and stop: a poll that resolves after a stop/start must not schedule a second loop.
+  let generation = 0;
   let inflight: Promise<void> | null = null;
 
   const set = (next: StatusState) => {
@@ -89,11 +91,12 @@ export function createStatusStore(opts: StatusStoreOptions): StatusStore {
     return inflight;
   };
 
-  const loop = () => {
-    if (!running) return;
+  const loop = (gen: number) => {
+    if (!running || gen !== generation) return;
     void poll().then(() => {
-      if (!running) return;
-      timer = setTimer(loop, nextDelay(state, iv, isHidden()));
+      if (!running || gen !== generation) return;
+      if (timer !== null) clearTimer(timer);
+      timer = setTimer(() => loop(gen), nextDelay(state, iv, isHidden()));
     });
   };
 
@@ -106,10 +109,12 @@ export function createStatusStore(opts: StatusStoreOptions): StatusStore {
     start() {
       if (running) return;
       running = true;
-      loop();
+      generation += 1;
+      loop(generation);
     },
     stop() {
       running = false;
+      generation += 1;
       if (timer !== null) clearTimer(timer);
       timer = null;
     },

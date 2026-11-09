@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALL_GROUPS, ExpandedGroups, expandedKey, resolveAnchor } from "../groups.ts";
+import { ALL_GROUPS, ExpandedGroups, NO_SEARCH_TOGGLES, expandedKey, keepMounted, resolveAnchor, toggleSearchMatch } from "../groups.ts";
 import { NOTICES, PARTIAL_NOTES } from "../notices.ts";
 test("group ids are unique and storage-safe; every non-working group has a notice, every partial one a note", () => {
   const ids = ALL_GROUPS.map((g) => g.id);
@@ -81,4 +81,25 @@ test("the mirror map documents every group and every blocked-by sentence verbati
   const doc = readFileSync(join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "docs/superpowers/plans/2026-10-31-settings-mirror-map.md"), "utf8");
   for (const g of ALL_GROUPS) assert.ok(doc.includes(`| ${g.title}`), `map row for ${g.title}`);
   for (const [id, n] of Object.entries(NOTICES)) assert.ok(doc.includes(n.blockedBy.replaceAll("|", "\\|")), `blocked-by for ${id}`);
+});
+
+test("a search click collapses an open match and a reopen is recorded as the user opening it", () => {
+  const first = toggleSearchMatch(NO_SEARCH_TOGGLES, "a");
+  assert.ok(first.collapsed.has("a") && !first.reopened.has("a"), "collapsing is not an opening");
+  const reopened = toggleSearchMatch(first, "a");
+  assert.ok(!reopened.collapsed.has("a") && reopened.reopened.has("a"));
+  assert.ok(!NO_SEARCH_TOGGLES.collapsed.size && !NO_SEARCH_TOGGLES.reopened.size, "the shared default is never mutated");
+});
+
+test("a search match shown open never mounts its body; a user-opened group stays mounted after it closes", () => {
+  const kept = new Set<string>();
+  // Shown open only because the search matched it: not mounted by the group, and not kept.
+  assert.equal(keepMounted(kept, "server", true, false), true);
+  assert.equal(kept.has("server"), false);
+  // Search cleared, closed: nothing keeps it, so the body unmounts and its timers stop.
+  assert.equal(keepMounted(kept, "server", false, false), false);
+  // The user opens it: kept from now on, even after closing.
+  assert.equal(keepMounted(kept, "server", true, true), true);
+  assert.equal(keepMounted(kept, "server", false, false), true);
+  assert.equal(keepMounted(kept, "other", false, false), false, "other groups are unaffected");
 });

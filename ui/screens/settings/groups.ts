@@ -143,3 +143,29 @@ export class ExpandedGroups {
     return next;
   }
 }
+
+/** A search match is shown open without the user asking for it; a click there toggles it and records a reopen. */
+export interface SearchToggles {
+  readonly collapsed: ReadonlySet<string>;
+  readonly reopened: ReadonlySet<string>;
+}
+
+export const NO_SEARCH_TOGGLES: SearchToggles = { collapsed: new Set(), reopened: new Set() };
+
+/** One click on a search match: an open match collapses; reopening a collapsed one counts as the user opening it. */
+export function toggleSearchMatch(t: SearchToggles, id: string): SearchToggles {
+  if (!t.collapsed.has(id)) return { collapsed: new Set([...t.collapsed, id]), reopened: t.reopened };
+  const collapsed = new Set(t.collapsed);
+  collapsed.delete(id);
+  return { collapsed, reopened: new Set([...t.reopened, id]) };
+}
+
+/**
+ * Whether a group's body must be mounted. Once the user opened a group its body stays mounted (hidden when closed) so
+ * unsaved input survives collapsing; a search match shown open does not count, so it unmounts when the search clears
+ * and its timers (log poll, pin interval) stop with it. Records the user opening into `kept`.
+ */
+export function keepMounted(kept: Set<string>, id: string, open: boolean, userOpened: boolean): boolean {
+  if (open && userOpened) kept.add(id);
+  return open || kept.has(id);
+}

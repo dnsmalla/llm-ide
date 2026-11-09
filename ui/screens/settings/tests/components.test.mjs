@@ -27,6 +27,7 @@ before(async () => {
   await build({
     entryPoints: {
       screen: join(SETTINGS, "SettingsScreen.tsx"),
+      group: join(SETTINGS, "SettingsGroup.tsx"),
       providers: join(SETTINGS, "sections/ProvidersSection.tsx"),
       builtin: join(SETTINGS, "sections/BuiltinProviders.tsx"),
       history: join(SETTINGS, "sections/AgentHistorySection.tsx"),
@@ -71,7 +72,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "general", "appModel", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret", "routing", "selfheal"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "general", "appModel", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret", "routing", "selfheal", "group"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });
@@ -464,4 +465,31 @@ test("Server & Backend: the log has an Auto-scroll checkbox that starts on, and 
   const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.server.default)));
   assert.match(out, /<button[^>]*role="checkbox"[^>]*aria-checked="true"[^>]*>Auto-scroll<\/button>/, "Auto-scroll is a labelled checkbox, on by default");
   assert.ok(m.componentsModel.LOG_POLL_MS >= 1000 && m.componentsModel.LOG_POLL_MS <= 5000, "the open log is re-read every few seconds");
+});
+
+test("SettingsGroup: never opened renders no body; opened renders it visible; closed after open keeps it mounted and hidden", () => {
+  const group = (open, mounted) => html(h(m.group.SettingsGroup, { id: "b", title: "Beta", icon: undefined, open, mounted, onToggle() {} }, h("p", null, "Unsaved draft")));
+  const bodyTag = (out) => out.match(/<div[^>]*id="st-group-b-b"[^>]*>/)?.[0];
+
+  // 1. Never opened: no body in the DOM, so its lazy chunk and timers never start.
+  const never = group(false, false);
+  assert.equal(bodyTag(never), undefined, "no body element");
+  assert.ok(!never.includes("Unsaved draft"));
+  assert.match(never, /aria-expanded="false"/);
+
+  // 2. Opened: body rendered, visible (no hidden attribute), labelled by the header.
+  const opened = group(true, true);
+  const openedTag = bodyTag(opened);
+  assert.ok(openedTag, "body element exists");
+  assert.doesNotMatch(openedTag, /\shidden(=|\s|>)/, "an open body is not hidden");
+  assert.match(openedTag, /role="region"/);
+  assert.match(opened, /Unsaved draft/);
+  assert.match(opened, /aria-expanded="true"/);
+
+  // 3. Closed after open: children still rendered (input survives) but hidden.
+  const closed = group(false, true);
+  const closedTag = bodyTag(closed);
+  assert.ok(closedTag, "the body stays mounted once it was opened");
+  assert.match(closedTag, /\shidden(=""|>|\s)/, "a closed body carries hidden");
+  assert.match(closed, /Unsaved draft/, "the children are kept, not unmounted");
 });
