@@ -322,6 +322,55 @@ export function formatDueDate(iso: string | null): string {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(d);
 }
 
+/** The create form's content as one string: the same repo, title and body always give the same fingerprint. */
+export function createFingerprint(provider: string, repo: string, title: string, body: string): string {
+  return JSON.stringify([provider, repo, title.trim(), body]);
+}
+
+/**
+ * The idempotency key for a create. The key minted for this exact content is kept; an edited form (or a new one)
+ * gets a fresh key, so a fixed retry is never replayed as a 409 IDEM_CONFLICT against the old content.
+ */
+export function idemKeyFor(
+  prev: { fingerprint: string; key: string } | null,
+  fingerprint: string,
+  mint: () => string,
+): { fingerprint: string; key: string } {
+  return prev && prev.fingerprint === fingerprint ? prev : { fingerprint, key: mint() };
+}
+
+/**
+ * What the create-issue key becomes after an attempt. Only a created issue or a 409 (the key is bound to other
+ * content) ends it. A thrown error, a 5xx or any other failure is ambiguous: the server may have created the issue
+ * before the answer was lost, so the same key must survive for the retry, even across Cancel and a reopened form.
+ */
+export type CreateOutcome = "created" | "conflict" | "failed";
+
+export function createKeyAfter<K>(prev: K | null, outcome: CreateOutcome): K | null {
+  return outcome === "created" || outcome === "conflict" ? null : prev;
+}
+
+/**
+ * The banner for a finished GitHub import. The core upserts what it fetched and deletes nothing when it stops early
+ * (page cap, row cap, time budget or a secondary limit), so a truncated import says so instead of reading "Imported N".
+ */
+export function importSummary(body: unknown): string {
+  const b = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  const n = typeof b.count === "number" ? b.count : typeof b.imported === "number" ? b.imported : null;
+  const head = n !== null ? `Imported ${n.toLocaleString("en")} issue${n === 1 ? "" : "s"}` : "Issues imported";
+  if (b.truncated !== true) return `${head}.`;
+  const wait = typeof b.retryAfter === "number" && Number.isFinite(b.retryAfter) && b.retryAfter > 0
+    ? ` GitHub asked to wait ${Math.ceil(b.retryAfter)} s before more requests.`
+    : "";
+  return `${head}, but the import stopped early, so the rest of the repository was not read.${wait} Import again to continue.`;
+}
+
+/** The banner for a failed request: the core's own `{ error: { message } }` when it sent one, else the fallback. */
+export function errorMessageOf(body: unknown, fallback: string): string {
+  const e = body && typeof body === "object" ? (body as { error?: { message?: unknown } }).error : undefined;
+  return typeof e?.message === "string" && e.message.trim() !== "" ? e.message : fallback;
+}
+
 /** The card's assignee line: the first three logins, then how many more. Plain text. */
 export function assigneeSummary(logins: readonly string[], shown = 3): string {
   const head = logins.slice(0, shown).join(", ");

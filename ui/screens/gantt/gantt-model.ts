@@ -160,6 +160,15 @@ export function enqueueShift(queue: QueuedShift[], row: GanttRow, days: number):
   return queue;
 }
 
+/**
+ * Drop a saved shift from the queue, but only when it is still the head AND no further shift accumulated on it while
+ * the save ran. A queue that was cleared (the provider or repo changed mid-save) or re-filled must not lose the item
+ * that replaced it.
+ */
+export function settleShift(queue: QueuedShift[], item: QueuedShift, savedDays: number): void {
+  if (queue[0] === item && item.days === savedDays) queue.shift();
+}
+
 /** A pointer drag's day delta: a 3 px threshold stops a click from becoming a tiny move. */
 export function dragShift(startX: number, clientX: number, dayWidth: number): { moved: boolean; days: number } {
   const delta = clientX - startX;

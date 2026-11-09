@@ -152,7 +152,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
               {!confirmClose ? <button type="button" className="iss-btn" disabled={writeBusy} onClick={() => setConfirmClose(true)}>Close issue</button> : (
                 <>
                   <span className="iss-hint">Close this issue on GitHub?</span>
-                  <button type="button" className="iss-btn iss-danger" disabled={writeBusy} onClick={() => void write("/kb/issues/close", {}, "Issue closed.")}>Close issue</button>
+                  <button type="button" className="iss-btn iss-danger" disabled={writeBusy} onClick={() => void write("/kb/issues/close", {}, "Issue closed.").then((ok) => { if (ok) onClose(); })}>Close issue</button>
                   <button type="button" className="iss-btn" disabled={writeBusy} onClick={() => setConfirmClose(false)}>Cancel</button>
                 </>
               )}

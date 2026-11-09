@@ -1,6 +1,50 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CORE_LIST_CAP, columnsFor, repoMatches, decodeIssues, filterIssues, assigneeSummary, formatDueDate, issueOpenUrl, labelNamespace, openedAgo, overlayRepoSupported, rawIssueCount, repoOptions, repoSlug } from "../issues-model.ts";
+import { CORE_LIST_CAP, columnsFor, repoMatches, decodeIssues, filterIssues, assigneeSummary, createFingerprint, errorMessageOf, formatDueDate, createKeyAfter, idemKeyFor, importSummary, issueOpenUrl, labelNamespace, openedAgo, overlayRepoSupported, rawIssueCount, repoOptions, repoSlug } from "../issues-model.ts";
+
+test("an edited create gets a new idempotency key; the same content keeps its key", () => {
+  let n = 0;
+  const mint = () => `k${++n}`;
+  const fp = createFingerprint("github", "acme/web", " Bug ", "body");
+  const first = idemKeyFor(null, fp, mint);
+  assert.equal(idemKeyFor(first, fp, mint).key, first.key, "a retry with the same content replays the same key");
+  const edited = idemKeyFor(first, createFingerprint("github", "acme/web", "Bug fixed", "body"), mint);
+  assert.notEqual(edited.key, first.key, "an edited title is a new issue, not a 409 against the old key");
+  assert.equal(createFingerprint("github", "acme/web", "Bug", "x") === createFingerprint("github", "acme/web", "Bug", "y"), false);
+});
+
+test("an ambiguous create keeps its key across a retry; only a created issue or a 409 ends it", () => {
+  let n = 0;
+  const mint = () => `k${++n}`;
+  const fp = createFingerprint("github", "acme/web", "Bug", "body");
+  const first = idemKeyFor(null, fp, mint);
+  // A thrown error or a 5xx: the server may already have created it, so the retry must replay the same key.
+  const afterTimeout = createKeyAfter(first, "failed");
+  assert.equal(afterTimeout, first, "an ambiguous failure keeps the key");
+  // Cancel and reopen do not touch the key; the same content still reuses it.
+  assert.equal(idemKeyFor(afterTimeout, fp, mint).key, first.key, "the retry after Cancel reuses the key");
+  assert.equal(createKeyAfter(first, "created"), null, "a success ends the key");
+  assert.equal(createKeyAfter(first, "conflict"), null, "a 409 ends the key");
+  // An edited form gets a new key regardless of what was kept.
+  const edited = idemKeyFor(afterTimeout, createFingerprint("github", "acme/web", "Bug", "other"), mint);
+  assert.notEqual(edited.key, first.key, "changed content is a new issue");
+});
+
+test("a truncated import says the rest was not read; a complete one reads as a count", () => {
+  assert.equal(importSummary({ count: 1, truncated: false }), "Imported 1 issue.");
+  assert.equal(importSummary({ count: 2400, truncated: false }), "Imported 2,400 issues.");
+  const stopped = importSummary({ count: 300, truncated: true, retryAfter: 42.2 });
+  assert.match(stopped, /^Imported 300 issues, but the import stopped early/);
+  assert.match(stopped, /wait 43 s/);
+  assert.match(importSummary({ count: 5, truncated: true, retryAfter: null }), /stopped early.*Import again to continue\.$/);
+  assert.equal(importSummary(null), "Issues imported.");
+});
+
+test("an error message comes from the core's envelope, else the fallback", () => {
+  assert.equal(errorMessageOf({ error: { code: "VALIDATION_FAILED", message: "Missing repo (owner/name)" } }, "x"), "Missing repo (owner/name)");
+  assert.equal(errorMessageOf({ error: { message: "  " } }, "fallback"), "fallback");
+  assert.equal(errorMessageOf("<html>", "fallback"), "fallback");
+});
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: "1", title: "T", body: "b", url: "https://github.com/o/r/issues/1", provider: "github",

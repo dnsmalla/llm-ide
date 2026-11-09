@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, shiftSchedule, shiftScheduleBody, scheduleBody, enqueueShift, dragShift, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
+import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, shiftSchedule, shiftScheduleBody, scheduleBody, enqueueShift, settleShift, dragShift, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -580,4 +580,19 @@ test("queued shifts accumulate for the same issue and stay separate for another"
   assert.equal(q.length, 2);
   assert.equal(q[0]!.days, 3);
   assert.equal(q[1]!.days, -1);
+});
+
+test("a saved shift leaves the queue only while it is still the head and unchanged", () => {
+  const row = { issue: issue({ id: "a", number: 7 }), schedule: sched({ startDate: "2026-01-05" }), start: 0, end: 0 } as never;
+  const q = enqueueShift([], row, 1);
+  const item = q[0]!;
+  enqueueShift(q, row, 2);
+  settleShift(q, item, 1);
+  assert.equal(q.length, 1, "more days accumulated during the save: the item stays for the next save");
+  const cleared: typeof q = [];
+  settleShift(cleared, item, 1);
+  assert.equal(cleared.length, 0, "a queue cleared for another view is not shifted");
+  const replaced = enqueueShift([], row, 5)[0]!;
+  settleShift([replaced], item, 1);
+  assert.equal(replaced.days, 5, "an item that replaced the saved one is never dropped");
 });

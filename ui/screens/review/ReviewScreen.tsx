@@ -9,7 +9,7 @@ import { ChatDockToggle } from "../shell/ChatDockToggle";
 import { shellBus } from "../shell/bus";
 import { Markdown } from "../chat/MarkdownView";
 import { readRepoConfig } from "../settings/repo-config.ts";
-import { REVIEW_EMPTY, REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, openFolderChildren, pickLinkedRepo, readChildren, refreshGate, type ReviewEntry } from "./review-model.ts";
+import { REVIEW_EMPTY, REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, listTruncation, openFolderChildren, pickLinkedRepo, readChildren, refreshGate, type ReviewEntry } from "./review-model.ts";
 import "./review.css";
 
 export interface ReviewDeps {
@@ -18,7 +18,7 @@ export interface ReviewDeps {
 }
 
 export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { deps: ReviewDeps }): ReactNode {
-  const [roots, setRoots] = useState<{ root: (typeof REVIEW_ROOTS)[number]; entries: ReviewEntry[]; error: boolean }[]>([]);
+  const [roots, setRoots] = useState<{ root: (typeof REVIEW_ROOTS)[number]; entries: ReviewEntry[]; error: boolean; more: { shown: number; total: number | null } | null }[]>([]);
   const [children, setChildren] = useState<Map<string, ReviewEntry[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<{ path: string; text: string; bytes: number } | null>(null);
@@ -31,20 +31,24 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
     try { const n = Number(localStorage.getItem("llmide.review.chatWidth")); return Number.isFinite(n) && n >= 240 && n <= 640 ? n : 320; } catch { return 320; }
   });
   const [tabs, setTabs] = useState<string[]>([]);
-  const linked = useMemo(() => pickLinkedRepo(readRepoConfig().saved), []);
+  // Re-read when the section is shown again, so a repository added or removed in Settings shows up here.
+  const linked = useMemo(() => pickLinkedRepo(readRepoConfig().saved), [active, projectRoot]);
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
 
   const gate = useRef(refreshGate()).current;
+  // Latest-wins for file reads: a file that resolves after a later pick (or after a project switch) is dropped.
+  const fileGate = useRef(refreshGate()).current;
   const loadRoots = useCallback(async () => {
     const token = gate.begin();
     setBusy(true);
     const next: typeof roots = [];
     for (const root of REVIEW_ROOTS) {
       try {
-        next.push({ root, entries: decodeEntries(await deps.list(root.path)), error: false });
+        const body = await deps.list(root.path);
+        next.push({ root, entries: decodeEntries(body), error: false, more: listTruncation(body) });
       } catch {
-        next.push({ root, entries: [], error: true });
+        next.push({ root, entries: [], error: true, more: null });
       }
     }
     // A newer refresh (Cmd+R twice, project change) owns the screen now: drop this one's results.
@@ -58,6 +62,15 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
     setBusy(false);
   }, [deps, gate]);
 
+  // A different project has its own tree and files: start from none. The shell also remounts this screen on a switch.
+  useEffect(() => {
+    fileGate.begin();
+    setTabs([]);
+    setSelected(null);
+    setFileError(null);
+    setExpanded(new Set());
+    setChildren(new Map());
+  }, [fileGate, projectRoot]);
   useEffect(() => {
     if (active) void loadRoots();
   }, [active, loadRoots, projectRoot]);
@@ -100,11 +113,13 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
   };
 
   const openFile = async (path: string) => {
+    const token = fileGate.begin();
     setTabs((t) => (t.includes(path) ? t : [...t, path]));
     setSelected({ path, text: "", bytes: 0 });
     setFileError(null);
     try {
       const body = await deps.read(path);
+      if (!fileGate.isCurrent(token)) return;
       const file = decodeFile(body);
       if (!file) {
         setFileError("This file is binary or too large to preview here. Open it in Explorer.");
@@ -112,7 +127,7 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
       }
       setSelected({ path, text: file.text, bytes: file.bytes });
     } catch {
-      setFileError("The file could not be read.");
+      if (fileGate.isCurrent(token)) setFileError("The file could not be read.");
     }
   };
 
@@ -147,7 +162,7 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
       ) : null}
       <div className="rv-body">
         <aside className="rv-tree" aria-label="Review files">
-          {roots.map(({ root, entries, error }) => (
+          {roots.map(({ root, entries, error, more }) => (
             <section key={root.path} className="rv-group">
               <h3 className="rv-group-title">{root.label}</h3>
               {error ? (
@@ -155,11 +170,18 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
               ) : entries.length === 0 ? (
                 <p className="rv-hint">No files in {root.path}/.</p>
               ) : (
+                <>
+                {more ? (
+                  <p className="rv-hint" role="note">
+                    Showing the first {more.shown.toLocaleString("en")}{more.total === null ? "" : ` of ${more.total.toLocaleString("en")}`}; the rest of {root.path}/ is not listed.
+                  </p>
+                ) : null}
                 <ul className="rv-list">
                   {entries.map((e) => (
                     <TreeRow key={e.path} entry={e} depth={0} expanded={expanded} childrenOf={rows} onToggle={openDir} onOpen={openFile} selected={selected?.path ?? null} />
                   ))}
                 </ul>
+                </>
               )}
             </section>
           ))}

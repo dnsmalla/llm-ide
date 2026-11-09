@@ -43,6 +43,15 @@ export function decodeEntries(body: unknown): ReviewEntry[] {
   return out.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name, "en") : a.kind === "dir" ? -1 : 1));
 }
 
+/**
+ * The "more rows" note for a listing page: set when the host says rows follow (`next_offset`), with the rows shown and
+ * the host's total when it sent one. Null for a complete listing.
+ */
+export function listTruncation(body: unknown): { shown: number; total: number | null } | null {
+  if (!isRecord(body) || typeof body.next_offset !== "number" || !Array.isArray(body.entries)) return null;
+  return { shown: body.entries.length, total: typeof body.total === "number" ? body.total : null };
+}
+
 /** The reader's text from a `fs_read_file` result; null when it is binary/too large/unreadable. */
 export function decodeFile(body: unknown): { text: string; bytes: number } | null {
   if (!isRecord(body) || body.status !== "ok" || typeof body.text !== "string") return null;

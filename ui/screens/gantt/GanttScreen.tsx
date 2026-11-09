@@ -24,7 +24,7 @@ import {
   projectOptions,
   timelineRange,
   todayScrollLeft,
-  enqueueShift, scheduleBody, shiftScheduleBody, type QueuedShift,
+  enqueueShift, scheduleBody, settleShift, shiftScheduleBody, type QueuedShift,
   type GanttCategory,
   type GanttRow,
   type Schedule,
@@ -79,6 +79,18 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const [nestedNote, setNestedNote] = useState(false);
   const shiftingRef = useRef(false);
   const shiftQueueRef = useRef<QueuedShift[]>([]);
+  // A failed move keeps its row and days so the user can retry it; the queue behind it is reported, not silently lost.
+  const [shiftFailure, setShiftFailure] = useState<{ row: GanttRow; days: number; message: string; dropped: number } | null>(null);
+  // The view a queued shift belongs to. Rows of another provider or repo are never saved from this queue.
+  const scope = `${provider}\u0000${repo}`;
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const detailIssue = useMemo(() => (detail ? issues.find((i) => i.id === detail.id) ?? detail : null), [issues, detail]);
+
+  useEffect(() => {
+    shiftQueueRef.current.length = 0;
+    setShiftFailure(null);
+  }, [provider, repo]);
 
   const load = useCallback(async () => {
     abortRef.current?.abort();
@@ -129,19 +141,40 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   /** Drag/keyboard shift: save the moved dates through the existing schedule overlay route. */
   const shiftRow = useCallback(async (row: GanttRow, days: number) => {
     if (shiftScheduleBody(row, days) === null) return;
+    setShiftFailure(null);
     enqueueShift(shiftQueueRef.current, row, days);
     if (shiftingRef.current) return;
     shiftingRef.current = true;
+    let item: QueuedShift | undefined;
+    // The view the in-flight save was started in; a failure is reported only while the user is still there.
+    let itemScope = "";
+    // Stops the queue and keeps the failed move (with what was queued behind it) for an explicit retry.
+    const failShift = (failed: QueuedShift, message: string) => {
+      const dropped = Math.max(0, shiftQueueRef.current.length - 1);
+      shiftQueueRef.current.length = 0;
+      setShiftFailure({ row: failed.row, days: failed.days, message, dropped });
+    };
     try {
       while (shiftQueueRef.current.length > 0) {
-        const item = shiftQueueRef.current[0]!;
+        item = shiftQueueRef.current[0]!;
         const savedDays = item.days;
+        const savedScope = scopeRef.current;
+        itemScope = savedScope;
         const body = scheduleBody(item.row, savedDays);
         if (body === null) { shiftQueueRef.current.shift(); continue; }
-        const r = await deps.request("PUT", "/kb/issue-schedule", body);
+        let r: Awaited<ReturnType<typeof deps.request>>;
+        try {
+          r = await deps.request("PUT", "/kb/issue-schedule", body);
+        } catch {
+          // A network failure after the user moved to another provider or repo belongs to the old view: no banner there.
+          if (scopeRef.current !== savedScope) continue;
+          failShift(item, "The core is not reachable right now.");
+          return;
+        }
+        // The provider or repo changed during the save: the queue was cleared for the old view, and its reload belongs to the new view.
+        if (scopeRef.current !== savedScope) continue;
         if (r.status !== 200) {
-          setNotice(`The schedule could not be moved (${r.status}).`);
-          shiftQueueRef.current.length = 0;
+          failShift(item, `The schedule could not be moved (${r.status}).`);
           return;
         }
         setNotice(savedDays === 0
@@ -150,11 +183,10 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         // Keep the item until the reload finishes: a compensating shift during the load must merge into the
         // SAME queued target, not start a new one from the stale pre-save row.
         await load();
-        if (item.days === savedDays) shiftQueueRef.current.shift();
+        settleShift(shiftQueueRef.current, item, savedDays);
       }
     } catch {
-      setNotice("The core is not reachable right now.");
-      shiftQueueRef.current.length = 0;
+      if (item && scopeRef.current === itemScope) failShift(item, "The core is not reachable right now.");
     } finally { shiftingRef.current = false; }
   }, [deps, load]);
   const onShift = useCallback((row: GanttRow, days: number) => { void shiftRow(row, days); }, [shiftRow]);
@@ -261,6 +293,14 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
 
       {error ? <StatusBanner severity="error" message={error} /> : null}
       {notice ? <StatusBanner severity="info" message={notice} /> : null}
+      {shiftFailure ? (
+        <div className="gnt-hint" role="alert">
+          {shiftFailure.message}
+          {shiftFailure.dropped > 0 ? ` ${shiftFailure.dropped} queued move${shiftFailure.dropped === 1 ? " was" : "s were"} not saved.` : ""}{" "}
+          <button type="button" className="gnt-btn" onClick={() => onShift(shiftFailure.row, shiftFailure.days)}>Retry move</button>{" "}
+          <button type="button" className="gnt-btn" onClick={() => setShiftFailure(null)}>Dismiss</button>
+        </div>
+      ) : null}
 
       {phase === "loading" && rows.length === 0 ? (
         <p className="gnt-empty" role="status">Loading the timeline…</p>
@@ -304,9 +344,9 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         />
       ) : null}
 
-      {detail ? (
+      {detailIssue ? (
         <IssueDetail
-          issue={detail}
+          issue={detailIssue}
           deps={deps}
           onClose={() => setDetail(null)}
           onNotice={setNotice}

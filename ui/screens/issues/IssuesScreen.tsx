@@ -8,7 +8,12 @@ import type { SectionProps } from "../shell/sections";
 import {
   assigneeSummary,
   columnsFor,
+  createFingerprint,
+  errorMessageOf,
   filterIssues,
+  createKeyAfter,
+  idemKeyFor,
+  importSummary,
   issueNumber,
   labelOptions,
   repoOptions,
@@ -44,8 +49,9 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createBody, setCreateBody] = useState("");
-  // One key per issue the user means to create: a double click or a retry after a lost answer replays, never duplicates.
-  const createIdem = useRef<string | null>(null);
+  // One key per distinct create (repo, title, body): a double click or a retry after a lost answer replays, never
+  // duplicates; an edited retry gets its own key, so it is not refused as a 409 against the old content.
+  const createKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const [createRepo, setCreateRepo] = useState("");
   const [repoDraft, setRepoDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -107,12 +113,10 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
     try {
       const r = await deps.request("POST", "/kb/connect-github-issues", { repo, state: filters.state });
       if (r.status !== 200) {
-        setError(r.status === 401 ? "Sign in again to import issues." : `The GitHub import failed (${r.status}).`);
+        setError(r.status === 401 ? "Sign in again to import issues." : errorMessageOf(r.body, `The GitHub import failed (${r.status}).`));
         return;
       }
-      const body = r.body && typeof r.body === "object" ? (r.body as Record<string, unknown>) : {};
-      const n = typeof body.count === "number" ? body.count : typeof body.imported === "number" ? body.imported : null;
-      setNotice(n !== null ? `Imported ${n.toLocaleString("en")} issue${n === 1 ? "" : "s"}.` : "Issues imported.");
+      setNotice(importSummary(r.body));
       setImportOpen(false);
       setRepoDraft("");
       await load();
@@ -124,23 +128,26 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   };
 
   const createIssue = async () => {
-    const repo = (createRepo || filters.repo).trim();
+    const repo = createRepo.trim();
     if (!REPO_SHAPE.test(repo) || !createTitle.trim()) { setError("Enter an owner/name repository and a title."); return; }
     setBusy(true); setError(null); setNotice(null);
     try {
-      createIdem.current ??= crypto.randomUUID();
-      const r = await deps.request("POST", "/kb/issues/create", { provider: filters.provider, repo, title: createTitle.trim(), body: createBody, idem: createIdem.current });
+      createKey.current = idemKeyFor(createKey.current, createFingerprint(filters.provider, repo, createTitle, createBody), () => crypto.randomUUID());
+      const r = await deps.request("POST", "/kb/issues/create", { provider: filters.provider, repo, title: createTitle.trim(), body: createBody, idem: createKey.current.key });
       if (r.status !== 200) {
-        if (r.status === 409) createIdem.current = null;
-        const b = r.body && typeof r.body === "object" ? r.body as { error?: { message?: unknown } } : {};
-        setError(typeof b.error?.message === "string" ? b.error.message : `The issue could not be created (${r.status}).`);
+        // A 409 means the key belongs to other content; anything else keeps it so a retry replays the same create.
+        createKey.current = createKeyAfter(createKey.current, r.status === 409 ? "conflict" : "failed");
+        setError(errorMessageOf(r.body, `The issue could not be created (${r.status}).`));
         return;
       }
-      createIdem.current = null;
+      createKey.current = createKeyAfter(createKey.current, "created");
       setNotice("Issue created.");
       setCreateOpen(false); setCreateTitle(""); setCreateBody(""); setCreateRepo("");
       await load();
-    } catch { setError("The core could not be reached."); }
+    } catch {
+      // Ambiguous: the create may have reached the core. The key is kept (see createKeyAfter).
+      setError("The core could not be reached.");
+    }
     finally { setBusy(false); }
   };
 
@@ -152,6 +159,15 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const repos = useMemo(() => repoOptions(rows), [rows]);
   const labels = useMemo(() => labelOptions(rows), [rows]);
   const closeDetail = useCallback(() => setSelected(null), []);
+  // The dialog shows the row as the latest reload has it (by id), so a changed or closed issue is not a stale snapshot.
+  const detailIssue = useMemo(() => (selected ? rows.find((r) => r.id === selected.id) ?? selected : null), [rows, selected]);
+
+  // The saved repository the select shows is the natural default for a new issue; a typed substring is not a repo.
+  const openCreate = () => {
+    const saved = configuredRepos.some((r) => r.provider === filters.provider && r.slug === filters.repo);
+    setCreateRepo(saved ? filters.repo : "");
+    setCreateOpen(true);
+  };
 
   useEffect(() => {
     if (!active) return;
@@ -186,7 +202,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
           <input type="search" value={filters.query} placeholder="Title, label, repo, #number" onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))} />
         </label>
         <button type="button" className="iss-btn" onClick={() => void load()} disabled={phase === "loading"}>Refresh</button>
-        <button type="button" className="iss-btn iss-primary" onClick={() => setCreateOpen(true)} disabled={busy}>New issue</button>
+        <button type="button" className="iss-btn iss-primary" onClick={openCreate} disabled={busy}>New issue</button>
         <button type="button" className="iss-btn" onClick={() => setImportOpen((v) => !v)} disabled={filters.provider !== "github" || busy}>
           Import GitHub issues
         </button>
@@ -288,12 +304,13 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
         </div>
       )}
 
-      {selected ? (
-        <IssueDetail issue={selected} deps={deps} onClose={closeDetail} onNotice={setNotice} onScheduleChanged={() => void load()} onChanged={() => void load()} />
+      {detailIssue ? (
+        <IssueDetail issue={detailIssue} deps={deps} onClose={closeDetail} onNotice={setNotice} onScheduleChanged={() => void load()} onChanged={() => void load()} />
       ) : null}
 
       <p className="iss-hint iss-foot">
 Create, comment and close use the core's provider write routes and the saved GitHub/GitLab token.
+Issues and saved repositories are per user, not per project: an import for any project shows here.
       </p>
     </div>
   );

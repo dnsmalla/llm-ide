@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, openFolderChildren, pickLinkedRepo, readChildren, refreshGate, safeReviewPath, type ReviewEntry } from "../review-model.ts";
+import { REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, listTruncation, openFolderChildren, pickLinkedRepo, readChildren, refreshGate, safeReviewPath, type ReviewEntry } from "../review-model.ts";
 
 test("roots are the Mac's ReviewConfig categories", () => {
   assert.deepEqual(REVIEW_ROOTS.map((r) => r.path), ["code", "llm-doc"]);
@@ -72,4 +72,11 @@ test("overlapping refreshes: only the latest may commit", () => {
   const second = g.begin();
   assert.equal(g.isCurrent(first), false, "the older refresh finishing last must not overwrite the newer one");
   assert.equal(g.isCurrent(second), true);
+});
+
+test("a listing that says rows follow reports how many it showed and the host's total", () => {
+  assert.deepEqual(listTruncation({ entries: [{}, {}], total: 812, next_offset: 2 }), { shown: 2, total: 812 });
+  assert.deepEqual(listTruncation({ entries: [{}], next_offset: 1 }), { shown: 1, total: null });
+  assert.equal(listTruncation({ entries: [{}], total: 1, next_offset: null }), null, "a complete listing has no note");
+  assert.equal(listTruncation(null), null);
 });
