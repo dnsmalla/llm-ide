@@ -22,7 +22,7 @@ flowchart TB
         EXT[Chrome extension MV3<br/>React 18 + TS + Vite<br/>side panel + popup]
         DESK[Desktop app Tauri<br/>Rust host + React ui/<br/>KB · Issues · Gantt · Review]
     end
-    SERVER[Local server server.mjs<br/>Node 20+ · zero framework<br/>CORS → JWT → rate-limit → route]
+    SERVER[Local server server.mjs<br/>Node 22+ · zero framework<br/>CORS → JWT → rate-limit → route]
     DB[(SQLite WAL+FTS5<br/>per-user vault)]
     CLI[Claude CLI claude -p]
     EXT3[External opt-in<br/>GitHub · GitLab · Backlog · Linear · Slack]
@@ -104,7 +104,7 @@ SQLite, WAL mode, FTS5, foreign keys on. There is no single schema-version numbe
 Each top-level directory owns one surface. Start reading where the
 description says to start.
 
-- **`extension/server/`** — local HTTP server (Node 20+, pure `http`,
+- **`extension/server/`** — local HTTP server (Node 22+, pure `http`,
   no framework). Owns the CORS → JWT → rate-limit → route pipeline,
   config (`config.mjs`), and request middleware. Start at
   `server.mjs` and follow the router into `routes/router.mjs`.

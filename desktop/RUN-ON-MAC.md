@@ -21,7 +21,7 @@ cannot be reached from a release build's web view.)
 
 - macOS 12 or later, Apple Silicon or Intel (build on the Mac you will run it on).
 - Xcode command line tools (`xcode-select --install`): `codesign`, `plutil`, `hdiutil`.
-- Node 20 or later and npm (the build also downloads the pinned official Node that ships inside the app).
+- Node 22 or later and npm (the build also downloads the pinned official Node that ships inside the app).
 - Rust from rustup (https://rustup.rs). The build script uses `~/.rustup/toolchains/stable-*/bin/cargo`.
 - Network access for the first build (Node download, `npm ci`, cargo crates).
 - For a real model in Chat: **either** `claude login` in a terminal (Claude Code installed; the app finds it

@@ -266,7 +266,7 @@ fires once, so a tab reads "(exited)" at once.
 ## macOS app build (`scripts/build-desktop-mac.sh`)
 
 `scripts/build-desktop-mac.sh [--dmg] [--skip-checks] [--no-smoke]` builds `LLM-IDE.app` for this Mac. Steps, each
-idempotent: `npm ci` in `ui/kit` and `desktop` when their lockfile is newer; `stage-core.mjs --target <host>` with
+idempotent: `npm ci` in `ui/kit`, `desktop` and `graph-kit/web` when their lockfile is newer; `stage-core.mjs --target <host>` with
 `LLMIDE_STAGE_RELEASE=1` (pinned, hash-checked official Node, production deps, no SDK `claude` binary, staged-tree
 verifier); `check:security`; `tauri build --bundles app` (runs `npm run build` itself); ad-hoc `codesign --force
 --deep --sign -` then `codesign --verify --deep --strict`; `scripts/verify-bundle.mjs` (layout, node present and

@@ -12,7 +12,7 @@ A working local install of LLM-IDE, capturing CC from a Google Meet call, with n
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - Chrome 116+
 - macOS, Linux, or Windows
 - Claude CLI installed and authenticated: `claude --help` must work

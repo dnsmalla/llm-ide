@@ -1515,7 +1515,7 @@ function TroubleshootingSection() {
           </li>
           <li>
             <strong>Check your Node version.</strong> Run <code>node --version</code>. LLM-IDE requires{' '}
-            <strong>Node.js 20+</strong>.
+            <strong>Node.js 22+</strong>.
           </li>
           <li>
             <strong>&ldquo;Server needs restart&rdquo;</strong> means the server is running but outdated. Press{' '}

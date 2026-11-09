@@ -126,11 +126,12 @@ done
 
 # The Tauri build script (desktop/src-tauri/build.rs) fails with "resource path
 # ../resources/core doesn't exist" unless the core is staged; that directory is gitignored.
-if [ -d "$REPO_ROOT/desktop/resources/core" ]; then
+# NOTE: STAGE.json is written last by stage-core.mjs; the directory alone can be a half-staged leftover.
+if [ -f "$REPO_ROOT/desktop/resources/core/STAGE.json" ]; then
     echo "✅ desktop core already staged (re-stage: node desktop/scripts/stage-core.mjs)"
 else
     echo "⚙️  Staging the Node core for the desktop app (downloads the pinned Node once)..."
-    if node "$REPO_ROOT/desktop/scripts/stage-core.mjs" >/dev/null 2>&1; then
+    if node "$REPO_ROOT/desktop/scripts/stage-core.mjs" >/dev/null; then
         echo "✅ desktop core staged"
     else
         echo "❌ core staging failed (re-run: node desktop/scripts/stage-core.mjs)"

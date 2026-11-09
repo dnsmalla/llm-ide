@@ -115,7 +115,7 @@ Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md)
 
 ### Runtime requirements
 
-- **Server:** Node.js **≥ 20** (`extension/package.json:7–9`, `engines.node: ">=20.0.0"`).
+- **Server:** Node.js **≥ 22** (`extension/package.json:7–9`, `engines.node: ">=22.0.0"`).
 - **`better-sqlite3`** is a **native module** compiled against the running Node ABI. It must be compiled against the exact Node version in use — do not `npm install` locally if the Node ABI differs from the target environment. Route dependency bumps through CI where the native build is verified (`extension/package.json:29`).
 
 ### Client builds

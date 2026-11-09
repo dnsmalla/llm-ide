@@ -49,7 +49,7 @@ Development setup follows a straightforward path:
 3. Load the unpacked extension from `extension/dist/` in Chrome.
 4. The desktop app is a separate Tauri target (`desktop/`, UI in `ui/`) built with `cargo tauri build` (see [desktop-release](../how-to/desktop-release.md)).
 
-The server requires Node.js 20 or later. `better-sqlite3` is a native module compiled against the running Node ABI — do not swap Node versions between install and run, and route dependency bumps for that package through CI where the native build is verified.
+The server requires Node.js 22 or later. `better-sqlite3` is a native module compiled against the running Node ABI — do not swap Node versions between install and run, and route dependency bumps for that package through CI where the native build is verified.
 
 For production (systemd, environment variable wiring, native-module considerations): [`../spec/cross-cutting.md`](../spec/cross-cutting.md).
 

@@ -5,6 +5,7 @@
 ```bash
 # 0. Prerequisites (new Mac): Xcode CLT, Node 22+, Rust 1.88+, Claude CLI
 xcode-select --install
+# Homebrew first if missing: https://brew.sh
 brew install node                                   # must be v22 or newer
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # then open a new shell
 # Claude CLI: https://docs.claude.com/en/docs/claude-code/quickstart, then `claude login`

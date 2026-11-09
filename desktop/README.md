@@ -20,5 +20,5 @@ The spike/bench commands (`ping`, `bench*`, `autobench_mode`, `*_override`, `sse
 `capabilities/spike.json` exist only with the `spike` cargo feature, which is off by default and never in a release
 build (`npm run check:security:product`, run by `npm run build` and `scripts/build-desktop-mac.sh`, enforces it).
 
-Requirements: Node 20.19+ (tested on 22), Rust 1.88+ (required by `time` 0.3.47; tested on stable 1.99).
+Requirements: Node 22+, Rust 1.88+ (required by `time` 0.3.47; tested on stable 1.99).
 The Rust lockfile (`src-tauri/Cargo.lock`) is resolved for Rust 1.84.
