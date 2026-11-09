@@ -40,7 +40,7 @@ import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { createDraftPr, assertSafeBaseBranch } from '../agents/github-pr.mjs';
 import {
-  commitAndPush, createDraftMr, findOpenRequest, parseShipBody, isFactoryWorktree, isProviderWebUrl, originMatchesRepo,
+  commitAndPush, createDraftMr, findOpenRequest, neutraliseMentions, parseShipBody, scanShipText, isFactoryWorktree, isProviderWebUrl, originMatchesRepo,
 } from '../agents/factory-ship.mjs';
 
 const MAX_SKILL_IDS = 5;
@@ -354,6 +354,11 @@ async function handleLoopShip(req, res, { userId } = {}, deps = {}) {
   if (!verifyBusHostProof(req)) return shipFail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
   const v = parseShipBody(parseJSON(await readBody(req, SHIP_BODY_LIMIT)));
   if (v.error) return shipFail(res, 400, 'VALIDATION_FAILED', v.error);
+  // The title and body go to a third party: a secret in them is refused (the rule name only, never the text), and
+  // @ mentions are defused so the request cannot ping people.
+  if (scanShipText(v.title, v.body)) return shipFail(res, 400, 'secret_detected', 'The title or description appears to contain a secret. Remove it, then Ship again.');
+  v.title = neutraliseMentions(v.title);
+  v.body = neutraliseMentions(v.body);
   const projectId = projectIdForFolder(getDb(), v.worktree);
   const hubRefusal = hubFolderRefusal(v.worktree, projectId);
   if (hubRefusal) return shipFail(res, hubRefusal.status, hubRefusal.code, hubRefusal.message);

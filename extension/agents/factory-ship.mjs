@@ -106,12 +106,26 @@ export function isFactoryWorktree(root, branch) {
  */
 export async function originMatchesRepo(worktree, provider, repo) {
   if (!Object.hasOwn(API, provider) || !validShipRepo(provider, repo)) return false;
-  const r = await runGit(worktree, ['remote', 'get-url', 'origin']);
+  const r = await runGit(worktree, ['remote', 'get-url', '--push', 'origin']);
   if (r.code !== 0) return false;
   const m = /^(?:https:\/\/(?:[^@/]+@)?([^/]+)\/|ssh:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/|[^@/\s]+@([^:/]+):)(.+?)(?:\.git)?\/?$/.exec(r.stdout.trim());
   if (!m) return false;
   const host = (m[1] || m[2] || m[3] || '').toLowerCase();
   return host === API[provider].host.replace(/^api\./, '') && m[4].toLowerCase() === repo.toLowerCase();
+}
+
+/**
+ * The rule name when the PR/MR title or body would carry a secret, else null. Each line is scanned as an added diff
+ * line (scanForSecrets only reads those), so the same rules apply as for the pushed diff.
+ */
+export function scanShipText(title, body) {
+  const added = `${title}\n${body}`.split('\n').map((l) => `+${l}`).join('\n');
+  return scanForSecrets(added);
+}
+
+/** Inserts a zero-width space after every `@` so the provider does not notify the person or team it names. */
+export function neutraliseMentions(text) {
+  return String(text ?? '').replaceAll('@', '@\u200b');
 }
 
 /** The checked ship body, or `{ error }` naming what is wrong. Pure; a value over a limit is refused. */
@@ -152,8 +166,9 @@ export async function commitAndPush({ worktree, branch, message, author = null }
     throw shipError('commit_failed', 'The changes could not be staged.');
   }
   const names = await runGit(worktree, ['diff', '--cached', '--name-only', '--no-renames', '-z', '--', '.', EXCLUDE_FACTORY]);
-  // --text: a binary file's bytes are scanned as text too, so a token inside one is not skipped.
-  const diff = await runGit(worktree, ['diff', '--cached', '--text', '--unified=0', '--no-color', '--no-ext-diff', '--', '.', EXCLUDE_FACTORY]);
+  // --text: a binary file's bytes are scanned as text too, so a token inside one is not skipped. --no-textconv: a
+  // repo-configured textconv driver must not rewrite (and hide) what the scan sees.
+  const diff = await runGit(worktree, ['diff', '--cached', '--text', '--no-textconv', '--unified=0', '--no-color', '--no-ext-diff', '--', '.', EXCLUDE_FACTORY]);
   if (names.code !== 0 || diff.code !== 0) {
     // Fail closed: a diff that cannot be read cannot be scanned.
     await runGit(worktree, ['reset', '-q']);

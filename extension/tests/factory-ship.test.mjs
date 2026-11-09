@@ -35,7 +35,7 @@ const { grant } = await import('./helpers/grant.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { _setPinnedFetchForTests } = await import('../server/pinned-fetch.mjs');
 const { busHostProof } = await import('../core/host-approval.mjs');
-const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo } = await import('../agents/factory-ship.mjs');
+const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutraliseMentions } = await import('../agents/factory-ship.mjs');
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 
 function git(args, cwd) {
@@ -298,6 +298,52 @@ test('originMatchesRepo accepts only the provider host and the same slug', async
     try { git(['remote', 'remove', 'origin'], dir); } catch { /* none yet */ }
     git(['remote', 'add', 'origin', url], dir);
     assert.equal(await originMatchesRepo(dir, provider, repo), want, `${url} ${provider} ${repo}`);
+  }
+});
+
+test('originMatchesRepo reads the PUSH url: a different pushurl is refused', async () => {
+  const dir = path.join(SANDBOX, 'origin-pushurl');
+  fs.mkdirSync(dir, { recursive: true });
+  git(['init', '-q'], dir);
+  git(['remote', 'add', 'origin', 'https://github.com/o/r.git'], dir);
+  assert.equal(await originMatchesRepo(dir, 'github', 'o/r'), true);
+  git(['remote', 'set-url', '--push', 'origin', 'https://evil.example/o/r.git'], dir);
+  assert.equal(await originMatchesRepo(dir, 'github', 'o/r'), false, 'fetch url matches but the push goes elsewhere');
+});
+
+test('ship refuses a secret in the PR title or body (400 secret_detected, never echoed, no provider call) and neutralises @ mentions', async () => {
+  const fake = `ghp_${'Ab1'.repeat(12)}`;
+  const seen = fakeProvider(() => json(201, {}));
+  try {
+    for (const over of [{ body: `see ${fake} here` }, { title: `Fix ${fake}` }]) {
+      const r = await ship(shipBody(over));
+      assert.equal(r.status, 400, r.raw);
+      assert.equal(r.body.error.code, 'secret_detected');
+      assert.equal(r.raw.includes(fake), false, 'the secret is never echoed');
+    }
+    assert.equal(seen.length, 0, 'no provider call');
+  } finally { _setPinnedFetchForTests(null); }
+  const out = neutraliseMentions('thanks @octocat and @org/team');
+  assert.equal(out.includes('@octocat'), false);
+  assert.equal(out.replaceAll('\u200b', ''), 'thanks @octocat and @org/team', 'only a zero-width space is inserted');
+});
+
+test('ship never lets a textconv driver rewrite what the secret scan sees', async () => {
+  const fake = `ghp_${'Zy9'.repeat(12)}`;
+  const driver = path.join(SANDBOX, 'textconv.sh');
+  fs.writeFileSync(driver, '#!/bin/sh\necho harmless\n', { mode: 0o755 });
+  git(['config', 'diff.hide.textconv', driver], WT);
+  fs.writeFileSync(path.join(WT, '.gitattributes'), '*.sec diff=hide\n');
+  fs.writeFileSync(path.join(WT, 'src', 'x.sec'), `token = "${fake}"\n`);
+  const before = git(['rev-parse', 'HEAD'], WT);
+  try {
+    await assert.rejects(commitAndPush({ worktree: WT, branch: BRANCH, message: 'x' }), (e) => e.code === 'secret_detected');
+    assert.equal(git(['rev-parse', 'HEAD'], WT), before, 'no commit');
+  } finally {
+    git(['reset', '-q'], WT);
+    fs.rmSync(path.join(WT, 'src', 'x.sec'));
+    fs.rmSync(path.join(WT, '.gitattributes'));
+    git(['config', '--unset', 'diff.hide.textconv'], WT);
   }
 });
 
