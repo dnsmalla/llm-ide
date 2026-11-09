@@ -105,3 +105,35 @@ test("time outside a pause still ends the run at the budget", async (t) => {
   assert.equal(out.passed, false);
   assert.equal(out.statusSummary, "wall-clock budget reached");
 });
+
+test("a passed runOnce stage is not re-run after a repair", async () => {
+  const calls = [];
+  const logs = [];
+  let bRuns = 0;
+  const out = await runNativeLoop(cfg([stage("a", "A", { runOnce: true }), stage("b", "B")]), {
+    async runStage(s) {
+      calls.push(s.name);
+      if (s.id !== "b") return { ok: true, output: "" };
+      bRuns += 1;
+      return { ok: bRuns > 1, output: bRuns > 1 ? "" : "boom" };
+    },
+    async repair() { return { ok: true, output: "fixed" }; },
+    log(line) { logs.push(line); },
+  });
+  assert.deepEqual(calls, ["A", "B", "B"]);
+  assert.equal(out.passed, true);
+  assert.equal(out.iterationsUsed, 2);
+  assert.equal(out.stages.length, 3, "a skipped stage adds no outcome");
+  assert.ok(logs.includes("↷ A: passed earlier in this run"), logs.join("\n"));
+});
+
+test("a failed runOnce stage is re-run in the next iteration", async () => {
+  const calls = [];
+  let aRuns = 0;
+  const out = await runNativeLoop(cfg([stage("a", "A", { runOnce: true })]), {
+    async runStage(s) { calls.push(s.name); aRuns += 1; return { ok: aRuns > 1, output: aRuns > 1 ? "" : "boom" }; },
+    async repair() { return { ok: true, output: "fixed" }; }, log() {},
+  });
+  assert.deepEqual(calls, ["A", "A"]);
+  assert.equal(out.passed, true);
+});

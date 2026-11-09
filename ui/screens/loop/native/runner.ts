@@ -1,5 +1,5 @@
 // Native Loop iteration/repair orchestrator, ported from LoopEngineRunner's outer loop: every iteration re-runs all
-// enabled stages from the top; an advisory failure is recorded but does not gate; a blocking failure may be repaired
+// enabled stages from the top, except a runOnce stage that already passed in this run; an advisory failure is recorded but does not gate; a blocking failure may be repaired
 // up to maxRepairsPerStage; the run ends at a repair budget, the consecutive non-improving stop, or maxIterations.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
 
@@ -48,6 +48,8 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   let iterationsUsed = 0;
   const outcomes: StageOutcome[] = [];
   const iterations: LoopIterationOutcome[] = [];
+  // Ids of runOnce stages that passed in this run; later iterations skip them instead of paying for them again.
+  const passedOnce = new Set<string>();
   const started = Date.now();
   const budgetMs = config.wallClockBudgetSeconds === null ? null : Math.max(0, config.wallClockBudgetSeconds) * 1000;
   // Paused time does not count toward the wall-clock budget (the Mac's pausedSeconds).
@@ -81,6 +83,10 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
     for (const stage of stages) {
+      if (stage.runOnce && passedOnce.has(stage.id)) {
+        deps.log(`↷ ${stage.name}: passed earlier in this run`);
+        continue;
+      }
       const heldAtStage = await heldOutcome();
       if (heldAtStage) return heldAtStage;
       if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
@@ -92,6 +98,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       outcomes.push(outcome);
       iterationOutcomes.push(outcome);
       deps.log(`${result.ok ? "✓" : "✗"} ${stage.name}: ${result.ok ? "passed" : "failed"}`);
+      if (result.ok && stage.runOnce) passedOnce.add(stage.id);
       if (!result.ok && stage.severity === "blocking") { failed = outcome; break; }
       const haltAfterStage = haltedOutcome();
       if (haltAfterStage) return haltAfterStage;
