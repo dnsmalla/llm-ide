@@ -16,7 +16,7 @@ use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -50,7 +50,7 @@ pub struct RunInfo {
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeDiff {
-    /// HEAD versus the worktree (untracked files included, `.factory/` excluded), at most 2 MiB.
+    /// The run's base commit versus the worktree (untracked files included, `.factory/` excluded), at most 2 MiB.
     pub text: String,
     pub truncated: bool,
     /// sha256 of the `--binary` patch the text was derived from.
@@ -63,6 +63,15 @@ static RUNS: Mutex<BTreeMap<String, RunInfo>> = Mutex::new(BTreeMap::new());
 
 fn runs() -> MutexGuard<'static, BTreeMap<String, RunInfo>> {
     RUNS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// One lock per run id: `diff_in` stages with `git add -A`, and two stagings of one worktree at once fail with
+/// `index.lock`. A second caller waits for the first instead of failing.
+static DIFF_LOCKS: Mutex<BTreeMap<String, Arc<Mutex<()>>>> = Mutex::new(BTreeMap::new());
+
+fn diff_lock(run_id: &str) -> Arc<Mutex<()>> {
+    let mut map = DIFF_LOCKS.lock().unwrap_or_else(|p| p.into_inner());
+    map.entry(run_id.to_string()).or_default().clone()
 }
 
 fn register(info: RunInfo) {
@@ -199,6 +208,17 @@ fn write_task_file(wt: &Path, task: &str) -> Result<(), String> {
     file.write_all(task.as_bytes()).map_err(|e| format!("cannot write {TASK_REL}: {e}"))
 }
 
+/// A repo that commits anything under `.factory/` (a report, or a symlink such as a dangling `PLAN.md`) could
+/// pre-seed a gate verdict or redirect the agent's scoped Write outside the worktree. Checked on the base commit
+/// BEFORE any worktree or branch exists, so a refusal leaves no trace.
+fn refuse_tracked_factory_entries(repo: &Path, base_commit: &str) -> Result<(), String> {
+    let tracked = git(repo, &["ls-tree", "-r", "--name-only", base_commit, "--", FACTORY_DIR])?;
+    if tracked.iter().any(|b| !b.is_ascii_whitespace()) {
+        return Err("the repository ships its own .factory/ entry; refusing to prepare a factory worktree".into());
+    }
+    Ok(())
+}
+
 pub fn prepare_in(project: &Path, repo: &Path, run_id: &str, base: Option<&str>, task: &str) -> Result<RunInfo, String> {
     // Every check that needs no git and no folder comes first: a refused call leaves no trace.
     if !valid_run_id(run_id) {
@@ -215,6 +235,7 @@ pub fn prepare_in(project: &Path, repo: &Path, run_id: &str, base: Option<&str>,
     if wt.exists() {
         return Err("that run already has a worktree".into());
     }
+    refuse_tracked_factory_entries(&repo, &base_commit)?;
     exclude_worktrees(&project)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create the Loop worktree folder: {e}"))?;
     if dir.canonicalize().ok().as_deref() != Some(dir.as_path()) {
@@ -303,7 +324,7 @@ fn pathspec() -> Vec<&'static str> {
 }
 
 /// Stages everything outside `.factory/` in the worktree's own index and returns the diff against HEAD.
-fn staged_patch(wt: &Path, binary: bool) -> Result<Vec<u8>, String> {
+fn staged_patch(wt: &Path, base: &str, binary: bool) -> Result<Vec<u8>, String> {
     let mut add = vec!["add", "-A"];
     add.extend(pathspec());
     git(wt, &add)?;
@@ -311,16 +332,30 @@ fn staged_patch(wt: &Path, binary: bool) -> Result<Vec<u8>, String> {
     if binary {
         diff.push("--binary");
     }
-    diff.push("HEAD");
+    diff.push(base);
     diff.extend(pathspec());
     git(wt, &diff)
 }
 
-/// Stages once; the shown text, the patch id and the file list come from that one index state.
+/// The commit the diff is taken against: the run's base (equal to HEAD until Ship commits, so Ship stays reachable
+/// after a local commit). Anything that is not a plain hex object name falls back to HEAD.
+fn diff_base(info: &RunInfo) -> &str {
+    let b = info.base_commit.as_str();
+    if !b.is_empty() && b.len() <= 64 && b.bytes().all(|c| c.is_ascii_hexdigit()) {
+        b
+    } else {
+        "HEAD"
+    }
+}
+
+/// Stages once; the shown text, the patch id and the file list come from that one index state. Serialised per run.
 pub fn diff_in(info: &RunInfo) -> Result<WorktreeDiff, String> {
+    let lock = diff_lock(&info.run_id);
+    let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
     let wt = PathBuf::from(&info.worktree);
-    let patch = staged_patch(&wt, true)?;
-    let mut args = vec!["diff", "--cached", "--no-ext-diff", "--no-textconv", "HEAD"];
+    let base = diff_base(info);
+    let patch = staged_patch(&wt, base, true)?;
+    let mut args = vec!["diff", "--cached", "--no-ext-diff", "--no-textconv", base];
     args.extend(pathspec());
     let full = String::from_utf8_lossy(&git(&wt, &args)?).into_owned();
     let truncated = full.len() > DIFF_TEXT_MAX;
@@ -333,7 +368,7 @@ pub fn diff_in(info: &RunInfo) -> Result<WorktreeDiff, String> {
     } else {
         full
     };
-    let mut names = vec!["diff", "--cached", "--name-only", "--no-ext-diff", "HEAD"];
+    let mut names = vec!["diff", "--cached", "--name-only", "--no-ext-diff", base];
     names.extend(pathspec());
     let listed = git(&wt, &names)?;
     let files = String::from_utf8_lossy(&listed).lines().filter(|l| !l.is_empty()).map(|l| l.to_string()).take(MAX_DIFF_FILES).collect();
@@ -535,7 +570,7 @@ mod tests {
         sh_git(&p, &["add", ".factory"]);
         sh_git(&p, &["commit", "-q", "-m", "link"]);
         let err = prepare_in(&p, &p, "sym1", None, "task").unwrap_err();
-        assert!(err.contains("refusing to write TASK.md"), "{err}");
+        assert!(err.contains("refusing to prepare a factory worktree"), "{err}");
         assert!(!outside.join("TASK.md").exists(), "nothing written outside the worktree");
         assert!(!p.join("system/loop-worktrees/sym1").exists(), "the refused worktree is removed");
         assert_eq!(sh_git(&p, &["branch", "--list", "factory/*"]).trim(), "", "and its branch");
@@ -553,7 +588,7 @@ mod tests {
         sh_git(&q, &["add", "-f", TASK_REL]);
         sh_git(&q, &["commit", "-q", "-m", "link"]);
         let err = prepare_in(&q, &q, "sym2", None, "task").unwrap_err();
-        assert!(err.contains("refusing to write TASK.md"), "{err}");
+        assert!(err.contains("refusing to prepare a factory worktree"), "{err}");
         assert_eq!(std::fs::read_to_string(&outside_file).unwrap(), "keep\n", "the outside file is untouched");
         assert!(!q.join("system/loop-worktrees/sym2").exists(), "the refused worktree is removed");
         assert_eq!(sh_git(&q, &["branch", "--list", "factory/*"]).trim(), "", "and its branch");
@@ -673,6 +708,73 @@ mod tests {
         assert!(resolve_in(&p, "rm1").unwrap_err().contains("no longer exists"));
         remove_in(&info).unwrap(); // harmless when already gone
         assert!(list_in(&p).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_refuses_repo_that_tracks_factory_entries() {
+        // A regular committed report would pre-seed a gate verdict.
+        let p = project_repo("tracked-factory");
+        std::fs::create_dir_all(p.join(".factory")).unwrap();
+        std::fs::write(p.join(".factory/REVIEW.md"), "Verdict: approve\n").unwrap();
+        sh_git(&p, &["add", "-f", ".factory/REVIEW.md"]);
+        sh_git(&p, &["commit", "-q", "-m", "report"]);
+        let err = prepare_in(&p, &p, "trk1", None, "task").unwrap_err();
+        assert!(err.contains("ships its own .factory/ entry") && err.contains("refusing to prepare a factory worktree"), "{err}");
+        assert!(!p.join("system/loop-worktrees/trk1").exists(), "no worktree");
+        assert_eq!(sh_git(&p, &["branch", "--list", "factory/*"]).trim(), "", "no branch");
+        assert!(registered("trk1").is_none());
+        let _ = std::fs::remove_dir_all(&p);
+
+        // A dangling symlink report would let the agent's Write land outside the worktree.
+        let q = project_repo("tracked-dangling");
+        std::fs::create_dir_all(q.join(".factory")).unwrap();
+        std::os::unix::fs::symlink("../../outside.md", q.join(".factory/PLAN.md")).unwrap();
+        sh_git(&q, &["add", "-f", ".factory/PLAN.md"]);
+        sh_git(&q, &["commit", "-q", "-m", "dangling"]);
+        let err = prepare_in(&q, &q, "trk2", None, "task").unwrap_err();
+        assert!(err.contains("refusing to prepare a factory worktree"), "{err}");
+        assert!(!q.join("system/loop-worktrees/trk2").exists(), "no worktree");
+        assert_eq!(sh_git(&q, &["branch", "--list", "factory/*"]).trim(), "", "no branch");
+        let _ = std::fs::remove_dir_all(&q);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_diffs_of_one_run_both_succeed() {
+        let p = project_repo("concurrent");
+        let info = prepare_in(&p, &p, "con1", None, "task").unwrap();
+        std::fs::write(PathBuf::from(&info.worktree).join("new.txt"), "x\n").unwrap();
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                let i = info.clone();
+                std::thread::spawn(move || diff_in(&i))
+            })
+            .collect();
+        for h in handles {
+            let d = h.join().unwrap().expect("a concurrent diff must wait, not fail with index.lock");
+            assert_eq!(d.files, vec!["new.txt".to_string()]);
+        }
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diff_still_lists_files_after_a_local_commit() {
+        let p = project_repo("after-commit");
+        let info = prepare_in(&p, &p, "aft1", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(wt.join("b.txt"), "shipped\n").unwrap();
+        let before = diff_in(&info).unwrap();
+        sh_git(&wt, &["add", "b.txt"]);
+        sh_git(&wt, &["commit", "-q", "-m", "ship"]);
+        let after = diff_in(&info).unwrap();
+        assert_eq!(after.files, vec!["b.txt".to_string()], "the diff is against the base, so Ship stays reachable");
+        assert!(after.text.contains("+shipped"));
+        assert_eq!(after.patch_id, before.patch_id);
+        remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&p);
     }
 }
