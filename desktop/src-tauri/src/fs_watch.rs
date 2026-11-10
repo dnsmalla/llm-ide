@@ -185,7 +185,14 @@ impl Watch {
         }
         let mut want = HashSet::new();
         for d in dirs {
-            let abs = resolve_existing(&self.root, d)?;
+            let abs = match resolve_existing(&self.root, d) {
+                Ok(p) => p,
+                // A folder can vanish between the tree listing and this call (deleted branch,
+                // removed worktree, collapsed build output). It is simply not watched; it must
+                // not fail every other folder in the set.
+                Err(e) if e.code == "not_found" => continue,
+                Err(e) => return Err(e),
+            };
             if !abs.is_dir() {
                 return Err(FsError { code: "not_a_directory", message: "not a folder".into() });
             }
@@ -366,6 +373,8 @@ mod tests {
         fs::write(root.join("f.txt"), "x").unwrap();
         let mut w = Watch::start(&root, true, Box::new(|_| {})).unwrap();
         assert!(w.set_dirs(&["a".into(), "".into()]).is_ok());
+        // A vanished directory is skipped, not a fatal error for the whole set.
+        assert!(w.set_dirs(&["a".into(), "missing".into()]).is_ok(), "missing dir is skipped");
         assert_eq!(w.set_dirs(&["../x".into()]).unwrap_err().code, "invalid_path");
         assert_eq!(w.set_dirs(&["f.txt".into()]).unwrap_err().code, "not_a_directory");
         assert_eq!(w.set_dirs(&(0..MAX_DIRS + 1).map(|i| format!("d{i}")).collect::<Vec<_>>()).unwrap_err().code, "too_large");
