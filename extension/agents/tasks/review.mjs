@@ -4,10 +4,9 @@
 import { redactSecrets } from '../../core/redact-secrets.mjs';
 import { PROMPT_PARTS } from '../../core/task-prompts.generated.mjs';
 
-// Transitional: doc and conflicts still run their old focus text until their own migrations (Tasks 12 and 13) move
-// them into the registry. Those tasks delete these entries.
+// Transitional: conflicts still runs its old focus text until its own migration (Task 13) moves it into the registry,
+// which deletes this entry.
 const LEGACY_FOCUS = {
-  doc: 'Review the documentation for statements that no longer match the code, stale commands or paths, and missing steps. Name the file for each finding.',
   conflicts: 'List files that contain unresolved merge conflict markers or are in a conflicted state, and any risky overlapping edits between branches. Name the file for each finding.',
 };
 const LEGACY_LINE1 = 'You are doing a READ-ONLY review of the project in the current directory. Do not modify, create or delete any file and do not run any command that changes state.';
@@ -34,7 +33,7 @@ export function reviewPromptFor(taskId, evidence = '', focusText = null) {
 
 function promptForFocus(focus, evidence, focusText) {
   if (PROMPT_PARTS[`review.${focus}`]) return reviewPromptFor(`review.${focus}`, evidence, focusText);
-  return [LEGACY_LINE1, LEGACY_FOCUS[focus] || LEGACY_FOCUS.doc, LEGACY_FORMAT, evidence ? evidenceBlock(evidence) : ''].filter(Boolean).join('\n\n');
+  return [LEGACY_LINE1, LEGACY_FOCUS[focus], LEGACY_FORMAT, evidence ? evidenceBlock(evidence) : ''].filter(Boolean).join('\n\n');
 }
 
 async function git(runGit, spawn, cwd, args, maxChars = 40_000) {
