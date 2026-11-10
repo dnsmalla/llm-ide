@@ -65,14 +65,11 @@ const BATCH_SKILLS = new Set(["skills/refactor-apply", "skills/refactor-conform"
 export function isBatchSkill(skillId: string | null): boolean {
   return skillId !== null && BATCH_SKILLS.has(skillId);
 }
-export function macBatchReason(loop: LoopProjectStore["loops"][number]): string | null {
+export function batchRollbackReason(loop: LoopProjectStore["loops"][number]): string | null {
   // Only an ENABLED batch stage is refused: the refactor loop with Refactor Apply/Conform switched off only plans and
   // checks, which the desktop runs safely (it stays manual-only through isManualOnly).
   if (loop.config.stages.some((s) => s.enabled && s.kind === "skill" && isBatchSkill(s.skillId))) {
-    return `“${loop.name}” applies refactor batches with the Mac's rollback, which the desktop does not have yet. Run it from the Mac app.`;
+    return `“${loop.name}” applies refactor batches, and batch rollback is not ported to the desktop yet, so this run is refused. Turn off its Refactor Apply and Refactor Conform stages to run the rest.`;
   }
   return null;
 }
-
-/** Mac default-loop keys, in creation/display order. */
-export const DEFAULT_LOOP_KEYS = ["regression", "test", "system-check", "plan", "refactor", "docs", "self-heal", "sdk-adoption"] as const;

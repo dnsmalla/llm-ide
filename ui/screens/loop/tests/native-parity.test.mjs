@@ -23,13 +23,13 @@ test("a complete project store gains nothing when defaults are re-ensured", () =
   assert.deepEqual(t.ensureDefaultLoops(full, null).added, []);
 });
 
-test("a refactor loop is refused by the desktop runner because the batch rollback is Mac-only", () => {
+test("a refactor loop is refused by the desktop runner because batch rollback is not ported", () => {
   const full = t.initialProjectStore("npm test");
   const refactor = full.loops.find((l) => l.defaultKey === "refactor");
-  assert.match(s.macBatchReason(refactor), /Mac app/);
-  assert.equal(s.macBatchReason(full.loops.find((l) => l.defaultKey === "regression")), null);
+  assert.match(s.batchRollbackReason(refactor), /batch rollback is not ported to the desktop/);
+  assert.equal(s.batchRollbackReason(full.loops.find((l) => l.defaultKey === "regression")), null);
   const custom = { ...full.loops[0], defaultKey: null, config: { ...full.loops[0].config, stages: [{ ...full.loops[0].config.stages[0], kind: "skill", skillId: "skills/refactor-apply", enabled: true }] } };
-  assert.match(s.macBatchReason(custom), /refactor batches/);
+  assert.match(s.batchRollbackReason(custom), /refactor batches/);
   assert.equal(s.isBatchSkill("skills/test-gap-writer"), false, "test writing is not a batch");
 });
 
@@ -52,7 +52,7 @@ test("iteration rows carry the stages and repair the run inspector reads", () =>
 test("the refactor loop runs on the desktop once its batch stages are switched off, and stays manual-only", () => {
   const refactor = t.initialProjectStore("npm test").loops.find((l) => l.defaultKey === "refactor");
   const planOnly = { ...refactor, config: { ...refactor.config, stages: refactor.config.stages.map((st) => s.isBatchSkill(st.skillId) ? { ...st, enabled: false } : st) } };
-  assert.equal(s.macBatchReason(planOnly), null);
+  assert.equal(s.batchRollbackReason(planOnly), null);
   assert.equal(s.isManualOnly(planOnly), true);
 });
 

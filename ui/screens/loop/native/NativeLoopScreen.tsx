@@ -9,7 +9,7 @@ import { createHostFs } from "../../explorer/fs";
 import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
-import { isBatchSkill, isManualOnly, loadLoops, macBatchReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
+import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
@@ -549,7 +549,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     const verifyProblem = isFactoryLoop(target) ? factoryVerifyProblem(target.config) : null;
     if (verifyProblem) { setNotice(verifyProblem); return; }
     if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
-    const batchBlock = macBatchReason(target);
+    const batchBlock = batchRollbackReason(target);
     if (batchBlock) { setNotice(batchBlock); return; }
     // The native Rust dialog (or a still-valid grant for exactly the same command hashes) is the approval. A
     // scheduled run never opens a dialog: it reuses an existing grant or skips, so the app cannot self-approve.
@@ -810,7 +810,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (!isNativeRunnable(stage)) { setNotice("This stage kind cannot run in the native runner yet."); return; }
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
-    if (stage.kind === "skill" && isBatchSkill(stage.skillId)) { setNotice("This refactor batch stage needs the Mac app's rollback; run it from the Mac."); return; }
+    if (stage.kind === "skill" && isBatchSkill(stage.skillId)) { setNotice("This refactor batch stage needs batch rollback, which is not ported to the desktop yet."); return; }
     // Shell stages and a Regression stage's fault verifies need the host's native approval for this exact stage.
     let approvalToken: string | null = null;
     if (stage.kind === "shellCommand" || stage.kind === "regressionSweep") {
