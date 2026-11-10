@@ -56,6 +56,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [notice, setNotice] = useState<string | null>(null);
   const [cleanup, setCleanup] = useState<CleanupPlan | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   // Refs so the 5-minute timer reads the latest facts without being re-created on every load.
   const itemsRef = useRef<WorkItemRecord[]>([]);
   const recordsRef = useRef<Map<string, RunRecordFacts>>(new Map());
@@ -150,6 +151,11 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   useEffect(() => {
     if (focus.key) setSelectedKey(focus.key);
   }, [focus.key, focus.n]);
+
+  useEffect(() => {
+    if (!selectedKey) return;
+    panelRef.current?.querySelector<HTMLElement>("button")?.focus();
+  }, [selectedKey]);
 
   useEffect(() => {
     if (addOpen && addKind === "spec") void listSpecFiles(fs).then(setSpecFiles);
@@ -368,10 +374,10 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           ))}
         </div>
         {selected ? (
-          <aside className="fx-panel" aria-label={`Details for ${selected.title}`}>
+          <aside className="fx-panel" ref={panelRef} tabIndex={-1} aria-label={`Details for ${selected.title}`}>
             <header className="fx-panel-head">
               <h3 className="fx-panel-title">{selected.title}</h3>
-              <button type="button" className="fx-btn" onClick={() => setSelectedKey(null)}>Close</button>
+              <button type="button" className="fx-btn" onClick={() => { const key = selectedKey; setSelectedKey(null); requestAnimationFrame(() => (document.querySelector(`[data-key="${CSS.escape(key ?? "")}"] .fx-card-title`) as HTMLElement | null)?.focus()); }}>Close</button>
             </header>
             {selLive ? (
               <>
