@@ -95,12 +95,20 @@ export const LOOP_CONFIG_DEFAULTS = Object.freeze({
  * built-in recipes. A recipe either lists `stages` (sparse; defaults filled here) or names a starter with
  * `configFrom` (the starter's config, copied as written).
  */
-export function buildLoopCatalog() {
+export function buildLoopCatalog(prompts = buildRegistry().prompts) {
   const doc = readJson(TEMPLATES_PATH);
   if (!doc || typeof doc !== 'object' || !Array.isArray(doc.starters) || !Array.isArray(doc.templates)) {
     throw new Error('templates.json must hold { version, starters[], templates[] }');
   }
-  const starters = doc.starters;
+  // A stage's `promptTask` names an agent task; its registry prompt becomes the stage's `prompt`. The reference itself is not emitted.
+  const resolveStage = (s) => {
+    if (s.promptTask === undefined) return s;
+    const { promptTask, ...rest } = s;
+    if (s.prompt !== undefined) throw new Error(`stage ${s.name ?? s.defaultKey}: promptTask and prompt are exclusive`);
+    if (typeof prompts[promptTask] !== 'string') throw new Error(`stage ${s.name ?? s.defaultKey}: promptTask ${promptTask} is not an agent task`);
+    return { ...rest, prompt: prompts[promptTask] };
+  };
+  const starters = doc.starters.map((spec) => ({ ...spec, config: { ...spec.config, stages: spec.config.stages.map(resolveStage) } }));
   const templates = doc.templates.map((t) => {
     if (!t || typeof t.id !== 'string' || !t.id) throw new Error('a template has no id');
     if (typeof t.name !== 'string' || !t.name) throw new Error(`template ${t.id}: name is required`);
@@ -114,7 +122,7 @@ export function buildLoopCatalog() {
     if (t.config !== undefined && (typeof t.config !== 'object' || t.config === null || Array.isArray(t.config) || 'stages' in t.config)) {
       throw new Error(`template ${t.id}: config holds overrides only`);
     }
-    const stages = t.stages.map((s, i) => ({ id: `${t.id}/${i}`, ...LOOP_STAGE_DEFAULTS, name: s.name ?? `Stage ${i + 1}`, ...s, order: i }));
+    const stages = t.stages.map(resolveStage).map((s, i) => ({ id: `${t.id}/${i}`, ...LOOP_STAGE_DEFAULTS, name: s.name ?? `Stage ${i + 1}`, ...s, order: i }));
     return { id: t.id, name: t.name, summary: t.summary, config: { ...LOOP_CONFIG_DEFAULTS, ...(t.config ?? {}), stages } };
   });
   const ids = templates.map((t) => t.id);
@@ -196,7 +204,7 @@ export function promptHash(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-export function renderAll(data = buildRegistry(), loop = buildLoopCatalog()) {
+export function renderAll(data = buildRegistry(), loop = buildLoopCatalog(data.prompts)) {
   return Object.freeze({
     [OUTPUTS.uiRegistry]: renderUiRegistry(data),
     [OUTPUTS.uiPrompts]: renderUiPrompts(data),

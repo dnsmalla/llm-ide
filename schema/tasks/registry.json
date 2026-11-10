@@ -551,6 +551,78 @@
       },
       "aliasOf": "issues.from_notes",
       "revision": 1
+    },
+    {
+      "id": "loop.test_structure_setup",
+      "label": "Test structure setup",
+      "group": "Maintenance",
+      "description": "Loop stage: create the smallest test layout the repository is missing, one package per run.",
+      "aliases": [],
+      "runner": {
+        "kind": "agent",
+        "prompt": "prompts/loop.test_structure_setup.md"
+      },
+      "input": {
+        "kind": "project",
+        "required": false,
+        "paths": []
+      },
+      "output": {
+        "kind": "file",
+        "persist": "file",
+        "revertWrites": false
+      },
+      "schedule": {
+        "backend": "none",
+        "defaultCron": null,
+        "schedulable": false
+      },
+      "scope": "project",
+      "readOnly": false,
+      "requiresRepo": true,
+      "requiresLocalHost": true,
+      "features": [],
+      "availability": {
+        "status": "available",
+        "reason": null
+      },
+      "revision": 2
+    },
+    {
+      "id": "loop.test_gap_writer",
+      "label": "Test gap writer",
+      "group": "Maintenance",
+      "description": "Loop stage: add behaviour tests for one unit-test candidate from TEST-MAP.md, through public calls, never editing the source.",
+      "aliases": [],
+      "runner": {
+        "kind": "agent",
+        "prompt": "prompts/loop.test_gap_writer.md"
+      },
+      "input": {
+        "kind": "project",
+        "required": false,
+        "paths": []
+      },
+      "output": {
+        "kind": "file",
+        "persist": "file",
+        "revertWrites": false
+      },
+      "schedule": {
+        "backend": "none",
+        "defaultCron": null,
+        "schedulable": false
+      },
+      "scope": "project",
+      "readOnly": false,
+      "requiresRepo": true,
+      "requiresLocalHost": true,
+      "features": [],
+      "availability": {
+        "status": "available",
+        "reason": null
+      },
+      "revision": 2
     }
   ]
 }

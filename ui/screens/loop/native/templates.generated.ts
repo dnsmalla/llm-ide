@@ -1277,10 +1277,10 @@ export const BUILT_IN_TEMPLATES = [
           "name": "Test Setup",
           "order": 1,
           "outputPath": ".",
-          "prompt": "Read the test-structure report at the Input. If it says the structure is missing, create the smallest working test layout for ONE package under the Output path, following the repo's language conventions; for Python use tests/unit/ mirroring the source package, with pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add one real test of an existing public behaviour; never edit application source and never add dependencies. If it says ok, change nothing.",
           "severity": "blocking",
           "skillId": "skills/test-structure-setup",
-          "targetPath": "llm-doc/loop/test/TEST-STRUCTURE.md"
+          "targetPath": "llm-doc/loop/test/TEST-STRUCTURE.md",
+          "prompt": "Read the test-structure report at the Input. If it says the structure is missing, create the smallest working test layout for ONE package under the Output path, following the repo's language conventions; for Python use tests/unit/ mirroring the source package, with pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add one real test of an existing public behaviour; never edit application source and never add dependencies. If it says ok, change nothing."
         },
         {
           "defaultKey": "test-structure-check",
@@ -1316,10 +1316,10 @@ export const BUILT_IN_TEMPLATES = [
           "name": "Test Write",
           "order": 4,
           "outputPath": ".",
-          "prompt": "Read the test map at the Input and the test-structure report next to it. Take the first file under \"Unit-test candidates\", read it, and choose the business behaviours its public interface offers — not one test per function; skip it if every function is trivial. Create ONE new test file at the path the structure report gives. Assert observable outputs through public calls only: never call private or underscore members, never check internal state, variable names or call order. Build inputs in memory inside the test (no reading input files); mock only external boundaries such as a solver, network or clock, never the unit itself. Create files only under the test root; never edit the source, existing tests or build config. End with `Covered: <path> — <behaviours>` or `Covered: none — <reason>`.",
           "severity": "blocking",
           "skillId": "skills/test-gap-writer",
-          "targetPath": "llm-doc/loop/test/TEST-MAP.md"
+          "targetPath": "llm-doc/loop/test/TEST-MAP.md",
+          "prompt": "Read the test map at the Input and the test-structure report next to it. Take the first file under \"Unit-test candidates\", read it, and choose the business behaviours its public interface offers — not one test per function; skip it if every function is trivial. Create ONE new test file at the path the structure report gives. Assert observable outputs through public calls only: never call private or underscore members, never check internal state, variable names or call order. Build inputs in memory inside the test (no reading input files); mock only external boundaries such as a solver, network or clock, never the unit itself. Create files only under the test root; never edit the source, existing tests or build config. End with `Covered: <path> — <behaviours>` or `Covered: none — <reason>`."
         },
         {
           "command": "<detected-test-command>",
