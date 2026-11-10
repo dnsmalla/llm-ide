@@ -323,6 +323,9 @@ const MODE_ROLES: Record<Exclude<RunMode, "full">, readonly FactoryRole[]> = {
 /** The Factory loop's config narrowed to the stages one run mode runs. Never mutates `base`. */
 export function configFor(mode: RunMode, base: LoopEngineConfig): LoopEngineConfig {
   const copy = structuredClone(base);
+  // A Factory run always has a ceiling, including an existing loop.json saved before the template default existed
+  // and a loop created through the app-wide Loop defaults (whose wallClockMinutes 0 would otherwise write null).
+  copy.wallClockBudgetSeconds = base.wallClockBudgetSeconds ?? 7200;
   // A factory run may hold at a stage boundary while its project is closed (Task 2); never time that hold out.
   copy.pauseTimeoutSeconds = 0;
   if (mode === "full") return copy;

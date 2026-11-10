@@ -24,7 +24,7 @@ import { cronMatches, describeCron, validateCron } from "../../autotasks/native/
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
-import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, type WorkItem } from "./factory.ts";
+import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
@@ -624,7 +624,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     const started = Date.now();
     let summaryPath: string | null = null;
     try {
-      const outcome = await runNativeLoop(target.config, {
+      const outcome = await runNativeLoop(isFactoryLoop(target) ? configFor("full", target.config) : target.config, {
         ...createStageDeps(stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), target),
         isCancelled() { return cancelledRef.current; },
         log(line) { setRunLog((l) => [...l, line]); },

@@ -567,7 +567,7 @@ Pinned by the tests in `desktop/src-tauri/src/loop_worktree.rs` and `loop_runner
 
 ### Phase B: the Factory board (`ui/screens/factory/`, `ui/screens/loop/native/run-manager.ts`, `extension/agents/factory-status.mjs`)
 
-- **A Factory run has its own two-hour ceiling.** `FACTORY_TEMPLATE.config.wallClockBudgetSeconds = 7200`; the runner stops at the wall clock even when stages keep repairing. The per-run USD ceiling is separate (Factory setting, default 10 USD, 0 = off).
+- **A Factory run has its own two-hour ceiling.** `FACTORY_TEMPLATE.config.wallClockBudgetSeconds = 7200`; the runner stops at the wall clock even when stages keep repairing.
 - **The parallel-run cap is per window.** `run-manager.ts` keeps it in `localStorage` (default 2); two desktop windows can therefore run two each. Accepted for a single-window desktop; there is no core semaphore. Every parallel run also reads the same remaining month budget, exactly as chat does (`extension/CLAUDE.md` "Turn concurrency").
 - **Factory runs live in the module-level run manager, never in a screen.** `ui/screens/loop/native/run-manager.ts` (`startRun`, `cancelRun`, `liveRuns`, `subscribe`) owns every live run, so switching section or project never stops or orphans one. A run stays bound to the project and `run_id` it started with; every host call carries the `run_id`, never `active_root()`.
 - **Concurrency cap: default 2, clamped to 1–4** (`setConcurrency`), stored per viewer in localStorage key `llmide.factory.concurrency` with every read and write in try/catch. Runs over the cap wait in a FIFO queue.

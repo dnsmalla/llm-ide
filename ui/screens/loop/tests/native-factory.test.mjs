@@ -63,6 +63,8 @@ test("factory template has the 8 stages in order with runOnce and gates as speci
   assert.equal(c.maxRepairsPerStage, 3);
   assert.equal(c.consecutiveFailureStop, 2);
   assert.equal(c.wallClockBudgetSeconds, 7200, "a Factory run has a two-hour ceiling");
+  assert.equal(f.configFor("full", { ...c, wallClockBudgetSeconds: null }).wallClockBudgetSeconds, 7200);
+  assert.equal(f.configFor("full", { ...c, wallClockBudgetSeconds: 3600 }).wallClockBudgetSeconds, 3600);
   assert.ok(BUILT_IN_TEMPLATES.some((t) => t.id === "factory" && t === f.FACTORY_TEMPLATE));
 });
 
