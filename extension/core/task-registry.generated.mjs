@@ -181,6 +181,14 @@ export const TASKS = Object.freeze([
         "focusText": {
           "type": "string",
           "maxLength": 4000
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "repo": {
+          "type": "string",
+          "maxLength": 512
         }
       },
       "timeoutSeconds": 1800
@@ -204,7 +212,9 @@ export const TASKS = Object.freeze([
     "readOnly": true,
     "requiresRepo": true,
     "requiresLocalHost": false,
-    "features": [],
+    "features": [
+      "doc_gen"
+    ],
     "availability": {
       "status": "available",
       "reason": null
@@ -232,6 +242,14 @@ export const TASKS = Object.freeze([
         "focusText": {
           "type": "string",
           "maxLength": 4000
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "repo": {
+          "type": "string",
+          "maxLength": 512
         }
       },
       "timeoutSeconds": 1800
@@ -255,7 +273,9 @@ export const TASKS = Object.freeze([
     "readOnly": true,
     "requiresRepo": true,
     "requiresLocalHost": false,
-    "features": [],
+    "features": [
+      "doc_gen"
+    ],
     "availability": {
       "status": "available",
       "reason": null
@@ -282,6 +302,14 @@ export const TASKS = Object.freeze([
         "focusText": {
           "type": "string",
           "maxLength": 4000
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "repo": {
+          "type": "string",
+          "maxLength": 512
         }
       },
       "timeoutSeconds": 1800
@@ -305,7 +333,9 @@ export const TASKS = Object.freeze([
     "readOnly": true,
     "requiresRepo": true,
     "requiresLocalHost": false,
-    "features": [],
+    "features": [
+      "doc_gen"
+    ],
     "availability": {
       "status": "available",
       "reason": null

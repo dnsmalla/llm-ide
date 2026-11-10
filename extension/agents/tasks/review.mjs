@@ -35,16 +35,17 @@ async function git(runGit, spawn, cwd, args, maxChars = 40_000) {
  * @param {string} o.userId
  * @param {{focus: string, focusText?: string, engine?: object}} o.args
  * @param {string} o.cwd  the realpath-checked project root
+ * @param {string|null} o.deterministicFirst  a git check that answers first and may skip the model (the registry's flag)
  * @param {(type: string, payload: object) => void} o.emit
  * @param {{runTask: Function, engineIdFor: Function, runGit: Function, engineDeps?: object}} o.deps
  */
-export async function runReviewTask({ userId, args, cwd, signal, spawn, emit, deps = {} }) {
+export async function runReviewTask({ userId, args, cwd, signal, spawn, emit, deps = {}, deterministicFirst = null }) {
   const focus = args.focus;
   const runGit = deps.runGit;
   // A root that is not a git repository is refused, not reviewed as an empty tree.
   const probe = await git(runGit, spawn, cwd, ['rev-parse', '--is-inside-work-tree']);
   if (probe.code !== 0) throw Object.assign(new Error('The project is not a git repository.'), { code: 'NOT_A_REPO' });
-  if (focus === 'conflicts') {
+  if (deterministicFirst === 'git-conflicts') {
     emit('progress', { step: 'checking merge state with git' });
     const unmerged = await git(runGit, spawn, cwd, ['ls-files', '-u']);
     const check = await git(runGit, spawn, cwd, ['diff', '--check']);

@@ -2,7 +2,10 @@
 // route never accepts a prompt, a command or a repo path. The desktop is the only caller (D14): a JWT-only or hub
 // caller gets 403 HOST_PROOF_REQUIRED before the body is read.
 import { getDb } from '../kb/db.mjs';
-import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { randomUUID } from 'node:crypto';
+import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
+import { recordUsage } from '../kb/usage.mjs';
+import { resolveProjectRoot } from '../kb/project-roots.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { authorizeAction } from '../server/route-authority.mjs';
 import { getSecret } from '../server/vault.mjs';
@@ -14,7 +17,7 @@ import { runSourcesUpdate } from './bus/sources-update.mjs';
 import { KIND_CLASS } from './bus/executor.mjs';
 import { runTask, engineIdFor } from './bus/engines.mjs';
 import { runGit } from './bus/git-safe.mjs';
-import { scopedProjectRoot } from './bus/project-scope.mjs';
+import { scopedProjectRoot, scopedRepoRoot, defaultProjectAllowed } from './bus/project-scope.mjs';
 import { runReviewTask } from '../agents/tasks/review.mjs';
 import { runGrouped } from '../core/process-group.mjs';
 
@@ -31,17 +34,70 @@ const NEEDS = Object.freeze({
   }),
 });
 
-// The agent runner's port per bus kind: the engine, git and spawn are supplied here, never imported by agents/.
+// The real collaborators of the agent ports. A test replaces them through `ctx.taskPorts`; the router never does.
+const DEFAULT_PORTS = Object.freeze({
+  runTask,
+  engineIdFor,
+  runGit,
+  spawn: (cmd, argv, opts = {}) => runGrouped(cmd, argv, opts),
+  resolveProjectRoot,
+  projectAllowed: defaultProjectAllowed,
+});
+
+const MODEL_RE = /^[A-Za-z0-9._:/[\]-]{1,128}$/;
+
+/**
+ * Ledger rows for one agent task run, the same rule the Loop route meters by: one row per model the run used, with
+ * the run's cost and turns on the primary model's row only. `source: 'auto-task'` and `endpoint: 'auto-task:<id>'`
+ * are what the usage report reads. Best effort: the answer never depends on the write.
+ */
+function meterTaskRun({ userId, taskId, projectId, run, requestId }) {
+  const usage = run?.usage;
+  if (!usage) return;
+  try {
+    const rows = Array.isArray(run.byModel) && run.byModel.length ? run.byModel : [{ model: run.model ?? 'unknown', ...usage }];
+    const primary = Math.max(0, rows.findIndex((row) => row.model === run.model));
+    const runCost = Number(usage.costUsd);
+    const turns = Number(usage.numTurns) > 0 ? Number(usage.numTurns) : null;
+    rows.forEach((row, index) => recordUsage(getDb(), {
+      userId, provider: 'anthropic', model: row.model, source: 'auto-task', endpoint: `auto-task:${taskId}`, requestId,
+      inputTokens: row.inputTokens, outputTokens: row.outputTokens,
+      cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
+      projectId: projectId ?? null,
+      ...(index === primary ? { turns, stopReason: run.stopReason ?? null, costUsd: runCost > 0 ? runCost : null } : {}),
+    }));
+  } catch { /* metering is best-effort */ }
+}
+
+// The agent runner's port per bus kind: the engine, git and spawn come from `ports`; agents/ never imports them.
 const AGENT_PORTS = Object.freeze({
-  review: ({ task, userId, projectRoot, args, signal, emit }) => runReviewTask({
-    userId,
-    args: { ...task.runner.busArgs, ...args },
-    cwd: projectRoot,
-    signal,
-    spawn: (cmd, argv, opts = {}) => runGrouped(cmd, argv, opts),
-    emit,
-    deps: { runTask, engineIdFor, runGit },
-  }).then((r) => ({ ok: true, summary: r.text.split('\n').find((l) => l.trim()) ?? 'completed', output: r.text, warnings: r.truncated ? ['The review was truncated.'] : [] })),
+  review: async ({ task, userId, projectRoot, projectId, args, signal, emit, ports }) => {
+    const { repo, model, focusText } = args;
+    if (model !== undefined && !MODEL_RE.test(model)) throw Object.assign(new Error('model is not valid'), { code: 'TASK_BAD_ARG' });
+    // A clone folder inside the project (the linked repo) is what the review reads; it must pass the same checks.
+    const cwd = repo === undefined ? projectRoot : scopedRepoRoot(userId, projectRoot, repo, { allowed: ports.projectAllowed });
+    let run = null;
+    const r = await runReviewTask({
+      userId,
+      args: {
+        ...task.runner.busArgs,
+        ...(focusText !== undefined ? { focusText } : {}),
+        ...(model !== undefined ? { engine: { provider: 'anthropic', model } } : {}),
+      },
+      cwd,
+      signal,
+      spawn: ports.spawn,
+      emit,
+      deterministicFirst: task.runner.deterministicFirst ?? null,
+      deps: {
+        runTask: (opts) => ports.runTask(opts).then((answer) => { run = answer; return answer; }),
+        engineIdFor: ports.engineIdFor,
+        runGit: ports.runGit,
+      },
+    });
+    if (run) meterTaskRun({ userId, taskId: task.id, projectId, run, requestId: `task-${randomUUID()}` });
+    return { ok: true, summary: r.text.split('\n').find((l) => l.trim()) ?? 'completed', output: r.text, warnings: r.truncated ? ['The review was truncated.'] : [] };
+  },
 });
 
 function publicTask(task) {
@@ -137,19 +193,23 @@ export async function handleTaskRoutes(req, res, ctx) {
     if (!decision.ok) return failure(res, decision.status, decision.code, decision.message);
   }
   // An agent task runs in one registered project; the root is the same realpath-checked one a bus job runs in.
+  const ports = { ...DEFAULT_PORTS, ...(ctx.taskPorts ?? {}) };
   let projectRoot = null;
   if (task.runner?.kind === 'agent') {
-    try { projectRoot = scopedProjectRoot(userId, raw.projectId); } catch (err) {
+    try { projectRoot = scopedProjectRoot(userId, raw.projectId, { resolve: ports.resolveProjectRoot, allowed: ports.projectAllowed }); } catch (err) {
       return err.message === 'project_not_registered'
         ? failure(res, 404, 'project_not_registered', 'The project is not registered.')
         : failure(res, 403, 'project_not_allowed', 'The project is not allowed.');
     }
   }
 
-  const runAgent = task.runner?.kind === 'agent' ? AGENT_PORTS[task.runner.busKind] : undefined;
+  // The run stops when the client goes away before the answer is sent (the desktop's Stop, or a closed app).
+  const ac = new AbortController();
+  onClientDisconnect(req, res, () => ac.abort());
+  const port = task.runner?.kind === 'agent' ? AGENT_PORTS[task.runner.busKind] : undefined;
   const deps = {
     runSourcesUpdate,
-    ...(runAgent ? { runAgent } : {}),
+    ...(port ? { runAgent: (run) => port({ ...run, ports, projectId: raw.projectId ?? null }) } : {}),
     ...(task.runner?.needs ?? []).reduce((acc, need) => ({ ...acc, ...NEEDS[need]?.(userId) }), {}),
   };
   try {
@@ -158,6 +218,7 @@ export async function handleTaskRoutes(req, res, ctx) {
       userId,
       projectRoot,
       args: raw.args ?? {},
+      signal: ac.signal,
       deps,
     });
     sendJSON(res, 200, result);

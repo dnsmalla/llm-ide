@@ -9210,6 +9210,8 @@ export type PostKbTasksIdRunRequest = {
     args?: {
       sourceIds?: string[];
       focusText?: string;
+      model?: string;
+      repo?: string;
     };
   };
 };

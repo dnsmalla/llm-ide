@@ -289,6 +289,16 @@
                   "type": "string",
                   "x-maxLength": 4000,
                   "x-optional": true
+                },
+                "model": {
+                  "type": "string",
+                  "x-maxLength": 128,
+                  "x-optional": true
+                },
+                "repo": {
+                  "type": "string",
+                  "x-maxLength": 512,
+                  "x-optional": true
                 }
               }
             }

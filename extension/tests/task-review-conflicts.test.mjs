@@ -14,6 +14,7 @@ test('a clean worktree answers with no model call', async () => {
   const out = await runReviewTask({
     userId: 'u1',
     args: { focus: 'conflicts' },
+    deterministicFirst: 'git-conflicts',
     cwd: '/p',
     signal: null,
     spawn: null,
@@ -39,6 +40,7 @@ test('a dirty worktree runs the registry conflicts prompt once', async () => {
   await runReviewTask({
     userId: 'u1',
     args: { focus: 'conflicts' },
+    deterministicFirst: 'git-conflicts',
     cwd: '/p',
     signal: null,
     spawn: null,
@@ -55,4 +57,23 @@ test('a dirty worktree runs the registry conflicts prompt once', async () => {
   });
   assert.equal(sent.prompt.startsWith(reviewPromptFor('review.conflicts', '').split('\n\n')[0]), true);
   assert.equal(sent.prompt.includes('src/a.js'), true);
+});
+
+test('the git pre-check runs only when the task says so: the flag, not the focus, decides', async () => {
+  const modelCalls = [];
+  const deps = {
+    runGit: async () => ({ code: 0, stdout: '' }),
+    runTask: async () => { modelCalls.push(1); return { text: 'No findings.', engine: 'claude', stopReason: 'end_turn' }; },
+    engineIdFor: () => 'claude',
+  };
+  const steps = (log) => (type, payload) => { if (type === 'progress') log.push(payload.step); };
+  const base = { userId: 'u1', args: { focus: 'conflicts' }, cwd: '/p', signal: null, spawn: null, deps };
+  const noFlag = [];
+  await runReviewTask({ ...base, emit: steps(noFlag) });
+  assert.equal(noFlag.includes('checking merge state with git'), false, 'no flag: the pre-check does not run');
+  assert.equal(modelCalls.length, 1, 'so the model is asked');
+  const flagged = [];
+  await runReviewTask({ ...base, emit: steps(flagged), deterministicFirst: 'git-conflicts' });
+  assert.equal(flagged.includes('checking merge state with git'), true, 'flag: git answers first');
+  assert.equal(modelCalls.length, 1, 'and a clean tree makes no second model call');
 });

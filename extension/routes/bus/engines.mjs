@@ -121,7 +121,7 @@ async function runClaude({ userId, engine, prompt, cwd, signal, deps }) {
     throw fail('engine_failed', 'the engine run failed');
   }
   if ((out.changedPaths || []).length || (out.createdPaths || []).length) throw fail('read_only_violated', 'a read-only run reported changed files');
-  return { ...capText(out.reply), usage: out.usage, stopReason: out.resultSubtype || 'end', engine: 'claude' };
+  return { ...capText(out.reply), usage: out.usage, model: out.model ?? null, byModel: out.byModel ?? [], stopReason: out.resultSubtype || 'end', engine: 'claude' };
 }
 
 async function runAdapter({ userId, engine, prompt, signal, deps }) {

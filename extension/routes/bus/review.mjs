@@ -6,5 +6,7 @@ import { runReviewTask } from '../../agents/tasks/review.mjs';
 
 /** `emit(type, payload)` appends a bus event; `cwd` is the validated project root. `deps` are the engine test seams. */
 export function runReview({ userId, args, cwd, signal, spawn, emit, deps = {} }) {
-  return runReviewTask({ userId, args, cwd, signal, spawn, emit, deps: { runTask, engineIdFor, runGit, engineDeps: deps } });
+  // The bus has no registry entry: its conflicts focus is the one that asks git first.
+  const deterministicFirst = args.focus === 'conflicts' ? 'git-conflicts' : null;
+  return runReviewTask({ userId, args, cwd, signal, spawn, emit, deterministicFirst, deps: { runTask, engineIdFor, runGit, engineDeps: deps } });
 }
