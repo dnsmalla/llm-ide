@@ -15,6 +15,7 @@
 // value out of secret findings before they're persisted/returned — see
 // findMatches(..., { redact: true }) below.
 import { redactSecrets, ZERO_WIDTH_RE } from '../core/redact-secrets.mjs';
+import { SECRET_SHAPES } from '../core/secret-patterns.mjs';
 
 // Zero-width characters an attacker can embed inside a token to defeat the
 // whitespace-collapse evasion pass. Defined ONCE in core/redact-secrets.mjs
@@ -24,38 +25,11 @@ import { redactSecrets, ZERO_WIDTH_RE } from '../core/redact-secrets.mjs';
 export { ZERO_WIDTH_RE };
 
 // Exported so scan.mjs can import the same list instead of maintaining
-// a parallel copy that could silently drift out of sync.
-export const SECRET_PATTERNS = [
-  // Conservative — match common token shapes anywhere in the body.
-  // gh[oprsu]_ covers all GitHub token classes (ghp_ PAT, gho_ OAuth,
-  // ghu_ user-to-server, ghs_ server-to-server, ghr_ refresh) — kept in
-  // sync with core/redact-secrets.mjs (the redaction sink for the same shapes).
-  { name: 'GitHub token',  re: /\b(gh[oprsu]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})\b/ },
-  // GitLab tokens (glpat- PAT, glrt- runner, glcbt- CI job, gldt- deploy, …).
-  // The project's own tracker is GitLab-hosted, so a leaked PAT here is a real
-  // risk; this list must match core/redact-secrets.mjs's GitLab shape.
-  { name: 'GitLab token',  re: /\bgl(?:pat|oas|rt|cbt|ptt|ft|imt|agent|soat|dt|ffct)-[A-Za-z0-9_-]{20,}\b/ },
-  { name: 'AWS access key', re: /\bAKIA[0-9A-Z]{16}\b/ },
-  { name: 'Slack token',   re: /\bxox[abp]-[A-Za-z0-9-]{10,}/ },
-  { name: 'Google API key', re: /\bAIza[0-9A-Za-z\-_]{35}\b/ },
-  // Anthropic API key — checked BEFORE the generic OpenAI-style "sk-" rule
-  // below so an sk-ant- key is reported under its own name rather than
-  // matching the more general pattern first.
-  { name: 'Anthropic API key', re: /\bsk-ant-[A-Za-z0-9-]{10,}\b/ },
-  // OpenAI project-scoped key — checked before the generic sk- rule. The
-  // generic rule can't catch it: sk-proj- contains a hyphen after "proj",
-  // which breaks the generic rule's [A-Za-z0-9]{20,} body match.
-  { name: 'OpenAI project key', re: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/ },
-  // Generic "sk-" secret key (OpenAI classic / other providers using the
-  // same shape). Excludes sk-ant- and sk-proj- via negative lookahead so it
-  // doesn't double-report a key already caught by the rules above.
-  { name: 'Generic sk- API key', re: /\bsk-(?!ant-|proj-)[A-Za-z0-9]{20,}\b/ },
-  // Separator limited to 1-3 chars to prevent catastrophic backtracking
-  // on inputs like 'api_key:::::::::::::::::' (unbounded '+' was exploitable).
-  { name: 'Generic API key', re: /\b(api[_-]?key|secret[_-]?key|access[_-]?token)["'\s:=]{1,3}[A-Za-z0-9_-]{16,}\b/i },
-  { name: 'Private key',    re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/ },
-  { name: 'Bearer token',   re: /Bearer\s+[A-Za-z0-9._-]{20,}\b/i },
-];
+// a parallel copy that could silently drift out of sync. The list itself is
+// core/secret-patterns.mjs, shared with core/redact-secrets.mjs and the Ship
+// pre-push scan (agents/github-pr.mjs): one place to add a credential shape.
+export { SECRET_SHAPES };
+export const SECRET_PATTERNS = SECRET_SHAPES;
 
 const PII_PATTERNS = [
   { name: 'Email address',      re: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i },

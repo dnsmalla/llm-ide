@@ -15,6 +15,7 @@
 import { execFile } from 'child_process';
 import path from 'path';
 import { redactSecrets } from '../core/redact-secrets.mjs';
+import { SECRET_SHAPES } from '../core/secret-patterns.mjs';
 import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 // Sanitize free-form text before splicing into the commit message / PR
 // title/body.  Newlines are particularly dangerous: a multi-line value
@@ -81,27 +82,10 @@ async function inferDefaultBranch(repoPath) {
 // deliberately conservative (high-signal patterns) to avoid blocking on
 // false positives, while still catching the obvious "an API key leaked into
 // generated code" case.
-// Keep the token shapes in sync with core/redact-secrets.mjs and
-// guardrails/rules.mjs — this is the third copy of the same coverage set
-// (it stays a local [name, regex] list because scanForSecrets needs the
-// human-readable name for the block message). When a shape is added there,
-// add it here too.
-const SECRET_RULES = [
-  ['AWS access key id',      /\bAKIA[0-9A-Z]{16}\b/],
-  ['GitHub token',           /\bgh[pousr]_[A-Za-z0-9]{36,}\b/],
-  // All GitLab token classes (glpat- PAT, glrt- runner, glcbt- CI job,
-  // gldt- deploy, …), not just glpat-.
-  ['GitLab token',           /\bgl(?:pat|oas|rt|cbt|ptt|ft|imt|agent|soat|dt|ffct)-[A-Za-z0-9_-]{20,}\b/],
-  ['Slack token',            /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/],
-  ['Anthropic API key',      /\bsk-ant-[A-Za-z0-9-]{20,}\b/],
-  // OpenAI project key — checked before the generic sk- rule, which can't
-  // match it (the hyphen after "proj" breaks the generic [A-Za-z0-9] body).
-  ['OpenAI project key',     /\bsk-proj-[A-Za-z0-9_-]{20,}\b/],
-  ['OpenAI API key',         /\bsk-[A-Za-z0-9]{32,}\b/],
-  ['Google API key',         /\bAIza[0-9A-Za-z_-]{35}\b/],
-  ['private key block',      /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/],
-  ['generic bearer secret',  /(?:secret|token|password|passwd|api[_-]?key)["'\s:=]+[A-Za-z0-9/+_-]{20,}/i],
-];
+// The shared credential-shape list (core/secret-patterns.mjs): ONE list also used by
+// core/redact-secrets.mjs and guardrails/rules.mjs. `name` lets the block message say which rule matched
+// without ever echoing the matched text.
+const SECRET_RULES = SECRET_SHAPES;
 
 export function scanForSecrets(diffText) {
   if (!diffText) return null;
@@ -115,7 +99,7 @@ export function scanForSecrets(diffText) {
     }
     if (rawLine[0] !== '+') continue;
     const added = rawLine.slice(1);
-    for (const [name, re] of SECRET_RULES) {
+    for (const { name, re } of SECRET_RULES) {
       if (re.test(added)) return name;
     }
   }

@@ -10,32 +10,11 @@
 // the audit log. A divergent-copy security control is one that eventually
 // leaks; keep the patterns here and import them everywhere.
 
-// Common credential shapes. Anchored with \b where the prefix is fixed-length
-// so we don't over-match; left open ({10,}/{20,}) where the body length varies.
-export const SECRET_PATTERNS = [
-  /\bgh[oprsu]_[A-Za-z0-9]{36}\b/g,           // GitHub tokens: ghp_ (PAT), gho_ (OAuth), ghu_ (user-to-server), ghs_ (server-to-server), ghr_ (refresh)
-  /\bgithub_pat_[A-Za-z0-9_]{82}\b/g,         // GitHub fine-grained PAT
-  /\bgl(?:pat|oas|rt|cbt|ptt|ft|imt|agent|soat|dt|ffct)-[A-Za-z0-9_-]{20,}\b/g, // GitLab tokens: glpat- (PAT), glrt- (runner), glcbt- (CI job), gldt- (deploy), etc.
-  /\bxox[abp]-[A-Za-z0-9-]{10,}\b/g,          // Slack token
-  /\bAIza[0-9A-Za-z\-_]{35}\b/g,              // Google API key
-  /\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b/g,  // AWS access key id (long-lived AKIA, temporary ASIA, ...)
-  /\baws[_-]?secret[_-]?access[_-]?key["']?\s*[:=]\s*["']?[A-Za-z0-9/+=]{40}/gi, // AWS secret access key (aws_secret_access_key = ...)
-  /\baws[_-]?session[_-]?token["']?\s*[:=]\s*["']?[A-Za-z0-9/+=]{100,}/gi,        // AWS session token
-  // PEM private key block, whole; a block cut short (truncated log, tool output limit) is redacted to the end of the text.
-  /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----|$)/g,
-  // ssh key material on one line (authorized_keys / id_*.pub shape, and what a private key's public half leaks)
-  /\b(?:ssh-(?:rsa|dss|ed25519)|ecdsa-sha2-nistp\d{3})\s+AAAA[A-Za-z0-9+/]{40,}={0,3}/g,
-  // a long base64-looking blob right after a key-named field (needs a digit, so a long plain word is not caught)
-  /\b[A-Za-z0-9_-]{0,40}key["']?\s*[:=]\s*["']?(?=[A-Za-z0-9+/_-]*\d)[A-Za-z0-9+/_-]{40,}={0,2}/gi,
-  /\bsk-ant-[A-Za-z0-9-]{10,}\b/g,            // Anthropic API key
-  /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g,          // OpenAI project-scoped key
-  /\bsk-[A-Za-z0-9]{32,}\b/g,                 // OpenAI classic secret key (won't match sk-ant-/sk-proj-)
-  /Bearer\s+[A-Za-z0-9._-]{20,}/gi,           // Authorization: Bearer <jwt/opaque>
-  /apiKey=[A-Za-z0-9_-]+/gi,                  // apiKey=<value> in query strings
-  /\bya29\.[A-Za-z0-9._-]{20,}/g,             // Google OAuth2 access token
-  /\b1\/\/[A-Za-z0-9_-]{20,}/g,               // Google OAuth2 refresh token (1//...)
-  /\bv[12]\.\d{10,15}\.[0-9a-f]{32}\.[0-9a-f]{64}\b/g, // host-signed approval token (v1 legacy, v2 chat-bound) (core/host-approval.mjs)
-];
+import { SECRET_SHAPES, globalSecretPattern } from './secret-patterns.mjs';
+
+// The shared shape list (core/secret-patterns.mjs), as global regexes: redaction replaces every occurrence.
+export { SECRET_SHAPES };
+export const SECRET_PATTERNS = SECRET_SHAPES.map(({ re }) => globalSecretPattern(re));
 
 const MARKER = '[REDACTED]';
 
