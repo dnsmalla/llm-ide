@@ -8,7 +8,7 @@ import type { RunInfo } from "./worktree-run.ts";
 export interface ShipBody { worktree: string; branch: string; provider: "github" | "gitlab"; repo: string; base: string; title: string; body: string; patchId: string }
 export type ShipResult = { ok: true; url: string; commit: string; reused: boolean } | { ok: false; code: string; message?: string; rule?: string; file?: string; line?: number };
 export type ShipState = "shipped" | "secret" | "rejected" | "changed" | "error";
-export interface WorktreeDiff { text: string; truncated: boolean; patchId: string; files: string[] }
+export interface WorktreeDiff { text: string; truncated: boolean; patchId: string; files: string[]; additions: number; deletions: number }
 export interface DiffFile { path: string; lines: string[] }
 
 const MAX_REVIEW_CHARS = 20_000;
@@ -102,6 +102,8 @@ export function decodeWorktreeDiff(raw: unknown): WorktreeDiff {
     truncated: o.truncated === true,
     patchId: patch,
     files: Array.isArray(o.files) ? o.files.filter((f): f is string => typeof f === "string") : [],
+    additions: typeof o.additions === "number" && Number.isFinite(o.additions) ? o.additions : 0,
+    deletions: typeof o.deletions === "number" && Number.isFinite(o.deletions) ? o.deletions : 0,
   };
 }
 

@@ -64,6 +64,9 @@ pub struct WorktreeDiff {
     pub patch_id: String,
     /// Changed paths, at most `MAX_DIFF_FILES`.
     pub files: Vec<String>,
+    /// Added/removed line counts from `git diff --numstat` with the same base and pathspec as the patch.
+    pub additions: u64,
+    pub deletions: u64,
 }
 
 static RUNS: Mutex<BTreeMap<String, RunInfo>> = Mutex::new(BTreeMap::new());
@@ -399,7 +402,16 @@ pub fn diff_in(info: &RunInfo) -> Result<WorktreeDiff, String> {
     names.extend(pathspec());
     let listed = git(&wt, &names)?;
     let files = String::from_utf8_lossy(&listed).lines().filter(|l| !l.is_empty()).map(|l| l.to_string()).take(MAX_DIFF_FILES).collect();
-    Ok(WorktreeDiff { text: text_out, truncated, patch_id: sha256_hex(&patch), files })
+    let mut numstat = vec!["diff", "--cached", "--numstat", "--no-ext-diff", base];
+    numstat.extend(pathspec());
+    let counts = String::from_utf8_lossy(&git(&wt, &numstat)?).into_owned();
+    let (additions, deletions) = counts.lines().fold((0u64, 0u64), |(a, d), line| {
+        let mut parts = line.split('\t');
+        let add = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        let del = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        (a + add, d + del)
+    });
+    Ok(WorktreeDiff { text: text_out, truncated, patch_id: sha256_hex(&patch), files, additions, deletions })
 }
 
 /// True when `rel` is a plain path under the literal `.factory/` folder (no absolute path, no `..`, no root/prefix).
@@ -805,6 +817,7 @@ mod tests {
         assert!(d.text.contains("+changed") && d.text.contains("+brand new"), "{}", d.text);
         assert!(!d.text.contains(".factory") && !d.text.contains("Verdict") && !d.text.contains("secret task text"), "{}", d.text);
         assert_eq!(d.files, vec!["a.txt".to_string(), "new.txt".to_string()]);
+        assert_eq!((d.additions, d.deletions), (2, 1), "numstat counts the same paths as the patch");
         assert!(!d.truncated);
         assert_eq!(d.patch_id.len(), 64);
         assert_eq!(diff_in(&info).unwrap().patch_id, d.patch_id, "same tree, same id");

@@ -1,12 +1,24 @@
 // Board columns, derived from stored facts every time the board is read. A column is never written anywhere.
 import type { LiveRun, RunMode } from "../loop/native/run-manager.ts";
+import { factoryRole } from "../loop/native/factory.ts";
+import { displayText } from "../explorer/scm/model.ts";
 
 export type Column = "inbox" | "needsDecision" | "working" | "needsYou" | "readyToShip" | "shipped" | "done";
 
 export interface ShipComment { author: string; body: string; at: string }
 export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; ci: "none" | "pending" | "success" | "failed"; ciSummary: string | null; comments: ShipComment[] }
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
-export interface RunRecordFacts { runId: string; mode: RunMode; statusCode: string; needsDecision: string | null; ship: { provider: "github" | "gitlab"; url: string } | null; costUsd: number | null; durationSeconds: number | null; reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null }
+export interface RunRecordFacts {
+  runId: string; mode: RunMode; statusCode: string; needsDecision: string | null;
+  ship: { provider: "github" | "gitlab"; url: string } | null;
+  costUsd: number | null; durationSeconds: number | null;
+  verdict: string | null;
+  changed: { files: number; additions: number | null; deletions: number | null } | null;
+  test: { command: string | null; ok: boolean | null } | null;
+  failingStage: { name: string; error: string } | null;
+  readiness: string | null;
+  reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null;
+}
 
 export interface ItemFacts { live: LiveRun | null; lastRecord: RunRecordFacts | null; worktreeExists: boolean; interrupted?: boolean; ship: ShipStatus | null; shipStatusError: boolean; lastKnownColumn: Column | null }
 
@@ -42,6 +54,13 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
   const mode = typeof raw.factoryMode === "string" && RUN_MODES.includes(raw.factoryMode) ? (raw.factoryMode as RunMode) : "full";
   const d = isRecord(raw.diffSummary) ? raw.diffSummary : null;
   const reviewedPatchId = typeof d?.patchId === "string" && /^[0-9a-f]{64}$/.test(d.patchId) ? d.patchId : null;
+  const stages = Array.isArray(raw.stages) ? raw.stages.filter(isRecord) : [];
+  const config = isRecord(raw.config) && Array.isArray(raw.config.stages) ? raw.config.stages.filter(isRecord) : [];
+  const verifyConfig = config.find((st) => factoryRole(st as never) === "verify") ?? null;
+  const verifyName = verifyConfig && typeof verifyConfig.name === "string" ? verifyConfig.name : null;
+  const verify = verifyName ? stages.find((st) => st.stageName === verifyName) ?? null : null;
+  const failed = stages.find((st) => isRecord(st.run) && st.run.exitCode !== 0) ?? null;
+  const changedFiles = Array.isArray(d?.files) ? d.files.filter((f): f is string => typeof f === "string").length : null;
   return {
     runId,
     mode,
@@ -51,6 +70,11 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     reviewedPatchId,
     costUsd: typeof raw.costUsd === "number" && Number.isFinite(raw.costUsd) ? raw.costUsd : Array.isArray(raw.stages) ? raw.stages.reduce((n, st) => n + (typeof st?.costUsd === "number" && Number.isFinite(st.costUsd) ? st.costUsd : 0), 0) : null,
     durationSeconds: typeof raw.durationSeconds === "number" && Number.isFinite(raw.durationSeconds) ? raw.durationSeconds : null,
+    verdict: typeof raw.statusSummary === "string" && raw.statusSummary.trim() !== "" ? raw.statusSummary.slice(0, 500) : null,
+    changed: changedFiles === null ? null : { files: changedFiles, additions: typeof d?.additions === "number" ? d.additions : null, deletions: typeof d?.deletions === "number" ? d.deletions : null },
+    test: verify ? { command: typeof verifyConfig?.command === "string" ? verifyConfig.command.slice(0, 300) : null, ok: isRecord(verify.run) ? verify.run.exitCode === 0 : null } : null,
+    failingStage: failed && typeof failed.stageName === "string" ? { name: failed.stageName.slice(0, 120), error: displayText(typeof (failed.run as Record<string, unknown>)?.stdout === "string" ? ((failed.run as Record<string, unknown>).stdout as string) : "").split("\n").slice(0, 3).join("\n").slice(0, 600) } : null,
+    readiness: typeof raw.needsDecision === "string" && raw.needsDecision.trim() !== "" ? raw.needsDecision.slice(0, 2000) : null,
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,
     entry,
   };

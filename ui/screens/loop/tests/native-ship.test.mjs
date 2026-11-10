@@ -67,9 +67,9 @@ test("shipState maps secret_detected to a secret message that contains no diff t
 });
 
 test("the worktree diff is decoded and split per file", () => {
-  assert.deepEqual(m.decodeWorktreeDiff({ text: "x", truncated: true, patch_id: "p1", files: ["a", 3] }), { text: "x", truncated: true, patchId: "p1", files: ["a"] });
+  assert.deepEqual(m.decodeWorktreeDiff({ text: "x", truncated: true, patch_id: "p1", files: ["a", 3] }), { text: "x", truncated: true, patchId: "p1", files: ["a"], additions: 0, deletions: 0 });
   assert.equal(m.decodeWorktreeDiff({ patchId: "p2" }).patchId, "p2");
-  assert.deepEqual(m.decodeWorktreeDiff(null), { text: "", truncated: false, patchId: "", files: [] });
+  assert.deepEqual(m.decodeWorktreeDiff(null), { text: "", truncated: false, patchId: "", files: [], additions: 0, deletions: 0 });
   const text = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/new.md b/new.md\nnew file mode 100644\n+hi\n";
   const files = m.splitDiffByFile(text);
   assert.deepEqual(files.map((f) => f.path), ["src/a.ts", "new.md"]);

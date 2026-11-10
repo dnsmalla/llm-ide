@@ -183,7 +183,7 @@ test("a finished run is removed from liveRuns and its record is appended once", 
   assert.deepEqual(record.worktree, { runId: a, branch: `factory/${a}`, baseCommit: "abc1234def", repo: "/p" });
   assert.equal(record.ship, null);
   assert.equal(record.needsDecision, null);
-  assert.deepEqual(record.diffSummary, { files: ["src/a.ts"], truncated: false, patchId: "c".repeat(64) });
+  assert.deepEqual(record.diffSummary, { files: ["src/a.ts"], truncated: false, patchId: "c".repeat(64), additions: null, deletions: null });
   assert.equal(record.gitRoot, `/p/system/loop-worktrees/${a}`);
   assert.deepEqual(world.copies.map((x) => [x.prefix, x.runId]), [[`system/loop-worktrees/${a}`, a]]);
   await settle();

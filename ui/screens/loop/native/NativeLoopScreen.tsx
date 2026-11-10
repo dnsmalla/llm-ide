@@ -671,7 +671,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const worktreeDiff = activeRun
         ? await invokeHost<unknown>("loop_worktree_diff", { runId: activeRun.runId }).then(decodeWorktreeDiff).catch(() => null)
         : null;
-      const diffSummary = worktreeDiff ? { files: worktreeDiff.files, truncated: worktreeDiff.truncated, patchId: worktreeDiff.patchId || null } : null;
+      const diffSummary = worktreeDiff ? { files: worktreeDiff.files, truncated: worktreeDiff.truncated, patchId: worktreeDiff.patchId || null, additions: worktreeDiff.additions, deletions: worktreeDiff.deletions } : null;
       const factoryFields: FactoryRunFields = {
         workItem: start ? { source: start.item.source, id: start.item.id, title: start.item.title } : null,
         worktree: activeRun ? { runId: activeRun.runId, branch: activeRun.branch, baseCommit: activeRun.baseCommit, repo: activeRun.repo } : null,
