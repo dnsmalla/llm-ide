@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  formatReport, parseArgs, resolveDbPath, summarize, taskFromEndpoint,
+  canonicalTaskId, formatReport, parseArgs, resolveDbPath, SUFFIX_TO_ID, summarize, taskFromEndpoint,
 } from '../../scripts/auto-task-usage.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -191,4 +191,16 @@ test('a long path is printed whole (a truncated path would name nothing)', () =>
   const long = `/${'d'.repeat(60)}/${'e'.repeat(60)}/data.db`;
   const report = formatReport(summarize({ historyPath: long, dbPath: long }));
   assert.ok(report.split(long).length >= 3, 'both lines carry the full path');
+});
+
+test('every ledger suffix resolves to a registry id (loop-engineering has no registry task yet)', () => {
+  const registry = JSON.parse(fs.readFileSync(path.join(here, '..', '..', 'schema', 'tasks', 'registry.json'), 'utf8'));
+  const ids = new Set(registry.tasks.map((t) => t.id));
+  // shortcut: loop-engineering maps to a legacy name with no registry entry (the Loop screen owns it); add the entry or drop the suffix when that changes.
+  const unresolved = Object.entries(SUFFIX_TO_ID)
+    .filter(([suffix]) => suffix !== 'loop-engineering')
+    .filter(([, legacy]) => !ids.has(canonicalTaskId(legacy)))
+    .map(([suffix]) => suffix);
+  assert.deepEqual(unresolved, []);
+  assert.equal(canonicalTaskId(SUFFIX_TO_ID['loop-engineering']), 'loopEngineering');
 });

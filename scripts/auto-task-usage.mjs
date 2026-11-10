@@ -67,7 +67,7 @@ export function canonicalTaskId(name) {
 export const BUILT_IN_TASKS = REGISTRY.tasks.filter((t) => t.availability.status !== 'alias').map((t) => t.id);
 
 /** Ledger endpoints use the log suffix (AutoTask.logSuffix), not the enum id. */
-const SUFFIX_TO_ID = {
+export const SUFFIX_TO_ID = {
   'source-update': 'sourceUpdate',
   'sources-to-issue': 'sourcesToIssue',
   'implement-issues': 'implementIssues',
