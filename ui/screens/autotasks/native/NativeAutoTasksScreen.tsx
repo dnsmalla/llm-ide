@@ -21,7 +21,7 @@ import { runCustomTask } from "./run-custom.ts";
 import { runTask as runRegisteredTask } from "../../tasks/runner.ts";
 import { registeredProjectId } from "../../tasks/project.ts";
 import { taskFocus, taskPromptWithFocus } from "../../tasks/model.ts";
-import { approveLoop, approveStage, approvalStatus } from "../../loop/native/approvals.ts";
+import { approveStage, approvalStatus } from "../../loop/native/approvals.ts";
 import { loadLoops } from "../../loop/native/store.ts";
 import { autoTaskBusy, releaseAutoTask, tryAcquireAutoTask } from "./lock.ts";
 import { appendCustomRun, CUSTOM_RUNS_EVENT, readCustomRuns, type CustomTaskRun } from "./schedule.ts";
@@ -111,7 +111,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const hasRepo = (() => { try { const c = readRepoConfig(); return [...c.saved.github, ...c.saved.gitlab].some((r) => r.active && r.clonePath.trim() !== ""); } catch { return false; } })();
   const taskEnv = { features: null, coreFeatures: null, hasRepo, localHost: true, mode: "local" as const };
   const selectedReason = taskUnavailableReason(selected, taskEnv);
-  const iconFor = (id: AutoTaskId): string => ({ sourceUpdate: "↻", sourcesToIssue: "◫", implementIssues: "⌘", reviewMerge: "⇄", reviewCode: "✓", reviewDoc: "▤", reviewConflicts: "⚠", updateIssues: "☑", updatePlanStatus: "▥", generateDoc: "▦", regression: "↺", generateKnowledge: "✦" } as Record<string, string>)[id] ?? "•";
+  const iconFor = (id: AutoTaskId): string => ({ "sources.update": "↻", sourcesToIssue: "◫", implementIssues: "⌘", reviewMerge: "⇄", "review.code": "✓", "review.doc": "▤", "review.conflicts": "⚠", updateIssues: "☑", "plan.status": "▥", "loop.regression": "↺" } as Record<string, string>)[id] ?? "•";
   const grouped = useMemo(() => GROUPS.map((g) => [g, TASKS.filter((t) => t.group === g && (!onlyEnabled || state.configs[t.id]?.enabled))] as const).filter(([, list]) => list.length > 0), [state, onlyEnabled]);
 
   const update = (patch: Partial<AutoTaskConfig>, id: AutoTaskId = selected) => {
@@ -206,7 +206,8 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           } else {
             // Approve only the Regression stage's fault-verify commands, not every shell command in the loop.
             const stage = regression.config.stages.find((s) => s.kind === "regressionSweep");
-            const approval = stage ? await approveStage(stage.id, regression.id) : await approveLoop(regression.id);
+            // No stage means no approval: approving the whole loop would also allow its other shell commands.
+            const approval = stage ? await approveStage(stage.id, regression.id) : null;
             if (approval) approvalToken = approval.token;
           }
           if (!approvalToken) {

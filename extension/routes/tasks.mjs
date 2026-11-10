@@ -20,6 +20,17 @@ import { runGrouped } from '../core/process-group.mjs';
 
 const BODY_KEYS = new Set(['projectId', 'args']);
 
+// What a registry task's `runner.needs` may ask the route for. Each need resolves to deps; only the route reads the vault.
+const NEEDS = Object.freeze({
+  trackerCreds: (userId) => ({
+    creds: {
+      github: { token: getSecret(getDb(), userId, 'github.token') || undefined },
+      backlog: { apiKey: getSecret(getDb(), userId, 'backlog.apiKey') || undefined },
+      linear: { apiKey: getSecret(getDb(), userId, 'linear.apiKey') || undefined },
+    },
+  }),
+});
+
 // The agent runner's port per bus kind: the engine, git and spawn are supplied here, never imported by agents/.
 const AGENT_PORTS = Object.freeze({
   review: ({ task, userId, projectRoot, args, signal, emit }) => runReviewTask({
@@ -98,11 +109,6 @@ export async function handleTaskRoutes(req, res, ctx) {
     return failure(res, 400, 'VALIDATION_FAILED', 'args must be an object');
   }
   if (raw.projectId !== undefined && typeof raw.projectId !== 'string') return failure(res, 400, 'VALIDATION_FAILED', 'projectId must be a string');
-  const sourceIds = raw.args?.sourceIds;
-  if (sourceIds !== undefined && (!Array.isArray(sourceIds) || sourceIds.length > 50 || sourceIds.some((id) => typeof id !== 'string' || id.length > 128))) {
-    return failure(res, 400, 'VALIDATION_FAILED', 'sourceIds must be an array of at most 50 strings');
-  }
-
   let taskId;
   try { taskId = decodeURIComponent(m[1]); } catch { return failure(res, 404, 'TASK_NOT_FOUND', 'Unknown task.'); }
   const task = TASKS.find((t) => t.id === taskId || t.aliases.includes(taskId));
@@ -114,7 +120,6 @@ export async function handleTaskRoutes(req, res, ctx) {
   if (task.availability.status !== 'available') return failure(res, 404, 'TASK_NOT_AVAILABLE', task.availability.reason ?? 'This task is not available.');
   const argSpecs = task.runner?.args ?? {};
   for (const [key, value] of Object.entries(raw.args ?? {})) {
-    if (key === 'sourceIds' && task.runner?.route === 'sources-update') continue; // checked above
     const spec = argSpecs[key];
     if (!spec) return failure(res, 400, 'VALIDATION_FAILED', `unknown args field ${key.slice(0, 40)}`);
     const ok = spec.type === 'string'
@@ -145,13 +150,7 @@ export async function handleTaskRoutes(req, res, ctx) {
   const deps = {
     runSourcesUpdate,
     ...(runAgent ? { runAgent } : {}),
-    ...(task.runner?.route === 'plan-status' ? {
-      creds: {
-        github: { token: getSecret(getDb(), userId, 'github.token') || undefined },
-        backlog: { apiKey: getSecret(getDb(), userId, 'backlog.apiKey') || undefined },
-        linear: { apiKey: getSecret(getDb(), userId, 'linear.apiKey') || undefined },
-      },
-    } : {}),
+    ...(task.runner?.needs ?? []).reduce((acc, need) => ({ ...acc, ...NEEDS[need]?.(userId) }), {}),
   };
   try {
     const result = await runCoreTask({

@@ -80,6 +80,10 @@ for (const task of tasks) {
           bad(`${at}: a frame must be prompts/_<name>.md`);
         }
       }
+      if (runner.needs !== undefined && (!Array.isArray(runner.needs) || runner.needs.some((n) => typeof n !== 'string' || !/^[a-zA-Z]+$/.test(n)))) {
+        // Named by the route's NEEDS table (routes/tasks.mjs); an unknown name is refused there, never here.
+        bad(`${at}: runner.needs must be an array of need names`);
+      }
       if (runner.args !== undefined) {
         // Args a caller may send to the task route. Only these names pass; each is typed and size-bounded.
         const specs = runner.args && typeof runner.args === 'object' && !Array.isArray(runner.args) ? Object.values(runner.args) : null;

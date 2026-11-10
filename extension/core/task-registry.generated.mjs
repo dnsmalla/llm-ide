@@ -130,6 +130,9 @@ export const TASKS = Object.freeze([
     "runner": {
       "kind": "core-route",
       "route": "plan-status",
+      "needs": [
+        "trackerCreds"
+      ],
       "timeoutSeconds": 1800
     },
     "input": {
@@ -321,6 +324,13 @@ export const TASKS = Object.freeze([
       "kind": "core-route",
       "route": "sources-update",
       "busKind": "sources.update",
+      "args": {
+        "sourceIds": {
+          "type": "string[]",
+          "maxLength": 128,
+          "maxItems": 50
+        }
+      },
       "timeoutSeconds": 1800
     },
     "input": {

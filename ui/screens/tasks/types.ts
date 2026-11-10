@@ -25,6 +25,8 @@ export interface TaskRunnerDef {
   prompt?: string;
   /** A shared frame with one {{focus}} slot; the task's prompt fills it. Agent tasks only. */
   frame?: string;
+  /** Server-side resources the core route supplies to this task (e.g. "trackerCreds"); never sent by a client. */
+  needs?: readonly string[];
   /** Args a caller may send to the task route; every other key is refused. */
   args?: Readonly<Record<string, { type: "string" | "string[]"; maxLength: number; maxItems?: number }>>;
   /** A fixed core adapter id, e.g. "sources-update". core-route tasks only. */
