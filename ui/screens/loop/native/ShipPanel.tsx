@@ -10,7 +10,7 @@ import { core } from "../../shell/runtime";
 import { readRepoConfig } from "../../settings/repo-config.ts";
 import type { WorkItem } from "./factory.ts";
 import { sensitiveChangedFiles } from "./protected.ts";
-import { decodeWorktreeDiff, diffLineKind, reviewedPatchIdWarning, shipBlockedReason, shipCopy, shipRequest, shipState, shipTarget, splitDiffByFile, type ShipResult, type WorktreeDiff } from "./ship-model.ts";
+import { decodeWorktreeDiff, decodeWorktreeStatus, diffLineKind, discardWarning, reviewedPatchIdWarning, shipBlockedReason, shipCopy, shipRequest, shipState, shipTarget, splitDiffByFile, type ShipResult, type WorktreeDiff, type WorktreeStatus } from "./ship-model.ts";
 import type { RunInfo } from "./worktree-run.ts";
 
 const PREVIEW_LINES = 400;
@@ -24,6 +24,8 @@ export interface ShipPanelProps {
   passed: boolean;
   /** The patch id the passing Review read (the run record's diffSummary.patchId), if that run recorded one. */
   reviewedPatchId?: string | null;
+  /** The provider of the open PR/MR the run record knows about, if any: Discard leaves it and the remote branch alone. */
+  requestProvider?: "github" | "gitlab" | null;
   fs: Pick<FsApi, "read" | "gitStatus">;
   /** Project-relative folder of the run's worktree: `system/loop-worktrees/<run id>`. */
   runPrefix: string;
@@ -32,7 +34,7 @@ export interface ShipPanelProps {
   onClose(): void;
 }
 
-export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = null, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
+export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = null, requestProvider = null, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
   const [diff, setDiff] = useState<WorktreeDiff | null>(initialDiff ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [review, setReview] = useState("");
@@ -42,6 +44,8 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   const [confirming, setConfirming] = useState<"ship" | "discard" | null>(null);
   const [shippedUrl, setShippedUrl] = useState<string | null>(null);
   const [message, setMessage] = useState<{ severity: "info" | "warning" | "error"; text: string } | null>(null);
+  const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
+  const [readingDiscard, setReadingDiscard] = useState(false);
   const config = useMemo(() => readRepoConfig(), []);
   const target = shipTarget(info, config);
   const blocked = target ? shipBlockedReason(config, target.provider) : "This repository is not in Settings → Repositories (with its clone folder), so it cannot be shipped from here.";
@@ -98,6 +102,16 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       if (/^https:\/\//.test(result.url)) setShippedUrl(result.url);
       onShipped({ provider: target.provider, url: result.url, commit: result.commit, reused: result.reused });
     }
+  };
+
+  const openDiscard = () => {
+    setConfirming("discard");
+    setDiscardStatus(null);
+    setReadingDiscard(true);
+    void invokeHost<unknown>("loop_worktree_status", { runId: info.runId })
+      .then((raw) => setDiscardStatus(decodeWorktreeStatus(raw)))
+      .catch(() => setDiscardStatus(null))
+      .finally(() => setReadingDiscard(false));
   };
 
   const discard = async () => {
@@ -159,9 +173,9 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       ) : null}
       {confirming === "discard" ? (
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm discard">
-          <p className="loop-warn">{`Discard this run? The worktree system/loop-worktrees/${info.runId} and the branch ${info.branch} are deleted, with every change in them.`}</p>
+          <p className="loop-warn">{`Discard this run? ${readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, requestProvider ? { provider: requestProvider } : null)}`}</p>
           <div className="loop-inline">
-            <button type="button" className="loop-btn loop-btn-primary" disabled={busy} onClick={() => void discard()}>Confirm discard</button>
+            <button type="button" className="loop-btn loop-btn-primary" disabled={busy || readingDiscard} onClick={() => void discard()}>Confirm discard</button>
             <button type="button" className="loop-btn" disabled={busy} onClick={() => setConfirming(null)}>Cancel</button>
           </div>
         </div>
@@ -169,7 +183,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       <div className="loop-inline">
         <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={() => setConfirming("ship")}>{busy ? "Working…" : "Ship as draft…"}</button>
         {shippedUrl ? <button type="button" className="loop-btn" onClick={() => { void invokeHost("open_external_url", { url: shippedUrl }).catch(() => undefined); }}>Open {kind}</button> : null}
-        <button type="button" className="loop-btn" disabled={busy} onClick={() => setConfirming("discard")}>Discard…</button>
+        <button type="button" className="loop-btn" disabled={busy} onClick={openDiscard}>Discard…</button>
       </div>
     </section>
   );

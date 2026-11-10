@@ -448,6 +448,46 @@ pub async fn loop_clear_factory_output(path: String, run_id: Option<String>) -> 
     blocking(move || clear_factory_output_for(run_id.as_deref(), &path)).await
 }
 
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeStatus {
+    /// Uncommitted changes in the worktree (`.factory/` excluded): what Discard deletes without a commit.
+    pub changed_files: usize,
+    /// Commits on the Factory branch that are not on `origin/<branch>` (nor in the base when there is no remote).
+    pub local_commits: usize,
+    /// HEAD is already contained in `origin/<branch>` (a successful Ship pushed it).
+    pub pushed: bool,
+}
+
+/// The numbers behind Discard's one honest confirm. `changedFiles` comes from `git status` (uncommitted work),
+/// `localCommits` from the branch against its remote-tracking ref (or the run's base when nothing was pushed), and
+/// `pushed` is true only when HEAD is reachable from `origin/<branch>`. Read-only apart from staging the index.
+pub fn status_in(info: &RunInfo) -> Result<WorktreeStatus, String> {
+    let wt = PathBuf::from(&info.worktree);
+    let head = text(git(&wt, &["rev-parse", "HEAD"])?);
+    let base = diff_base(info);
+    let changed = crate::loop_runner::changed_paths_in(&wt)?
+        .into_iter()
+        .filter(|p| !p.eq_ignore_ascii_case(FACTORY_DIR) && !p.to_ascii_lowercase().starts_with(&format!("{}/", FACTORY_DIR.to_ascii_lowercase())))
+        .count();
+    let remote_ref = format!("refs/remotes/origin/{}", info.branch);
+    let remote = git(&wt, &["rev-parse", "--verify", "--quiet", &remote_ref]).ok().map(|b| text(b)).filter(|s| !s.is_empty());
+    let range = match &remote {
+        Some(r) => format!("{r}..HEAD"),
+        None => format!("{base}..HEAD"),
+    };
+    let local_commits = text(git(&wt, &["rev-list", "--count", &range])?).parse::<usize>().unwrap_or(0);
+    let pushed = remote.as_ref().is_some_and(|r| {
+        git(&wt, &["merge-base", "--is-ancestor", &head, r]).is_ok()
+    });
+    Ok(WorktreeStatus { changed_files: changed, local_commits, pushed })
+}
+
+#[tauri::command]
+pub async fn loop_worktree_status(run_id: String) -> Result<WorktreeStatus, String> {
+    blocking(move || status_in(&resolve(&run_id)?)).await
+}
+
 /// Removes the run's worktree (dirty or not) and its branch, and forgets the run. Harmless when already gone.
 /// Only ever removes `<project>/system/loop-worktrees/<run_id>`.
 pub fn remove_in(info: &RunInfo) -> Result<(), String> {
@@ -766,6 +806,32 @@ mod tests {
         assert_eq!(sh_git(&p, &["status", "--porcelain"]).trim(), "", "diffing never touches the main tree");
         remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_reports_changed_files_local_commits_and_pushed() {
+        let p = project_repo("status");
+        let remote = temp("status-remote");
+        std::fs::create_dir_all(&remote).unwrap();
+        sh_git(&remote, &["init", "-q", "--bare"]);
+        sh_git(&p, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        let info = prepare_in(&p, &p, "st1", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        assert_eq!(status_in(&info).unwrap(), WorktreeStatus { changed_files: 0, local_commits: 0, pushed: false });
+        std::fs::write(wt.join("one.txt"), "1\n").unwrap();
+        std::fs::write(wt.join("two.txt"), "2\n").unwrap();
+        assert_eq!(status_in(&info).unwrap(), WorktreeStatus { changed_files: 2, local_commits: 0, pushed: false });
+        sh_git(&wt, &["add", "one.txt", "two.txt"]);
+        sh_git(&wt, &["commit", "-q", "-m", "work"]);
+        assert_eq!(status_in(&info).unwrap(), WorktreeStatus { changed_files: 0, local_commits: 1, pushed: false }, "a commit that was never pushed");
+        sh_git(&wt, &["push", "-q", "-u", "origin", "factory/st1"]);
+        assert_eq!(status_in(&info).unwrap(), WorktreeStatus { changed_files: 0, local_commits: 0, pushed: true });
+        std::fs::write(wt.join("three.txt"), "3\n").unwrap();
+        assert_eq!(status_in(&info).unwrap(), WorktreeStatus { changed_files: 1, local_commits: 0, pushed: true }, "uncommitted work after a push");
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+        let _ = std::fs::remove_dir_all(&remote);
     }
 
     #[cfg(unix)]

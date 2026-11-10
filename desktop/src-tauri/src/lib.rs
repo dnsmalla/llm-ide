@@ -334,6 +334,7 @@ macro_rules! product_handlers {
                 loop_worktree::loop_worktree_diff,
                 loop_worktree::loop_worktree_remove,
                 loop_worktree::loop_worktree_list,
+                loop_worktree::loop_worktree_status,
                 loop_worktree::loop_clear_factory_output,
                 repo_clone::repo_clone,
                 feature_rebuild::feature_rebuild,

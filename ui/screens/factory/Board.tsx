@@ -290,9 +290,24 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
             <section key={col} className="fx-col" aria-label={`${COLUMN_LABELS[col]} (${board[col].length})`}>
               <h3 className="fx-col-title">{COLUMN_LABELS[col]} <span>{board[col].length}</span></h3>
               <ul className="fx-cards">
-                {board[col].map((view) => (
-                  <Card key={view.key} view={view} selected={view.key === selectedKey} onOpen={() => setSelectedKey(view.key)} onAction={(a, note) => { const it = byKey.get(view.key); if (it) onAction(it, a, note); }} />
-                ))}
+                {board[col].map((view) => {
+                  const it = byKey.get(view.key) ?? null;
+                  return (
+                    <Card
+                      key={view.key}
+                      view={view}
+                      selected={view.key === selectedKey}
+                      onOpen={() => setSelectedKey(view.key)}
+                      onAction={(a, note) => { if (it) onAction(it, a, note); }}
+                      requestProvider={it ? facts.get(it.key)?.lastRecord?.ship?.provider ?? null : null}
+                      onDiscardStatus={it ? async () => {
+                        const runId = it.runIds.at(-1);
+                        if (!runId || !worktrees.has(runId)) return null;
+                        return invokeHost<unknown>("loop_worktree_status", { runId });
+                      } : undefined}
+                    />
+                  );
+                })}
               </ul>
             </section>
           ))}
@@ -321,6 +336,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                 item={toWorkItem(selected)}
                 passed={selFacts?.lastRecord?.statusCode === "success"}
                 reviewedPatchId={selFacts?.lastRecord?.reviewedPatchId ?? null}
+                requestProvider={selFacts?.lastRecord?.ship?.provider ?? null}
                 fs={fs}
                 runPrefix={repoPrefixFor(projectRoot, selInfo.worktree)}
                 onShipped={(r) => {

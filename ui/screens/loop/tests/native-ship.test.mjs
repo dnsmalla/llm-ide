@@ -77,6 +77,19 @@ test("the worktree diff is decoded and split per file", () => {
   assert.deepEqual(m.splitDiffByFile(""), []);
 });
 
+test("A7: Discard states the exact counts and what happens to an open PR/MR", () => {
+  assert.deepEqual(m.decodeWorktreeStatus({ changedFiles: 3, localCommits: 1, pushed: false }), { changedFiles: 3, localCommits: 1, pushed: false });
+  assert.equal(m.decodeWorktreeStatus({ changedFiles: -1, localCommits: 1, pushed: false }), null);
+  assert.equal(m.decodeWorktreeStatus({ changedFiles: 3, localCommits: 1 }), null);
+  assert.equal(m.discardWarning({ changedFiles: 3, localCommits: 1, pushed: false }), "3 changed files and 1 commit that was never pushed will be deleted.");
+  assert.equal(m.discardWarning({ changedFiles: 1, localCommits: 0, pushed: false }), "1 changed file will be deleted.");
+  assert.equal(m.discardWarning({ changedFiles: 0, localCommits: 2, pushed: false }), "2 commits that were never pushed will be deleted.");
+  assert.equal(m.discardWarning({ changedFiles: 0, localCommits: 0, pushed: true }, null), "Nothing unpushed will be lost.");
+  assert.equal(m.discardWarning({ changedFiles: 2, localCommits: 0, pushed: true }, { provider: "github" }), "2 changed files will be deleted. The remote branch and the open pull request stay.");
+  assert.equal(m.discardWarning({ changedFiles: 0, localCommits: 0, pushed: true }, { provider: "gitlab" }), "Nothing unpushed will be lost. The remote branch and the open merge request stay.");
+  assert.match(m.discardWarning(null), /Every change/);
+});
+
 test("A4: the recorded review patch id warns and blocks Ship when the diff changed", () => {
   const reviewed = "a".repeat(64);
   assert.equal(m.reviewedPatchIdWarning(reviewed, reviewed), null);

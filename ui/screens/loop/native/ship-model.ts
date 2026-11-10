@@ -137,6 +137,41 @@ export function splitDiffByFile(text: string): DiffFile[] {
   return files;
 }
 
+/** `loop_worktree_status` (host): what Discard would delete locally, and whether HEAD is already pushed. */
+export interface WorktreeStatus { changedFiles: number; localCommits: number; pushed: boolean }
+
+export function decodeWorktreeStatus(raw: unknown): WorktreeStatus | null {
+  const o = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
+  const n = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.trunc(v) : null);
+  const changedFiles = n(o.changedFiles);
+  const localCommits = n(o.localCommits);
+  if (changedFiles === null || localCommits === null || typeof o.pushed !== "boolean") return null;
+  return { changedFiles, localCommits, pushed: o.pushed };
+}
+
+/**
+ * A7: Discard states exactly what it deletes. `request` is the open PR/MR the record knows about, if any: only the
+ * local worktree and branch are removed, so the remote branch and the request itself stay (say so, never imply a close).
+ */
+export function discardWarning(status: WorktreeStatus | null, request: { provider: "github" | "gitlab" } | null = null): string {
+  let local: string;
+  if (!status) {
+    local = "Every change in its worktree and branch is deleted.";
+  } else {
+    const files = status.changedFiles;
+    const commits = status.localCommits;
+    const fileText = `${files} changed file${files === 1 ? "" : "s"}`;
+    const commitText = `${commits} commit${commits === 1 ? "" : "s"} that ${commits === 1 ? "was" : "were"} never pushed`;
+    if (files > 0 && commits > 0) local = `${fileText} and ${commitText} will be deleted.`;
+    else if (files > 0) local = `${fileText} will be deleted.`;
+    else if (commits > 0) local = `${commitText} will be deleted.`;
+    else local = status.pushed ? "Nothing unpushed will be lost." : "No local changes or commits will be lost.";
+  }
+  if (!request) return local;
+  const kind = request.provider === "gitlab" ? "merge request" : "pull request";
+  return `${local} The remote branch and the open ${kind} stay.`;
+}
+
 /** The HistoryView line classes: file headers (`+++`/`---`) are context, not additions or deletions. */
 export function diffLineKind(line: string): "add" | "del" | "hunk" | "ctx" {
   if (line.startsWith("+") && !line.startsWith("+++")) return "add";

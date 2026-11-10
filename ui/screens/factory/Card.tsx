@@ -1,9 +1,20 @@
 // One Factory card: title, source, the derived note and the actions its column allows.
 import { useState, type ReactNode } from "react";
 import { ACTION_LABELS, SOURCE_LABELS, type CardAction, type CardView } from "./board-model.ts";
+import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
 
-export function Card({ view, selected, onOpen, onAction }: { view: CardView; selected: boolean; onOpen: () => void; onAction: (action: CardAction, note?: string) => void }): ReactNode {
+export function Card({ view, selected, onOpen, onAction, onDiscardStatus, requestProvider = null }: {
+  view: CardView;
+  selected: boolean;
+  onOpen: () => void;
+  onAction: (action: CardAction, note?: string) => void;
+  /** Reads the item's worktree status before the confirm, so the confirm can state the numbers. */
+  onDiscardStatus?: () => Promise<unknown>;
+  requestProvider?: "github" | "gitlab" | null;
+}): ReactNode {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
+  const [readingDiscard, setReadingDiscard] = useState(false);
   const [sendBackOpen, setSendBackOpen] = useState(false);
   const [note, setNote] = useState("");
   return (
@@ -23,14 +34,26 @@ export function Card({ view, selected, onOpen, onAction }: { view: CardView; sel
       ) : null}
       {confirmDiscard ? (
         <div className="fx-actions" role="group" aria-label="Confirm discard">
-          <span className="fx-hint">Remove this card and its worktree?</span>
-          <button type="button" className="fx-btn fx-danger" onClick={() => { setConfirmDiscard(false); onAction("discard"); }}>Discard</button>
-          <button type="button" className="fx-btn" onClick={() => setConfirmDiscard(false)}>Cancel</button>
+          <span className="fx-hint" role="alert">Remove this card and its worktree? {readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, requestProvider ? { provider: requestProvider } : null)}</span>
+          <button type="button" className="fx-btn fx-danger" disabled={readingDiscard} onClick={() => { setConfirmDiscard(false); onAction("discard"); }}>Discard</button>
+          <button type="button" className="fx-btn" onClick={() => { setConfirmDiscard(false); setDiscardStatus(null); }}>Cancel</button>
         </div>
       ) : view.actions.length > 0 ? (
         <div className="fx-actions">
           {view.actions.map((a) => (
-            <button key={a} type="button" className={a === "start" || a === "ship" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => (a === "discard" ? setConfirmDiscard(true) : a === "sendBack" ? setSendBackOpen(true) : onAction(a))}>{ACTION_LABELS[a]}</button>
+            <button key={a} type="button" className={a === "start" || a === "ship" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
+              if (a === "discard") {
+                setConfirmDiscard(true);
+                setDiscardStatus(null);
+                if (onDiscardStatus) {
+                  setReadingDiscard(true);
+                  void onDiscardStatus().then((raw) => setDiscardStatus(decodeWorktreeStatus(raw))).catch(() => setDiscardStatus(null)).finally(() => setReadingDiscard(false));
+                }
+                return;
+              }
+              if (a === "sendBack") setSendBackOpen(true);
+              else onAction(a);
+            }}>{ACTION_LABELS[a]}</button>
           ))}
         </div>
       ) : null}
