@@ -285,7 +285,11 @@ async function execute(run: ManagedRun): Promise<void> {
     fail(run, e instanceof Error ? e.message : String(e));
   }
   if (finished) {
-    try { await saveRecord(d, run, fs, finished, started); }
+    try {
+      await saveRecord(d, run, fs, finished, started);
+      const marker = `${repoPrefixFor(run.live.projectRoot, finished.info.worktree)}/.factory/RUN.json`;
+      await fs.remove(marker).catch(() => undefined);
+    }
     catch (e) { appendLog(run, `run record not written: ${e instanceof Error ? e.message : String(e)}`); }
     try {
       d.onRunFinished?.({ runId: run.live.runId, itemKey: run.item.key, projectRoot: run.live.projectRoot, mode: run.live.mode, statusCode: runStatusCode(finished.outcome), statusSummary: finished.outcome.statusSummary });
@@ -311,6 +315,10 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   if (run.cancelled) { log("Run cancelled before it started."); return null; }
   const info = run.reuse ? await findWorktree(d, run.live.runId) : await prepareWorktree(d, run);
   if (!info) { fail(run, `The worktree of run ${run.live.runId} no longer exists; the run did not start.`); return null; }
+  const marker = `${repoPrefixFor(run.live.projectRoot, info.worktree)}/.factory/RUN.json`;
+  try {
+    await fs.write(marker, JSON.stringify({ runId: run.live.runId, mode: run.live.mode, startedAt: new Date().toISOString(), itemKey: run.item.key }), { expected_hash: null });
+  } catch { log("The run marker could not be written; an interrupted run may not offer Resume."); }
   const ctx: StageExecContext = {
     projectRoot: run.live.projectRoot, runId: run.live.runId, runRoot: info.worktree, fs, host: d.host, core: d.core, log,
     approvalToken: async () => token, signal: run.abort.signal,

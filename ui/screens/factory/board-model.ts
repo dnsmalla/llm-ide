@@ -70,7 +70,7 @@ export function decodeWorktreeList(body: unknown): Map<string, WorktreeInfo> {
   return out;
 }
 
-export interface FactsContext { projectRoot: string; live: readonly LiveRun[]; records: ReadonlyMap<string, RunRecordFacts>; worktrees: ReadonlyMap<string, unknown>; ship: ReadonlyMap<string, ShipStatus | "error">; lastKnown: ReadonlyMap<string, Column> }
+export interface FactsContext { projectRoot: string; live: readonly LiveRun[]; records: ReadonlyMap<string, RunRecordFacts>; worktrees: ReadonlyMap<string, unknown>; interrupted?: ReadonlySet<string>; ship: ReadonlyMap<string, ShipStatus | "error">; lastKnown: ReadonlyMap<string, Column> }
 
 /** The facts of one card: its last run's record, its worktree, the PR/MR status and its last known column. */
 export function assembleFacts(item: WorkItemRecord, ctx: FactsContext): ItemFacts {
@@ -83,6 +83,7 @@ export function assembleFacts(item: WorkItemRecord, ctx: FactsContext): ItemFact
     live,
     lastRecord,
     worktreeExists: runId !== null && ctx.worktrees.has(runId),
+    interrupted: runId !== null && ctx.interrupted?.has(runId) === true,
     ship: entry !== undefined && entry !== "error" ? entry : null,
     shipStatusError: entry === "error",
     lastKnownColumn: ctx.lastKnown.get(item.key) ?? null,

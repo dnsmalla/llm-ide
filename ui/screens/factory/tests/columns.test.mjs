@@ -88,3 +88,8 @@ test("decodeRunRecordFacts reads the factory fields and rejects other records", 
   assert.equal(decodeRunRecordFacts({ ...raw, needsDecision: "needs decision: see .factory/READINESS.md" }).needsDecision, "needs decision: see .factory/READINESS.md");
   assert.equal(decodeRunRecordFacts(null), null);
 });
+
+test("a run marker with no live run is Interrupted, whatever older record exists", () => {
+  assert.deepEqual(columnFor(facts({ interrupted: true })), { column: "needsYou", note: NOTE.interrupted });
+  assert.deepEqual(columnFor(facts({ interrupted: true, lastRecord: record({ statusCode: "success" }), worktreeExists: true })), { column: "needsYou", note: NOTE.interrupted });
+});

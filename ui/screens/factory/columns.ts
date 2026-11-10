@@ -8,7 +8,7 @@ export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; 
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
 export interface RunRecordFacts { runId: string; mode: RunMode; statusCode: string; needsDecision: string | null; ship: { provider: "github" | "gitlab"; url: string } | null; reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null }
 
-export interface ItemFacts { live: LiveRun | null; lastRecord: RunRecordFacts | null; worktreeExists: boolean; ship: ShipStatus | null; shipStatusError: boolean; lastKnownColumn: Column | null }
+export interface ItemFacts { live: LiveRun | null; lastRecord: RunRecordFacts | null; worktreeExists: boolean; interrupted?: boolean; ship: ShipStatus | null; shipStatusError: boolean; lastKnownColumn: Column | null }
 
 export const COLUMNS: readonly Column[] = ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"];
 export const COLUMN_LABELS: Readonly<Record<Column, string>> = { inbox: "Inbox", needsDecision: "Needs decision", working: "Working", needsYou: "Needs you", readyToShip: "Ready to ship", shipped: "Shipped", done: "Done" };
@@ -66,6 +66,8 @@ function finishedNote(statusCode: string): string {
 /** The spec's column table. Order matters: live run, then no record, then the PR/MR, then the run result. */
 export function columnFor(f: ItemFacts): { column: Column; note: string | null } {
   if (f.live) return { column: "working", note: f.live.state === "queued" ? NOTE.queued : f.live.state === "paused" ? NOTE.paused : null };
+  // A run marker with no live run means the app stopped mid-run, whatever older record exists.
+  if (f.interrupted) return { column: "needsYou", note: NOTE.interrupted };
   const rec = f.lastRecord;
   // No finished record: a worktree left behind means the app stopped mid-run. It is never auto-deleted.
   if (!rec) return f.worktreeExists ? { column: "needsYou", note: NOTE.interrupted } : { column: "inbox", note: null };

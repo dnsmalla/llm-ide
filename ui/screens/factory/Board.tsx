@@ -39,6 +39,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [items, setItems] = useState<WorkItemRecord[]>([]);
   const [records, setRecords] = useState<Map<string, RunRecordFacts>>(() => new Map());
   const [worktrees, setWorktrees] = useState<Map<string, WorktreeInfo>>(() => new Map());
+  const [interrupted, setInterrupted] = useState<ReadonlySet<string>>(() => new Set());
   const [ship, setShip] = useState<Map<string, ShipStatus | "error">>(() => new Map());
   const [live, setLive] = useState<readonly LiveRun[]>(() => liveRuns());
   const [cap, setCap] = useState(() => concurrency());
@@ -82,11 +83,17 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         latestRecords(fs, runIds),
         invokeHost<unknown>("loop_worktree_list").then(decodeWorktreeList, () => new Map<string, WorktreeInfo>()),
       ]);
+      const marks = new Set<string>();
+      await Promise.all([...wts].map(async ([runId, wt]) => {
+        const prefix = repoPrefixFor(projectRoot, wt.worktree);
+        try { const r = await fs.read(`${prefix}/.factory/RUN.json`); if (r.status === "ok") marks.add(runId); } catch { /* no marker */ }
+      }));
       itemsRef.current = next;
       recordsRef.current = recs;
       setItems(next);
       setRecords(recs);
       setWorktrees(wts);
+      setInterrupted(marks);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "The Factory items could not be read.");
@@ -152,7 +159,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
 
   const facts = useMemo(() => {
     const m = new Map<string, ItemFacts>();
-    for (const item of items) m.set(item.key, assembleFacts(item, { projectRoot: projectRoot ?? "", live, records, worktrees, ship, lastKnown: lastKnown.current }));
+    for (const item of items) m.set(item.key, assembleFacts(item, { projectRoot: projectRoot ?? "", live, records, worktrees, interrupted, ship, lastKnown: lastKnown.current }));
     return m;
   }, [items, live, records, worktrees, ship, projectRoot]);
   const board = useMemo(() => buildBoard(items, facts), [items, facts]);
