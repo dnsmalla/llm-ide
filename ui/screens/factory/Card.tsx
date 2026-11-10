@@ -19,7 +19,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
   const [note, setNote] = useState("");
   const [answer, setAnswer] = useState("");
   return (
-    <li className="fx-card" data-key={view.key} data-selected={selected}>
+    <li className="fx-card" data-key={view.key} data-selected={selected} onKeyDown={(e) => { if (e.key === "Escape") { setConfirmDiscard(false); setSendBackOpen(false); setNote(""); } }}>
       <button type="button" className="fx-card-title" onClick={onOpen} title="Show details">{view.title}</button>
       <div className="fx-card-meta">
         <span className="fx-source">{SOURCE_LABELS[view.source]}</span>

@@ -202,3 +202,12 @@ test("D4: nextCardKey moves within a column and into the next non-empty column",
   assert.equal(nextCardKey(board, "b", "down"), "b");
   assert.equal(nextCardKey(board, null, "down"), "a");
 });
+
+test("D4: the board markup uses a region, labelled lists and a log", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../Board.tsx", import.meta.url), "utf8");
+  assert.match(src, /role="region" aria-label="Factory board"/);
+  assert.match(src, /<ul className="fx-cards" role="list"/);
+  assert.match(src, /role="log"/);
+  assert.doesNotMatch(src, /className="fx-board" role="list"/);
+});
