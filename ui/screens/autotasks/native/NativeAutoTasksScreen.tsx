@@ -259,7 +259,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         <div className="atn-head">
           <button type="button" className="atn-switch" data-on={state.masterEnabled || undefined} aria-label={state.masterEnabled ? "Disable Auto Tasks" : "Enable Auto Tasks"} aria-pressed={state.masterEnabled} onClick={() => setMaster(!state.masterEnabled)} />
           <strong>{state.masterEnabled ? "Enabled" : "Disabled"}</strong>
-          <span className="atn-head-actions"><button type="button" className="atn-icon" aria-label="Expand" title="Run state is managed by the native scheduler (next phase)">⤢</button><button type="button" className="atn-icon" aria-label="Refresh" onClick={() => setNotice("Auto Tasks settings are local; reloading is not needed.")}>↻</button></span>
+          <span className="atn-head-actions"><button type="button" className="atn-icon" aria-label="Refresh" onClick={() => setNotice("Auto Tasks settings are local; reloading is not needed.")}>↻</button></span>
         </div>
         {!hasRepo ? (
           <div className="atn-warning">
