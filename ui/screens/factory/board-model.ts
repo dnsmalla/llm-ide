@@ -10,9 +10,15 @@ export { factoryAnchor, focusKeyFromAnchor } from "./anchor.ts";
 
 export const STATUS_REFRESH_MS = 5 * 60 * 1000;
 export const SHIP_STATUS_BATCH = 20;
-export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "intake";
-export interface CardView { key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[]; costUsd?: number | null; durationSeconds?: number | null; progressLabel?: string | null; lastLine?: string | null }
-export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", intake: "Run intake" };
+export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "intake" | "answer";
+export interface CardView {
+  key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[];
+  costUsd?: number | null; durationSeconds?: number | null; progressLabel?: string | null; lastLine?: string | null;
+  verdict?: string | null; changed?: { files: number; additions: number | null; deletions: number | null } | null;
+  test?: { command: string | null; ok: boolean | null } | null; failingStage?: { name: string; error: string } | null;
+  readiness?: string | null;
+}
+export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", intake: "Run intake", answer: "Answer & continue" };
 export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> = { issue: "Issue", spec: "Spec", text: "Text" };
 export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeExists: false, ship: null, shipStatusError: false, lastKnownColumn: null };
 
@@ -20,7 +26,7 @@ export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeEx
 export function actionsFor(column: Column, note: string | null): CardAction[] {
   switch (column) {
     case "inbox": return note === NOTE.intakeReady ? ["start", "discard"] : ["start", "intake", "discard"];
-    case "needsDecision": return ["intake", "discard"];
+    case "needsDecision": return ["answer", "intake", "discard"];
     case "working": return [];
     case "needsYou":
       if (note === NOTE.interrupted) return ["resume", "discard"];
@@ -39,7 +45,7 @@ export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: f.lastRecord?.readiness ?? null });
   }
   return board;
 }

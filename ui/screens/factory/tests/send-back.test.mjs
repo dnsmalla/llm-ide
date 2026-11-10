@@ -4,7 +4,7 @@ import { memFs } from "./mem-fs.mjs";
 import { feedbackMarkdown } from "../../loop/native/factory.ts";
 import { columnFor } from "../columns.ts";
 import { actionsFor, sendBackAllowed } from "../board-model.ts";
-import { feedbackInput, prepareSendBack, sendBack, worktreePrefix } from "../send-back.ts";
+import { answerDecision, feedbackInput, prepareAnswer, prepareSendBack, sendBack, worktreePrefix } from "../send-back.ts";
 
 const URL7 = "https://github.com/acme/web/pull/7";
 const status = {
@@ -72,4 +72,21 @@ test("send back is allowed only with a readable failing status and the worktree"
   assert.equal(sendBackAllowed(f({ ship: { ...status, ci: "success" } })), true, "new comments alone are enough");
   assert.equal(sendBackAllowed(f({ ship: null, shipStatusError: true })), false);
   assert.equal(sendBackAllowed(f({ worktreeExists: false })), false);
+});
+
+test("answerDecision appends a fenced, dated DECISIONS.md and starts continue in the same worktree", async () => {
+  const fs = memFs();
+  await prepareAnswer(fs, worktreePrefix("r1"), "Use Postgres.");
+  await prepareAnswer(fs, worktreePrefix("r1"), "Keep SQLite after all.");
+  const text = fs.files.get("system/loop-worktrees/r1/.factory/DECISIONS.md");
+  assert.match(text, /^# Decisions/);
+  assert.match(text, /Use Postgres\./);
+  assert.match(text, /Keep SQLite after all\./);
+  assert.equal((text.match(/```text/g) ?? []).length, 2, "each answer is fenced");
+  await assert.rejects(prepareAnswer(fs, worktreePrefix("r1"), "  "), /empty answer/);
+  const calls = [];
+  const start = (root, it, mode, opts) => { calls.push([root, it.key, mode, opts]); return "run-new"; };
+  assert.equal(await answerDecision({ fs, projectRoot: "/p", start }, item, "Use Postgres."), "run-new");
+  assert.deepEqual(calls, [["/p", "issue:x1", "continue", { runId: "r1" }]]);
+  await assert.rejects(answerDecision({ fs, projectRoot: "/p", start }, { ...item, runIds: [] }, "x"), /no run/);
 });

@@ -50,3 +50,25 @@ export async function sendBack(deps: { fs: SendBackFs; start: StartRunFn; projec
   await prepareSendBack(deps.fs, worktreePrefix(runId), status, userNote);
   return deps.start(deps.projectRoot, item, "sendBack", { runId });
 }
+
+/** `.factory/DECISIONS.md`: the user's answer to a needs-decision, appended and dated, fenced as data. */
+export async function prepareAnswer(fs: SendBackFs, runRootPrefix: string, answer: string): Promise<void> {
+  const text = answer.trim().slice(0, MAX_NOTE);
+  if (!text) throw new Error("An empty answer cannot continue the run.");
+  const dir = `${runRootPrefix}/.factory`;
+  const path = `${dir}/DECISIONS.md`;
+  try { await fs.create(dir, "dir"); } catch (e) { if (codeOf(e) !== "exists") throw e; }
+  let previous = "";
+  let hash: string | null = null;
+  try { const r = await fs.read(path, 1_000_000); previous = r.text ?? ""; hash = r.hash; } catch (e) { if (codeOf(e) !== "not_found") throw e; }
+  const block = `\n## ${new Date().toISOString()}\n\n\`\`\`text\n${text}\n\`\`\`\n`;
+  await fs.write(path, (previous || "# Decisions\n") + block, { expected_hash: hash });
+}
+
+/** Writes the answer, then starts a continue run in the same worktree. */
+export async function answerDecision(deps: { fs: SendBackFs; start: StartRunFn; projectRoot: string }, item: WorkItemRecord, answer: string): Promise<string> {
+  const runId = item.runIds.at(-1);
+  if (!runId) throw new Error("This card has no run to continue.");
+  await prepareAnswer(deps.fs, worktreePrefix(runId), answer);
+  return deps.start(deps.projectRoot, item, "continue", { runId });
+}

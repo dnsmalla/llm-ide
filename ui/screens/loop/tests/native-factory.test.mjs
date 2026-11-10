@@ -241,6 +241,7 @@ test("configFor intakeOnly keeps only setup, intake and its gate, also with ids 
 test("configFor continue keeps everything after the Intake gate", () => {
   const c = configFor("continue", structuredClone(FACTORY_TEMPLATE.config));
   assert.deepEqual(c.stages.map((s) => s.name), ["Plan", "Implement", "Verify", "Review", "Review gate"]);
+  for (const s of c.stages.filter((st) => st.name === "Plan" || st.name === "Implement")) assert.match(s.prompt, /\.factory\/DECISIONS\.md/);
 });
 
 test("configFor sendBack starts at Implement and its prompt names FEEDBACK.md", () => {

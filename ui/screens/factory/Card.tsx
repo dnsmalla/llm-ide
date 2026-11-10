@@ -17,6 +17,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
   const [readingDiscard, setReadingDiscard] = useState(false);
   const [sendBackOpen, setSendBackOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [answer, setAnswer] = useState("");
   return (
     <li className="fx-card" data-key={view.key} data-selected={selected}>
       <button type="button" className="fx-card-title" onClick={onOpen} title="Show details">{view.title}</button>
@@ -28,6 +29,17 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
         {view.costUsd != null && view.costUsd > 0 ? <span className="fx-hint">${view.costUsd.toFixed(2)}</span> : null}
         {view.lastLine ? <span className="fx-hint" title={view.lastLine}>{view.lastLine.slice(0, 120)}</span> : null}
       </div>
+      {view.verdict ? <p className="fx-hint">{view.verdict}</p> : null}
+      {view.changed ? <p className="fx-hint">{view.changed.files} file{view.changed.files === 1 ? "" : "s"}{view.changed.additions != null ? ` · +${view.changed.additions}/−${view.changed.deletions ?? 0}` : ""}</p> : null}
+      {view.test ? <p className="fx-hint">Test: {view.test.ok === null ? "unknown" : view.test.ok ? "passed" : "failed"}{view.test.command ? ` · ${view.test.command}` : ""}</p> : null}
+      {view.failingStage ? <div className="fx-failure"><strong>{view.failingStage.name}</strong><pre>{view.failingStage.error}</pre></div> : null}
+      {view.readiness ? (
+        <form className="fx-form" aria-label="Answer the decision" onSubmit={(e) => { e.preventDefault(); if (!answer.trim()) return; onAction("answer", answer); setAnswer(""); }}>
+          <p className="fx-hint">{view.readiness}</p>
+          <label className="fx-field fx-grow"><span>Answer</span><textarea rows={3} maxLength={4000} value={answer} onChange={(e) => setAnswer(e.target.value)} /></label>
+          <button type="submit" className="fx-btn fx-primary" disabled={!answer.trim()}>Answer &amp; continue</button>
+        </form>
+      ) : null}
       {sendBackOpen ? (
         <form className="fx-form" aria-label="Send back" onSubmit={(e) => { e.preventDefault(); setSendBackOpen(false); onAction("sendBack", note); setNote(""); }}>
           <label className="fx-field fx-grow"><span>Note for the agent (optional)</span><textarea rows={3} value={note} maxLength={4000} onChange={(e) => setNote(e.target.value)} autoFocus /></label>

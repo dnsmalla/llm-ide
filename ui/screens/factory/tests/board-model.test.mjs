@@ -20,7 +20,7 @@ test("buildBoard groups items by derived column and keeps insertion order", () =
   assert.deepEqual(Object.keys(board), ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"]);
   assert.deepEqual(board.inbox.map((c) => c.key), ["issue:a", "issue:c"]);
   assert.deepEqual(board.working.map((c) => c.key), ["issue:b"]);
-  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null }]);
+  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null }]);
   assert.deepEqual(board.done, []);
   assert.equal(lastKnownFrom(board).get("issue:d"), "readyToShip");
 });
@@ -36,7 +36,7 @@ test("actionsFor needsYou with Interrupted is resume, discard", () => {
 test("actionsFor covers every column and every action has a label", () => {
   assert.deepEqual(actionsFor("inbox", null), ["start", "intake", "discard"]);
   assert.deepEqual(actionsFor("inbox", "Intake ready"), ["start", "discard"]);
-  assert.deepEqual(actionsFor("needsDecision", null), ["intake", "discard"]);
+  assert.deepEqual(actionsFor("needsDecision", null), ["answer", "intake", "discard"]);
   assert.deepEqual(actionsFor("working", "Queued"), []);
   assert.deepEqual(actionsFor("needsYou", "CI failed"), ["sendBack", "openRequest", "openDiff", "discard"]);
   assert.deepEqual(actionsFor("needsYou", "New review comments"), ["sendBack", "openRequest", "openDiff", "discard"]);
@@ -46,7 +46,7 @@ test("actionsFor covers every column and every action has a label", () => {
   assert.deepEqual(actionsFor("needsYou", "Failed"), ["resume", "openDiff", "discard"]);
   assert.deepEqual(actionsFor("shipped", null), ["openRequest", "openDiff"]);
   assert.deepEqual(actionsFor("done", null), ["openRequest", "discard"]);
-  for (const a of ["start", "openDiff", "ship", "sendBack", "discard", "openRequest", "resume", "intake"]) assert.equal(typeof ACTION_LABELS[a], "string", a);
+  for (const a of ["start", "openDiff", "ship", "sendBack", "discard", "openRequest", "resume", "intake", "answer"]) assert.equal(typeof ACTION_LABELS[a], "string", a);
 });
 
 test("assembleFacts uses the item's last run and ignores live runs of the same key in other projects", () => {

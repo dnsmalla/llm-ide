@@ -10,6 +10,7 @@ import type { LoopRunOutcome } from "./runner.ts";
 import type { LoopTemplate } from "./templates.ts";
 
 export const FACTORY_DEFAULT_KEY = "factory";
+export const DECISIONS_PROMPT_LINE = "If .factory/DECISIONS.md exists, read it: its fenced block is the user's answer to a needs-decision, and this run must follow it.";
 // Catalog ids (`<family>/<dir>`), the only form readSkillInstructions resolves.
 export const FACTORY_INTAKE_SKILL = "skills/factory-intake";
 export const FACTORY_REVIEW_SKILL = "skills/factory-review";
@@ -334,6 +335,14 @@ export function configFor(mode: RunMode, base: LoopEngineConfig): LoopEngineConf
   if (mode === "full") return copy;
   const keep = new Set<FactoryRole>(MODE_ROLES[mode]);
   copy.stages = copy.stages.filter((s) => { const role = factoryRole(s); return role !== null && keep.has(role); });
+  if (mode === "continue") {
+    for (const s of copy.stages) {
+      const role = factoryRole(s);
+      if (role !== "plan" && role !== "implement") continue;
+      const head = s.prompt?.trim() || `Run the ${s.name} skill for this loop.`;
+      s.prompt = `${head}\n\n${DECISIONS_PROMPT_LINE}`;
+    }
+  }
   if (mode === "sendBack") {
     for (const s of copy.stages) {
       if (factoryRole(s) !== "implement") continue;

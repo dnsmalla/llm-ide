@@ -16,7 +16,7 @@ import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.t
 import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
 import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
-import { sendBack } from "./send-back.ts";
+import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
 
 // Wire the run manager to the real host once, when this chunk loads: startRun throws without it, and runs must
@@ -246,6 +246,9 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           await removeItem(fs, item.key);
           setSelectedKey((k) => (k === item.key ? null : k));
         });
+        return;
+      case "answer":
+        void act(async () => { await answerDecision({ fs, start: startRun, projectRoot: root }, item, note ?? ""); });
         return;
       case "sendBack": {
         const f = facts.get(item.key);
