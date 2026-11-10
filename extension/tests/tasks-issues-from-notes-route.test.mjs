@@ -120,3 +120,10 @@ test('a run without a project is refused before any work', async () => {
   assert.equal(res.out.status, 400);
   assert.equal(res.out.body.error.code, 'PROJECT_REQUIRED');
 });
+
+test('the retired id updateIssues runs Sources -> Issue through the same route', async () => {
+  const res = fakeRes();
+  await handleTaskRoutes(fakeReq('/kb/tasks/updateIssues/run', { projectId: 'p-issues', args: { provider: 'github', repo: 'o/r' } }), res, { userId: owner, url: '/kb/tasks/updateIssues/run' });
+  assert.equal(res.out.status, 200, JSON.stringify(res.out.body));
+  assert.equal(res.out.body.taskId, 'issues.from_notes');
+});

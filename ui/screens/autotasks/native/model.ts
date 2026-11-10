@@ -11,7 +11,7 @@ export { taskById };
 export type AutoTaskId =
   | "sourceUpdate" | "issues.from_notes" | "issues.implement" | "reviewMerge"
   | "review.code" | "review.doc" | "review.conflicts"
-  | "updateIssues" | "updatePlanStatus" | "generateDoc" | "regression" | "generateKnowledge"
+  | "updatePlanStatus" | "generateDoc" | "regression" | "generateKnowledge"
   | "loop.regression" | "sources.update" | "plan.status";
 
 export type AutoTaskGroup = "Pipeline" | "Review" | "Automation" | "Maintenance";
@@ -38,7 +38,6 @@ const RETIRED_DEFAULT_PROMPTS: Readonly<Record<string, string>> = {
 
 const LEGACY_TASKS: readonly AutoTaskDef[] = [
   { id: "reviewMerge", label: "Review & Merge", group: "Pipeline", prompt: "Review the pending merge request for bugs, missing tests and unintended changes. Report findings; do not merge." },
-  { id: "updateIssues", label: "Update Issues", group: "Automation", prompt: "Update the tracked issues with the current status and evidence from the repository. Report every issue you change." },
 ];
 
 export const GROUPS: readonly AutoTaskGroup[] = ["Pipeline", "Review", "Automation", "Maintenance"];
@@ -95,6 +94,21 @@ export function loadState(storage: Storage | undefined = globalThis.localStorage
 
 export function saveState(s: AutoTaskLocalState, storage: Storage | undefined = globalThis.localStorage): void {
   try { storage?.setItem(KEY, JSON.stringify(s)); } catch { /* session only */ }
+}
+
+const MERGED_NOTICE_KEY = "llmide.autoTasks.updateIssuesMerged.v1";
+export const UPDATE_ISSUES_MERGED_NOTICE = "Update Issues was merged into Sources → Issue.";
+
+/** Once, for a user whose stored Update Issues config is now the Sources → Issue row: its own prompt is ignored. */
+export function takeMergedNotice(storage: Storage | undefined = globalThis.localStorage): string | null {
+  try {
+    const raw = storage?.getItem(KEY);
+    if (!raw || storage?.getItem(MERGED_NOTICE_KEY)) return null;
+    const parsed = JSON.parse(raw) as Partial<AutoTaskLocalState>;
+    if (!parsed.configs || !Object.hasOwn(parsed.configs, "updateIssues")) return null;
+    storage?.setItem(MERGED_NOTICE_KEY, "1");
+    return UPDATE_ISSUES_MERGED_NOTICE;
+  } catch { return null; }
 }
 
 /** The Mac's structural tasks (`AutoTask.isStructural`, minus Loop Engineering, which the desktop does not have). They

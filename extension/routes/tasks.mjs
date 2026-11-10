@@ -144,8 +144,11 @@ export async function handleTaskRoutes(req, res, ctx) {
   if (raw.projectId !== undefined && typeof raw.projectId !== 'string') return failure(res, 400, 'VALIDATION_FAILED', 'projectId must be a string');
   let taskId;
   try { taskId = decodeURIComponent(m[1]); } catch { return failure(res, 404, 'TASK_NOT_FOUND', 'Unknown task.'); }
-  const task = TASKS.find((t) => t.id === taskId || t.aliases.includes(taskId));
-  if (!task) return failure(res, 404, 'TASK_NOT_FOUND', `Unknown task "${taskId}".`);
+  const found = TASKS.find((t) => t.id === taskId || t.aliases.includes(taskId));
+  if (!found) return failure(res, 404, 'TASK_NOT_FOUND', `Unknown task "${taskId}".`);
+  // An alias entry (retired id, e.g. updateIssues) runs the task it points at, one hop, as the core adapter does.
+  // (conformance-tasks.mjs guarantees the target exists and is available.)
+  const task = found.availability.status === 'alias' ? TASKS.find((t) => t.id === found.aliasOf) : found;
   if (!taskEnabled(task)) {
     const feature = task.features.find((f) => config.features != null && !config.features.has(f));
     return failure(res, 404, 'feature_disabled', `The ${feature} feature is off.`, { feature });

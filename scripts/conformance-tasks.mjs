@@ -134,6 +134,13 @@ for (const task of tasks) {
   }
 }
 
+// An alias points at one available task: never at another alias or at a retired one, so no chain and no cycle.
+for (const task of tasks) {
+  if (task?.availability?.status !== 'alias') continue;
+  const target = tasks.find((t) => t?.id === task.aliasOf);
+  if (!target || target.availability?.status !== 'available') bad(`task ${task.id}: aliasOf ${task.aliasOf} must be an available task`);
+}
+
 // Prompt files: only *.md, every agent prompt exists, and no two files have the same text.
 const promptNames = readdirSync(PROMPTS_DIR).filter((n) => n.endsWith('.md')).sort();
 const hashes = new Map();

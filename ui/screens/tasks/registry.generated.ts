@@ -135,6 +135,42 @@ export const TASKS: readonly TaskDef[] = [
     "revision": 1
   },
   {
+    "id": "issues.update",
+    "label": "Update Issues",
+    "group": "Automation",
+    "description": "Update Issues is Sources → Issue. This entry keeps the old id and its history resolving to that task.",
+    "aliases": [
+      "updateIssues"
+    ],
+    "runner": null,
+    "input": {
+      "kind": "none",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "none",
+      "persist": "none",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": true,
+    "requiresRepo": false,
+    "requiresLocalHost": false,
+    "features": [],
+    "availability": {
+      "status": "alias",
+      "reason": "Update Issues is Sources → Issue; the old prompt is retired."
+    },
+    "aliasOf": "issues.from_notes",
+    "revision": 1
+  },
+  {
     "id": "knowledge.update",
     "label": "Knowledge",
     "group": "Maintenance",
@@ -493,6 +529,7 @@ export const ALIASES: Readonly<Record<string, string>> = Object.freeze({
   "reviewDoc": "review.doc",
   "sourcesToIssue": "issues.from_notes",
   "sourceUpdate": "sources.update",
+  "updateIssues": "issues.update",
   "updatePlanStatus": "plan.status"
 });
 

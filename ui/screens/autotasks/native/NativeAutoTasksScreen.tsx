@@ -9,7 +9,7 @@ import { readRepoConfig } from "../../settings/repo-config.ts";
 import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
 import { createHostFs } from "../../explorer/fs";
-import { GROUPS, MAC_ONLY_MESSAGE, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, TASKS, TASK_BY_ID, agentRunSucceeded, composeTaskMessage, desktopRunnable, issuesFromNotesArgs, taskById, taskUnavailableReason, scheduleStatusLine, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, scheduledRunAllowed, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
+import { GROUPS, MAC_ONLY_MESSAGE, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, TASKS, TASK_BY_ID, agentRunSucceeded, composeTaskMessage, desktopRunnable, issuesFromNotesArgs, takeMergedNotice, taskById, taskUnavailableReason, scheduleStatusLine, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, scheduledRunAllowed, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
 import { describeCron, validateCron } from "./cron.ts";
 import { minuteKey, takeDueAutoTasks } from "./due.ts";
 import { addTemplate, loadTemplates, removeTemplate, saveTemplates, type PromptTemplate } from "./prompt-templates.ts";
@@ -94,6 +94,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     return () => { live = false; };
   }, [fs, projectRoot]);
   useEffect(() => { setCronDraft(config.cron); setScheduleError(false); }, [selected, config.cron]);
+  useEffect(() => { const merged = takeMergedNotice(); if (merged) setNotice(merged); }, []);
   // A delete armed for one custom task must not carry over to another task's editor.
   useEffect(() => { setCustomDeleteOpen(false); }, [customEdit]);
   useEffect(() => {
@@ -111,7 +112,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const hasRepo = (() => { try { const c = readRepoConfig(); return [...c.saved.github, ...c.saved.gitlab].some((r) => r.active && r.clonePath.trim() !== ""); } catch { return false; } })();
   const taskEnv = { features: null, coreFeatures: null, hasRepo, localHost: true, mode: "local" as const };
   const selectedReason = taskUnavailableReason(selected, taskEnv);
-  const iconFor = (id: AutoTaskId): string => ({ "sources.update": "↻", "issues.from_notes": "◫", "issues.implement": "⌘", reviewMerge: "⇄", "review.code": "✓", "review.doc": "▤", "review.conflicts": "⚠", updateIssues: "☑", "plan.status": "▥", "loop.regression": "↺" } as Record<string, string>)[id] ?? "•";
+  const iconFor = (id: AutoTaskId): string => ({ "sources.update": "↻", "issues.from_notes": "◫", "issues.implement": "⌘", reviewMerge: "⇄", "review.code": "✓", "review.doc": "▤", "review.conflicts": "⚠", "plan.status": "▥", "loop.regression": "↺" } as Record<string, string>)[id] ?? "•";
   const grouped = useMemo(() => GROUPS.map((g) => [g, TASKS.filter((t) => t.group === g && (!onlyEnabled || state.configs[t.id]?.enabled))] as const).filter(([, list]) => list.length > 0), [state, onlyEnabled]);
 
   const update = (patch: Partial<AutoTaskConfig>, id: AutoTaskId = selected) => {
