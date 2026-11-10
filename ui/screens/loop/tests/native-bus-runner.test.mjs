@@ -165,3 +165,15 @@ test("the terminal state and result mapping", () => {
   assert.deepEqual(finishResult("succeeded"), { readyToShip: true, shipped: false });
   assert.equal(finishResult("failed", "boom").shipped, false);
 });
+
+test("a skipped timer tick is covered by the next stage-boundary poll", async () => {
+  const w = world();
+  w.claimable = [command("c1")];
+  await pollOnce(w.deps);
+  // No poll for two timer periods; the stage boundary runs pollOnce before the core's lease expires.
+  w.nowMs += 120_000;
+  w.liveRuns = [{ runId: "run-i-c1", projectRoot: "/p", log: ["$ Verify"] }];
+  const out = await pollOnce(w.deps);
+  assert.equal(out.progressed, 1);
+  assert.deepEqual(posts(w, "/events").at(-1), { claimToken: "tok-c1", type: "progress", payload: { step: "stage: Verify" } });
+});
