@@ -58,8 +58,10 @@ function SectionButton({ def, count, selected, onClick }: { def: SectionDef; cou
 }
 
 const COLLAPSE_KEY = "llmide.library.collapsed.v2";
-/** The Mac opens every Library section collapsed until the user expands it. */
-const DEFAULT_COLLAPSED = ["sources", "docs", "extensions", "connectors"];
+// The Mac opened every group collapsed, which left the 280px sidebar almost empty. The desktop opens the
+// two note sources by default; Extensions and Connections stay folded until used.
+const DEFAULT_COLLAPSED = ["extensions", "connectors"];
+const LEGACY_DEFAULT = JSON.stringify(["sources", "docs", "extensions", "connectors"]);
 function readCollapsed(): Set<string> {
   try {
     // In the app every section starts collapsed (Mac); server-render tests keep the full tree visible.
@@ -67,6 +69,7 @@ function readCollapsed(): Set<string> {
     const raw = localStorage.getItem(COLLAPSE_KEY);
     if (raw === null) return new Set(DEFAULT_COLLAPSED);
     const parsed = JSON.parse(raw) as unknown;
+    if (JSON.stringify(parsed) === LEGACY_DEFAULT) return new Set(DEFAULT_COLLAPSED);
     return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : DEFAULT_COLLAPSED);
   } catch { return new Set(DEFAULT_COLLAPSED); }
 }

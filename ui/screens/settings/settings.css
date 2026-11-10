@@ -50,15 +50,15 @@
 
 /* Premium Settings shell: calmer hierarchy, larger targets, card groups, search-first navigation. */
 .st-root { background: radial-gradient(1100px 420px at 50% -18%, color-mix(in srgb, var(--tok-color-accent) 10%, transparent), transparent 65%), var(--tok-color-body); }
-.st-page { padding: 28px 30px 56px; }
-.st-page > * { max-width: 920px; }
+.st-page { padding: 18px 22px 32px; }
+.st-page > * { max-width: 1040px; }
 .st-h1 { margin: 0 0 4px; font-size: 25px; letter-spacing: -.03em; color: var(--tok-color-text); }
-.st-search { position: relative; margin: 16px auto 4px; max-width: 920px; }
+.st-search { position: relative; margin: 12px auto 4px; max-width: 1040px; }
 .st-search input { width: 100%; height: 42px; box-sizing: border-box; padding: 0 14px 0 38px; border: 1px solid var(--tok-color-border); border-radius: 11px; background: color-mix(in srgb, var(--tok-color-surface) 86%, transparent); color: var(--tok-color-text); font: inherit; outline: none; box-shadow: 0 10px 28px color-mix(in srgb, #000 14%, transparent); }
 .st-search input:focus { border-color: var(--tok-color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tok-color-accent) 16%, transparent); }
 .st-search::before { content: ""; position: absolute; left: 14px; top: 50%; width: 12px; height: 12px; transform: translateY(-60%) rotate(-45deg); border: 2px solid var(--tok-color-text-muted); border-radius: 50%; pointer-events: none; }
 .st-search::after { content: ""; position: absolute; left: 24px; top: calc(50% + 4px); width: 5px; height: 2px; background: var(--tok-color-text-muted); transform: rotate(-45deg); pointer-events: none; }
-.st-groups { gap: 10px; margin: 16px auto; }
+.st-groups { gap: 8px; margin: 12px auto; }
 .st-group { overflow: hidden; border: 1px solid var(--tok-color-border); border-radius: 12px; background: color-mix(in srgb, var(--tok-color-surface) 78%, transparent); box-shadow: 0 8px 24px color-mix(in srgb, #000 12%, transparent); }
 .st-group-btn { padding: 15px 17px; transition: background .15s ease; }
 .st-group-btn:hover { background: color-mix(in srgb, var(--tok-color-accent) 7%, transparent); }
@@ -93,7 +93,7 @@
 .st-group[data-open="true"] .st-input,
 .st-group[data-open="true"] .st-select { min-height: 36px; }
 
-.st-page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 920px; margin: 0 auto 2px; }
+.st-page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 1040px; margin: 0 auto 2px; }
 .st-help-toggle { height: 30px; padding: 0 11px; border: 1px solid var(--tok-color-border); border-radius: 8px; background: transparent; color: var(--tok-color-text-muted); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
 .st-help-toggle:hover { border-color: var(--tok-color-accent); color: var(--tok-color-text); }
 /* Explanations are opt-in. Status, loading and error text stay visible. */
