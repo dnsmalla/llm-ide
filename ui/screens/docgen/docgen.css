@@ -1,23 +1,23 @@
 /* Doc Gen and Visual. Tokens only. */
 .dg-root { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: auto; background: var(--tok-color-body); color: var(--tok-color-text); font-size: var(--tok-type-body-size); }
 .dg-root[data-active="false"] { pointer-events: none; }
-.dg-top { display: flex; align-items: baseline; gap: var(--tok-space-md); padding: 8px var(--tok-space-md); border-bottom: 1px solid var(--tok-color-border); }
-.dg-title { margin: 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); }
+.dg-top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface); }
+.dg-title { margin: 0 auto 0 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); letter-spacing: -0.01em; }
 .dg-h2 { margin: 0 0 4px; font-size: var(--tok-type-heading-size, 1.1em); }
 .dg-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 420px) minmax(0, 1fr); gap: var(--tok-space-md); padding: var(--tok-space-md); }
 @media (max-width: 860px) { .dg-grid { grid-template-columns: minmax(0, 1fr); } }
 .dg-left, .dg-right { display: flex; flex-direction: column; gap: var(--tok-space-md); min-width: 0; min-height: 0; }
 .dg-setup, .dg-sources, .dg-result { display: flex; flex-direction: column; gap: var(--tok-space-sm); min-width: 0; }
-.dg-group { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); margin: 0; padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.dg-group { border: 1px solid var(--tok-color-border); border-radius: 10px; margin: 0; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--tok-color-surface); }
 .dg-group legend { padding: 0 4px; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .dg-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
-.dg-field input[type="text"], .dg-field input[type="search"], .dg-field select, .dg-field textarea { font: inherit; color: var(--tok-color-text); background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 4px 8px; min-width: 0; }
+.dg-field input[type="text"], .dg-field input[type="search"], .dg-field select, .dg-field textarea { font: inherit; color: var(--tok-color-text); background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: 6px; padding: 7px 9px; min-width: 0; }
 .dg-field textarea { resize: vertical; }
 .dg-field :focus-visible, .dg-btn:focus-visible, .dg-link:focus-visible, .dg-tab:focus-visible, .dg-rowbtn:focus-visible, .dg-vlist:focus-visible, .dg-check input:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
 .dg-grow { flex: 1; min-width: 0; }
 .dg-bar { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
 .dg-actions { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
-.dg-btn { font: inherit; font-size: var(--tok-type-button-size); color: var(--tok-color-text); background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 3px 10px; cursor: pointer; }
+.dg-btn { font: inherit; font-size: var(--tok-type-button-size); color: var(--tok-color-text); background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
 .dg-btn:hover:not(:disabled) { border-color: var(--tok-color-accent); }
 .dg-btn:disabled { opacity: 0.55; cursor: default; }
 .dg-primary { background: color-mix(in srgb, var(--tok-color-accent) 28%, transparent); }
@@ -27,7 +27,7 @@
 .dg-note { padding: 4px 8px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); font-size: var(--tok-type-caption-size); }
 .dg-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .dg-tabs, .dg-roots { display: flex; gap: 2px; border-bottom: 1px solid var(--tok-color-border); }
-.dg-tab { font: inherit; color: var(--tok-color-text-muted); background: none; border: 0; border-bottom: 2px solid transparent; padding: 4px 12px; cursor: pointer; }
+.dg-tab { font: inherit; color: var(--tok-color-text-muted); background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 14px; cursor: pointer; }
 .dg-tab[aria-selected="true"] { color: var(--tok-color-text); border-bottom-color: var(--tok-color-accent); }
 .dg-pane { display: flex; flex-direction: column; gap: var(--tok-space-sm); min-width: 0; padding-top: var(--tok-space-sm); }
 .dg-vlist { overflow: auto; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); outline: none; }
@@ -40,7 +40,7 @@
 .dg-empty, .dg-progress, .dg-error { padding: var(--tok-space-md); border: 1px dashed var(--tok-color-border); border-radius: var(--tok-radius-sm); display: flex; flex-direction: column; gap: 6px; }
 .dg-error { border-style: solid; border-color: var(--tok-color-danger); }
 .dg-done { display: flex; flex-direction: column; gap: var(--tok-space-sm); min-width: 0; }
-.dg-doc { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: var(--tok-space-md); overflow: auto; max-height: 60vh; min-width: 0; }
+.dg-doc { border: 1px solid var(--tok-color-border); border-radius: 10px; padding: 16px; overflow: auto; max-height: 64vh; min-width: 0; background: var(--tok-color-surface); }
 .dg-dialog-wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, #000 45%, transparent); z-index: 20; }
 .dg-dialog { width: min(560px, 92vw); max-height: 86vh; overflow: auto; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md, 8px); padding: var(--tok-space-md); display: flex; flex-direction: column; gap: var(--tok-space-sm); }
 .dg-tlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -50,7 +50,7 @@
 .dg-mermaid .dg-mermaid-img { display: block; max-width: 100%; height: auto; padding: var(--tok-space-sm); background: var(--tok-color-surface); }
 .dg-mermaid .dg-mermaid-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-top: 1px solid var(--tok-color-border); }
 /* Steps to generate (Mac GenerationEditorPanel checklist). */
-.dg-steps { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); padding: var(--tok-space-sm); display: flex; flex-direction: column; gap: var(--tok-space-xs); }
+.dg-steps { border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-surface); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .dg-steps-title { margin: 0; font-size: var(--tok-type-caption-size); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-color-text-muted); }
 .dg-steps-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--tok-space-xs); }
 .dg-step { display: flex; gap: var(--tok-space-sm); align-items: flex-start; }
@@ -71,18 +71,18 @@
 .dg-grid > .dg-chat { order: 3; }
 
 /* Mac three-column generation layout: sources | steps/result | prompt+chat. */
-.dg-grid, .dg-grid[data-chat="true"], .dg-grid[data-sources="true"] { display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; gap: 0; padding: 0; min-height: 0; }
+.dg-grid, .dg-grid[data-chat="true"], .dg-grid[data-sources="true"] { display: grid; grid-template-columns: 280px minmax(0, 1fr) 360px; gap: 0; padding: 0; min-height: 0; }
 .dg-grid[data-sources="false"] { grid-template-columns: minmax(0, 1fr) 340px; }
-.dg-grid[data-chat="false"] { grid-template-columns: 260px minmax(0, 1fr) 300px; }
+.dg-grid[data-chat="false"] { grid-template-columns: 280px minmax(0, 1fr) 320px; }
 .dg-grid[data-sources="false"][data-chat="false"] { grid-template-columns: minmax(0, 1fr) 300px; }
-.dg-sidebar { min-width: 0; min-height: 0; overflow: auto; border-right: 1px solid var(--tok-color-border); padding: var(--tok-space-md); display: flex; flex-direction: column; gap: var(--tok-space-md); }
-.dg-center { min-width: 0; min-height: 0; overflow: auto; padding: var(--tok-space-md); display: flex; flex-direction: column; gap: var(--tok-space-md); }
-.dg-chat { min-width: 0; min-height: 0; border-left: 1px solid var(--tok-color-border); padding: var(--tok-space-md); display: flex; flex-direction: column; gap: var(--tok-space-sm); }
+.dg-sidebar { min-width: 0; min-height: 0; overflow: auto; border-right: 1px solid var(--tok-color-border); padding: 14px; display: flex; flex-direction: column; gap: 14px; background: var(--tok-color-surface); }
+.dg-center { min-width: 0; min-height: 0; overflow: auto; padding: 18px 22px 28px; display: flex; flex-direction: column; gap: 14px; }
+.dg-chat { min-width: 0; min-height: 0; border-left: 1px solid var(--tok-color-border); padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--tok-color-surface); }
 .dg-chat-dock { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .dg-sidebar-use { display: flex; align-items: center; gap: var(--tok-space-sm); }
-.dg-side-section { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 8px; }
+.dg-side-section { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--tok-color-border); border-radius: 10px; padding: 12px; }
 .dg-side-title { margin: 0; font-size: var(--tok-type-caption-size); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-color-text-muted); }
-.dg-selected { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); padding: var(--tok-space-sm); display: flex; flex-direction: column; gap: 6px; }
+.dg-selected { border: 1px solid var(--tok-color-border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--tok-color-surface); }
 .dg-selected header { display: flex; align-items: center; gap: var(--tok-space-sm); }
 .dg-selected-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--tok-type-caption-size); }
 .dg-selected-list li { display: flex; align-items: center; gap: 8px; min-width: 0; }
