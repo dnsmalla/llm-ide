@@ -468,6 +468,44 @@ export const TASKS = Object.freeze([
     "revision": 1
   },
   {
+    "id": "review.merge",
+    "label": "Review & Merge",
+    "group": "Pipeline",
+    "description": "Review the pending Factory run; merging is a separate Ship click.",
+    "aliases": [
+      "reviewMerge"
+    ],
+    "runner": {
+      "kind": "desktop-action",
+      "action": "factory.ship-review"
+    },
+    "input": {
+      "kind": "repo",
+      "required": true,
+      "paths": []
+    },
+    "output": {
+      "kind": "none",
+      "persist": "log",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": true,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
     "id": "sources.update",
     "label": "Source Update",
     "group": "Pipeline",
@@ -526,6 +564,7 @@ export const ALIASES = Object.freeze({
   "reviewCode": "review.code",
   "reviewConflicts": "review.conflicts",
   "reviewDoc": "review.doc",
+  "reviewMerge": "review.merge",
   "sourcesToIssue": "issues.from_notes",
   "sourceUpdate": "sources.update",
   "updateIssues": "issues.update",

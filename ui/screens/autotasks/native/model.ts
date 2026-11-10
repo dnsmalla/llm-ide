@@ -9,7 +9,7 @@ export { taskById };
 // module owns the part the desktop can already be authoritative for: which tasks are enabled, their input/output,
 // skill and prompt, stored per project on this machine. No Mobile Control token is involved.
 export type AutoTaskId =
-  | "sourceUpdate" | "issues.from_notes" | "issues.implement" | "reviewMerge"
+  | "sourceUpdate" | "issues.from_notes" | "issues.implement" | "review.merge"
   | "review.code" | "review.doc" | "review.conflicts"
   | "updatePlanStatus" | "generateDoc" | "regression" | "generateKnowledge"
   | "loop.regression" | "sources.update" | "plan.status";
@@ -36,9 +36,7 @@ const RETIRED_DEFAULT_PROMPTS: Readonly<Record<string, string>> = {
   "review.conflicts": "Review conflict markers and divergent changes. Explain the conflicting intents and propose a resolution without applying it.",
 };
 
-const LEGACY_TASKS: readonly AutoTaskDef[] = [
-  { id: "reviewMerge", label: "Review & Merge", group: "Pipeline", prompt: "Review the pending merge request for bugs, missing tests and unintended changes. Report findings; do not merge." },
-];
+const LEGACY_TASKS: readonly AutoTaskDef[] = [];
 
 export const GROUPS: readonly AutoTaskGroup[] = ["Pipeline", "Review", "Automation", "Maintenance"];
 
@@ -114,9 +112,7 @@ export function takeMergedNotice(storage: Storage | undefined = globalThis.local
 /** The Mac's structural tasks (`AutoTask.isStructural`, minus Loop Engineering, which the desktop does not have). They
  *  run deterministic code in the Mac app; the desktop has no such code, so it must never send them to the agent as an
  *  invented prompt. They stay listed, but are not runnable here, and a schedule never fires them. */
-export const MAC_ONLY_TASK_IDS: ReadonlySet<AutoTaskId> = new Set<AutoTaskId>([
-  "reviewMerge",
-]);
+export const MAC_ONLY_TASK_IDS: ReadonlySet<AutoTaskId> = new Set<AutoTaskId>([]);
 export const MAC_ONLY_MESSAGE = "This task runs deterministic code in the Mac app; the desktop does not run it yet.";
 
 const DEFAULT_TASK_ENV: TaskEnv = { features: null, coreFeatures: null, hasRepo: true, localHost: true, mode: "local" };

@@ -261,6 +261,14 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           actions: {
             startFactory: async (ids, root) => (await import("../../loop/native/run-manager-host.ts")).startIssueRuns(root, ids),
             factoryItemKeys: async (root) => (await import("../../loop/native/run-manager-host.ts")).factoryItemKeys(root),
+            // Opens the pending card on the Factory board (goto-section, as Issues → Send to Factory does); never ships.
+            reviewPendingMerge: async () => {
+              const [review, anchor] = await Promise.all([import("../../tasks/ship-review.ts"), import("../../factory/anchor.ts")]);
+              const pick = await review.loadPendingRun(createHostFs(), () => invokeHost("loop_worktree_list"));
+              if (!pick) return null;
+              shellBus.publish({ type: "goto-section", section: "conflicts", anchor: anchor.factoryAnchor(pick.itemKey) });
+              return { runId: pick.runId, reviewed: true };
+            },
           },
         });
         setLog((l) => [...l, result.output]);

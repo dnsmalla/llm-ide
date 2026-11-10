@@ -17,8 +17,8 @@ export interface TaskActions {
   startFactory?(issueIds: readonly string[], projectRoot: string): Promise<{ runIds: string[] }>;
   /** Card keys already on the Factory board; an issue with one is never started twice. */
   factoryItemKeys?(projectRoot: string): Promise<ReadonlySet<string>>;
-  /** Open the latest passed Factory run for review; never ships. Implemented in Task 8. */
-  reviewPendingMerge?(projectRoot: string, runId: string | null): Promise<{ runId: string | null; reviewed: boolean }>;
+  /** Open the pending Factory run (passed, unshipped, on a card) on the board; never ships. null = none waiting. */
+  reviewPendingMerge?(projectRoot: string, runId: string | null): Promise<{ runId: string; reviewed: boolean } | null>;
 }
 
 export interface TaskRunContext {
@@ -201,6 +201,23 @@ async function runDesktopAction(task: TaskDef, ctx: TaskRunContext): Promise<Tas
       runner: "desktop-action",
       summary: `Started Factory run for issue #${issue.number ?? issue.id}.`,
       output: runIds.join("\n"),
+      changedPaths: [],
+      warnings: [],
+    };
+  }
+  if (action === "factory.ship-review") {
+    const review = ctx.actions.reviewPendingMerge;
+    if (!review) throw new TaskRunError("TASK_NOT_AVAILABLE", "Open a project with the Factory on to review a run.");
+    const opened = await review(ctx.projectRoot, null);
+    if (!opened) {
+      return { taskId: task.id, ok: false, runner: "desktop-action", summary: "No Factory run is waiting for review.", output: "", changedPaths: [], warnings: [], code: "NO_PENDING_RUN" };
+    }
+    return {
+      taskId: task.id,
+      ok: true,
+      runner: "desktop-action",
+      summary: `Opened the Factory run ${opened.runId} for review. Ship is a separate click.`,
+      output: opened.runId,
       changedPaths: [],
       warnings: [],
     };

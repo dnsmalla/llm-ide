@@ -28,8 +28,8 @@ test("Save writes only the providers the user changed", () => {
 test("a Mac-only task says so first, whatever its schedule flags", () => {
   const now = new Date(2026, 10, 2, 9, 30);
   const off = { enabled: false, inputPath: "", outputPath: "", skillName: "", template: "builtin", prompt: "", cron: "0 * * * *", scheduleActive: false };
-  assert.match(m.scheduleStatusLine(true, off, "reviewMerge", now), /^Mac app only/);
-  assert.match(m.scheduleStatusLine(false, { ...off, scheduleActive: true }, "reviewMerge", now), /^Mac app only/);
+  assert.match(m.scheduleStatusLine(true, off, "generateKnowledge", now), /^Mac app only/);
+  assert.match(m.scheduleStatusLine(false, { ...off, scheduleActive: true }, "generateKnowledge", now), /^Mac app only/);
 });
 
 test("day-of-week 7 is Sunday, as validateCron accepts it", () => {

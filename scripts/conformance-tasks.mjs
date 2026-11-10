@@ -32,7 +32,7 @@ const GROUPS = new Set(['Pipeline', 'Review', 'Automation', 'Maintenance', 'Fact
 const STATUSES = new Set(['available', 'unported', 'retired', 'alias']);
 const RUNNERS = new Set(['agent', 'shell', 'core-route', 'desktop-action']);
 // The closed set of desktop actions (runner.ts dispatches on it); a new action is added here and in runner.ts together.
-const DESKTOP_ACTIONS = new Set(['factory.start']);
+const DESKTOP_ACTIONS = new Set(['factory.start', 'factory.ship-review']);
 const INPUTS = new Set(['repo', 'project', 'notes', 'issues', 'doc', 'none']);
 const OUTPUTS_KIND = new Set(['text', 'file', 'fault-report', 'issue', 'pr', 'run-record', 'none']);
 const PERSIST = new Set(['log', 'run-record', 'note', 'tracker', 'file', 'none']);

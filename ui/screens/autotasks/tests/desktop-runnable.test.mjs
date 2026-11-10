@@ -4,9 +4,9 @@ import * as m from "../native/model.ts";
 
 // The Mac's structural tasks (AutoTask.isStructural) run deterministic code; the desktop must never send them to the agent.
 test("Mac structural tasks are not runnable; Regression now runs via the task registry", () => {
-  const mac = ["reviewMerge"];
-  assert.deepEqual([...m.MAC_ONLY_TASK_IDS].sort(), [...mac].sort());
-  for (const id of mac) assert.equal(m.desktopRunnable(id), false, id);
+  // No legacy Mac-only row is left: Review & Merge is a registry desktop-action task now (it was the last one).
+  assert.deepEqual([...m.MAC_ONLY_TASK_IDS], []);
+  assert.equal(m.desktopRunnable("reviewMerge"), true, "Review & Merge opens the pending Factory run");
   assert.equal(m.desktopRunnable("implementIssues"), true, "Implement Issues is a registry desktop-action task");
   assert.equal(m.TASKS.some((t) => t.id === "implementIssues"), false, "the legacy Implement Issues row is gone");
   for (const id of ["sourceUpdate", "updatePlanStatus", "reviewCode", "reviewDoc", "reviewConflicts", "updateIssues"]) assert.equal(m.desktopRunnable(id), true, id);

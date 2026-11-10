@@ -47,5 +47,5 @@ test("a registry task's unavailable reason is shown, not the Mac-app copy", () =
   assert.match(m.taskUnavailableReason("regression", env), /linked repository/i);
   assert.equal(m.taskUnavailableReason("sourceUpdate", env), null, "Source Update needs no repo");
   assert.match(m.taskUnavailableReason("issues.from_notes", env), /linked repository/i, "the registry reason, not the Mac copy");
-  assert.equal(m.taskUnavailableReason("reviewMerge", env), null, "legacy tasks leave the Mac copy to the screen");
+  assert.match(m.taskUnavailableReason("reviewMerge", env), /linked repository/i, "Review & Merge is a registry task: its reason, not the Mac copy");
 });

@@ -12,7 +12,7 @@ test("only Source Update runs without a linked repository, as on the Mac", () =>
 
 test("task labels match the Mac catalog", () => {
   assert.equal(m.TASK_BY_ID["issues.from_notes"].label, "Sources → Issue");
-  assert.equal(m.TASK_BY_ID.reviewMerge.label, "Review & Merge");
+  assert.equal(m.TASK_BY_ID["review.merge"].label, "Review & Merge");
   assert.equal(REGISTRY["docs.generate"].label, "Generate Documentation");
 });
 
