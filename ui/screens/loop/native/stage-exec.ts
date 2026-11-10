@@ -9,6 +9,7 @@ import { guardedAgentCall, type AgentWrites, type GuardedCallOutcome } from "./a
 import { evaluateArtifact } from "./artifact.ts";
 import { runCodeGraph } from "./codegraph.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, agentRunBody, guardedPaths, isFactoryLoop, reviewDiffSection } from "./factory.ts";
+import { registrySource, stagePromptText } from "./default-stage.ts";
 import type { LoopDefinition, LoopStage } from "./model.ts";
 import { checkWrites } from "./protected.ts";
 import { runRegression } from "./regression.ts";
@@ -142,7 +143,8 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
       return { ok: false, output: `the old report could not be cleared before the stage (${e instanceof Error ? e.message : String(e)})` };
     }
   }
-  const parts = [s.prompt?.trim() || `Run the ${s.name} skill for this loop.`];
+  // A built-in stage that is still unedited runs the registry prompt, the same text the editor shows.
+  const parts = [stagePromptText(s, registrySource(s))?.trim() || `Run the ${s.name} skill for this loop.`];
   if (target.goal) parts.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
   if (s.targetPath) parts.push(`Target path: ${s.targetPath}`);

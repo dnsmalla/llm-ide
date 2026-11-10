@@ -15,7 +15,7 @@ export interface EnsuredDefaults {
 export async function persistEnsuredDefaults(fs: LoopFs, load: LoopLoad, testCommand: string | null, defaults?: LoopDefaults): Promise<EnsuredDefaults> {
   if (load.kind !== "ok") return { load, added: [], saved: false, error: null };
   const ensured = ensureDefaultLoops(load.store, testCommand, defaults);
-  if (ensured.added.length === 0) return { load, added: [], saved: false, error: null };
+  if (ensured.added.length === 0 && ensured.upgraded.length === 0) return { load, added: [], saved: false, error: null };
   try {
     const r = await saveLoops(fs, ensured.store, load.hash);
     return { load: { kind: "ok", store: ensured.store, hash: r.hash }, added: ensured.added, saved: true, error: null };

@@ -106,7 +106,8 @@ export function buildLoopCatalog(prompts = buildRegistry().prompts) {
     const { promptTask, ...rest } = s;
     if (s.prompt !== undefined) throw new Error(`stage ${s.name ?? s.defaultKey}: promptTask and prompt are exclusive`);
     if (typeof prompts[promptTask] !== 'string') throw new Error(`stage ${s.name ?? s.defaultKey}: promptTask ${promptTask} is not an agent task`);
-    return { ...rest, prompt: prompts[promptTask] };
+    // The link and the hash of the text the stage was saved with let the app tell an unedited stage from an edited one.
+    return { ...rest, prompt: prompts[promptTask], promptRef: promptTask, promptHash: promptHash(prompts[promptTask]) };
   };
   const starters = doc.starters.map((spec) => ({ ...spec, config: { ...spec.config, stages: spec.config.stages.map(resolveStage) } }));
   const templates = doc.templates.map((t) => {

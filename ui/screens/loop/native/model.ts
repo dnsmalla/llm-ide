@@ -43,6 +43,10 @@ export interface LoopStage {
   /** Skip this stage in later iterations of the same run once it has passed in that run. Default false. */
   runOnce: boolean;
   defaultRevision: number | null;
+  /** The registry task this default stage follows while it is unedited (Task 14d). Absent on older files. */
+  promptRef?: string | null;
+  /** SHA-256 of the prompt text this stage was saved with; a stage whose prompt no longer matches was edited. */
+  promptHash?: string | null;
   disabledByDetection: boolean | null;
   /** Original object for an unknown kind, so saving does not destroy a newer build's fields. */
   raw: Record<string, unknown> | null;
@@ -119,6 +123,8 @@ export function decodeStage(v: unknown): LoopStage | null {
     allowsRepair: bool(v.allowsRepair, true),
     runOnce: bool(v.runOnce, false),
     defaultRevision: num(v.defaultRevision),
+    promptRef: str(v.promptRef),
+    promptHash: str(v.promptHash),
     disabledByDetection: typeof v.disabledByDetection === "boolean" ? v.disabledByDetection : null,
     raw: kind === "unsupported" ? v : null,
   };
@@ -214,6 +220,8 @@ function encodeStage(s: LoopStage): Record<string, unknown> {
     allowsRepair: s.allowsRepair,
     ...(s.runOnce ? { runOnce: true } : {}),
     ...(s.defaultRevision !== null ? { defaultRevision: s.defaultRevision } : {}),
+    ...(s.promptRef ? { promptRef: s.promptRef } : {}),
+    ...(s.promptHash ? { promptHash: s.promptHash } : {}),
     ...(s.disabledByDetection !== null ? { disabledByDetection: s.disabledByDetection } : {}),
   };
 }

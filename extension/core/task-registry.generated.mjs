@@ -72,7 +72,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1
+    "revision": 1,
+    "knownPromptHashes": [
+      "183cc6de634c34d75c69f619ee8bbdbc39349535fd7685a06f8795d19e706007"
+    ]
   },
   {
     "id": "factory.intake",
@@ -108,7 +111,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1
+    "revision": 1,
+    "knownPromptHashes": [
+      "5d0c5dd22006676c2b19b31f6b7f407e1198cb721bc1ff8b5f54a544fbf5a00b"
+    ]
   },
   {
     "id": "factory.plan",
@@ -144,7 +150,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1
+    "revision": 1,
+    "knownPromptHashes": [
+      "d6f592cb6efeccfad4e5d8fc2e0fc885c7b9c00c341059bb315062fe70755ab3"
+    ]
   },
   {
     "id": "factory.review",
@@ -180,7 +189,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1
+    "revision": 1,
+    "knownPromptHashes": [
+      "39e0da10239cceee1e544430a8019fe5258539a19e1ae7a7f54d5ce2dabeea29"
+    ]
   },
   {
     "id": "issues.from_notes",
@@ -382,7 +394,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 2
+    "revision": 2,
+    "knownPromptHashes": [
+      "935d5b26f121d5393798bc962f541391516522f746dda2f9885f5ae582d4c248"
+    ]
   },
   {
     "id": "loop.doc_writer",
@@ -418,7 +433,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 2
+    "revision": 2,
+    "knownPromptHashes": [
+      "49d174908b052b2ce7dfcc54878b447035496ab76ee7512868bd12df5730f7b8"
+    ]
   },
   {
     "id": "loop.plan_director",
@@ -454,7 +472,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 2
+    "revision": 2,
+    "knownPromptHashes": [
+      "918457c0ab47a016e99efcbbef923eb98624c3f54d5cb83260d17abafd92ff4b"
+    ]
   },
   {
     "id": "loop.plan_structure_index",
@@ -490,7 +511,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 2
+    "revision": 2,
+    "knownPromptHashes": [
+      "a5cadde48ce5e4000c8e1a7ae4a316decfc908128b2fec454a28cd238c19c183"
+    ]
   },
   {
     "id": "loop.refactor_apply",
@@ -526,7 +550,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 4
+    "revision": 4,
+    "knownPromptHashes": [
+      "ea584195d007675744fbe713a32562df8f483620f6d6f6060b397a2b6fabb2df"
+    ]
   },
   {
     "id": "loop.refactor_conform",
@@ -562,7 +589,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1
+    "revision": 1,
+    "knownPromptHashes": [
+      "f3c22277386b8a4c883319fe84e91d141f2e5cea676098fd0d09a918f9014caf"
+    ]
   },
   {
     "id": "loop.refactor_planner",
@@ -598,7 +628,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 4
+    "revision": 4,
+    "knownPromptHashes": [
+      "3f01b3ca6fe917820028ad627553dfcbe55e71b8d045170f606995d6a7457050"
+    ]
   },
   {
     "id": "loop.refactor_test_gap_writer",
@@ -634,7 +667,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 2
+    "revision": 2,
+    "knownPromptHashes": [
+      "8150a528487348f9cf6e51ac1fc936d96e8ea2875ce11e41eab310db202e4183"
+    ]
   },
   {
     "id": "loop.regression",
@@ -716,7 +752,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 2
+    "revision": 2,
+    "knownPromptHashes": [
+      "455912ceb0fd79bb27c0d5f6f6beac90776a100bcdf4c47fb0b7c2170ea71d82"
+    ]
   },
   {
     "id": "loop.test_structure_setup",
@@ -752,7 +791,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 2
+    "revision": 2,
+    "knownPromptHashes": [
+      "c8213a2a5dcffce35d81bb3d70e2cdb9c454e76a0d50b7f415a17b9885134ae6"
+    ]
   },
   {
     "id": "plan.status",
@@ -852,7 +894,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1
+    "revision": 1,
+    "knownPromptHashes": [
+      "73916b2081f22125325eed55fca609e2f10b0c3efff949d1bc8595d4a5f503dc"
+    ]
   },
   {
     "id": "review.conflicts",
@@ -911,7 +956,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1
+    "revision": 1,
+    "knownPromptHashes": [
+      "c7417c6e03c54b2aea994846a3cebbd25b046b50d1d545831e008a48fc24655b"
+    ]
   },
   {
     "id": "review.doc",
@@ -969,7 +1017,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1
+    "revision": 1,
+    "knownPromptHashes": [
+      "e88e155e4856c9a89f134901b816dee85fd83a5248bc937c68b41f55905fc272"
+    ]
   },
   {
     "id": "review.merge",

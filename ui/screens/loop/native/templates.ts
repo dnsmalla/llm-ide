@@ -6,6 +6,7 @@ import { DETECTED_TEST } from "./environment.ts";
 import { DEFAULT_LOOP_SPECS } from "./defaults.ts";
 import { BUILT_IN_TEMPLATES as GENERATED_RECIPES } from "./templates.generated.ts";
 import { FACTORY_DEFAULT_KEY, FACTORY_TEMPLATE, withSetupCommand } from "./factory.ts";
+import { registrySource, upgradeDefaultStage } from "./default-stage.ts";
 
 export interface LoopTemplate {
   id: string;
@@ -167,7 +168,7 @@ export function applyLoopDefaults(config: LoopEngineConfig, defaults: LoopDefaul
 
 /** The Mac re-ensures its default loops on every load: a starter loop whose defaultKey is missing from the file is
  *  added back, and nothing that exists is changed. Returns the names added so the caller can ask for a save. */
-export function ensureDefaultLoops(store: LoopProjectStore, testCommand: string | null, defaults?: LoopDefaults): { store: LoopProjectStore; added: string[] } {
+export function ensureDefaultLoops(store: LoopProjectStore, testCommand: string | null, defaults?: LoopDefaults): { store: LoopProjectStore; added: string[]; upgraded: string[] } {
   const have = new Set(store.loops.map((l) => l.defaultKey).filter((k): k is string => k !== null));
   const added: string[] = [];
   const loops = [...store.loops];
@@ -184,5 +185,19 @@ export function ensureDefaultLoops(store: LoopProjectStore, testCommand: string 
     loops.push(factoryLoop(testCommand, defaults));
     added.push(FACTORY_TEMPLATE.name);
   }
-  return { store: { ...store, loops }, added };
+  // An unedited built-in stage that is behind the registry takes the registry prompt; an edited one is left alone.
+  const upgraded: string[] = [];
+  const current = loops.map((loop) => {
+    let changed = false;
+    const stages = loop.config.stages.map((s) => {
+      const source = registrySource(s);
+      const next = source ? upgradeDefaultStage(s, source) : s;
+      if (next !== s) changed = true;
+      return next;
+    });
+    if (!changed) return loop;
+    upgraded.push(loop.name);
+    return { ...loop, config: { ...loop.config, stages } };
+  });
+  return { store: { ...store, loops: current }, added, upgraded };
 }

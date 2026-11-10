@@ -855,7 +855,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/plan-structure-index",
           "targetPath": "llm-doc/plans",
-          "prompt": "Refresh the plan structure index: read every plan in the Input directory and rewrite only the drifted sections of the Output index file, creating it if missing. Resolve relative paths against the repo root first, then the project root (the directory containing system/project.json — the repo root itself, or two levels up when the repo is checked out under code/). The index holds: a folder-structure index of the codebase, a file index and a function index for the areas the collected plans touch, and a registry of every plan file in the Input directory. With no plans yet, build the index from the code itself: entry points, each area's key modules and public functions, and the largest refactor candidates (files over 500 lines), rows marked status proposed."
+          "prompt": "Refresh the plan structure index: read every plan in the Input directory and rewrite only the drifted sections of the Output index file, creating it if missing. Resolve relative paths against the repo root first, then the project root (the directory containing system/project.json — the repo root itself, or two levels up when the repo is checked out under code/). The index holds: a folder-structure index of the codebase, a file index and a function index for the areas the collected plans touch, and a registry of every plan file in the Input directory. With no plans yet, build the index from the code itself: entry points, each area's key modules and public functions, and the largest refactor candidates (files over 500 lines), rows marked status proposed.",
+          "promptRef": "loop.plan_structure_index",
+          "promptHash": "a5cadde48ce5e4000c8e1a7ae4a316decfc908128b2fec454a28cd238c19c183"
         },
         {
           "defaultKey": "plan-director",
@@ -870,7 +872,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/plan-director",
           "targetPath": "llm-doc/plans",
-          "prompt": "Consolidate every plan in the Input directory into the master plan at the Output path: a hierarchy of areas → file plans → function plans, each entry with a stable task ID, a status, and links back to its source plan and its structure-index rows. With no plans yet, derive the first master plan from the code itself via the structure index: propose areas from real signals (oversized files, missing tests, TODO/FIXME markers, layering violations), each area marked status proposed — future plans build on these indexes. Keep every generated plan file within the 250-line limit, splitting oversized areas into an areas/ folder beside the Output file. Preserve existing task IDs and completed ticks; never delete or rewrite the source plans."
+          "prompt": "Consolidate every plan in the Input directory into the master plan at the Output path: a hierarchy of areas → file plans → function plans, each entry with a stable task ID, a status, and links back to its source plan and its structure-index rows. With no plans yet, derive the first master plan from the code itself via the structure index: propose areas from real signals (oversized files, missing tests, TODO/FIXME markers, layering violations), each area marked status proposed — future plans build on these indexes. Keep every generated plan file within the 250-line limit, splitting oversized areas into an areas/ folder beside the Output file. Preserve existing task IDs and completed ticks; never delete or rewrite the source plans.",
+          "promptRef": "loop.plan_director",
+          "promptHash": "918457c0ab47a016e99efcbbef923eb98624c3f54d5cb83260d17abafd92ff4b"
         },
         {
           "check": {
@@ -956,7 +960,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/test-structure-setup",
           "targetPath": "llm-doc/loop/test/TEST-STRUCTURE.md",
-          "prompt": "Read the test-structure report at the Input. If it says the structure is missing, create the smallest working test layout for ONE package under the Output path, following the repo's language conventions; for Python use tests/unit/ mirroring the source package, with pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add one real test of an existing public behaviour; never edit application source and never add dependencies. If it says ok, change nothing."
+          "prompt": "Read the test-structure report at the Input. If it says the structure is missing, create the smallest working test layout for ONE package under the Output path, following the repo's language conventions; for Python use tests/unit/ mirroring the source package, with pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add one real test of an existing public behaviour; never edit application source and never add dependencies. If it says ok, change nothing.",
+          "promptRef": "loop.test_structure_setup",
+          "promptHash": "c8213a2a5dcffce35d81bb3d70e2cdb9c454e76a0d50b7f415a17b9885134ae6"
         },
         {
           "defaultKey": "refactor-structure-check",
@@ -1007,7 +1013,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/refactor-planner",
           "targetPath": ".",
-          "prompt": "Write or update the refactor plan at the Output path for the code under the Input, driven by the code-graph snapshot, the test map and the rules digest (RULES.md) the loop wrote beside it (read all three first). Classify the Input as a file, a folder or a repo; for a folder or repo with more than one top-level area, give each batch an `- Area:` line. Rank batches by measured structure — cycles, files over 500 lines, high fan-in files mixing roles — then naming and docs; a RULES.md violation found in the Input is itself a batch candidate. Every batch carries a stable ID, a status, its files, the symbols it moves, which of its files still lack tests, its intent, its risk, an Expect line naming the graph counter it will reduce, and a `- Rules:` line naming the rule sources it touches or fixes (or `none found`). Write each batch as a heading `### R<n> <title> (status: todo)`, and no other headings may start with `### R`; mark a batch the runner could not finish safely `(status: blocked)` with a `- Blocked:` line under it — never retry a blocked batch as-is, instead append smaller batch(es) that first remove the blocker, each carrying `- Replaces: R<n>`. Under each heading give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack them), `- Intent:`, `- Risk:`, `- Expect:` and `- Rules:` lines, plus `- Area:` when classified above. If an existing `done`, `skipped` or `blocked` batch lacks `- Rules:`, add `- Rules: none found` to it — this is the only edit ever allowed to a non-todo batch's content. Keep batches small and behaviour-preserving, ordered by value then by fewest dependants first (GRAPH.md `usedBy`) — safest first. When the plan nears 250 lines, move its done, skipped and blocked batches to REFACTOR-DONE.md beside it, keeping IDs unique across both files. Never edit code."
+          "prompt": "Write or update the refactor plan at the Output path for the code under the Input, driven by the code-graph snapshot, the test map and the rules digest (RULES.md) the loop wrote beside it (read all three first). Classify the Input as a file, a folder or a repo; for a folder or repo with more than one top-level area, give each batch an `- Area:` line. Rank batches by measured structure — cycles, files over 500 lines, high fan-in files mixing roles — then naming and docs; a RULES.md violation found in the Input is itself a batch candidate. Every batch carries a stable ID, a status, its files, the symbols it moves, which of its files still lack tests, its intent, its risk, an Expect line naming the graph counter it will reduce, and a `- Rules:` line naming the rule sources it touches or fixes (or `none found`). Write each batch as a heading `### R<n> <title> (status: todo)`, and no other headings may start with `### R`; mark a batch the runner could not finish safely `(status: blocked)` with a `- Blocked:` line under it — never retry a blocked batch as-is, instead append smaller batch(es) that first remove the blocker, each carrying `- Replaces: R<n>`. Under each heading give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack them), `- Intent:`, `- Risk:`, `- Expect:` and `- Rules:` lines, plus `- Area:` when classified above. If an existing `done`, `skipped` or `blocked` batch lacks `- Rules:`, add `- Rules: none found` to it — this is the only edit ever allowed to a non-todo batch's content. Keep batches small and behaviour-preserving, ordered by value then by fewest dependants first (GRAPH.md `usedBy`) — safest first. When the plan nears 250 lines, move its done, skipped and blocked batches to REFACTOR-DONE.md beside it, keeping IDs unique across both files. Never edit code.",
+          "promptRef": "loop.refactor_planner",
+          "promptHash": "3f01b3ca6fe917820028ad627553dfcbe55e71b8d045170f606995d6a7457050"
         },
         {
           "check": {
@@ -1059,7 +1067,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/test-gap-writer",
           "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md",
-          "prompt": "Read the next refactor batch at the Input. First make sure the integration tests (tests/integration/ in a layered layout, else the test root) hold one before/after-equality test that runs the pipeline end to end on the smallest input that reaches the final output; create it if missing. Then, for EVERY file the batch lists as missing tests, create a new test file under the Output path, at the path the test-structure report gives, that pins the file's current observable outputs through public calls only — never pin private helpers or internal state. Never edit the source, existing tests or build config. End with one `Covered: <path> — <behaviours>` line per file."
+          "prompt": "Read the next refactor batch at the Input. First make sure the integration tests (tests/integration/ in a layered layout, else the test root) hold one before/after-equality test that runs the pipeline end to end on the smallest input that reaches the final output; create it if missing. Then, for EVERY file the batch lists as missing tests, create a new test file under the Output path, at the path the test-structure report gives, that pins the file's current observable outputs through public calls only — never pin private helpers or internal state. Never edit the source, existing tests or build config. End with one `Covered: <path> — <behaviours>` line per file.",
+          "promptRef": "loop.refactor_test_gap_writer",
+          "promptHash": "8150a528487348f9cf6e51ac1fc936d96e8ea2875ce11e41eab310db202e4183"
         },
         {
           "allowsRepair": false,
@@ -1088,7 +1098,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/refactor-apply",
           "targetPath": "llm-doc/loop/refactor/REFACTOR.md",
-          "prompt": "Apply exactly the FIRST todo batch of the plan at the Input to the code under the Output path, using the graph snapshot beside the plan to find every dependant of the files you move or split. Read the rules digest (RULES.md) beside the plan before editing: the result must satisfy it for every file the batch touches. Preserve every listed symbol, update every import, reference and build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never touch more than that batch, never commit. End with `Applied: R<n>`."
+          "prompt": "Apply exactly the FIRST todo batch of the plan at the Input to the code under the Output path, using the graph snapshot beside the plan to find every dependant of the files you move or split. Read the rules digest (RULES.md) beside the plan before editing: the result must satisfy it for every file the batch touches. Preserve every listed symbol, update every import, reference and build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never touch more than that batch, never commit. End with `Applied: R<n>`.",
+          "promptRef": "loop.refactor_apply",
+          "promptHash": "ea584195d007675744fbe713a32562df8f483620f6d6f6060b397a2b6fabb2df"
         },
         {
           "defaultKey": "refactor-conform",
@@ -1103,7 +1115,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/refactor-conform",
           "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md",
-          "prompt": "Read the refactor rules (RULES.md) and the batch just applied, both beside the Input, then look at the code it touched under the Output path. For every file the batch lists, and any file it created, fix violations of those rules behaviour-preservingly — never widen the change to any other file, and never edit tests or build config. Write each fix as one line, `file:line — rule source — what`, to the rule-review file (RULE-REVIEW.md) beside the Input. End with `Conformed: R<n> — <k> fixes`."
+          "prompt": "Read the refactor rules (RULES.md) and the batch just applied, both beside the Input, then look at the code it touched under the Output path. For every file the batch lists, and any file it created, fix violations of those rules behaviour-preservingly — never widen the change to any other file, and never edit tests or build config. Write each fix as one line, `file:line — rule source — what`, to the rule-review file (RULE-REVIEW.md) beside the Input. End with `Conformed: R<n> — <k> fixes`.",
+          "promptRef": "loop.refactor_conform",
+          "promptHash": "f3c22277386b8a4c883319fe84e91d141f2e5cea676098fd0d09a918f9014caf"
         },
         {
           "command": "<detected-test-command>",
@@ -1177,7 +1191,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/doc-structure-index",
           "targetPath": ".",
-          "prompt": "Write or update the doc index file at the Output path for the code under the Input. Resolve the Input and the Output path against the repo root only (never the project root), creating the Output's directory there when missing: the docs must be inside the git tree so the code graph scans and links them. The index lists the areas of the codebase, for each area the doc page that will describe it (beside the index), and the key files and symbols that page must cover. Code is cited only as a backticked repo-relative path (`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify with the check-citations / find-code tools when available, else by reading the file). Rewrite only the drifted sections, keep the index within 300 lines, and never edit hand-written docs."
+          "prompt": "Write or update the doc index file at the Output path for the code under the Input. Resolve the Input and the Output path against the repo root only (never the project root), creating the Output's directory there when missing: the docs must be inside the git tree so the code graph scans and links them. The index lists the areas of the codebase, for each area the doc page that will describe it (beside the index), and the key files and symbols that page must cover. Code is cited only as a backticked repo-relative path (`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify with the check-citations / find-code tools when available, else by reading the file). Rewrite only the drifted sections, keep the index within 300 lines, and never edit hand-written docs.",
+          "promptRef": "loop.doc_structure_index",
+          "promptHash": "935d5b26f121d5393798bc962f541391516522f746dda2f9885f5ae582d4c248"
         },
         {
           "defaultKey": "doc-writer",
@@ -1192,7 +1208,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/doc-writer",
           "targetPath": "llm-doc/loop/docs/INDEX.md",
-          "prompt": "For every page listed in the doc index at the Input, write or update that page in the Output directory: purpose, how it works (the logic, step by step), key files and functions, invariants, how to change it safely, and related pages. Resolve the Input and the Output path against the repo root only (never the project root), creating the Output's directory there when missing: the docs must be inside the git tree so the code graph scans and links them. Code is cited only as a backticked repo-relative path (`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify with the check-citations / find-code tools when available, else by reading the file). Update only drifted sections; never delete a page the index still lists; keep each page within 250 lines. Write only inside the Output directory — never edit code, hand-written docs, or the index."
+          "prompt": "For every page listed in the doc index at the Input, write or update that page in the Output directory: purpose, how it works (the logic, step by step), key files and functions, invariants, how to change it safely, and related pages. Resolve the Input and the Output path against the repo root only (never the project root), creating the Output's directory there when missing: the docs must be inside the git tree so the code graph scans and links them. Code is cited only as a backticked repo-relative path (`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify with the check-citations / find-code tools when available, else by reading the file). Update only drifted sections; never delete a page the index still lists; keep each page within 250 lines. Write only inside the Output directory — never edit code, hand-written docs, or the index.",
+          "promptRef": "loop.doc_writer",
+          "promptHash": "49d174908b052b2ce7dfcc54878b447035496ab76ee7512868bd12df5730f7b8"
         },
         {
           "check": {
@@ -1280,7 +1298,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/test-structure-setup",
           "targetPath": "llm-doc/loop/test/TEST-STRUCTURE.md",
-          "prompt": "Read the test-structure report at the Input. If it says the structure is missing, create the smallest working test layout for ONE package under the Output path, following the repo's language conventions; for Python use tests/unit/ mirroring the source package, with pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add one real test of an existing public behaviour; never edit application source and never add dependencies. If it says ok, change nothing."
+          "prompt": "Read the test-structure report at the Input. If it says the structure is missing, create the smallest working test layout for ONE package under the Output path, following the repo's language conventions; for Python use tests/unit/ mirroring the source package, with pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add one real test of an existing public behaviour; never edit application source and never add dependencies. If it says ok, change nothing.",
+          "promptRef": "loop.test_structure_setup",
+          "promptHash": "c8213a2a5dcffce35d81bb3d70e2cdb9c454e76a0d50b7f415a17b9885134ae6"
         },
         {
           "defaultKey": "test-structure-check",
@@ -1319,7 +1339,9 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking",
           "skillId": "skills/test-gap-writer",
           "targetPath": "llm-doc/loop/test/TEST-MAP.md",
-          "prompt": "Read the test map at the Input and the test-structure report next to it. Take the first file under \"Unit-test candidates\", read it, and choose the business behaviours its public interface offers — not one test per function; skip it if every function is trivial. Create ONE new test file at the path the structure report gives. Assert observable outputs through public calls only: never call private or underscore members, never check internal state, variable names or call order. Build inputs in memory inside the test (no reading input files); mock only external boundaries such as a solver, network or clock, never the unit itself. Create files only under the test root; never edit the source, existing tests or build config. End with `Covered: <path> — <behaviours>` or `Covered: none — <reason>`."
+          "prompt": "Read the test map at the Input and the test-structure report next to it. Take the first file under \"Unit-test candidates\", read it, and choose the business behaviours its public interface offers — not one test per function; skip it if every function is trivial. Create ONE new test file at the path the structure report gives. Assert observable outputs through public calls only: never call private or underscore members, never check internal state, variable names or call order. Build inputs in memory inside the test (no reading input files); mock only external boundaries such as a solver, network or clock, never the unit itself. Create files only under the test root; never edit the source, existing tests or build config. End with `Covered: <path> — <behaviours>` or `Covered: none — <reason>`.",
+          "promptRef": "loop.test_gap_writer",
+          "promptHash": "455912ceb0fd79bb27c0d5f6f6beac90776a100bcdf4c47fb0b7c2170ea71d82"
         },
         {
           "command": "<detected-test-command>",

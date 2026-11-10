@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 2,
+  "loops": [
+    {
+      "id": "loop-test-1",
+      "name": "Test",
+      "isPrimary": false,
+      "scopeGlobs": [],
+      "defaultKey": "test",
+      "runsOnSchedule": false,
+      "config": {
+        "stages": [
+          {
+            "id": "test/test-structure",
+            "name": "Test Structure",
+            "kind": "testMap",
+            "order": 0,
+            "isDefault": true,
+            "enabled": true,
+            "defaultKey": "test-structure",
+            "severity": "blocking",
+            "testOp": "structure",
+            "allowsRepair": true,
+            "defaultRevision": 1
+          },
+          {
+            "id": "test/test-setup",
+            "name": "Test Setup",
+            "kind": "skill",
+            "order": 1,
+            "skillId": "skills/test-structure-setup",
+            "targetPath": "llm-doc/loop/test/TEST-STRUCTURE.md",
+            "outputPath": ".",
+            "prompt": "Read the test-structure report at the Input. If it says the structure is missing, create the smallest working test layout for ONE package under the Output path, following the repo's language conventions; for Python use tests/unit/ mirroring the source package, with pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add one real test of an existing public behaviour; never edit application source and never add dependencies. If it says ok, change nothing.",
+            "isDefault": true,
+            "enabled": false,
+            "defaultKey": "test-setup",
+            "severity": "blocking",
+            "allowsRepair": true,
+            "defaultRevision": 2,
+            "disabledByDetection": true
+          },
+          {
+            "id": "test/test-structure-check",
+            "name": "Test Structure Check",
+            "kind": "testMap",
+            "order": 2,
+            "isDefault": true,
+            "enabled": true,
+            "defaultKey": "test-structure-check",
+            "severity": "blocking",
+            "testOp": "structure",
+            "allowsRepair": true,
+            "defaultRevision": 1
+          },
+          {
+            "id": "test/test-map",
+            "name": "Test Map",
+            "kind": "testMap",
+            "order": 3,
+            "isDefault": true,
+            "enabled": true,
+            "defaultKey": "test-map",
+            "severity": "blocking",
+            "testOp": "map",
+            "allowsRepair": true,
+            "defaultRevision": 1
+          },
+          {
+            "id": "test/test-write",
+            "name": "Test Write",
+            "kind": "skill",
+            "order": 4,
+            "skillId": "skills/test-gap-writer",
+            "targetPath": "llm-doc/loop/test/TEST-MAP.md",
+            "outputPath": ".",
+            "prompt": "Read the test map at the Input and the test-structure report next to it. Take the first file under \"Unit-test candidates\", read it, and choose the business behaviours its public interface offers — not one test per function; skip it if every function is trivial. Create ONE new test file at the path the structure report gives. Assert observable outputs through public calls only: never call private or underscore members, never check internal state, variable names or call order. Build inputs in memory inside the test (no reading input files); mock only external boundaries such as a solver, network or clock, never the unit itself. Create files only under the test root; never edit the source, existing tests or build config. End with `Covered: <path> — <behaviours>` or `Covered: none — <reason>`.",
+            "isDefault": true,
+            "enabled": true,
+            "defaultKey": "test-write",
+            "severity": "blocking",
+            "allowsRepair": true,
+            "defaultRevision": 2
+          },
+          {
+            "id": "F1E552A0-0675-466D-95A1-F22083712026",
+            "name": "Test",
+            "kind": "shellCommand",
+            "command": "<detected-test-command>",
+            "order": 5,
+            "isDefault": true,
+            "enabled": true,
+            "defaultKey": "test",
+            "severity": "blocking",
+            "detectedCommand": "npm test",
+            "allowsRepair": true,
+            "defaultRevision": 2
+          },
+          {
+            "id": "test/test-ledger",
+            "name": "Test Ledger",
+            "kind": "testMap",
+            "order": 6,
+            "isDefault": true,
+            "enabled": true,
+            "defaultKey": "test-ledger",
+            "severity": "blocking",
+            "testOp": "ledger",
+            "allowsRepair": true,
+            "defaultRevision": 1
+          },
+          {
+            "id": "test/test-map-check",
+            "name": "Test Map Check",
+            "kind": "testMap",
+            "order": 7,
+            "isDefault": true,
+            "enabled": true,
+            "defaultKey": "test-map-check",
+            "severity": "blocking",
+            "testOp": "map",
+            "allowsRepair": true,
+            "defaultRevision": 1
+          },
+          {
+            "id": "test/test-prune",
+            "name": "Test Prune",
+            "kind": "testPrune",
+            "order": 8,
+            "isDefault": true,
+            "enabled": true,
+            "defaultKey": "test-prune",
+            "severity": "advisory",
+            "allowsRepair": true,
+            "defaultRevision": 1
+          },
+          {
+            "id": "user-stage-1",
+            "name": "Lint",
+            "kind": "shellCommand",
+            "command": "npm run lint",
+            "order": 9,
+            "isDefault": false,
+            "enabled": true,
+            "severity": "blocking",
+            "allowsRepair": true
+          }
+        ],
+        "maxIterations": 10,
+        "consecutiveFailureStop": 2,
+        "maxRepairsPerStage": 3,
+        "pauseTimeoutSeconds": 1800,
+        "protectedPathPolicy": "revert",
+        "extraProtectedGlobs": [],
+        "writeSummaryNote": false,
+        "useWorktreesForConcurrentRuns": false,
+        "alwaysUseWorktree": false,
+        "openMergeRequest": true
+      }
+    }
+  ]
+}

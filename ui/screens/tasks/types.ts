@@ -88,6 +88,8 @@ export interface TaskDef {
   /** Only for availability.status "alias"; the canonical task it resolves to. */
   aliasOf?: string;
   revision: number;
+  /** Agent tasks only: the SHA-256 of every published revision of the prompt (a stage saved with one is unedited). */
+  knownPromptHashes?: readonly string[];
 }
 
 export interface TaskEnv {

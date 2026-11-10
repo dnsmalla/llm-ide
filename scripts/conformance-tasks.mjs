@@ -157,6 +157,19 @@ for (const task of tasks) {
   const rel = task.runner.prompt;
   if (typeof rel !== 'string' || !promptNames.includes(rel.slice('prompts/'.length))) bad(`task ${task.id}: prompt ${rel} is missing`);
 }
+// An agent task names the hash of its current prompt among knownPromptHashes, so an unedited Loop stage saved with
+// that text is still recognised after a registry revision. A new prompt text needs its old hash kept and a revision bump.
+let livePrompts = {};
+try { livePrompts = buildRegistry().prompts; } catch { /* reported by the generator check below */ }
+for (const task of tasks) {
+  if (task.runner?.kind !== 'agent' || livePrompts[task.id] === undefined) continue;
+  const known = task.knownPromptHashes;
+  if (!Array.isArray(known) || known.some((h) => typeof h !== 'string' || !/^[0-9a-f]{64}$/.test(h))) {
+    bad(`task ${task.id}: knownPromptHashes must be sha-256 hex strings`);
+  } else if (!known.includes(promptHash(livePrompts[task.id]))) {
+    bad(`task ${task.id}: knownPromptHashes lacks the hash of the current prompt (keep the old hash and bump revision)`);
+  }
+}
 
 // Loop templates: every stage taskId exists; no removed Mac app command, in a starter or a recipe.
 const starters = Array.isArray(templates?.starters) ? templates.starters : [];
