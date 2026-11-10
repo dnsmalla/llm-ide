@@ -4,14 +4,6 @@
 import { redactSecrets } from '../../core/redact-secrets.mjs';
 import { PROMPT_PARTS } from '../../core/task-prompts.generated.mjs';
 
-// Transitional: conflicts still runs its old focus text until its own migration (Task 13) moves it into the registry,
-// which deletes this entry.
-const LEGACY_FOCUS = {
-  conflicts: 'List files that contain unresolved merge conflict markers or are in a conflicted state, and any risky overlapping edits between branches. Name the file for each finding.',
-};
-const LEGACY_LINE1 = 'You are doing a READ-ONLY review of the project in the current directory. Do not modify, create or delete any file and do not run any command that changes state.';
-const LEGACY_FORMAT = 'Answer in concise markdown: a list of findings, each with a severity (high, medium, low) and file:line. If there is nothing to report, answer exactly "No findings."';
-
 export const MAX_FOCUS_TEXT = 4000;
 
 const evidenceBlock = (evidence) =>
@@ -29,11 +21,6 @@ export function reviewPromptFor(taskId, evidence = '', focusText = null) {
   const focus = typeof focusText === 'string' && focusText.trim() !== '' ? neutraliseFocus(focusText) : parts.focus;
   const text = parts.frame.replace('{{focus}}', () => focus);
   return evidence ? `${text}\n\n${evidenceBlock(evidence)}` : text;
-}
-
-function promptForFocus(focus, evidence, focusText) {
-  if (PROMPT_PARTS[`review.${focus}`]) return reviewPromptFor(`review.${focus}`, evidence, focusText);
-  return [LEGACY_LINE1, LEGACY_FOCUS[focus], LEGACY_FORMAT, evidence ? evidenceBlock(evidence) : ''].filter(Boolean).join('\n\n');
 }
 
 async function git(runGit, spawn, cwd, args, maxChars = 40_000) {
@@ -82,7 +69,7 @@ export async function runReviewTask({ userId, args, cwd, signal, spawn, emit, de
     evidence = redactSecrets(parts.filter(Boolean).join('\n'));
   }
   emit('progress', { step: `running review on ${id || 'engine'}` });
-  const prompt = promptForFocus(focus, evidence, args.focusText);
+  const prompt = reviewPromptFor(`review.${focus}`, evidence, args.focusText);
   const r = await deps.runTask({ userId, engine, prompt, cwd, mode: 'read', signal, spawn, deps: deps.engineDeps });
   if (r.stopReason === 'aborted') return { focus, engine: r.engine, text: '', truncated: false };
   emit('data', { name: 'engine', value: { engine: r.engine, focus, textBytes: Buffer.byteLength(r.text || '', 'utf8'), truncated: !!r.truncated } });

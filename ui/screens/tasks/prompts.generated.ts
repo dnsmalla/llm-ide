@@ -2,6 +2,7 @@
 
 export const PROMPTS: Readonly<Record<string, string>> = Object.freeze({
   "review.code": "You are doing a READ-ONLY review of the project in the current directory. Do not modify, create or delete any file and do not run any command that changes state.\n\nReview the most recent changes (HEAD) for correctness bugs, security problems, missing error handling and regressions. Name the file and line for each finding.\n\nAnswer in concise markdown: a list of findings, each with a severity (high, medium, low) and file:line. If there is nothing to report, answer exactly \"No findings.\"",
+  "review.conflicts": "You are doing a READ-ONLY review of the project in the current directory. Do not modify, create or delete any file and do not run any command that changes state.\n\nList files that contain unresolved merge conflict markers or are in a conflicted state, and any risky overlapping edits between branches. Name the file for each finding.\n\nAnswer in concise markdown: a list of findings, each with a severity (high, medium, low) and file:line. If there is nothing to report, answer exactly \"No findings.\"",
   "review.doc": "You are doing a READ-ONLY review of the project in the current directory. Do not modify, create or delete any file and do not run any command that changes state.\n\nReview the documentation for statements that no longer match the code, stale commands or paths, and missing steps. Name the file for each finding.\n\nAnswer in concise markdown: a list of findings, each with a severity (high, medium, low) and file:line. If there is nothing to report, answer exactly \"No findings.\""
 });
 
@@ -9,6 +10,10 @@ export const PROMPT_PARTS: Readonly<Record<string, { frame: string; focus: strin
   "review.code": {
     "frame": "You are doing a READ-ONLY review of the project in the current directory. Do not modify, create or delete any file and do not run any command that changes state.\n\n{{focus}}\n\nAnswer in concise markdown: a list of findings, each with a severity (high, medium, low) and file:line. If there is nothing to report, answer exactly \"No findings.\"",
     "focus": "Review the most recent changes (HEAD) for correctness bugs, security problems, missing error handling and regressions. Name the file and line for each finding."
+  },
+  "review.conflicts": {
+    "frame": "You are doing a READ-ONLY review of the project in the current directory. Do not modify, create or delete any file and do not run any command that changes state.\n\n{{focus}}\n\nAnswer in concise markdown: a list of findings, each with a severity (high, medium, low) and file:line. If there is nothing to report, answer exactly \"No findings.\"",
+    "focus": "List files that contain unresolved merge conflict markers or are in a conflicted state, and any risky overlapping edits between branches. Name the file for each finding."
   },
   "review.doc": {
     "frame": "You are doing a READ-ONLY review of the project in the current directory. Do not modify, create or delete any file and do not run any command that changes state.\n\n{{focus}}\n\nAnswer in concise markdown: a list of findings, each with a severity (high, medium, low) and file:line. If there is nothing to report, answer exactly \"No findings.\"",

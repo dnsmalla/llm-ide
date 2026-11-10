@@ -8,7 +8,7 @@ export { taskById };
 // skill and prompt, stored per project on this machine. No Mobile Control token is involved.
 export type AutoTaskId =
   | "sourceUpdate" | "sourcesToIssue" | "implementIssues" | "reviewMerge"
-  | "review.code" | "review.doc" | "reviewConflicts"
+  | "review.code" | "review.doc" | "review.conflicts"
   | "updateIssues" | "updatePlanStatus" | "generateDoc" | "regression" | "generateKnowledge"
   | "loop.regression" | "sources.update" | "plan.status";
 
@@ -31,13 +31,13 @@ export interface AutoTaskLocalState { masterEnabled: boolean; configs: Record<st
 const RETIRED_DEFAULT_PROMPTS: Readonly<Record<string, string>> = {
   "review.code": "Review the recent commits in this repository for bugs, security issues, and code style problems. This is a READ-ONLY review: do NOT edit, create, or delete any files, and do NOT commit or push. Print your findings as a summary to your output.",
   "review.doc": "Review the project's documentation against the code and recent changes. Report inaccurate, missing or stale sections; do not edit files.",
+  "review.conflicts": "Review conflict markers and divergent changes. Explain the conflicting intents and propose a resolution without applying it.",
 };
 
 const LEGACY_TASKS: readonly AutoTaskDef[] = [
   { id: "sourcesToIssue", label: "Sources → Issue", group: "Pipeline", prompt: "Turn the unresolved action items in the latest sources into tracked issues. Report every issue you create." },
   { id: "implementIssues", label: "Implement Issues", group: "Pipeline", prompt: "Pick the next open issue that is ready to implement, implement it, and report the changed files and test result." },
   { id: "reviewMerge", label: "Review & Merge", group: "Pipeline", prompt: "Review the pending merge request for bugs, missing tests and unintended changes. Report findings; do not merge." },
-  { id: "reviewConflicts", label: "Review Conflicts", group: "Review", prompt: "Review conflict markers and divergent changes. Explain the conflicting intents and propose a resolution without applying it." },
   { id: "updateIssues", label: "Update Issues", group: "Automation", prompt: "Update the tracked issues with the current status and evidence from the repository. Report every issue you change." },
 ];
 
