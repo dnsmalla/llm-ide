@@ -278,7 +278,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm worktree clean-up">
           <p>Remove {cleanup.remove.length} worktree{cleanup.remove.length === 1 ? "" : "s"}? Kept: {cleanup.keep.length} (unshipped changes, a card waiting for Ship, a live run or an unreadable status).</p>
           <ul>{cleanup.remove.map((id) => <li key={id}><code>{worktrees.get(id)?.branch ?? id}</code></li>)}</ul>
-          <div className="atn-modal-actions">
+          <div className="fx-actions">
             <button type="button" className="fx-btn" onClick={() => setCleanup(null)}>Cancel</button>
             <button type="button" className="fx-btn fx-primary" disabled={cleanup.remove.length === 0} onClick={() => void act(async () => {
               for (const runId of cleanup.remove) await invokeHost("loop_worktree_remove", { runId });

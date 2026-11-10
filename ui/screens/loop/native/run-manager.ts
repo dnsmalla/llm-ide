@@ -425,10 +425,12 @@ async function flushPending(projectRoot: string): Promise<void> {
   const writes = pending.get(projectRoot);
   if (!writes) return;
   pending.delete(projectRoot);
+  const failed: Array<() => Promise<void>> = [];
   for (const write of writes) {
-    // WARNING: a write that fails here is lost; the worktree stays, so the board shows the run as Interrupted.
-    try { await write(); } catch { /* see WARNING */ }
+    try { await write(); } catch { failed.push(write); }
   }
+  // A failed write is retried on the next project change instead of being dropped.
+  if (failed.length > 0) pending.set(projectRoot, [...(pending.get(projectRoot) ?? []), ...failed]);
 }
 
 /** The file API for one project: every call refuses (code no_project) while another project is open. */
