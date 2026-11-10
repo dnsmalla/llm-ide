@@ -1,6 +1,7 @@
 # Fixtures that tests compare byte for byte across platforms: keep LF on every checkout
 # (a Windows runner with core.autocrlf would otherwise rewrite them to CRLF).
 ui/screens/library/fixtures/lta/*.md text eol=lf
+ui/screens/loop/tests/fixtures/*.json text eol=lf
 
 # Host API generated constants: compared byte for byte by --check, so line endings
 # must not depend on the checkout's core.autocrlf.
