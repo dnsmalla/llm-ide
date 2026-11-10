@@ -9,7 +9,7 @@ import { readRepoConfig } from "../../settings/repo-config.ts";
 import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
 import { createHostFs } from "../../explorer/fs";
-import { GROUPS, MAC_ONLY_MESSAGE, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, TASKS, TASK_BY_ID, agentRunSucceeded, composeTaskMessage, desktopRunnable, scheduleStatusLine, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, scheduledRunAllowed, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
+import { GROUPS, MAC_ONLY_MESSAGE, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, TASKS, TASK_BY_ID, agentRunSucceeded, composeTaskMessage, desktopRunnable, taskById, scheduleStatusLine, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, scheduledRunAllowed, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
 import { describeCron, validateCron } from "./cron.ts";
 import { minuteKey, takeDueAutoTasks } from "./due.ts";
 import { addTemplate, loadTemplates, removeTemplate, saveTemplates, type PromptTemplate } from "./prompt-templates.ts";
@@ -19,7 +19,8 @@ import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
 import { CUSTOM_IMPLEMENT_MESSAGE, createCustomTask, customTaskRunnable, customTaskStatus, loadCustomTasks, saveCustomTasks, updateCustomTask, validateCustomTask, type CustomAutoTask, type CustomTaskMode } from "./custom.ts";
 import { runCustomTask } from "./run-custom.ts";
 import { runTask as runRegisteredTask } from "../../tasks/runner.ts";
-import { approveStage } from "../../loop/native/approvals.ts";
+import { approveLoop, approvalStatus } from "../../loop/native/approvals.ts";
+import { loadLoops } from "../../loop/native/store.ts";
 import { autoTaskBusy, releaseAutoTask, tryAcquireAutoTask } from "./lock.ts";
 import { appendCustomRun, CUSTOM_RUNS_EVENT, readCustomRuns, type CustomTaskRun } from "./schedule.ts";
 import { decideRun, resolvePath, type Resolve } from "./usage.ts";
@@ -106,6 +107,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     return () => window.removeEventListener(CUSTOM_RUNS_EVENT, onRuns);
   }, []);
   const hasRepo = (() => { try { const c = readRepoConfig(); return [...c.saved.github, ...c.saved.gitlab].some((r) => r.active && r.clonePath.trim() !== ""); } catch { return false; } })();
+  const taskEnv = { features: null, coreFeatures: null, hasRepo, localHost: true, mode: "local" as const };
   const iconFor = (id: AutoTaskId): string => ({ sourceUpdate: "↻", sourcesToIssue: "◫", implementIssues: "⌘", reviewMerge: "⇄", reviewCode: "✓", reviewDoc: "▤", reviewConflicts: "⚠", updateIssues: "☑", updatePlanStatus: "▥", generateDoc: "▦", regression: "↺", generateKnowledge: "✦" } as Record<string, string>)[id] ?? "•";
   const grouped = useMemo(() => GROUPS.map((g) => [g, TASKS.filter((t) => t.group === g && (!onlyEnabled || state.configs[t.id]?.enabled))] as const).filter(([, list]) => list.length > 0), [state, onlyEnabled]);
 
@@ -129,7 +131,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       try { persisted = JSON.parse(localStorage.getItem("llmide.autoTaskFired.v1") ?? "{}") as Record<string, string>; } catch { persisted = {}; }
       // Every task due this minute is queued, not only the first: they run one after another (see the effect's re-run).
       const due = takeDueAutoTasks(
-        TASKS.map((t) => ({ id: t.id, cron: state.configs[t.id].cron, allowed: scheduledRunAllowed(t.id, state.configs[t.id], hasRepo) })),
+        TASKS.map((t) => ({ id: t.id, cron: state.configs[t.id].cron, allowed: scheduledRunAllowed(t.id, state.configs[t.id], hasRepo, taskEnv) })),
         now,
         (key) => Boolean(firedRef.current[key] || persisted[key]),
         (key) => { firedRef.current[key] = minute; persisted[key] = minute; },
@@ -140,7 +142,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       }
       // The next queued task starts now; a finished run re-runs this effect (running changes), which starts the one after.
       const next = pendingRef.current.shift();
-      if (next) void runTask(next);
+      if (next) void runTask(next, { scheduled: true });
     };
     tick();
     const timer = window.setInterval(tick, 30_000);
@@ -161,10 +163,11 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     runAbortRef.current?.abort();
   }, []);
 
-  const runTask = async (id: AutoTaskId = selected) => {
+  const runTask = async (id: AutoTaskId = selected, opts: { scheduled?: boolean } = {}) => {
     if (running) return;
     const t = TASK_BY_ID[id]; const c = state.configs[id];
-    if (!desktopRunnable(id)) { setNotice(MAC_ONLY_MESSAGE); return; }
+    const registered = taskById(id);
+    if (!desktopRunnable(id, taskEnv)) { setNotice(MAC_ONLY_MESSAGE); return; }
     if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
     if (requiresLinkedRepo(id) && !hasRepo) { setNotice("No linked repository detected. Add one in Settings first."); return; }
     const inputPath = normalizeProjectPath(c.inputPath);
@@ -180,18 +183,41 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     const started = new Date();
     try {
       const workRoot = await invokeHost<string>("loop_work_root");
-      // A registered shell task (Regression today) runs the exact Loop stage, not an invented agent prompt.
-      if (id === "regression") {
-        const approval = await approveStage("loop.regression", null);
-        if (!approval) throw new Error("Regression needs the native shell approval for its fault verify commands.");
-        const result = await runRegisteredTask("loop.regression", {
+      // A registered non-agent task runs its own runner: the exact Loop stage for shell, the core route for
+      // core-route, or a desktop action. No invented agent prompt is involved.
+      if (registered?.runner && registered.runner.kind !== "agent") {
+        let approvalToken: string | null = null;
+        if (registered.runner.kind === "shell") {
+          // The host mints approvals only for a stage it resolves from system/loop.json, so use the project's
+          // real Regression loop, never the synthetic stage id.
+          const loaded = await loadLoops(fs);
+          const regression = loaded.kind === "ok" ? loaded.store.loops.find((l) => l.defaultKey === "regression") : null;
+          if (!regression) {
+            setNotice("No Regression loop exists in this project. Open Loop → Regression once, then run again.");
+            setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: "no Regression loop", durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
+            return;
+          }
+          if (opts.scheduled) {
+            const status = await approvalStatus(regression.id);
+            if (status.approved && status.token) approvalToken = status.token;
+          } else {
+            const approval = await approveLoop(regression.id);
+            if (approval) approvalToken = approval.token;
+          }
+          if (!approvalToken) {
+            setNotice("Regression needs its fault commands approved once in Loop.");
+            setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: "needs shell approval", durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
+            return;
+          }
+        }
+        const result = await runRegisteredTask(id, {
           projectRoot: projectRoot ?? "",
           core,
           host: invokeHost,
           fs,
           log: (line) => setLog((l) => [...l, line]),
           signal: abort.signal,
-          approvalToken: async () => approval.token,
+          approvalToken: async () => approvalToken,
           changedPaths: changedPathsNow,
           revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
           actions: {},
@@ -353,9 +379,9 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
                 {tasks.map((t) => (
                   <li key={t.id}>
                     <button type="button" className="atn-row" data-on={selected === t.id || undefined} onClick={() => setSelected(t.id)}>
-                      <input type="checkbox" checked={state.configs[t.id]?.enabled ?? false} disabled={!desktopRunnable(t.id)} onClick={(e) => e.stopPropagation()} onChange={(e) => update({ enabled: e.target.checked }, t.id)} aria-label={`${t.label} enabled`} />
+                      <input type="checkbox" checked={state.configs[t.id]?.enabled ?? false} disabled={!desktopRunnable(t.id, taskEnv)} onClick={(e) => e.stopPropagation()} onChange={(e) => update({ enabled: e.target.checked }, t.id)} aria-label={`${t.label} enabled`} />
                       <span className="atn-task-icon" aria-hidden="true">{iconFor(t.id)}</span><span>{t.label}</span>
-                      {desktopRunnable(t.id) ? null : <span className="atn-hint atn-mac-only">Mac app</span>}
+                      {desktopRunnable(t.id, taskEnv) ? null : <span className="atn-hint atn-mac-only">Mac app</span>}
                     </button>
                   </li>
                 ))}
@@ -384,7 +410,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         <button type="button" className="atn-model" onClick={() => setLimitsOpen(true)}>Model &amp; Limits</button>
         <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{r.durationSeconds}s · {new Date(r.at).toLocaleString()}</span></li>)}</ul>}</section>
         <section className="atn-history"><h3>Action items</h3><p className="atn-hint">No action items yet. Run Sources → Issue or record a meeting with action items.</p></section>
-        <button type="button" className="atn-run-now" disabled={!running && !desktopRunnable(selected)} title={running ? "Stop the running task" : !desktopRunnable(selected) ? MAC_ONLY_MESSAGE : "Run the selected task now"} onClick={running ? stopTask : () => void runTask()}>{running ? "■ Stop" : "▶ Run Now"}</button>
+        <button type="button" className="atn-run-now" disabled={!running && !desktopRunnable(selected, taskEnv)} title={running ? "Stop the running task" : !desktopRunnable(selected, taskEnv) ? MAC_ONLY_MESSAGE : "Run the selected task now"} onClick={running ? stopTask : () => void runTask()}>{running ? "■ Stop" : "▶ Run Now"}</button>
       </aside>
 
       <main className="atn-main">
@@ -392,19 +418,19 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           <span className="atn-title-icon" aria-hidden="true">✓</span>
           <h1>{task.label}</h1>
           <span className="atn-spacer" />
-          <button type="button" className="atn-btn atn-primary" disabled={!running && !desktopRunnable(selected)} title={!desktopRunnable(selected) ? MAC_ONLY_MESSAGE : undefined} onClick={running ? stopTask : () => void runTask()}>{running ? "■ Stop" : "▶ Run"}</button>
+          <button type="button" className="atn-btn atn-primary" disabled={!running && !desktopRunnable(selected, taskEnv)} title={!desktopRunnable(selected, taskEnv) ? MAC_ONLY_MESSAGE : undefined} onClick={running ? stopTask : () => void runTask()}>{running ? "■ Stop" : "▶ Run"}</button>
         </header>
         <div className="atn-stars" aria-label="Task rating">★ ★ ★ ★ ☆</div>
-        <div className="atn-subtitle"><span className="atn-hint" role="status">◷ {scheduleStatusLine(state.masterEnabled, config, selected, new Date())}{desktopRunnable(selected) && config.scheduleActive && config.enabled && state.masterEnabled ? ` (${describeCron(config.cron)})` : ""}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} disabled={!desktopRunnable(selected)} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => { setCronDraft(config.cron); setScheduleActiveDraft(config.scheduleActive); setScheduleError(false); setScheduleOpen(true); }}>Edit</button></div>
+        <div className="atn-subtitle"><span className="atn-hint" role="status">◷ {scheduleStatusLine(state.masterEnabled, config, selected, new Date(), taskEnv)}{desktopRunnable(selected, taskEnv) && config.scheduleActive && config.enabled && state.masterEnabled ? ` (${describeCron(config.cron)})` : ""}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} disabled={!desktopRunnable(selected, taskEnv)} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label><button type="button" className="atn-btn" onClick={() => { setCronDraft(config.cron); setScheduleActiveDraft(config.scheduleActive); setScheduleError(false); setScheduleOpen(true); }}>Edit</button></div>
         {notice ? <p className="atn-notice" role="status">{notice}</p> : null}
 
-        {!desktopRunnable(selected) ? (
+        {!desktopRunnable(selected, taskEnv) ? (
           <section className="atn-card">
             <header><span aria-hidden="true">ⓘ</span><h2>ABOUT</h2></header>
             <p className="atn-notice">{MAC_ONLY_MESSAGE}</p>
           </section>
         ) : null}
-        {desktopRunnable(selected) ? (<>
+        {desktopRunnable(selected, taskEnv) ? (<>
         <section className="atn-card">
           <header><span aria-hidden="true">☰</span><h2>SETTINGS</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Reload task settings" onClick={() => setState(loadState())}>↻</button></header>
           <label className="atn-field"><span>Input path <button type="button" className="atn-link" onClick={() => openFolderPicker("inputPath")}>Choose…</button></span><input value={config.inputPath} placeholder="Whole project" onChange={(e) => update({ inputPath: e.target.value })} /><em>What the task reads. Empty means the whole project.</em></label>
@@ -412,6 +438,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           <label className="atn-field"><span>Skill <button type="button" className="atn-link" aria-label="Rescan skills" disabled={!projectRoot} onClick={rescanSkills}>Rescan</button></span><select value={config.skillName} onChange={(e) => update({ skillName: e.target.value })}><option value="">None</option>{[...skills.map((x) => x.name), ...(config.skillName && !skills.some((x) => x.name === config.skillName) ? [config.skillName] : [])].map((name) => <option key={name} value={name}>{skillOptionLabel(name, skills.some((x) => x.name === name) || !skillsScanned)}</option>)}</select><em>Run the prompt under one of the project's agent skills.</em></label>
         </section>
 
+        {task.prompt ? (<>
         <section className="atn-card">
           <header><span aria-hidden="true">📄</span><h2>TEMPLATE</h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setResetOpen(true)}>Restore Default</button><button type="button" className="atn-link" onClick={() => { setTemplateName(""); setTemplateOpen(true); }}>Save as…</button></header>
           <select aria-label="Template" value={config.template} onChange={(e) => update({ template: e.target.value as "builtin" | "custom" })}><option value="builtin">Built-in prompt</option><option value="custom">Custom prompt</option></select>
@@ -426,6 +453,12 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           <header><span aria-hidden="true">▤</span><h2>EFFECTIVE PROMPT</h2><span className="atn-spacer" /><button type="button" className="atn-link" aria-expanded={showPreview} onClick={() => setShowPreview((v) => !v)}>{showPreview ? "Hide" : "Show"}</button></header>
           {showPreview ? <EffectivePrompt config={config} task={task} /> : <p className="atn-hint">What this task will send to the agent, with the skill and folders above applied.</p>}
         </section>
+        </>) : (
+        <section className="atn-card">
+          <header><span aria-hidden="true">▤</span><h2>RUNNER</h2></header>
+          <p className="atn-hint">Runs the {task.label} stage through the shared task runner; this task has no model prompt.</p>
+        </section>
+        )}
         </>) : null}
 
         <section className="atn-card atn-log"><header><h2>Log <span className="atn-hint">live</span></h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setLog([])}>Clear</button></header>{log.length === 0 ? <p className="atn-hint">No log lines yet.</p> : <pre className="atn-log-pre">{log.join("\n")}</pre>}</section>

@@ -9,12 +9,15 @@ test("Mac structural tasks are not runnable; Regression now runs via the task re
   for (const id of mac) assert.equal(m.desktopRunnable(id), false, id);
   for (const id of ["reviewCode", "reviewDoc", "reviewConflicts", "updateIssues", "generateDoc"]) assert.equal(m.desktopRunnable(id), true, id);
   assert.match(m.MAC_ONLY_MESSAGE, /^This task runs deterministic code in the Mac app; the desktop does not run it yet\.$/);
+  assert.equal(m.TASK_BY_ID["loop.regression"].prompt, "", "the old Regression prompt is gone");
+  assert.equal(m.TASKS.some((t) => t.id === "regression"), false, "the legacy Regression row is gone");
+  assert.equal(m.desktopRunnable("regression"), true, "the alias resolves to the runnable registry task");
 });
 
 test("a schedule never fires a Mac-only task, even when armed and enabled", () => {
   const armed = { enabled: true, scheduleActive: true };
   assert.equal(m.scheduledRunAllowed("sourceUpdate", armed, true), false);
-  assert.equal(m.scheduledRunAllowed("sourceUpdate", armed, true), false);
+  assert.equal(m.scheduledRunAllowed("regression", armed, true), true);
   assert.equal(m.scheduledRunAllowed("reviewCode", armed, true), true);
   assert.equal(m.scheduledRunAllowed("reviewCode", { enabled: true, scheduleActive: false }, true), false);
   assert.equal(m.scheduledRunAllowed("reviewCode", { enabled: false, scheduleActive: true }, true), false);
