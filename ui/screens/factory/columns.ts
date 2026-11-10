@@ -10,7 +10,7 @@ export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; 
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
 export interface RunRecordFacts {
   runId: string; mode: RunMode; statusCode: string; needsDecision: string | null;
-  ship: { provider: "github" | "gitlab"; url: string; secretOverride?: { rule: string; file: string | null; line: number | null; at: string } | null } | null;
+  ship: { provider: "github" | "gitlab"; url: string; secretOverride?: { rule: string; file: string | null; line: number | null; at: string; hits?: { rule: string; file: string | null; line: number }[]; total?: number } | null } | null;
   costUsd: number | null; durationSeconds: number | null;
   verdict: string | null;
   changed: { files: number; additions: number | null; deletions: number | null; truncated: boolean } | null;

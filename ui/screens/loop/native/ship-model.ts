@@ -6,7 +6,7 @@ import type { RunInfo } from "./worktree-run.ts";
 
 /** The `POST /kb/loop/ship` body. `repo` is the provider slug (owner/name), never a path. */
 export interface ShipBody { worktree: string; branch: string; provider: "github" | "gitlab"; repo: string; base: string; title: string; body: string; patchId: string; allowSecret?: boolean }
-export type ShipResult = { ok: true; url: string; commit: string; reused: boolean; secretOverride?: { rule: string; file: string | null; line: number | null } } | { ok: false; code: string; message?: string; rule?: string; file?: string; line?: number };
+export type ShipResult = { ok: true; url: string; commit: string; reused: boolean; secretOverride?: { rule: string; file: string | null; line: number | null; hits?: { rule: string; file: string | null; line: number }[]; total?: number } } | { ok: false; code: string; message?: string; rule?: string; file?: string; line?: number; hits?: { rule: string; file: string | null; line: number }[]; total?: number };
 export type ShipState = "shipped" | "secret" | "rejected" | "changed" | "error";
 export interface WorktreeDiff { text: string; truncated: boolean; patchId: string; files: string[]; additions: number; deletions: number }
 export interface DiffFile { path: string; lines: string[] }

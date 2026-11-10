@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 import { sanitizeLine } from '../core/utils.mjs';
-import { scanForSecretsDetailed } from './github-pr.mjs';
+import { scanForSecretsDetailed, scanForSecretsHits } from './github-pr.mjs';
 
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const FACTORY_BRANCH_RE = /^factory\/[A-Za-z0-9_-]{1,64}$/;
@@ -268,15 +268,16 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   const paths = names.stdout.split('\0').filter((p) => p && !isFactoryPath(p));
   let secretOverride = null;
   if (paths.length > 0) {
-    const hit = scanForSecretsDetailed(diff.stdout);
+    const found = scanForSecretsHits(diff.stdout, 20);
+    const hit = found.hits[0] ?? null;
     if (hit && !allowSecret) {
       await runGit(worktree, ['reset', '-q']);
-      // The rule, file and line only, never the matched text.
-      const err = shipError('secret_detected', `The changes appear to contain a secret (${hit.rule}${hit.file ? ` at ${hit.file}:${hit.line}` : ''}). Remove it, then Ship again.`);
-      err.details = { rule: hit.rule, file: hit.file, line: hit.line };
+      // The rules, files and lines only, never the matched text.
+      const err = shipError('secret_detected', `The changes appear to contain ${found.total} secret hit(s) (first: ${hit.rule}${hit.file ? ` at ${hit.file}:${hit.line}` : ''}). Remove them, then Ship again.`);
+      err.details = { rule: hit.rule, file: hit.file, line: hit.line, hits: found.hits, total: found.total };
       throw err;
     }
-    if (hit) secretOverride = { rule: hit.rule, file: hit.file, line: hit.line };
+    if (hit) secretOverride = { rule: hit.rule, file: hit.file, line: hit.line, hits: found.hits, total: found.total };
     const signing = await runGit(worktree, ['config', '--bool', '--get', 'commit.gpgsign']);
     const signArgs = signing.stdout.trim() === 'true' ? [] : ['-c', 'commit.gpgsign=false'];
     const env = author?.name && author?.email

@@ -104,8 +104,10 @@ function localOrExampleHost(host) {
  * The first gated hit with file and line (never the text), or null. Lines are added diff lines; the line number
  * comes from the hunk header and advances for context and added lines, not for removals.
  */
-export function scanForSecretsDetailed(diffText) {
-  if (!diffText) return null;
+export function scanForSecretsHits(diffText, cap = 20) {
+  if (!diffText) return { hits: [], total: 0 };
+  const hits = [];
+  let total = 0;
   let file = null;
   let line = 0;
   let inHeader = false;
@@ -120,15 +122,19 @@ export function scanForSecretsDetailed(diffText) {
         const creds = [...added.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@["']?(\[[^\]]+\]|[A-Za-z0-9.-]+)(?=[:/?#"'(),\s]|$)/gi)];
         const local = creds.length > 0 && creds.every((m) => localOrExampleHost(m[1]));
         for (const { name, re, gate } of SECRET_RULES) {
-          if (gate === false) continue; // redaction-only heuristic: not a hard Ship gate
+          if (gate === false) continue;
           if (name === 'URL with credentials' && local) continue;
-          if (re.test(added)) return { rule: name, file, line };
+          if (re.test(added)) { total += 1; if (hits.length < cap) hits.push({ rule: name, file, line }); break; }
         }
       }
       line += 1;
     }
   }
-  return null;
+  return { hits, total };
+}
+
+export function scanForSecretsDetailed(diffText) {
+  return scanForSecretsHits(diffText, 1).hits[0] ?? null;
 }
 
 function safeBranchName(taskId) {

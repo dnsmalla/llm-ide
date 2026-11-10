@@ -47,7 +47,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   const [busy, setBusy] = useState(false);
   // In-app confirm bar. `window.confirm` is not used anywhere in this app and is unreliable in the Tauri webview.
   const [confirming, setConfirming] = useState<"ship" | "discard" | "anyway" | null>(null);
-  const [secretHit, setSecretHit] = useState<{ rule: string; file: string | null; line: number | null } | null>(null);
+  const [secretHit, setSecretHit] = useState<{ rule: string; file: string | null; line: number | null; hits: { rule: string; file: string | null; line: number }[]; total: number } | null>(null);
   const [shippedUrl, setShippedUrl] = useState<string | null>(null);
   const [message, setMessage] = useState<{ severity: "info" | "warning" | "error"; text: string } | null>(null);
   const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
@@ -107,12 +107,13 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
     } catch (e) {
       const code = typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : "error";
       const d = (e as { details?: Record<string, unknown> })?.details;
-      result = { ok: false, code, message: e instanceof Error ? e.message : "", ...(typeof d?.rule === "string" ? { rule: d.rule } : {}), ...(typeof d?.file === "string" ? { file: d.file } : {}), ...(typeof d?.line === "number" ? { line: d.line } : {}) };
+      const hits = Array.isArray(d?.hits) ? d.hits.filter((h): h is { rule: string; file: string | null; line: number } => typeof h === "object" && h !== null && typeof (h as { rule?: unknown }).rule === "string").slice(0, 20) : [];
+      result = { ok: false, code, message: e instanceof Error ? e.message : "", ...(typeof d?.rule === "string" ? { rule: d.rule } : {}), ...(typeof d?.file === "string" ? { file: d.file } : {}), ...(typeof d?.line === "number" ? { line: d.line } : {}), hits, total: typeof d?.total === "number" ? d.total : hits.length };
     } finally {
       setBusy(false);
     }
     const state = shipState(result);
-    if (state === "secret" && !result.ok) setSecretHit({ rule: result.rule ?? "secret", file: result.file ?? null, line: result.line ?? null });
+    if (state === "secret" && !result.ok) setSecretHit({ rule: result.rule ?? "secret", file: result.file ?? null, line: result.line ?? null, hits: result.hits ?? [], total: result.total ?? 1 });
     if (result.ok) setSecretHit(null);
     setMessage({ severity: state === "shipped" ? "info" : state === "secret" ? "error" : "warning", text: shipCopy(result) });
     // The worktree changed after the review: show the new diff before the user ships again.
@@ -208,7 +209,8 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       ) : null}
       {confirming === "anyway" && secretHit ? (
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm ship anyway">
-          <p className="loop-warn">Ship anyway despite {secretHit.rule}{secretHit.file ? ` at ${secretHit.file}${secretHit.line ? `:${secretHit.line}` : ""}` : ""}? This is logged in the run record. Remove the secret instead when possible.</p>
+          <p className="loop-warn">Ship anyway despite {secretHit.total} secret hit{secretHit.total === 1 ? "" : "s"}? This is logged in the run record. Remove them instead when possible.</p>
+          <ul>{secretHit.hits.map((h, i) => <li key={i}><code>{h.rule}{h.file ? ` at ${h.file}${h.line ? `:${h.line}` : ""}` : ""}</code></li>)}</ul>
           <div className="loop-inline">
             <button type="button" className="loop-btn loop-btn-primary" disabled={busy} onClick={() => void ship(true)}>Ship anyway</button>
             <button type="button" className="loop-btn" disabled={busy} onClick={() => setConfirming(null)}>Cancel</button>

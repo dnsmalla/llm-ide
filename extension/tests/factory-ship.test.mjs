@@ -206,16 +206,20 @@ test('ship refuses a planted fake token and creates no commit', async () => {
 test('ship anyway commits and pushes the reviewed diff when the user explicitly allows a secret hit', async () => {
   const fake = `ghp_${'Ab1'.repeat(12)}`;
   fs.writeFileSync(path.join(WT, 'src', 'leak2.txt'), `token = "${fake}"\n`);
+  fs.writeFileSync(path.join(WT, 'src', 'leak3.txt'), `token = "${fake}"\n`);
   fakeProvider(() => json(201, { html_url: 'https://github.com/o/r/pull/8' }));
   try {
     const r = await ship(shipBody({ allowSecret: true }));
     assert.equal(r.status, 200, r.raw);
-    assert.deepEqual(r.body.secretOverride, { rule: 'GitHub token', file: 'src/leak2.txt', line: 1 });
+    assert.equal(r.body.secretOverride.total, 2);
+    assert.deepEqual(r.body.secretOverride.hits.map((h) => h.file).sort(), ['src/leak2.txt', 'src/leak3.txt']);
+    assert.equal(r.body.secretOverride.rule, r.body.secretOverride.hits[0].rule);
     assert.equal(remoteHead(`refs/heads/${BRANCH}`), r.body.commit);
     assert.equal(r.raw.includes(fake), false, 'the secret is never echoed');
   } finally {
     _setPinnedFetchForTests(null);
     fs.rmSync(path.join(WT, 'src', 'leak2.txt'));
+    fs.rmSync(path.join(WT, 'src', 'leak3.txt'));
   }
 });
 
