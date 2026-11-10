@@ -300,3 +300,25 @@ export function stageTimeline(live: { log: readonly string[]; progress?: { stage
   if (current && !rows.has(current)) rows.set(current, "running");
   return [...rows].map(([name, state]) => ({ id: name, name, state }));
 }
+
+/** The card key after `key` in column order, or the first/last when key is null. */
+export function nextCardKey(board: Record<Column, CardView[]>, key: string | null, direction: "left" | "right" | "up" | "down"): string | null {
+  const columns = COLUMNS.filter((c) => board[c].length > 0);
+  if (columns.length === 0) return null;
+  const flat = COLUMNS.flatMap((c) => board[c].map((v) => ({ key: v.key, col: c })));
+  const current = key ? flat.find((x) => x.key === key) : null;
+  if (!current) return flat[0]?.key ?? null;
+  const allCols = COLUMNS;
+  const ci = allCols.indexOf(current.col);
+  if (direction === "left" || direction === "right") {
+    for (let i = ci + (direction === "right" ? 1 : -1); i >= 0 && i < allCols.length; i += direction === "right" ? 1 : -1) {
+      const col = board[allCols[i]];
+      if (col.length) return (col.find((v) => v.key === key) ?? col[0]).key;
+    }
+    return current.key;
+  }
+  const col = board[current.col];
+  const i = col.findIndex((v) => v.key === key);
+  const next = direction === "down" ? i + 1 : i - 1;
+  return col[Math.max(0, Math.min(col.length - 1, next))].key;
+}

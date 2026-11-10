@@ -14,7 +14,7 @@ import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
@@ -329,11 +329,22 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         </form>
       ) : null}
       <div className="fx-body">
-        <div className="fx-board" role="list" aria-label="Factory board">
+        <div className="fx-board" role="region" aria-label="Factory board" onKeyDown={(e) => {
+          const t = e.target as HTMLElement;
+          if (t.closest("input, textarea, select, [contenteditable=true]")) return;
+          const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" } as const;
+          const dir = map[e.key as keyof typeof map];
+          if (!dir) return;
+          const next = nextCardKey(board, selectedKey, dir);
+          if (!next) return;
+          e.preventDefault();
+          setSelectedKey(next);
+          requestAnimationFrame(() => (document.querySelector(`[data-key="${CSS.escape(next)}"] .fx-card-title`) as HTMLElement | null)?.focus());
+        }}>
           {COLUMNS.map((col) => (
-            <section key={col} className="fx-col" aria-label={`${COLUMN_LABELS[col]} (${board[col].length})`}>
+            <section key={col} className="fx-col" role="group" aria-label={`${COLUMN_LABELS[col]} (${board[col].length})`}>
               <h3 className="fx-col-title">{COLUMN_LABELS[col]} <span>{board[col].length}</span></h3>
-              <ul className="fx-cards">
+              <ul className="fx-cards" role="list" aria-label={`${COLUMN_LABELS[col]} cards`}>
                 {board[col].map((view) => {
                   const it = byKey.get(view.key) ?? null;
                   return (
@@ -369,7 +380,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                 <ul className="fx-timeline" aria-label="Stage timeline">
                   {stageTimeline(selLive).map((row) => <li key={row.id} className={`fx-stage fx-stage-${row.state}`}>{row.name} <span>{row.state}</span></li>)}
                 </ul>
-                <pre className="fx-log">{selLive.log.slice(-200).join("\n")}</pre>
+                <pre className="fx-log" role="log" aria-live="polite" aria-label="Run log">{selLive.log.slice(-200).join("\n")}</pre>
               </>
             ) : selFacts?.lastRecord ? (
               <p className="fx-hint">Last run {selFacts.lastRecord.runId}: {selFacts.lastRecord.statusCode}{selFacts.lastRecord.needsDecision ? ` — ${selFacts.lastRecord.needsDecision}` : ""}</p>

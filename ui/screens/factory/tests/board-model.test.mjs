@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -192,4 +192,13 @@ test("R-048: a typed timeline keeps early stages and resets a repeated stage to 
   assert.deepEqual(rows, [{ id: "i", name: "Implement", state: "running" }, { id: "v", name: "Verify", state: "passed" }]);
   const collapsed = stageTimeline({ log: ["$ Same", "$ Same"], progress: null });
   assert.deepEqual(collapsed.map((r) => r.id), ["Same"], "old-image fallback still merges by name; typed runs do not");
+});
+
+test("D4: nextCardKey moves within a column and into the next non-empty column", () => {
+  const board = { inbox: [{ key: "a" }, { key: "b" }], needsDecision: [], working: [{ key: "c" }], needsYou: [], readyToShip: [], shipped: [], done: [] };
+  assert.equal(nextCardKey(board, "a", "down"), "b");
+  assert.equal(nextCardKey(board, "a", "right"), "c");
+  assert.equal(nextCardKey(board, "c", "left"), "a");
+  assert.equal(nextCardKey(board, "b", "down"), "b");
+  assert.equal(nextCardKey(board, null, "down"), "a");
 });
