@@ -19,6 +19,8 @@ import { listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec
 import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
 
+const EMPTY_COPY: Record<Column, string> = { inbox: "No work items", needsDecision: "Nothing waiting for a decision", working: "No run in progress", needsYou: "Nothing needs you", readyToShip: "Nothing ready to ship", shipped: "No open PR/MR", done: "Nothing done yet" };
+
 // Wire the run manager to the real host once, when this chunk loads: startRun throws without it, and runs must
 // outlive this component (the Issues entry installs it the same way before it starts an intake run).
 installRunManagerHost();
@@ -44,6 +46,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [live, setLive] = useState<readonly LiveRun[]>(() => liveRuns());
   // One board timer for “4m 12s”, not one per card.
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [offline, setOffline] = useState(false);
+  const [retryAt, setRetryAt] = useState<number | null>(null);
   const [cap, setCap] = useState(() => concurrency());
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -99,6 +103,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       setWorktrees(wts);
       setInterrupted(marks);
       setError(null);
+      setOffline(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "The Factory items could not be read.");
     }
@@ -120,11 +125,13 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         if (r.status === 200) for (const [url, s] of decodeShipResults(r.body)) next.set(url, s);
       } catch {
         // Core unreachable: these cards keep their last known column (columnFor), never Inbox.
+        setOffline(true);
       }
       for (const q of chunk) if (!next.has(q.url)) next.set(q.url, "error");
     }
     // Rate limited: keep the statuses already shown instead of marking every card "status unavailable".
-    if (!rateLimited) setShip(next);
+    if (!rateLimited) { setShip(next); setRetryAt(null); }
+    else setRetryAt(Date.now() + STATUS_MIN_GAP_MS);
   }, []);
 
   // Shown: read the facts, then the PR/MR status, and again every 5 minutes while shown. Hidden or unmounted: no timer.
@@ -306,6 +313,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           </div>
         </div>
       ) : null}
+      {offline ? <StatusBanner severity="warning" message="The core is not reachable; the board is showing the last known state." onDismiss={() => setOffline(false)} /> : null}
+      {retryAt ? <p className="fx-hint" role="status">PR/MR status paused; retrying in {Math.max(0, Math.ceil((retryAt - nowMs) / 1000))}s.</p> : null}
       {error ? <StatusBanner severity="error" message={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} /> : null}
       {addOpen ? (
@@ -370,6 +379,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                   );
                 })}
               </ul>
+              {board[col].length === 0 ? <p className="fx-hint">{EMPTY_COPY[col]}</p> : null}
             </section>
           ))}
         </div>
