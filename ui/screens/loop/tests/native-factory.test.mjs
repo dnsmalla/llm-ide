@@ -146,7 +146,7 @@ test("work items come from issues, specs and free text", async () => {
   assert.equal(issues.length, 1);
   assert.equal(issues[0].body.length, 5000, "the body is not cut to the Issues screen's 2000 chars");
   const item = f.workItemFromIssue(issues[0]);
-  assert.deepEqual({ ...item, body: undefined }, { source: "issue", id: "12", title: "Fix login", body: undefined, repo: "acme/web" });
+  assert.deepEqual({ ...item, body: undefined }, { source: "issue", id: "12", title: "Fix login", body: undefined, repo: "acme/web", provider: "github" });
   assert.match(item.body, /Issue URL: https:\/\/github.com\/acme\/web\/issues\/12$/);
   assert.deepEqual(f.workItemFromSpec("llm-doc/specs/login.md", "intro\n# Login spec\nbody"), { source: "spec", id: "llm-doc/specs/login.md", title: "Login spec", body: "intro\n# Login spec\nbody", repo: null });
   assert.equal(f.workItemFromSpec("llm-doc/notes.md", "no heading").title, "notes.md");

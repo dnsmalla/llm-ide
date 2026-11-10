@@ -4,6 +4,7 @@
 // `WorkItem`; these return `WorkItemRecord` and are separate on purpose. Do not import the Phase A ones here.
 import type { FsApi } from "../explorer/fs";
 import type { Issue } from "../issues/issues-model.ts";
+import type { WorkItem } from "../loop/native/factory.ts";
 import type { RunMode } from "../loop/native/run-manager.ts";
 import { safeRelativePath } from "../shell/bus.ts";
 import type { ItemFacts } from "./columns.ts";
@@ -56,6 +57,23 @@ export async function sendToFactory(fs: ItemsFs, items: WorkItemRecord[], opts: 
     }
   }
   return { added: fresh.length, existing };
+}
+
+/**
+ * Puts a Loop-page Factory run on the board: its work item is stored (an item with the same source and id is reused)
+ * and the run id attached. Returns null on success, or the message to log. It never throws, so a failed board write
+ * cannot stop or fail the run.
+ */
+export async function putRunOnBoard(fs: ItemsFs, item: WorkItem, runId: string): Promise<string | null> {
+  try {
+    // An issue's board id is provider:repo#number, the key workItemFromIssue writes, so both screens reach one card.
+    const id = item.source === "issue" && item.provider && item.repo && item.id ? `${item.provider}:${item.repo}#${item.id}` : item.id;
+    const { record } = await addItem(fs, newWorkItem({ source: item.source, id, title: item.title, body: item.body, repo: item.repo, provider: item.provider ?? null }));
+    await attachRun(fs, record.key, runId);
+    return null;
+  } catch (e) {
+    return `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 /** What Start, Run intake and Resume do with a card: a fresh run, a reuse of its worktree, or a continue after intake. */

@@ -625,6 +625,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setShipRun(null);
     setRunningStage(true);
     setRunLog((l) => [...l, `▶ ${target.name}`, ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`] : []), ""]);
+    // Every Factory run is on the board. Loaded on demand, so the Loop screen does not hard-depend on the Factory chunk.
+    if (activeRun && isFactoryLoop(target) && start) {
+      const boardNote = await import("../../factory/intake.ts").then((m) => m.putRunOnBoard(fs, start.item, activeRun.runId), (e: unknown) => `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}`);
+      if (boardNote) setRunLog((l) => [...l, boardNote]);
+    }
     const started = Date.now();
     let summaryPath: string | null = null;
     try {
@@ -665,7 +670,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setNotice(outcome.cancelled ? (cancelledRef.current ? "The loop was cancelled." : outcome.statusSummary) : outcome.passed ? "The loop passed." : outcome.statusSummary);
       if (!outcome.cancelled) void notifyTask("loop", outcome.passed);
       const startedAt = new Date(started).toISOString();
-      const entry: LoopRunIndexEntry = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled) };
+      // factoryRunId + factoryMode: the board finds a card's last run through these fields (the run manager writes them too).
+      const entry: LoopRunIndexEntry & { factoryRunId?: string; factoryMode?: "full" } = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled), ...(activeRun && isFactoryLoop(target) ? { factoryRunId: activeRun.runId, factoryMode: "full" as const } : {}) };
       // One diff read per run end: ShipPanel gets it as a prop instead of re-reading (two parallel reads race on the
       // worktree's index.lock).
       const worktreeDiff = activeRun

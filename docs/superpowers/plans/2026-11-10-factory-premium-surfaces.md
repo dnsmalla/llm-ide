@@ -192,4 +192,4 @@ For every commit: `cd desktop && npm test`, `npx tsc --noEmit`, `make regression
 - **D3 secret override:** ALLOWED by the user on 2026-11-10. One explicit “ship anyway” confirm names rule/file/line (no matched text) and is logged in the run record; the hard block stays the default.
 - **D6:** virtualise only if the node model misses 50 ms; otherwise close as measured.
 - **D7:** needs the user at the window.
-- **Loop-page runs:** a Factory run started from the Loop page has no card, so no surface shows it. Recommended for a separate follow-up: `sendToFactory` + `attachRun` from that start so every run is on the board (this would also remove the clean-up special case). Not blocking D1.
+- **Loop-page runs:** DONE. A Factory run started from the Loop page is put on the board (`putRunOnBoard` in `ui/screens/factory/intake.ts`). The clean-up special case is kept: `cleanupPlan`'s `live` input still guards any active run. Not blocking D1.
