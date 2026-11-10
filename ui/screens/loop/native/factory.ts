@@ -54,7 +54,7 @@ export const FACTORY_TEMPLATE: LoopTemplate = {
       stage(6, { id: "factory/review", name: "Review", kind: "skill", skillId: FACTORY_REVIEW_SKILL, allowsRepair: false, outputPath: REVIEW_PATH, prompt: REVIEW_PROMPT }),
       stage(7, { id: "factory/review-gate", name: "Review gate", kind: "artifactCheck", check: { verdict: { path: REVIEW_PATH, line: "Verdict: approve" } }, allowsRepair: true }),
     ],
-    maxIterations: 10, consecutiveFailureStop: 2, wallClockBudgetSeconds: null, pauseTimeoutSeconds: 1800,
+    maxIterations: 10, consecutiveFailureStop: 2, wallClockBudgetSeconds: 7200, pauseTimeoutSeconds: 1800,
     maxRepairsPerStage: 3, repairModel: null, protectedPathPolicy: "revert", writeSummaryNote: false,
     extraProtectedGlobs: [], useWorktreesForConcurrentRuns: false, alwaysUseWorktree: true, openMergeRequest: true,
     refactorBatchesPerRun: null,
