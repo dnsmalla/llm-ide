@@ -10,7 +10,7 @@ import { usedUsdMonth } from '../../kb/usage.mjs';
 import {
   createCommand, getCommand, getCommandArgs, approveCommand, denyCommand, cancelPending, expireStale, expireStaleAllSystem,
   ensureTerminal, appendEvent, terminalFor, backfillTerminalsSystem, purgeOldCommandsSystem, isKindEnabled, ERROR_CODES,
-  expireDesktopLeasesSystem,
+  expireDesktopLeasesSystem, expireOldDesktopCommandsSystem,
 } from '../../kb/bus-store.mjs';
 import { reapOrphanedRunningSystem } from '../../kb/job-queue.mjs';
 import { resolveProjectRoot } from '../../kb/project-roots.mjs';
@@ -191,7 +191,7 @@ export function createBus({
     return reaped;
   }
   const sweep = () => {
-    try { sweepOrphans(); expireStaleAllSystem(); expireDesktopLeasesSystem(); purgeOldCommandsSystem(); backfillTerminalsSystem(); }
+    try { sweepOrphans(); expireStaleAllSystem(); expireDesktopLeasesSystem(); expireOldDesktopCommandsSystem(); purgeOldCommandsSystem(); backfillTerminalsSystem(); }
     catch (e) { log('warn', 'bus_sweep_failed', { error: String(e?.message || e) }); }
   };
 

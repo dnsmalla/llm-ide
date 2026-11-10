@@ -414,6 +414,28 @@ export function expireDesktopLeasesSystem({ now = Date.now() } = {}) {
   })();
 }
 
+/** A desktop-queued command older than this is expired, not started when the desktop opens days later. */
+export const DESKTOP_COMMAND_MAX_AGE_MS = 24 * 3600_000;
+
+/** Expire queued desktop-runner commands older than maxAgeMs, with one terminal event each. */
+export function expireOldDesktopCommandsSystem({ now = Date.now(), maxAgeMs = DESKTOP_COMMAND_MAX_AGE_MS } = {}) {
+  const db = getDb();
+  const cutoff = new Date(now - maxAgeMs).toISOString();
+  return db.transaction(() => {
+    const rows = db.prepare(`SELECT c.id, c.user_id FROM bus_commands c JOIN jobs j ON j.id = c.id AND j.user_id = c.user_id
+      WHERE c.state = 'enqueued' AND j.runner = 'desktop' AND j.state = 'queued' AND c.created_at <= ?`).all(cutoff);
+    const out = [];
+    for (const r of rows) {
+      const changed = db.prepare("UPDATE jobs SET state='cancelled', error=?, finished_at=?, updated_at=? WHERE id=? AND state='queued'").run('desktop_command_expired', new Date(now).toISOString(), new Date(now).toISOString(), r.id).changes;
+      if (!changed) continue;
+      db.prepare("UPDATE bus_commands SET state='expired', decided_at=? WHERE user_id=? AND id=? AND state='enqueued'").run(new Date(now).toISOString(), r.user_id, r.id);
+      appendEvent(r.user_id, r.id, { type: 'error', terminal: true, payload: { code: 'expired', message: 'the desktop did not start this command within 24 hours' } });
+      out.push({ id: r.id, userId: r.user_id });
+    }
+    return out;
+  })();
+}
+
 /** This user's approved desktop-runner commands no live lease holds, oldest first (GET /bus/claimable). No token. */
 export function listClaimableCommands(userId, kinds = [], { limit = 50 } = {}) {
   const wanted = (Array.isArray(kinds) ? kinds : []).filter((k) => typeof k === 'string' && k);
