@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isProtectedPath, protectedPaths } from "../native/protected.ts";
+import { isProtectedPath, protectedPaths, isCiHookPath, sensitiveChangedFiles } from "../native/protected.ts";
 
 test("protected paths cover tests, build config and Loop state", () => {
   assert.equal(isProtectedPath("Tests/A.swift"), true);
@@ -10,6 +10,22 @@ test("protected paths cover tests, build config and Loop state", () => {
   assert.equal(isProtectedPath("src/app.ts"), false);
   assert.deepEqual(protectedPaths(["src/app.ts", "Tests/A.swift"], []), ["Tests/A.swift"]);
   assert.equal(isProtectedPath("Tests/A.swift", ["!Tests/A.swift"]), false);
+});
+
+test("A5: CI and hook files are protected for everyone, case-insensitively", () => {
+  for (const p of [".github/workflows/ci.yml", "pkg/.github/workflows/ci.yml", ".gitlab-ci.yml", "sub/.gitlab-ci.yml", ".husky/pre-commit", ".circleci/config.yml", "lefthook.yml", "nested/lefthook.yml", ".pre-commit-config.yaml"]) {
+    assert.equal(isProtectedPath(p), true, p);
+    assert.equal(isCiHookPath(p), true, p);
+    assert.equal(isCiHookPath(p.toUpperCase()), true, `${p} in another case`);
+  }
+  for (const p of [".github/ISSUE_TEMPLATE/x.md", "src/ci.yml", ".huskyrc", "lefthook.yaml", "docs/lefthook.yml.md"]) assert.equal(isCiHookPath(p), false, p);
+  assert.equal(isProtectedPath("package.json", []), true, "build config stays protected");
+  assert.equal(isCiHookPath("package.json"), false);
+});
+
+test("A5: the Ship panel lists sensitive files changed (build config, CI, hooks) but not tests", () => {
+  assert.deepEqual(sensitiveChangedFiles(["package.json", "src/a.ts", "Makefile", ".github/workflows/ci.yml", ".husky/pre-commit", "tests/a.test.ts", "lefthook.yml"]), ["package.json", "Makefile", ".github/workflows/ci.yml", ".husky/pre-commit", "lefthook.yml"]);
+  assert.deepEqual(sensitiveChangedFiles(["src/a.ts"]), []);
 });
 
 test("scope globs flag changed paths that match none of them; blank or empty globs are unrestricted", async () => {

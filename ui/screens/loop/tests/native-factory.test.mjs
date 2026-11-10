@@ -124,6 +124,10 @@ test("factory loops are recognised by defaultKey and guard paths exclude .factor
   assert.deepEqual(f.guardedPaths(factory, null, paths), ["src/a.ts", "tests/a.test.ts"], "repairs: only .factory is exempt");
   assert.deepEqual(f.guardedPaths(factory, s[6], paths), ["src/a.ts", "tests/a.test.ts"]);
   assert.deepEqual(f.guardedPaths(factory, s[4], paths), [], "Implement writes tests by design");
+  // A5: Implement's exemption covers tests and build config only; CI and hook files are still judged.
+  const sensitive = ["tests/a.test.ts", "package.json", "Makefile", ".github/workflows/ci.yml", "pkg/.gitlab-ci.yml", ".husky/pre-commit", "lefthook.yml", "src/a.ts"];
+  assert.deepEqual(f.guardedPaths(factory, s[4], sensitive), [".github/workflows/ci.yml", "pkg/.gitlab-ci.yml", ".husky/pre-commit", "lefthook.yml"]);
+  assert.deepEqual(f.guardedPaths(factory, null, sensitive), ["tests/a.test.ts", "package.json", "Makefile", ".github/workflows/ci.yml", "pkg/.gitlab-ci.yml", ".husky/pre-commit", "lefthook.yml", "src/a.ts"], "a repair is fully checked");
 });
 
 test("work items come from issues, specs and free text", async () => {

@@ -5,6 +5,7 @@ import type { FsApi } from "../../explorer/fs";
 import { repoSlugOf, type RepoConfig } from "../../settings/repo-config.ts";
 import { DETECTED_TEST } from "./environment.ts";
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
+import { isCiHookPath } from "./protected.ts";
 import type { LoopRunOutcome } from "./runner.ts";
 import type { LoopTemplate } from "./templates.ts";
 
@@ -118,12 +119,15 @@ export function agentRunBody(a: {
 
 /**
  * The written paths the protected-path/scope guard judges. `.factory/` (the run's own reports) is never judged. In a
- * Factory loop the Implement stage writes tests and code by design (Verify and Review judge it); its repairs do not
- * get that exemption (`stage` is null for a repair call).
+ * Factory loop the Implement stage writes tests and code by design (Verify and Review judge it), so it is exempt from
+ * the test and build-config globs; CI and hook files still apply to it. Its repairs do not get that exemption
+ * (`stage` is null for a repair call).
  */
 export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind" | "skillId"> | null, paths: readonly string[]): string[] {
   if (!isFactoryLoop(loop)) return [...paths];
-  if (stage && stage.kind === "skill" && stage.skillId === FACTORY_IMPLEMENT_SKILL) return [];
+  if (stage && stage.kind === "skill" && stage.skillId === FACTORY_IMPLEMENT_SKILL) {
+    return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/") && isCiHookPath(p));
+  }
   return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/"));
 }
 

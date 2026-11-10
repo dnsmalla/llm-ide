@@ -1,14 +1,38 @@
 // Protected-path guard for agent edits. Mirrors the Mac's default groups: tests, build/verify config, the Loop's
 // machine data and its own contract. `!glob` exemptions are supported; a bare "!" is ignored. The runner reverts a
 // protected path through the host and fails the stage rather than letting a repair rewrite the verdict.
+// CI and hook files are protected for EVERY stage, including Factory Implement: an agent that may write tests by
+// design must still not rewrite the pipeline that judges it (R-036 A5).
+export const CI_HOOK_PROTECTED_GLOBS = [
+  ".github/workflows/**", "**/.github/workflows/**",
+  ".gitlab-ci.yml", "**/.gitlab-ci.yml",
+  ".husky/**", "**/.husky/**",
+  ".circleci/**", "**/.circleci/**",
+  "lefthook.yml", "**/lefthook.yml",
+  ".pre-commit-config.yaml", "**/.pre-commit-config.yaml",
+];
+
 export const DEFAULT_PROTECTED_GLOBS = [
   "**/Tests/**", "**/tests/**", "**/test/**", "**/__tests__/**",
   "**/*Tests.swift", "**/*Test.swift", "**/*.test.mjs", "**/*.test.ts", "**/*.test.js", "**/*.test.tsx",
   "**/*_test.go", "**/test_*.py", "**/*_test.py", "**/*.spec.ts", "**/*.spec.js",
   "Makefile", "**/Makefile", "**/Package.swift", "**/package.json", "pytest.ini", "**/pytest.ini",
-  "**/pyproject.toml", "**/setup.cfg", ".githooks/**", "**/jest.config.js", "**/vitest.config.ts",
+  "**/pyproject.toml", "**/setup.cfg", ".githooks/**", "**/.githooks/**", "**/jest.config.js", "**/vitest.config.ts",
+  ...CI_HOOK_PROTECTED_GLOBS,
   "**/system/faults.csv", "**/system/faults/**", "**/system/loop-runs/**", "**/system/loop/**", "**/system/loop.json",
 ];
+
+// Files the Ship panel calls out before the final confirm: a change to the build, the pipeline or a hook is the kind
+// of thing a Review can miss. Tests are not listed (Implement writes them by design and Review judges them).
+export const SENSITIVE_SHIP_GLOBS = [
+  "package.json", "**/package.json", "Makefile", "**/Makefile", ".githooks/**", "**/.githooks/**",
+  ...CI_HOOK_PROTECTED_GLOBS,
+];
+
+/** A glob match; case-insensitive so a `.GitHub/workflows` or `.FACTORY` spelling on a case-folding filesystem is the same path. */
+function globMatch(glob: string, path: string): boolean {
+  return globRe(glob).test(path) || globRe(glob.toLowerCase()).test(path.toLowerCase());
+}
 
 function globRe(glob: string): RegExp {
   let out = "";
@@ -29,10 +53,20 @@ export function isProtectedPath(path: string, extra: readonly string[] = []): bo
   for (const glob of globs) {
     if (glob.startsWith("!")) {
       const pattern = glob.slice(1).trim();
-      if (pattern && globRe(pattern).test(path)) return false;
-    } else if (!hit && globRe(glob).test(path)) hit = true;
+      if (pattern && globMatch(pattern, path)) return false;
+    } else if (!hit && globMatch(glob, path)) hit = true;
   }
   return hit;
+}
+
+/** True when `path` is a CI pipeline or hook file (protected even for the Implement stage). */
+export function isCiHookPath(path: string): boolean {
+  return CI_HOOK_PROTECTED_GLOBS.some((glob) => globMatch(glob, path));
+}
+
+/** The changed files the Ship panel lists as sensitive (build config, CI, hooks), in diff order. */
+export function sensitiveChangedFiles(paths: readonly string[]): string[] {
+  return [...new Set(paths.filter((p) => SENSITIVE_SHIP_GLOBS.some((glob) => globMatch(glob, p))))];
 }
 
 export function protectedPaths(paths: readonly string[], extra: readonly string[] = []): string[] {

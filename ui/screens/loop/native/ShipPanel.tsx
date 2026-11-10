@@ -9,6 +9,7 @@ import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
 import { readRepoConfig } from "../../settings/repo-config.ts";
 import type { WorkItem } from "./factory.ts";
+import { sensitiveChangedFiles } from "./protected.ts";
 import { decodeWorktreeDiff, diffLineKind, reviewedPatchIdWarning, shipBlockedReason, shipCopy, shipRequest, shipState, shipTarget, splitDiffByFile, type ShipResult, type WorktreeDiff } from "./ship-model.ts";
 import type { RunInfo } from "./worktree-run.ts";
 
@@ -114,6 +115,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   };
 
   const files = diff ? splitDiffByFile(diff.text) : [];
+  const sensitive = diff ? sensitiveChangedFiles(diff.files) : [];
   return (
     <section className="loop-card loop-ship" aria-label="Review and ship">
       <div className="loop-inline"><h2>REVIEW AND SHIP</h2><span className="loop-spacer" /><button type="button" className="loop-btn" disabled={busy} onClick={onClose}>Close</button></div>
@@ -140,6 +142,12 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       {!passed ? <p className="loop-native-hint">Ship is offered only after a passed run. You can still discard this worktree.</p> : null}
       {passed && blocked ? <p className="loop-warn">{blocked}</p> : null}
       <label className="loop-field"><span>Target branch</span><input value={base} disabled={busy} onChange={(e) => setBase(e.target.value)} /></label>
+      {sensitive.length > 0 ? (
+        <div className="loop-warn" role="note" aria-label="Sensitive files changed">
+          <p>Sensitive files changed — check these before shipping:</p>
+          <ul>{sensitive.map((p) => <li key={p}><code>{displayText(p)}</code></li>)}</ul>
+        </div>
+      ) : null}
       {confirming === "ship" && target ? (
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm ship">
           <p className="loop-warn">{`Ship ${info.branch} as a ${kind} to ${target.slug} (${target.provider}), into ${base.trim() || "(no target branch)"}? This commits the worktree changes (never .factory/), pushes ${info.branch} with your git credentials and opens a ${kind}. Nothing is merged.`}</p>
