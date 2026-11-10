@@ -2,7 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Plan only — this document changes no code.
+**Status 2026-11-10 (Task 16 closed).** Tasks 1–15 are on `main`; Task 16 is done on this branch. The registry is the only task catalog: the dead bridge screen `AutoTasksScreen.tsx`, the Mac-only set and the "Mac app only" copy are deleted; the usage ledger resolves through the registry (`loopEngineering` aside, below); the reference is `docs/reference/task-registry.md`. Carry-overs A–D from Tasks 14–15 are fixed, except C, which is correct as written and reported below.
+
+Known limits (also in `docs/reference/task-registry.md`): (1) Factory stages carry no `promptRef`, so a registry prompt change does not reach existing Factory loops. (2) `loop.refactor_apply` and `loop.refactor_conform` are registered `available`, but the Loop still refuses an enabled batch stage because batch rollback is not ported; the registry should say `unported`. (3) `loopEngineering` has no registry entry. (4) The Loop page's own cron is a second scheduler and fires only while the Loop page is open. (5) Custom Implement mode still says "Mac app only" (custom tasks are not registry tasks). (6) `ui/screens/bridge/` lost its only importer and is still present.
+
+Checkboxes: Task 16 steps 1–4 are ticked. Tasks 1–15 were not re-verified step by step in this pass, so their boxes stay unticked.
 
 **Goal:** One implementation per task, referenced by Auto Tasks, Loop templates/stages, the Factory/Ship pipeline and the review surfaces, so a prompt, policy or runner change reaches every surface; migrate one task per commit; delete the duplicated prompts and catalogs only after both surfaces read the registry.
 
@@ -1364,19 +1368,19 @@ git commit -am "feat(tasks): project-scoped task config and one scheduler for bu
 
 **Interfaces:** none new; this task removes the old paths and proves the registry is the only one.
 
-- [ ] **Step 1: Write the failing test.** `no-duplicates.test.mjs` walks `ui/screens` and `extension/routes` and asserts:
+- [x] **Step 1: Write the failing test.** `no-duplicates.test.mjs` walks `ui/screens` and `extension/routes` and asserts:
   - no file outside `schema/tasks/prompts/` contains the first 40 characters of any prompt (a cheap duplicate detector; use the generated prompt hash);
   - `AutoTasksScreen.tsx` does not exist;
   - `rg` finds no `MAC_ONLY_TASK_IDS`, `MAC_ONLY_MESSAGE`, `LOCAL_TASKS`, `const TASKS: readonly AutoTaskDef[]` in `ui/screens/autotasks`;
   - `runTask` is the only exported entry point the Auto Tasks screen calls for a task.
 
-- [ ] **Step 2: Delete the dead screen and the old catalogs.** Confirm no importer first: `grep -R "AutoTasksScreen" ui desktop web --include=*.ts --include=*.tsx --include=*.mjs` returns only the file itself. Delete it. Remove the `loopEngineering` reference (it was only in the old screen).
+- [x] **Step 2: Delete the dead screen and the old catalogs.** Confirm no importer first: `grep -R "AutoTasksScreen" ui desktop web --include=*.ts --include=*.tsx --include=*.mjs` returns only the file itself. Delete it. Remove the `loopEngineering` reference (it was only in the old screen).
 
   If `NativeAutoTasksScreen.tsx` still imports `TASKS`/`TASK_BY_ID` from `autotasks/native/model.ts`, change those imports to `ui/screens/tasks/model.ts` (or leave a one-line re-export) before deleting the local arrays; the screen must not lose its catalog. Keep the pure helpers that are not catalogs: `agentRunSucceeded` (used by `ui/screens/loop/native/stage-exec.ts:7`), `normalizeProjectPath` (used by the folder picker), `composeTaskMessage` (the effective-prompt preview) and `resetTemplateTitle`/`RESET_TEMPLATE_MESSAGE` (the reset dialog). Move them to `ui/screens/tasks/text.ts` if `autotasks/native/model.ts` should become a thin re-export, or leave them in place and delete only `TASKS`, `TASK_BY_ID`, `MAC_ONLY_TASK_IDS`, `MAC_ONLY_MESSAGE`, `blankConfig`, `defaultState`, `loadState`, `saveState` and the local `desktopRunnable`/`scheduledRunAllowed`. Do not delete a helper another module imports.
 
-- [ ] **Step 3: Update the usage script.** `scripts/auto-task-usage.mjs` reads `ui/screens/tasks/registry.generated.ts`? It is a Node script outside the UI; simplest is to read `schema/tasks/registry.json` with `readFileSync` and build `BUILT_IN_TASKS` from `tasks.map(t => t.id)` plus aliases. The ledger suffix map stays for old records (`source-update` -> `sourceUpdate` -> `sourceUpdate` alias -> `sources.update`). Add a test that every ledger suffix resolves to a registry id.
+- [x] **Step 3: Update the usage script.** `scripts/auto-task-usage.mjs` reads `ui/screens/tasks/registry.generated.ts`? It is a Node script outside the UI; simplest is to read `schema/tasks/registry.json` with `readFileSync` and build `BUILT_IN_TASKS` from `tasks.map(t => t.id)` plus aliases. The ledger suffix map stays for old records (`source-update` -> `sourceUpdate` -> `sourceUpdate` alias -> `sources.update`). Add a test that every ledger suffix resolves to a registry id.
 
-- [ ] **Step 4: Update docs.** `docs/spec/command-bus.md` §5: add one paragraph that task ids are the UI vocabulary and bus kinds are the wire vocabulary, and that `loop.run`/`custom.run` remain unavailable (the `issues.from_notes` row was updated in Task 9, with the fixtures). Add `docs/reference/task-registry.md` with the schema, the generation commands and the "no prompt outside `schema/tasks/prompts`" rule. Link it from `docs/reference/project-structure.md` and `extension/CLAUDE.md` (one line each).
+- [x] **Step 4: Update docs.** `docs/spec/command-bus.md` §5: add one paragraph that task ids are the UI vocabulary and bus kinds are the wire vocabulary, and that `loop.run`/`custom.run` remain unavailable (the `issues.from_notes` row was updated in Task 9, with the fixtures). Add `docs/reference/task-registry.md` with the schema, the generation commands and the "no prompt outside `schema/tasks/prompts`" rule. Link it from `docs/reference/project-structure.md` and `extension/CLAUDE.md` (one line each).
 
 - [ ] **Step 5: Full gates.**
 
