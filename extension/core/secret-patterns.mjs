@@ -15,11 +15,14 @@
 export const SECRET_SHAPES = Object.freeze([
   // GitHub: classic (ghp_ PAT, gho_ OAuth, ghu_ user-to-server, ghs_ server-to-server, ghr_ refresh) and the
   // fine-grained github_pat_ shape.
-  { name: 'GitHub token', re: /\b(?:gh[oprsu]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{80,})\b/ },
+  { name: 'GitHub token', re: /\b(?:gh[oprsu]_[A-Za-z0-9]{36,128}|github_pat_[A-Za-z0-9_]{80,256})\b/ },
+  // The fixed 36-char classic shape is what the storage redactor's wrap-safe pass can bound exactly.
+  { name: 'GitHub token', re: /\bgh[oprsu]_[A-Za-z0-9]{36}\b/ },
   // GitLab: glpat- PAT, glrt- runner, glcbt- CI job, gldt- deploy, … (the project's own tracker is GitLab-hosted).
   { name: 'GitLab token', re: /\bgl(?:pat|oas|rt|cbt|ptt|ft|imt|agent|soat|dt|ffct)-[A-Za-z0-9_-]{20,}\b/ },
   { name: 'Stripe live key', re: /\b(?:sk|rk)_live_[A-Za-z0-9]{10,}\b/ },
-  { name: 'npm token', re: /\bnpm_[A-Za-z0-9]{36,}\b/ },
+  { name: 'npm token', re: /\bnpm_[A-Za-z0-9]{36,128}\b/ },
+  { name: 'npm token', re: /\bnpm_[A-Za-z0-9]{36}\b/ },
   // Anthropic / OpenAI before the generic sk- rule, so a specific key is reported under its own name.
   { name: 'Anthropic API key', re: /\bsk-ant-[A-Za-z0-9-]{10,}\b/ },
   { name: 'OpenAI project key', re: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/ },

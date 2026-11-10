@@ -83,7 +83,7 @@ export function hasSecretShape(input) {
 // (No pattern puts `\b` inside a character class — there it would mean
 // backspace and this strip would corrupt it; keep it that way.)
 const WRAP_SAFE_PATTERNS = STORAGE_PATTERNS
-  .filter((re) => /\{\d+\}/.test(re.source) && !/\{\d+,\}/.test(re.source))
+  .filter((re) => /\{\d+\}/.test(re.source) && !/\{\d+,\d*\}/.test(re.source))
   .map((re) => new RegExp(re.source.replace(/\\b/g, ''), re.flags));
 
 // Match `patterns` against `s` with every `sepRe` character removed, and
