@@ -40,6 +40,150 @@ export const TASKS: readonly TaskDef[] = [
     "revision": 1
   },
   {
+    "id": "factory.implement",
+    "label": "Factory implement",
+    "group": "Factory",
+    "description": "Factory stage: implement .factory/PLAN.md test first, changing only what the plan needs.",
+    "aliases": [],
+    "runner": {
+      "kind": "agent",
+      "prompt": "prompts/factory.implement.md"
+    },
+    "input": {
+      "kind": "repo",
+      "required": true,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
+    "id": "factory.intake",
+    "label": "Factory intake",
+    "group": "Factory",
+    "description": "Factory stage: read the work item, compare it with the code and llm-doc/, and write .factory/READINESS.md.",
+    "aliases": [],
+    "runner": {
+      "kind": "agent",
+      "prompt": "prompts/factory.intake.md"
+    },
+    "input": {
+      "kind": "repo",
+      "required": true,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
+    "id": "factory.plan",
+    "label": "Factory plan",
+    "group": "Factory",
+    "description": "Factory stage: write a short, test-first implementation plan to .factory/PLAN.md. Changes no code.",
+    "aliases": [],
+    "runner": {
+      "kind": "agent",
+      "prompt": "prompts/factory.plan.md"
+    },
+    "input": {
+      "kind": "repo",
+      "required": true,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
+    "id": "factory.review",
+    "label": "Factory review",
+    "group": "Factory",
+    "description": "Factory stage: review the diff against the work item and plan, and write .factory/REVIEW.md.",
+    "aliases": [],
+    "runner": {
+      "kind": "agent",
+      "prompt": "prompts/factory.review.md"
+    },
+    "input": {
+      "kind": "repo",
+      "required": true,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
     "id": "issues.from_notes",
     "label": "Sources → Issue",
     "group": "Pipeline",
