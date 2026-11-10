@@ -17,7 +17,12 @@
   "response": {
     "error": {
       "code": "secret_detected",
-      "message": "The changes appear to contain a secret (GitHub token). Remove it, then Ship again."
+      "message": "The changes appear to contain a secret (GitHub token at src/a.ts:2). Remove it, then Ship again.",
+      "details": {
+        "rule": "GitHub token",
+        "file": "src/a.ts",
+        "line": 2
+      }
     }
   }
 }

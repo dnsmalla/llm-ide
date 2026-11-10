@@ -434,7 +434,7 @@ async function handleLoopShip(req, res, { userId } = {}, deps = {}) {
     ({ commit } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId }));
   } catch (err) {
     const known = Object.hasOwn(SHIP_STATUS, err?.code);
-    return shipFail(res, known ? SHIP_STATUS[err.code] : 500, known ? err.code : 'commit_failed', known ? err.message : 'The commit could not be made.', err?.details ?? null);
+    return shipFail(res, known ? SHIP_STATUS[err.code] : 500, known ? err.code : 'commit_failed', known ? err.message : 'The commit could not be made.', err?.details ? { details: err.details } : null);
   }
   let url = null;
   let reused = false;

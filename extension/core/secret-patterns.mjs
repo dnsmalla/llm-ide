@@ -48,7 +48,9 @@ export const SECRET_SHAPES = Object.freeze([
   // password: … / token: … in a config or log line.
   // Config-style credential literals stay a HARD gate (R-044 #1): a keyword followed by a quoted 20+ value, or an
   // unquoted value ending the line. Identifier/call forms (`const token = generate...`) are left to redaction.
-  { name: 'Credential literal', re: /(?:client[_-]?secret|api[_-]?key|secret[_-]?key|access[_-]?token|password|passwd)\s*[:=]\s*(?:"[^"]{20,}"|'[^']{20,}'|[A-Za-z0-9/+_-]{20,}\s*$)/i },
+  // The value must look like a secret (no whitespace/dots/${}/<>), with a digit AND a letter; UI copy,
+  // template references and env paths are not literals. A quoted key (`"password":`) is accepted.
+  { name: 'Credential literal', re: /["']?(?:client[_-]?secret|api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|secret|token|password|passwd)["']?\s*[:=]\s*(?:"(?=[A-Za-z0-9+/_-]*\d)(?=[A-Za-z0-9+/_-]*[A-Za-z])[A-Za-z0-9+/_-]{20,}"|'(?=[A-Za-z0-9+/_-]*\d)(?=[A-Za-z0-9+/_-]*[A-Za-z])[A-Za-z0-9+/_-]{20,}'|(?=[A-Za-z0-9+/_-]*\d)(?=[A-Za-z0-9+/_-]*[A-Za-z])[A-Za-z0-9+/_-]{20,}\s*$)/i },
   { name: 'Generic credential', gate: false, re: /(?:secret|token|password|passwd)["'\s:=]+[A-Za-z0-9/+_-]{20,}/i },
   { name: 'Bearer token', gate: false, re: /Bearer\s+[A-Za-z0-9._-]{20,}/i },
   { name: 'apiKey parameter', gate: false, re: /apiKey=[A-Za-z0-9_-]+/i },

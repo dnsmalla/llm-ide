@@ -50,6 +50,8 @@ test("shipState maps secret_detected to a secret message that contains no diff t
   const copy = m.shipCopy(secret);
   assert.doesNotMatch(copy, /ghp_|const token/);
   assert.match(copy, /Nothing was pushed/);
+  assert.match(m.shipCopy({ ...secret, rule: "GitHub token", file: "src/a.ts", line: 2 }), /GitHub token at src\/a\.ts:2/);
+  assert.doesNotMatch(m.shipCopy({ ...secret, rule: "x", file: "/etc/passwd" }), /\/etc\/passwd/, "an absolute path is not echoed");
   assert.equal(m.shipState({ ok: false, code: "push_rejected" }), "rejected");
   assert.match(m.shipCopy({ ok: false, code: "push_rejected", message: "remote: secret hook said no" }), /No pull request or merge request was opened/);
   assert.equal(m.shipState({ ok: false, code: "provider_error" }), "error");

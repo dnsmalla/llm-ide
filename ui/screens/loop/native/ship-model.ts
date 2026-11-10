@@ -6,7 +6,7 @@ import type { RunInfo } from "./worktree-run.ts";
 
 /** The `POST /kb/loop/ship` body. `repo` is the provider slug (owner/name), never a path. */
 export interface ShipBody { worktree: string; branch: string; provider: "github" | "gitlab"; repo: string; base: string; title: string; body: string; patchId: string }
-export type ShipResult = { ok: true; url: string; commit: string; reused: boolean } | { ok: false; code: string; message?: string };
+export type ShipResult = { ok: true; url: string; commit: string; reused: boolean } | { ok: false; code: string; message?: string; rule?: string; file?: string; line?: number };
 export type ShipState = "shipped" | "secret" | "rejected" | "changed" | "error";
 export interface WorktreeDiff { text: string; truncated: boolean; patchId: string; files: string[] }
 export interface DiffFile { path: string; lines: string[] }
@@ -49,8 +49,14 @@ export function shipCopy(result: ShipResult): string {
       const r = result as Extract<ShipResult, { ok: true }>;
       return r.reused ? `Pushed commit ${r.commit.slice(0, 7)}; the existing draft is updated: ${r.url}` : `Opened a draft: ${r.url}`;
     }
-    case "secret":
-      return "Ship stopped: the secret scan found what looks like a credential in the changes. Nothing was pushed. Remove it in the worktree and ship again.";
+    case "secret": {
+      const r = result as Extract<ShipResult, { ok: false }>;
+      const rule = typeof r.rule === "string" && /^[A-Za-z0-9 /()-]{1,60}$/.test(r.rule) ? r.rule : null;
+      const file = typeof r.file === "string" && /^[A-Za-z0-9._/-]{1,300}$/.test(r.file) && !r.file.startsWith("/") ? r.file : null;
+      const line = typeof r.line === "number" && Number.isInteger(r.line) && r.line > 0 ? r.line : null;
+      const where = rule ? ` (${rule}${file ? ` at ${file}${line ? `:${line}` : ""}` : ""})` : "";
+      return `Ship stopped: the secret scan found what looks like a credential${where}. Nothing was pushed. Remove it in the worktree and ship again.`;
+    }
     case "rejected":
       return "The remote rejected the push. No pull request or merge request was opened. Check branch protection and your git credentials, then ship again.";
     case "changed":

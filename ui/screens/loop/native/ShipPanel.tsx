@@ -90,7 +90,8 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       result = { ok: true, url: typeof r.url === "string" ? r.url : "", commit: typeof r.commit === "string" ? r.commit : "", reused: r.reused === true };
     } catch (e) {
       const code = typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : "error";
-      result = { ok: false, code, message: e instanceof Error ? e.message : "" };
+      const d = (e as { details?: Record<string, unknown> })?.details;
+      result = { ok: false, code, message: e instanceof Error ? e.message : "", ...(typeof d?.rule === "string" ? { rule: d.rule } : {}), ...(typeof d?.file === "string" ? { file: d.file } : {}), ...(typeof d?.line === "number" ? { line: d.line } : {}) };
     } finally {
       setBusy(false);
     }

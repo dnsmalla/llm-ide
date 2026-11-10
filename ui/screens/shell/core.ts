@@ -41,6 +41,7 @@ export class CoreError extends Error {
     readonly status: number,
     readonly code: CoreErrorCode,
     message: string,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "CoreError";
@@ -171,6 +172,7 @@ function linkSignal(parent: AbortSignal | undefined, timeoutMs: number): { signa
 async function errorFromResponse(res: Response): Promise<CoreError> {
   let code = "HTTP_ERROR";
   let message = `Request failed (${res.status})`;
+  let details: Record<string, unknown> | undefined;
   try {
     const body: unknown = await res.json();
     if (body && typeof body === "object") {
@@ -179,11 +181,13 @@ async function errorFromResponse(res: Response): Promise<CoreError> {
       if (typeof env.code === "string") code = env.code;
       else if (typeof b.error === "string") code = b.error;
       if (typeof env.message === "string") message = env.message;
+      const ed = env.details && typeof env.details === 'object' ? env.details as Record<string, unknown> : {};
+      details = { rule: ed.rule, file: ed.file, line: ed.line };
     }
   } catch {
     // not JSON: keep the generic message
   }
-  return new CoreError(res.status, code, message);
+  return new CoreError(res.status, code, message, details);
 }
 
 function parseSession(body: unknown): { tokens: Omit<Tokens, "expiresAt"> & { ttlSec: number }; user: SessionUser | null } {

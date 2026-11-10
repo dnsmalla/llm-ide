@@ -98,3 +98,38 @@ test("a diff hit reports rule, file and line, never the text (R-044 #3)", () => 
   const diff = ["diff --git a/src/a.ts b/src/a.ts", "--- a/src/a.ts", "+++ b/src/a.ts", "@@ -0,0 +1,2 @@", "+safe", `+${fake}`].join("\n");
   assert.deepEqual(scanForSecretsDetailed(diff), { rule: "GitHub token", file: "src/a.ts", line: 2 });
 });
+
+test("R-046 #1: credential-shaped literals block, ordinary UI/template/env text does not", () => {
+  for (const line of [
+    "+const password = \"hunter2hunter2hunter2xx\";",
+    "+api_key = \"abcd1234abcd1234abcd\"",
+    "+client_secret: 9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+  ]) assert.equal(shipScan(line), "Credential literal", line);
+  for (const line of [
+    "+password: \"Enter your password to continue\",",
+    "+api_key: \"${{ secrets.OPENAI_API_KEY }}\"",
+    "+password: \"process.env.DB_PASSWORD_VALUE\"",
+    "+password = \"<your-password-goes-here>\"",
+    "+password = get_password_from_keychain_value",
+  ]) assert.equal(shipScan(line), null, line);
+});
+
+test("R-046 #2: quoted JSON keys and token/secret literals block", () => {
+  assert.equal(shipScan('+"password": "Zx9vQ2LmN8rT4wYb6cHd1234"'), "Credential literal");
+  assert.equal(shipScan('+"api_key": "abcd1234abcd1234abcd"'), "Credential literal");
+  assert.equal(shipScan('+"token": "Zx9vQ2LmN8rT4wYb6cHd1234"'), "Credential literal");
+  assert.equal(shipScan('+"secret": "Zx9vQ2LmN8rT4wYb6cHd1234"'), "Credential literal");
+});
+
+test("R-046 #3: quoted/bracketed/multiple local URLs are exempt only when every host is local", () => {
+  for (const line of [
+    '+"postgres://u:pw@localhost"',
+    "+postgres://u:pw@'localhost'",
+    "+postgres://u:pw@localhost)",
+    "+postgres://u:pw@localhost,",
+    "+postgres://u:pw@[::1]:5432/db",
+    "+a=postgres://u:p@localhost/db b=postgres://u:p@127.0.0.1/x",
+    "+postgres://u:p@example.com/db",
+  ]) assert.equal(shipScan(line), null, line);
+  assert.equal(shipScan("+a=postgres://u:p@localhost/db b=postgres://u:real@prod.db.io/x"), "URL with credentials");
+});

@@ -93,8 +93,11 @@ export function scanForSecrets(diffText) {
 
 /** True for a host a test fixture may plausibly use; a real host still blocks. */
 function localOrExampleHost(host) {
-  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
-  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.example.com') || h.endsWith('.test');
+  const h0 = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h0 === '::1') return true;
+  const h = h0.replace(/:\d+$/, '');
+  return h === 'localhost' || h === '127.0.0.1' || h === 'example.com' || h === 'example.org' || h === 'example.net'
+    || h.endsWith('.example.com') || h.endsWith('.example') || h.endsWith('.localhost') || h.endsWith('.invalid') || h.endsWith('.test');
 }
 
 /**
@@ -114,8 +117,8 @@ export function scanForSecretsDetailed(diffText) {
     if (rawLine[0] === ' ' || rawLine[0] === '+') {
       if (rawLine[0] === '+') {
         const added = rawLine.slice(1);
-        const cred = /[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@([^\s/]+)/i.exec(added);
-        const local = cred && localOrExampleHost(cred[1].split(':')[0]);
+        const creds = [...added.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@["']?(\[[^\]]+\]|[A-Za-z0-9.-]+)/gi)];
+        const local = creds.length > 0 && creds.every((m) => localOrExampleHost(m[1]));
         for (const { name, re, gate } of SECRET_RULES) {
           if (gate === false) continue; // redaction-only heuristic: not a hard Ship gate
           if (name === 'URL with credentials' && local) continue;
