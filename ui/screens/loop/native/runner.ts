@@ -8,7 +8,7 @@ export type ProgressEvent =
   | { type: "iteration"; iteration: number }
   | { type: "stage-start"; stage: LoopStage; index: number; count: number; iteration: number }
   | { type: "stage-result"; stage: LoopStage; ok: boolean; iteration: number }
-  | { type: "stage-skipped"; stage: LoopStage; iteration: number }
+  | { type: "stage-skipped"; stage: LoopStage; index: number; count: number; iteration: number }
   | { type: "repair"; stage: LoopStage; attempt: number }
   | { type: "paused"; paused: boolean };
 export interface RunnerDeps {
@@ -75,9 +75,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   const heldOutcome = async (): Promise<LoopRunOutcome | null> => {
     if (!deps.holdWhilePaused) return null;
     const since = Date.now();
-    deps.onProgress?.({ type: "paused", paused: true });
     const result = await deps.holdWhilePaused(config.pauseTimeoutSeconds);
-    deps.onProgress?.({ type: "paused", paused: false });
     pausedMs += Date.now() - since;
     if (result !== "timedOut") return null;
     deps.log("pause timed out without a resume; the run is aborted to release the loop");
@@ -99,7 +97,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     for (const stage of stages) {
       if (stage.runOnce && passedOnce.has(stage.id)) {
         deps.log(`↷ ${stage.name}: passed earlier in this run`);
-        deps.onProgress?.({ type: "stage-skipped", stage, iteration });
+        deps.onProgress?.({ type: "stage-skipped", stage, index: stages.indexOf(stage) + 1, count: stages.length, iteration });
         continue;
       }
       const heldAtStage = await heldOutcome();

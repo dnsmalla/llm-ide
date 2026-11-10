@@ -38,7 +38,6 @@ export interface LiveRun {
     stageCount: number;
     iteration: number;
     repairs: number;
-    lastLine: string | null;
     startedAt: string | null;
   } | null;
 }
@@ -341,17 +340,14 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     isCancelled: () => run.cancelled, markCancelled: () => { run.cancelled = true; },
   };
   log(`▶ ${loop.name} (${run.live.mode})`);
-  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, repairs: 0, lastLine: null, startedAt: run.live.startedAt };
+  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, repairs: 0, startedAt: run.live.startedAt };
   run.live.progress = progress;
-  const emitProgress = () => { progress.lastLine = run.live.log.at(-1) ?? null; emit(); };
   const onProgress = (e: RunProgressEvent) => {
     if (e.type === "iteration") progress.iteration = e.iteration;
     else if (e.type === "stage-start") { progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration; }
-    else if (e.type === "stage-result") { progress.repairs = progress.repairs; }
-    else if (e.type === "stage-skipped") { progress.stageName = e.stage.name; progress.lastLine = `skipped ${e.stage.name}`; }
-    else if (e.type === "repair") { progress.repairs += 1; progress.lastLine = `repair ${e.stage.name} (${e.attempt})`; }
-    else if (e.type === "paused") { progress.lastLine = e.paused ? "paused" : "resumed"; }
-    emitProgress();
+    else if (e.type === "stage-skipped") { progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration; }
+    else if (e.type === "repair") { progress.repairs += 1; }
+    emit();
   };
   const outcome = await d.runLoop(config, { ...d.createStageDeps(ctx, loop), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress });
   log(outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`);

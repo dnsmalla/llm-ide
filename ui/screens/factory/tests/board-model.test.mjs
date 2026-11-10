@@ -174,7 +174,7 @@ test("formatDuration is human, not raw seconds", () => {
 });
 
 test("a live card shows the typed stage and elapsed time", () => {
-  const f = new Map([["issue:a", { ...EMPTY_FACTS, live: { ...live("issue:a"), progress: { stageName: "Implement", stageIndex: 3, stageCount: 8, iteration: 2, repairs: 1, lastLine: "wrote tests", startedAt: "2026-11-09T09:55:48.000Z" } } }]]);
+  const f = new Map([["issue:a", { ...EMPTY_FACTS, live: { ...live("issue:a"), log: ["wrote tests"], progress: { stageName: "Implement", stageIndex: 3, stageCount: 8, iteration: 2, repairs: 1, lastLine: "wrote tests", startedAt: "2026-11-09T09:55:48.000Z" } } }]]);
   const board = buildBoard([item("issue:a")], f, Date.parse("2026-11-09T10:00:00.000Z"));
   assert.deepEqual(board.working[0].progressLabel, "Implement · 3 of 8 · iter 2 · repair 1 · 4m 12s");
   assert.equal(board.working[0].lastLine, "wrote tests");

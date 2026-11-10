@@ -39,7 +39,7 @@ export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.progress?.lastLine ?? null });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null });
   }
   return board;
 }
