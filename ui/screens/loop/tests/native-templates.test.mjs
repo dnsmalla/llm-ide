@@ -99,3 +99,9 @@ test("a write that does not reach storage throws instead of reading as saved", (
   const storage = { getItem: () => null, setItem: () => { throw new Error("quota"); }, removeItem() {} };
   assert.throws(() => t.saveCustomTemplate("Mine", "", t.BUILT_IN_TEMPLATES[0].config, storage), /quota/);
 });
+
+test("detectTestCommand reads a run worktree when given a prefix", async () => {
+  const prefix = "system/loop-worktrees/run1";
+  const fs = { async read(path) { if (path === `${prefix}/Makefile`) return { status: "ok", text: "test:\n\tnpm test\n" }; throw Object.assign(new Error("missing"), { code: "missing" }); } };
+  assert.deepEqual(await e.detectTestCommand(fs, prefix), { command: "make test", reason: "Makefile has a test target." });
+});

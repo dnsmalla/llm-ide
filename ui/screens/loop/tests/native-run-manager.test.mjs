@@ -306,7 +306,7 @@ test("a Factory loop whose Verify has no command does not start and says where t
   rm.startRun("/p", item(1), "full");
   await settle();
   assert.match(rm.takeRunNotice(), /“Verify” stage has no test command.*did not start/);
-  assert.equal(world.hostCalls.some(([c]) => c === "loop_worktree_prepare"), false, "no worktree is cut");
+  assert.equal(world.configs.length, 0, "the loop never starts");
 });
 
 test("a project without a Factory loop leaves a notice", async () => {

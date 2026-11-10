@@ -24,7 +24,7 @@ import { cronMatches, describeCron, validateCron } from "../../autotasks/native/
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
-import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, type WorkItem } from "./factory.ts";
+import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
@@ -546,7 +546,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     // A loop.json from a cloned repo can mark a code-applying loop runsOnSchedule; it still never runs unattended.
     // A Factory run needs a picked work item; the schedule and the queue never have one.
     if (isFactoryLoop(target) && !start) { setNotice(`“${target.name}” is a Factory loop: start it with ▶ Run and pick a work item.`); return; }
-    const verifyProblem = isFactoryLoop(target) ? factoryVerifyProblem(target.config) : null;
+    // A Factory run with a picked work item may still get Verify from the repo worktree below.
+    const verifyProblem = isFactoryLoop(target) && !start ? factoryVerifyProblem(target.config) : null;
     if (verifyProblem) { setNotice(verifyProblem); return; }
     if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
     const batchBlock = batchRollbackReason(target);
@@ -609,6 +610,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (unmountedRef.current) { startingRef.current = false; return; }
     }
     const activeRun = prepared;
+    let runConfig = target.config;
+    if (isFactoryLoop(target) && activeRun) {
+      const detected = await detectTestCommand(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree)).catch(() => null);
+      const filled = withDetectedVerify(target, detected?.command ?? null);
+      runConfig = filled.loop.config;
+      const problem = factoryVerifyProblem(configFor("full", runConfig));
+      if (problem) { setNotice(`${problem} The run did not start.`); startingRef.current = false; return; }
+    }
     const marker = activeRun ? `${repoPrefixFor(projectRoot ?? "", activeRun.worktree)}/.factory/RUN.json` : null;
     if (activeRun && isFactoryLoop(target) && marker) {
       try { await fs.write(marker, JSON.stringify({ runId: activeRun.runId, mode: "full", startedAt: new Date().toISOString(), itemKey: start ? (start.item.id ?? start.item.title) : null }), { expected_hash: null }); } catch { /* Resume marker only */ }
@@ -642,7 +651,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           setRunLog((l) => [...l, `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}`]);
         }
       }
-      const outcome = await runNativeLoop(isFactoryLoop(target) ? configFor("full", target.config) : target.config, {
+      const outcome = await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : target.config, {
         ...createStageDeps(stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), target),
         isCancelled() { return cancelledRef.current; },
         log(line) { setRunLog((l) => [...l, line]); },

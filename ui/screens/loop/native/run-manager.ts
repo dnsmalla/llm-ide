@@ -352,14 +352,18 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   };
   const loop = await d.loadFactoryLoop(fs);
   if (!loop) { fail(run, "This project has no Factory loop (system/loop.json could not be read); the run did not start."); return null; }
-  const config = configFor(run.live.mode, loop.config);
-  const verifyProblem = factoryVerifyProblem(config);
-  if (verifyProblem) { fail(run, `${verifyProblem} The run did not start.`); return null; }
+  let config = configFor(run.live.mode, loop.config);
   const token = await d.approve(loop.id);
   if (token === null) { fail(run, "The Factory loop's commands were not approved; the run did not start."); return null; }
   if (run.cancelled) { log("Run cancelled before it started."); return null; }
   const info = run.reuse ? await findWorktree(d, run.live.runId) : await prepareWorktree(d, run);
   if (!info) { fail(run, `The worktree of run ${run.live.runId} no longer exists; the run did not start.`); return null; }
+  // The project root often holds the clone under code/<name>, so detect the test command in the run worktree, not only at the project root.
+  const detected = await detectTestCommand(fs, repoPrefixFor(run.live.projectRoot, info.worktree)).catch(() => null);
+  const filled = withDetectedVerify(loop, detected?.command ?? null);
+  if (filled.changed) config = configFor(run.live.mode, filled.loop.config);
+  const verifyProblem = factoryVerifyProblem(config);
+  if (verifyProblem) { fail(run, `${verifyProblem} The run did not start.`); return null; }
   const marker = `${repoPrefixFor(run.live.projectRoot, info.worktree)}/.factory/RUN.json`;
   if (!(await writeMarker(fs, marker, JSON.stringify({ runId: run.live.runId, mode: run.live.mode, startedAt: new Date().toISOString(), itemKey: run.item.key })))) {
     log("The run marker could not be written; an interrupted run may not offer Resume.");

@@ -20,9 +20,10 @@ async function exists(fs: DetectFs, path: string): Promise<boolean> {
 }
 
 /** The Mac's ProjectEnvironmentInspector shape, limited to a test command the desktop can prove from a manifest. */
-export async function detectTestCommand(fs: DetectFs): Promise<{ command: string | null; reason: string }> {
+export async function detectTestCommand(fs: DetectFs, prefix = ""): Promise<{ command: string | null; reason: string }> {
+  const path = (name: string) => (prefix ? `${prefix}/${name}` : name);
   try {
-    const pkg = await fs.read("package.json", 500_000);
+    const pkg = await fs.read(path("package.json"), 500_000);
     if (pkg.status === "ok" && pkg.text) {
       const script = JSON.parse(pkg.text) as { scripts?: Record<string, unknown> };
       if (typeof script.scripts?.test === "string" && script.scripts.test.trim() !== "") {
@@ -30,11 +31,11 @@ export async function detectTestCommand(fs: DetectFs): Promise<{ command: string
       }
     }
   } catch { /* no package.json */ }
-  if (await exists(fs, "Package.swift")) return { command: "swift test", reason: "Swift Package manifest found." };
-  if (await exists(fs, "pyproject.toml") || await exists(fs, "pytest.ini") || await exists(fs, "tox.ini")) return { command: "pytest", reason: "Python test configuration found." };
-  if (await exists(fs, "Makefile")) {
+  if (await exists(fs, path("Package.swift"))) return { command: "swift test", reason: "Swift Package manifest found." };
+  if (await exists(fs, path("pyproject.toml")) || await exists(fs, path("pytest.ini")) || await exists(fs, path("tox.ini"))) return { command: "pytest", reason: "Python test configuration found." };
+  if (await exists(fs, path("Makefile"))) {
     try {
-      const mk = await fs.read("Makefile", 500_000);
+      const mk = await fs.read(path("Makefile"), 500_000);
       if (mk.status === "ok" && mk.text && /^test\s*:/m.test(mk.text)) return { command: "make test", reason: "Makefile has a test target." };
     } catch { /* ignore */ }
   }
