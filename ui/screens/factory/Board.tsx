@@ -118,10 +118,11 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     lastStatusAt.current = now;
     const next = new Map<string, ShipStatus | "error">();
     let rateLimited = false;
+    let retryAfterMs: number | null = null;
     for (const chunk of chunkShipRequests(requests)) {
       try {
         const r = await core.requestRaw("/kb/loop/ship-status", { method: "POST", body: { requests: chunk } });
-        if (r.status === 429) { rateLimited = true; break; }
+        if (r.status === 429) { rateLimited = true; retryAfterMs = r.retryAfterSeconds ? r.retryAfterSeconds * 1000 : null; break; }
         if (r.status === 200) { setOffline(false); for (const [url, s] of decodeShipResults(r.body)) next.set(url, s); }
       } catch {
         // Core unreachable: these cards keep their last known column (columnFor), never Inbox.
@@ -131,7 +132,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     }
     // Rate limited: keep the statuses already shown instead of marking every card "status unavailable".
     if (!rateLimited) { setShip(next); setRetryAt(null); }
-    else setRetryAt(Date.now() + STATUS_MIN_GAP_MS);
+    else setRetryAt(Date.now() + (retryAfterMs ?? STATUS_MIN_GAP_MS));
   }, []);
 
   // Shown: read the facts, then the PR/MR status, and again every 5 minutes while shown. Hidden or unmounted: no timer.

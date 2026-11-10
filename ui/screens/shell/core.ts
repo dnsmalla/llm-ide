@@ -213,6 +213,8 @@ export interface RawResponse {
   status: number;
   /** Parsed JSON, or `undefined` for an empty body, or `null` when the body is not JSON. */
   body: unknown;
+  /** A 429's Retry-After in seconds, when the server sent one. */
+  retryAfterSeconds?: number;
 }
 
 /** Receives the access token each time it is issued (login, refresh) and `null` on sign-out. */
@@ -459,7 +461,9 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
 
     async requestRaw(path: string, opts: RequestOptions = {}): Promise<RawResponse> {
       const res = await send(path, opts, false);
-      if (res.status === 204) return { status: 204, body: undefined };
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined;
+      if (res.status === 204) return { status: 204, body: undefined, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) };
       let body: unknown = null;
       try {
         const text = await res.text();
@@ -467,7 +471,7 @@ export function createCoreClient(options: CoreClientOptions): CoreClient {
       } catch {
         body = null;
       }
-      return { status: res.status, body };
+      return { status: res.status, body, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) };
     },
 
     republishAccessToken() {
