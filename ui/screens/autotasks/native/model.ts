@@ -118,10 +118,10 @@ export const MAC_ONLY_MESSAGE = "This task runs deterministic code in the Mac ap
 const DEFAULT_TASK_ENV: TaskEnv = { features: null, coreFeatures: null, hasRepo: true, localHost: true, mode: "local" };
 
 /** Whether the desktop may run this task at all. Registry tasks use the one availability function; legacy entries keep the shim. */
-export function desktopRunnable(id: AutoTaskId, env: TaskEnv = DEFAULT_TASK_ENV): boolean {
+export function desktopRunnable(id: string, env: TaskEnv = DEFAULT_TASK_ENV): boolean {
   const registered = taskById(id);
   if (registered) return taskAvailability(registered, env).runnable;
-  return !MAC_ONLY_TASK_IDS.has(id);
+  return !MAC_ONLY_TASK_IDS.has(id as AutoTaskId);
 }
 
 /** Whether the page scheduler may fire this task now (apart from the cron match itself). */
@@ -133,12 +133,12 @@ export function taskUnavailableReason(id: AutoTaskId, env: TaskEnv = DEFAULT_TAS
   return availability.runnable ? null : availability.reason;
 }
 
-export function scheduledRunAllowed(id: AutoTaskId, c: AutoTaskConfig | undefined, hasRepo: boolean, env: TaskEnv = DEFAULT_TASK_ENV): boolean {
+export function scheduledRunAllowed(id: string, c: Pick<AutoTaskConfig, "enabled" | "scheduleActive"> | undefined, hasRepo: boolean, env: TaskEnv = DEFAULT_TASK_ENV): boolean {
   return isSchedulable(id) && desktopRunnable(id, env) && c?.enabled === true && c.scheduleActive === true && (!requiresLinkedRepo(id) || hasRepo);
 }
 
 /** A task whose registry schedule is `none` (it writes a tracker or code) only runs when a person presses Run (D17). */
-export function isSchedulable(id: AutoTaskId): boolean {
+export function isSchedulable(id: string): boolean {
   return taskById(id)?.schedule.schedulable ?? true;
 }
 
@@ -153,7 +153,7 @@ export function issuesFromNotesArgs(c: RepoConfig): { provider: "github" | "gitl
 }
 
 /** Mac parity (`AutoTask.requiresLinkedRepo`): only Source Update runs without a linked repository. */
-export function requiresLinkedRepo(id: AutoTaskId): boolean {
+export function requiresLinkedRepo(id: string): boolean {
   const registered = taskById(id);
   if (registered) return registered.requiresRepo;
   return id !== "sourceUpdate";
