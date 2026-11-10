@@ -54,6 +54,8 @@ export function shipCopy(result: ShipResult): string {
       const rule = typeof r.rule === "string" && /^[A-Za-z0-9 /()-]{1,60}$/.test(r.rule) ? r.rule : null;
       const file = typeof r.file === "string" && /^[A-Za-z0-9._/-]{1,300}$/.test(r.file) && !r.file.startsWith("/") ? r.file : null;
       const line = typeof r.line === "number" && Number.isInteger(r.line) && r.line > 0 ? r.line : null;
+      // No rule at all: the hit is in the request text, which the server reports without a file.
+      if (typeof r.rule !== "string") return "Ship stopped: the title or description contains what looks like a credential. Nothing was pushed. Edit the text and ship again.";
       const where = rule ? ` (${rule}${file ? ` at ${file}${line ? `:${line}` : ""}` : ""})` : "";
       return `Ship stopped: the secret scan found what looks like a credential${where}. Nothing was pushed. Remove it in the worktree and ship again.`;
     }
