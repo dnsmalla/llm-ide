@@ -264,7 +264,7 @@ Options are listed; the leaning is my recommendation only. **2026-10-29: Q1, Q3,
 | Q7 | Who owns the 5 457 lines of plugin, MCP and LLM-source UI in `Features/Library`? | knowledge-kit, agent-kit K3/K4 | agent-kit |
 | Q8 | `ProjectExporter` second `.md` per meeting | fix names and frontmatter, retire | retire after Q1 |
 | Q9 | Kit boundaries in the plan table: `agents/slack.mjs`, `agents/code-sync.mjs`, `connectors/{git,issues,qa}`, `/kb/conflict-questions`, `/kb/notify/slack` | reassign to work-kit and graph-kit, leave | reassign |
-| Q10 | Project registration route (`/kb/projects/register`) is in the `doc_gen` group; knowledge K1 needs it always on | move out of the group, add a second route | move |
+| Q10 | Project registration route (`/kb/projects/register`) is in the `doc_gen` group; knowledge K1 needs it always on | move out of the group, add a second route | move (done, API 143: routes/project-register.mjs, always on) |
 | Q11 | Notes folder in iCloud, Dropbox, Google Drive or OneDrive (`NotesFolderConfig.detectSyncProvider` `:95-103`) | server reads it, fallback to C for those | fallback |
 | Q12 | N-1 window for the Swift path | one release (plan), two | one |
 | Q13 | Does the kit stay keyless (always on)? | keep, add a `library` key | keep |

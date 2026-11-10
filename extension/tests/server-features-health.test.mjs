@@ -79,6 +79,8 @@ test('/health with LLMIDE_FEATURES=agent_chat: features listed, pruned endpoints
     for (const pruned of ['/kb/loop/agent-run', '/kb/issue-schedule', '/kb/ingest-code-graph']) {
       assert.ok(!health.endpoints.includes(pruned), `${pruned} is not advertised`);
     }
+    // doc_gen is off here, yet project registration is always on (the bus and the task route need it).
+    assert.ok(health.endpoints.includes('/kb/projects/register'), 'register is advertised without doc_gen');
     const missing = requiredEndpoints().filter((e) => !health.endpoints.includes(e));
     assert.deepEqual(missing, [], 'Chrome REQUIRED_ENDPOINTS survive a minimal feature set');
     assert.doesNotMatch(output, /LLMIDE_FEATURES/, 'a valid list logs no warning');

@@ -21,6 +21,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const kb = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const { handleDocsRoutes } = await import('../routes/docs-routes.mjs');
+const { handleProjectRegister } = await import('../routes/project-register.mjs');
 const { handleKB } = await import('../routes/router.mjs');
 const { featureDisabledFor, FEATURE_ROUTE_GROUPS } = await import('../routes/feature-routes.mjs');
 const { getProject } = await import('../kb/projects.mjs');
@@ -58,7 +59,9 @@ test.after(() => { try { fs.rmSync(YAML_DIR, { recursive: true, force: true }); 
 async function call(user, method, url, body, rawBody, dir = YAML_DIR) {
   const req = makeReq({ method, url, body, rawBody, user: user ? { id: user } : undefined });
   const res = makeRes();
-  await handleDocsRoutes(req, res, { userId: user, url, dir });
+  // Registration moved out of the docs routes (routes/project-register.mjs, always on); the rest stays here.
+  const handle = new URL(url, 'http://127.0.0.1').pathname === '/kb/projects/register' ? handleProjectRegister : handleDocsRoutes;
+  await handle(req, res, { userId: user, url, dir });
   return res;
 }
 
@@ -271,12 +274,15 @@ test('auth: the /kb tree answers 401 with no user, before any docs route runs', 
 
 test('feature gate: every docs-kit path is owned by doc_gen and answers feature_disabled when it is off', () => {
   const off = new Set(['gantt_issues', 'code_graph_3d', 'auto_tasks']);
-  for (const p of ['/kb/docs/templates?project=x', '/kb/docs/commands', '/kb/docs/seed', '/kb/projects/register', '/kb/docs/templates/a']) {
+  for (const p of ['/kb/docs/templates?project=x', '/kb/docs/commands', '/kb/docs/seed', '/kb/docs/templates/a']) {
     assert.equal(featureDisabledFor(p, off), 'doc_gen', p);
   }
+  // Project registration is always on (the bus and the task route need it), so doc_gen does not own it.
+  assert.equal(featureDisabledFor('/kb/projects/register', off), null, 'register is always on');
   assert.equal(featureDisabledFor('/kb/projects/registered', off), null, 'a sibling path is not the register route');
   assert.equal(featureDisabledFor('/kb/docs/templates?project=x', null), null, 'all features on: served');
   assert.ok(FEATURE_ROUTE_GROUPS.doc_gen.prefixes.includes('/kb/docs/'));
+  assert.ok(!FEATURE_ROUTE_GROUPS.doc_gen.prefixes.includes('/kb/projects/register'));
 });
 
 test('latency: a list call through the route (200 templates) answers in under 200 ms', async (t) => {

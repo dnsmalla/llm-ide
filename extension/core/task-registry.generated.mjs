@@ -251,9 +251,7 @@ export const TASKS = Object.freeze([
     "readOnly": true,
     "requiresRepo": true,
     "requiresLocalHost": false,
-    "features": [
-      "doc_gen"
-    ],
+    "features": [],
     "availability": {
       "status": "available",
       "reason": null
@@ -312,9 +310,7 @@ export const TASKS = Object.freeze([
     "readOnly": true,
     "requiresRepo": true,
     "requiresLocalHost": false,
-    "features": [
-      "doc_gen"
-    ],
+    "features": [],
     "availability": {
       "status": "available",
       "reason": null
@@ -372,9 +368,7 @@ export const TASKS = Object.freeze([
     "readOnly": true,
     "requiresRepo": true,
     "requiresLocalHost": false,
-    "features": [
-      "doc_gen"
-    ],
+    "features": [],
     "availability": {
       "status": "available",
       "reason": null

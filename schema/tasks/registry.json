@@ -259,9 +259,7 @@
       "readOnly": true,
       "requiresRepo": true,
       "requiresLocalHost": false,
-      "features": [
-        "doc_gen"
-      ],
+      "features": [],
       "availability": {
         "status": "available",
         "reason": null
@@ -319,9 +317,7 @@
       "readOnly": true,
       "requiresRepo": true,
       "requiresLocalHost": false,
-      "features": [
-        "doc_gen"
-      ],
+      "features": [],
       "availability": {
         "status": "available",
         "reason": null
@@ -380,9 +376,7 @@
       "readOnly": true,
       "requiresRepo": true,
       "requiresLocalHost": false,
-      "features": [
-        "doc_gen"
-      ],
+      "features": [],
       "availability": {
         "status": "available",
         "reason": null

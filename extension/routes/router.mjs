@@ -20,6 +20,7 @@ import { listRuns } from '../agents/meeting-agent.mjs';
 // live-sessions imports moved into routes/live.mjs.
 import { handleAgentRoutes } from './agent.mjs';
 import { handleAgentV2Routes } from './agent-v2.mjs';
+import { handleProjectRegister } from './project-register.mjs';
 import { handlePlanningRoutes } from './planning.mjs';
 import { handleLiveRoutes } from './live.mjs';
 import { handleReviewRoutes } from './review.mjs';
@@ -146,8 +147,10 @@ export async function handleKB(req, res) {
       sendFeatureDisabled(res, disabledFeature);
       return true;
     }
+    // Always on: POST /kb/projects/register (the bus and the task route need a registered project).
+    if (await handleProjectRegister(req, res, { userId, url })) return true;
     const { handlers: featureHandlers } = await (featureRoutes ?? initFeatureRoutes(activeFeatures));
-    // docs-kit K1 (doc_gen group): /kb/docs/* and /kb/projects/register.
+    // docs-kit K1 (doc_gen group): /kb/docs/*.
     if (await featureHandlers.doc_gen?.(req, res, { userId, url })) return true;
 
     // Provider catalog (connections, model capability flags, settings, the

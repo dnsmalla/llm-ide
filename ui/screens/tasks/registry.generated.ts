@@ -252,9 +252,7 @@ export const TASKS: readonly TaskDef[] = [
     "readOnly": true,
     "requiresRepo": true,
     "requiresLocalHost": false,
-    "features": [
-      "doc_gen"
-    ],
+    "features": [],
     "availability": {
       "status": "available",
       "reason": null
@@ -313,9 +311,7 @@ export const TASKS: readonly TaskDef[] = [
     "readOnly": true,
     "requiresRepo": true,
     "requiresLocalHost": false,
-    "features": [
-      "doc_gen"
-    ],
+    "features": [],
     "availability": {
       "status": "available",
       "reason": null
@@ -373,9 +369,7 @@ export const TASKS: readonly TaskDef[] = [
     "readOnly": true,
     "requiresRepo": true,
     "requiresLocalHost": false,
-    "features": [
-      "doc_gen"
-    ],
+    "features": [],
     "availability": {
       "status": "available",
       "reason": null

@@ -1,14 +1,14 @@
-// docs-kit K1 routes: Doc Gen templates, commands and seeding, plus the
-// project-id registration they depend on. Owned by the doc_gen feature: the
+// docs-kit K1 routes: Doc Gen templates, commands and seeding. Owned by the doc_gen feature: the
 // group in routes/feature-routes.mjs lists these prefixes, so with doc_gen off
-// they answer 404 feature_disabled before this module is reached.
+// they answer 404 feature_disabled before this module is reached. Project
+// registration (POST /kb/projects/register) is always on and lives in
+// routes/project-register.mjs.
 //
 // Every route addresses a project by id (`?project=<id>`), never by a path.
 // The folder is resolved per user (kb/project-roots.mjs), so another user's
 // id is simply unknown. Folder names in the path are checked by
 // kb/doc-project-files.mjs (assertFolderName) before any disk access.
 //
-//   POST   /kb/projects/register                 { id, root, name? } (also the canonical registry row)
 //   GET    /kb/docs/templates?project=<id>       { templates, count }
 //   GET    /kb/docs/commands?project=<id>        { commands, count }
 //   PUT    /kb/docs/templates/:folder?project=   { name, sections?, surface?, rawContent?, rewrite?, createOnly? } -> { template }
@@ -19,68 +19,30 @@
 //
 // handleDocsRoutes(req, res, ctx) -> boolean, ctx = { userId, url }.
 
-import nodePath from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { AppError } from '../core/errors.mjs';
-import { config } from '../core/config.mjs';
-import { persistTeamYaml } from '../kb/team-yaml.mjs';
-import { readBody, parseJSON, sendJSON } from '../core/utils.mjs';
+import { sendJSON } from '../core/utils.mjs';
 import { listGenerationLibrary } from '../llm_agent/skills/generation-library.mjs';
 import {
-  DocFilesError, deleteFolder, scanCommandsPage, scanTemplatesPage,
+  deleteFolder, scanCommandsPage, scanTemplatesPage,
   seedProjectFiles, writeCommand, writeTemplate,
 } from '../kb/doc-project-files.mjs';
 import { SURFACES } from '../kb/doc-templates.mjs';
-import { PROJECT_ID_RE, registerProjectRoot, resolveProjectRoot } from '../kb/project-roots.mjs';
-import { getDb } from '../kb/db.mjs';
-import { canManageProject, getProject, projectIdForRoot, registerProject } from '../kb/projects.mjs';
+import { PROJECT_ID_RE, resolveProjectRoot } from '../kb/project-roots.mjs';
+import { fail, invalid, objectBody, DOCS_BODY_LIMIT } from './project-register.mjs';
 
-const REGISTER = '/kb/projects/register';
+export { DOCS_BODY_LIMIT };
+
 const DOCS = '/kb/docs/';
 const ITEM_RE = /^\/kb\/docs\/(templates|commands)\/([^/]+)$/;
 
-/** Upper bound for a request body; the template file itself is capped in doc-project-files. */
-export const DOCS_BODY_LIMIT = 512 * 1024;
 const MAX_NAME = 200;
 const MAX_SECTIONS = 100;
 const MAX_SECTION = 200;
 const MAX_INSTRUCTION = 20_000;
 
-const FAIL = {
-  INVALID_ROOT: 400, INVALID_PROJECT_ID: 400, INVALID_FOLDER: 400, RESERVED_FOLDER: 400,
-  UNSAFE_PATH: 400, TOO_LARGE: 413, TOO_MANY_PROJECTS: 409,
-  PROJECT_NOT_REGISTERED: 404,
-};
-
-function fail(res, err) {
-  if (err instanceof DocFilesError) {
-    // A DocFilesError may carry its own status (409 for an ingest layout).
-    const status = err.status ?? FAIL[err.code] ?? 400;
-    sendJSON(res, status, { error: { code: err.code, message: err.message } });
-    return;
-  }
-  if (err instanceof AppError) {
-    sendJSON(res, err.status ?? 400, { error: { code: err.code ?? 'VALIDATION_FAILED', message: err.message } });
-    return;
-  }
-  sendJSON(res, 500, { error: { code: 'DOCS_FAILED', message: 'document request failed' } });
-}
-
-function invalid(res, message) {
-  sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message } });
-  return true;
-}
-
 /** The validated `?project=` id, or null (the caller answers 400). */
 function projectParam(url) {
   const id = new URL(url, 'http://127.0.0.1').searchParams.get('project');
   return id && PROJECT_ID_RE.test(id) ? id : null;
-}
-
-/** A JSON object body, or null when the body is missing, not JSON, or not an object. */
-async function objectBody(req) {
-  const body = parseJSON(await readBody(req, DOCS_BODY_LIMIT));
-  return body && typeof body === 'object' && !Array.isArray(body) ? body : null;
 }
 
 /** Validate the shared fields of a template or command write. Returns an error string or null. */
@@ -114,47 +76,8 @@ function checkWriteFields(body, { allowSections }) {
  * the caller can keep dispatching.
  */
 export async function handleDocsRoutes(req, res, ctx) {
-  const { userId, url, dir } = ctx;
-  const dataDir = typeof dir === 'string' && dir ? dir : (config.dataDir ?? nodePath.dirname(config.dbPath));
+  const { userId, url } = ctx;
   const path = new URL(url, 'http://127.0.0.1').pathname;
-
-  if (path === REGISTER) {
-    if (req.method !== 'POST') return false;
-    try {
-      const body = await objectBody(req);
-      if (!body) return invalid(res, 'body must be a JSON object { id, root, name? }');
-      // R-021 #4: the SERVER chooses a new project's id (a client-supplied one is ignored, so it cannot be
-      // pre-claimed with another root). A root that is already registered keeps its server-issued id.
-      const db = getDb();
-      const id = projectIdForRoot(db, body.root) ?? randomUUID();
-      const stored = registerProjectRoot(userId, { id, root: body.root });
-      // ADR 0022: the per-user Doc Gen map stays as it was; the canonical registry row is team-wide.
-      // A viewer opening an existing project may register their own folder mapping but never rewrite
-      // the project's root/name; a new project's registrar becomes its project owner.
-      let canonical = getProject(db, stored.id);
-      if (!canonical || canManageProject(db, userId, stored.id)) {
-        const registered = registerProject(db, userId, { id: stored.id, root: stored.root, name: body.name });
-        canonical = registered.project;
-        // R-020 #6: team.yaml is authoritative once it has a projects: section, so a new registration is written
-        // through at once (as membership changes are); a failed write rolls the project and its owner row back.
-        if (registered.created) {
-          try {
-            persistTeamYaml(db, dataDir, { trigger: 'project.register' });
-          } catch {
-            db.transaction(() => {
-              db.prepare('DELETE FROM project_members WHERE project_id = ?').run(stored.id);
-              db.prepare('DELETE FROM projects WHERE id = ?').run(stored.id);
-            })();
-            return fail(res, 500, 'INTERNAL_ERROR', 'Could not write team.yaml; the project registration was rolled back');
-          }
-        }
-      }
-      sendJSON(res, 200, { id: stored.id, root: stored.root, name: canonical?.name ?? null });
-    } catch (err) {
-      fail(res, err);
-    }
-    return true;
-  }
 
   if (!path.startsWith(DOCS)) return false;
 
