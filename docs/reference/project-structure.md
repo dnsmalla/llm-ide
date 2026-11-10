@@ -44,3 +44,5 @@ llm-ide/
                          #   directory) the DB, agent.db, secrets and agent-sdk
                          #   are MOVED there (originals kept as *.pre-move for one boot); kb/backups/ is left alone (see the how-to)
 ```
+
+Task catalog (one registry, generated copies, prompts in `schema/tasks/prompts/`): [task-registry.md](task-registry.md).

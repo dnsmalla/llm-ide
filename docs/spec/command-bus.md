@@ -91,6 +91,8 @@ Receipt gate (`decideReceipt`, pure, tested by `fixtures/tiers`): unknown kind r
 
 An unavailable kind is registered (it shows in `GET /bus/kinds` with its reason) and answers 501 `KIND_NOT_AVAILABLE`; nothing is stubbed as success. The six kinds replace the Mac's 13 Auto Task cases (audit section 3).
 
+**Two vocabularies.** Task ids (`review.code`, `issues.from_notes`, …) are the UI vocabulary and come from `schema/tasks/registry.json` ([task registry](../reference/task-registry.md)); bus kinds (`review`, `sources.update`, …) are the wire vocabulary. A task maps to a kind through its registry entry, never by name. `loop.run` and `custom.run` stay unavailable: Loop definitions and custom tasks are not in the core, so the bus cannot run them.
+
 `review` with `conflicts` asks git first (`ls-files -u`, `diff --check`) and makes **no model call** when git finds nothing.
 
 ## 6. Engines

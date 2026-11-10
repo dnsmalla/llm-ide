@@ -163,3 +163,5 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
 `<desktop data dir>/core/addons/plugins`. The sibling add-on bundles and JSON state live under
 `<core>/addons/`. A one-time host copy imports the retired Mac app's add-ons; spawned-core tests must
 set `LLMIDE_PLUGIN_DIR` to their temp dir so they never write real user data.
+
+Task registry (task ids, runners, prompts, generated copies): [docs/reference/task-registry.md](../docs/reference/task-registry.md).
