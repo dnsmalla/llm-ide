@@ -1,13 +1,13 @@
-// The Terminal dock for every section except Explorer (Explorer embeds its own copy above its status strip, like
-// the Mac). Ctrl+` and the status-bar item toggle it; one shared manager means tabs survive section switches.
+// The Terminal dock for every section except Explorer, which renders the same shared dock inside its editor
+// column. One open state and one manager mean Ctrl+`, the status-bar item and both dock positions agree.
 import { useEffect, useState, type ReactNode } from "react";
 import { TerminalDock, clampDock, DOCK_DEFAULT } from "../explorer/terminal/TerminalDock";
 import { TerminalIcon } from "@llmide/ui-kit";
 import { TERMINAL_BUILT, loadTerminalRuntime, sharedTerminalManager } from "../explorer/terminal/shared";
 import type { TerminalRuntime } from "../explorer/terminal/runtime-types";
 import { readTerminalPrefs, writeTerminalPrefs } from "./terminal-prefs";
-import type { SectionId } from "./sections";
 import { terminalCwd } from "../settings/repo-config.ts";
+import type { SectionId } from "./sections";
 
 export function ShellTerminalDock({ activeSection, projectRoot, projectName, open, onToggle }: { activeSection: SectionId; projectRoot: string | null; projectName: string; open: boolean; onToggle: (open: boolean) => void }): ReactNode {
   const initial = readTerminalPrefs();
@@ -29,13 +29,12 @@ export function ShellTerminalDock({ activeSection, projectRoot, projectName, ope
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.key !== "`") return;
-      if (activeSection === "explorer") return;
       e.preventDefault();
       show(!open);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeSection, open, show]);
+  }, [open, show]);
 
   if (!TERMINAL_BUILT || activeSection === "explorer") return null;
   if (!ever) return null;
@@ -57,8 +56,8 @@ export function ShellTerminalDock({ activeSection, projectRoot, projectName, ope
 }
 
 /** Status-bar toggle for the shell dock (Explorer owns its own toggle). */
-export function ShellTerminalItem({ activeSection, onToggle, built, open }: { activeSection: SectionId; onToggle: () => void; built: boolean; open: boolean }): ReactNode {
-  if (!built || activeSection === "explorer") return null;
+export function ShellTerminalItem({ onToggle, built, open }: { onToggle: () => void; built: boolean; open: boolean }): ReactNode {
+  if (!built) return null;
   return (
     <button type="button" className="sh-statusbar-item sh-statusbar-terminal" data-open={open || undefined} aria-pressed={open} aria-expanded={open} onClick={onToggle} title={open ? "Hide terminal (Ctrl+`)" : "Show terminal (Ctrl+`)"}>
       <TerminalIcon />

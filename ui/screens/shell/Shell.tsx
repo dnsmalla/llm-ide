@@ -19,7 +19,7 @@ import { chatApprovalStore } from "./chat-approvals";
 import { menuAction } from "./menu-model";
 import { useSyncExternalStore } from "react";
 import { TERMINAL_BUILT } from "../explorer/terminal/shared";
-import { readTerminalPrefs, writeTerminalPrefs } from "./terminal-prefs";
+import { setTerminalDockOpen, toggleTerminalDock, useTerminalDockOpen } from "../explorer/terminal/dock-state.ts";
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { deepLinkSection } from "./deep-link.ts";
@@ -83,7 +83,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   }, []);
   const [assistant, setAssistant] = useState({ open: false, fits: true });
   const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? getTheme());
-  const [terminalOpen, setTerminalOpen] = useState(() => readTerminalPrefs().open);
+  const terminalOpen = useTerminalDockOpen();
   const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
   const hostAvailable = shellHost.isAvailable();
   const view = useCoreStatusView();
@@ -403,7 +403,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           projectRoot={project?.root ?? null}
           projectName={project?.name ?? ""}
           open={terminalOpen}
-          onToggle={(open) => { setTerminalOpen(open); writeTerminalPrefs({ open, height: readTerminalPrefs().height }); }}
+          onToggle={(open) => setTerminalDockOpen(open)}
         />
         </div>
       </div>
@@ -412,7 +412,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         theme={theme}
         onTheme={onTheme}
         chatActive={nav.active === "chat"}
-        terminalItem={<ShellTerminalItem activeSection={nav.active} built={TERMINAL_BUILT} open={terminalOpen} onToggle={() => { const next = !terminalOpen; setTerminalOpen(next); writeTerminalPrefs({ open: next, height: readTerminalPrefs().height }); }} />}
+        terminalItem={<ShellTerminalItem built={TERMINAL_BUILT} open={terminalOpen} onToggle={toggleTerminalDock} />}
       /> : null}
       {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} /> : null}
       {permissionsOpen ? <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-permissions-title"><div className="sh-modal-card"><h2 id="sh-permissions-title" className="sh-panel-title">Permissions</h2><p className="sh-panel-text">Accessibility, Screen Recording and Microphone permissions belong to the Mac app’s live-capture engine. The desktop has no capture engine, so there is nothing to grant here.</p><div className="sh-form-actions"><button type="button" className="sh-button" onClick={() => setPermissionsOpen(false)}>Close</button></div></div></div> : null}

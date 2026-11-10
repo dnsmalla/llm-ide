@@ -237,7 +237,7 @@ test("dock: height clamps to bounds and non-finite input", () => {
   assert.equal(clampDock(500, 500), 300, "never taller than the window minus 200");
 });
 
-test("screen: explorer renders the panel switcher, search panel and terminal strip; terminal is not started", async () => {
+test("screen: explorer renders the panel switcher and search; the terminal is owned by the shell status bar", async () => {
   const fs = makeFs({ "a.ts": "x" });
   const editor = makeEditor();
   const host = fakeHost();
@@ -246,7 +246,7 @@ test("screen: explorer renders the panel switcher, search panel and terminal str
   assert.match(out, /id="ex-panel-search"[^>]*hidden/);
   assert.doesNotMatch(out, /id="ex-panel-explorer"[^>]*hidden/);
   assert.match(out, /role="searchbox"/);
-  assert.match(out, /aria-expanded="false"[^>]*>[\s\S]*?Terminal</);
+  assert.doesNotMatch(out, /id="tm-dock"/);
   assert.equal(host.spawns, 0);
 });
 
