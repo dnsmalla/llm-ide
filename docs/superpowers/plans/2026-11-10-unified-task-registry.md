@@ -12,6 +12,8 @@
 
 **Spec:** This plan is the design record for the user goal. It is grounded in the command-bus contract (`docs/spec/command-bus.md`, especially §5 and §10), the Auto Tasks audit (`docs/superpowers/plans/2026-10-31-auto-tasks-audit.md`, especially §2 and §5) and the code as of `main` at `a4cc5c065`. Where this plan and those documents disagree, this plan's decision table (§7) says why.
 
+**Revision after review R-037 (2026-11-10).** Revised after `agent-coord/reviews/R-037-unified-task-registry-plan.md`; the user accepted every recommendation in §7, including D14-D17. **Prerequisite:** REQ-019 groups A-C (review R-036) are pushed first, because they change `factory.ts`, `stage-exec.ts`, `run-manager.ts`, `ship-model.ts`, `ShipPanel.tsx` and `loop-agent.mjs`, which Tasks 7, 8 and 14 rewrite. Before Task 1, re-check every `file:line` in this plan against the new `main`; the numbers here are from `a4cc5c065`.
+
 ---
 
 ## Global constraints
@@ -26,6 +28,10 @@
 - **Feature gates:** a task declares `features` (a list). `auto_tasks` gates the Auto Tasks/Loop surfaces (`ui/screens/shell/features.ts:57-66`); `doc_gen` gates `/generate-doc` (`extension/routes/feature-routes.mjs:43-46`); `gantt_issues` gates issue writes (`extension/routes/feature-routes.mjs:35-38`). A task is runnable only when every listed feature is enabled in both the UI pref set and the core's `/health.features`. The list is **capability** gates, not surface ownership: the `/kb/tasks` route group already carries `auto_tasks`, so a core task that is also reachable from the bus lists only its extra requirement (`gantt_issues`, `doc_gen`) or `[]`.
 - **Remote mode:** the desktop UI in remote mode shows only `REMOTE_SECTIONS` (`ui/screens/shell/sections.ts:147`), which excludes `autotasks` and `loop`. A task whose runner needs the local host sets `requiresLocalHost: true`; the runner refuses it with `LOCAL_ONLY` and the UI never lists it in remote mode. Remote clients reach core tasks through the command bus, never through a local path.
 - **No new store.** Task config uses the existing `localStorage` pattern and `system/loop.json`; schedules use the existing five-field cron parser. No SQLite migration is needed for the registry (it is checked-in data). A later bus change may add a `cron` column, but this plan does not.
+- **One exception to "no new store" (D15):** Task 9 adds one append-only migration for the durable Sources → Issue record. Without it the task would re-create issues on every run.
+- **The run route is desktop-only (D14).** `POST /kb/tasks/:id/run` requires the bus host proof (`verifyBusHostProof`, as `routes/issue-writes.mjs:140` does). A JWT-only caller (web app, Chrome extension, remote desktop) and every caller on a hub gets `403 HOST_PROOF_REQUIRED`. Remote clients keep using the command bus and its tiers.
+- **Nothing that writes code or a tracker runs unattended (D17).** `issues.implement`, `review.merge` and `issues.from_notes` are `schedule.backend: "none"`. The Task 15 migration switches `scheduleActive` off for every task whose runner changed, so a schedule saved while the task could not run never starts firing by itself. A scheduled `shell` task reuses a live host approval or is skipped; it never opens the native approval dialog.
+- **Scheduled agent runs are metered and capped.** Every agent task run writes its ledger row with the task id, and a scheduled run is refused (`USD_CAP`) when the member or project budget is reached, through the same resolver a chat turn uses.
 - **Tests fail before the change.** Every migration names the test and the assertion that fails on the current code. A test that passes on both sides is not a regression test for this plan.
 - **No user-visible "Mac app" wording.** The Mac app was removed on 2026-11-06. `MAC_ONLY_MESSAGE` (`ui/screens/autotasks/native/model.ts:74`) and `macBatchReason` (`ui/screens/loop/native/store.ts:68-75`) must be replaced by registry availability reasons that name the real missing capability.
 
@@ -70,7 +76,7 @@ This is the clearest "one label per task" regression. It is deleted in Task 16, 
 ### 1c. Loop built-in templates and stages
 
 - `ui/screens/loop/native/templates.ts:31-40` defines `test-and-fix`, `regression`, `test`, `full-verify`; `:42-57` adds `skill-loop`, `docs-refresh`, `operation-diagnosis`, `system-check`; `:65-71` adds `plan-director`, `refactoring`, `doc-optimization`, `test-growth`, `FACTORY_TEMPLATE`. `applyTemplate` is `:75-86`; `initialProjectStore` is `:181-191`.
-- `ui/screens/loop/native/defaults.ts:5-644` defines the six starter loops (Regression `:6-53`, Test `:54-194`, Plan `:195-286`, Main `:287-311`, Refactoring `:312-549`, Doc Optimization `:550-643`) with full inline prompts in `config.stages[*].prompt`.
+- `ui/screens/loop/native/defaults.ts:5-644` defines the six Mac starter loops (since `6e31859e4` the Factory is a seventh default loop, built by `factoryLoop()` in `templates.ts` from `FACTORY_TEMPLATE`) (Regression `:6-53`, Test `:54-194`, Plan `:195-286`, Main `:287-311`, Refactoring `:312-549`, Doc Optimization `:550-643`) with full inline prompts in `config.stages[*].prompt`.
 - Duplication **inside Loop**: Regression is defined twice (`templates.ts:33,35` and `defaults.ts:6-53`); Test is defined twice (`templates.ts:36-37` and `defaults.ts:54-194`); "Test & Fix" and "Full Verify" re-compose the same Regression/Test stages (`templates.ts:33,39`).
 - Prompts duplicated between `defaults.ts` and `.skills` SKILL.md bodies: `skills/test-structure-setup` (`defaults.ts:87`, `:345`), `skills/test-gap-writer` (`:126`, `:448`), `skills/plan-structure-index` (`:215`), `skills/plan-director` (`:230`), `skills/refactor-planner` (`:396`), `skills/refactor-apply` (`:477`), `skills/refactor-conform` (`:492`), `skills/doc-structure-index` (`:570`), `skills/doc-writer` (`:585`). The stage prompt is an instruction wrapper around the skill; it is not identical, but it is a second copy of the same policy and it drifts.
 - `FACTORY_TEMPLATE` (`ui/screens/loop/native/factory.ts:42-62`) has four inline prompts (`INTAKE_PROMPT` `:27`, `PLAN_PROMPT` `:28`, `IMPLEMENT_PROMPT` `:29`, `REVIEW_PROMPT` `:30`) plus `FACTORY_REPAIR_HINT` `:31`. The skill ids are `:14-17`; `agentRunBody` is `:97-118`; the role mapping is `:299-315`.
@@ -157,15 +163,15 @@ Field rules (all enforced by `conformance-tasks.mjs`):
 - `id` is `^[a-z][a-z0-9]*(\.[a-z0-9]+)+$` (dotted, stable, never a label). `aliases` are old ids; an alias may not equal another task's id or alias.
 - `group` is one of `Pipeline`, `Review`, `Automation`, `Maintenance` (the Auto Tasks groups at `model.ts:10`). Factory-only tasks use `Factory`; the group is a UI hint, not a runner decision.
 - `runner.kind` is one of `agent`, `shell`, `core-route`, `desktop-action`. `runner` is `null` only when `availability.status` is `retired` or `alias`.
-- `agent` requires `prompt` and forbids `route`/`action`; it may carry `stage` metadata (skill id, target/output path, severity) when a Loop template uses it. `shell` requires `stage.kind` and forbids `prompt`. `core-route` requires `route` (a fixed path in `extension/`) and forbids `prompt`. `desktop-action` requires `action` (a value from the closed `desktopActions` set in the registry) and forbids `prompt`.
+- `agent` requires `prompt` and forbids `route`/`action`; it may carry `stage` metadata (skill id, target/output path, severity) when a Loop template uses it. `shell` requires `stage.kind` and forbids `prompt`. `core-route` requires `route` (the id of an adapter registered in `extension/agents/task-runner.mjs`, for example `sources-update` or `plan-status`; never a URL or a file path) and forbids `prompt`. `desktop-action` requires `action` (a value from the closed `desktopActions` set in the registry) and forbids `prompt`.
 - `busKind`, when present, must exist in `schema/bus/registry.json`; `busArgs` are merged with the task's typed args. `review.code` -> `review` + `{focus:"code"}`; `sources.update` -> `sources.update`; `issues.implement` -> `issues.implement`; `issues.from_notes` -> `issues.from_notes`.
 - `input.kind` is `repo`, `project`, `notes`, `issues`, `doc`, `none`. `input.required` is a boolean; `input.paths` are documentation only (never sent to a shell).
-- `output.persist` is `log`, `run-record`, `note`, `tracker`, `file` or `none`; `revertWrites` is true exactly for read-only tasks.
+- `output.persist` is `log`, `run-record`, `note`, `tracker`, `file` or `none`; `revertWrites` is true exactly for read-only `agent` tasks (a `desktop-action` or `core-route` task has nothing to revert).
 - `scope` is `project` or `app`. An `app` task keeps per-project enable/cron but is scheduled once from the active project (Task 15); its work is not repeated per project.
-- `schedule.backend` is `none`, `desktop` or `bus`. `desktop` means the one desktop scheduler (Task 15); `bus` means `POST /bus/schedules` (only `sources.update` is schedulable there today, `extension/routes/bus/schedules.mjs:8`). A task with `schedule.backend: "none"` is manual-only.
+- `schedule.backend` is `none`, `desktop` or `bus`. `desktop` means the one desktop scheduler (Task 15); `bus` means `POST /bus/schedules` (only `sources.update` is schedulable there today, `extension/routes/bus/schedules.mjs:8`). A task with `schedule.backend: "none"` is manual-only. A task that writes code or an external tracker is always `none` (D17): the conformance gate fails when a `desktop-action` task, or a task whose `output.persist` is `tracker`, is schedulable.
 - `features` is a subset of `agent_chat`, `file_explorer`, `code_graph_3d`, `gantt_issues`, `terminal`, `doc_gen`, `mobile_sync`, `auto_tasks` (`ui/screens/shell/features.ts:5-14`). The `/kb/tasks` route group itself is gated by `auto_tasks`; that is not repeated in every task entry. `docs.generate` lists `doc_gen`, `issues.from_notes` lists `gantt_issues`, and the rest are `[]`.
 - `availability.status` is `available`, `unported`, `retired` or `alias` (only with `aliasOf`). `unported` requires a reason that names the missing capability (never "Mac app"). `retired` keeps the alias for stored history but is hidden from every picker.
-- `revision` is a positive integer. It is used for Loop's existing `defaultRevision` upgrade (Task 14), not for the task runner.
+- `revision` is a positive integer. It drives the default-stage upgrade that Task 14 builds (the desktop only stores `defaultRevision` today; nothing upgrades yet), not the task runner. An `agent` task also carries `knownPromptHashes`: the SHA-256 of every published revision of its prompt, so an unedited stage in an existing `loop.json` can be recognised.
 
 ### 2c. Templates
 
@@ -176,7 +182,7 @@ Field rules (all enforced by `conformance-tasks.mjs`):
   "version": 1,
   "templates": [
     {
-      "id": "loop.regression",
+      "id": "regression",
       "name": "Regression",
       "summary": "Re-check known faults only.",
       "kind": "starter",
@@ -287,11 +293,14 @@ Why two adapters and not one module: `shell` tasks need the Tauri host commands 
 
 The route body is `{ projectId?, args? }`; it never accepts `prompt`, `route`, `command`, `repoRoot` or a shell string. The registry supplies those. This is the security property that stops the task API becoming a generic agent endpoint. The handler:
 
+0. refuses a request without the bus host proof with `403 HOST_PROOF_REQUIRED` (D14), before reading the body;
 1. resolves `taskId` (aliases accepted) from `TASK_BY_ID`;
 2. refuses `availability.status !== "available"` with `TASK_NOT_AVAILABLE { reason }`;
 3. checks `features` against `config.features` and answers the existing `404 { error: "feature_disabled", feature }` envelope;
 4. checks the project with `projectScopeRefusal` and the task's action class (`model.read` for reviews, `external.read` for `sources.update`, `model.exec` for `issues.implement`, `external.write` for `issues.from_notes`);
 5. validates `args` against the task's `args` JSON schema (same validator as the bus, `extension/routes/bus/schema-validate.mjs`), then calls `runCoreTask`.
+
+`ROUTE_POLICY` gives a method + path exactly one class, so `POST /kb/tasks/*/run` is declared `model.read` (the lowest class any task needs) and the handler makes a second `authorizeAction` call with the task's own class. The project checks are the bus executor's, reused and not re-written: move `projectRootFor` → `realpathSync` → `projectAllowed` → `classRefusal` (`routes/bus/executor.mjs`, the block before the kind dispatch) into one exported helper that the executor and `routes/tasks.mjs` both call. An adapter that needs something only a route may read declares it (`needs: ["tracker-creds"]`); `routes/tasks.mjs` resolves each need through one small table (the vault read both `/kb/outcomes/refresh` and the task route call) and passes it in `deps`. The generic route never branches on a task id.
 
 `extension/agents/tasks/review.mjs` is the moved `runReview` from `extension/routes/bus/review.mjs`; `extension/routes/bus/review.mjs` becomes a thin wrapper that calls it. `extension/routes/bus/executor.mjs:148-150` calls the same agent module. That is the concrete "one implementation" for Review Code/Doc/Conflicts.
 
@@ -372,7 +381,7 @@ Each task is one commit. "Delete old duplicate" is always the last step and alwa
 - Create: `ui/screens/tasks/registry.generated.ts`, `ui/screens/tasks/model.ts`
 - Create: `extension/core/task-registry.generated.mjs`, `extension/core/task-prompts.generated.mjs`
 - Create: `ui/screens/tasks/tests/registry.test.mjs`, `ui/screens/tasks/tests/availability.test.mjs`
-- Modify: `Makefile:150-161` (`contract-gates`), `desktop/package.json:10` (test glob)
+- Modify: `Makefile:150-161` (`contract-gates`), `desktop/package.json:11` (test glob)
 
 **Interfaces:**
 - Produces: `TASKS`, `TASK_BY_ID`, `ALIASES`, `TEMPLATES` from both generated files; `resolveTaskId`, `taskAvailability`, `taskPrompt` from `ui/screens/tasks/model.ts`.
@@ -428,7 +437,7 @@ Run: `cd desktop && node --test --experimental-strip-types ../ui/screens/tasks/t
 
 `registry.schema.json` is a JSON Schema with `additionalProperties:false` at the root and in every object; it encodes the field rules in §2b. Do not add a new validation dependency: `conformance-tasks.mjs` uses the existing `validate` from `extension/routes/bus/schema-validate.mjs` for task `args` and hand-written structural checks for the registry, exactly as `scripts/conformance-bus.mjs:55-90` does for the bus.
 
-- [ ] **Step 3: Write the generator.** `scripts/gen-task-registry.mjs` exports `buildRegistry()` and `renderTs(reg)` / `renderPromptsTs(reg)` / `renderMjs(reg)` / `renderPromptsMjs(reg)`; the CLI writes all four files, or with `--check` compares them and exits 1 with `generated copy is stale: <path> (run: node scripts/gen-task-registry.mjs --sync)`. The TS catalog copy ends with:
+- [ ] **Step 3: Write the generator.** `scripts/gen-task-registry.mjs` exports `buildRegistry()` and `renderTs(reg)` / `renderPromptsTs(reg)` / `renderMjs(reg)` / `renderPromptsMjs(reg)`; the CLI writes all four files, or with `--check` compares them and exits 1 with `generated copy is stale: <path> (run: node scripts/gen-task-registry.mjs)`. The TS catalog copy ends with:
 
 ```ts
 export const TASKS: readonly TaskDef[] = [];
@@ -448,7 +457,7 @@ The MJS copy is the same data with no type annotations and `export const`. Promp
   6. every alias points at a task, and no alias collides with another task id;
   7. a non-`agent` runner has no `prompt`; a `retired` task has no runner.
 
-Add `node scripts/conformance-tasks.mjs` to `contract-gates` after the bus line (`Makefile:150-161`), and add `../ui/screens/tasks/tests/*.test.*` to the `desktop/package.json:10` glob.
+Add `node scripts/conformance-tasks.mjs` to `contract-gates` after the bus line (`Makefile:150-161`), and add `../ui/screens/tasks/tests/*.test.*` to the `desktop/package.json:11` glob.
 
 - [ ] **Step 5: Add the pure selector.** `ui/screens/tasks/model.ts` exports the types and `taskAvailability` from §2d, plus `resolveTaskId(idOrAlias)` (own-property lookup, never `__proto__`), `taskPrompt(taskId)` (throws `TASK_NOT_PROMPTABLE` for a non-agent task) and `taskGroup(taskId)` (falls back to `Automation`). Write `availability.test.mjs` with one task fixture per status and the matrix from §2d.
 
@@ -596,6 +605,8 @@ return { taskId: task.id, ok: r.ok, runner: "shell", summary: r.output.split("\n
 
 - [ ] **Step 4: Wire Auto Tasks to the runner.** In `NativeAutoTasksScreen.tsx:162-231`, replace the `guardedAgentCall` block for `regression` with a `runTask("loop.regression", ctx)` branch. Keep the existing model-limit decision (`decideRun`) only for `agent` tasks; a shell task does not need a model. Pass the same `invokeHost`, `core`, `fs`, `changedPathsNow`, `loop_revert_paths` and `approveStage` wiring the Loop screen uses (`NativeLoopScreen.tsx:487-490`, `:555-568`). Add the optional `taskId` field to `LoopStage` (`model.ts:21-47`, decode `:91-120`, encode `:190-213`) and tag the existing Regression stage definitions in `templates.ts:33,35` and `defaults.ts:7-25` with `taskId:"loop.regression"`. `taskId` is the identity reference; `promptRef` in Task 14 is the prompt pointer. Older builds drop `taskId` on save (it has no inline effect), which is safe because the stage still carries its own `kind`. `MAC_ONLY_TASK_IDS` loses `regression`; `desktopRunnable("regression")` becomes true through `taskAvailability`, not a hardcoded set. Update every `desktopRunnable`/`scheduledRunAllowed` call in `NativeAutoTasksScreen.tsx` (`:165`, `:332`, `:334`, `:363`, `:371`, `:374`, `:377`, `:383`) and the `scheduleStatusLine` call at `model.ts:126` to pass the screen's `TaskEnv` (feature set from the shell + `/health`, `hasRepo`, `localHost`, `mode`).
 
+  **Approval (R-037 #4).** The host mints an approval only for a stage it resolves from `system/loop.json` (`loop_approve_stage(stageId, loopId)`), and `loop_run_fault_verify` checks the token against the fault path and its command hash. The in-memory stage above is not in `loop.json`, so it cannot be approved by its own id. `ctx.approvalToken` therefore asks for the project's real Regression loop: find the loop whose `defaultKey` is `regression` in the loaded store and call `approveLoop(thatLoop.id)` for a manual run. A scheduled run calls `approvalStatus(thatLoop.id)` and uses its token only when `approved` is true; otherwise the run is skipped with the reason "Regression needs its fault commands approved once in Loop", and no dialog opens. A project with no Regression loop gets `NO_REGRESSION_LOOP`. Add both cases to `runner-regression.test.mjs` (a scheduled run with no grant makes no `loop_run_fault_verify` call).
+
 - [ ] **Step 5: Delete the old prompt.** Remove `model.ts:36` from `TASKS`. The label, group and runner now come from the registry. Keep `AutoTaskId` including `"regression"` (it is the alias) and map it via `resolveTaskId`.
 
 - [ ] **Step 6: Run and commit.**
@@ -616,7 +627,7 @@ git commit -am "feat(tasks): Regression runs the Loop regression stage through t
 - Modify: `schema/tasks/registry.json` (task), `ui/screens/autotasks/native/model.ts:26`, `:72`
 - Create: `extension/agents/tasks/sources-update.mjs` (move `runSourcesUpdate` from `extension/routes/bus/sources-update.mjs:65-110`; the route re-exports it)
 - Create: `extension/routes/tasks.mjs`, `extension/agents/task-runner.mjs`
-- Modify: `extension/routes/feature-routes.mjs:49-52` (add `/kb/tasks/`), `extension/server.mjs:456-470` (`ALL_ENDPOINTS`, version bump), `extension/routes/router.mjs` (dispatch `/kb/tasks`)
+- Modify: `extension/routes/feature-routes.mjs:49-52` (add `/kb/tasks/`), `extension/server.mjs:456-470` (`ALL_ENDPOINTS`, version bump), `extension/server/route-authority.mjs` (`ROUTE_POLICY`); `extension/routes/router.mjs` gets NO static import of the task route
 - Test: `extension/tests/task-runner-sources.test.mjs`, `extension/tests/task-routes.test.mjs`
 
 **Interfaces:**
@@ -651,26 +662,19 @@ test('sources.update runs the deterministic adapter and never the agent', async 
 
 Run: `cd extension && node --test tests/task-runner-sources.test.mjs`. Expected: FAIL (`../agents/task-runner.mjs` missing).
 
-- [ ] **Step 2: Move the logic down without inverting a layer.** The registry entry is `runner.kind:"core-route"`, `runner.route:"sources-update"`, `scope:"app"`, `features:[]`, `requiresRepo:false`, `requiresLocalHost:false`, `schedule.backend:"desktop"` (or `"bus"` if you want to reuse the existing `sources.update` bus schedule; the desktop scheduler is the default in this plan). Create `extension/agents/tasks/sources-update.mjs` with the body of `extension/routes/bus/sources-update.mjs:65-110`. It may import `kb/` and `connectors/` (L1/L3), but it may **not** import `routes/google-connectors.mjs` or `routes/calendar-ical.mjs` (L4). Take `runGoogleSync`, `runIcalSync` and `indexBoxFolder` as injected deps (`deps.runGoogleSync ?? runGoogleSync` is not allowed; the route supplies them, tests supply fakes). `extension/routes/bus/sources-update.mjs` becomes:
-
-```js
-export { runSourcesUpdate } from '../../agents/tasks/sources-update.mjs';
-```
-
-The route wrapper supplies the real L4 functions:
+- [ ] **Step 2: Move the logic down without inverting a layer.** The registry entry is `runner.kind:"core-route"`, `runner.route:"sources-update"`, `scope:"app"`, `features:[]`, `requiresRepo:false`, `requiresLocalHost:false`, `schedule.backend:"desktop"` (or `"bus"` if you want to reuse the existing `sources.update` bus schedule; the desktop scheduler is the default in this plan). Create `extension/agents/tasks/sources-update.mjs` with the body of `extension/routes/bus/sources-update.mjs:65-110`. It may import `kb/` and `connectors/` (L1/L3), but it may **not** import `routes/google-connectors.mjs` or `routes/calendar-ical.mjs` (L4). Take `runGoogleSync` and `runIcalSync` as injected deps (`indexBoxFolder` is in `connectors/`, which `agents/` may import directly) (`deps.runGoogleSync ?? runGoogleSync` is not allowed; the route supplies them, tests supply fakes). `extension/routes/bus/sources-update.mjs` becomes a wrapper that supplies the real L4 functions:
 
 ```js
 import { runGoogleSync } from '../google-connectors.mjs';
 import { runIcalSync } from '../calendar-ical.mjs';
-import { indexBoxFolder } from '../../connectors/box.mjs';
 import { runSourcesUpdate as core } from '../../agents/tasks/sources-update.mjs';
 
-export const runSourcesUpdate = (a) => core({ ...a, deps: { runGoogleSync, runIcalSync, indexBoxFolder } });
+export const runSourcesUpdate = (a) => core({ ...a, deps: { runGoogleSync, runIcalSync } });
 ```
 
 The bus route (`extension/routes/bus/executor.mjs:149`) and `routes/tasks.mjs` both use this wrapper, so there is one implementation and no L3 → L4 import. Keep the route file until Task 16 so the bus import path does not change twice.
 
-- [ ] **Step 3: Add the task route.** `extension/routes/tasks.mjs` exports `handleTaskRoutes(req, res, ctx)`; `GET /kb/tasks` returns the catalog filtered by `config.features` and **omits `runner.prompt`** (a prompt is a server-side implementation detail; the UI already has the generated copy); `POST /kb/tasks/:id/run` parses `{ projectId?, args? }`, rejects any other key (`prompt`, `route`, `command`, `repoRoot` are `VALIDATION_FAILED`), resolves the alias, refuses unavailable tasks with `TASK_NOT_AVAILABLE`, checks authority, validates args with `extension/routes/bus/schema-validate.mjs`, then calls `runCoreTask`. Add `/kb/tasks/` to `FEATURE_ROUTE_GROUPS.auto_tasks.prefixes` (`feature-routes.mjs:49-52`), and to `ALL_ENDPOINTS`/`ROUTE_POLICY`; bump `SERVER_API_VERSION` to 136.
+- [ ] **Step 3: Add the task route.** `extension/routes/tasks.mjs` exports `handleTaskRoutes(req, res, ctx)`; `GET /kb/tasks` returns the catalog filtered by `config.features` and **omits `runner.prompt`** (a prompt is a server-side implementation detail; the UI already has the generated copy); `POST /kb/tasks/:id/run` parses `{ projectId?, args? }`, rejects any other key (`prompt`, `route`, `command`, `repoRoot` are `VALIDATION_FAILED`), resolves the alias, refuses unavailable tasks with `TASK_NOT_AVAILABLE`, checks authority, validates args with `extension/routes/bus/schema-validate.mjs`, then calls `runCoreTask`. The run handler starts with the host-proof check (D14). Wiring (R-037 #6): add `/kb/tasks/` to `FEATURE_ROUTE_GROUPS.auto_tasks.prefixes` (`feature-routes.mjs:49-52`) and make that group's single lazy `load` return one handler that tries `handleLoopAgentRoutes` and then `handleTaskRoutes` (each returns `false` for a path it does not own). Never import `routes/tasks.mjs` statically from `router.mjs` or `server.mjs`, and `agents/task-runner.mjs` imports the Loop engine with a dynamic `import()` on first use (`tests/feature-routes.test.mjs`, `tests/lazy-engine.test.mjs` must stay green). Add the paths to `ALL_ENDPOINTS` and to `ROUTE_POLICY` as described in §2f; bump `SERVER_API_VERSION` to 136. `tests/task-routes.test.mjs` includes: no host proof → 403 `HOST_PROOF_REQUIRED`; a body with `prompt` → `VALIDATION_FAILED`; `auto_tasks` off → 404 `feature_disabled`.
 
 - [ ] **Step 4: Wire the desktop.** `runTask` for `core-route` calls `ctx.core.request("/kb/tasks/" + task.id + "/run", { method: "POST", body: { projectId, args } })`. Auto Tasks no longer needs `requiresLinkedRepo` for this task (`model.ts:86-89` says only Source Update is exempt); that stays true through the registry (`requiresRepo:false`).
 
@@ -732,7 +736,7 @@ export async function runPlanStatus({ userId, creds, deps = {} }) {
 }
 ```
 
-Credentials come from the vault in the route, exactly as `router.mjs:1449-1464` does; do not accept them from the task body (the task route's `args` schema has no `creds`).
+Credentials come from the vault in the route, exactly as `router.mjs:1449-1464` does; do not accept them from the task body (the task route's `args` schema has no `creds`). The entry declares `needs: ["tracker-creds"]`; `routes/tasks.mjs` resolves it through the table in §2f and passes `deps.creds`, so `runPlanStatus` receives `creds` without the generic route knowing the task.
 
 - [ ] **Step 4: Wire the desktop and delete the old prompt.** Remove `model.ts:34`, remove `updatePlanStatus` from `MAC_ONLY_TASK_IDS`. In `NativeAutoTasksScreen`, the task now goes through `runTask`'s `core-route` branch and does not call `decideRun` (no model).
 
@@ -861,10 +865,10 @@ test("Implement Issues starts one Factory run, never an agent prompt", async () 
     core: { request: async (path) => { coreCalls.push(path); return { issues }; } },
     host: async () => null, fs: {}, log: () => {}, approvalToken: async () => null,
     changedPaths: async () => [], revert: async () => {},
-    actions: { startFactory: async (ids) => { started = ids; return { runIds: ["r1"] }; } },
+    actions: { factoryItemKeys: async () => new Set(), startFactory: async (ids) => { started = ids; return { runIds: ["r1"] }; } },
   });
   assert.equal(out.ok, true);
-  assert.deepEqual(coreCalls, ["/kb/issues"]);
+  assert.deepEqual(coreCalls, ["/kb/issues?state=open"]);
   assert.deepEqual(started, ["1"]);
   assert.deepEqual(out.changedPaths, []);
 });
@@ -872,15 +876,15 @@ test("Implement Issues starts one Factory run, never an agent prompt", async () 
 
 Run: `cd desktop && node --test --experimental-strip-types ../ui/screens/tasks/tests/runner-implement-issues.test.mjs`. Expected: FAIL.
 
-- [ ] **Step 2: Add the registry entry.** `runner.kind:"desktop-action"`, `action:"factory.start"`, `input:{kind:"issues", required:true, selector:"next-ready"}`, `requiresRepo:true`, `requiresLocalHost:true`, `readOnly:false`, `output.persist:"run-record"`, `features:["gantt_issues"]` (the Issues board/read is `gantt_issues`; the `/kb/tasks` route group is already gated by `auto_tasks`, so it is not repeated here).
+- [ ] **Step 2: Add the registry entry.** `runner.kind:"desktop-action"`, `action:"factory.start"`, `input:{kind:"issues", required:true, selector:"next-ready"}`, `requiresRepo:true`, `requiresLocalHost:true`, `readOnly:false`, `output.persist:"run-record"`, `features:["gantt_issues"]` (the Issues board/read is `gantt_issues`; the `/kb/tasks` route group is already gated by `auto_tasks`, so it is not repeated here). `schedule: { backend: "none", schedulable: false }` (D17: it starts a code-writing run).
 
-- [ ] **Step 3: Implement selection and the action.** `select-issues.ts` sorts by `number`/`id` ascending, drops `isPR`, non-open, empty-body and already-assigned rows. The `desktop-action` branch:
+- [ ] **Step 3: Implement selection and the action.** `select-issues.ts` sorts by `number`/`id` ascending, drops `isPR`, non-open and empty-body rows, and every issue that already has a Factory card (`taken`: the item keys from `readItems` in `ui/screens/factory/items.ts`, whatever their column), so an issue with a live run, a finished run or a shipped PR is never started twice. `/kb/issues` rows have no assignee field; do not invent one. Signature: `selectNextReadyIssue(issues, taken = new Set())`. The `desktop-action` branch:
 
 ```ts
 if (task.runner?.kind === "desktop-action") {
   if (task.runner.action === "factory.start") {
-    const body = await ctx.core.request<{ issues: Issue[] }>("/kb/issues", { method: "GET" });
-    const issue = selectNextReadyIssue(body.issues ?? []);
+    const body = await ctx.core.request<{ issues: Issue[] }>("/kb/issues?state=open", { method: "GET" });
+    const issue = selectNextReadyIssue(body.issues ?? [], await ctx.actions.factoryItemKeys(ctx.projectRoot));
     if (!issue) return { taskId: task.id, ok: false, runner: "desktop-action", summary: "No ready issue.", output: "", changedPaths: [], warnings: [], code: "NO_READY_ISSUE" };
     const { runIds } = await ctx.actions.startFactory([issue.id], ctx.projectRoot);
     return { taskId: task.id, ok: runIds.length > 0, runner: "desktop-action", summary: `Started Factory run for issue #${issue.number}.`, output: runIds.join("\n"), changedPaths: [], warnings: [] };
@@ -942,9 +946,9 @@ test("Review & Merge opens the latest passed Factory run and never ships", async
 
 Run: `cd desktop && node --test --experimental-strip-types ../ui/screens/tasks/tests/runner-review-merge.test.mjs`. Expected: FAIL.
 
-- [ ] **Step 2: Add the registry entry.** `runner.kind:"desktop-action"`, `action:"factory.ship-review"`, `input:{kind:"repo", required:true}`, `readOnly:true` (the task itself does not write; Ship is a separate user click), `requiresRepo:true`, `requiresLocalHost:true`, `features:[]`, `output.persist:"log"`. The label stays "Review & Merge" for stored history, but the description says "Review the pending Factory run; merging is a separate Ship click."
+- [ ] **Step 2: Add the registry entry.** `runner.kind:"desktop-action"`, `action:"factory.ship-review"`, `input:{kind:"repo", required:true}`, `readOnly:true` (the task itself does not write; Ship is a separate user click), `requiresRepo:true`, `requiresLocalHost:true`, `features:[]`, `output.persist:"log"`. Also `output.revertWrites:false` and `schedule.backend:"none"` (D17: it opens a panel for a person, so a timer must never run it). The label stays "Review & Merge" for stored history, but the description says "Review the pending Factory run; merging is a separate Ship click."
 
-- [ ] **Step 3: Implement the action.** Extract the body of `NativeLoopScreen`'s `openShipRun` (`:278-288`) into `ui/screens/tasks/ship-review.ts` so the screen and the task use one builder. It must:
+- [ ] **Step 3: Implement the action.** Extract the body of `NativeLoopScreen`'s `reopenWorktree` (`:279-289`) into `ui/screens/tasks/ship-review.ts` so the screen and the task use one builder. It must:
   - read `invokeHost<RunInfo[]>("loop_worktree_list")` (the Rust command at `desktop/src-tauri/src/loop_worktree.rs:572-574`, returning `runId/project/repo/worktree/branch/baseCommit`);
   - read `readRecentRuns(fs, 50)` (`history.ts:41-60`) and keep the newest entry whose `statusCode === "success"` and whose `id` has a live worktree;
   - load the run record (`loadRunRecord` in `history.ts`) for its `workItem`, so `ShipPanel` gets a real `WorkItem`, not a synthesized title;
@@ -970,6 +974,7 @@ git commit -am "feat(tasks): Review & Merge opens the latest passed Factory run 
 - Modify: `schema/tasks/registry.json` (task), `ui/screens/autotasks/native/model.ts:27`, `:72`
 - Create: `extension/agents/issue-writer.mjs` (extract `parseIssueWrite`, `providerCall`, `callProvider`, `onceForIdem` from `extension/routes/issue-writes.mjs:26-120`; the route imports it)
 - Create: `extension/agents/tasks/issues-from-notes.mjs`
+- Create: `extension/kb/migrations/<next>-issue-source-links.sql`, `extension/kb/issue-source-links.mjs` (+ `extension/tests/issue-source-links.test.mjs`)
 - Modify: `extension/routes/issue-writes.mjs` (thin route over `issue-writer.mjs`), `extension/agents/task-runner.mjs`
 - Modify: `schema/bus/registry.json` + `extension/routes/bus/registry.json` (`issues.from_notes` becomes `available:true`; run `node scripts/conformance-bus.mjs --sync`)
 - Test: `extension/tests/issues-from-notes.test.mjs`
@@ -1006,7 +1011,7 @@ test('issues.from_notes creates one issue per new action and skips repeats', asy
 
 Run: `cd extension && node --test tests/issues-from-notes.test.mjs`. Expected: FAIL.
 
-- [ ] **Step 2: Extract the writer.** `agents/issue-writer.mjs` exports the pure parser and the provider call; it takes `token`, `makePinnedFetch`, `onceForIdem` and the clock as deps. `routes/issue-writes.mjs` becomes a 40-line HTTP wrapper that resolves the token and calls it. This is required by the "routes cannot import routes" rule: the task runner cannot reuse the route's private functions otherwise. The existing `issue-writes` tests must stay green (they cover the parser and idempotency).
+- [ ] **Step 2: Extract the writer.** `agents/issue-writer.mjs` exports the pure parser and the provider call; it takes `token`, `makePinnedFetch`, `onceForIdem` and the clock as deps. `routes/issue-writes.mjs` becomes a 40-line HTTP wrapper that resolves the token and calls it. This is required because `agents/` (L3) cannot import a route module (L4): the task runner cannot reuse the route's private functions otherwise. The existing `issue-writes` tests must stay green (they cover the parser and idempotency).
 
 - [ ] **Step 3: Implement the adapter.** `agents/tasks/issues-from-notes.mjs`:
   - reads actions via `deps.searchActions` (the real one calls `kb.search`);
@@ -1016,13 +1021,15 @@ Run: `cd extension && node --test tests/issues-from-notes.test.mjs`. Expected: F
   - stops at 20 creates per run (the bus `issueIds` cap is 20, `schema/bus/registry.json:117`); reports the rest as `skipped`.
   - A provider failure is a `TaskResult` with `ok:false` and the typed code, not a silent partial success.
 
+  **Durable record (D15, R-037 #2).** `onceForIdem` is in memory for 10 minutes (`issue-writes.mjs:17-18`), so by itself a second run, or any run after a restart, would create every issue again. Add one append-only migration (the next free number under `extension/kb/migrations/`) for `issue_source_links (user_id, provider, repo, source_ref, text_hash, issue_number, issue_url, created_at)`, unique on `(user_id, provider, repo, source_ref, text_hash)`, with `extension/kb/issue-source-links.mjs` (`findLink`, `recordLink`; `userId` first, as every kb helper). The adapter looks the action up before calling the provider and records the link in the same step as a successful create; an action with a link is reported as `skipped: already filed (#n)`. Tests: a second run with the same actions creates nothing; a run after "restart" (fresh module state, same DB) creates nothing; another user's link never suppresses this user's create. The entry is `schedule: { backend: "none" }` (D17): a person starts every run.
+
 - [ ] **Step 4: Flip the bus kind and wire its executor.** `schema/bus/registry.json`: `issues.from_notes.available: true`, `"engineless": true` (the conformance gate refuses an available write kind without it, `scripts/conformance-bus.mjs:56-57`), remove `unavailableReason`; keep tier T1/lane write. The kind was unavailable, so there is no stored command to keep compatible: add `provider` (`enum:["github","gitlab"]`) and `repo` (the same `owner/name`/project-path shape as `issue-writes.mjs:39-42`) to `issues.from_notes.args.required`, alongside `projectId`; `since` stays optional. The desktop task config's `repo` supplies them, and a phone command must name the exact repo its approval covers. Update the command fixtures and the tier matrix, then `node scripts/conformance-bus.mjs --sync`. In `extension/routes/bus/executor.mjs`:
   - add `'issues.from_notes': 'external.write'` to `KIND_CLASS` (`:33`);
   - import `runIssuesFromNotes` from `agents/tasks/issues-from-notes.mjs`;
   - add the branch beside `:148-150`: `else if (kind === 'issues.from_notes') result = await runIssuesFromNotes({ userId, args, signal });`
   - the kind's task entry lists `gantt_issues`; `runCoreTask` refuses when the feature is off, and the bus executor checks the same feature before calling (the route's `featureDisabledFor` only covers HTTP paths, not bus kinds). The bus registry has no per-kind feature field today, so `GET /bus/kinds` still lists the kind; the execution-time refusal is `TASK_NOT_AVAILABLE`/`feature_disabled`, never a run with the feature off. Adding `features` to the bus kind is a follow-up, not part of this commit.
 
-Run `node scripts/conformance-bus.mjs --sync` and the bus tests (`extension/tests/command-bus.test.mjs` asserts the unavailable list at `:318`; update that assertion to only `loop.run`/`custom.run`). This is a wire-visible change: the phone can now enqueue the kind, and it still needs desktop approval (T1).
+Run `node scripts/conformance-bus.mjs --sync` and the bus tests (`extension/tests/command-bus.test.mjs` asserts the unavailable list at `:318`; update that assertion to only `loop.run`/`custom.run`). This is a wire-visible change: the phone can now enqueue the kind, and it still needs desktop approval (T1). Everything that states the kind's availability changes in this same commit, or `make docs-check` and the contract gate go red: `docs/spec/command-bus.md` (the kinds table row and the unavailable list), `schema/http/fixtures/bus/get-bus-kinds-200-*.json`, `schema/bus/fixtures/tiers/matrix.json`, and the spec-values guard (`docs/_scripts/test_check_spec_values.py`). Bump `SERVER_API_VERSION` by one: `GET /bus/kinds` answers differently.
 
 - [ ] **Step 5: Resolve the repo on the desktop and delete the old prompt.** `runTask` for `issues.from_notes` resolves the active linked repo with `readRepoConfig()` (the same source the Issues screen uses) and passes `{ provider, repo }` in `args`; no repo field is added to the task config, and no user-typed repo reaches the core. With no active repo the task returns `NO_REPO` before any request. Remove `model.ts:27`, remove `sourcesToIssue` from `MAC_ONLY`.
 
@@ -1101,8 +1108,9 @@ import { readFileSync } from 'node:fs';
 import { reviewPromptFor } from '../agents/tasks/review.mjs';
 
 test('review.code uses the registry prompt verbatim', () => {
-  const want = readFileSync(new URL('../../schema/tasks/prompts/review.code.md', import.meta.url), 'utf8').trim();
-  assert.equal(reviewPromptFor('review.code', '').trim(), want);
+  // Captured from today's reviewPrompt('code') BEFORE anything moves (Step 2).
+  const want = readFileSync(new URL('./fixtures/review-prompt-code.txt', import.meta.url), 'utf8');
+  assert.equal(reviewPromptFor('review.code', ''), want);
 });
 ```
 
@@ -1110,11 +1118,16 @@ Run: `cd extension && node --test tests/task-review-code.test.mjs`. Expected: FA
 
 Also add `ui/screens/tasks/tests/review-code-prompt.test.mjs`: a fake `runTask` captures the `POST /kb/tasks/review.code/run` body and asserts it is `{}` (no `prompt`, no `message`). This is the test that keeps the desktop from re-introducing a prompt copy.
 
-- [ ] **Step 2: Add the prompt and entry.** Copy the **current** `FOCUS.code` text and the static parts of `reviewPrompt` into `schema/tasks/prompts/review.code.md`, preserving the READ-ONLY preamble, the focus line and the concise-markdown instruction from `review.mjs:14-22`. The dynamic `Evidence gathered by the host...` block stays in `runReview` and is appended when evidence is non-empty; it is not stored in the prompt file. The test with no evidence proves the static text is byte-identical to the old prompt. Entry: `runner.kind:"agent"`, `busKind:"review"`, `busArgs:{focus:"code"}`, `engine:{mode:"read"}`, `prompt:"prompts/review.code.md"`, `readOnly:true`, `requiresRepo:true`, `requiresLocalHost:false` (the core can review a registered project), `features:[]`.
+- [ ] **Step 2: Add the prompt and entry.** First write today's `reviewPrompt('code')` output to `extension/tests/fixtures/review-prompt-code.txt` (the same for `doc` and `conflicts` in Tasks 12 and 13). Then create `schema/tasks/prompts/_review.frame.md` once: the READ-ONLY preamble, a `{{focus}}` line and the concise-markdown instruction from `review.mjs:14-22`, separated by blank lines. `schema/tasks/prompts/review.code.md` holds only the current `FOCUS.code` sentence. The entry names both (`prompt` and `frame`), the generator inlines the frame once, and `reviewPromptFor` fills the slot, so the shared text exists once instead of three times (R-037 #14). The dynamic `Evidence gathered by the host...` block stays in `runReview` and is appended when evidence is non-empty; it is not stored in the prompt file. The test with no evidence proves the static text is byte-identical to the old prompt. Entry: `runner.kind:"agent"`, `busKind:"review"`, `busArgs:{focus:"code"}`, `engine:{mode:"read"}`, `prompt:"prompts/review.code.md"`, `readOnly:true`, `requiresRepo:true`, `requiresLocalHost:false` (the core can review a registered project), `features:[]`.
+
+  **What changes for Auto Tasks (D16, R-037 #5).** Today these three tasks run `/kb/loop/agent-run` in `loop_work_root` with the user's stored prompt, an optional skill, input/output paths and the model-limit fallback (`NativeAutoTasksScreen.tsx:180-215`). After this task they run the bus review engine: one engine for the phone and the desktop. State it in the commit message and the UI copy; do not call it "the same output". Rules:
+  - **Folder.** The bus runs a review in the registered project root. The task adds an optional `args.repo` (a project-relative clone folder, validated against the user's repo allow-list and realpath-checked like the project root); the desktop sends the linked repo it used to pass as `loop_work_root`. A root that is not a git repository answers `NOT_A_REPO` instead of reviewing nothing.
+  - **Prompt.** The editor stays as an override (D9): empty means the registry prompt. A non-empty `promptOverride` replaces only the focus sentence, never the READ-ONLY frame, and is sent as `args.focusText` (bounded, fence-neutralised), so the route still accepts no free prompt.
+  - **Dropped, and said so in the task's hint:** the skill picker and the input/output paths for the three review tasks (the bus review has neither). The model-limit decision moves to the core, which already applies the per-model cap and fallback to a bus engine run.
 
 - [ ] **Step 3: Move the logic with injected ports.** `agents/tasks/review.mjs` owns `reviewPromptFor`, the git evidence collection and `runReview`. It must not import `routes/bus/engines.mjs` or `routes/bus/git-safe.mjs` (L4); it takes `deps.runTask`, `deps.engineIdFor` and `deps.git` and calls them. `routes/bus/review.mjs` becomes the wrapper that supplies the real functions from `engines.mjs`/`git-safe.mjs`; `routes/bus/executor.mjs` calls the wrapper as today. `agents/task-runner.mjs` calls `runReview` with the ports the task route injects (`routes/tasks.mjs` imports `runTask`/`engineIdFor` from `routes/bus/engines.mjs` and passes them in `deps`). There is no cycle and no L3 -> L4 import. When the engine interface itself moves down later, only the wrapper changes.
 
-- [ ] **Step 4: Wire Auto Tasks and delete the old prompt.** `model.ts:30` removed; `NativeAutoTasksScreen` uses `runTask` with a read-only `core-route`/`agent` result. The prompt editor for `review.code` disappears (registry-owned); the "Effective prompt" panel (`NativeAutoTasksScreen.tsx:483-498`) shows the registry prompt read-only via `taskPrompt`.
+- [ ] **Step 4: Wire Auto Tasks and delete the old prompt.** `model.ts:30` removed; `NativeAutoTasksScreen` uses `runTask` with a read-only `core-route`/`agent` result. The "Effective prompt" panel (`NativeAutoTasksScreen.tsx:483-498`) shows the framed registry prompt via `taskPrompt`, with the override applied when one is set. A prompt the user had edited (the stored `prompt` differs from the old default at `model.ts:30`) is carried into `promptOverride` by the Task 15 migration; an unedited one is dropped.
 
 - [ ] **Step 5: Run and commit.**
 
@@ -1125,7 +1138,7 @@ cd .. && node scripts/conformance-tasks.mjs && make contract-gates
 git commit -am "feat(tasks): Review Code reads its prompt from the task registry"
 ```
 
-**Compatibility:** the bus `review` response shape is unchanged; the prompt text is byte-identical to the old `FOCUS.code` wrapper (the test enforces it). **Rollback:** revert; the bus route still has the old copy until the wrapper is removed. **User-visible change:** same review output; Auto Tasks no longer lets the user edit this prompt (it was already `readOnlyOutput`).
+**Compatibility:** the bus `review` response shape is unchanged; the prompt text is byte-identical to the old `FOCUS.code` wrapper (the test enforces it). **Rollback:** revert; the bus route still has the old copy until the wrapper is removed. **User-visible change:** Review Code in Auto Tasks now runs on the bus review engine with the registry prompt (the wording differs from the old Auto Tasks default); an edited prompt is kept as an override; the skill and input/output fields are gone for this task. The phone's `review` command is unchanged.
 
 ---
 
@@ -1152,7 +1165,7 @@ cd desktop && node --test --experimental-strip-types ../ui/screens/autotasks/tes
 git commit -am "feat(tasks): Review Doc reads its prompt from the task registry"
 ```
 
-**Compatibility:** bus shape unchanged; prompt byte-identical. **Rollback:** revert. **User-visible change:** none in output; prompt no longer editable.
+**Compatibility:** bus shape unchanged; prompt byte-identical. **Rollback:** revert. **User-visible change:** as Task 11 (bus review engine, registry prompt unless overridden).
 
 ---
 
@@ -1226,6 +1239,8 @@ git commit -am "feat(tasks): Review Conflicts keeps the deterministic git check 
 - Produces: `BUILT_IN_TEMPLATES` and `DEFAULT_LOOP_SPECS` from the generated module; `LoopStage.promptRef`/`promptHash` additive fields.
 - Produces: `upgradeDefaultStage(stage, task) -> LoopStage` in `templates.ts` (or a new `defaults-upgrade.ts`), using `defaultRevision` + `promptHash`.
 
+**Commit split (R-037 #11).** This is five commits, not one, each with its own failing test: **14a** the generator emits the template modules and `templates.ts`/`defaults.ts` re-export them, arrays byte-identical to today (a test deep-compares the generated arrays with the hand-written ones before those are deleted); **14b** one commit per starter loop (Regression, Test, Plan, Refactoring, Doc Optimization) moving its stage prompts into `schema/tasks/prompts/`; **14c** the Factory prompts (`factoryLoop()` in `templates.ts` stays the builder of the seventh default loop and keeps `factoryVerifyProblem`); **14d** `promptRef`, the known-revision upgrade and the editor rule (Step 4); **14e** the stale Mac stages (Step 5). Template ids do not change (`"factory"`, `"regression"`, … are compared in `NativeLoopScreen.tsx` and stored in custom-template selections).
+
 - [ ] **Step 1: Write the failing test.**
 
 ```js
@@ -1238,7 +1253,7 @@ test("the generated Loop templates have no Mac build stages and reference real t
     .flatMap((t) => t.config.stages)
     .map((s) => s.command ?? "");
   assert.equal(commands.some((c) => /(^|\s)mac\//.test(c) || /cd mac\b/.test(c)), false);
-  for (const t of BUILT_IN_TEMPLATES) assert.ok(t.id.startsWith("loop."), t.id);
+  assert.ok(BUILT_IN_TEMPLATES.some((t) => t.id === "factory"), "template ids are unchanged");
 });
 ```
 
@@ -1252,8 +1267,10 @@ Run: `cd desktop && node --test --experimental-strip-types ../ui/screens/loop/te
   - `stage.isDefault === true`;
   - `stage.promptRef` maps to a registry task;
   - `stage.defaultRevision < task.revision`;
-  - `sha256(stage.prompt ?? "") === stage.promptHash` (the prompt is unedited).
-  It then writes the new prompt, hash and revision. A stage without a hash is left alone. `runSkill` (`stage-exec.ts:145`) must use the registry prompt when `stage.promptRef` is set and the stage is unedited, else the inline `stage.prompt`; this is what makes a registry change reach a project without rewriting `loop.json` on every open. Test: an unedited Regression/Test stage upgrades; a hand-edited prompt does not; a stage with `promptRef` runs the registry text even when its inline `prompt` is an older copy.
+  - the prompt is unedited: `sha256Hex(stage.prompt ?? "")` (the existing synchronous helper in `ui/screens/chat/approvals/digest.ts:15`) equals `stage.promptHash`, **or** the stage has no hash yet and that digest is one of the task's `knownPromptHashes` (R-037 #7). The second branch is what lets a project created before this plan follow the registry; without it no existing `loop.json` would ever upgrade.
+  It then writes the new prompt, hash and revision. A stage whose prompt matches no known revision was edited by the user and is left alone, permanently. `runSkill` (`stage-exec.ts:145`) must use the registry prompt when `stage.promptRef` is set and the stage is unedited, else the inline `stage.prompt`; this is what makes a registry change reach a project without rewriting `loop.json` on every open. Test: an unedited Regression/Test stage upgrades; a hand-edited prompt does not; a stage with `promptRef` runs the registry text even when its inline `prompt` is an older copy.
+
+  **The editor shows what runs.** When a stage resolves its prompt from the registry, the stage editor shows that text (with a "built-in prompt, revision n" note), not the stale inline copy; the first edit detaches the stage (`promptRef` cleared, the edited text saved inline). There must never be one prompt on screen and another sent. Test: the rendered prompt of an unedited default stage equals `taskPrompt(promptRef)`.
 
 - [ ] **Step 5: Fix the stale Mac stages.** `operation-diagnosis` loses `cd mac && swift build`; `system-check` loses `cd mac && swift test` and `make test-shared-protocol` if it is Mac-only. Replace with `cd extension && npm run build` and `make test` where the repo actually has them. The conformance gate's `cd mac` rule must stay.
 
@@ -1318,7 +1335,11 @@ Run: `cd desktop && node --test --experimental-strip-types ../ui/screens/tasks/t
 
 - [ ] **Step 2: Implement the store.** Key `llmide.tasks.v2:<normalized project root>`; state `{ masterEnabled, configs }`; every `available` task id in the registry gets a default config (`enabled:false`, `cron:"0 * * * *"`, `scheduleActive:false`, `promptOverride:null`). Legacy migration reads `llmide.autoTasks.v1` once per project, maps keys through `resolveTaskId`, writes the new key, and sets `llmide.tasks.v2.migrated` (a set of project roots) so a later legacy edit does not overwrite the project state. `promptOverride` is only accepted for `agent` tasks; for any other runner it is `null` and the UI hides the editor.
 
+  **Migration safety (D17, R-037 #3 and #5).** For every task whose runner changed in Tasks 2-13 (all seven former `MAC_ONLY_TASK_IDS` plus the three review tasks), the migrated config keeps `enabled` and `cron` but sets `scheduleActive: false`; the one-time notice lists them ("These schedules were switched off because the task now does real work: …"). A task with `schedule.backend: "none"` has no schedule fields at all. A stored review prompt that differs from the old default text becomes `promptOverride`; an unedited one is dropped. Tests: a legacy `implementIssues` config with `scheduleActive: true` migrates to `false`; `dueTasks` never returns a `backend: "none"` task, whatever its stored config says.
+
 - [ ] **Step 3: One scheduler.** `startTaskScheduler` runs every 30 s (the current cadence, `NativeAutoTasksScreen.tsx:144`), checks `autoTaskBusy()`/the Loop run manager's `liveRuns()` for a write task in the same project, computes due tasks with `takeDueAutoTasks` (reuse `due.ts`), and runs them one at a time through `runTask`. Custom tasks are `TaskDef`s built at runtime (`custom:<id>`, `runner.kind:"agent"`, `promptSource:"user"`) and go through the same queue; `runTask` resolves `extraTasks` after the registry and before failing `UNKNOWN_TASK`. An app-scoped task (`plan.status`, `sources.update`) is scheduled from the active project only and never once per open project; the scheduler keeps one fired key per task id, not per project. Start it from `Shell.tsx:194-202` with the open project; delete the page-local effect. The hint at `NativeAutoTasksScreen.tsx:474` becomes "Schedules run while the app is open; missed runs are not backfilled."
+
+  **Cost (R-037 #12).** A scheduled `agent` task asks the core before it starts; a member or project at its monthly cap gets `USD_CAP` and the slot is skipped with that reason in the run list. Every agent task run is metered with its `taskId` (ledger `source: "task"`, `detail.taskId`), so `scripts/auto-task-usage.mjs` can report spend per task. Test: a capped member's scheduled run makes no engine call.
 
 - [ ] **Step 4: Run history by id.** Add `taskId` to each run record (`NativeAutoTasksScreen.tsx:189`, `:219`, `:227`) while keeping `task` (the old label) for display. The Recent runs list resolves the label through `TASK_BY_ID[taskId]?.label ?? task`.
 
@@ -1355,7 +1376,7 @@ git commit -am "feat(tasks): project-scoped task config and one scheduler for bu
 
 - [ ] **Step 3: Update the usage script.** `scripts/auto-task-usage.mjs` reads `ui/screens/tasks/registry.generated.ts`? It is a Node script outside the UI; simplest is to read `schema/tasks/registry.json` with `readFileSync` and build `BUILT_IN_TASKS` from `tasks.map(t => t.id)` plus aliases. The ledger suffix map stays for old records (`source-update` -> `sourceUpdate` -> `sourceUpdate` alias -> `sources.update`). Add a test that every ledger suffix resolves to a registry id.
 
-- [ ] **Step 4: Update docs.** `docs/spec/command-bus.md` §5: add one paragraph that task ids are the UI vocabulary and bus kinds are the wire vocabulary, and that `issues.from_notes` is now available (T1) while `loop.run`/`custom.run` remain unavailable. Add `docs/reference/task-registry.md` with the schema, the generation commands and the "no prompt outside `schema/tasks/prompts`" rule. Link it from `docs/reference/project-structure.md` and `extension/CLAUDE.md` (one line each).
+- [ ] **Step 4: Update docs.** `docs/spec/command-bus.md` §5: add one paragraph that task ids are the UI vocabulary and bus kinds are the wire vocabulary, and that `loop.run`/`custom.run` remain unavailable (the `issues.from_notes` row was updated in Task 9, with the fixtures). Add `docs/reference/task-registry.md` with the schema, the generation commands and the "no prompt outside `schema/tasks/prompts`" rule. Link it from `docs/reference/project-structure.md` and `extension/CLAUDE.md` (one line each).
 
 - [ ] **Step 5: Full gates.**
 
@@ -1421,7 +1442,7 @@ Every built-in task is project-scoped after Task 15: `llmide.tasks.v2:<projectRo
 
 ### 4e. Remote mode
 
-Auto Tasks and Loop are local-only sections (`ui/screens/shell/sections.ts:147`), and this plan does not change that. A task with `requiresLocalHost:true` (`shell`, `desktop-action`) returns `LOCAL_ONLY` from `runTask`; the UI never lists it when `mode === "remote"`. Core tasks remain reachable through the command bus: `review` (T0), `sources.update` and `issues.from_notes` (T1, desktop approval), `issues.implement` (T2, desktop claim). The bus is the only remote entry point; there is no `/kb/tasks` call from a hub that bypasses the bus tier. `GET /kb/tasks` is still served by the core for the local desktop and omits prompts; it does not grant execution.
+Auto Tasks and Loop are local-only sections (`ui/screens/shell/sections.ts:147`), and this plan does not change that. A task with `requiresLocalHost:true` (`shell`, `desktop-action`) returns `LOCAL_ONLY` from `runTask`; the UI never lists it when `mode === "remote"`. Core tasks remain reachable through the command bus: `review` (T0), `sources.update` and `issues.from_notes` (T1, desktop approval), `issues.implement` (T2, desktop claim). The bus is the only remote entry point: `POST /kb/tasks/:id/run` requires the bus host proof (D14), so it answers only the app that spawned the core and is `403 HOST_PROOF_REQUIRED` for every other client and on a hub. `GET /kb/tasks` is still served by the core for the local desktop and omits prompts; it does not grant execution.
 
 ### 4f. No fake prompts
 
@@ -1439,7 +1460,7 @@ Each migration's last step is a test that the old prompt text is no longer read 
 |---|---|---|
 | Registry conformance | `node scripts/conformance-tasks.mjs` | stale generated copies, missing/duplicate prompts, bad aliases, unknown bus kind/feature/template ref, `cd mac` stages |
 | Generated drift | `node scripts/gen-task-registry.mjs --check` | a hand-edited generated file |
-| Contract | `make contract-gates` | HTTP schema/fixtures for `/kb/tasks` and `/kb/issues/from-notes`, bus copy, OpenAPI/api-types |
+| Contract | `make contract-gates` | HTTP schema/fixtures for `/kb/tasks`, bus copy, OpenAPI/api-types |
 | UI tests | `cd desktop && npm test` | generated TS imports, availability matrix, runner dispatch, per-task tests |
 | Core tests | `cd extension && npm test` | task runner, route authority, bus availability, issue writer |
 | TypeScript | `cd desktop && npx tsc --noEmit` | the generated TS and the `TaskDef` unions |
@@ -1448,7 +1469,7 @@ Each migration's last step is a test that the old prompt text is no longer read 
 | HTTP inventory | `node scripts/http-inventory.mjs --coverage` | roster coverage; `schema/http/INVENTORY.md` stays a snapshot (do not commit a stale diff, `docs/explanation/invariants.md`) |
 | Full regression | `make regression` | all of the above plus graph/agent-v2 gates |
 
-Add `node scripts/conformance-tasks.mjs` to `contract-gates` in Task 1; add `../ui/screens/tasks/tests/*.test.*` to `desktop/package.json:10` in Task 1. Do not put the generator in the pre-push hook as a write step; the gate is `--check`, and the committed artifacts are the source of truth for CI.
+Add `node scripts/conformance-tasks.mjs` to `contract-gates` in Task 1; add `../ui/screens/tasks/tests/*.test.*` to `desktop/package.json:11` in Task 1. Do not put the generator in the pre-push hook as a write step; the gate is `--check`, and the committed artifacts are the source of truth for CI.
 
 ---
 
@@ -1459,7 +1480,7 @@ Add `node scripts/conformance-tasks.mjs` to `contract-gates` in Task 1; add `../
 3. **Schedules change lifetime.** Built-in tasks will fire from the shell, not only the Auto Tasks page. This is a behavior change; the UI copy says so, the master switch still gates everything, and a task still needs `enabled` + `scheduleActive`. A missed slot is not backfilled, matching the current custom scheduler.
 4. **Project-scoped migration can surprise a multi-project user.** Seed each project from the legacy global config once, show a notice, and keep the legacy key. Never delete it. A user who had one config for all projects gets the same starting point per project.
 5. **Remote mode.** Auto Tasks/Loop are hidden (`sections.ts:147`); the task route is still a core route, so a remote client can reach it only through the bus. `requiresLocalHost` tasks return `LOCAL_ONLY`; the desktop action layer never runs on a hub.
-6. **Security of a task-run route.** The body cannot carry a prompt, route, command, repo path or credentials. The registry supplies the prompt/route; the handler validates `args` with the bus schema validator and the project with `projectScopeRefusal`; `ROUTE_POLICY` coverage is tested (`extension/tests/route-policy-coverage.test.mjs`). This is the difference between a task API and a generic agent API.
+6. **Security of a task-run route.** The route requires the bus host proof (D14), so the bus tiers and desktop approvals cannot be bypassed over HTTP. The body cannot carry a prompt, route, command, repo path or credentials. The registry supplies the prompt/route; the handler validates `args` with the bus schema validator and the project with `projectScopeRefusal`; `ROUTE_POLICY` coverage is tested (`extension/tests/route-policy-coverage.test.mjs`). This is the difference between a task API and a generic agent API.
 7. **Concurrency.** A write task and a Loop run in the same checkout can race. The scheduler checks `autoTaskBusy()` and the Loop run manager's live runs before starting a write task; Factory runs already use worktrees, and non-Factory Loop runs are the remaining risk. If both are allowed, the task refuses with `PROJECT_BUSY` rather than running in the main tree.
 8. **Mac-only removal.** Users will see "not available: <reason>" instead of "Mac app only". History aliases keep old runs readable. The refactor batch task remains genuinely unavailable (`store.ts:62-75`); its reason becomes "batch rollback is not ported to the desktop", not "Mac app".
 9. **Stale Mac stages.** `templates.ts:45,54` currently fail by construction. The generated templates remove them; a conformance rule prevents `cd mac` from returning.
@@ -1485,15 +1506,19 @@ Add `node scripts/conformance-tasks.mjs` to `contract-gates` in Task 1; add `../
 | D11 | `/kb/tasks/:id/run` vs calling every legacy route? | One task route | It is the only way to have one prompt/runner and typed args; the adapters call the same functions the legacy routes use. |
 | D12 | Remote mode: show a read-only catalog or hide it? | Hide Auto Tasks/Loop as today; bus is the remote path | `REMOTE_SECTIONS` already excludes them; a read-only catalog would imply a runner that cannot execute. |
 | D13 | `plan.status`: keep the task or remove it (the audit says remove)? | Keep it as a thin trigger of `/kb/outcomes/refresh` | The user's migration order names it; as a `core-route` task it owns no logic and cannot drift from the poller. Removing it later is a one-line registry change. |
+| D14 | Is `POST /kb/tasks/:id/run` desktop-only? | Yes: bus host proof required, refused on a hub | Otherwise a JWT-only client runs `sources.update` and `issues.from_notes` without the T1 desktop approval the bus enforces (R-037 #1). |
+| D15 | One migration for a durable Sources → Issue record? | Yes (`issue_source_links`) | The in-memory idempotency lasts 10 minutes; without a durable record every run re-creates the issues (R-037 #2). |
+| D16 | Review tasks in Auto Tasks: keep the Loop agent, or the bus review engine? | One engine (bus); the prompt stays overridable; stored edited prompts migrate | Two engines for the same task is the duplication this plan removes; dropping a user's edited prompt silently is not acceptable (R-037 #5). |
+| D17 | May a task that writes code or the tracker be scheduled? | No; and every migrated schedule of a task whose runner changed starts switched off | Schedules saved while a task could not run would otherwise start Factory runs and tracker writes unattended (R-037 #3). |
 
-**Needs your answer before Task 5/6/10** (the retire/alias tasks): D2, D3, D5. The rest can proceed with the recommendation and be revised without code churn because the registry is data.
+**Answered 2026-11-10:** the user accepted every recommendation in this table (D1-D17). D14-D17 were D13-D16 in review R-037; they were renumbered because this table already had a D13.
 
 ---
 
 ## 8. Definition of done
 
 - `schema/tasks/registry.json` is the only place a task id, label, prompt, runner, read-only policy, schedule policy and feature gate live.
-- `rg "MAC_ONLY_TASK_IDS|LOCAL_TASKS|const TASKS: readonly AutoTaskDef|BUILT_IN_TEMPLATES|DEFAULT_LOOP_SPECS" ui extension` finds no live catalog (only generated modules and tests that assert their absence).
+- `rg "MAC_ONLY_TASK_IDS|LOCAL_TASKS|const TASKS: readonly AutoTaskDef|BUILT_IN_TEMPLATES|DEFAULT_LOOP_SPECS" ui extension` finds only the generated modules, their importers and tests: no hand-written catalog array.
 - Every prompt in the repo that belongs to a task exists once under `schema/tasks/prompts/`; `conformance-tasks.mjs` proves it.
 - Auto Tasks, Loop, Factory, Ship and the review screens all call `runTask`/`runCoreTask` or read the generated catalog; no surface has its own prompt table.
 - `make regression`, `cd desktop && npm test`, `cd extension && npm test`, `make feature-matrix FM_ARGS="--key auto_tasks"` and `--key doc_gen` are green.
