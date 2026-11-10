@@ -164,11 +164,11 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
           <li key={f.path}>
             <details>
               <summary><code>{displayText(f.path)}</code> <span className="loop-native-hint">+{f.lines.filter((l) => diffLineKind(l) === "add").length} −{f.lines.filter((l) => diffLineKind(l) === "del").length}</span></summary>
-              <div className="loop-inline"><button type="button" className="loop-btn" onClick={() => shellBus.publish({ type: "open-file", path: `${runPrefix}/${f.path}` })}>Open in editor</button><span className="loop-native-hint">Editing changes the reviewed patch; Ship will need Review again.</span></div>
+              {f.lines.some((l) => diffLineKind(l) !== "del") ? <div className="loop-inline"><button type="button" className="loop-btn" onClick={() => shellBus.publish({ type: "open-file", path: `${runPrefix}/${f.path}` })}>Open in editor</button><span className="loop-native-hint">Editing changes the reviewed patch; Ship will need Review again.</span></div> : null}
               {split ? (
                 <div className="loop-inline" aria-label={`Split diff of ${displayText(f.path)}`}>
-                  <pre className="loop-diff">{f.lines.filter((l) => diffLineKind(l) !== "add").slice(0, PREVIEW_LINES).map((l, i) => <span key={i} className="loop-diff-line" data-kind={diffLineKind(l)}>{displayText(l) + "\n"}</span>)}</pre>
-                  <pre className="loop-diff">{f.lines.filter((l) => diffLineKind(l) !== "del").slice(0, PREVIEW_LINES).map((l, i) => <span key={i} className="loop-diff-line" data-kind={diffLineKind(l)}>{displayText(l) + "\n"}</span>)}</pre>
+                  <div><p className="loop-native-hint">Before</p><pre className="loop-diff" tabIndex={0} aria-label={`Before ${displayText(f.path)}`}>{f.lines.filter((l) => diffLineKind(l) !== "add").slice(0, PREVIEW_LINES).map((l, i) => <span key={i} className="loop-diff-line" data-kind={diffLineKind(l)}>{displayText(l) + "\n"}</span>)}</pre></div>
+                  <div><p className="loop-native-hint">After</p><pre className="loop-diff" tabIndex={0} aria-label={`After ${displayText(f.path)}`}>{f.lines.filter((l) => diffLineKind(l) !== "del").slice(0, PREVIEW_LINES).map((l, i) => <span key={i} className="loop-diff-line" data-kind={diffLineKind(l)}>{displayText(l) + "\n"}</span>)}{f.lines.length > PREVIEW_LINES ? <span className="loop-diff-line" data-kind="hunk">{`… ${f.lines.length - PREVIEW_LINES} more lines\n`}</span> : null}</pre></div>
                 </div>
               ) : (
                 <pre className="loop-diff" tabIndex={0} aria-label={`Diff of ${displayText(f.path)}`}>
