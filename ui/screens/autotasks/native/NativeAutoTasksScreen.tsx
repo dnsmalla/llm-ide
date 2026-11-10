@@ -19,7 +19,7 @@ import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
 import { CUSTOM_IMPLEMENT_MESSAGE, createCustomTask, customTaskRunnable, customTaskStatus, loadCustomTasks, saveCustomTasks, updateCustomTask, validateCustomTask, type CustomAutoTask, type CustomTaskMode } from "./custom.ts";
 import { runCustomTask } from "./run-custom.ts";
 import { runTask as runRegisteredTask } from "../../tasks/runner.ts";
-import { registeredProjectId } from "../../tasks/project.ts";
+import { registeredProjectId, repoRelativeTo } from "../../tasks/project.ts";
 import { taskFocus, taskPromptWithFocus } from "../../tasks/model.ts";
 import { approveStage, approvalStatus } from "../../loop/native/approvals.ts";
 import { loadLoops } from "../../loop/native/store.ts";
@@ -219,9 +219,28 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         // An agent task runs the registry prompt in the registered project; the user's edit (if any) is a focus override.
         const isAgent = registered.runner.kind === "agent";
         const focusOverride = isAgent && c.prompt.trim() !== "" && c.prompt !== (taskFocus(id) ?? "") ? c.prompt : undefined;
+        let agentArgs: Record<string, unknown> = {};
+        if (isAgent) {
+          // The server's model caps still decide first, as for every run: a paused chain stops the task, and an
+          // engaged one picks the model the core runs. A failed check runs on the default model, and the log says so.
+          const decision = await decideRun(() => core.request<Resolve>(resolvePath("anthropic")));
+          if (decision.proceed && decision.warning) { const w = decision.warning; setLog((l) => [...l, w]); }
+          if (!decision.proceed) {
+            setLog((l) => [...l, decision.notice]);
+            setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: false, summary: "paused by model limits", durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
+            setNotice(decision.notice);
+            return;
+          }
+          const repo = repoRelativeTo(projectRoot ?? "", workRoot);
+          agentArgs = {
+            ...(focusOverride ? { focusText: focusOverride } : {}),
+            ...(decision.proceed && decision.model ? { model: decision.model } : {}),
+            ...(repo !== null ? { repo } : {}),
+          };
+        }
         const result = await runRegisteredTask(id, {
           projectRoot: projectRoot ?? "",
-          ...(isAgent ? { projectId: await registeredProjectId(core, projectRoot ?? ""), args: focusOverride ? { focusText: focusOverride } : {} } : {}),
+          ...(isAgent ? { projectId: await registeredProjectId(core, projectRoot ?? ""), args: agentArgs } : {}),
           core,
           host: invokeHost,
           fs,
@@ -443,9 +462,13 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         {desktopRunnable(selected, taskEnv) ? (<>
         <section className="atn-card">
           <header><span aria-hidden="true">☰</span><h2>SETTINGS</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Reload task settings" onClick={() => setState(loadState())}>↻</button></header>
+          {taskFocus(selected) !== null ? (
+            <p className="atn-hint">This review runs the registry prompt on the review engine in the registered project. The skill and the input and output folders do not apply to it.</p>
+          ) : (<>
           <label className="atn-field"><span>Input path <button type="button" className="atn-link" onClick={() => openFolderPicker("inputPath")}>Choose…</button></span><input value={config.inputPath} placeholder="Whole project" onChange={(e) => update({ inputPath: e.target.value })} /><em>What the task reads. Empty means the whole project.</em></label>
           <label className="atn-field"><span>Output path <button type="button" className="atn-link" onClick={() => openFolderPicker("outputPath")}>Choose…</button></span><input value={config.outputPath} placeholder="Whole project" onChange={(e) => update({ outputPath: e.target.value })} /><em>{task.readOnlyOutput ? "Read-only task — edits are reverted after the run; this is the intended destination." : "Where the task writes its result."}</em></label>
           <label className="atn-field"><span>Skill <button type="button" className="atn-link" aria-label="Rescan skills" disabled={!projectRoot} onClick={rescanSkills}>Rescan</button></span><select value={config.skillName} onChange={(e) => update({ skillName: e.target.value })}><option value="">None</option>{[...skills.map((x) => x.name), ...(config.skillName && !skills.some((x) => x.name === config.skillName) ? [config.skillName] : [])].map((name) => <option key={name} value={name}>{skillOptionLabel(name, skills.some((x) => x.name === name) || !skillsScanned)}</option>)}</select><em>Run the prompt under one of the project's agent skills.</em></label>
+          </>)}
         </section>
 
         {task.prompt ? (<>
