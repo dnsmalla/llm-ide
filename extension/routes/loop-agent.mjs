@@ -5,7 +5,7 @@
 // metering and the response shape.
 //
 // Request  { message, skills?: [id], repoRoot, extraRoots?: [abs], language?,
-//            model?, provider?, timeoutMs?, writeScope?: ".factory" }
+//            model?, provider?, timeoutMs?, writeScope?: ".factory", denyWrite?: ".factory" }
 //
 // `provider` (API v66, the Mac's Loop tier route): "anthropic" or an
 // Anthropic-compatible "custom:<id>" (one with an anthropicBaseURL). Absent =
@@ -192,6 +192,11 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     return validationError(res, 'writeScope must be ".factory"', 'invalid_write_scope');
   }
   const writeScope = body.writeScope === '.factory' ? '.factory' : undefined;
+  // Factory Implement and every repair may write code/tests but never the run's own reports.
+  if (body.denyWrite != null && body.denyWrite !== '.factory') {
+    return validationError(res, 'denyWrite must be ".factory"', 'invalid_deny_write');
+  }
+  const denyWrite = body.denyWrite === '.factory' ? '.factory' : undefined;
 
   // R-021 #1: the Loop root decides the project. A body projectId that names another project is a mismatch, and a
   // hub run in an unregistered folder is refused. R-020 Q1: the project grant may only narrow the team grant.
@@ -302,6 +307,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       model,
       provider,
       writeScope,
+      denyWrite,
       authorityCheck,
       projectId,
       abortController: ac,

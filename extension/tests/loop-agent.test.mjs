@@ -1356,6 +1356,57 @@ test('runLoopAgent writeScope: a Write under .factory lands, a Write elsewhere i
   assert.match(out.denied[0].reason, /\.factory\//);
 }));
 
+test('denyWrite refuses Edit/Write under .factory (case variant and a symlink into it), reads unchanged', () => {
+  fs.symlinkSync(path.join(SCOPED, '.factory'), path.join(SCOPED, 'src', 'tofactory'));
+  const DENY = { denyWrite: '.factory' };
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(SCOPED, '.factory', 'TASK.md') }, SCOPED, DENY));
+  assert.ok(loopToolRefusal('Edit', { file_path: path.join(SCOPED, '.factory', 'REVIEW.md') }, SCOPED, DENY));
+  assert.ok(loopToolRefusal('Write', { file_path: '.factory/PLAN.md' }, SCOPED, DENY), 'relative to the first root');
+  assert.match(loopToolRefusal('Write', { file_path: path.join(SCOPED, '.factory', 'TASK.md') }, SCOPED, DENY), /may not write under \.factory\//);
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(SCOPED, '.FACTORY', 'REVIEW.md') }, SCOPED, DENY), 'a case variant is the same folder on a case-insensitive filesystem');
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(SCOPED, 'src', 'tofactory', 'REVIEW.md') }, SCOPED, DENY), 'a symlink into .factory');
+  assert.equal(loopToolRefusal('Write', { file_path: path.join(SCOPED, 'src', 'a.ts') }, SCOPED, DENY), null);
+  assert.equal(loopToolRefusal('Edit', { file_path: path.join(SCOPED, 'src', 'a.ts') }, SCOPED, DENY), null);
+  assert.equal(loopToolRefusal('Read', { file_path: path.join(SCOPED, '.factory', 'TASK.md') }, SCOPED, DENY), null);
+  assert.equal(loopToolRefusal('Write', { file_path: path.join(SCOPED, '.factoryx', 'x') }, SCOPED, DENY), null, 'a lookalike is not the folder');
+  assert.equal(loopToolRefusal('Edit', { file_path: path.join(SCOPED, 'src', 'a.ts') }, SCOPED), null, 'without denyWrite nothing changes');
+});
+
+test('route rejects an unknown denyWrite with 400', async () => {
+  for (const denyWrite of ['src', '.factory/', '../.factory', '', 5, ['.factory']]) {
+    let ran = false;
+    const res = makeRes();
+    await handleLoopAgentRoutes(
+      makeReq({ body: { message: 'x', repoRoot: REPO, denyWrite }, user }), res, { userId: user.id },
+      { runAgent: async () => { ran = true; return {}; } },
+    );
+    assert.equal(res.statusCode, 400, JSON.stringify(denyWrite));
+    assert.equal(res.json().error.code, 'invalid_deny_write');
+    assert.equal(ran, false, 'nothing runs');
+  }
+});
+
+test('route passes denyWrite ".factory" to the engine, and nothing when absent', async () => {
+  const fakeOut = {
+    reply: '', changedPaths: [], changedExtraPaths: [], createdPaths: [],
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, numTurns: 0 },
+    byModel: [], resolvedSkills: [], unresolvedSkills: [], truncatedSkills: [], ran: true,
+    resultSubtype: 'success', denied: [], toolEvents: [],
+  };
+  for (const [body, want] of [
+    [{ message: 'x', repoRoot: REPO, denyWrite: '.factory' }, '.factory'],
+    [{ message: 'x', repoRoot: REPO }, null],
+  ]) {
+    let seen = null;
+    const res = makeRes();
+    await handleLoopAgentRoutes(makeReq({ body, user }), res, { userId: user.id }, {
+      runAgent: async (args) => { seen = args; return fakeOut; },
+    });
+    assert.equal(res.statusCode, 200, res._body);
+    assert.equal(seen.denyWrite ?? null, want);
+  }
+});
+
 test('route rejects an unknown writeScope with 400', async () => {
   for (const writeScope of ['src', '.factory/', '../.factory', '', 5, ['.factory']]) {
     let ran = false;

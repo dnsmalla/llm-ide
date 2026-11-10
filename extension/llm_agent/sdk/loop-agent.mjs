@@ -279,15 +279,17 @@ function resolveWriteTarget(filePath, base) {
   return resolveWriteLanding(filePath, base);
 }
 
-// True when `filePath` lands strictly inside `<root>/<writeScope>/` (the scope directory
-// itself is not a file to write).
-function insideWriteScope(filePath, root, writeScope) {
+// True when `filePath` lands strictly inside `<root>/<scope>/` (the scope directory itself is
+// not a file to write). The first segment is compared case-insensitively: on a case-insensitive
+// filesystem `.FACTORY/x` is the same file as `.factory/x`, and `realpathNearest` may not fold a
+// path that does not exist yet, so the spelling alone must not slip past a deny rule.
+function insideWriteScope(filePath, root, scope) {
   let realRoot;
   try { realRoot = fs.realpathSync.native(root); } catch { return false; }
   const target = resolveWriteTarget(filePath, realRoot);
   if (!target) return false;
-  const rel = path.relative(path.join(realRoot, writeScope), target);
-  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  const parts = path.relative(realRoot, target).split(path.sep);
+  return parts.length > 1 && parts[0].toLowerCase() === scope.toLowerCase();
 }
 
 /**
@@ -297,7 +299,7 @@ function insideWriteScope(filePath, root, writeScope) {
  * and canUseTool apply. `writeScope` (e.g. ".factory"): Edit/Write only under
  * `<roots[0]>/<writeScope>/`; reads are unchanged.
  */
-export function loopToolRefusal(toolName, input, roots, { readOnly = false, writeScope = null } = {}) {
+export function loopToolRefusal(toolName, input, roots, { readOnly = false, writeScope = null, denyWrite = null } = {}) {
   const allowed = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
   const where = allowed.join(', ');
   if (!LOOP_AGENT_TOOL_SET.has(toolName)) {
@@ -314,9 +316,13 @@ export function loopToolRefusal(toolName, input, roots, { readOnly = false, writ
     if (!inside(input?.file_path, !WRITE_TOOLS.has(toolName))) {
       return `${toolName} refused: ${String(input?.file_path ?? '(no path)')} is outside the Loop's repository ${where} (or is a protected secret path).`;
     }
-    // A scoped run (Factory Intake / Review) may write only its own reports under <git root>/<writeScope>/.
+    // A scoped run (Factory Intake / Plan / Review) may write only its own reports under <git root>/<writeScope>/.
     if (writeScope && WRITE_TOOLS.has(toolName) && !insideWriteScope(input?.file_path, allowed[0], writeScope)) {
       return `${toolName} refused: this run may write only under ${writeScope}/ (${String(input?.file_path ?? '(no path)')} is outside it).`;
+    }
+    // The inverse (Factory Implement / repairs): code and tests, but never the run's own reports.
+    if (denyWrite && WRITE_TOOLS.has(toolName) && insideWriteScope(input?.file_path, allowed[0], denyWrite)) {
+      return `${toolName} refused: this run may not write under ${denyWrite}/ (${String(input?.file_path ?? '(no path)')} is inside it).`;
     }
     return null;
   }
@@ -533,7 +539,7 @@ const sdkQueryFactory = (prompt, options) => {
 export async function runLoopAgent(
   {
     message, skills, root, extraRoots = [], userId, language, model, provider, abortController,
-    authorityCheck = null, allowAmbientAuth = false, queryFactory = sdkQueryFactory, readOnly = false, writeScope = null,
+    authorityCheck = null, allowAmbientAuth = false, queryFactory = sdkQueryFactory, readOnly = false, writeScope = null, denyWrite = null,
     projectId = null, budget = resolveMaxBudgetUsd,
   } = {},
   { readSkill = readSkillInstructions } = {},
@@ -611,7 +617,7 @@ export async function runLoopAgent(
   };
 
   const preToolUse = async (input) => {
-    const reason = loopToolRefusal(input?.tool_name, input?.tool_input, roots, { readOnly, writeScope });
+    const reason = loopToolRefusal(input?.tool_name, input?.tool_input, roots, { readOnly, writeScope, denyWrite });
     // Refused calls never count as repeats (only on the error streak).
     const verdict = reason ? { action: 'ok' } : progress.onCall(input?.tool_name, input?.tool_input);
     if (verdict.action !== 'ok') {
@@ -670,7 +676,7 @@ export async function runLoopAgent(
       try { stepAc.abort(); } catch { /* already stopping */ }
       return { behavior: 'deny', message: current.message || 'Your team or project access changed; this run was stopped.' };
     }
-    const reason = loopToolRefusal(toolName, input, roots, { readOnly, writeScope });
+    const reason = loopToolRefusal(toolName, input, roots, { readOnly, writeScope, denyWrite });
     if (reason) {
       refuse(toolName, reason);
       return { behavior: 'deny', message: reason };

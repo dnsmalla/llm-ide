@@ -431,6 +431,11 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          ciSummary, comments: [{ author, body, at }] } (newer than `since`, the newest 20, bodies cut at 4,000
 //          characters). github.com PRs and gitlab.com MRs only; the vault github.token / gitlab.token is used and never
 //          returned. Rides the 'dispatch' bucket.
+//   v134 — Factory write confinement, additive (contract schema/http/live-loop-misc.schema.json):
+//          POST /kb/loop/agent-run accepts `denyWrite: ".factory"` (Edit/Write anywhere inside repoRoot except
+//          under .factory/; any other value is 400 invalid_deny_write). Factory Implement and every repair send
+//          it, so only Intake, Plan and Review can write the reports the gates read (R-036 A2). Plan also joins
+//          the existing writeScope.
 //   v133 — desktop-claimed Factory commands (feature auto_tasks; contract schema/http/bus.schema.json):
 //          the command bus gains a `runner: "desktop"` kind (`issues.implement`, now available and engineless).
 //          The core creates the job on the T2 desktop approval and never runs it; the desktop host claims it with
@@ -442,7 +447,7 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          is idempotent, a wrong token is 409 LEASE_LOST). All four need the desktop class AND the bus host proof
 //          (403 HOST_PROOF_REQUIRED). An expired lease becomes `interrupted` in the minute sweep. `ship` never
 //          ships: a passed run answers { readyToShip: true, shipped: false } and a desktop click is still the only Ship.
-const SERVER_API_VERSION = 133;
+const SERVER_API_VERSION = 134;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

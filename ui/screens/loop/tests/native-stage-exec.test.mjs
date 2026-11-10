@@ -108,7 +108,7 @@ test("createStageDeps sends repoRoot = runRoot and writeScope for skill stages t
   // the real behaviour, so the exact body carries it here too.
   assert.deepEqual(rest, { skills: ["skills/factory-intake"], repoRoot: "/p/system/loop-worktrees/r1", timeoutMs: 120_000, writeScope: ".factory", extraRoots: ["/p/llm-doc"] });
   await deps.runStage(plan, []);
-  assert.equal("writeScope" in calls[1][1].body, false);
+  assert.equal(calls[1][1].body.writeScope, ".factory", "Plan writes only its PLAN.md report");
   assert.equal(calls[1][1].body.repoRoot, "/p/system/loop-worktrees/r1");
   assert.deepEqual(hostCalls.filter(([c]) => c === "loop_changed_paths").map(([, a]) => a), [{ runId: "r1" }, { runId: "r1" }]);
   assert.equal(deps.halt(), null);
@@ -241,4 +241,14 @@ test("the Review stage prompt carries the worktree diff, read by run id, and a r
   assert.match(coreCalls[0][1].body.message, /\+added line/);
   await deps.repair(stage(), "1 failing", 1);
   assert.match(coreCalls[1][1].body.message, /This is a Factory run/);
+  assert.equal(coreCalls[1][1].body.denyWrite, ".factory", "a Factory repair may not rewrite the reports it is judged by");
+});
+
+test("a repair outside a Factory loop sends no denyWrite", async () => {
+  const { host } = fakeHost();
+  const { core, calls } = fakeCore({ reply: "fixed", resultSubtype: "success", changedPaths: ["src/a.ts"], createdPaths: [] });
+  const { ctx } = ctxOf({ host, core });
+  const loop = { ...loopOf([stage()]), defaultKey: "regression" };
+  await createStageDeps(ctx, loop).repair(stage(), "1 failing", 1);
+  assert.equal("denyWrite" in calls[0][1].body, false);
 });

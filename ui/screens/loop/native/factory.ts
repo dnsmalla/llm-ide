@@ -71,9 +71,9 @@ export function isFactoryLoop(loop: LoopDefinition): boolean {
   return loop.defaultKey === FACTORY_DEFAULT_KEY;
 }
 
-/** The agent-run write scope of a stage: Intake and Review may write only under `.factory/`. */
+/** The agent-run write scope of a stage: Intake, Plan and Review may write only under `.factory/`. */
 export function writeScopeFor(s: Pick<LoopStage, "kind" | "skillId">): ".factory" | null {
-  return s.kind === "skill" && (s.skillId === FACTORY_INTAKE_SKILL || s.skillId === FACTORY_REVIEW_SKILL) ? ".factory" : null;
+  return s.kind === "skill" && (s.skillId === FACTORY_INTAKE_SKILL || s.skillId === FACTORY_PLAN_SKILL || s.skillId === FACTORY_REVIEW_SKILL) ? ".factory" : null;
 }
 
 /** The `/kb/loop/agent-run` body of a skill stage. */
@@ -83,14 +83,15 @@ export interface AgentRunBody {
   repoRoot: string;
   timeoutMs: number;
   writeScope?: ".factory";
+  denyWrite?: ".factory";
   extraRoots?: string[];
 }
 
 /**
  * Builds the agent-run body. Only the Intake stage (which also carries the `.factory` write scope) is given the
  * project's `llm-doc/` folder as an extra read root, so it can see the docs of a split layout where the run root is
- * a worktree outside `llm-doc/`. The scope still confines its writes to `.factory/`. Plan, Implement, Review and
- * repairs never get it.
+ * a worktree outside `llm-doc/`. The scope still confines its writes to `.factory/`. Implement carries the inverse
+ * rule: it may write code and tests, never `.factory/` (the reports Review judges). Repairs add the same denyWrite.
  */
 export function agentRunBody(a: {
   message: string;
@@ -101,6 +102,7 @@ export function agentRunBody(a: {
   llmDocExists: boolean;
 }): AgentRunBody {
   const scope = writeScopeFor(a.stage);
+  const implement = a.stage.kind === "skill" && a.stage.skillId === FACTORY_IMPLEMENT_SKILL;
   const project = a.projectRoot.replace(/\/+$/, "");
   const wantsDocs = a.stage.skillId === FACTORY_INTAKE_SKILL && a.llmDocExists && project !== "" && a.repoRoot.replace(/\/+$/, "") !== project;
   return {
@@ -109,6 +111,7 @@ export function agentRunBody(a: {
     repoRoot: a.repoRoot,
     timeoutMs: a.timeoutMs,
     ...(scope ? { writeScope: scope } : {}),
+    ...(implement ? { denyWrite: ".factory" as const } : {}),
     ...(wantsDocs ? { extraRoots: [`${project}/llm-doc`] } : {}),
   };
 }

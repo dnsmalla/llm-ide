@@ -253,7 +253,7 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
   const g: GuardedCallOutcome<AgentRunReply> = await guardedAgentCall<AgentRunReply>({
     before,
     call: () => ctx.core.request<AgentRunReply>("/kb/loop/agent-run", {
-      method: "POST", body: { message: message.join("\n\n"), repoRoot: ctx.runRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined },
+      method: "POST", body: { message: message.join("\n\n"), repoRoot: ctx.runRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined, ...(isFactoryLoop(target) ? { denyWrite: ".factory" as const } : {}) },
       signal: ctx.signal,
     }),
     changedNow: () => changedPathsNow(ctx),

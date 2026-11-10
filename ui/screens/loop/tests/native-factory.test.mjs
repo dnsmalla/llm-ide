@@ -55,7 +55,7 @@ test("factory template has the 8 stages in order with runOnce and gates as speci
   assert.equal(s[5].command, DETECTED_TEST);
   assert.deepEqual(s[2].check, { verdict: { path: ".factory/READINESS.md", line: "Verdict: ready" } });
   assert.deepEqual(s[7].check, { verdict: { path: ".factory/REVIEW.md", line: "Verdict: approve" } });
-  assert.deepEqual(s.map((x) => f.writeScopeFor(x)), [null, ".factory", null, null, null, null, ".factory", null]);
+  assert.deepEqual(s.map((x) => f.writeScopeFor(x)), [null, ".factory", null, ".factory", null, null, ".factory", null]);
   for (const x of s) assert.doesNotMatch(x.prompt ?? "", /<<<|>>>/, "stage prompts never carry fence markers");
   const c = f.FACTORY_TEMPLATE.config;
   assert.equal(c.alwaysUseWorktree, true);
@@ -197,7 +197,14 @@ test("agentRunBody: only Intake sees the project llm-doc folder, and only when t
   assert.equal("extraRoots" in f.agentRunBody({ ...base, stage: intake, repoRoot: "/p" }), false, "run root is the project root");
   assert.equal("extraRoots" in f.agentRunBody({ ...base, stage: intake, llmDocExists: false }), false, "no llm-doc folder");
   assert.equal("extraRoots" in f.agentRunBody({ ...base, stage: intake, projectRoot: "" }), false, "no project root");
-  assert.equal("writeScope" in f.agentRunBody({ ...base, stage: { kind: "skill", skillId: f.FACTORY_PLAN_SKILL } }), false);
+  assert.equal(f.agentRunBody({ ...base, stage: { kind: "skill", skillId: f.FACTORY_PLAN_SKILL } }).writeScope, ".factory");
+  // A2: Implement may write code and tests, never the run's own reports.
+  const implement = f.agentRunBody({ ...base, stage: { kind: "skill", skillId: f.FACTORY_IMPLEMENT_SKILL } });
+  assert.equal(implement.denyWrite, ".factory");
+  assert.equal("writeScope" in implement, false);
+  for (const skillId of [f.FACTORY_INTAKE_SKILL, f.FACTORY_REVIEW_SKILL, f.FACTORY_PLAN_SKILL, "skills/other"]) {
+    assert.equal("denyWrite" in f.agentRunBody({ ...base, stage: { kind: "skill", skillId } }), false, skillId);
+  }
 });
 
 const roleOf = (stages) => stages.map((s) => factoryRole(s));
