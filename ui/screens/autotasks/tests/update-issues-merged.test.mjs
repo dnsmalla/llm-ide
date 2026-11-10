@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as m from "../native/model.ts";
+import { loadTaskState } from "../../tasks/store.ts";
 
 function storageWith(state) {
   const map = new Map(state === undefined ? [] : [["llmide.autoTasks.v1", JSON.stringify(state)]]);
@@ -9,7 +10,7 @@ function storageWith(state) {
 
 test("a stored Update Issues config maps onto the Sources -> Issue row, schedule off", () => {
   const stored = { masterEnabled: true, configs: { updateIssues: { enabled: true, scheduleActive: true, prompt: "my own prompt", cron: "0 * * * *" } } };
-  const state = m.loadState(storageWith(stored));
+  const state = loadTaskState("/p/a", storageWith(stored));
   assert.equal(state.configs["issues.from_notes"].enabled, true);
   assert.equal(state.configs["issues.from_notes"].scheduleActive, false, "a schedule saved on the old row does not start firing");
   assert.equal(Object.hasOwn(state.configs, "updateIssues"), false);

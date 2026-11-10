@@ -188,16 +188,15 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   // Landing: Welcome without a project, the home section with one. First load, then project open/close.
   const prevRoot = useRef<string | null | undefined>(undefined);
   const projectRoot = project?.root ?? null;
-  // Custom Auto Tasks schedule from the shell, so a cron still fires while another section is open (or Auto Tasks
-  // was never opened this session). Loaded lazily and only for a usable Auto Tasks feature so an auto_tasks-off
-  // build does not ship or run the scheduler. The built-in tasks keep their page scheduler for now.
+  // The one desktop scheduler for the open project (built-in and custom tasks), so a schedule fires while any section is
+  // open. Loaded lazily and only for a usable Auto Tasks feature so an auto_tasks-off build does not ship or run it.
   useEffect(() => {
     if (!projectRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("autotasks", features.usable)) return undefined;
     if (typeof __FEATURE_AUTO_TASKS__ === "boolean" && !__FEATURE_AUTO_TASKS__) return undefined;
     let live = true;
     let stop: (() => void) | undefined;
-    void import("../autotasks/native/schedule.ts").then((m) => {
-      if (live) stop = m.startCustomTaskScheduler(projectRoot);
+    void import("../tasks/scheduler-host.ts").then((m) => {
+      if (live) stop = m.startDesktopScheduler(projectRoot);
     });
     return () => { live = false; stop?.(); };
   }, [projectRoot, session.signedIn, gate, features.usable]);

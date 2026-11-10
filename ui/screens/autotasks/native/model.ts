@@ -1,13 +1,13 @@
 import { fireLabel, nextFireAfter } from "./cron.ts";
 import { TASKS as REGISTRY_TASKS, taskAvailability, taskById, taskFocus } from "../../tasks/model.ts";
 import type { TaskDef, TaskEnv } from "../../tasks/types.ts";
+import type { TaskConfig } from "../../tasks/store.ts";
 import { repoSlug } from "../../issues/issues-model.ts";
 import type { RepoConfig } from "../../settings/repo-config.ts";
 
 export { taskById };
-// Native Auto Tasks catalog and local configuration. The Mac's runner/scheduler is being ported separately; this
-// module owns the part the desktop can already be authoritative for: which tasks are enabled, their input/output,
-// skill and prompt, stored per project on this machine. No Mobile Control token is involved.
+// Native Auto Tasks catalog and pure helpers. Task settings are per project and live in tasks/store.ts; this module
+// owns the catalog view, availability wording and the pure run/schedule helpers the page and the scheduler share.
 export type AutoTaskId =
   | "sourceUpdate" | "issues.from_notes" | "issues.implement" | "review.merge"
   | "review.code" | "review.doc" | "review.conflicts"
@@ -16,25 +16,6 @@ export type AutoTaskId =
 
 export type AutoTaskGroup = "Pipeline" | "Review" | "Automation" | "Maintenance";
 export interface AutoTaskDef { id: AutoTaskId; label: string; group: AutoTaskGroup; prompt: string; readOnlyOutput?: boolean }
-export interface AutoTaskConfig {
-  enabled: boolean;
-  inputPath: string;
-  outputPath: string;
-  skillName: string;
-  template: "builtin" | "custom";
-  prompt: string;
-  /** Five-field cron; an expression alone does not arm a schedule. */
-  cron: string;
-  scheduleActive: boolean;
-}
-export interface AutoTaskLocalState { masterEnabled: boolean; configs: Record<string, AutoTaskConfig>; }
-
-/** The default prompt text the desktop stored before a registry task owned it. A stored copy of it is not an override. */
-const RETIRED_DEFAULT_PROMPTS: Readonly<Record<string, string>> = {
-  "review.code": "Review the recent commits in this repository for bugs, security issues, and code style problems. This is a READ-ONLY review: do NOT edit, create, or delete any files, and do NOT commit or push. Print your findings as a summary to your output.",
-  "review.doc": "Review the project's documentation against the code and recent changes. Report inaccurate, missing or stale sections; do not edit files.",
-  "review.conflicts": "Review conflict markers and divergent changes. Explain the conflicting intents and propose a resolution without applying it.",
-};
 
 const LEGACY_TASKS: readonly AutoTaskDef[] = [];
 
@@ -59,50 +40,16 @@ export const TASKS: readonly AutoTaskDef[] = [
 ];
 export const TASK_BY_ID = Object.fromEntries(TASKS.map((t) => [t.id, t])) as Record<AutoTaskId, AutoTaskDef>;
 
-const KEY = "llmide.autoTasks.v1";
-function blankConfig(t: AutoTaskDef): AutoTaskConfig { return { enabled: false, inputPath: "", outputPath: "", skillName: "", template: "builtin", prompt: t.prompt, cron: "0 * * * *", scheduleActive: false }; }
-export function defaultState(): AutoTaskLocalState {
-  return { masterEnabled: false, configs: Object.fromEntries(TASKS.map((t) => [t.id, blankConfig(t)])) };
-}
-
-export function loadState(storage: Storage | undefined = globalThis.localStorage): AutoTaskLocalState {
-  try {
-    const raw = storage?.getItem(KEY);
-    if (!raw) return defaultState();
-    const parsed = JSON.parse(raw) as Partial<AutoTaskLocalState>;
-    const base = defaultState();
-    base.masterEnabled = parsed.masterEnabled === true;
-    for (const t of TASKS) {
-      const legacy = Object.entries(parsed.configs ?? {}).find(([key]) => taskById(key)?.id === t.id);
-      const own = parsed.configs?.[t.id];
-      const c = own ?? legacy?.[1];
-      if (c && typeof c === "object") {
-        // A schedule saved while the task was "Mac app only" must not start firing after the migration.
-        const migrated = own === undefined && legacy !== undefined;
-        base.configs[t.id] = {
-          ...base.configs[t.id], ...c,
-          scheduleActive: migrated ? false : c.scheduleActive === true,
-          prompt: typeof c.prompt === "string" && c.prompt !== RETIRED_DEFAULT_PROMPTS[t.id] ? c.prompt : t.prompt,
-        };
-      }
-    }
-    return base;
-  } catch { return defaultState(); }
-}
-
-export function saveState(s: AutoTaskLocalState, storage: Storage | undefined = globalThis.localStorage): void {
-  try { storage?.setItem(KEY, JSON.stringify(s)); } catch { /* session only */ }
-}
-
+const LEGACY_KEY = "llmide.autoTasks.v1";
 const MERGED_NOTICE_KEY = "llmide.autoTasks.updateIssuesMerged.v1";
 export const UPDATE_ISSUES_MERGED_NOTICE = "Update Issues was merged into Sources → Issue.";
 
 /** Once, for a user whose stored Update Issues config is now the Sources → Issue row: its own prompt is ignored. */
 export function takeMergedNotice(storage: Storage | undefined = globalThis.localStorage): string | null {
   try {
-    const raw = storage?.getItem(KEY);
+    const raw = storage?.getItem(LEGACY_KEY);
     if (!raw || storage?.getItem(MERGED_NOTICE_KEY)) return null;
-    const parsed = JSON.parse(raw) as Partial<AutoTaskLocalState>;
+    const parsed = JSON.parse(raw) as Partial<{ configs: Record<string, unknown> }>;
     if (!parsed.configs || !Object.hasOwn(parsed.configs, "updateIssues")) return null;
     storage?.setItem(MERGED_NOTICE_KEY, "1");
     return UPDATE_ISSUES_MERGED_NOTICE;
@@ -124,16 +71,16 @@ export function desktopRunnable(id: string, env: TaskEnv = DEFAULT_TASK_ENV): bo
   return !MAC_ONLY_TASK_IDS.has(id as AutoTaskId);
 }
 
-/** Whether the page scheduler may fire this task now (apart from the cron match itself). */
 /** Why a task cannot run, in the registry's words; null for legacy Mac-only tasks (the screen uses its own copy). */
-export function taskUnavailableReason(id: AutoTaskId, env: TaskEnv = DEFAULT_TASK_ENV): string | null {
+export function taskUnavailableReason(id: string, env: TaskEnv = DEFAULT_TASK_ENV): string | null {
   const registered = taskById(id);
   if (!registered) return null;
   const availability = taskAvailability(registered, env);
   return availability.runnable ? null : availability.reason;
 }
 
-export function scheduledRunAllowed(id: string, c: Pick<AutoTaskConfig, "enabled" | "scheduleActive"> | undefined, hasRepo: boolean, env: TaskEnv = DEFAULT_TASK_ENV): boolean {
+/** Whether the scheduler may fire this task now (apart from the cron match itself). */
+export function scheduledRunAllowed(id: string, c: Pick<TaskConfig, "enabled" | "scheduleActive"> | undefined, hasRepo: boolean, env: TaskEnv = DEFAULT_TASK_ENV): boolean {
   return isSchedulable(id) && desktopRunnable(id, env) && c?.enabled === true && c.scheduleActive === true && (!requiresLinkedRepo(id) || hasRepo);
 }
 
@@ -159,7 +106,7 @@ export function requiresLinkedRepo(id: string): boolean {
   return id !== "sourceUpdate";
 }
 
-/** Input and output folders are stored project-relative, as on the Mac (`AutoTaskConfig`). Returns the normalized
+/** Input and output folders are stored project-relative, as on the Mac. Returns the normalized
  *  relative folder, "" for empty (the whole project), or null when the value is absolute or escapes the project. */
 export function normalizeProjectPath(p: string): string | null {
   const t = p.trim().replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "");
@@ -192,7 +139,7 @@ export function agentRunSucceeded(r: { reply?: string; ran?: boolean; unresolved
 
 /** One-line schedule status, in the Mac's order (CronField.statusLine): schedule off, master switch off, task disabled,
  *  then the next fire. A Mac-only task never fires on the desktop, so its status says so. */
-export function scheduleStatusLine(masterEnabled: boolean, c: AutoTaskConfig, id: AutoTaskId, now: Date, env: TaskEnv = DEFAULT_TASK_ENV): string {
+export function scheduleStatusLine(masterEnabled: boolean, c: Pick<TaskConfig, "enabled" | "scheduleActive" | "cron">, id: string, now: Date, env: TaskEnv = DEFAULT_TASK_ENV): string {
   // First: "press Run" or "task disabled" would be wrong for a task the desktop never runs, schedule or not.
   if (!desktopRunnable(id, env)) return "Mac app only — the desktop does not run this task";
   if (!isSchedulable(id)) return "Manual only — runs only when you press Run";
