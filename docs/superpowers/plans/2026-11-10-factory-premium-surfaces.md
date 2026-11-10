@@ -157,6 +157,8 @@ D4 is three commits. UI tests have no DOM (`renderToStaticMarkup` only, no new d
 
 **Files:** `Board.tsx`, `board-model.ts`, `virtual-column.ts` (only if needed), `factory.css`, a 500-item fixture test.
 
+**Measured 2026-11-10:** `buildBoard` for 500 items averaged **0.17 ms** (10 runs) on the development machine — far under the 50 ms threshold. D6 is closed with **no virtualisation and no filter**; first paint/scroll remain on the D7 window check.
+
 - [ ] Node thresholds: `readItems` + `latestRecords` + `buildBoard` for 500 items **under 50 ms** and a stable model. A node fixture cannot measure first paint or scroll; those go to D7 in the real window.
 - [ ] Only if the node threshold is missed: virtualise per column with the chat `virtual.ts` helper and add the text filter (`f` shortcut, scoped like D4c).
 - [ ] Record the measured numbers in the commit message; if already smooth, close D6 as measured with no code.
