@@ -97,14 +97,15 @@ test("free text items and the send summary", () => {
 test("a Loop-page run lands on the board under the same key as Issues, reusing an existing item", async () => {
   const fs = memFs();
   const loopItem = { source: "issue", id: "12", title: "#12 Fix 12", body: "Body 12", repo: "acme/web", provider: "github" };
-  assert.equal(await putRunOnBoard(fs, loopItem, "r1"), null);
+  const first = await putRunOnBoard(fs, loopItem, "r1");
+  assert.deepEqual(first, { key: "issue:github:acme/web#12" });
   let items = await readItems(fs);
   assert.equal(items.length, 1);
   assert.equal(items[0].key, "issue:github:acme/web#12");
   assert.deepEqual(items[0].runIds, ["r1"]);
   // The same issue sent from Issues is the same card; a second Loop-page run attaches to it, not a new item.
   await sendToFactory(fs, [workItemFromIssue(issue(12), NOW)], { runIntake: false, projectRoot: "/p", start: recorder().start });
-  assert.equal(await putRunOnBoard(fs, loopItem, "r2"), null);
+  assert.deepEqual(await putRunOnBoard(fs, loopItem, "r2"), { key: "issue:github:acme/web#12" });
   items = await readItems(fs);
   assert.equal(items.length, 1, "no duplicate card");
   assert.deepEqual(items[0].runIds, ["r1", "r2"]);
@@ -112,8 +113,8 @@ test("a Loop-page run lands on the board under the same key as Issues, reusing a
 
 test("a spec or text run is put on the board too", async () => {
   const fs = memFs();
-  assert.equal(await putRunOnBoard(fs, { source: "spec", id: "llm-doc/a.md", title: "A", body: "x", repo: null }, "r1"), null);
-  assert.equal(await putRunOnBoard(fs, { source: "text", id: null, title: "Free", body: "y", repo: null }, "r2"), null);
+  assert.ok("key" in await putRunOnBoard(fs, { source: "spec", id: "llm-doc/a.md", title: "A", body: "x", repo: null }, "r1"));
+  assert.ok("key" in await putRunOnBoard(fs, { source: "text", id: null, title: "Free", body: "y", repo: null }, "r2"));
   const items = await readItems(fs);
   assert.deepEqual(items.map((i) => [i.source, i.runIds]), [["spec", ["r1"]], ["text", ["r2"]]]);
 });
@@ -121,7 +122,6 @@ test("a spec or text run is put on the board too", async () => {
 test("a failed board write is reported, not thrown, so the run goes on", async () => {
   const fs = memFs();
   const denied = { ...fs, write: async () => { throw Object.assign(new Error("denied"), { code: "denied" }); } };
-  const note = await putRunOnBoard(denied, { source: "text", id: null, title: "Free", body: "", repo: null }, "r1");
-  assert.equal(typeof note, "string");
-  assert.match(note, /not on the Factory board/);
+  const result = await putRunOnBoard(denied, { source: "text", id: null, title: "Free", body: "", repo: null }, "r1");
+  assert.match(result.error, /not on the Factory board/);
 });

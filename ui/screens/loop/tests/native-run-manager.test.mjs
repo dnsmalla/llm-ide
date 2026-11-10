@@ -98,6 +98,31 @@ test("cancelRun cancels only that run and passes its runId to loop_cancel", asyn
   assert.equal(world.hostCalls.filter(([cmd]) => cmd === "loop_cancel").length, 1, "a queued run is dropped without a host call");
 });
 
+test("a Loop-page run is listed as running, takes no slot, cannot be cancelled, and its release removes it", async () => {
+  setup();
+  rm.setConcurrency(1);
+  let emits = 0;
+  const unsubscribe = rm.subscribe(() => { emits += 1; });
+  const release = rm.trackExternalRun({ runId: "L1", itemKey: "issue:github:acme/web#12", projectRoot: "/p" });
+  const row = () => rm.liveRuns().find((r) => r.runId === "L1");
+  assert.equal(row().state, "running");
+  assert.equal(row().note, rm.LOOP_PAGE_NOTE);
+  assert.equal(row().itemKey, "issue:github:acme/web#12");
+  const managed = rm.startRun("/p", item(1), "full");
+  await settle();
+  assert.equal(rm.liveRuns().find((r) => r.runId === managed).state, "running", "the external run does not take the one slot");
+  rm.cancelRun("L1");
+  assert.equal(world.hostCalls.filter(([c]) => c === "loop_cancel").length, 0, "no host cancel for a Loop-page run");
+  assert.ok(row(), "cancelRun leaves the row");
+  const before = emits;
+  release();
+  assert.equal(row(), undefined, "release removes the row");
+  assert.equal(emits, before + 1, "release emits once");
+  release();
+  unsubscribe();
+  await finish(managed);
+});
+
 test("runs keep their projectRoot after the active project changes", async () => {
   setup();
   const a = rm.startRun("/p", item(1), "full");

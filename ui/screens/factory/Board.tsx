@@ -7,7 +7,7 @@ import { createHostFs } from "../explorer/fs";
 import { invokeHost } from "../shell/host";
 import { core } from "../shell/runtime";
 import { setRunRecordShip } from "../loop/native/history.ts";
-import { cancelRun, concurrency, liveRuns, setConcurrency, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
+import { LOOP_PAGE_NOTE, cancelRun, concurrency, liveRuns, setConcurrency, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
 import { installRunManagerHost } from "../loop/native/run-manager-host.ts";
 import { ShipPanel } from "../loop/native/ShipPanel.tsx";
 import { repoPrefixFor } from "../loop/native/worktree-run.ts";
@@ -365,7 +365,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
             {selLive ? (
               <>
                 <p className="fx-hint">Run {selLive.runId} · {selLive.state}</p>
-                <button type="button" className="fx-btn" onClick={() => cancelRun(selLive.runId)}>Stop run</button>
+                {selLive.note === LOOP_PAGE_NOTE ? null : <button type="button" className="fx-btn" onClick={() => cancelRun(selLive.runId)}>Stop run</button>}
                 <ul className="fx-timeline" aria-label="Stage timeline">
                   {stageTimeline(selLive).map((row) => <li key={row.id} className={`fx-stage fx-stage-${row.state}`}>{row.name} <span>{row.state}</span></li>)}
                 </ul>

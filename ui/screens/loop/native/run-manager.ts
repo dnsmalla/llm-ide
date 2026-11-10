@@ -120,6 +120,10 @@ const PURE_DEFAULTS: Partial<RunManagerDeps> = {
 
 let deps: Partial<RunManagerDeps> = { ...PURE_DEFAULTS };
 const runs = new Map<string, ManagedRun>();
+/** Loop-page runs on the board (trackExternalRun): listed by liveRuns, outside the queue, the cap and every action. */
+const external = new Map<string, LiveRun>();
+/** The note a Loop-page run shows; the board hides Stop for it (it cannot be stopped from the board). */
+export const LOOP_PAGE_NOTE = "Running on the Loop page";
 let queue: string[] = [];
 let cap: number | null = null;
 const listeners = new Set<() => void>();
@@ -153,6 +157,7 @@ export function resetRunManagerForTests(): void {
     run.wake?.();
   }
   runs.clear();
+  external.clear();
   lastNotice = null;
   queue = [];
   cap = null;
@@ -197,13 +202,26 @@ export function setConcurrency(n: number): void {
 }
 
 function emit(): void {
-  snapshot = Object.freeze([...runs.values()].map((r) => Object.freeze({ ...r.live, log: [...r.live.log] })));
+  const all = [...[...runs.values()].map((r) => r.live), ...external.values()];
+  snapshot = Object.freeze(all.map((r) => Object.freeze({ ...r, log: [...r.log] })));
   for (const l of [...listeners]) l();
 }
 
 /** The same frozen snapshot until something changes (`useSyncExternalStore` needs a stable value). */
 export function liveRuns(): readonly LiveRun[] {
   return snapshot;
+}
+
+/**
+ * A run the Loop page is executing, shown on the board while it runs. It is NOT queued, holds no concurrency slot and
+ * is never cancelled, saved or held by this manager. Returns the release that removes it.
+ */
+export function trackExternalRun(run: { runId: string; itemKey: string; projectRoot: string }): () => void {
+  external.set(run.runId, { runId: run.runId, itemKey: run.itemKey, projectRoot: run.projectRoot, mode: "full", state: "running", startedAt: (deps.now ?? (() => new Date()))().toISOString(), note: LOOP_PAGE_NOTE, log: [], progress: null });
+  emit();
+  return () => {
+    if (external.delete(run.runId)) emit();
+  };
 }
 
 export function subscribe(listener: () => void): () => void {

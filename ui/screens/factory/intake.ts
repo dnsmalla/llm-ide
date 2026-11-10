@@ -61,18 +61,18 @@ export async function sendToFactory(fs: ItemsFs, items: WorkItemRecord[], opts: 
 
 /**
  * Puts a Loop-page Factory run on the board: its work item is stored (an item with the same source and id is reused)
- * and the run id attached. Returns null on success, or the message to log. It never throws, so a failed board write
+ * and the run id attached. Returns the board key, or the error to log. It never throws, so a failed board write
  * cannot stop or fail the run.
  */
-export async function putRunOnBoard(fs: ItemsFs, item: WorkItem, runId: string): Promise<string | null> {
+export async function putRunOnBoard(fs: ItemsFs, item: WorkItem, runId: string): Promise<{ key: string } | { error: string }> {
   try {
     // An issue's board id is provider:repo#number, the key workItemFromIssue writes, so both screens reach one card.
     const id = item.source === "issue" && item.provider && item.repo && item.id ? `${item.provider}:${item.repo}#${item.id}` : item.id;
     const { record } = await addItem(fs, newWorkItem({ source: item.source, id, title: item.title, body: item.body, repo: item.repo, provider: item.provider ?? null }));
     await attachRun(fs, record.key, runId);
-    return null;
+    return { key: record.key };
   } catch (e) {
-    return `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}`;
+    return { error: `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 

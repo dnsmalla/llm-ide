@@ -10,6 +10,14 @@ const shipStatus = (over = {}) => ({ url: URL7, state: "open", ci: "success", ci
 const shipped = record({ ship: { provider: "github", url: URL7 } });
 const comment = { author: "rev", body: "nit", at: "2026-11-09T11:00:00Z" };
 
+test("a Loop-page run with a RUN.json marker and a live row is Working, not interrupted", () => {
+  const loopRow = { ...liveRun("running"), note: "Running on the Loop page", progress: null };
+  const f = facts({ live: loopRow, interrupted: true, worktreeExists: true });
+  assert.deepEqual(columnFor(f), { column: "working", note: null });
+  // Without the row the same marker is an interrupted run: the marker alone never means "working".
+  assert.equal(columnFor(facts({ interrupted: true, worktreeExists: true })).column, "needsYou");
+});
+
 test("the seven columns in board order with their labels", () => {
   assert.deepEqual(COLUMNS, ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"]);
   assert.deepEqual(COLUMNS.map((c) => COLUMN_LABELS[c]), ["Inbox", "Needs decision", "Working", "Needs you", "Ready to ship", "Shipped", "Done"]);

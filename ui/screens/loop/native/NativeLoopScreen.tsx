@@ -625,14 +625,22 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setShipRun(null);
     setRunningStage(true);
     setRunLog((l) => [...l, `▶ ${target.name}`, ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`] : []), ""]);
-    // Every Factory run is on the board. Loaded on demand, so the Loop screen does not hard-depend on the Factory chunk.
-    if (activeRun && isFactoryLoop(target) && start) {
-      const boardNote = await import("../../factory/intake.ts").then((m) => m.putRunOnBoard(fs, start.item, activeRun.runId), (e: unknown) => `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}`);
-      if (boardNote) setRunLog((l) => [...l, boardNote]);
-    }
     const started = Date.now();
     let summaryPath: string | null = null;
+    // Shown on the board as Working while it runs; released after the run record is saved (the finally below), so a
+    // card can never be left behind. Loaded on demand, so the Loop screen does not hard-depend on the Factory chunk.
+    let releaseBoardRun: (() => void) | null = null;
     try {
+      if (activeRun && isFactoryLoop(target) && start) {
+        try {
+          const [intake, manager] = await Promise.all([import("../../factory/intake.ts"), import("./run-manager.ts")]);
+          const put = await intake.putRunOnBoard(fs, start.item, activeRun.runId);
+          if ("error" in put) setRunLog((l) => [...l, put.error]);
+          else releaseBoardRun = manager.trackExternalRun({ runId: activeRun.runId, itemKey: put.key, projectRoot: projectRoot ?? "" });
+        } catch (e) {
+          setRunLog((l) => [...l, `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}`]);
+        }
+      }
       const outcome = await runNativeLoop(isFactoryLoop(target) ? configFor("full", target.config) : target.config, {
         ...createStageDeps(stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), target),
         isCancelled() { return cancelledRef.current; },
@@ -696,6 +704,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       reportUiIncident("loop", e instanceof Error ? e.message : String(e));
       void notifyTask("loop", false);
     } finally {
+      releaseBoardRun?.();
       runningRef.current = false;
       runAbortRef.current = null;
       activeRunRef.current = null;
