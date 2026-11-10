@@ -68,23 +68,33 @@ export const DEFAULT_CONCURRENCY = 2;
 const MAX_LOG_LINES = 500;
 const REQUIRED = ["host", "core", "fsFor", "approve", "activeProject", "subscribeProject"] as const;
 
+/** The project's Factory loop. It is a default loop: a project whose Loop page was never opened gets it (and loop.json) written here. */
+async function ensureFactoryLoop(fs: FsApi): Promise<LoopDefinition | null> {
+  let r = await loadLoops(fs);
+  if (r.kind === "corrupt") return null;
+  const command = (await detectTestCommand(fs).catch(() => null))?.command ?? null;
+  if (r.kind === "missing") {
+    const store = initialProjectStore(command);
+    r = { kind: "ok", store, hash: (await saveLoops(fs, store, null)).hash };
+  } else {
+    const ensured = await persistEnsuredDefaults(fs, r, command);
+    // An unsaved Factory loop cannot be approved or run by the host, which reads loop.json.
+    if (ensured.error !== null) throw new Error(`The Factory loop could not be added to system/loop.json (${ensured.error}); the run did not start.`);
+    r = ensured.load;
+  }
+  return r.kind === "ok" ? r.store.loops.find(isFactoryLoop) ?? null : null;
+}
+
+let ensuring: Promise<unknown> = Promise.resolve();
+/** `ensureFactoryLoop`, one call at a time: runs that start together would each add the loop and the later write would conflict. */
+export function loadOrCreateFactoryLoop(fs: FsApi): Promise<LoopDefinition | null> {
+  const next = ensuring.then(() => ensureFactoryLoop(fs));
+  ensuring = next.catch(() => undefined);
+  return next;
+}
+
 const PURE_DEFAULTS: Partial<RunManagerDeps> = {
-  // The Factory is a default loop: a project whose Loop page was never opened gets it (and loop.json) written here.
-  loadFactoryLoop: async (fs) => {
-    let r = await loadLoops(fs);
-    if (r.kind === "corrupt") return null;
-    const command = (await detectTestCommand(fs).catch(() => null))?.command ?? null;
-    if (r.kind === "missing") {
-      const store = initialProjectStore(command);
-      r = { kind: "ok", store, hash: (await saveLoops(fs, store, null)).hash };
-    } else {
-      const ensured = await persistEnsuredDefaults(fs, r, command);
-      // An unsaved Factory loop cannot be approved or run by the host, which reads loop.json.
-      if (ensured.error !== null) throw new Error(`The Factory loop could not be added to system/loop.json (${ensured.error}); the run did not start.`);
-      r = ensured.load;
-    }
-    return r.kind === "ok" ? r.store.loops.find(isFactoryLoop) ?? null : null;
-  },
+  loadFactoryLoop: loadOrCreateFactoryLoop,
   createStageDeps,
   runLoop: runNativeLoop,
   appendRecord: appendRunRecord,

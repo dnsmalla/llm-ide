@@ -291,3 +291,15 @@ test("a project without a Factory loop leaves a notice", async () => {
   assert.deepEqual(rm.liveRuns(), []);
   assert.match(rm.takeRunNotice(), /no Factory loop/);
 });
+
+test("runs that start together in a project without a Factory loop all get the one loop that is added", async () => {
+  const { memFs } = await import("../../factory/tests/mem-fs.mjs");
+  for (const initial of [{}, { "system/loop.json": JSON.stringify({ schemaVersion: 2, loops: [] }) }]) {
+    const fs = memFs(initial);
+    const loops = await Promise.all([rm.loadOrCreateFactoryLoop(fs), rm.loadOrCreateFactoryLoop(fs), rm.loadOrCreateFactoryLoop(fs)]);
+    assert.equal(new Set(loops.map((l) => l.id)).size, 1, "every run sees the same loop");
+    const saved = JSON.parse(fs.files.get("system/loop.json")).loops.filter((l) => l.defaultKey === "factory");
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].id, loops[0].id);
+  }
+});

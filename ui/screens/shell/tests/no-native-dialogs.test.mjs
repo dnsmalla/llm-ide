@@ -4,8 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const screens = new URL("../../", import.meta.url).pathname;
+const screens = fileURLToPath(new URL("../../", import.meta.url));
 
 test("no screen calls window.prompt, window.confirm or window.alert", () => {
   const hits = [];
