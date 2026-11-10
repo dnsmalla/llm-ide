@@ -17,11 +17,9 @@ export type AutoTaskId =
 export type AutoTaskGroup = "Pipeline" | "Review" | "Automation" | "Maintenance";
 export interface AutoTaskDef { id: AutoTaskId; label: string; group: AutoTaskGroup; prompt: string; readOnlyOutput?: boolean }
 
-const LEGACY_TASKS: readonly AutoTaskDef[] = [];
-
 export const GROUPS: readonly AutoTaskGroup[] = ["Pipeline", "Review", "Automation", "Maintenance"];
 
-/** Registry tasks are the migrated ones; `LEGACY_TASKS` shrinks by one entry per migration commit. */
+/** The screen's rows are a view of the generated registry; nothing here is a second catalog. */
 function toAutoTask(t: TaskDef): AutoTaskDef | null {
   if (t.availability.status === "retired" || t.availability.status === "alias") return null;
   return {
@@ -34,11 +32,8 @@ function toAutoTask(t: TaskDef): AutoTaskDef | null {
   };
 }
 
-export const TASKS: readonly AutoTaskDef[] = [
-  ...REGISTRY_TASKS.flatMap((t) => { const a = toAutoTask(t); return a ? [a] : []; }),
-  ...LEGACY_TASKS,
-];
-export const TASK_BY_ID = Object.fromEntries(TASKS.map((t) => [t.id, t])) as Record<AutoTaskId, AutoTaskDef>;
+export const AUTO_TASK_ROWS: readonly AutoTaskDef[] = REGISTRY_TASKS.flatMap((t) => { const a = toAutoTask(t); return a ? [a] : []; });
+export const AUTO_TASK_BY_ID = Object.fromEntries(AUTO_TASK_ROWS.map((t) => [t.id, t])) as Record<AutoTaskId, AutoTaskDef>;
 
 const LEGACY_KEY = "llmide.autoTasks.v1";
 const MERGED_NOTICE_KEY = "llmide.autoTasks.updateIssuesMerged.v1";
@@ -56,25 +51,18 @@ export function takeMergedNotice(storage: Storage | undefined = globalThis.local
   } catch { return null; }
 }
 
-/** The Mac's structural tasks (`AutoTask.isStructural`, minus Loop Engineering, which the desktop does not have). They
- *  run deterministic code in the Mac app; the desktop has no such code, so it must never send them to the agent as an
- *  invented prompt. They stay listed, but are not runnable here, and a schedule never fires them. */
-export const MAC_ONLY_TASK_IDS: ReadonlySet<AutoTaskId> = new Set<AutoTaskId>([]);
-export const MAC_ONLY_MESSAGE = "This task runs deterministic code in the Mac app; the desktop does not run it yet.";
-
 const DEFAULT_TASK_ENV: TaskEnv = { features: null, coreFeatures: null, hasRepo: true, localHost: true, mode: "local" };
 
-/** Whether the desktop may run this task at all. Registry tasks use the one availability function; legacy entries keep the shim. */
+/** Whether the desktop may run this task at all: the registry's one availability function decides. */
 export function desktopRunnable(id: string, env: TaskEnv = DEFAULT_TASK_ENV): boolean {
   const registered = taskById(id);
-  if (registered) return taskAvailability(registered, env).runnable;
-  return !MAC_ONLY_TASK_IDS.has(id as AutoTaskId);
+  return registered ? taskAvailability(registered, env).runnable : false;
 }
 
-/** Why a task cannot run, in the registry's words; null for legacy Mac-only tasks (the screen uses its own copy). */
+/** Why a task cannot run, in the registry's words; null when it can run. */
 export function taskUnavailableReason(id: string, env: TaskEnv = DEFAULT_TASK_ENV): string | null {
   const registered = taskById(id);
-  if (!registered) return null;
+  if (!registered) return "This task is not in the task registry.";
   const availability = taskAvailability(registered, env);
   return availability.runnable ? null : availability.reason;
 }
@@ -101,9 +89,7 @@ export function issuesFromNotesArgs(c: RepoConfig): { provider: "github" | "gitl
 
 /** Mac parity (`AutoTask.requiresLinkedRepo`): only Source Update runs without a linked repository. */
 export function requiresLinkedRepo(id: string): boolean {
-  const registered = taskById(id);
-  if (registered) return registered.requiresRepo;
-  return id !== "sourceUpdate";
+  return taskById(id)?.requiresRepo ?? true;
 }
 
 /** Input and output folders are stored project-relative, as on the Mac. Returns the normalized
@@ -138,10 +124,11 @@ export function agentRunSucceeded(r: { reply?: string; ran?: boolean; unresolved
 }
 
 /** One-line schedule status, in the Mac's order (CronField.statusLine): schedule off, master switch off, task disabled,
- *  then the next fire. A Mac-only task never fires on the desktop, so its status says so. */
+ *  then the next fire. A task that cannot run says why first, in the registry's words. */
 export function scheduleStatusLine(masterEnabled: boolean, c: Pick<TaskConfig, "enabled" | "scheduleActive" | "cron">, id: string, now: Date, env: TaskEnv = DEFAULT_TASK_ENV): string {
-  // First: "press Run" or "task disabled" would be wrong for a task the desktop never runs, schedule or not.
-  if (!desktopRunnable(id, env)) return "Mac app only — the desktop does not run this task";
+  // First: "press Run" or "task disabled" would be wrong for a task that cannot run, schedule or not.
+  const unavailable = taskUnavailableReason(id, env);
+  if (unavailable) return unavailable;
   if (!isSchedulable(id)) return "Manual only — runs only when you press Run";
   if (!c.scheduleActive) return "Schedule off — runs only when you press Run";
   if (!masterEnabled) return "Auto Tasks paused — master switch off";

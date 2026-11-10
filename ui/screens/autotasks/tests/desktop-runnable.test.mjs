@@ -3,22 +3,20 @@ import assert from "node:assert/strict";
 import * as m from "../native/model.ts";
 
 // The Mac's structural tasks (AutoTask.isStructural) run deterministic code; the desktop must never send them to the agent.
-test("Mac structural tasks are not runnable; Regression now runs via the task registry", () => {
+test("Tasks the desktop cannot run are not runnable; the registry decides", () => {
   // No legacy Mac-only row is left: Review & Merge is a registry desktop-action task now (it was the last one).
-  assert.deepEqual([...m.MAC_ONLY_TASK_IDS], []);
   assert.equal(m.desktopRunnable("reviewMerge"), true, "Review & Merge opens the pending Factory run");
   assert.equal(m.desktopRunnable("implementIssues"), true, "Implement Issues is a registry desktop-action task");
-  assert.equal(m.TASKS.some((t) => t.id === "implementIssues"), false, "the legacy Implement Issues row is gone");
+  assert.equal(m.AUTO_TASK_ROWS.some((t) => t.id === "implementIssues"), false, "the legacy Implement Issues row is gone");
   for (const id of ["sourceUpdate", "updatePlanStatus", "reviewCode", "reviewDoc", "reviewConflicts", "updateIssues"]) assert.equal(m.desktopRunnable(id), true, id);
   assert.equal(m.desktopRunnable("generateKnowledge"), false);
   assert.equal(m.desktopRunnable("sourcesToIssue"), true, "the old id is an alias of the runnable Sources -> Issue task");
   assert.equal(m.desktopRunnable("generateDoc"), false);
-  assert.match(m.MAC_ONLY_MESSAGE, /^This task runs deterministic code in the Mac app; the desktop does not run it yet\.$/);
-  assert.equal(m.TASK_BY_ID["loop.regression"].prompt, "", "the old Regression prompt is gone");
-  assert.equal(m.TASK_BY_ID["sources.update"].prompt, "", "the old Source Update prompt is gone");
-  assert.equal(m.TASKS.some((t) => t.id === "regression"), false, "the legacy Regression row is gone");
-  assert.equal(m.TASKS.some((t) => t.id === "sourceUpdate"), false, "the legacy Source Update row is gone");
-  assert.equal(m.TASKS.some((t) => t.id === "updatePlanStatus"), false, "the legacy Update Plan Status row is gone");
+  assert.equal(m.AUTO_TASK_BY_ID["loop.regression"].prompt, "", "the old Regression prompt is gone");
+  assert.equal(m.AUTO_TASK_BY_ID["sources.update"].prompt, "", "the old Source Update prompt is gone");
+  assert.equal(m.AUTO_TASK_ROWS.some((t) => t.id === "regression"), false, "the legacy Regression row is gone");
+  assert.equal(m.AUTO_TASK_ROWS.some((t) => t.id === "sourceUpdate"), false, "the legacy Source Update row is gone");
+  assert.equal(m.AUTO_TASK_ROWS.some((t) => t.id === "updatePlanStatus"), false, "the legacy Update Plan Status row is gone");
   assert.equal(m.desktopRunnable("regression"), true, "the alias resolves to the runnable registry task");
 });
 
