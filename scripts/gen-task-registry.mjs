@@ -24,6 +24,8 @@ export const OUTPUTS = Object.freeze({
 });
 
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
+// A Windows checkout may hand back CRLF; a prompt is the same text on every platform.
+const readPrompt = (path) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n').trimEnd();
 const sortObject = (obj) => Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)));
 
 /** JSON that is safe inside a JS/TS module (U+2028/U+2029 are line terminators in old parsers). */
@@ -52,10 +54,10 @@ export function buildRegistry() {
     if (task.runner?.kind === 'agent') {
       if (typeof task.runner.prompt !== 'string') throw new Error(`task ${task.id}: an agent runner needs a prompt path`);
       const path = join(ROOT, 'schema/tasks', task.runner.prompt);
-      const focus = readFileSync(path, 'utf8').trimEnd();
+      const focus = readPrompt(path);
       if (typeof task.runner.frame === 'string') {
         // A shared frame (the READ-ONLY preamble and output format) holds one {{focus}} slot; the task supplies the slot.
-        const frame = readFileSync(join(ROOT, 'schema/tasks', task.runner.frame), 'utf8').trimEnd();
+        const frame = readPrompt(join(ROOT, 'schema/tasks', task.runner.frame));
         if (frame.split('{{focus}}').length !== 2) throw new Error(`task ${task.id}: frame ${task.runner.frame} needs exactly one {{focus}} slot`);
         promptParts[task.id] = { frame, focus };
         prompts[task.id] = frame.replace('{{focus}}', () => focus);
