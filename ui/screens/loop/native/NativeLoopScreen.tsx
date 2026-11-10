@@ -149,7 +149,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runRecord, setRunRecord] = useState<Record<string, unknown> | null>(null);
   const [runRecordLoaded, setRunRecordLoaded] = useState(false);
   /** The run whose worktree is open in the Review and Ship panel. */
-  const [shipRun, setShipRun] = useState<{ info: RunInfo; item: WorkItem; entry: LoopRunIndexEntry; passed: boolean; diff?: WorktreeDiff } | null>(null);
+  const [shipRun, setShipRun] = useState<{ info: RunInfo; item: WorkItem; entry: LoopRunIndexEntry; passed: boolean; diff?: WorktreeDiff; reviewedPatchId?: string | null; requestProvider?: "github" | "gitlab" | null } | null>(null);
   /** The Factory loop waiting for its work item; the picker is shown while this is set. */
   const [pickerLoop, setPickerLoop] = useState<LoopDefinition | null>(null);
   // A picker card for a loop the user has since left must not start that loop over the one now shown.
@@ -285,7 +285,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (!info) { setNotice("This run's worktree was removed; only its record is left."); return; }
     const w = fields.workItem;
     const item: WorkItem = w ? { source: w.source, id: w.id, title: w.title, body: "", repo: null } : { source: "text", id: null, title: entry.loopName, body: "", repo: null };
-    setShipRun({ info, item, entry, passed: entry.statusCode === "success" });
+    setShipRun({ info, item, entry, passed: entry.statusCode === "success", reviewedPatchId: fields.diffSummary?.patchId ?? null, requestProvider: fields.ship?.provider ?? null });
   };
 
   const revealRunRecord = (entry: LoopRunIndexEntry) => {
@@ -678,7 +678,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
       // Awaited: Ship's record update (setRunRecordShip) needs the record on disk, so the panel opens only after it.
       await appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
-      if (isFactoryLoop(target) && activeRun && start && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) setShipRun({ info: activeRun, item: start.item, entry, passed: true, ...(worktreeDiff ? { diff: worktreeDiff } : {}) });
+      if (isFactoryLoop(target) && activeRun && start && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) setShipRun({ info: activeRun, item: start.item, entry, passed: true, reviewedPatchId: diffSummary?.patchId ?? null, requestProvider: null, ...(worktreeDiff ? { diff: worktreeDiff } : {}) });
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
@@ -921,7 +921,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       <main className="loop-run" aria-label="Run">
         <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
-        {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.diff?.patchId ?? null} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
+        {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.reviewedPatchId ?? shipRun.diff?.patchId ?? null} requestProvider={shipRun.requestProvider ?? null} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <section className="loop-card loop-overview">
           <h2>OVERVIEW</h2>
