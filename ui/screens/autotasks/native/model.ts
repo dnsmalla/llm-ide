@@ -73,9 +73,18 @@ export function loadState(storage: Storage | undefined = globalThis.localStorage
     const base = defaultState();
     base.masterEnabled = parsed.masterEnabled === true;
     for (const t of TASKS) {
-      const legacy = Object.entries(parsed.configs ?? {}).find(([key]) => taskById(key)?.id === t.id)?.[1];
-      const c = parsed.configs?.[t.id] ?? legacy;
-      if (c && typeof c === "object") base.configs[t.id] = { ...base.configs[t.id], ...c, prompt: typeof c.prompt === "string" ? c.prompt : t.prompt };
+      const legacy = Object.entries(parsed.configs ?? {}).find(([key]) => taskById(key)?.id === t.id);
+      const own = parsed.configs?.[t.id];
+      const c = own ?? legacy?.[1];
+      if (c && typeof c === "object") {
+        // A schedule saved while the task was "Mac app only" must not start firing after the migration.
+        const migrated = own === undefined && legacy !== undefined;
+        base.configs[t.id] = {
+          ...base.configs[t.id], ...c,
+          scheduleActive: migrated ? false : c.scheduleActive === true,
+          prompt: typeof c.prompt === "string" ? c.prompt : t.prompt,
+        };
+      }
     }
     return base;
   } catch { return defaultState(); }
@@ -103,6 +112,14 @@ export function desktopRunnable(id: AutoTaskId, env: TaskEnv = DEFAULT_TASK_ENV)
 }
 
 /** Whether the page scheduler may fire this task now (apart from the cron match itself). */
+/** Why a task cannot run, in the registry's words; null for legacy Mac-only tasks (the screen uses its own copy). */
+export function taskUnavailableReason(id: AutoTaskId, env: TaskEnv = DEFAULT_TASK_ENV): string | null {
+  const registered = taskById(id);
+  if (!registered) return null;
+  const availability = taskAvailability(registered, env);
+  return availability.runnable ? null : availability.reason;
+}
+
 export function scheduledRunAllowed(id: AutoTaskId, c: AutoTaskConfig | undefined, hasRepo: boolean, env: TaskEnv = DEFAULT_TASK_ENV): boolean {
   return desktopRunnable(id, env) && c?.enabled === true && c.scheduleActive === true && (!requiresLinkedRepo(id) || hasRepo);
 }

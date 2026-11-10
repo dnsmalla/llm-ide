@@ -777,7 +777,9 @@ function rateLimitProfile(url, method) {
   if (url === '/agent/v2/stream')        return 'agentTurn';
   // The Loop's headless agent step — the same multi-minute agent-turn cost.
   if (url === '/kb/loop/agent-run')      return 'agentTurn';
-  if (url.startsWith('/kb/tasks'))       return 'agentTurn';   // one task run; a core task may call a model
+  if (url === '/kb/tasks')              return null;            // the catalog is a cheap read
+  if (/^\/kb\/tasks\/(sources\.update|plan\.status)\/run$/.test(url)) return null;   // deterministic, no model
+  if (url.startsWith('/kb/tasks'))       return 'agentTurn';   // an agent task run may call a model
   if (url === '/kb/loop/ship')           return 'dispatch';   // one push + up to two outbound GitHub/GitLab calls
   if (url === '/kb/generate-plan')       return 'llm';
   if (url === '/kb/analyze-risks')       return 'llm';

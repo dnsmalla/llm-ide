@@ -9,9 +9,9 @@ import { getSecret } from '../server/vault.mjs';
 import { config } from '../core/config.mjs';
 import { TASKS } from '../core/task-registry.generated.mjs';
 import { runCoreTask, TaskCoreError } from '../agents/task-runner.mjs';
+import { TASK_CLASS } from '../agents/task-classes.mjs';
 import { runSourcesUpdate } from './bus/sources-update.mjs';
 
-const TASK_CLASS = Object.freeze({ 'sources-update': 'external.read', 'plan-status': 'external.read' });
 const BODY_KEYS = new Set(['projectId', 'args']);
 
 function publicTask(task) {
@@ -84,7 +84,8 @@ export async function handleTaskRoutes(req, res, ctx) {
     return failure(res, 400, 'VALIDATION_FAILED', 'sourceIds must be an array of at most 50 strings');
   }
 
-  const taskId = decodeURIComponent(m[1]);
+  let taskId;
+  try { taskId = decodeURIComponent(m[1]); } catch { return failure(res, 404, 'TASK_NOT_FOUND', 'Unknown task.'); }
   const task = TASKS.find((t) => t.id === taskId || t.aliases.includes(taskId));
   if (!task) return failure(res, 404, 'TASK_NOT_FOUND', `Unknown task "${taskId}".`);
   if (!taskEnabled(task)) {
@@ -92,8 +93,13 @@ export async function handleTaskRoutes(req, res, ctx) {
     return failure(res, 404, 'feature_disabled', `The ${feature} feature is off.`, { feature });
   }
   if (task.availability.status !== 'available') return failure(res, 404, 'TASK_NOT_AVAILABLE', task.availability.reason ?? 'This task is not available.');
-  const cls = TASK_CLASS[task.runner?.route];
-  if (task.runner?.kind === 'core-route' && cls) {
+  const allowedArgs = task.runner?.route === 'sources-update' ? new Set(['sourceIds']) : new Set();
+  for (const key of Object.keys(raw.args ?? {})) {
+    if (!allowedArgs.has(key)) return failure(res, 400, 'VALIDATION_FAILED', `unknown args field ${key.slice(0, 40)}`);
+  }
+  if (task.runner?.kind === 'core-route') {
+    const cls = TASK_CLASS[task.runner.route];
+    if (!cls) return failure(res, 400, 'TASK_BAD_ROUTE', `Task "${task.id}" has no action class.`);
     const decision = authorizeAction(getDb(), userId, cls, { req, ...(raw.projectId ? { projectId: raw.projectId } : {}) });
     if (!decision.ok) return failure(res, decision.status, decision.code, decision.message);
   }

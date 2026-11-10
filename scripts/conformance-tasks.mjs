@@ -12,6 +12,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildRegistry, OUTPUTS, PROMPTS_DIR, promptHash, renderAll, ROOT } from './gen-task-registry.mjs';
+import { TASK_CLASS } from '../extension/agents/task-classes.mjs';
 
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
 const problems = [];
@@ -95,6 +96,9 @@ for (const task of tasks) {
   if (!Array.isArray(task.features) || task.features.some((f) => typeof f !== 'string' || !featureKeys.has(f))) bad(`${at}: unknown feature key`);
   if (!Number.isInteger(task.revision) || task.revision < 1) bad(`${at}: revision must be a positive integer`);
 
+  if (task.runner?.kind === 'core-route' && (typeof task.runner.route !== 'string' || !Object.hasOwn(TASK_CLASS, task.runner.route))) {
+    bad(`${at}: core-route ${task.runner.route ?? '(missing)'} has no TASK_CLASS entry`);
+  }
   if (typeof task.runner?.busKind === 'string') {
     if (!Object.hasOwn(bus.kinds ?? {}, task.runner.busKind)) bad(`${at}: busKind ${task.runner.busKind} does not exist`);
     else {

@@ -26,6 +26,8 @@ export interface TaskRunContext {
   fs: FsApi;
   log(line: string): void;
   signal?: AbortSignal;
+  /** Task args from the config (never a prompt or a path). */
+  args?: Record<string, unknown>;
   approvalToken(stage: LoopStage): Promise<string | null>;
   changedPaths(): Promise<string[] | null>;
   revert(paths: string[], created: string[]): Promise<void>;
@@ -148,6 +150,35 @@ async function runShell(task: TaskDef, ctx: TaskRunContext): Promise<TaskResult>
   };
 }
 
+type CoreTaskAnswer = Partial<TaskResult> & { ok?: unknown; summary?: unknown; output?: unknown; code?: unknown };
+
+async function runCore(task: TaskDef, ctx: TaskRunContext): Promise<TaskResult> {
+  const runner = task.runner?.kind === "agent" ? "agent" : "core-route";
+  try {
+    const answer = await ctx.core.request<CoreTaskAnswer>(`/kb/tasks/${encodeURIComponent(task.id)}/run`, {
+      method: "POST",
+      body: { ...(ctx.projectId ? { projectId: ctx.projectId } : {}), args: ctx.args ?? {} },
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+    });
+    if (!answer || typeof answer !== "object") throw new TaskRunError("TASK_BAD_ANSWER", "The core returned no task result.");
+    return {
+      taskId: task.id,
+      ok: answer.ok === true,
+      runner,
+      summary: typeof answer.summary === "string" ? answer.summary : answer.ok === true ? "completed" : "failed",
+      output: typeof answer.output === "string" ? answer.output : "",
+      changedPaths: Array.isArray(answer.changedPaths) ? answer.changedPaths.filter((p): p is string => typeof p === "string") : [],
+      warnings: Array.isArray(answer.warnings) ? answer.warnings.filter((p): p is string => typeof p === "string") : [],
+      ...(typeof answer.code === "string" ? { code: answer.code } : {}),
+    };
+  } catch (err) {
+    if (err instanceof TaskRunError) throw err;
+    const code = typeof (err as { code?: unknown })?.code === "string" ? String((err as { code: string }).code) : "TASK_FAILED";
+    const message = err instanceof Error ? err.message : String(err);
+    return { taskId: task.id, ok: false, runner, summary: message, output: "", changedPaths: [], warnings: [], code };
+  }
+}
+
 async function runDesktopAction(task: TaskDef, _ctx: TaskRunContext): Promise<TaskResult> {
   const action = task.runner?.action;
   throw new TaskRunError("TASK_NOT_IMPLEMENTED", `Desktop action "${action ?? "(none)"}" for task "${task.id}" is not wired yet.`);
@@ -168,8 +199,7 @@ export async function runTask(taskId: string, ctx: TaskRunContext): Promise<Task
   switch (runner.kind) {
     case "shell": return runShell(task, ctx);
     case "core-route":
-    case "agent":
-      throw new TaskRunError("TASK_NOT_IMPLEMENTED", `Task "${task.id}" needs the core task route, which is not wired yet.`);
+    case "agent": return runCore(task, ctx);
     case "desktop-action": return runDesktopAction(task, ctx);
     default: throw new TaskRunError("TASK_BAD_RUNNER", `Task "${task.id}" has an unknown runner.`);
   }
