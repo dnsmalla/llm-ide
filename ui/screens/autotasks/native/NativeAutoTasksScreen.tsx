@@ -111,7 +111,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const hasRepo = (() => { try { const c = readRepoConfig(); return [...c.saved.github, ...c.saved.gitlab].some((r) => r.active && r.clonePath.trim() !== ""); } catch { return false; } })();
   const taskEnv = { features: null, coreFeatures: null, hasRepo, localHost: true, mode: "local" as const };
   const selectedReason = taskUnavailableReason(selected, taskEnv);
-  const iconFor = (id: AutoTaskId): string => ({ "sources.update": "↻", sourcesToIssue: "◫", implementIssues: "⌘", reviewMerge: "⇄", "review.code": "✓", "review.doc": "▤", "review.conflicts": "⚠", updateIssues: "☑", "plan.status": "▥", "loop.regression": "↺" } as Record<string, string>)[id] ?? "•";
+  const iconFor = (id: AutoTaskId): string => ({ "sources.update": "↻", sourcesToIssue: "◫", "issues.implement": "⌘", reviewMerge: "⇄", "review.code": "✓", "review.doc": "▤", "review.conflicts": "⚠", updateIssues: "☑", "plan.status": "▥", "loop.regression": "↺" } as Record<string, string>)[id] ?? "•";
   const grouped = useMemo(() => GROUPS.map((g) => [g, TASKS.filter((t) => t.group === g && (!onlyEnabled || state.configs[t.id]?.enabled))] as const).filter(([, list]) => list.length > 0), [state, onlyEnabled]);
 
   const update = (patch: Partial<AutoTaskConfig>, id: AutoTaskId = selected) => {
@@ -249,30 +249,10 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           approvalToken: async () => approvalToken,
           changedPaths: changedPathsNow,
           revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
+          // The Factory's own run path (the bus uses the same functions); loaded on first use, as the Issues screen does.
           actions: {
-            factoryItemKeys: async () => {
-              const { readItems } = await import("../../factory/items.ts");
-              return new Set((await readItems(createHostFs())).map((i) => i.key));
-            },
-            startFactory: async (issueIds) => {
-              const [{ startRun }, host, intake, items] = await Promise.all([
-                import("../../loop/native/run-manager.ts"),
-                import("../../loop/native/run-manager-host.ts"),
-                import("../../factory/intake.ts"),
-                import("../../factory/items.ts"),
-              ]);
-              host.installRunManagerHost();
-              const body = await core.request<{ issues?: Array<{ id: string; number: number | null; title: string; body: string; state: string; isPR: boolean; labels?: unknown }> }>("/kb/issues?state=open", { method: "GET" });
-              const wanted = new Set(issueIds);
-              const runIds: string[] = [];
-              for (const issue of (body.issues ?? []).filter((i) => wanted.has(i.id))) {
-                const { record } = await items.addItem(createHostFs(), intake.workItemFromIssue(issue as never));
-                const runId = startRun(projectRoot ?? "", record, "full");
-                await items.attachRun(createHostFs(), record.key, runId);
-                runIds.push(runId);
-              }
-              return { runIds };
-            },
+            startFactory: async (ids, root) => (await import("../../loop/native/run-manager-host.ts")).startIssueRuns(root, ids),
+            factoryItemKeys: async (root) => (await import("../../loop/native/run-manager-host.ts")).factoryItemKeys(root),
           },
         });
         setLog((l) => [...l, result.output]);

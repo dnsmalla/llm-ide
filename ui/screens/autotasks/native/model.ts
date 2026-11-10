@@ -7,7 +7,7 @@ export { taskById };
 // module owns the part the desktop can already be authoritative for: which tasks are enabled, their input/output,
 // skill and prompt, stored per project on this machine. No Mobile Control token is involved.
 export type AutoTaskId =
-  | "sourceUpdate" | "sourcesToIssue" | "implementIssues" | "reviewMerge"
+  | "sourceUpdate" | "sourcesToIssue" | "issues.implement" | "reviewMerge"
   | "review.code" | "review.doc" | "review.conflicts"
   | "updateIssues" | "updatePlanStatus" | "generateDoc" | "regression" | "generateKnowledge"
   | "loop.regression" | "sources.update" | "plan.status";

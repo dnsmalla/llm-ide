@@ -31,6 +31,8 @@ const featureKeys = new Set([...featureText.matchAll(/id:\s*"([a-z_]+)"/g)].map(
 const GROUPS = new Set(['Pipeline', 'Review', 'Automation', 'Maintenance', 'Factory', 'Loop']);
 const STATUSES = new Set(['available', 'unported', 'retired', 'alias']);
 const RUNNERS = new Set(['agent', 'shell', 'core-route', 'desktop-action']);
+// The closed set of desktop actions (runner.ts dispatches on it); a new action is added here and in runner.ts together.
+const DESKTOP_ACTIONS = new Set(['factory.start']);
 const INPUTS = new Set(['repo', 'project', 'notes', 'issues', 'doc', 'none']);
 const OUTPUTS_KIND = new Set(['text', 'file', 'fault-report', 'issue', 'pr', 'run-record', 'none']);
 const PERSIST = new Set(['log', 'run-record', 'note', 'tracker', 'file', 'none']);
@@ -99,6 +101,7 @@ for (const task of tasks) {
       if (runner.kind === 'core-route' && runner.prompt !== undefined) bad(`${at}: a core-route runner has no prompt`);
       if (runner.kind === 'desktop-action' && (typeof runner.action !== 'string' || !runner.action)) bad(`${at}: a desktop-action runner needs an action`);
       if (runner.kind === 'desktop-action' && runner.prompt !== undefined) bad(`${at}: a desktop-action runner has no prompt`);
+      if (runner.kind === 'desktop-action' && !DESKTOP_ACTIONS.has(runner.action)) bad(`${at}: unknown desktop action ${runner.action}`);
       if (runner.timeoutSeconds !== undefined && (!Number.isInteger(runner.timeoutSeconds) || runner.timeoutSeconds < 1)) bad(`${at}: timeoutSeconds must be a positive integer`);
     }
   }
@@ -107,6 +110,10 @@ for (const task of tasks) {
   if (!OUTPUTS_KIND.has(task.output?.kind) || !PERSIST.has(task.output?.persist) || typeof task.output?.revertWrites !== 'boolean') bad(`${at}: invalid output`);
   if (!SCHEDULE_BACKENDS.has(task.schedule?.backend) || typeof task.schedule?.schedulable !== 'boolean') bad(`${at}: invalid schedule`);
   if (task.schedule?.defaultCron !== null && typeof task.schedule?.defaultCron !== 'string') bad(`${at}: defaultCron must be a string or null`);
+  // D17: a task that starts a code-writing run or writes a tracker is never scheduled unattended.
+  if ((task.runner?.kind === 'desktop-action' || task.output?.persist === 'tracker') && task.schedule?.schedulable === true) {
+    bad(`${at}: a desktop-action or tracker task cannot be schedulable (D17)`);
+  }
   if (!SCOPES.has(task.scope)) bad(`${at}: invalid scope`);
   for (const key of ['readOnly', 'requiresRepo', 'requiresLocalHost']) if (typeof task[key] !== 'boolean') bad(`${at}: ${key} must be boolean`);
   if (!Array.isArray(task.features) || task.features.some((f) => typeof f !== 'string' || !featureKeys.has(f))) bad(`${at}: unknown feature key`);

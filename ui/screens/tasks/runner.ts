@@ -3,18 +3,19 @@
 // a host/Factory/Ship action the Node core cannot run. No prompt is ever composed here: an agent task's prompt
 // lives in the registry and is sent by the core.
 import type { FsApi } from "../explorer/fs";
+import type { Issue } from "../issues/issues-model.ts";
 import type { CoreClient } from "../shell/core";
 import type { LoopDefinition, LoopStage, LoopStageKind } from "../loop/native/model.ts";
 import { faultPathsFromOutput, reopenFault } from "../loop/native/regression.ts";
 import { runOneStage, type StageExecContext } from "../loop/native/stage-exec.ts";
 import { resolveTaskId, taskById } from "./model.ts";
-import { selectNextReadyIssue, type IssueRow } from "./select-issues.ts";
+import { selectNextReadyIssue } from "./select-issues.ts";
 import type { RunnerKind, TaskDef, TaskStageDef } from "./types.ts";
 
 export interface TaskActions {
-  /** Start one Factory run per issue. Implemented by the Auto Tasks/Factory wiring (Task 7). */
+  /** Start one Factory run per issue id (the Factory's own path, also used by the bus). */
   startFactory?(issueIds: readonly string[], projectRoot: string): Promise<{ runIds: string[] }>;
-  /** Item keys already on the Factory board, so an issue is never started twice. */
+  /** Card keys already on the Factory board; an issue with one is never started twice. */
   factoryItemKeys?(projectRoot: string): Promise<ReadonlySet<string>>;
   /** Open the latest passed Factory run for review; never ships. Implemented in Task 8. */
   reviewPendingMerge?(projectRoot: string, runId: string | null): Promise<{ runId: string | null; reviewed: boolean }>;
@@ -185,13 +186,24 @@ async function runCore(task: TaskDef, ctx: TaskRunContext): Promise<TaskResult> 
 async function runDesktopAction(task: TaskDef, ctx: TaskRunContext): Promise<TaskResult> {
   const action = task.runner?.action;
   if (action === "factory.start") {
-    const body = await ctx.core.request<{ issues?: IssueRow[] }>("/kb/issues?state=open", { method: "GET" });
-    const taken = ctx.actions.factoryItemKeys ? await ctx.actions.factoryItemKeys(ctx.projectRoot) : new Set<string>();
-    const issue = selectNextReadyIssue(body.issues ?? [], taken);
-    if (!issue) return { taskId: task.id, ok: false, runner: "desktop-action", summary: "No ready issue.", output: "", changedPaths: [], warnings: [], code: "NO_READY_ISSUE" };
-    if (!ctx.actions.startFactory) throw new TaskRunError("TASK_NOT_IMPLEMENTED", "The Factory start action is not wired.");
-    const { runIds } = await ctx.actions.startFactory([issue.id], ctx.projectRoot);
-    return { taskId: task.id, ok: runIds.length > 0, runner: "desktop-action", summary: `Started Factory run for issue #${issue.number ?? issue.id}.`, output: runIds.join("\n"), changedPaths: [], warnings: [] };
+    const start = ctx.actions.startFactory;
+    if (!start) throw new TaskRunError("TASK_NOT_AVAILABLE", "Open a project with the Factory on to start an issue run.");
+    const listed = await ctx.core.request<{ issues?: Issue[] }>("/kb/issues?state=open", { method: "GET" });
+    const taken = (await ctx.actions.factoryItemKeys?.(ctx.projectRoot)) ?? new Set<string>();
+    const issue = selectNextReadyIssue(listed.issues ?? [], taken);
+    if (!issue) {
+      return { taskId: task.id, ok: false, runner: "desktop-action", summary: "No ready issue.", output: "", changedPaths: [], warnings: [], code: "NO_READY_ISSUE" };
+    }
+    const { runIds } = await start([issue.id], ctx.projectRoot);
+    return {
+      taskId: task.id,
+      ok: runIds.length > 0,
+      runner: "desktop-action",
+      summary: `Started Factory run for issue #${issue.number ?? issue.id}.`,
+      output: runIds.join("\n"),
+      changedPaths: [],
+      warnings: [],
+    };
   }
   throw new TaskRunError("TASK_NOT_IMPLEMENTED", `Desktop action "${action ?? "(none)"}" for task "${task.id}" is not wired yet.`);
 }

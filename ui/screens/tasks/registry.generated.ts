@@ -43,7 +43,7 @@ export const TASKS: readonly TaskDef[] = [
     "id": "issues.implement",
     "label": "Implement Issues",
     "group": "Pipeline",
-    "description": "Start one Factory run for the oldest ready issue with no Factory card; never types an agent prompt.",
+    "description": "Start one Factory run for the oldest open issue that has no Factory card yet. The Factory does the work; no model prompt runs here and nothing ships.",
     "aliases": [
       "implementIssues"
     ],
@@ -54,10 +54,11 @@ export const TASKS: readonly TaskDef[] = [
     "input": {
       "kind": "issues",
       "required": true,
+      "paths": [],
       "selector": "next-ready"
     },
     "output": {
-      "kind": "text",
+      "kind": "run-record",
       "persist": "run-record",
       "revertWrites": false
     },
@@ -70,9 +71,7 @@ export const TASKS: readonly TaskDef[] = [
     "readOnly": false,
     "requiresRepo": true,
     "requiresLocalHost": true,
-    "features": [
-      "gantt_issues"
-    ],
+    "features": [],
     "availability": {
       "status": "available",
       "reason": null

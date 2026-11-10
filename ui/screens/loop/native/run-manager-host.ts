@@ -1,8 +1,8 @@
 // Wires the factory run manager to the real host, core, file API and project store. The Factory board calls
 // installRunManagerHost() on mount; it is idempotent, so runs survive the board unmounting.
-import { createHostFs, type FsApi } from "../../explorer/fs";
+import { createHostFs } from "../../explorer/fs";
 import { sendToFactory, workItemFromIssue } from "../../factory/intake.ts";
-import { attachRun, type WorkItemRecord } from "../../factory/items.ts";
+import { attachRun, readItems, type WorkItemRecord } from "../../factory/items.ts";
 import { issueRowsFor, noteRunFinished, pollOnce } from "./bus-runner.ts";
 import { invokeHost } from "../../shell/host";
 import { projectStore } from "../../shell/project-store";
@@ -37,7 +37,35 @@ export function installRunManagerHost(): void {
     // The bus runner reports a finished Factory run to the phone's claimed command (B5).
     onRunFinished: (info) => noteRunFinished(info.runId, info.statusCode, info.statusSummary),
   });
-  installBusRunner(hostFs);
+  installBusRunner();
+}
+
+/** The Factory's own path for issues: store each as a card and start one `full` run per issue (bus and Auto Task). */
+export async function startIssueRuns(projectRoot: string, issueIds: readonly string[]): Promise<{ runIds: string[]; missing: string[] }> {
+  installRunManagerHost();
+  const fs = projectGuardedFs(createHostFs(), projectRoot, () => projectStore.getSnapshot().project?.root ?? null);
+  // The phone names cached issues by the core's id; only the Factory's own cards become runs.
+  const listed = await core.requestRaw("/kb/issues?state=open", { method: "GET" }).catch(() => null);
+  const { rows, missing } = issueRowsFor(listed?.status === 200 ? listed.body : null, issueIds);
+  const items: WorkItemRecord[] = rows.map((row) => workItemFromIssue({
+    id: String(row.id), provider: String(row.provider ?? ""), repo: String(row.repo ?? ""),
+    number: typeof row.number === "number" ? row.number : null, title: String(row.title),
+    body: typeof row.body === "string" ? row.body : "", url: typeof row.url === "string" ? row.url : "",
+  }));
+  await sendToFactory(fs, items, { runIntake: false, projectRoot, start: startRun });
+  const runIds: string[] = [];
+  for (const item of items) {
+    const runId = startRun(projectRoot, item, "full");
+    await attachRun(fs, item.key, runId);
+    runIds.push(runId);
+  }
+  return { runIds, missing };
+}
+
+/** The keys of every card on the Factory board for a project (any column), so a task never starts an issue twice. */
+export async function factoryItemKeys(projectRoot: string): Promise<Set<string>> {
+  const fs = projectGuardedFs(createHostFs(), projectRoot, () => projectStore.getSnapshot().project?.root ?? null);
+  return new Set((await readItems(fs)).map((r) => r.key));
 }
 
 /**
@@ -50,7 +78,7 @@ function kickPoll(deps: Parameters<typeof pollOnce>[0]): void {
   void pollOnce(deps).catch(() => undefined).finally(() => { polling = false; });
 }
 
-function installBusRunner(hostFs: FsApi): void {
+function installBusRunner(): void {
   if (busRunnerInstalled) return;
   busRunnerInstalled = true;
   const deps: Parameters<typeof pollOnce>[0] = {
@@ -59,25 +87,7 @@ function installBusRunner(hostFs: FsApi): void {
       live: () => liveRuns(),
       concurrency: () => concurrency(),
       now: () => Date.now(),
-      sendItems: async (projectRoot, issueIds) => {
-        const fs = projectGuardedFs(hostFs, projectRoot, () => projectStore.getSnapshot().project?.root ?? null);
-        // The phone names cached issues by the core's id; only the Factory's own cards become runs.
-        const listed = await core.requestRaw("/kb/issues?state=open", { method: "GET" }).catch(() => null);
-        const { rows, missing } = issueRowsFor(listed?.status === 200 ? listed.body : null, issueIds);
-        const items: WorkItemRecord[] = rows.map((row) => workItemFromIssue({
-          id: String(row.id), provider: String(row.provider ?? ""), repo: String(row.repo ?? ""),
-          number: typeof row.number === "number" ? row.number : null, title: String(row.title),
-          body: typeof row.body === "string" ? row.body : "", url: typeof row.url === "string" ? row.url : "",
-        }));
-        await sendToFactory(fs, items, { runIntake: false, projectRoot, start: startRun });
-        const runIds: string[] = [];
-        for (const item of items) {
-          const runId = startRun(projectRoot, item, "full");
-          await attachRun(fs, item.key, runId);
-          runIds.push(runId);
-        }
-        return { runIds, missing };
-      },
+      sendItems: startIssueRuns,
   };
   busDeps = deps;
   const timer = setInterval(() => kickPoll(deps), BUS_POLL_MS);
