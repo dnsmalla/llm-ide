@@ -8,7 +8,7 @@
 import type { Entry } from "./fs";
 
 export const PAGE_SIZE = 500;
-export const ROW_HEIGHT = 22;
+export const ROW_HEIGHT = 24;
 
 export interface DirState {
   total: number;
