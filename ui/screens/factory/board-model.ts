@@ -11,7 +11,7 @@ export { factoryAnchor, focusKeyFromAnchor } from "./anchor.ts";
 export const STATUS_REFRESH_MS = 5 * 60 * 1000;
 export const SHIP_STATUS_BATCH = 20;
 export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "intake";
-export interface CardView { key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[]; costUsd?: number | null; durationSeconds?: number | null }
+export interface CardView { key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[]; costUsd?: number | null; durationSeconds?: number | null; progressLabel?: string | null; lastLine?: string | null }
 export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", intake: "Run intake" };
 export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> = { issue: "Issue", spec: "Spec", text: "Text" };
 export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeExists: false, ship: null, shipStatusError: false, lastKnownColumn: null };
@@ -34,12 +34,12 @@ export function actionsFor(column: Column, note: string | null): CardAction[] {
 }
 
 /** One card per item, grouped by the column its facts derive. Insertion order is kept inside a column. */
-export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<string, ItemFacts>): Record<Column, CardView[]> {
+export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<string, ItemFacts>, nowMs = Date.now()): Record<Column, CardView[]> {
   const board = Object.fromEntries(COLUMNS.map((c) => [c, [] as CardView[]])) as Record<Column, CardView[]>;
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.progress?.lastLine ?? null });
   }
   return board;
 }
@@ -254,6 +254,20 @@ export function formatDuration(seconds: number): string {
   const n = Math.max(0, Math.round(seconds));
   if (n < 60) return `${n}s`;
   const minutes = Math.floor(n / 60);
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) return n % 60 === 0 ? `${minutes}m` : `${minutes}m ${n % 60}s`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/** One line for a live card: `Implement · 3 of 8 · iter 2 · repair 1 · 4m 12s`. */
+export function progressLabel(
+  p: { stageName: string | null; stageIndex: number; stageCount: number; iteration: number; repairs: number; startedAt: string | null },
+  nowMs = Date.now(),
+): string {
+  const stage = p.stageName ? `${p.stageName} · ${p.stageIndex} of ${p.stageCount}` : p.iteration > 0 ? `Iteration ${p.iteration}` : "Starting";
+  const parts = [stage];
+  if (p.stageName && p.iteration > 0) parts.push(`iter ${p.iteration}`);
+  if (p.repairs > 0) parts.push(`repair ${p.repairs}`);
+  const started = p.startedAt ? Date.parse(p.startedAt) : NaN;
+  if (Number.isFinite(started) && nowMs > started) parts.push(formatDuration((nowMs - started) / 1000));
+  return parts.join(" · ");
 }

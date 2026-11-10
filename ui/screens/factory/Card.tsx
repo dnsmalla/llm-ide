@@ -23,8 +23,10 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       <div className="fx-card-meta">
         <span className="fx-source">{SOURCE_LABELS[view.source]}</span>
         {view.note ? <span className="fx-note">{view.note}</span> : null}
+        {view.progressLabel ? <span className="fx-hint">{view.progressLabel}</span> : null}
         {view.durationSeconds != null ? <span className="fx-hint">{formatDuration(view.durationSeconds)}</span> : null}
         {view.costUsd != null && view.costUsd > 0 ? <span className="fx-hint">${view.costUsd.toFixed(2)}</span> : null}
+        {view.lastLine ? <span className="fx-hint" title={view.lastLine}>{view.lastLine.slice(0, 120)}</span> : null}
       </div>
       {sendBackOpen ? (
         <form className="fx-form" aria-label="Send back" onSubmit={(e) => { e.preventDefault(); setSendBackOpen(false); onAction("sendBack", note); setNote(""); }}>

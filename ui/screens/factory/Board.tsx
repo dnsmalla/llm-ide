@@ -42,6 +42,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [interrupted, setInterrupted] = useState<ReadonlySet<string>>(() => new Set());
   const [ship, setShip] = useState<Map<string, ShipStatus | "error">>(() => new Map());
   const [live, setLive] = useState<readonly LiveRun[]>(() => liveRuns());
+  // One board timer for “4m 12s”, not one per card.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [cap, setCap] = useState(() => concurrency());
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -163,7 +165,13 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     for (const item of items) m.set(item.key, assembleFacts(item, { projectRoot: projectRoot ?? "", live, records, worktrees, interrupted, ship, lastKnown: lastKnown.current }));
     return m;
   }, [items, live, records, worktrees, ship, projectRoot]);
-  const board = useMemo(() => buildBoard(items, facts), [items, facts]);
+  useEffect(() => {
+    if (!live.some((r) => r.state === "running" || r.state === "paused")) return;
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [live]);
+
+  const board = useMemo(() => buildBoard(items, facts, nowMs), [items, facts, nowMs]);
   const openCleanup = async () => {
     const merged = new Set(items.filter((i) => facts.get(i.key)?.ship?.state === "merged").flatMap((i) => i.runIds));
     const statuses = new Map();

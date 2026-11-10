@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, progressLabel, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -20,7 +20,7 @@ test("buildBoard groups items by derived column and keeps insertion order", () =
   assert.deepEqual(Object.keys(board), ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"]);
   assert.deepEqual(board.inbox.map((c) => c.key), ["issue:a", "issue:c"]);
   assert.deepEqual(board.working.map((c) => c.key), ["issue:b"]);
-  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null }]);
+  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null }]);
   assert.deepEqual(board.done, []);
   assert.equal(lastKnownFrom(board).get("issue:d"), "readyToShip");
 });
@@ -171,4 +171,12 @@ test("formatDuration is human, not raw seconds", () => {
   assert.equal(formatDuration(45), "45s");
   assert.equal(formatDuration(300), "5m");
   assert.equal(formatDuration(5400), "1h 30m");
+});
+
+test("a live card shows the typed stage and elapsed time", () => {
+  const f = new Map([["issue:a", { ...EMPTY_FACTS, live: { ...live("issue:a"), progress: { stageName: "Implement", stageIndex: 3, stageCount: 8, iteration: 2, repairs: 1, lastLine: "wrote tests", startedAt: "2026-11-09T09:55:48.000Z" } } }]]);
+  const board = buildBoard([item("issue:a")], f, Date.parse("2026-11-09T10:00:00.000Z"));
+  assert.deepEqual(board.working[0].progressLabel, "Implement · 3 of 8 · iter 2 · repair 1 · 4m 12s");
+  assert.equal(board.working[0].lastLine, "wrote tests");
+  assert.equal(progressLabel({ stageName: null, stageIndex: 0, stageCount: 8, iteration: 0, repairs: 0, startedAt: null }), "Starting");
 });
