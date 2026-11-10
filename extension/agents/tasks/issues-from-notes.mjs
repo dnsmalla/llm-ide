@@ -1,12 +1,13 @@
 // Sources -> Issue (`issues.from_notes`, Task 9): files each meeting action item as an issue on a repository already on
-// the Issues board. The durable record (issue_source_links, migration 0077) keeps a re-run or a core restart from filing
-// an action twice; the writer's in-memory key only covers a concurrent double click. No model is called, so no usage
-// row is written and no USD cap applies. The result carries counts and issue numbers only, never a URL or a title.
+// the Issues board. The durable record (issue_source_links, migration 0077) is claimed 'pending' before the provider is
+// called and completed after it, so a re-run, a core restart or a crash after the provider answered cannot file the same
+// action twice inside the writer's idempotency window. No model is called, so no usage row and no USD cap applies. The
+// result carries counts and issue numbers only, never a URL or a title.
 import { createHash } from 'node:crypto';
 import * as kb from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
-import { findIssueLink, recordIssueLink } from '../../kb/issue-source-links.mjs';
-import { createIssue, repoOnBoard, parseIssueWrite, ISSUE_LIMITS, NAME } from '../issue-writer.mjs';
+import { findIssueLink, claimIssueLink, completeIssueLink, releaseIssueLink } from '../../kb/issue-source-links.mjs';
+import { createIssue, repoOnBoard, parseIssueWrite, ISSUE_LIMITS, IDEM_TTL_MS, NAME } from '../issue-writer.mjs';
 
 export const MAX_CREATES_PER_RUN = 20; // the bus `issueIds` cap (schema/bus/registry.json)
 const SINCE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -20,11 +21,12 @@ const DEFAULT_DEPS = Object.freeze({
   getToken: (userId, provider) => getSecret(kb.getDb(), userId, `${provider}.token`),
 });
 
-const refused = (code, summary) => ({ ok: false, code, summary, created: 0, skipped: 0, issues: [] });
+const refused = (code, summary) => ({ ok: false, code, summary, created: 0, skipped: 0, deferred: 0, issues: [] });
 
 /**
- * File the action items of one project. `args` = { provider, repo, since? }. Returns
- * { ok, summary, code?, created, skipped, issues }; a provider failure stops the run with its typed code.
+ * File the action items of one project. `args` = { provider, repo, since? }. Returns { ok, summary, code?, created,
+ * skipped, deferred, issues }: skipped = already filed (or claimed by a run still in flight), deferred = left for the
+ * next run because of the per-run cap. A provider failure stops the run with its typed code.
  */
 export async function runIssuesFromNotes({ userId, projectId = null, args = {}, signal, deps = {} }) {
   const d = { ...DEFAULT_DEPS, ...deps };
@@ -42,6 +44,7 @@ export async function runIssuesFromNotes({ userId, projectId = null, args = {}, 
   const actions = await d.searchActions(userId, projectId);
   let created = 0;
   let skipped = 0;
+  let deferred = 0;
   const issues = [];
   let failure = null;
   for (const a of actions) {
@@ -51,17 +54,21 @@ export async function runIssuesFromNotes({ userId, projectId = null, args = {}, 
     if (!text || (since && date < since)) continue;
     const sourceRef = `meeting:${a.meetingId}/action:${a.entityId}`;
     const key = { provider, repo, sourceRef, textHash: sha(text) };
-    if (findIssueLink(userId, key)) { skipped += 1; continue; }
-    if (created >= MAX_CREATES_PER_RUN) { skipped += 1; continue; }
+    if (findIssueLink(userId, key)?.status === 'filed') { skipped += 1; continue; }
+    if (created >= MAX_CREATES_PER_RUN) { deferred += 1; continue; }
+    const now = new Date();
+    const claim = claimIssueLink(userId, key, { now: now.toISOString(), staleBefore: new Date(now.getTime() - IDEM_TTL_MS).toISOString() });
+    if (claim !== 'claimed') { skipped += 1; continue; }
     const title = text.split('\n')[0].slice(0, ISSUE_LIMITS.title);
     const body = `${text}\n\nSource: ${a.meetingTitle ?? 'meeting'} (${date || 'undated'}), ${sourceRef}`.slice(0, ISSUE_LIMITS.body);
     const idem = sha(['issues.from_notes', provider, repo, sourceRef, key.textHash].join('\0')).slice(0, 32);
     const res = await d.createIssue({ userId, provider, repo, title, body, idem, token });
     if (res.status !== 200) {
+      releaseIssueLink(userId, key); // refused: nothing was filed, so the next run may try again
       failure = { code: res.body?.error?.code ?? 'TASK_FAILED', message: res.body?.error?.message ?? 'The issue could not be created.' };
       break;
     }
-    recordIssueLink(userId, { ...key, issueNumber: res.number ?? null, issueUrl: res.body?.url ?? null });
+    completeIssueLink(userId, key, { issueNumber: res.number ?? null, issueUrl: res.body?.url ?? null });
     if (res.body?.deduped) { skipped += 1; continue; }
     created += 1;
     if (res.number != null) issues.push(res.number);
@@ -71,6 +78,6 @@ export async function runIssuesFromNotes({ userId, projectId = null, args = {}, 
     ? `Cancelled after ${plural(created, 'issue')}.`
     : failure
       ? `Created ${plural(created, 'issue')} before a failure: ${failure.message}`
-      : `Created ${plural(created, 'issue')}; skipped ${plural(skipped, 'duplicate')}.`;
-  return { ok: !failure, summary, ...(failure ? { code: failure.code } : {}), created, skipped, issues };
+      : `Created ${plural(created, 'issue')}; skipped ${skipped} already filed; ${deferred} left for the next run.`;
+  return { ok: !failure, summary, ...(failure ? { code: failure.code } : {}), created, skipped, deferred, issues };
 }

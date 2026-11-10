@@ -144,7 +144,7 @@ export function createBus({
         if (config.features && !config.features.has('gantt_issues')) fail('switch_off');
         const r = await runIssuesFromNotes({ userId, projectId: args.projectId, args, signal });
         if (!r.ok) fail(r.code === 'cancelled' ? 'cancelled' : 'engine_failed');
-        result = { text: r.summary, created: r.created, skipped: r.skipped, issues: r.issues };
+        result = { text: r.summary, created: r.created, skipped: r.skipped, deferred: r.deferred, issues: r.issues };
       }
       else fail('kind_not_available');
       if (signal.aborted) return undefined;

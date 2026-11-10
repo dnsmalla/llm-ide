@@ -21,7 +21,7 @@ after(() => {
   try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-for (const id of ['u1', 'u2', 'u3', 'u4', 'u5']) {
+for (const id of ['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7']) {
   getDb().prepare("INSERT OR IGNORE INTO users (id, email, display_name, password_hash, role, status) VALUES (?, ?, ?, 'x', 'user', 'active')")
     .run(id, `${id}@example.com`, id);
 }
@@ -32,9 +32,8 @@ const ACTIONS = [
 ];
 const searchActions = async () => ACTIONS.map((a) => ({ ...a }));
 
-function fakeCreate(created, { fail = null } = {}) {
+function fakeCreate(created) {
   return async (a) => {
-    if (fail) return { status: 400, body: { error: { code: fail, message: 'refused' } } };
     created.push(a);
     const number = 100 + created.length;
     return { status: 200, number, body: { ok: true, id: number, url: `https://github.com/o/r/issues/${number}`, state: 'open', deduped: false } };
@@ -54,14 +53,14 @@ test('issues.from_notes creates one issue per new action and skips repeats', asy
   assert.equal(out.ok, true);
   assert.equal(out.runner, 'core-route');
   assert.equal(created.length, 1);
-  assert.equal(out.summary, 'Created 1 issue; skipped 1 duplicate.');
+  assert.equal(out.summary, 'Created 1 issue; skipped 1 already filed; 0 left for the next run.');
 });
 
 test('a second run with the same actions creates nothing (durable record, not memory)', async () => {
   const created = [];
   const out = await run('u1', { createIssue: fakeCreate(created) });
   assert.equal(created.length, 0);
-  assert.equal(out.summary, 'Created 0 issues; skipped 2 duplicates.');
+  assert.equal(out.summary, 'Created 0 issues; skipped 2 already filed; 0 left for the next run.');
 });
 
 test('a run after a restart (DB closed and reopened) still creates nothing', async () => {
@@ -114,14 +113,48 @@ test('a provider failure stops with its typed code and keeps the creates already
   assert.equal(again.length, 2, 'the first action stays filed; the other two are created on the re-run');
 });
 
-test('actions before the since date are not filed; at most 20 are created per run', async () => {
+test('actions before the since date are not filed; the cap defers the rest and counts them apart from duplicates', async () => {
   const many = Array.from({ length: 25 }, (_, i) => ({ meetingId: 'm2', entityId: 500 + i, meetingTitle: 'M', date: '2026-11-05', title: `Item ${i}` }));
   const created = [];
   const out = await run('u5', { searchActions: async () => [...many, { meetingId: 'm0', entityId: 1, meetingTitle: 'Old', date: '2026-10-01', title: 'Old item' }], createIssue: fakeCreate(created) });
   assert.equal(created.length, 20);
   assert.equal(out.ok, true);
-  assert.equal(out.result.skipped, 5, 'the five over the cap are skipped; the item before since is not an action of this run');
+  assert.equal(out.result.created, 20);
+  assert.equal(out.result.skipped, 0, 'nothing was already filed');
+  assert.equal(out.result.deferred, 5, 'the five over the cap are left for the next run');
+  assert.equal(out.summary, 'Created 20 issues; skipped 0 already filed; 5 left for the next run.');
   assert.ok(!created.some((c) => c.title === 'Old item'));
+});
+
+test('a crash after a claim: a fresh claim is skipped, an old one is retried', async () => {
+  const one = [{ meetingId: 'm7', entityId: 701, meetingTitle: 'M', date: '2026-11-04', title: 'Crash case' }];
+  // The first run claimed the action, the provider call threw (the process died), so the claim stays pending.
+  const died = await run('u6', { searchActions: async () => one, createIssue: async () => { throw new Error('died'); } });
+  assert.equal(died.ok, false);
+  const created = [];
+  const fresh = await run('u6', { searchActions: async () => one, createIssue: fakeCreate(created) });
+  assert.equal(created.length, 0, 'a fresh claim may still belong to a live run');
+  assert.equal(fresh.summary, 'Created 0 issues; skipped 1 already filed; 0 left for the next run.');
+  // Past the idempotency window the claim is retried: the provider may have filed it, which is the accepted residual.
+  getDb().prepare("UPDATE issue_source_links SET created_at = ? WHERE user_id = 'u6'").run(new Date(Date.now() - 11 * 60_000).toISOString());
+  const retry = await run('u6', { searchActions: async () => one, createIssue: fakeCreate(created) });
+  assert.equal(retry.ok, true);
+  assert.equal(created.length, 1);
+  const again = await run('u6', { searchActions: async () => one, createIssue: fakeCreate(created) });
+  assert.equal(created.length, 1, 'once the retry is filed, it is filed for good');
+  assert.equal(again.ok, true);
+});
+
+test('a create the provider refuses releases its claim, so the next run files the action', async () => {
+  const one = [{ meetingId: 'm8', entityId: 801, meetingTitle: 'M', date: '2026-11-04', title: 'Refused case' }];
+  const refuse = async () => ({ status: 400, body: { error: { code: 'PROVIDER_REJECTED', message: 'GitHub answered 422.' } } });
+  const first = await run('u7', { searchActions: async () => one, createIssue: refuse });
+  assert.equal(first.ok, false);
+  assert.equal(first.code, 'PROVIDER_REJECTED');
+  const created = [];
+  const second = await run('u7', { searchActions: async () => one, createIssue: fakeCreate(created) });
+  assert.equal(second.ok, true);
+  assert.equal(created.length, 1);
 });
 
 test('a bad provider is refused as a typed task error before any create', async () => {

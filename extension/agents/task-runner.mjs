@@ -83,7 +83,7 @@ export async function runCoreTask({ taskId, userId, projectRoot, projectId = nul
     emit?.('progress', { step: 'filing issues' });
     try {
       const r = await (deps.runIssuesFromNotes ?? runIssuesFromNotes)({ userId, projectId, args, signal, deps });
-      return { taskId: task.id, runner: 'core-route', ok: r.ok, summary: r.summary, output: r.summary, warnings: [], ...(r.code ? { code: r.code } : {}), result: { created: r.created, skipped: r.skipped, issues: r.issues } };
+      return { taskId: task.id, runner: 'core-route', ok: r.ok, summary: r.summary, output: r.summary, warnings: [], ...(r.code ? { code: r.code } : {}), result: { created: r.created, skipped: r.skipped, deferred: r.deferred, issues: r.issues } };
     } catch (err) {
       const code = typeof err?.code === 'string' ? err.code : 'TASK_FAILED';
       return { taskId: task.id, runner: 'core-route', ok: false, summary: 'The issues could not be filed.', output: '', warnings: [], code };

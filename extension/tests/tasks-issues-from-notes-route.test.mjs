@@ -95,14 +95,14 @@ test('a member files the action once through the route, and a second run files n
   assert.equal(first.status, 200, JSON.stringify(first.body));
   assert.equal(first.body.ok, true);
   assert.equal(providerCalls, 1);
-  assert.match(first.body.summary, /^Created 1 issue; skipped 0 duplicates\.$/);
+  assert.match(first.body.summary, /^Created 1 issue; skipped 0 already filed; 0 left for the next run\.$/);
   assert.deepEqual(first.body.result.issues, [77]);
   assert.ok(!JSON.stringify(first.body).includes('https://'), 'the answer carries counts and numbers, never a URL');
   providerOk();
   const second = await run(owner);
   assert.equal(second.status, 200);
   assert.equal(providerCalls, 0, 'the durable record stops the second run before any provider call');
-  assert.match(second.body.summary, /^Created 0 issues; skipped 1 duplicate\.$/);
+  assert.match(second.body.summary, /^Created 0 issues; skipped 1 already filed; 0 left for the next run\.$/);
 });
 
 test('a viewer is refused by the tracker-write class before any provider call', async () => {
