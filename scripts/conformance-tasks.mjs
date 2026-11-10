@@ -38,7 +38,8 @@ const OUTPUTS_KIND = new Set(['text', 'file', 'fault-report', 'issue', 'pr', 'ru
 const PERSIST = new Set(['log', 'run-record', 'note', 'tracker', 'file', 'none']);
 const SCHEDULE_BACKENDS = new Set(['none', 'desktop', 'bus']);
 const SCOPES = new Set(['project', 'app']);
-const ID = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
+// Underscore is allowed after the first dot: `issues.from_notes` is the bus kind name the plan fixes as the id.
+const ID = /^[a-z][a-z0-9]*(\.[a-z0-9_]+)+$/;
 
 if (!registry || typeof registry !== 'object' || !Array.isArray(registry.tasks)) bad('registry.json must hold { version, tasks[] }');
 if (!templates || typeof templates !== 'object' || !Array.isArray(templates.templates)) bad('templates.json must hold { version, templates[] }');

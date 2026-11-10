@@ -17,7 +17,7 @@
           "availability", "revision"
         ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9]+)+$" },
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_]+)+$" },
           "label": { "type": "string", "minLength": 1 },
           "group": { "enum": ["Pipeline", "Review", "Automation", "Maintenance", "Factory", "Loop"] },
           "description": { "type": "string" },

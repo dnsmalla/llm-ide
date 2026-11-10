@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 import { resolveProjectRoot } from '../kb/project-roots.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
-import { authorizeAction } from '../server/route-authority.mjs';
+import { authorizeAction, projectScopeRefusal } from '../server/route-authority.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { config } from '../core/config.mjs';
 import { TASKS } from '../core/task-registry.generated.mjs';
@@ -160,7 +160,12 @@ export async function handleTaskRoutes(req, res, ctx) {
       : Array.isArray(value) && value.length <= (spec.maxItems ?? 50) && value.every((v) => typeof v === 'string' && v.length <= spec.maxLength);
     if (!ok) return failure(res, 400, 'VALIDATION_FAILED', `args.${key.slice(0, 40)} is not valid`);
   }
-  if (task.runner?.kind === 'agent' && !raw.projectId) return failure(res, 400, 'PROJECT_REQUIRED', 'This task runs on a registered project.');
+  if (task.scope === 'project' && !raw.projectId) return failure(res, 400, 'PROJECT_REQUIRED', 'This task runs on a registered project.');
+  // A hub accepts a project-scoped task only for a known project (the same rule the Issues board's writes follow).
+  if (task.scope === 'project') {
+    const scope = projectScopeRefusal(getDb(), userId, raw.projectId);
+    if (scope) return failure(res, scope.status, scope.code, scope.message);
+  }
   const cls = task.runner?.kind === 'core-route' ? TASK_CLASS[task.runner.route] : task.runner?.kind === 'agent' ? KIND_CLASS[task.runner.busKind] : null;
   if ((task.runner?.kind === 'core-route' || task.runner?.kind === 'agent') && !cls) {
     return failure(res, 400, 'TASK_BAD_ROUTE', `Task "${task.id}" has no action class.`);
@@ -194,6 +199,7 @@ export async function handleTaskRoutes(req, res, ctx) {
       taskId: task.id,
       userId,
       projectRoot,
+      projectId: raw.projectId ?? null,
       args: raw.args ?? {},
       signal: ac.signal,
       deps,

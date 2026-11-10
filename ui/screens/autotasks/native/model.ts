@@ -1,13 +1,15 @@
 import { fireLabel, nextFireAfter } from "./cron.ts";
 import { TASKS as REGISTRY_TASKS, taskAvailability, taskById, taskFocus } from "../../tasks/model.ts";
 import type { TaskDef, TaskEnv } from "../../tasks/types.ts";
+import { repoSlug } from "../../issues/issues-model.ts";
+import type { RepoConfig } from "../../settings/repo-config.ts";
 
 export { taskById };
 // Native Auto Tasks catalog and local configuration. The Mac's runner/scheduler is being ported separately; this
 // module owns the part the desktop can already be authoritative for: which tasks are enabled, their input/output,
 // skill and prompt, stored per project on this machine. No Mobile Control token is involved.
 export type AutoTaskId =
-  | "sourceUpdate" | "sourcesToIssue" | "issues.implement" | "reviewMerge"
+  | "sourceUpdate" | "issues.from_notes" | "issues.implement" | "reviewMerge"
   | "review.code" | "review.doc" | "review.conflicts"
   | "updateIssues" | "updatePlanStatus" | "generateDoc" | "regression" | "generateKnowledge"
   | "loop.regression" | "sources.update" | "plan.status";
@@ -35,7 +37,6 @@ const RETIRED_DEFAULT_PROMPTS: Readonly<Record<string, string>> = {
 };
 
 const LEGACY_TASKS: readonly AutoTaskDef[] = [
-  { id: "sourcesToIssue", label: "Sources → Issue", group: "Pipeline", prompt: "Turn the unresolved action items in the latest sources into tracked issues. Report every issue you create." },
   { id: "reviewMerge", label: "Review & Merge", group: "Pipeline", prompt: "Review the pending merge request for bugs, missing tests and unintended changes. Report findings; do not merge." },
   { id: "updateIssues", label: "Update Issues", group: "Automation", prompt: "Update the tracked issues with the current status and evidence from the repository. Report every issue you change." },
 ];
@@ -100,7 +101,7 @@ export function saveState(s: AutoTaskLocalState, storage: Storage | undefined = 
  *  run deterministic code in the Mac app; the desktop has no such code, so it must never send them to the agent as an
  *  invented prompt. They stay listed, but are not runnable here, and a schedule never fires them. */
 export const MAC_ONLY_TASK_IDS: ReadonlySet<AutoTaskId> = new Set<AutoTaskId>([
-  "sourcesToIssue", "reviewMerge",
+  "reviewMerge",
 ]);
 export const MAC_ONLY_MESSAGE = "This task runs deterministic code in the Mac app; the desktop does not run it yet.";
 
@@ -123,7 +124,22 @@ export function taskUnavailableReason(id: AutoTaskId, env: TaskEnv = DEFAULT_TAS
 }
 
 export function scheduledRunAllowed(id: AutoTaskId, c: AutoTaskConfig | undefined, hasRepo: boolean, env: TaskEnv = DEFAULT_TASK_ENV): boolean {
-  return desktopRunnable(id, env) && c?.enabled === true && c.scheduleActive === true && (!requiresLinkedRepo(id) || hasRepo);
+  return isSchedulable(id) && desktopRunnable(id, env) && c?.enabled === true && c.scheduleActive === true && (!requiresLinkedRepo(id) || hasRepo);
+}
+
+/** A task whose registry schedule is `none` (it writes a tracker or code) only runs when a person presses Run (D17). */
+export function isSchedulable(id: AutoTaskId): boolean {
+  return taskById(id)?.schedule.schedulable ?? true;
+}
+
+/** The provider and repo a Sources -> Issue run files into: the active saved repository, named as the Issues board names it. */
+export function issuesFromNotesArgs(c: RepoConfig): { provider: "github" | "gitlab"; repo: string } | null {
+  const github = c.saved.github.map((r) => ({ ...r, provider: "github" as const }));
+  const gitlab = c.saved.gitlab.map((r) => ({ ...r, provider: "gitlab" as const }));
+  // The primary provider's active repository wins when both providers have one.
+  const active = (c.primary === "gitlab" ? [...gitlab, ...github] : [...github, ...gitlab]).find((r) => r.active);
+  const repo = active ? repoSlug(active.url) : "";
+  return active && repo ? { provider: active.provider, repo } : null;
 }
 
 /** Mac parity (`AutoTask.requiresLinkedRepo`): only Source Update runs without a linked repository. */
@@ -169,6 +185,7 @@ export function agentRunSucceeded(r: { reply?: string; ran?: boolean; unresolved
 export function scheduleStatusLine(masterEnabled: boolean, c: AutoTaskConfig, id: AutoTaskId, now: Date, env: TaskEnv = DEFAULT_TASK_ENV): string {
   // First: "press Run" or "task disabled" would be wrong for a task the desktop never runs, schedule or not.
   if (!desktopRunnable(id, env)) return "Mac app only — the desktop does not run this task";
+  if (!isSchedulable(id)) return "Manual only — runs only when you press Run";
   if (!c.scheduleActive) return "Schedule off — runs only when you press Run";
   if (!masterEnabled) return "Auto Tasks paused — master switch off";
   if (!c.enabled) return "Task disabled — won't run";

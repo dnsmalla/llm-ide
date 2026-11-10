@@ -5,6 +5,8 @@
     "idem": "k1",
     "args": {
       "projectId": "p",
+      "provider": "github",
+      "repo": "owner/name",
       "since": "last tuesday"
     }
   },

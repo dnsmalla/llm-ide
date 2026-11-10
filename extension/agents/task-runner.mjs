@@ -4,6 +4,7 @@
 import { config } from '../core/config.mjs';
 import { ALIASES, TASK_BY_ID } from '../core/task-registry.generated.mjs';
 import { runPlanStatus } from './tasks/plan-status.mjs';
+import { runIssuesFromNotes } from './tasks/issues-from-notes.mjs';
 
 export class TaskCoreError extends Error {
   constructor(code, message, details) {
@@ -33,7 +34,7 @@ function featureRefusal(task) {
  * Run one registry task inside the core.
  * @returns {Promise<{taskId: string, runner: string, ok: boolean, summary: string, output: string, warnings: string[], code?: string}>}
  */
-export async function runCoreTask({ taskId, userId, projectRoot, args = {}, signal, emit, deps = {} }) {
+export async function runCoreTask({ taskId, userId, projectRoot, projectId = null, args = {}, signal, emit, deps = {} }) {
   const task = resolveTask(taskId);
   if (!task) throw new TaskCoreError('TASK_NOT_FOUND', `Unknown task "${taskId}".`);
   if (task.availability.status !== 'available') {
@@ -74,6 +75,18 @@ export async function runCoreTask({ taskId, userId, projectRoot, args = {}, sign
     } catch (err) {
       const code = typeof err?.code === 'string' ? err.code : 'TASK_FAILED';
       return { taskId: task.id, runner: 'core-route', ok: false, summary: err instanceof Error ? err.message : String(err), output: '', warnings: [], code };
+    }
+  }
+  if (runner.route === 'issues-from-notes') {
+    // The shared writer files the actions; a refusal is a typed result, never a silent partial success.
+    if (signal?.aborted) return { taskId: task.id, runner: 'core-route', ok: false, summary: 'cancelled', output: '', warnings: [], code: 'cancelled' };
+    emit?.('progress', { step: 'filing issues' });
+    try {
+      const r = await (deps.runIssuesFromNotes ?? runIssuesFromNotes)({ userId, projectId, args, signal, deps });
+      return { taskId: task.id, runner: 'core-route', ok: r.ok, summary: r.summary, output: r.summary, warnings: [], ...(r.code ? { code: r.code } : {}), result: { created: r.created, skipped: r.skipped, issues: r.issues } };
+    } catch (err) {
+      const code = typeof err?.code === 'string' ? err.code : 'TASK_FAILED';
+      return { taskId: task.id, runner: 'core-route', ok: false, summary: 'The issues could not be filed.', output: '', warnings: [], code };
     }
   }
   if (runner.route === 'plan-status') {

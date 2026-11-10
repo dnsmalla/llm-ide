@@ -89,7 +89,7 @@
       "client": "ios-native",
       "kind": "issues.from_notes",
       "flagEnabled": false,
-      "expect": "not_available"
+      "expect": "needs_approval"
     },
     {
       "client": "ios-native",
@@ -125,7 +125,7 @@
       "client": "desktop-ui",
       "kind": "issues.from_notes",
       "flagEnabled": false,
-      "expect": "not_available"
+      "expect": "needs_approval"
     },
     {
       "client": "desktop-ui",

@@ -4,13 +4,14 @@ import * as m from "../native/model.ts";
 
 // The Mac's structural tasks (AutoTask.isStructural) run deterministic code; the desktop must never send them to the agent.
 test("Mac structural tasks are not runnable; Regression now runs via the task registry", () => {
-  const mac = ["sourcesToIssue", "reviewMerge"];
+  const mac = ["reviewMerge"];
   assert.deepEqual([...m.MAC_ONLY_TASK_IDS].sort(), [...mac].sort());
   for (const id of mac) assert.equal(m.desktopRunnable(id), false, id);
   assert.equal(m.desktopRunnable("implementIssues"), true, "Implement Issues is a registry desktop-action task");
   assert.equal(m.TASKS.some((t) => t.id === "implementIssues"), false, "the legacy Implement Issues row is gone");
   for (const id of ["sourceUpdate", "updatePlanStatus", "reviewCode", "reviewDoc", "reviewConflicts", "updateIssues"]) assert.equal(m.desktopRunnable(id), true, id);
   assert.equal(m.desktopRunnable("generateKnowledge"), false);
+  assert.equal(m.desktopRunnable("sourcesToIssue"), true, "the old id is an alias of the runnable Sources -> Issue task");
   assert.equal(m.desktopRunnable("generateDoc"), false);
   assert.match(m.MAC_ONLY_MESSAGE, /^This task runs deterministic code in the Mac app; the desktop does not run it yet\.$/);
   assert.equal(m.TASK_BY_ID["loop.regression"].prompt, "", "the old Regression prompt is gone");
@@ -23,7 +24,7 @@ test("Mac structural tasks are not runnable; Regression now runs via the task re
 
 test("a schedule never fires a Mac-only task, even when armed and enabled", () => {
   const armed = { enabled: true, scheduleActive: true };
-  assert.equal(m.scheduledRunAllowed("sourcesToIssue", armed, true), false);
+  assert.equal(m.scheduledRunAllowed("sourcesToIssue", armed, true), false, "a tracker-writing task is manual only (D17)");
   assert.equal(m.scheduledRunAllowed("sourceUpdate", armed, true), true);
   assert.equal(m.scheduledRunAllowed("regression", armed, true), true);
   assert.equal(m.scheduledRunAllowed("reviewCode", armed, true), true);

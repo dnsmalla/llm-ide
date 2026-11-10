@@ -9,7 +9,7 @@ import { readRepoConfig } from "../../settings/repo-config.ts";
 import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
 import { createHostFs } from "../../explorer/fs";
-import { GROUPS, MAC_ONLY_MESSAGE, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, TASKS, TASK_BY_ID, agentRunSucceeded, composeTaskMessage, desktopRunnable, taskById, taskUnavailableReason, scheduleStatusLine, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, scheduledRunAllowed, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
+import { GROUPS, MAC_ONLY_MESSAGE, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, TASKS, TASK_BY_ID, agentRunSucceeded, composeTaskMessage, desktopRunnable, issuesFromNotesArgs, taskById, taskUnavailableReason, scheduleStatusLine, loadState, normalizeProjectPath, requiresLinkedRepo, saveState, scheduledRunAllowed, type AutoTaskConfig, type AutoTaskId, type AutoTaskLocalState } from "./model.ts";
 import { describeCron, validateCron } from "./cron.ts";
 import { minuteKey, takeDueAutoTasks } from "./due.ts";
 import { addTemplate, loadTemplates, removeTemplate, saveTemplates, type PromptTemplate } from "./prompt-templates.ts";
@@ -111,7 +111,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const hasRepo = (() => { try { const c = readRepoConfig(); return [...c.saved.github, ...c.saved.gitlab].some((r) => r.active && r.clonePath.trim() !== ""); } catch { return false; } })();
   const taskEnv = { features: null, coreFeatures: null, hasRepo, localHost: true, mode: "local" as const };
   const selectedReason = taskUnavailableReason(selected, taskEnv);
-  const iconFor = (id: AutoTaskId): string => ({ "sources.update": "↻", sourcesToIssue: "◫", "issues.implement": "⌘", reviewMerge: "⇄", "review.code": "✓", "review.doc": "▤", "review.conflicts": "⚠", updateIssues: "☑", "plan.status": "▥", "loop.regression": "↺" } as Record<string, string>)[id] ?? "•";
+  const iconFor = (id: AutoTaskId): string => ({ "sources.update": "↻", "issues.from_notes": "◫", "issues.implement": "⌘", reviewMerge: "⇄", "review.code": "✓", "review.doc": "▤", "review.conflicts": "⚠", updateIssues: "☑", "plan.status": "▥", "loop.regression": "↺" } as Record<string, string>)[id] ?? "•";
   const grouped = useMemo(() => GROUPS.map((g) => [g, TASKS.filter((t) => t.group === g && (!onlyEnabled || state.configs[t.id]?.enabled))] as const).filter(([, list]) => list.length > 0), [state, onlyEnabled]);
 
   const update = (patch: Partial<AutoTaskConfig>, id: AutoTaskId = selected) => {
@@ -216,6 +216,12 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
             return;
           }
         }
+        // Sources -> Issue files into the active saved repository; the core refuses a repository that is not on the board.
+        const tracker = registered.runner.kind === "core-route" && registered.runner.route === "issues-from-notes" ? issuesFromNotesArgs(readRepoConfig()) : null;
+        if (registered.runner.kind === "core-route" && registered.runner.route === "issues-from-notes" && !tracker) {
+          setNotice("Make a saved repository active in Settings → Repositories first.");
+          return;
+        }
         // An agent task runs the registry prompt in the registered project; the user's edit (if any) is a focus override.
         const isAgent = registered.runner.kind === "agent";
         const focusOverride = isAgent && c.prompt.trim() !== "" && c.prompt !== (taskFocus(id) ?? "") ? c.prompt : undefined;
@@ -241,6 +247,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         const result = await runRegisteredTask(id, {
           projectRoot: projectRoot ?? "",
           ...(isAgent ? { projectId: await registeredProjectId(core, projectRoot ?? ""), args: agentArgs } : {}),
+          ...(tracker ? { projectId: await registeredProjectId(core, projectRoot ?? ""), args: tracker } : {}),
           core,
           host: invokeHost,
           fs,

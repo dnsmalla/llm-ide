@@ -40,6 +40,62 @@ export const TASKS: readonly TaskDef[] = [
     "revision": 1
   },
   {
+    "id": "issues.from_notes",
+    "label": "Sources → Issue",
+    "group": "Pipeline",
+    "description": "File each action item from the Library meeting notes as an issue on a repository already on the Issues board. Each action is filed once.",
+    "aliases": [
+      "sourcesToIssue"
+    ],
+    "runner": {
+      "kind": "core-route",
+      "route": "issues-from-notes",
+      "busKind": "issues.from_notes",
+      "args": {
+        "provider": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "repo": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "since": {
+          "type": "string",
+          "maxLength": 10
+        }
+      },
+      "timeoutSeconds": 1800
+    },
+    "input": {
+      "kind": "notes",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "issue",
+      "persist": "tracker",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": false,
+    "features": [
+      "gantt_issues"
+    ],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
     "id": "issues.implement",
     "label": "Implement Issues",
     "group": "Pipeline",
@@ -435,6 +491,7 @@ export const ALIASES: Readonly<Record<string, string>> = Object.freeze({
   "reviewCode": "review.code",
   "reviewConflicts": "review.conflicts",
   "reviewDoc": "review.doc",
+  "sourcesToIssue": "issues.from_notes",
   "sourceUpdate": "sources.update",
   "updatePlanStatus": "plan.status"
 });

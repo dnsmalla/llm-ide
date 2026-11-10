@@ -1,11 +1,13 @@
 {
-  "description": "issues.from_notes since a date",
+  "description": "issues.from_notes since a date, on a named repository",
   "frame": {
     "v": 1,
     "kind": "issues.from_notes",
     "idem": "k-ifn-1",
     "args": {
       "projectId": "proj-1",
+      "provider": "github",
+      "repo": "owner/name",
       "since": "2026-10-01"
     }
   },

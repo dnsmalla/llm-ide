@@ -4,4 +4,6 @@
 export const TASK_CLASS = Object.freeze({
   'sources-update': 'external.read',
   'plan-status': 'external.read',
+  // The same class the Issues board's create route uses (routes/issue-writes.mjs).
+  'issues-from-notes': 'external.write',
 });

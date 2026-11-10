@@ -303,7 +303,6 @@ test('custom.run is desktop-only: every other client class gets 403 KIND_NOT_ALL
 test('unavailable kinds answer KIND_NOT_AVAILABLE with the reason; nothing is stubbed as success', async () => {
   await reset();
   for (const [kind, args, client] of [
-    ['issues.from_notes', { projectId: 'proj-1' }, 'ios-native'],
     ['loop.run', { projectId: 'proj-1', loopId: 'l' }, 'ios-native'], ['custom.run', { customTaskId: 'c-1' }, 'desktop-ui'],
   ]) {
     const r = await call('POST', '/bus/commands', cmd({ kind, args }), { client });
@@ -315,7 +314,9 @@ test('unavailable kinds answer KIND_NOT_AVAILABLE with the reason; nothing is st
   assert.equal(kinds.client, 'desktop-ui');
   const by = Object.fromEntries(kinds.kinds.map((k) => [k.kind, k]));
   assert.equal(by.review.available, true); assert.equal(by['sources.update'].available, true);
-  for (const k of ['issues.from_notes', 'loop.run', 'custom.run']) { assert.equal(by[k].available, false); assert.ok(by[k].unavailableReason); }
+  for (const k of ['loop.run', 'custom.run']) { assert.equal(by[k].available, false); assert.ok(by[k].unavailableReason); }
+  // Task 9: Sources -> Issue is available (a T1 write that still needs the desktop approval).
+  assert.equal(by['issues.from_notes'].available, true); assert.equal(by['issues.from_notes'].tier, 'T1');
   // B5: the Factory kind is available to the desktop, and only the desktop runs it (a host-proof claim lease).
   assert.equal(by['issues.implement'].available, true);
   assert.equal(by['issues.implement'].tier, 'T2');

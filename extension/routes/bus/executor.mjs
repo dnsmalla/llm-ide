@@ -19,6 +19,8 @@ import { REGISTRY, COMMAND_SCHEMA, LIMITS, kindInfo, classInfo, decideReceipt, m
 import { validate } from './schema-validate.mjs';
 import { runReview } from './review.mjs';
 import { runSourcesUpdate } from './sources-update.mjs';
+import { runIssuesFromNotes } from '../../agents/tasks/issues-from-notes.mjs';
+import { config } from '../../core/config.mjs';
 import { getSchedule } from '../../kb/bus-schedules.mjs';
 import { standingRefusal } from './schedules.mjs';
 import { truncateUtf8, chunkUtf8 } from './bytes.mjs';
@@ -29,7 +31,7 @@ export const busEnabled = () => String(process.env.LLMIDE_BUS || '').toLowerCase
 // Plan H1.2: the action class of each kind, re-checked when the job RUNS (a member demoted after
 // enqueueing is refused) and on every desktop claim/renew of a desktop-runner kind. Reuses the existing
 // tier_denied code: no new wire value.
-export const KIND_CLASS = Object.freeze({ review: 'model.read', 'sources.update': 'external.read', 'issues.implement': 'model.exec' });
+export const KIND_CLASS = Object.freeze({ review: 'model.read', 'sources.update': 'external.read', 'issues.implement': 'model.exec', 'issues.from_notes': 'external.write' });
 
 export class BusError extends Error {
   constructor(status, code, message, details) { super(message); this.status = status; this.code = code; if (details !== undefined) this.details = details; }
@@ -137,6 +139,13 @@ export function createBus({
       let result;
       if (kind === 'review') result = await review({ userId, args, cwd: root, signal, spawn, emit, deps: deps.engineDeps });
       else if (kind === 'sources.update') result = await sourcesUpdate({ userId, args, signal });
+      else if (kind === 'issues.from_notes') {
+        // The same feature gate the task route applies; the phone sees the closed bus code, never the provider's text.
+        if (config.features && !config.features.has('gantt_issues')) fail('switch_off');
+        const r = await runIssuesFromNotes({ userId, projectId: args.projectId, args, signal });
+        if (!r.ok) fail(r.code === 'cancelled' ? 'cancelled' : 'engine_failed');
+        result = { text: r.summary, created: r.created, skipped: r.skipped, issues: r.issues };
+      }
       else fail('kind_not_available');
       if (signal.aborted) return undefined;
       result = capResult(result);

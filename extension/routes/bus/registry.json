@@ -85,16 +85,18 @@
       "tier": "T1",
       "lane": "write",
       "write": true,
-      "available": false,
-      "unavailableReason": "The deterministic note action extractor and the tracker allow-list live in the Mac app; Node has only the meeting planner, a different function.",
-      "description": "Extract action items from recent notes and create upstream issues.",
+      "available": true,
+      "engineless": true,
+      "description": "Extract action items from the project's meeting notes and create issues on a repository already on the Issues board; each action is filed once.",
       "engines": [],
       "args": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["projectId"],
+        "required": ["projectId", "provider", "repo"],
         "properties": {
           "projectId": { "type": "string", "x-format": "id" },
+          "provider": { "type": "string", "enum": ["github", "gitlab"] },
+          "repo": { "type": "string", "minLength": 1, "maxLength": 200 },
           "since": { "type": "string", "x-format": "date" }
         }
       }
