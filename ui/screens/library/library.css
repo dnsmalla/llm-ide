@@ -15,7 +15,7 @@
 .lib-nav { display: flex; flex-direction: column; min-height: 0; max-height: 45%; flex: 0 0 auto; overflow-y: auto; border-top: 1px solid var(--tok-color-border); background: var(--tok-color-surface); padding: var(--tok-space-md); gap: 7px; }
 .lib-nav-head { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--tok-space-xs); }
 .lib-nav-title { margin: 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); }
-.lib-nav-group { display: flex; align-items: center; gap: var(--tok-space-sm); margin: var(--tok-space-xl) 0 6px; padding: 0 var(--tok-space-xs); min-height: 26px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--tok-color-text-muted); }
+.lib-nav-group { display: flex; align-items: center; gap: var(--tok-space-sm); margin: var(--tok-space-xl) 0 6px; padding: 0 var(--tok-space-xs); min-height: 26px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--tok-color-accent2); }
 .lib-nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .lib-nav-item { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: var(--tok-space-sm); font: inherit; font-size: 13px; color: inherit; background: none; border: 0; border-radius: var(--tok-radius-sm); padding: 7px 10px; cursor: pointer; text-align: left; }
 .lib-nav-item:hover { background: var(--tok-color-row-alt); }

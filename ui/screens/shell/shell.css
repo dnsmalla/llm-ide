@@ -1,3 +1,12 @@
+:root, :root[data-theme] {
+  /* Semantic aliases: several screens used these names before they existed in the generated palette. */
+  --tok-color-success: var(--tok-color-accent3);
+  --tok-color-warning: var(--tok-color-accent4);
+  --tok-color-info: var(--tok-color-accent2);
+  --tok-color-ok: var(--tok-color-accent3);
+  --tok-color-on-accent: var(--tok-color-body);
+}
+
 /* Shell chrome. Tokens only (--tok-*): no raw colours, no remote resources. */
 .sh-app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: var(--tok-color-body); color: var(--tok-color-text); font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); }
 .sh-splash { display: grid; place-items: center; height: 100vh; background: var(--tok-color-body); color: var(--tok-color-text-muted); font-family: var(--tok-type-sans-family); }
@@ -139,3 +148,22 @@
 .sh-inbox-form { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 12px; font-size: 12px; }
 .sh-statusbar-terminal[data-open] { background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); color: var(--tok-color-text); }
 .sh-statusbar-terminal svg { width: 13px; height: 13px; }
+
+/* Section identity: a quiet colour per toolbar item, used for both the icon and the current pill.
+   Tokens only, so every theme keeps its own contrast. Sections without a mapping stay neutral. */
+.sh-tool[data-tb-id="explorer"] { --tb: var(--tok-color-category-amber); }
+.sh-tool[data-tb-id="graph"] { --tb: var(--tok-color-category-purple); }
+.sh-tool[data-tb-id="autotasks"] { --tb: var(--tok-color-category-teal); }
+.sh-tool[data-tb-id="conflicts"] { --tb: var(--tok-color-accent4); }
+.sh-tool[data-tb-id="issues"] { --tb: var(--tok-color-accent3); }
+.sh-tool[data-tb-id="gantt"] { --tb: var(--tok-color-accent2); }
+.sh-tool[data-tb-id="loop"] { --tb: var(--tok-color-accent); }
+.sh-tool[data-tb-id="docgen"] { --tb: var(--tok-color-category-purple); }
+.sh-tool[data-tb-id="visual"] { --tb: var(--tok-color-category-teal); }
+.sh-tool[data-tb-id="library"] { --tb: var(--tok-color-category-amber); }
+.sh-tool[data-tb-id="live"] { --tb: var(--tok-color-accent4); }
+.sh-tool[data-tb-id="chat"] { --tb: var(--tok-color-accent2); }
+.sh-tool[data-tb-id] svg { color: var(--tb, currentColor); opacity: .9; }
+.sh-tool[data-tb-id]:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--tb, var(--tok-color-text)) 10%, transparent); }
+.sh-tool[data-tb-id][aria-current="page"] { background: color-mix(in srgb, var(--tb, var(--tok-color-accent)) 18%, transparent); color: var(--tb, var(--tok-color-accent)); }
+.sh-tool[data-tb-id][aria-current="page"] svg { opacity: 1; }

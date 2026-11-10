@@ -64,7 +64,8 @@
 .st-group-btn:hover { background: color-mix(in srgb, var(--tok-color-accent) 7%, transparent); }
 .st-group[data-open="true"] > .st-group-h .st-group-btn, .st-group:focus-within > .st-group-h .st-group-btn { background: color-mix(in srgb, var(--tok-color-accent) 5%, transparent); }
 .ui-settings-title { font-size: 12px; letter-spacing: .055em; color: var(--tok-color-text); }
-.ui-settings-icon { width: 24px; height: 24px; border-radius: 7px; justify-content: center; background: color-mix(in srgb, var(--tok-color-accent) 10%, transparent); }
+.ui-settings-icon { width: 24px; height: 24px; border-radius: 7px; justify-content: center; color: var(--tok-color-accent2); background: color-mix(in srgb, var(--tok-color-accent2) 12%, transparent); }
+.st-group-btn:hover .ui-settings-icon { background: color-mix(in srgb, var(--tok-color-accent2) 20%, transparent); }
 .st-group > .ui-card { border: 0; border-top: 1px solid var(--tok-color-border); border-radius: 0; padding: 18px 17px 20px; background: transparent; }
 .st-group .ui-settings-section { border: 0; background: transparent; box-shadow: none; }
 .st-stack { gap: 14px; }

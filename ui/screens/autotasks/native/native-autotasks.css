@@ -10,7 +10,7 @@
 .atn-link { font: inherit; font-size: var(--tok-type-caption-size); border: 0; background: none; color: var(--tok-color-accent); padding: 0 2px; cursor: pointer; }
 .atn-filter { padding: 6px 12px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); border-bottom: 1px solid var(--tok-color-border); }
 .atn-groups { flex: 1; overflow: auto; padding: 6px 0 14px; }
-.atn-group { margin: 14px 16px 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--tok-color-text-muted); }
+.atn-group { margin: 14px 16px 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--tok-color-accent2); }
 .atn-groups ul { list-style: none; margin: 0; padding: 0; }
 .atn-row { width: calc(100% - 12px); margin: 0 6px; display: flex; align-items: center; gap: 9px; font: inherit; font-size: var(--tok-type-body-size); color: inherit; background: none; border: 0; border-radius: 6px; text-align: left; padding: 8px 10px; cursor: pointer; }
 .atn-row:hover { background: var(--tok-color-row-alt); }
