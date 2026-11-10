@@ -6,6 +6,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import type { FsApi } from "../../explorer/fs";
 import { displayText } from "../../explorer/scm/model";
 import { invokeHost } from "../../shell/host";
+import { shellBus } from "../../shell/bus";
 import { core } from "../../shell/runtime";
 import { readRepoConfig } from "../../settings/repo-config.ts";
 import type { WorkItem } from "./factory.ts";
@@ -39,6 +40,9 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   const [diffError, setDiffError] = useState<string | null>(null);
   const [review, setReview] = useState("");
   const [base, setBase] = useState("main");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [split, setSplit] = useState(false);
   const [busy, setBusy] = useState(false);
   // In-app confirm bar. `window.confirm` is not used anywhere in this app and is unreliable in the Tauri webview.
   const [confirming, setConfirming] = useState<"ship" | "discard" | null>(null);
@@ -51,6 +55,13 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   const blocked = target ? shipBlockedReason(config, target.provider) : "This repository is not in Settings → Repositories (with its clone folder), so it cannot be shipped from here.";
   const kind = target?.provider === "gitlab" ? "draft merge request" : "draft pull request";
   const staleReview = reviewedPatchIdWarning(reviewedPatchId, diff?.patchId ?? null);
+
+  useEffect(() => {
+    if (!target || diff === null) return;
+    const req = shipRequest(info, item, { provider: target.provider, slug: target.slug, base: base.trim() || "main" }, review, diff.patchId);
+    setTitle((t) => t || req.title);
+    setBody((b) => b || req.body);
+  }, [target, diff, info, item, review, base]);
 
   const reloadDiff = async () => {
     try {
@@ -86,7 +97,9 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
     let result: ShipResult;
     try {
       if (!diff?.patchId) throw Object.assign(new Error("the reviewed diff has no patch id"), { code: "diff_changed" });
-      const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown }>("/kb/loop/ship", { method: "POST", body: shipRequest(info, item, repo, review, diff.patchId), timeoutMs: 5 * 60_000 });
+      const baseReq = shipRequest(info, item, repo, review, diff.patchId);
+      if (!title.trim()) throw Object.assign(new Error("the request title is empty"), { code: "validation" });
+      const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown }>("/kb/loop/ship", { method: "POST", body: { ...baseReq, title: title.trim(), body }, timeoutMs: 5 * 60_000 });
       result = { ok: true, url: typeof r.url === "string" ? r.url : "", commit: typeof r.commit === "string" ? r.commit : "", reused: r.reused === true };
     } catch (e) {
       const code = typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : "error";
@@ -135,19 +148,29 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
     <section className="loop-card loop-ship" aria-label="Review and ship">
       <div className="loop-inline"><h2>REVIEW AND SHIP</h2><span className="loop-spacer" /><button type="button" className="loop-btn" disabled={busy} onClick={onClose}>Close</button></div>
       <p className="loop-native-hint">{displayText(item.title)} · branch <code>{info.branch}</code> · started from <code>{info.baseCommit.slice(0, 7)}</code></p>
+      <p className="loop-native-hint" aria-label="Ship target">{target ? `${target.provider} · ${target.slug} · ${info.branch} → ${base.trim() || "main"}` : "No ship target configured"}</p>
       {message ? <StatusBanner severity={message.severity} message={message.text} onDismiss={() => setMessage(null)} /> : null}
       {diffError ? <StatusBanner severity="error" message={`The diff could not be read: ${diffError}`} /> : null}
       {!diff && !diffError ? <p className="loop-native-hint" role="status">Reading the diff…</p> : null}
       {diff && files.length === 0 ? <p className="loop-native-hint">No changes outside .factory/.</p> : null}
+      <div className="loop-inline"><button type="button" className="loop-btn" onClick={() => setSplit((v) => !v)} aria-pressed={split}>{split ? "Unified view" : "Split view"}</button></div>
       <ul className="loop-ship-files">
         {files.map((f) => (
           <li key={f.path}>
             <details>
               <summary><code>{displayText(f.path)}</code> <span className="loop-native-hint">+{f.lines.filter((l) => diffLineKind(l) === "add").length} −{f.lines.filter((l) => diffLineKind(l) === "del").length}</span></summary>
-              <pre className="loop-diff" tabIndex={0} aria-label={`Diff of ${displayText(f.path)}`}>
-                {f.lines.slice(0, PREVIEW_LINES).map((l, i) => <span key={i} className="loop-diff-line" data-kind={diffLineKind(l)}>{displayText(l) + "\n"}</span>)}
-                {f.lines.length > PREVIEW_LINES ? <span className="loop-diff-line" data-kind="hunk">{`… ${f.lines.length - PREVIEW_LINES} more lines\n`}</span> : null}
-              </pre>
+              <div className="loop-inline"><button type="button" className="loop-btn" onClick={() => shellBus.publish({ type: "open-file", path: `${runPrefix}/${f.path}` })}>Open in editor</button><span className="loop-native-hint">Editing changes the reviewed patch; Ship will need Review again.</span></div>
+              {split ? (
+                <div className="loop-inline" aria-label={`Split diff of ${displayText(f.path)}`}>
+                  <pre className="loop-diff">{f.lines.filter((l) => diffLineKind(l) !== "add").slice(0, PREVIEW_LINES).map((l, i) => <span key={i} className="loop-diff-line" data-kind={diffLineKind(l)}>{displayText(l) + "\n"}</span>)}</pre>
+                  <pre className="loop-diff">{f.lines.filter((l) => diffLineKind(l) !== "del").slice(0, PREVIEW_LINES).map((l, i) => <span key={i} className="loop-diff-line" data-kind={diffLineKind(l)}>{displayText(l) + "\n"}</span>)}</pre>
+                </div>
+              ) : (
+                <pre className="loop-diff" tabIndex={0} aria-label={`Diff of ${displayText(f.path)}`}>
+                  {f.lines.slice(0, PREVIEW_LINES).map((l, i) => <span key={i} className="loop-diff-line" data-kind={diffLineKind(l)}>{displayText(l) + "\n"}</span>)}
+                  {f.lines.length > PREVIEW_LINES ? <span className="loop-diff-line" data-kind="hunk">{`… ${f.lines.length - PREVIEW_LINES} more lines\n`}</span> : null}
+                </pre>
+              )}
             </details>
           </li>
         ))}
@@ -157,6 +180,12 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       {!passed ? <p className="loop-native-hint">Ship is offered only after a passed run. You can still discard this worktree.</p> : null}
       {passed && blocked ? <p className="loop-warn">{blocked}</p> : null}
       <label className="loop-field"><span>Target branch</span><input value={base} disabled={busy} onChange={(e) => setBase(e.target.value)} /></label>
+      {requestProvider ? <p className="loop-native-hint">The existing draft keeps its text.</p> : (
+        <>
+          <label className="loop-field"><span>Title</span><input value={title} maxLength={200} disabled={busy} onChange={(e) => setTitle(e.target.value)} /></label>
+          <label className="loop-field"><span>Description</span><textarea rows={4} maxLength={20000} value={body} disabled={busy} onChange={(e) => setBody(e.target.value)} /></label>
+        </>
+      )}
       {sensitive.length > 0 ? (
         <div className="loop-warn" role="note" aria-label="Sensitive files changed">
           <p>Sensitive files changed — check these before shipping:</p>
