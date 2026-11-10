@@ -102,7 +102,7 @@ const GanttLabel = memo(function GanttLabel({ row, index, count, selected, onAct
       title={`${row.issue.title}\nOpen details`}
     >
       <span className="gnt-status" data-state={row.issue.state === "closed" ? "closed" : "open"} aria-hidden="true">{row.issue.state === "closed" ? "✓" : "○"}</span>
-      <span className="gnt-rowtext"><span className="gnt-num">{row.issue.number !== null ? `#${row.issue.number}` : ""}</span> {issueTitleBody(row.issue)}</span>
+      <span className="gnt-rowtext"><span className="gnt-num">{row.issue.number !== null ? `#${row.issue.number}` : ""}</span> {issueTitleBody(row.issue)}<span className="gnt-rowdates">{barDates(row)}</span></span>
     </button>
     </div>
   );

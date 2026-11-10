@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, scheduleSaveBody, shiftSchedule, shiftScheduleBody, scheduleBody, enqueueShift, settleShift, dragShift, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
+import { DEFAULT_SPAN_DAYS, DETAIL_NESTED_HINT, GANTT_NESTED_HINT, issueDatesView, loadTimeline, readIssueSchedule, GITLAB_LOCAL_DATES_NOTE, localDatesNote, barDates, GANTT_ROW_ACTIONS, canSchedule, estimateSpanDays, macBounds, projectOptions, presetRange, scheduleSaveBody, shiftSchedule, shiftScheduleBody, scheduleBody, enqueueShift, settleShift, dragShift, barGeometry, buildRows, countCategories, dayNumber, dayString, decodeSchedules, dependencyLines, filterRows, fillRange, isSaveShortcut, isWeekend, localToday, rowCategory, span, timelineRange, todayScrollLeft, undatedRows } from "../gantt-model.ts";
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: String(over.number ?? 1), title: "T", body: "", url: "", provider: "github", repo: "o/r",
@@ -595,4 +595,13 @@ test("a saved shift leaves the queue only while it is still the head and unchang
   const replaced = enqueueShift([], row, 5)[0]!;
   settleShift([replaced], item, 1);
   assert.equal(replaced.days, 5, "an item that replaced the saved one is never dropped");
+});
+
+test("presetRange: today, two weeks, month and quarter", () => {
+  const today = Math.floor(Date.UTC(2026, 10, 15) / 86_400_000);
+  assert.deepEqual(presetRange("today", today), { from: "2026-11-15", until: "2026-11-15" });
+  assert.deepEqual(presetRange("2w", today), { from: "2026-11-08", until: "2026-11-22" });
+  assert.deepEqual(presetRange("month", today), { from: "2026-11-01", until: "2026-11-30" });
+  assert.deepEqual(presetRange("quarter", today), { from: "2026-10-01", until: "2026-12-31" });
+  assert.deepEqual(presetRange("all", today), { from: "", until: "" });
 });

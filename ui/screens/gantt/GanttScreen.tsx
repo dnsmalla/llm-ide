@@ -21,8 +21,10 @@ import {
   GANTT_ROW_ACTIONS,
   issueLabel,
   localToday,
+  presetRange,
   projectOptions,
   timelineRange,
+  type GanttRangePreset,
   todayScrollLeft,
   enqueueShift, scheduleBody, settleShift, shiftScheduleBody, type QueuedShift,
   type GanttCategory,
@@ -59,6 +61,8 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const [stateFilter, setStateFilter] = useState<"all" | "open" | "closed">("all");
   const [dateFilter, setDateFilter] = useState<"any" | "scheduled" | "unscheduled">("any");
   const [label, setLabel] = useState("");
+  const [milestone, setMilestone] = useState("");
+  const [rangePreset, setRangePreset] = useState<GanttRangePreset>("all");
   const [from, setFrom] = useState("");
   const [until, setUntil] = useState("");
   const [categories, setCategories] = useState<GanttCategory[]>([...GANTT_CATEGORIES]);
@@ -132,10 +136,11 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
     const q = query.trim().toLowerCase();
     return issues.filter((i) => {
       if (stateFilter !== "all" && i.state !== stateFilter) return false;
+      if (milestone && i.milestone?.title !== milestone) return false;
       if (q && !`${i.title} ${i.repo} ${i.labels.join(" ")} #${i.number ?? ""}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [issues, query, stateFilter]);
+  }, [issues, query, stateFilter, milestone]);
   const baseRows = useMemo(() => buildRows(filteredIssues, schedules, provider, repo), [filteredIssues, schedules, provider, repo]);
   const today = localToday();
   /** Drag/keyboard shift: save the moved dates through the existing schedule overlay route. */
@@ -203,6 +208,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const dated = useMemo(() => datedRows(rows), [rows]);
   const range = useMemo<TimelineRange>(() => timelineRange(rows, today), [rows, today]);
   const labels = useMemo(() => labelOptions(issues), [issues]);
+  const milestones = useMemo(() => [...new Set(issues.map((i) => i.milestone?.title).filter((x): x is string => typeof x === "string" && x !== ""))].sort(), [issues]);
   // The Mac's project list is the saved repositories of this provider only (GitHubClient/GitLabClient listProjects):
   // a repo removed from Settings, or another provider's, never shows. Re-read on load so a Settings edit applies.
   const savedRepos = useMemo(() => readRepoConfig().saved[provider].map((r) => repoSlug(r.url)), [provider, issues]);
@@ -225,6 +231,13 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   useEffect(() => {
     if (active && phase === "ready") scrollToToday();
   }, [active, phase, zoom]);
+
+  const chooseRange = (preset: GanttRangePreset) => {
+    setRangePreset(preset);
+    const r = presetRange(preset, today);
+    setFrom(r.from);
+    setUntil(r.until);
+  };
 
   const toggleCategory = (c: GanttCategory) => {
     setCategories((cur) => (cur.includes(c) ? (cur.length > 1 ? cur.filter((x) => x !== c) : cur) : [...cur, c]));
@@ -284,8 +297,10 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         </div>
         <label className="gnt-field"><span className="gnt-sr">Date</span><select value={dateFilter} onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}><option value="any">Any date</option><option value="scheduled">Scheduled</option><option value="unscheduled">Unscheduled</option></select></label>
         <label className="gnt-field"><span>Label</span><select value={label} onChange={(e) => setLabel(e.target.value)}><option value="">All labels</option>{labels.map((l) => <option key={l} value={l}>{l}</option>)}</select></label>
-        <label className="gnt-field"><span>From</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label className="gnt-field"><span>Until</span><input type="date" value={until} onChange={(e) => setUntil(e.target.value)} /></label>
+        <label className="gnt-field"><span>Milestone</span><select value={milestone} onChange={(e) => setMilestone(e.target.value)}><option value="">All milestones</option>{milestones.map((m) => <option key={m} value={m}>{m}</option>)}</select></label>
+        <label className="gnt-field"><span>Range</span><select value={rangePreset} onChange={(e) => chooseRange(e.target.value as GanttRangePreset)}><option value="all">All dates</option><option value="today">Today</option><option value="2w">± 1 week</option><option value="month">This month</option><option value="quarter">This quarter</option><option value="custom">Custom</option></select></label>
+        <label className="gnt-field"><span>From</span><input type="date" value={from} onChange={(e) => { setRangePreset("custom"); setFrom(e.target.value); }} /></label>
+        <label className="gnt-field"><span>Until</span><input type="date" value={until} onChange={(e) => { setRangePreset("custom"); setUntil(e.target.value); }} /></label>
         <label className="gnt-check"><input type="checkbox" checked={hideUndated} onChange={(e) => setHideUndated(e.target.checked)} /><span>Hide undated</span></label>
       </div>
       {nestedNote ? <p className="gnt-hint">{GANTT_NESTED_HINT}</p> : null}

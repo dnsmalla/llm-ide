@@ -558,3 +558,19 @@ export async function readIssueSchedule(request: Request, issue: Pick<Issue, "pr
     return { kind: "error", error: "The core is not reachable right now." };
   }
 }
+
+export type GanttRangePreset = "all" | "today" | "2w" | "month" | "quarter" | "custom";
+
+/** The from/until dates a range preset selects (empty strings = no bound). */
+export function presetRange(preset: GanttRangePreset, today: number): { from: string; until: string } {
+  if (preset === "all" || preset === "custom") return { from: "", until: "" };
+  const date = new Date(today * DAY_MS);
+  if (preset === "today") return { from: dayString(today), until: dayString(today) };
+  if (preset === "2w") return { from: dayString(today - 7), until: dayString(today + 7) };
+  const y = date.getUTCFullYear();
+  if (preset === "month") {
+    return { from: dayString(Math.floor(Date.UTC(y, date.getUTCMonth(), 1) / DAY_MS)), until: dayString(Math.floor(Date.UTC(y, date.getUTCMonth() + 1, 0) / DAY_MS)) };
+  }
+  const q = Math.floor(date.getUTCMonth() / 3) * 3;
+  return { from: dayString(Math.floor(Date.UTC(y, q, 1) / DAY_MS)), until: dayString(Math.floor(Date.UTC(y, q + 3, 0) / DAY_MS)) };
+}
