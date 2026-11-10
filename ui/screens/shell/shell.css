@@ -137,3 +137,5 @@
 .sh-inbox-actions { display: flex; gap: 8px; margin-top: 4px; }
 .sh-inbox-confirm { font-size: 12px; }
 .sh-inbox-form { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 12px; font-size: 12px; }
+.sh-statusbar-terminal[data-open] { background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); color: var(--tok-color-text); }
+.sh-statusbar-terminal svg { width: 13px; height: 13px; }

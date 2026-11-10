@@ -2,6 +2,7 @@
 // the Mac). Ctrl+` and the status-bar item toggle it; one shared manager means tabs survive section switches.
 import { useEffect, useState, type ReactNode } from "react";
 import { TerminalDock, clampDock, DOCK_DEFAULT } from "../explorer/terminal/TerminalDock";
+import { TerminalIcon } from "@llmide/ui-kit";
 import { TERMINAL_BUILT, loadTerminalRuntime, sharedTerminalManager } from "../explorer/terminal/shared";
 import type { TerminalRuntime } from "../explorer/terminal/runtime-types";
 import { readTerminalPrefs, writeTerminalPrefs } from "./terminal-prefs";
@@ -56,7 +57,12 @@ export function ShellTerminalDock({ activeSection, projectRoot, projectName, ope
 }
 
 /** Status-bar toggle for the shell dock (Explorer owns its own toggle). */
-export function ShellTerminalItem({ activeSection, onToggle, built }: { activeSection: SectionId; onToggle: () => void; built: boolean }): ReactNode {
+export function ShellTerminalItem({ activeSection, onToggle, built, open }: { activeSection: SectionId; onToggle: () => void; built: boolean; open: boolean }): ReactNode {
   if (!built || activeSection === "explorer") return null;
-  return <button type="button" className="sh-statusbar-item" onClick={onToggle} title="Toggle terminal (Ctrl+`)">Terminal</button>;
+  return (
+    <button type="button" className="sh-statusbar-item sh-statusbar-terminal" data-open={open || undefined} aria-pressed={open} aria-expanded={open} onClick={onToggle} title={open ? "Hide terminal (Ctrl+`)" : "Show terminal (Ctrl+`)"}>
+      <TerminalIcon />
+      <span>Terminal</span>
+    </button>
+  );
 }
