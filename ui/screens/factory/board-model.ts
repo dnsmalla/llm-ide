@@ -11,7 +11,7 @@ export { factoryAnchor, focusKeyFromAnchor } from "./anchor.ts";
 export const STATUS_REFRESH_MS = 5 * 60 * 1000;
 export const SHIP_STATUS_BATCH = 20;
 export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "intake";
-export interface CardView { key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[] }
+export interface CardView { key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[]; costUsd?: number | null; durationSeconds?: number | null }
 export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", intake: "Run intake" };
 export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> = { issue: "Issue", spec: "Spec", text: "Text" };
 export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeExists: false, ship: null, shipStatusError: false, lastKnownColumn: null };
@@ -38,7 +38,8 @@ export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<
   const board = Object.fromEntries(COLUMNS.map((c) => [c, [] as CardView[]])) as Record<Column, CardView[]>;
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note) });
+    const f = facts.get(item.key) ?? EMPTY_FACTS;
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null });
   }
   return board;
 }

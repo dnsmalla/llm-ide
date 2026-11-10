@@ -6,7 +6,7 @@ export type Column = "inbox" | "needsDecision" | "working" | "needsYou" | "ready
 export interface ShipComment { author: string; body: string; at: string }
 export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; ci: "none" | "pending" | "success" | "failed"; ciSummary: string | null; comments: ShipComment[] }
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
-export interface RunRecordFacts { runId: string; mode: RunMode; statusCode: string; needsDecision: string | null; ship: { provider: "github" | "gitlab"; url: string } | null; reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null }
+export interface RunRecordFacts { runId: string; mode: RunMode; statusCode: string; needsDecision: string | null; ship: { provider: "github" | "gitlab"; url: string } | null; costUsd: number | null; durationSeconds: number | null; reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null }
 
 export interface ItemFacts { live: LiveRun | null; lastRecord: RunRecordFacts | null; worktreeExists: boolean; interrupted?: boolean; ship: ShipStatus | null; shipStatusError: boolean; lastKnownColumn: Column | null }
 
@@ -49,6 +49,8 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     needsDecision: typeof raw.needsDecision === "string" && raw.needsDecision.trim() !== "" ? raw.needsDecision.slice(0, 500) : null,
     ship,
     reviewedPatchId,
+    costUsd: Array.isArray(raw.stages) ? raw.stages.reduce((n, st) => n + (typeof st?.costUsd === "number" && Number.isFinite(st.costUsd) ? st.costUsd : 0), 0) : null,
+    durationSeconds: typeof raw.durationSeconds === "number" && Number.isFinite(raw.durationSeconds) ? raw.durationSeconds : null,
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,
     entry,
   };

@@ -20,7 +20,7 @@ test("buildBoard groups items by derived column and keeps insertion order", () =
   assert.deepEqual(Object.keys(board), ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"]);
   assert.deepEqual(board.inbox.map((c) => c.key), ["issue:a", "issue:c"]);
   assert.deepEqual(board.working.map((c) => c.key), ["issue:b"]);
-  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, actions: ["openDiff", "ship", "discard"] }]);
+  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null }]);
   assert.deepEqual(board.done, []);
   assert.equal(lastKnownFrom(board).get("issue:d"), "readyToShip");
 });
