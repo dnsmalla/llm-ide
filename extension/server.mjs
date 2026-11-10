@@ -979,6 +979,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // A disabled feature's path answers 404 before the rate limiter: it does no work, so it must not spend a token or
+  // turn into a 429 (the feature matrix calls these paths in a burst).
+  const featureOffEarly = featureDisabledFor(req.url || '', config.features);
+  if (featureOffEarly) {
+    sendFeatureDisabled(res, featureOffEarly);
+    return;
+  }
+
   // Rate limit per-(profile, user).  Anonymous health probes don't
   // hit this branch because they have no profile.
   const profile = rateLimitProfile(req.url || '', req.method || 'GET');

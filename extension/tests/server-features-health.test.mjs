@@ -64,7 +64,7 @@ async function withServer(features, fn) {
       await new Promise((r) => setTimeout(r, 100));
     }
     assert.ok(health, `server answered /health (output: ${output.slice(-2000)})`);
-    await fn(health, output);
+    await fn(health, output, port);
   } finally {
     child.kill('SIGTERM');
     await new Promise((r) => (child.exitCode != null ? r() : child.once('exit', r)));
@@ -95,5 +95,23 @@ test('/health with LLMIDE_FEATURES unset: features null and the full endpoint li
     }
     const missing = requiredEndpoints().filter((e) => !health.endpoints.includes(e));
     assert.deepEqual(missing, []);
+  });
+});
+
+test('a disabled feature answers 404 before the rate limiter, however often it is called', async () => {
+  await withServer('agent_chat', async (_health, _output, port) => {
+    const base = `http://127.0.0.1:${port}`;
+    const json = { 'content-type': 'application/json' };
+    const creds = { email: 'burst@example.com', password: 'correct horse battery staple' };
+    const reg = await fetch(`${base}/auth/register`, { method: 'POST', headers: json, body: JSON.stringify({ ...creds, displayName: 'Burst' }) });
+    assert.equal(reg.status, 201);
+    const login = await (await fetch(`${base}/auth/login`, { method: 'POST', headers: json, body: JSON.stringify(creds) })).json();
+    const headers = { ...json, authorization: `Bearer ${login.accessToken}` };
+    // /kb/loop/ship-status is on the small `dispatch` bucket: before the fix the burst turned into 429.
+    for (let i = 0; i < 40; i++) {
+      const r = await fetch(`${base}/kb/loop/ship-status`, { method: 'POST', headers, body: '{}' });
+      assert.equal(r.status, 404, `call ${i + 1}`);
+      assert.deepEqual(await r.json(), { error: 'feature_disabled', feature: 'auto_tasks' });
+    }
   });
 });
