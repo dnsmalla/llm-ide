@@ -423,7 +423,7 @@ export function expireOldDesktopCommandsSystem({ now = Date.now(), maxAgeMs = DE
   const cutoff = new Date(now - maxAgeMs).toISOString();
   return db.transaction(() => {
     const rows = db.prepare(`SELECT c.id, c.user_id FROM bus_commands c JOIN jobs j ON j.id = c.id AND j.user_id = c.user_id
-      WHERE c.state = 'enqueued' AND j.runner = 'desktop' AND j.state = 'queued' AND c.created_at <= ?`).all(cutoff);
+      WHERE c.state = 'enqueued' AND j.runner = 'desktop' AND j.state = 'queued' AND COALESCE(c.decided_at, c.created_at) <= ?`).all(cutoff);
     const out = [];
     for (const r of rows) {
       const changed = db.prepare("UPDATE jobs SET state='cancelled', error=?, finished_at=?, updated_at=? WHERE id=? AND state='queued'").run('desktop_command_expired', new Date(now).toISOString(), new Date(now).toISOString(), r.id).changes;

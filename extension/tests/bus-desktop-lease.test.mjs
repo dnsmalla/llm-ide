@@ -150,7 +150,7 @@ test('a queued desktop command older than 24 h is expired, not claimed later', (
   reset();
   const cmd = approved();
   const old = new Date(Date.now() - store.DESKTOP_COMMAND_MAX_AGE_MS - 1000).toISOString();
-  db.getDb().prepare('UPDATE bus_commands SET created_at=? WHERE id=?').run(old, cmd.id);
+  db.getDb().prepare('UPDATE bus_commands SET created_at=?, decided_at=? WHERE id=?').run(old, old, cmd.id);
   const out = store.expireOldDesktopCommandsSystem();
   assert.equal(out.length, 1);
   assert.equal(store.getCommand(A, cmd.id).state, 'expired');

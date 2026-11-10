@@ -327,6 +327,7 @@ export function configFor(mode: RunMode, base: LoopEngineConfig): LoopEngineConf
   // and a loop created through the app-wide Loop defaults (whose wallClockMinutes 0 would otherwise write null).
   copy.wallClockBudgetSeconds = base.wallClockBudgetSeconds ?? 7200;
   // A factory run may hold at a stage boundary while its project is closed (Task 2); never time that hold out.
+  // Factory runs hold while their project is closed; the Loop page also uses configFor, so its pause is unbounded too.
   copy.pauseTimeoutSeconds = 0;
   if (mode === "full") return copy;
   const keep = new Set<FactoryRole>(MODE_ROLES[mode]);
