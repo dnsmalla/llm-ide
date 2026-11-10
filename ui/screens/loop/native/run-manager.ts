@@ -54,6 +54,10 @@ export interface RunManagerDeps {
   now(): Date;
   rand(): number;
   newId(): string;
+  /** A stage boundary: the Factory bus runner renews its lease from this, not only from the 60 s timer. */
+  onStage?(runId: string): void;
+  /** A stage boundary: the Factory bus runner renews its lease from this, not only from the 60 s timer. */
+  onStage?(runId: string): void;
   /** A finished run's record was written (or held): the Factory bus runner reports it to the phone. */
   onRunFinished?(info: { runId: string; itemKey: string; projectRoot: string; mode: RunMode; statusCode: string; statusSummary: string }): void;
 }
@@ -293,7 +297,10 @@ async function execute(run: ManagedRun): Promise<void> {
 }
 
 async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Promise<Finished | null> {
-  const log = (line: string) => appendLog(run, line);
+  const log = (line: string) => {
+    appendLog(run, line);
+    if (line.startsWith("$ ")) { try { d.onStage?.(run.live.runId); } catch { /* a listener must not stop the run */ } }
+  };
   const loop = await d.loadFactoryLoop(fs);
   if (!loop) { fail(run, "This project has no Factory loop (system/loop.json could not be read); the run did not start."); return null; }
   const config = configFor(run.live.mode, loop.config);

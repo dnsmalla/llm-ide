@@ -14,6 +14,7 @@ import { configureRunManager, concurrency, liveRuns, projectGuardedFs, startRun 
 
 let installed = false;
 let busRunnerInstalled = false;
+let busDeps: Parameters<typeof pollOnce>[0] | null = null;
 const BUS_POLL_MS = 60_000;
 
 export function installRunManagerHost(): void {
@@ -29,6 +30,8 @@ export function installRunManagerHost(): void {
     // An issue runs in the clone Settings → Repositories maps its owner/name slug to (null = not mapped).
     repoForSlug: (provider, slug, projectRoot) => repoForIssue({ provider, repo: slug }, readRepoConfig().saved, projectRoot),
     activeProject,
+    // A stage boundary renews the phone command's lease instead of waiting for the 60 s tick.
+    onStage: () => { if (busDeps) void pollOnce(busDeps); },
     subscribeProject: (listener) => projectStore.subscribe(listener),
     // The bus runner reports a finished Factory run to the phone's claimed command (B5).
     onRunFinished: (info) => noteRunFinished(info.runId, info.statusCode, info.statusSummary),
@@ -43,8 +46,7 @@ export function installRunManagerHost(): void {
 function installBusRunner(hostFs: FsApi): void {
   if (busRunnerInstalled) return;
   busRunnerInstalled = true;
-  const timer = setInterval(() => {
-    void pollOnce({
+  const deps: Parameters<typeof pollOnce>[0] = {
       requestRaw: (path, opts) => core.requestRaw(path, opts as Parameters<typeof core.requestRaw>[1]),
       activeProject: () => projectStore.getSnapshot().project?.root ?? null,
       live: () => liveRuns(),
@@ -69,7 +71,8 @@ function installBusRunner(hostFs: FsApi): void {
         }
         return { runIds, missing };
       },
-    }).catch(() => undefined);
-  }, BUS_POLL_MS);
+  };
+  busDeps = deps;
+  const timer = setInterval(() => { void pollOnce(deps); }, BUS_POLL_MS);
   (timer as unknown as { unref?: () => void }).unref?.();
 }

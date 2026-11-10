@@ -103,6 +103,7 @@ async function finishClaim(deps: BusRunnerDeps, claim: Claim): Promise<boolean> 
   const r = await post(deps, `/bus/commands/${claim.command.id}/finish`, { claimToken: claim.token, state, result: finishResult(state, summary) });
   // 200 = finished; 409 LEASE_LOST = the lease or the command is gone, so nothing is left to report.
   if (r.status === 200 || r.status === 409) {
+    if (r.status === 409 && state === "succeeded") deps.notice?.("The phone command timed out, the run finished: Ready to ship.");
     claims.delete(claim.command.id);
     for (const id of claim.runIds) finished.delete(id);
     return true;
