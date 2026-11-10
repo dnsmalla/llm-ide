@@ -44,6 +44,8 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   const [body, setBody] = useState("");
   const [split, setSplit] = useState(false);
   const edited = useRef(false);
+  const opener = useRef<HTMLButtonElement | null>(null);
+  const confirmRef = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
   // In-app confirm bar. `window.confirm` is not used anywhere in this app and is unreliable in the Tauri webview.
   const [confirming, setConfirming] = useState<"ship" | "discard" | "anyway" | null>(null);
@@ -63,6 +65,12 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
     const req = shipRequest(info, item, { provider: target.provider, slug: target.slug, base: base.trim() || "main" }, review, diff.patchId);
     if (!edited.current) { setTitle(req.title); setBody(req.body); }
   }, [target, diff, info, item, review, base]);
+
+  useEffect(() => {
+    if (!confirming) { opener.current?.focus(); return; }
+    const first = confirmRef.current?.querySelector<HTMLElement>("button");
+    first?.focus();
+  }, [confirming]);
 
   const reloadDiff = async () => {
     try {
@@ -151,7 +159,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   const files = diff ? splitDiffByFile(diff.text) : [];
   const sensitive = diff ? sensitiveChangedFiles(diff.files) : [];
   return (
-    <section className="loop-card loop-ship" aria-label="Review and ship">
+    <section className="loop-card loop-ship" aria-label="Review and ship" onKeyDown={(e) => { if (e.key === "Escape" && confirming) { e.stopPropagation(); setConfirming(null); } }}>
       <div className="loop-inline"><h2>REVIEW AND SHIP</h2><span className="loop-spacer" /><button type="button" className="loop-btn" disabled={busy} onClick={onClose}>Close</button></div>
       <p className="loop-native-hint">{displayText(item.title)} · branch <code>{info.branch}</code> · started from <code>{info.baseCommit.slice(0, 7)}</code></p>
       <p className="loop-native-hint" aria-label="Ship target">{target ? `${target.provider} · ${target.slug} · ${info.branch} → ${base.trim() || "main"}` : "No ship target configured"}</p>
@@ -199,7 +207,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
         </div>
       ) : null}
       {confirming === "ship" && target ? (
-        <div className="loop-confirm" role="alertdialog" aria-label="Confirm ship">
+        <div className="loop-confirm" role="alertdialog" aria-label="Confirm ship" ref={confirmRef}>
           <p className="loop-warn">{`Ship ${info.branch} as a ${kind} to ${target.slug} (${target.provider}), into ${base.trim() || "(no target branch)"}? This commits the worktree changes (never .factory/), pushes ${info.branch} with your git credentials and opens a ${kind}. Nothing is merged.`}</p>
           <div className="loop-inline">
             <button type="button" className="loop-btn loop-btn-primary" disabled={busy} onClick={() => void ship()}>Confirm ship</button>
@@ -208,7 +216,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
         </div>
       ) : null}
       {confirming === "anyway" && secretHit ? (
-        <div className="loop-confirm" role="alertdialog" aria-label="Confirm ship anyway">
+        <div className="loop-confirm" role="alertdialog" aria-label="Confirm ship anyway" ref={confirmRef}>
           <p className="loop-warn">Ship anyway despite {secretHit.total} secret hit{secretHit.total === 1 ? "" : "s"}? This is logged in the run record. Remove them instead when possible.</p>
           <ul>{secretHit.hits.map((h, i) => <li key={i}><code>{h.rule}{h.file ? ` at ${h.file}${h.line ? `:${h.line}` : ""}` : ""}</code></li>)}</ul>
           <div className="loop-inline">
@@ -218,7 +226,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
         </div>
       ) : null}
       {confirming === "discard" ? (
-        <div className="loop-confirm" role="alertdialog" aria-label="Confirm discard">
+        <div className="loop-confirm" role="alertdialog" aria-label="Confirm discard" ref={confirmRef}>
           <p className="loop-warn">{`Discard this run? ${readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, requestProvider ? { provider: requestProvider } : null)}`}</p>
           <div className="loop-inline">
             <button type="button" className="loop-btn loop-btn-primary" disabled={busy || readingDiscard} onClick={() => void discard()}>Confirm discard</button>
@@ -227,7 +235,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
         </div>
       ) : null}
       <div className="loop-inline">
-        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={() => setConfirming("ship")}>{busy ? "Working…" : "Ship as draft…"}</button>
+        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} ref={opener} onClick={() => setConfirming("ship")}>{busy ? "Working…" : "Ship as draft…"}</button>
         {secretHit && secretHit.rule ? <button type="button" className="loop-btn" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={() => setConfirming("anyway")}>Ship anyway…</button> : null}
         {shippedUrl ? <button type="button" className="loop-btn" onClick={() => { void invokeHost("open_external_url", { url: shippedUrl }).catch(() => undefined); }}>Open {kind}</button> : null}
         <button type="button" className="loop-btn" disabled={busy} onClick={openDiscard}>Discard…</button>
