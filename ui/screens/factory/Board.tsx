@@ -122,7 +122,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       try {
         const r = await core.requestRaw("/kb/loop/ship-status", { method: "POST", body: { requests: chunk } });
         if (r.status === 429) { rateLimited = true; break; }
-        if (r.status === 200) for (const [url, s] of decodeShipResults(r.body)) next.set(url, s);
+        if (r.status === 200) { setOffline(false); for (const [url, s] of decodeShipResults(r.body)) next.set(url, s); }
       } catch {
         // Core unreachable: these cards keep their last known column (columnFor), never Inbox.
         setOffline(true);
@@ -179,10 +179,10 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     return m;
   }, [items, live, records, worktrees, ship, projectRoot]);
   useEffect(() => {
-    if (!live.some((r) => r.state === "running" || r.state === "paused")) return;
+    if (!live.some((r) => r.state === "running" || r.state === "paused") && retryAt === null) return;
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [live]);
+  }, [live, retryAt]);
 
   const board = useMemo(() => buildBoard(items, facts, nowMs), [items, facts, nowMs]);
   const openCleanup = async () => {
@@ -348,12 +348,12 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           const t = e.target as HTMLElement;
           if (t.closest("input, textarea, select, [contenteditable=true]")) return;
           const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" } as const;
+          const cardKey = t.closest("[data-key]")?.getAttribute("data-key") ?? selectedKey;
           const dir = map[e.key as keyof typeof map];
-          if (!dir) return;
-          const next = nextCardKey(board, selectedKey, dir);
+          if (!dir) { if ((e.key === "Enter" || e.key === " ") && cardKey) { e.preventDefault(); setSelectedKey(cardKey); } return; }
+          const next = nextCardKey(board, cardKey, dir);
           if (!next) return;
           e.preventDefault();
-          setSelectedKey(next);
           requestAnimationFrame(() => (document.querySelector(`[data-key="${CSS.escape(next)}"] .fx-card-title`) as HTMLElement | null)?.focus());
         }}>
           {COLUMNS.map((col) => (

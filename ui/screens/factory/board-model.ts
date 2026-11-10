@@ -313,7 +313,7 @@ export function nextCardKey(board: Record<Column, CardView[]>, key: string | nul
   if (direction === "left" || direction === "right") {
     for (let i = ci + (direction === "right" ? 1 : -1); i >= 0 && i < allCols.length; i += direction === "right" ? 1 : -1) {
       const col = board[allCols[i]];
-      if (col.length) return (col.find((v) => v.key === key) ?? col[0]).key;
+      if (col.length) return col[Math.min(i, col.length - 1)].key;
     }
     return current.key;
   }

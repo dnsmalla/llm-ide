@@ -211,3 +211,14 @@ test("D4: the board markup uses a region, labelled lists and a log", async () =>
   assert.match(src, /role="log"/);
   assert.doesNotMatch(src, /className="fx-board" role="list"/);
 });
+
+test("D6: 500 cards assemble and build well under 50 ms", () => {
+  const items = Array.from({ length: 500 }, (_, i) => item(`issue:${i}`, { runIds: [`r${i}`] }));
+  const facts = new Map(items.map((it, i) => [it.key, { ...EMPTY_FACTS, worktreeExists: true, lastRecord: rec(`r${i}`) }]));
+  const ctx = { projectRoot: "/p", live: [], records: new Map(items.map((it, i) => [`r${i}`, rec(`r${i}`)])), worktrees: new Map(items.map((it, i) => [`r${i}`, {}])), ship: new Map(), lastKnown: new Map() };
+  const t = performance.now();
+  for (const it of items) assembleFacts(it, ctx);
+  buildBoard(items, facts, Date.now());
+  const ms = performance.now() - t;
+  assert.ok(ms < 50, `500 cards took ${ms.toFixed(1)} ms`);
+});

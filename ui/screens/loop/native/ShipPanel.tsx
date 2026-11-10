@@ -46,10 +46,11 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   const edited = useRef(false);
   const opener = useRef<HTMLButtonElement | null>(null);
   const confirmRef = useRef<HTMLDivElement | null>(null);
+  const lastOpener = useRef<HTMLElement | null>(null);
   const [busy, setBusy] = useState(false);
   // In-app confirm bar. `window.confirm` is not used anywhere in this app and is unreliable in the Tauri webview.
   const [confirming, setConfirming] = useState<"ship" | "discard" | "anyway" | null>(null);
-  const [secretHit, setSecretHit] = useState<{ rule: string; file: string | null; line: number | null; hits: { rule: string; file: string | null; line: number }[]; total: number } | null>(null);
+  const [secretHit, setSecretHit] = useState<{ rule: string | null; file: string | null; line: number | null; hits: { rule: string; file: string | null; line: number }[]; total: number } | null>(null);
   const [shippedUrl, setShippedUrl] = useState<string | null>(null);
   const [message, setMessage] = useState<{ severity: "info" | "warning" | "error"; text: string } | null>(null);
   const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
@@ -67,7 +68,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   }, [target, diff, info, item, review, base]);
 
   useEffect(() => {
-    if (!confirming) { opener.current?.focus(); return; }
+    if (!confirming) { (lastOpener.current ?? opener.current)?.focus(); return; }
     const first = confirmRef.current?.querySelector<HTMLElement>("button");
     first?.focus();
   }, [confirming]);
@@ -111,7 +112,8 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       if (!title.trim()) { setMessage({ severity: "warning", text: "Enter a title first." }); return; }
       const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown; secretOverride?: unknown }>("/kb/loop/ship", { method: "POST", body: { ...baseReq, title: title.trim(), body, ...(allowSecret ? { allowSecret: true } : {}) }, timeoutMs: 5 * 60_000 });
       const so = r.secretOverride && typeof r.secretOverride === "object" ? r.secretOverride as Record<string, unknown> : null;
-      result = { ok: true, url: typeof r.url === "string" ? r.url : "", commit: typeof r.commit === "string" ? r.commit : "", reused: r.reused === true, ...(so && typeof so.rule === "string" ? { secretOverride: { rule: so.rule, file: typeof so.file === "string" ? so.file : null, line: typeof so.line === "number" ? so.line : null } } : {}) };
+      const soHits = Array.isArray(so?.hits) ? so.hits.filter((h): h is { rule: string; file: string | null; line: number } => typeof h === "object" && h !== null && typeof (h as { rule?: unknown }).rule === "string").slice(0, 20) : [];
+      result = { ok: true, url: typeof r.url === "string" ? r.url : "", commit: typeof r.commit === "string" ? r.commit : "", reused: r.reused === true, ...(so && typeof so.rule === "string" ? { secretOverride: { rule: so.rule, file: typeof so.file === "string" ? so.file : null, line: typeof so.line === "number" ? so.line : null, hits: soHits, total: typeof so.total === "number" ? so.total : soHits.length } } : {}) };
     } catch (e) {
       const code = typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : "error";
       const d = (e as { details?: Record<string, unknown> })?.details;
@@ -121,7 +123,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       setBusy(false);
     }
     const state = shipState(result);
-    if (state === "secret" && !result.ok) setSecretHit({ rule: result.rule ?? "secret", file: result.file ?? null, line: result.line ?? null, hits: result.hits ?? [], total: result.total ?? 1 });
+    if (state === "secret" && !result.ok) setSecretHit({ rule: result.rule ?? null, file: result.file ?? null, line: result.line ?? null, hits: result.hits ?? [], total: result.total ?? 1 });
     if (result.ok) setSecretHit(null);
     setMessage({ severity: state === "shipped" ? "info" : state === "secret" ? "error" : "warning", text: shipCopy(result) });
     // The worktree changed after the review: show the new diff before the user ships again.
@@ -235,10 +237,10 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
         </div>
       ) : null}
       <div className="loop-inline">
-        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} ref={opener} onClick={() => setConfirming("ship")}>{busy ? "Working…" : "Ship as draft…"}</button>
-        {secretHit && secretHit.rule ? <button type="button" className="loop-btn" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={() => setConfirming("anyway")}>Ship anyway…</button> : null}
+        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} ref={opener} onClick={() => { lastOpener.current = opener.current; setConfirming("ship"); }}>{busy ? "Working…" : "Ship as draft…"}</button>
+        {secretHit && secretHit.hits.length > 0 ? <button type="button" className="loop-btn" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={(e) => { lastOpener.current = e.currentTarget; setConfirming("anyway"); }}>Ship anyway…</button> : null}
         {shippedUrl ? <button type="button" className="loop-btn" onClick={() => { void invokeHost("open_external_url", { url: shippedUrl }).catch(() => undefined); }}>Open {kind}</button> : null}
-        <button type="button" className="loop-btn" disabled={busy} onClick={openDiscard}>Discard…</button>
+        <button type="button" className="loop-btn" disabled={busy} onClick={(e) => { lastOpener.current = e.currentTarget; openDiscard(); }}>Discard…</button>
       </div>
     </section>
   );
