@@ -750,7 +750,7 @@
     {
       "id": "operation-diagnosis",
       "name": "Operation App Diagnosis",
-      "summary": "Check the local server responds and the extension and Mac app build cleanly, then the fault sweep.",
+      "summary": "Check the local server responds and the extension builds cleanly, then the fault sweep.",
       "config": {
         "maxIterations": 6
       },
@@ -764,10 +764,6 @@
           "command": "cd extension && npm run build"
         },
         {
-          "name": "Mac app build",
-          "command": "cd mac && swift build"
-        },
-        {
           "name": "Regression",
           "taskId": "loop.regression",
           "kind": "regressionSweep"
@@ -777,7 +773,7 @@
     {
       "id": "system-check",
       "name": "System Check",
-      "summary": "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the Mac app and known faults.",
+      "summary": "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the extension build and known faults.",
       "config": {
         "maxIterations": 8
       },
@@ -807,12 +803,12 @@
           "command": "cd extension && npm test"
         },
         {
-          "name": "iOS ↔ Mac shared protocol",
+          "name": "iOS shared protocol",
           "command": "make test-shared-protocol"
         },
         {
-          "name": "Mac app",
-          "command": "cd mac && swift test"
+          "name": "Extension build",
+          "command": "cd extension && npm run build"
         },
         {
           "name": "Regression",

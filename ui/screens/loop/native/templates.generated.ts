@@ -455,7 +455,7 @@ export const BUILT_IN_TEMPLATES = [
   {
     "id": "operation-diagnosis",
     "name": "Operation App Diagnosis",
-    "summary": "Check the local server responds and the extension and Mac app build cleanly, then the fault sweep.",
+    "summary": "Check the local server responds and the extension builds cleanly, then the fault sweep.",
     "config": {
       "maxIterations": 6,
       "consecutiveFailureStop": 3,
@@ -526,32 +526,6 @@ export const BUILT_IN_TEMPLATES = [
         },
         {
           "id": "operation-diagnosis/2",
-          "taskId": null,
-          "kind": "shellCommand",
-          "command": "cd mac && swift build",
-          "skillId": null,
-          "targetPath": null,
-          "outputPath": null,
-          "prompt": null,
-          "isDefault": false,
-          "enabled": true,
-          "defaultKey": null,
-          "severity": "blocking",
-          "timeoutSeconds": null,
-          "detectedCommand": null,
-          "check": null,
-          "testOp": null,
-          "graphOp": null,
-          "allowsRepair": true,
-          "runOnce": false,
-          "defaultRevision": null,
-          "disabledByDetection": null,
-          "raw": null,
-          "name": "Mac app build",
-          "order": 2
-        },
-        {
-          "id": "operation-diagnosis/3",
           "taskId": "loop.regression",
           "kind": "regressionSweep",
           "command": null,
@@ -574,7 +548,7 @@ export const BUILT_IN_TEMPLATES = [
           "disabledByDetection": null,
           "raw": null,
           "name": "Regression",
-          "order": 3
+          "order": 2
         }
       ]
     }
@@ -582,7 +556,7 @@ export const BUILT_IN_TEMPLATES = [
   {
     "id": "system-check",
     "name": "System Check",
-    "summary": "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the Mac app and known faults.",
+    "summary": "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the extension build and known faults.",
     "config": {
       "maxIterations": 8,
       "consecutiveFailureStop": 3,
@@ -778,14 +752,14 @@ export const BUILT_IN_TEMPLATES = [
           "defaultRevision": null,
           "disabledByDetection": null,
           "raw": null,
-          "name": "iOS ↔ Mac shared protocol",
+          "name": "iOS shared protocol",
           "order": 6
         },
         {
           "id": "system-check/7",
           "taskId": null,
           "kind": "shellCommand",
-          "command": "cd mac && swift test",
+          "command": "cd extension && npm run build",
           "skillId": null,
           "targetPath": null,
           "outputPath": null,
@@ -804,7 +778,7 @@ export const BUILT_IN_TEMPLATES = [
           "defaultRevision": null,
           "disabledByDetection": null,
           "raw": null,
-          "name": "Mac app",
+          "name": "Extension build",
           "order": 7
         },
         {

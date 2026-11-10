@@ -25,6 +25,12 @@ test("generated starter loops are deep-equal to the hand-written DEFAULT_LOOP_SP
   assert.deepEqual(withoutLoopLinks(DEFAULT_LOOP_SPECS), fixture.starters);
 });
 
+// Task 14e: the Mac app was removed on 2026-11-06, so no built-in Loop stage may still build or test it.
+test("no generated Loop stage runs the removed Mac app", () => {
+  const commands = [...BUILT_IN_TEMPLATES, ...DEFAULT_LOOP_SPECS].flatMap((t) => t.config.stages).map((s) => s.command ?? "");
+  assert.equal(commands.some((c) => /\bmac\//.test(c) || /cd mac\b/.test(c)), false);
+});
+
 test("templates.ts keeps every built-in id and appends the Factory template", () => {
   const ids = templates.BUILT_IN_TEMPLATES.map((t) => t.id);
   assert.deepEqual(ids, [...legacyRecipes.map((t) => t.id), "factory"]);

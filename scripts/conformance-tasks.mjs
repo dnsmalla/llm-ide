@@ -176,16 +176,14 @@ const starters = Array.isArray(templates?.starters) ? templates.starters : [];
 const recipes = Array.isArray(templates?.templates) ? templates.templates : [];
 const agentTaskIds = new Set(tasks.filter((t) => t?.runner?.kind === 'agent').map((t) => t.id));
 const starterKeys = new Set(starters.map((s) => s?.defaultKey).filter((k) => typeof k === 'string'));
-// Known debt, removed by Task 14e together with the stages: these two recipes still run `cd mac`.
-const STALE_MAC_TEMPLATES = new Set(['operation-diagnosis', 'system-check']);
-const checkStages = (at, stages, macDebt = false) => {
+const checkStages = (at, stages) => {
   if (!Array.isArray(stages)) { bad(`${at}: stages must be an array`); return; }
   for (const stage of stages) {
     if (typeof stage?.taskId === 'string' && !ids.has(stage.taskId)) bad(`${at}: stage task ${stage.taskId} does not exist`);
     // A stage's prompt comes from one agent task's prompt file, never from an inline copy in templates.json.
     if (stage?.promptTask !== undefined && !agentTaskIds.has(stage.promptTask)) bad(`${at}: promptTask ${stage.promptTask} is not an agent task`);
     if (stage?.promptTask !== undefined && stage?.prompt !== undefined) bad(`${at}: a stage has promptTask or prompt, not both`);
-    if (!macDebt && typeof stage?.command === 'string' && /\bcd\s+mac\b/.test(stage.command)) bad(`${at}: stage command still runs the removed Mac app`);
+    if (typeof stage?.command === 'string' && /\bcd\s+mac\b/.test(stage.command)) bad(`${at}: stage command still runs the removed Mac app`);
   }
 };
 for (const starter of starters) {
@@ -203,7 +201,7 @@ for (const template of recipes) {
   if (template.configFrom !== undefined) {
     if (!starterKeys.has(template.configFrom)) bad(`${at}: configFrom ${template.configFrom} is not a starter`);
   } else {
-    checkStages(at, template.stages, STALE_MAC_TEMPLATES.has(template.id));
+    checkStages(at, template.stages);
   }
 }
 

@@ -441,7 +441,7 @@
     {
       "id": "operation-diagnosis",
       "name": "Operation App Diagnosis",
-      "summary": "Check the local server responds and the extension and Mac app build cleanly, then the fault sweep.",
+      "summary": "Check the local server responds and the extension builds cleanly, then the fault sweep.",
       "config": {
         "stages": [
           {
@@ -495,36 +495,11 @@
             "raw": null
           },
           {
-            "taskId": null,
-            "name": "Mac app build",
-            "kind": "shellCommand",
-            "command": "cd mac && swift build",
-            "order": 2,
-            "skillId": null,
-            "targetPath": null,
-            "outputPath": null,
-            "prompt": null,
-            "isDefault": false,
-            "enabled": true,
-            "defaultKey": null,
-            "severity": "blocking",
-            "timeoutSeconds": null,
-            "detectedCommand": null,
-            "check": null,
-            "testOp": null,
-            "graphOp": null,
-            "allowsRepair": true,
-            "runOnce": false,
-            "defaultRevision": null,
-            "disabledByDetection": null,
-            "raw": null
-          },
-          {
             "taskId": "loop.regression",
             "name": "Regression",
             "kind": "regressionSweep",
             "command": null,
-            "order": 3,
+            "order": 2,
             "skillId": null,
             "targetPath": null,
             "outputPath": null,
@@ -564,7 +539,7 @@
     {
       "id": "system-check",
       "name": "System Check",
-      "summary": "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the Mac app and known faults.",
+      "summary": "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the extension build and known faults.",
       "config": {
         "stages": [
           {
@@ -719,7 +694,7 @@
           },
           {
             "taskId": null,
-            "name": "iOS ↔ Mac shared protocol",
+            "name": "iOS shared protocol",
             "kind": "shellCommand",
             "command": "make test-shared-protocol",
             "order": 6,
@@ -744,9 +719,9 @@
           },
           {
             "taskId": null,
-            "name": "Mac app",
+            "name": "Extension build",
             "kind": "shellCommand",
-            "command": "cd mac && swift test",
+            "command": "cd extension && npm run build",
             "order": 7,
             "skillId": null,
             "targetPath": null,
