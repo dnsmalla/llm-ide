@@ -95,8 +95,9 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       if (expired()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
       const haltAtStage = haltedOutcome();
       if (haltAtStage) return haltAtStage;
+      const t0 = Date.now();
       const result = await deps.runStage(stage, outcomes);
-      const outcome = { stage, ok: result.ok, output: result.output, durationMs: result.durationMs, usage: result.usage };
+      const outcome = { stage, ok: result.ok, output: result.output, durationMs: result.durationMs ?? Date.now() - t0, usage: result.usage };
       spentUsd += result.usage?.costUsd ?? 0;
       outcomes.push(outcome);
       iterationOutcomes.push(outcome);
