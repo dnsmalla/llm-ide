@@ -132,6 +132,10 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     deps.log(`↻ repairing ${failed.stage.name} (attempt ${used + 1} of ${Math.max(1, config.maxRepairsPerStage)})`);
     const repair = await deps.repair(failed.stage, failed.output, used + 1);
+    spentUsd += repair.usage?.costUsd ?? 0;
+    if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {
+      return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `cost ceiling reached ($${spentUsd.toFixed(2)} of $${config.maxCostUsd})`, costUsd: spentUsd };
+    }
     repairs.set(failed.stage.id, used + 1);
     iterations.push({ index: iteration, stages: iterationOutcomes, repair: { stageId: failed.stage.id, attempt: used + 1, ok: repair.ok } });
     const haltAfterRepair = haltedOutcome();

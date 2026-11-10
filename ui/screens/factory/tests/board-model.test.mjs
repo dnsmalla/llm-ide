@@ -161,5 +161,8 @@ test("cleanup keeps a live Loop-page run and an orphan with unshipped changes", 
   );
   assert.deepEqual(plan.remove.sort(), ["r-clean", "r-merged"]);
   assert.ok(plan.keep.some((k) => k.runId === "r-live"));
+  const marked = cleanupPlan([], new Map([["r-loop", {}]]), [], new Set(["r-loop"]), new Set(), new Map([["r-loop", { changedFiles: 0, localCommits: 0 }]]));
+  assert.equal(marked.remove.length, 0);
+  assert.equal(marked.keep[0].runId, "r-loop");
   assert.ok(plan.keep.some((k) => k.runId === "r-dirty" && /Discard/.test(k.reason)));
 });

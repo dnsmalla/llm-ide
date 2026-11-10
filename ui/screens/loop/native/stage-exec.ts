@@ -264,7 +264,7 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
   for (const line of [`↻ repair ${s.name}`, r.reply ?? (g.error !== null ? `(agent call failed: ${g.error})` : "(no reply)"), ...(g.writes.length ? [`changed: ${g.writes.join(", ")}`] : []), ""]) ctx.log(line);
   const stop = stopReason(g);
   if (g.result === null || stop !== null) return haltOn(ctx, halt, g.violation, stop);
-  return { ok: agentRunSucceeded(g.result), output: g.result.reply ?? "" };
+  return { ok: agentRunSucceeded(g.result), output: g.result.reply ?? "", ...(typeof g.result.usage?.costUsd === "number" ? { usage: { costUsd: g.result.usage.costUsd } } : {}) };
 }
 
 /** The runner deps that execute stages for one run. Each call has its own halt state. */

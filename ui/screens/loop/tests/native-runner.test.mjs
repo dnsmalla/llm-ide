@@ -148,3 +148,13 @@ test("native runner stops at the per-run USD ceiling and keeps the spent amount"
   assert.equal(out.costUsd, 1.25);
   assert.equal(out.stages.length, 1, "it stops before the next stage");
 });
+
+test("repairs count toward the USD ceiling", async () => {
+  const out = await runNativeLoop(cfg([stage("a", "A")], { maxCostUsd: 5 }), {
+    async runStage() { return { ok: false, output: "boom", usage: { costUsd: 0.1 } }; },
+    async repair() { return { ok: true, output: "fixed", usage: { costUsd: 6 } }; }, log() {},
+  });
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /cost ceiling/);
+  assert.equal(out.costUsd, 6.1);
+});

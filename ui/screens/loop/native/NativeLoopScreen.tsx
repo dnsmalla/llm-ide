@@ -608,6 +608,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (unmountedRef.current) { startingRef.current = false; return; }
     }
     const activeRun = prepared;
+    const marker = activeRun ? `${repoPrefixFor(projectRoot ?? "", activeRun.worktree)}/.factory/RUN.json` : null;
+    if (activeRun && isFactoryLoop(target) && marker) {
+      try { await fs.write(marker, JSON.stringify({ runId: activeRun.runId, mode: "full", startedAt: new Date().toISOString(), itemKey: start ? (start.item.id ?? start.item.title) : null }), { expected_hash: null }); } catch { /* Resume marker only */ }
+    }
     activeRunRef.current = activeRun;
     runningRef.current = true;
     startingRef.current = false;
@@ -677,7 +681,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
       // Awaited: Ship's record update (setRunRecordShip) needs the record on disk, so the panel opens only after it.
-      await appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      await appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
       if (isFactoryLoop(target) && activeRun && start && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) setShipRun({ info: activeRun, item: start.item, entry, passed: true, reviewedPatchId: diffSummary?.patchId ?? null, requestProvider: null, ...(worktreeDiff ? { diff: worktreeDiff } : {}) });
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
