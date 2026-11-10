@@ -568,10 +568,23 @@ pub fn run() {
         .manage(host)
         .manage(chat_cmds::ChatService::new())
         .plugin(navigation_guard())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init());
     // The updater exists only in a release build whose overlay carries a valid key and the fixed channel URL.
     let builder = if update_problem.is_none() { builder.plugin(tauri_plugin_updater::Builder::new().build()) } else { builder };
     let app = builder
+        .setup(|app| {
+            use tauri_plugin_deep_link::DeepLinkExt;
+            #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+            app.deep_link().register_all()?;
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    let _ = tauri::Emitter::emit(&handle, "deep-link", url.to_string());
+                }
+            });
+            Ok(())
+        })
         // A reload drops the webview's terminal state; its shells must not outlive it.
         .on_page_load(|_webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started {

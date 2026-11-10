@@ -22,6 +22,7 @@ import { TERMINAL_BUILT } from "../explorer/terminal/shared";
 import { readTerminalPrefs, writeTerminalPrefs } from "./terminal-prefs";
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
+import { deepLinkSection } from "./deep-link.ts";
 import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type SectionDef, type SectionId } from "./sections";
 import { RemoteProjectBar } from "./RemoteProjectBar";
 import { getHubError, remoteBanner, subscribeHubError } from "./remote-status";
@@ -265,6 +266,20 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // OS deep links: Chrome's /launch-app redirects to llmide://<tab>; the Rust host forwards the URL here.
+  useEffect(() => {
+    let off: (() => void) | null = null;
+    let disposed = false;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) => listen<string>("deep-link", (ev) => {
+        const id = deepLinkSection(ev.payload);
+        if (id) dispatch({ type: "select", id });
+      }))
+      .then((unlisten) => { if (disposed) unlisten(); else off = unlisten; })
+      .catch(() => undefined);
+    return () => { disposed = true; off?.(); };
   }, []);
 
   // Cross-screen requests: "open this file" lands in Explorer, "go to <section>" switches (the target screen

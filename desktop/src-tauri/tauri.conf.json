@@ -36,7 +36,9 @@
     "shortDescription": "Local-first AI meeting intelligence and code assistant",
     "linux": {
       "deb": {
-        "depends": ["libayatana-appindicator3-1"]
+        "depends": [
+          "libayatana-appindicator3-1"
+        ]
       }
     },
     "macOS": {
@@ -52,5 +54,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "llmide"
+        ]
+      }
+    }
   }
 }
