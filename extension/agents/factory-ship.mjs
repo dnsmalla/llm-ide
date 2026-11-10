@@ -18,7 +18,7 @@ export const FACTORY_BRANCH_RE = /^factory\/[A-Za-z0-9_-]{1,64}$/;
 const FACTORY_DIR = '.factory';
 // `.factory/` is never committed or reviewed: the run's own reports. The list is mirrored by
 // desktop/src-tauri/src/loop_worktree.rs::EXCLUDES and pinned by schema/factory/staged-patch.json.
-export const STAGED_PATCH_EXCLUDES = Object.freeze([':(exclude,icase).factory']);
+export const STAGED_PATCH_EXCLUDES = Object.freeze([':(exclude,icase).factory', ':(exclude,icase,glob)**/.factory/**']);
 const EXCLUDE_FACTORY = STAGED_PATCH_EXCLUDES[0];
 const PUSH_TIMEOUT_MS = 120_000;
 const PROVIDER_TIMEOUT_MS = 15_000;
@@ -263,7 +263,10 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
     await runGit(worktree, ['reset', '-q']);
     throw shipError('commit_failed', 'The changes could not be scanned for secrets.');
   }
-  const paths = names.stdout.split('\0').filter((p) => p && p !== FACTORY_DIR && !p.startsWith(`${FACTORY_DIR}/`));
+  // `:(exclude,icase)` covers any case; the `glob` exclude covers `.factory` at any depth. Filter again in JS,
+  // case-insensitively at any depth, so a path the pathspec somehow lists is still never committed or scanned.
+  const isFactoryPath = (p) => p.split('/').some((seg) => seg.toLowerCase() === FACTORY_DIR);
+  const paths = names.stdout.split('\0').filter((p) => p && !isFactoryPath(p));
   if (paths.length > 0) {
     const hit = scanForSecrets(diff.stdout);
     if (hit) {

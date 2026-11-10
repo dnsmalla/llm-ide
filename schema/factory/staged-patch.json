@@ -1,6 +1,24 @@
 {
   "description": "The exact git invocations that compute a Factory run's patch id (sha256 of the --binary staged patch against the run's base commit, .factory/ excluded). Mirrored by extension/agents/factory-ship.mjs (STAGED_PATCH_*) and desktop/src-tauri/src/loop_worktree.rs (staged_patch_args); both test suites compare their builders to this file so a change on one side alone fails.",
-  "add": ["add", "-A", "--", ".", ":(exclude,icase).factory"],
-  "diff": ["diff", "--cached", "--no-ext-diff", "--no-textconv", "--binary", "{base}", "--", ".", ":(exclude,icase).factory"],
+  "add": [
+    "add",
+    "-A",
+    "--",
+    ".",
+    ":(exclude,icase).factory",
+    ":(exclude,icase,glob)**/.factory/**"
+  ],
+  "diff": [
+    "diff",
+    "--cached",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--binary",
+    "{base}",
+    "--",
+    ".",
+    ":(exclude,icase).factory",
+    ":(exclude,icase,glob)**/.factory/**"
+  ],
   "hash": "sha256 of the diff stdout bytes"
 }

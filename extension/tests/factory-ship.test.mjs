@@ -413,16 +413,31 @@ test('ship refuses a secret on a title/body line starting with ++', async () => 
   } finally { _setPinnedFetchForTests(null); }
 });
 
-test('ship neither stages nor commits a case-variant .FACTORY path', async () => {
+test('ship neither stages nor commits .factory at the top or at any depth, in any case', async () => {
   fs.mkdirSync(path.join(WT, '.FACTORY'), { recursive: true });
   fs.writeFileSync(path.join(WT, '.FACTORY', 'REVIEW.md'), 'Verdict: approve\n');
+  fs.mkdirSync(path.join(WT, 'pkg', '.factory'), { recursive: true });
+  fs.writeFileSync(path.join(WT, 'pkg', '.factory', 'PLAN.md'), '# plan\n');
+  fs.mkdirSync(path.join(WT, 'deep', '.FACTORY'), { recursive: true });
+  fs.writeFileSync(path.join(WT, 'deep', '.FACTORY', 'READINESS.md'), 'Verdict: ready\n');
   fs.writeFileSync(path.join(WT, 'src', 'icase.txt'), 'i\n');
   try {
-    const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'icase', patchId: await stagedPatchId(WT, BASE) });
+    const patchId = await stagedPatchId(WT, BASE);
+    const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'icase', patchId });
     const files = git(['show', '--name-only', '--format=', out.commit], WT).split('\n').filter(Boolean);
-    assert.deepEqual(files, ['src/icase.txt'], 'only the real file was committed');
+    assert.ok(files.includes('src/icase.txt'), 'the real file was committed');
+    assert.equal(files.some((f) => f.toLowerCase().includes('.factory')), false, `no report was committed: ${files}`);
+    assert.equal(git(['diff', '--cached', '--name-only'], WT), '', 'no report staged');
+    // The diff the host would show (and Ship now verifies) never includes a nested report.
+    const shown = git(['diff', '--cached', '--name-only', BASE, '--', '.', ':(exclude,icase).factory', ':(exclude,icase,glob)**/.factory/**'], WT).split('\n').filter(Boolean);
+    assert.ok(shown.includes('src/icase.txt'));
+    assert.equal(shown.some((f) => f.toLowerCase().includes('.factory')), false, `show excludes reports: ${shown}`);
   } finally {
     fs.rmSync(path.join(WT, '.FACTORY'), { recursive: true, force: true });
+    fs.rmSync(path.join(WT, 'pkg', '.factory'), { recursive: true, force: true });
+    fs.rmSync(path.join(WT, 'deep', '.FACTORY'), { recursive: true, force: true });
+    fs.rmSync(path.join(WT, 'pkg'), { recursive: true, force: true });
+    fs.rmSync(path.join(WT, 'deep'), { recursive: true, force: true });
   }
 });
 

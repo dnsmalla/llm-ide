@@ -30,8 +30,15 @@ const TASK_MAX: usize = 1024 * 1024;
 const DIFF_TEXT_MAX: usize = 2 * 1024 * 1024;
 const MAX_DIFF_FILES: usize = 1000;
 const MAX_LISTED: usize = 500;
-/// Never part of the diff, so never part of what Ship commits: the run's work item and reports.
-const EXCLUDES: &[&str] = &[":(exclude,icase).factory"];
+/// Never part of the diff, so never part of what Ship commits: the run's work item and reports. The top-level
+/// `.factory` plus `.factory` at ANY depth (`pkg/.factory/x`), both case-insensitively (R-036 A8).
+const EXCLUDES: &[&str] = &[":(exclude,icase).factory", ":(exclude,icase,glob)**/.factory/**"];
+
+/// True when any path segment is `.factory`, in any case: the one predicate the status count and the Ship paths
+/// filter use, so a nested report can never be counted, committed or scanned.
+fn is_factory_rel(p: &str) -> bool {
+    p.split('/').any(|seg| seg.eq_ignore_ascii_case(FACTORY_DIR))
+}
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -468,7 +475,7 @@ pub fn status_in(info: &RunInfo) -> Result<WorktreeStatus, String> {
     let base = diff_base(info);
     let changed = crate::loop_runner::changed_paths_in(&wt)?
         .into_iter()
-        .filter(|p| !p.eq_ignore_ascii_case(FACTORY_DIR) && !p.to_ascii_lowercase().starts_with(&format!("{}/", FACTORY_DIR.to_ascii_lowercase())))
+        .filter(|p| !is_factory_rel(p.trim_end_matches('/')))
         .count();
     let remote_ref = format!("refs/remotes/origin/{}", info.branch);
     let remote = git(&wt, &["rev-parse", "--verify", "--quiet", &remote_ref]).ok().map(|b| text(b)).filter(|s| !s.is_empty());
@@ -1026,9 +1033,13 @@ mod tests {
         let wt = PathBuf::from(&info.worktree);
         std::fs::create_dir_all(wt.join(".FACTORY")).unwrap();
         std::fs::write(wt.join(".FACTORY/REVIEW.md"), "Verdict: approve\n").unwrap();
+        std::fs::create_dir_all(wt.join("pkg/.factory")).unwrap();
+        std::fs::write(wt.join("pkg/.factory/PLAN.md"), "Verdict: approve\n").unwrap();
+        std::fs::create_dir_all(wt.join("deep/.FACTORY")).unwrap();
+        std::fs::write(wt.join("deep/.FACTORY/READINESS.md"), "Verdict: ready\n").unwrap();
         std::fs::write(wt.join("real.txt"), "x\n").unwrap();
         let d = diff_in(&info).unwrap();
-        assert_eq!(d.files, vec!["real.txt".to_string()], "{:?}", d.files);
+        assert_eq!(d.files, vec!["real.txt".to_string()], "nested .factory/ paths are excluded at any depth: {:?}", d.files);
         assert!(!d.text.to_lowercase().contains(".factory"), "{}", d.text);
         remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&p);
