@@ -99,7 +99,8 @@ export function scanForSecrets(diffText) {
     }
     if (rawLine[0] !== '+') continue;
     const added = rawLine.slice(1);
-    for (const { name, re } of SECRET_RULES) {
+    for (const { name, re, gate } of SECRET_RULES) {
+      if (gate === false) continue; // redaction-only heuristic: not a hard Ship gate
       if (re.test(added)) return name;
     }
   }

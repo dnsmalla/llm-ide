@@ -21,6 +21,11 @@ test('the redactor and the guardrails use the exact core list, not a copy', () =
 
 test('every shared shape is non-global, so .test() never carries lastIndex between lines', () => {
   for (const { name, re } of SECRET_SHAPES) assert.equal(re.global, false, name);
+  // Open-ended lengths: a longer token must never slip past the last pre-push gate.
+  assert.equal(shipScan(`+const k = "ghp_${'a'.repeat(40)}"`), 'GitHub token');
+  assert.equal(shipScan(`+const k = "ghs_${'b'.repeat(60)}"`), 'GitHub token');
+  assert.equal(shipScan(`+const k = "github_pat_${'c'.repeat(90)}"`), 'GitHub token');
+  assert.equal(shipScan(`+const k = "npm_${'d'.repeat(40)}"`), 'npm token');
   const aws = `aws_secret_access_key = "${'a1'.repeat(20)}"`;
   assert.equal(shipScan(`+const url = "https://example.com/x"\n+${aws}`), 'AWS secret access key');
 });
@@ -62,4 +67,13 @@ test('near misses are not redacted and not blocked', () => {
     assert.equal(shipScan(`+${value}`), null, `${name}: Ship scan`);
     assert.equal(guardScan(value), false, `${name}: guard scan`);
   }
+});
+
+test("redaction-only heuristics do not block Ship on ordinary code", () => {
+  for (const line of [
+    "+const x = opts.apiKey;",
+    "+const token = generateHostApprovalToken(user);",
+    "+Authorization: Bearer YOUR_ACCESS_TOKEN_GOES_HERE",
+    "+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExamplePublicKeyMaterialForAFixtureOnly12345",
+  ]) assert.equal(shipScan(line), null, line);
 });

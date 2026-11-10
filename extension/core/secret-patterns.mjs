@@ -15,11 +15,11 @@
 export const SECRET_SHAPES = Object.freeze([
   // GitHub: classic (ghp_ PAT, gho_ OAuth, ghu_ user-to-server, ghs_ server-to-server, ghr_ refresh) and the
   // fine-grained github_pat_ shape.
-  { name: 'GitHub token', re: /\b(?:gh[oprsu]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})\b/ },
+  { name: 'GitHub token', re: /\b(?:gh[oprsu]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{80,})\b/ },
   // GitLab: glpat- PAT, glrt- runner, glcbt- CI job, gldt- deploy, … (the project's own tracker is GitLab-hosted).
   { name: 'GitLab token', re: /\bgl(?:pat|oas|rt|cbt|ptt|ft|imt|agent|soat|dt|ffct)-[A-Za-z0-9_-]{20,}\b/ },
   { name: 'Stripe live key', re: /\b(?:sk|rk)_live_[A-Za-z0-9]{10,}\b/ },
-  { name: 'npm token', re: /\bnpm_[A-Za-z0-9]{36}\b/ },
+  { name: 'npm token', re: /\bnpm_[A-Za-z0-9]{36,}\b/ },
   // Anthropic / OpenAI before the generic sk- rule, so a specific key is reported under its own name.
   { name: 'Anthropic API key', re: /\bsk-ant-[A-Za-z0-9-]{10,}\b/ },
   { name: 'OpenAI project key', re: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/ },
@@ -37,15 +37,15 @@ export const SECRET_SHAPES = Object.freeze([
   // PEM private key block, whole; a block cut short (truncated log, tool output limit) is redacted to the end of the text.
   { name: 'Private key', re: /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----|$)/ },
   // ssh key material on one line (authorized_keys / id_*.pub shape, and what a private key's public half leaks).
-  { name: 'SSH key material', re: /\b(?:ssh-(?:rsa|dss|ed25519)|ecdsa-sha2-nistp\d{3})\s+AAAA[A-Za-z0-9+/]{40,}={0,3}/ },
+  { name: 'SSH key material', gate: false, re: /\b(?:ssh-(?:rsa|dss|ed25519)|ecdsa-sha2-nistp\d{3})\s+AAAA[A-Za-z0-9+/]{40,}={0,3}/ },
   // Separator limited to 1-3 chars: an unbounded '+' was catastrophic on inputs like 'api_key:::::::::::'.
-  { name: 'Generic API key', re: /\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)["'\s:=]{1,3}[A-Za-z0-9_-]{16,}\b/i },
+  { name: 'Generic API key', gate: false, re: /\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)["'\s:=]{1,3}[A-Za-z0-9_-]{16,}\b/i },
   // A long base64-looking blob right after a key-named field (needs a digit, so a long plain word is not caught).
   { name: 'Generic key field', re: /\b[A-Za-z0-9_-]{0,40}key["']?\s*[:=]\s*["']?(?=[A-Za-z0-9+/_-]*\d)[A-Za-z0-9+/_-]{40,}={0,2}/i },
   // password: … / token: … in a config or log line.
-  { name: 'Generic credential', re: /(?:secret|token|password|passwd)["'\s:=]+[A-Za-z0-9/+_-]{20,}/i },
-  { name: 'Bearer token', re: /Bearer\s+[A-Za-z0-9._-]{20,}/i },
-  { name: 'apiKey parameter', re: /apiKey=[A-Za-z0-9_-]+/i },
+  { name: 'Generic credential', gate: false, re: /(?:secret|token|password|passwd)["'\s:=]+[A-Za-z0-9/+_-]{20,}/i },
+  { name: 'Bearer token', gate: false, re: /Bearer\s+[A-Za-z0-9._-]{20,}/i },
+  { name: 'apiKey parameter', gate: false, re: /apiKey=[A-Za-z0-9_-]+/i },
   { name: 'Google OAuth access token', re: /\bya29\.[A-Za-z0-9._-]{20,}/ },
   { name: 'Google OAuth refresh token', re: /\b1\/\/[A-Za-z0-9_-]{20,}/ },
   // Host-signed approval token (v1 legacy, v2 chat-bound) (core/host-approval.mjs).

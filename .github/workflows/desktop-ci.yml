@@ -150,6 +150,8 @@ jobs:
 
       - name: Build the frontend (tauri-build embeds desktop/dist)
         working-directory: desktop
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build
 
       # tauri.conf.json maps ../resources/core into the bundle and tauri-build
