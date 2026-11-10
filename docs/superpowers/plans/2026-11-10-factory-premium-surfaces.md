@@ -189,7 +189,7 @@ For every commit: `cd desktop && npm test`, `npx tsc --noEmit`, `make regression
 - **D1:** progress exposes stage names plus the last log line, never the stage output body. **Recommended.**
 - **D2:** inline answer uses `.factory/DECISIONS.md` + `continue` (recommended); no new wire.
 - **D3:** editable title/body is local-only and does not update an already-open PR/MR; an existing draft keeps its text. **Recommended.**
-- **D3 secret override:** allow one explicit “ship anyway” confirm naming rule/file/line, logged in the record, or keep the hard block. **Recommended: allow, after R-044 #3.**
+- **D3 secret override:** ALLOWED by the user on 2026-11-10. One explicit “ship anyway” confirm names rule/file/line (no matched text) and is logged in the run record; the hard block stays the default.
 - **D6:** virtualise only if the node model misses 50 ms; otherwise close as measured.
 - **D7:** needs the user at the window.
 - **Loop-page runs:** a Factory run started from the Loop page has no card, so no surface shows it. Recommended for a separate follow-up: `sendToFactory` + `attachRun` from that start so every run is on the board (this would also remove the clean-up special case). Not blocking D1.
