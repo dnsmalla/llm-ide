@@ -289,7 +289,9 @@ export class TauriChatStore implements ChatStore {
   private async appendRaw(id: string, messages: Record<string, unknown>[], header: Record<string, unknown>): Promise<void> {
     for (let attempt = 0; ; attempt++) {
       const t = this.tracked.get(id) ?? (await this.refresh(id));
-      const session = { id, scope: t.scope, title: t.title, ...header, messages };
+      // Append merges the stored header, but the host validates the payload first: createdAt must be a finite
+      // number even though append never uses it. Without this every append was rejected as an invalid chat.
+      const session = { id, scope: t.scope, title: t.title, ...header, createdAt: 0, messages };
       try {
         const out = await this.call<HostSaved>("chat_save", { args: { session, mode: "append", expectedCount: t.count, expectedRevision: t.revision } });
         this.tracked.set(id, { ...t, ...(typeof header.title === "string" ? { title: header.title } : {}), count: out.messageCount, revision: out.revision });
