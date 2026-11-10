@@ -19,6 +19,12 @@ test('the redactor and the guardrails use the exact core list, not a copy', () =
   assert.doesNotMatch(rules, /export const SECRET_PATTERNS = \[/, 'no local copy in the guardrails');
 });
 
+test('every shared shape is non-global, so .test() never carries lastIndex between lines', () => {
+  for (const { name, re } of SECRET_SHAPES) assert.equal(re.global, false, name);
+  const aws = `aws_secret_access_key = "${'a1'.repeat(20)}"`;
+  assert.equal(shipScan(`+const url = "https://example.com/x"\n+${aws}`), 'AWS secret access key');
+});
+
 const POSITIVE = [
   { name: 'GitHub token', value: `github_pat_${'A1'.repeat(41)}` },
   { name: 'Stripe live key', value: `sk_live_${'a1'.repeat(12)}` },

@@ -27,13 +27,13 @@ export const SECRET_SHAPES = Object.freeze([
   { name: 'Google API key', re: /\bAIza[0-9A-Za-z\-_]{35}\b/ },
   // AWS: long-lived AKIA, temporary ASIA/ABIA/ACCA, and the secret/session values written next to a key name.
   { name: 'AWS access key id', re: /\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b/ },
-  { name: 'AWS secret access key', re: /\baws[_-]?secret[_-]?access[_-]?key["']?\s*[:=]\s*["']?[A-Za-z0-9/+=]{40}/gi },
-  { name: 'AWS session token', re: /\baws[_-]?session[_-]?token["']?\s*[:=]\s*["']?[A-Za-z0-9/+=]{100,}/gi },
+  { name: 'AWS secret access key', re: /\baws[_-]?secret[_-]?access[_-]?key["']?\s*[:=]\s*["']?[A-Za-z0-9/+=]{40}/i },
+  { name: 'AWS session token', re: /\baws[_-]?session[_-]?token["']?\s*[:=]\s*["']?[A-Za-z0-9/+=]{100,}/i },
   { name: 'Slack token', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
   // A Slack incoming-webhook URL is a credential in its own right (anyone holding it may post as the app).
   { name: 'Slack webhook URL', re: /https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/_-]{10,}/ },
   // scheme://user:password@host — a connection string with inline credentials.
-  { name: 'URL with credentials', re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@[^\s/]+/gi },
+  { name: 'URL with credentials', re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@[^\s/]+/i },
   // PEM private key block, whole; a block cut short (truncated log, tool output limit) is redacted to the end of the text.
   { name: 'Private key', re: /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----|$)/ },
   // ssh key material on one line (authorized_keys / id_*.pub shape, and what a private key's public half leaks).
@@ -41,7 +41,7 @@ export const SECRET_SHAPES = Object.freeze([
   // Separator limited to 1-3 chars: an unbounded '+' was catastrophic on inputs like 'api_key:::::::::::'.
   { name: 'Generic API key', re: /\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)["'\s:=]{1,3}[A-Za-z0-9_-]{16,}\b/i },
   // A long base64-looking blob right after a key-named field (needs a digit, so a long plain word is not caught).
-  { name: 'Generic key field', re: /\b[A-Za-z0-9_-]{0,40}key["']?\s*[:=]\s*["']?(?=[A-Za-z0-9+/_-]*\d)[A-Za-z0-9+/_-]{40,}={0,2}/gi },
+  { name: 'Generic key field', re: /\b[A-Za-z0-9_-]{0,40}key["']?\s*[:=]\s*["']?(?=[A-Za-z0-9+/_-]*\d)[A-Za-z0-9+/_-]{40,}={0,2}/i },
   // password: … / token: … in a config or log line.
   { name: 'Generic credential', re: /(?:secret|token|password|passwd)["'\s:=]+[A-Za-z0-9/+_-]{20,}/i },
   { name: 'Bearer token', re: /Bearer\s+[A-Za-z0-9._-]{20,}/i },
