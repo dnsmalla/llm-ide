@@ -84,6 +84,22 @@ function cloneStore(store: LoopProjectStore): LoopProjectStore {
   return structuredClone(store);
 }
 
+/** A pending confirmation, shown as an in-app bar where it was asked: the desktop webview shows no window.confirm. */
+interface Ask { /** What is asked; the bar shows only while this still names the selection. */ key: string; label: string; text: string }
+
+// Cancel takes the focus, so a stray Enter does not delete.
+function ConfirmBar({ ask, run, onDone }: { ask: Ask; /** The action as it is NOW, not as it was when asked. */ run: () => void; onDone: () => void }): ReactNode {
+  return (
+    <div className="loop-confirm" role="alertdialog" aria-label={ask.label} onKeyDown={(e) => { if (e.key === "Escape") onDone(); }}>
+      <p className="loop-warn">{ask.text}</p>
+      <div className="loop-inline">
+        <button type="button" className="loop-btn" autoFocus onClick={onDone}>Cancel</button>
+        <button type="button" className="loop-btn loop-btn-primary" onClick={() => { onDone(); run(); }}>{ask.label}</button>
+      </div>
+    </div>
+  );
+}
+
 export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
   const [load, setLoad] = useState<LoopLoad | null>(null);
@@ -94,6 +110,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const [templateDraft, setTemplateDraft] = useState<{ name: string; summary: string } | null>(null);
   const [templateId, setTemplateId] = useState(BUILT_IN_TEMPLATES[0].id);
   const [testCommand, setTestCommand] = useState<string | null>(null);
   const [envReason, setEnvReason] = useState("Checking the project environment…");
@@ -389,7 +407,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const deleteLoop = () => {
     if (!store || !loop || loop.defaultKey !== null || store.loops.length <= 1) return;
-    if (!window.confirm(`Delete “${loop.name}”? Its stages stay in loop.json but the loop disappears from this project.`)) return;
     mutateStore((s) => {
       s.loops = s.loops.filter((l) => l.id !== loop.id);
       if (loop.isPrimary && s.loops.length > 0 && !s.loops.some((l) => l.isPrimary)) s.loops[0].isPrimary = true;
@@ -853,8 +870,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <button type="button" className="loop-btn" disabled={loop.isPrimary} onClick={setPrimary}>★ Primary</button>
           <button type="button" className="loop-btn" disabled={isManualOnly(loop)} title={isManualOnly(loop) ? "Manual-only: it applies code" : "Include in the scheduled run"} onClick={() => patchLoop((l) => { l.runsOnSchedule = !l.runsOnSchedule; })}>{loop.runsOnSchedule ? "◷ Scheduled" : "◷ Schedule"}</button>
           <button type="button" className="loop-btn" onClick={duplicateLoop}>Duplicate</button>
-          {loop.defaultKey === null && store.loops.length > 1 ? <button type="button" className="loop-btn" onClick={deleteLoop}>Delete</button> : null}
+          {loop.defaultKey === null && store.loops.length > 1 ? <button type="button" className="loop-btn" onClick={() => setAsk({ key: `loop:${loop.id}`, label: "Delete loop", text: `Delete “${loop.name}”? Its stages stay in loop.json but the loop disappears from this project.` })}>Delete</button> : null}
         </div>
+        {ask?.key === `loop:${loop.id}` ? <ConfirmBar ask={ask} run={deleteLoop} onDone={() => setAsk(null)} /> : null}
         <ul className="loop-list">
           {store.loops.map((l) => (
             <li key={l.id}>
@@ -995,37 +1013,46 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             }}>Apply</button>
           </div>
           <div className="loop-inline">
-            <button type="button" className="loop-btn" onClick={() => {
-              const name = window.prompt("Save the current stages and budgets as a template named:", `${loop.name} Recipe`);
-              if (!name) return;
-              const summary = window.prompt("What does this loop do? (optional)", "");
-              if (summary === null) return;
+            <button type="button" className="loop-btn" aria-expanded={templateDraft !== null} onClick={() => setTemplateDraft({ name: `${loop.name} Recipe`, summary: "" })}>Save as…</button>
+            {customTemplates.some((t) => t.id === templateId) ? <button type="button" className="loop-btn" onClick={() => setAsk({ key: `template:${templateId}`, label: "Delete template", text: "Delete this saved template?" })}>Delete template</button> : null}
+          </div>
+          {templateDraft ? (
+            <form className="loop-confirm" aria-label="Save as template" onSubmit={(e) => {
+              e.preventDefault();
+              if (!templateDraft.name.trim()) return;
               try {
-                const t = saveCustomTemplate(name, summary, loop.config);
+                const t = saveCustomTemplate(templateDraft.name, templateDraft.summary, loop.config);
                 refreshTemplates();
                 setTemplateId(t.id);
                 setNotice(`Saved template “${t.name}”.`);
-              } catch (e) { setNotice(e instanceof Error ? e.message : "The template could not be saved."); }
-            }}>Save as…</button>
-            {customTemplates.some((t) => t.id === templateId) ? <button type="button" className="loop-btn" onClick={() => {
-              if (!window.confirm("Delete this saved template?")) return;
-              try {
-                deleteCustomTemplate(templateId);
-                refreshTemplates();
-                setTemplateId(BUILT_IN_TEMPLATES[0].id);
-              } catch (e) { setNotice(e instanceof Error ? e.message : "The template could not be deleted."); }
-            }}>Delete template</button> : null}
-          </div>
+              } catch (err) { setNotice(err instanceof Error ? err.message : "The template could not be saved."); }
+              setTemplateDraft(null);
+            }}>
+              <label className="loop-field"><span>Save the current stages and budgets as a template named</span><input autoFocus value={templateDraft.name} maxLength={200} onChange={(e) => setTemplateDraft({ ...templateDraft, name: e.target.value })} /></label>
+              <label className="loop-field"><span>What does this loop do? (optional)</span><input value={templateDraft.summary} maxLength={500} onChange={(e) => setTemplateDraft({ ...templateDraft, summary: e.target.value })} /></label>
+              <div className="loop-inline">
+                <button type="button" className="loop-btn" onClick={() => setTemplateDraft(null)}>Cancel</button>
+                <button type="submit" className="loop-btn loop-btn-primary" disabled={!templateDraft.name.trim()}>Save template</button>
+              </div>
+            </form>
+          ) : null}
+          {ask?.key === `template:${templateId}` ? <ConfirmBar ask={ask} onDone={() => setAsk(null)} run={() => {
+            try {
+              deleteCustomTemplate(templateId);
+              refreshTemplates();
+              setTemplateId(BUILT_IN_TEMPLATES[0].id);
+            } catch (e) { setNotice(e instanceof Error ? e.message : "The template could not be deleted."); }
+          }} /> : null}
           {customLoad.problem ? (
             <div className="loop-inline">
               <StatusBanner severity="error" message="Saved Loop recipes could not be read in full, so saving and deleting are refused to keep them. The old data is kept as a backup." />
-              <button type="button" className="loop-btn" onClick={() => {
-                if (!window.confirm("Reset custom templates? The stored recipes are kept as a backup in this app's storage, and the list starts empty.")) return;
+              <button type="button" className="loop-btn" onClick={() => setAsk({ key: "reset-templates", label: "Reset custom templates", text: "Reset custom templates? The stored recipes are kept as a backup in this app's storage, and the list starts empty." })}>Reset custom templates</button>
+              {ask?.key === "reset-templates" ? <ConfirmBar ask={ask} onDone={() => setAsk(null)} run={() => {
                 resetCustomTemplates();
                 refreshTemplates();
                 setTemplateId(BUILT_IN_TEMPLATES[0].id);
                 setNotice("Custom templates reset. The old data is kept as a backup.");
-              }}>Reset custom templates</button>
+              }} /> : null}
             </div>
           ) : null}
           <p className="loop-native-hint">{[...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === templateId)?.summary}</p>

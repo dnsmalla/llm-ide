@@ -65,7 +65,12 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const [projectFile, setProjectFile] = useState<string | null>(null);
   const [projectFileDirty, setProjectFileDirty] = useState(false);
-  const selectProjectFile = (path: string | null) => { if (projectFileDirty && !window.confirm("Discard unsaved changes?")) return; setProjectFileDirty(false); setProjectFile(path); if (path !== null) setExtensionId(null); };
+  // Unsaved changes ask through the in-app discard dialog: the desktop webview shows no window.confirm.
+  const selectProjectFile = (path: string | null) => {
+    const open = () => { setProjectFileDirty(false); setProjectFile(path); if (path !== null) setExtensionId(null); };
+    if (projectFileDirty) setPendingNav({ proceed: open });
+    else open();
+  };
   const [noteMenu, setNoteMenu] = useState<{ rel: string; x: number; y: number } | null>(null);
   useEffect(() => {
     if (!noteMenu) return undefined;
@@ -229,9 +234,8 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                   store.setSection(state.sectionId === id ? null : id);
                 }}
                 onExtension={(id) => {
-                  if (projectFileDirty && !window.confirm("Discard unsaved changes?")) return;
                   const open = () => { setProjectFile(null); setProjectFileDirty(false); setExtensionId(id); };
-                  if (dirtyRef.current) setPendingNav({ proceed: open });
+                  if (projectFileDirty || dirtyRef.current) setPendingNav({ proceed: open });
                   else open();
                 }}
                 onRefresh={refresh}
