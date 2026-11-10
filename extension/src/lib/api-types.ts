@@ -6595,6 +6595,8 @@ export type PostKbLoopShipRequest = {
     title: string;
     /** PR/MR description (at most 20000 characters; absent = empty) */
     body?: string;
+    /** The reviewed diff id from loop_worktree_diff.patchId: 64 lowercase hex characters, sha256 of the staged --binary patch against the run's base commit with .factory/ excluded. commitAndPush recomputes it after staging and refuses 409 diff_changed (resetting the index) when it differs (API 135) */
+    patchId: string;
   };
 };
 

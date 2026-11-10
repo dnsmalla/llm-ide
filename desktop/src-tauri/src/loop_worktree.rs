@@ -326,18 +326,35 @@ fn pathspec() -> Vec<&'static str> {
     v
 }
 
+/// The `git add` args that stage a run's worktree (`.factory/` excluded). The shared fixture
+/// `schema/factory/staged-patch.json` pins these and `staged_diff_args`; the Ship route mirrors them to
+/// compute the same patch id it then verifies.
+fn staged_add_args() -> Vec<String> {
+    let mut v = vec!["add".to_string(), "-A".to_string()];
+    v.extend(pathspec().into_iter().map(str::to_string));
+    v
+}
+
+/// The `git diff` args that turn the staged index into the patch whose sha256 is the run's patch id.
+fn staged_diff_args(binary: bool, base: &str) -> Vec<String> {
+    let mut v: Vec<String> = vec!["diff".into(), "--cached".into(), "--no-ext-diff".into(), "--no-textconv".into()];
+    if binary {
+        v.push("--binary".into());
+    }
+    v.push(base.to_string());
+    v.extend(pathspec().into_iter().map(str::to_string));
+    v
+}
+
+fn git_owned(dir: &Path, args: &[String]) -> Result<Vec<u8>, String> {
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    git(dir, &refs)
+}
+
 /// Stages everything outside `.factory/` in the worktree's own index and returns the diff against HEAD.
 fn staged_patch(wt: &Path, base: &str, binary: bool) -> Result<Vec<u8>, String> {
-    let mut add = vec!["add", "-A"];
-    add.extend(pathspec());
-    git(wt, &add)?;
-    let mut diff = vec!["diff", "--cached", "--no-ext-diff", "--no-textconv"];
-    if binary {
-        diff.push("--binary");
-    }
-    diff.push(base);
-    diff.extend(pathspec());
-    git(wt, &diff)
+    git_owned(wt, &staged_add_args())?;
+    git_owned(wt, &staged_diff_args(binary, base))
 }
 
 /// The commit the diff is taken against: the run's base (equal to HEAD until Ship commits, so Ship stays reachable
@@ -870,6 +887,19 @@ mod tests {
         write_task_file(&wt, "task").unwrap();
         assert_eq!(std::fs::read_to_string(wt.join(TASK_REL)).unwrap(), "task");
         let _ = std::fs::remove_dir_all(&wt);
+    }
+
+    #[test]
+    fn staged_patch_arguments_match_the_shared_fixture() {
+        let fx: serde_json::Value = serde_json::from_str(include_str!("../../../schema/factory/staged-patch.json")).unwrap();
+        let list = |key: &str| -> Vec<String> {
+            fx[key].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(staged_add_args(), list("add"));
+        let want: Vec<String> = list("diff").into_iter().map(|a| if a == "{base}" { "BASE".to_string() } else { a }).collect();
+        assert_eq!(staged_diff_args(true, "BASE"), want);
+        let no_binary: Vec<String> = want.into_iter().filter(|a| a != "--binary").collect();
+        assert_eq!(staged_diff_args(false, "BASE"), no_binary);
     }
 
     #[cfg(unix)]

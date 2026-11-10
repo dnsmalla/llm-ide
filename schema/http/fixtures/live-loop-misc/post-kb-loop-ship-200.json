@@ -10,7 +10,8 @@
       "repo": "octo/repo",
       "base": "main",
       "title": "Fix the widget",
-      "body": "Closes #12"
+      "body": "Closes #12",
+      "patchId": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     }
   },
   "response": {

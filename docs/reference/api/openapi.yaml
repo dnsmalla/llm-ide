@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 134
+  x-api-version: 135
 servers:
   - url: "https://{host}"
     variables:
@@ -12147,6 +12147,7 @@ paths:
                 - "repo"
                 - "base"
                 - "title"
+                - "patchId"
               properties:
                 worktree:
                   type: "string"
@@ -12171,6 +12172,9 @@ paths:
                 body:
                   type: "string"
                   description: "PR/MR description (at most 20000 characters; absent = empty)"
+                patchId:
+                  type: "string"
+                  description: "The reviewed diff id from loop_worktree_diff.patchId: 64 lowercase hex characters, sha256 of the staged --binary patch against the run's base commit with .factory/ excluded. commitAndPush recomputes it after staging and refuses 409 diff_changed (resetting the index) when it differs (API 135)"
       responses:
         "200":
           description: "Committed (without .factory/), pushed, and a draft PR/MR opened, or the open one reused. The 200 fixture is recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin, faked provider)."

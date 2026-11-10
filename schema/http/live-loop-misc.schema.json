@@ -628,7 +628,8 @@
             "provider",
             "repo",
             "base",
-            "title"
+            "title",
+            "patchId"
           ],
           "properties": {
             "worktree": {
@@ -661,6 +662,10 @@
             "body": {
               "type": "string",
               "description": "PR/MR description (at most 20000 characters; absent = empty)"
+            },
+            "patchId": {
+              "type": "string",
+              "description": "The reviewed diff id from loop_worktree_diff.patchId: 64 lowercase hex characters, sha256 of the staged --binary patch against the run's base commit with .factory/ excluded. commitAndPush recomputes it after staging and refuses 409 diff_changed (resetting the index) when it differs (API 135)"
             }
           }
         }

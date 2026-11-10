@@ -35,7 +35,7 @@ const { grant } = await import('./helpers/grant.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { _setPinnedFetchForTests } = await import('../server/pinned-fetch.mjs');
 const { busHostProof } = await import('../core/host-approval.mjs');
-const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutraliseMentions } = await import('../agents/factory-ship.mjs');
+const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutraliseMentions, stagedAddArgs, stagedDiffArgs, stagedPatchId } = await import('../agents/factory-ship.mjs');
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 
 function git(args, cwd) {
@@ -61,6 +61,8 @@ git(['push', '-q', 'origin', 'main'], REPO);
 fs.mkdirSync(path.dirname(WT), { recursive: true });
 git(['worktree', 'add', '-q', '-b', BRANCH, WT, 'HEAD'], REPO);
 const remoteHead = (ref) => git(['--git-dir', REMOTE, 'rev-parse', ref], SANDBOX);
+// The run's base: the commit the worktree was cut from (HEAD moves after the first Ship).
+const BASE = git(['rev-parse', 'HEAD'], WT);
 
 const user = registerUser(getDb(), { email: 'factory-ship@example.com', password: 'CorrectHorseBattery', displayName: 't' });
 grant(getDb(), user.id, { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 });
@@ -97,8 +99,11 @@ function makeRes() {
 // tests named "origin" pass `{ deps: {} }` to run the real check.
 const STUB_ORIGIN = { originMatchesRepo: async () => true };
 async function ship(body, opts) {
+  const withId = !opts?.rawBody && body.patchId === undefined
+    ? { ...body, patchId: body.worktree === WT ? await stagedPatchId(WT, BASE) : '0'.repeat(64) }
+    : body;
   const res = makeRes();
-  const handled = await handleLoopAgentRoutes(makeReq(body, opts), res, { userId: user.id }, opts?.deps ?? STUB_ORIGIN);
+  const handled = await handleLoopAgentRoutes(makeReq(withId, opts), res, { userId: user.id }, opts?.deps ?? STUB_ORIGIN);
   assert.equal(handled, true);
   return { status: res.statusCode, body: JSON.parse(res._body), raw: res._body };
 }
@@ -120,7 +125,8 @@ test('ship commits worktree changes excluding .factory and pushes the branch', a
   fs.writeFileSync(path.join(WT, '.factory', 'TASK.md'), '# task\n');
   fs.writeFileSync(path.join(WT, 'src', 'b.txt'), 'b\n');
   const before = git(['rev-parse', 'HEAD'], WT);
-  const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'Add b', author: { name: 'Ship Bot', email: 'ship@example.com' } });
+  const patchId = await stagedPatchId(WT, BASE);
+  const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'Add b', author: { name: 'Ship Bot', email: 'ship@example.com' }, patchId });
   assert.equal(out.pushed, true);
   assert.notEqual(out.commit, before);
   assert.equal(out.commit, git(['rev-parse', 'HEAD'], WT));
@@ -130,6 +136,49 @@ test('ship commits worktree changes excluding .factory and pushes the branch', a
   assert.equal(fs.existsSync(path.join(WT, '.factory', 'TASK.md')), true, '.factory stays on disk');
   assert.match(git(['status', '--porcelain'], WT), /\?\? \.factory\//, '.factory stays untracked');
   assert.equal(git(['rev-parse', '--abbrev-ref', `${BRANCH}@{upstream}`], WT), `origin/${BRANCH}`, 'push -u set the upstream');
+  assert.equal(git(['config', '--get', `factory.patchid-${out.commit}`], WT), patchId, 'the shipped diff id is recorded for that commit');
+});
+
+test('staged patch git args match the shared host fixture', () => {
+  const fx = JSON.parse(fs.readFileSync(new URL('../../schema/factory/staged-patch.json', import.meta.url), 'utf8'));
+  assert.deepEqual(stagedAddArgs(), fx.add);
+  const want = fx.diff.map((a) => (a === '{base}' ? 'BASE' : a));
+  assert.deepEqual(stagedDiffArgs('BASE', true), want);
+  assert.deepEqual(stagedDiffArgs('BASE', false), want.filter((a) => a !== '--binary'));
+});
+
+test('ship refuses a file edited after the review with 409 diff_changed and commits nothing', async () => {
+  const file = path.join(WT, 'src', 'reviewed.txt');
+  fs.writeFileSync(file, 'the reviewed change\n');
+  const reviewed = await stagedPatchId(WT, BASE);
+  fs.writeFileSync(file, 'edited after the review\n');
+  const before = git(['rev-parse', 'HEAD'], WT);
+  const remoteBefore = remoteHead(`refs/heads/${BRANCH}`);
+  const seen = fakeProvider(() => json(201, {}));
+  try {
+    const r = await ship(shipBody({ patchId: reviewed }));
+    assert.equal(r.status, 409, r.raw);
+    assert.equal(r.body.error.code, 'diff_changed');
+    assert.equal(r.raw.includes('edited after the review'), false, 'the diff text is never echoed');
+    assert.equal(git(['rev-parse', 'HEAD'], WT), before, 'nothing committed');
+    assert.equal(git(['diff', '--cached', '--name-only'], WT), '', 'the index is reset');
+    assert.equal(remoteHead(`refs/heads/${BRANCH}`), remoteBefore, 'nothing pushed');
+    assert.equal(seen.length, 0, 'no provider call');
+  } finally {
+    _setPinnedFetchForTests(null);
+    fs.rmSync(file);
+  }
+});
+
+test('ship requires a 64-hex patchId', async () => {
+  for (const patchId of ['', 'short', 'A'.repeat(64), `${'a'.repeat(63)}z`]) {
+    const r = await ship(shipBody({ patchId }), { rawBody: true });
+    assert.equal(r.status, 400, JSON.stringify(patchId));
+    assert.equal(r.body.error.code, 'VALIDATION_FAILED');
+  }
+  const missing = await ship(shipBody({ patchId: undefined }), { rawBody: true });
+  assert.equal(missing.status, 400);
+  assert.equal(missing.body.error.code, 'VALIDATION_FAILED');
 });
 
 test('ship refuses a planted fake token and creates no commit', async () => {
@@ -240,9 +289,15 @@ test('rejected push opens no PR/MR', async () => {
     assert.equal(r.body.error.code, 'push_rejected');
     assert.equal(remoteHead(`refs/heads/${BRANCH}`), remoteBefore, 'origin did not move');
     assert.equal(seen.length, 0, 'no PR/MR call after a rejected push');
+    // The commit stays; removing the hook and shipping the same tree again pushes it (re-ship after push_rejected).
+    fs.rmSync(hook);
+    const again = await ship(shipBody());
+    assert.equal(again.status, 200, again.raw);
+    assert.equal(remoteHead(`refs/heads/${BRANCH}`), again.body.commit, 'the re-ship pushed the kept commit');
+    assert.equal(again.body.commit, git(['rev-parse', 'HEAD'], WT));
   } finally {
     _setPinnedFetchForTests(null);
-    fs.rmSync(hook);
+    try { fs.rmSync(hook); } catch { /* removed already */ }
   }
 });
 
@@ -337,7 +392,7 @@ test('ship never lets a textconv driver rewrite what the secret scan sees', asyn
   fs.writeFileSync(path.join(WT, 'src', 'x.sec'), `token = "${fake}"\n`);
   const before = git(['rev-parse', 'HEAD'], WT);
   try {
-    await assert.rejects(commitAndPush({ worktree: WT, branch: BRANCH, message: 'x' }), (e) => e.code === 'secret_detected');
+    await assert.rejects(commitAndPush({ worktree: WT, branch: BRANCH, message: 'x', patchId: await stagedPatchId(WT, BASE) }), (e) => e.code === 'secret_detected');
     assert.equal(git(['rev-parse', 'HEAD'], WT), before, 'no commit');
   } finally {
     git(['reset', '-q'], WT);
@@ -363,7 +418,7 @@ test('ship neither stages nor commits a case-variant .FACTORY path', async () =>
   fs.writeFileSync(path.join(WT, '.FACTORY', 'REVIEW.md'), 'Verdict: approve\n');
   fs.writeFileSync(path.join(WT, 'src', 'icase.txt'), 'i\n');
   try {
-    const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'icase' });
+    const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'icase', patchId: await stagedPatchId(WT, BASE) });
     const files = git(['show', '--name-only', '--format=', out.commit], WT).split('\n').filter(Boolean);
     assert.deepEqual(files, ['src/icase.txt'], 'only the real file was committed');
   } finally {
@@ -398,7 +453,7 @@ test('ship never runs repo hooks, even a hooksPath the agent controls', async ()
   git(['config', 'core.hooksPath', hooks], WT);
   fs.writeFileSync(path.join(WT, 'src', 'g.txt'), 'g\n');
   try {
-    const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'No hooks' });
+    const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'No hooks', patchId: await stagedPatchId(WT, BASE) });
     assert.equal(out.pushed, true);
     assert.equal(fs.existsSync(marker), false, 'no hook ran');
   } finally {

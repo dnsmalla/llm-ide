@@ -5,9 +5,10 @@ import { decodeRepoConfig, defaultRepoConfig } from "../../settings/repo-config.
 
 const info = { runId: "20261109-100000-abc123", project: "/p", repo: "/p/code/web", worktree: "/p/system/loop-worktrees/20261109-100000-abc123", branch: "factory/20261109-100000-abc123", baseCommit: "0123456789abcdef0123" };
 const issue = { source: "issue", id: "12", title: "  Fix login\n", body: "The login breaks.", repo: "acme/web" };
+const PATCH = "a".repeat(64);
 
 test("shipRequest uses the item title and links the issue", () => {
-  const body = m.shipRequest(info, issue, { provider: "github", slug: "acme/web", base: "main" }, "## Findings\nNone.\nVerdict: approve\n");
+  const body = m.shipRequest(info, issue, { provider: "github", slug: "acme/web", base: "main" }, "## Findings\nNone.\nVerdict: approve\n", PATCH);
   assert.equal(body.title, "Fix login");
   assert.equal(body.worktree, info.worktree);
   assert.equal(body.branch, info.branch);
@@ -17,10 +18,11 @@ test("shipRequest uses the item title and links the issue", () => {
   assert.match(body.body, /^Refs #12$/m);
   assert.match(body.body, /Verdict: approve/);
   assert.match(body.body, /0123456789ab/);
-  const cross = m.shipRequest(info, { ...issue, repo: "acme/api" }, { provider: "github", slug: "acme/web", base: "main" }, "");
+  assert.equal(body.patchId, PATCH);
+  const cross = m.shipRequest(info, { ...issue, repo: "acme/api" }, { provider: "github", slug: "acme/web", base: "main" }, "", PATCH);
   assert.match(cross.body, /^Refs acme\/api#12$/m);
   assert.match(cross.body, /\(no review report\)/);
-  const text = m.shipRequest(info, { source: "text", id: null, title: "", body: "x", repo: null }, { provider: "github", slug: "acme/web", base: "main" }, "");
+  const text = m.shipRequest(info, { source: "text", id: null, title: "", body: "x", repo: null }, { provider: "github", slug: "acme/web", base: "main" }, "", PATCH);
   assert.equal(text.title, `Factory run ${info.runId}`);
   assert.doesNotMatch(text.body, /Refs/);
 });
@@ -32,7 +34,7 @@ test("shipRequest picks gitlab for a gitlab saved repo", () => {
   } });
   const target = m.shipTarget(info, config);
   assert.deepEqual(target, { provider: "gitlab", slug: "grp/web" });
-  const body = m.shipRequest(info, issue, { ...target, base: "develop" }, "");
+  const body = m.shipRequest(info, issue, { ...target, base: "develop" }, "", PATCH);
   assert.equal(body.provider, "gitlab");
   assert.equal(body.repo, "grp/web");
   assert.equal(body.base, "develop");
@@ -52,6 +54,8 @@ test("shipState maps secret_detected to a secret message that contains no diff t
   assert.match(m.shipCopy({ ok: false, code: "push_rejected", message: "remote: secret hook said no" }), /No pull request or merge request was opened/);
   assert.equal(m.shipState({ ok: false, code: "provider_error" }), "error");
   assert.equal(m.shipState({ ok: false, code: "invalid_worktree" }), "error");
+  assert.equal(m.shipState({ ok: false, code: "diff_changed" }), "changed");
+  assert.equal(m.shipCopy({ ok: false, code: "diff_changed", message: "+new line" }), "The changes changed since you opened this review. Read the new diff, then ship again.");
   assert.doesNotMatch(m.shipCopy({ ok: false, code: "provider_error", message: "token glpat-123 rejected" }), /glpat/);
   assert.match(m.shipCopy({ ok: false, code: "<script>" }), /\(error\)/, "an odd code is not echoed");
   const ok = { ok: true, url: "https://github.com/acme/web/pull/3", commit: "abcdef1234", reused: false };

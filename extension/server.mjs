@@ -431,6 +431,12 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          ciSummary, comments: [{ author, body, at }] } (newer than `since`, the newest 20, bodies cut at 4,000
 //          characters). github.com PRs and gitlab.com MRs only; the vault github.token / gitlab.token is used and never
 //          returned. Rides the 'dispatch' bucket.
+//   v135 — Factory Ship verifies the reviewed diff, additive (contract schema/http/live-loop-misc.schema.json):
+//          POST /kb/loop/ship requires `patchId` (64 lowercase hex; the host's loop_worktree_diff.patchId).
+//          After staging without .factory/, commitAndPush recomputes the sha256 of the staged --binary patch
+//          against the run's base commit with the host's exact git arguments (schema/factory/staged-patch.json
+//          pins them on both sides) and refuses 409 diff_changed, resetting the index, when it differs from the
+//          reviewed id. A commit's id is recorded so a re-ship of that commit (after push_rejected) is accepted.
 //   v134 — Factory write confinement, additive (contract schema/http/live-loop-misc.schema.json):
 //          POST /kb/loop/agent-run accepts `denyWrite: ".factory"` (Edit/Write anywhere inside repoRoot except
 //          under .factory/; any other value is 400 invalid_deny_write). Factory Implement and every repair send
@@ -447,7 +453,7 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          is idempotent, a wrong token is 409 LEASE_LOST). All four need the desktop class AND the bus host proof
 //          (403 HOST_PROOF_REQUIRED). An expired lease becomes `interrupted` in the minute sweep. `ship` never
 //          ships: a passed run answers { readyToShip: true, shipped: false } and a desktop click is still the only Ship.
-const SERVER_API_VERSION = 134;
+const SERVER_API_VERSION = 135;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

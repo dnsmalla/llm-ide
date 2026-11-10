@@ -6,6 +6,7 @@
 // is never committed. Provider calls go to fixed hosts with no redirects, and a provider's
 // own answer text never reaches an error message (it can echo token fragments).
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
@@ -15,7 +16,10 @@ import { scanForSecrets } from './github-pr.mjs';
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const FACTORY_BRANCH_RE = /^factory\/[A-Za-z0-9_-]{1,64}$/;
 const FACTORY_DIR = '.factory';
-const EXCLUDE_FACTORY = ':(exclude,icase).factory';
+// `.factory/` is never committed or reviewed: the run's own reports. The list is mirrored by
+// desktop/src-tauri/src/loop_worktree.rs::EXCLUDES and pinned by schema/factory/staged-patch.json.
+export const STAGED_PATCH_EXCLUDES = Object.freeze([':(exclude,icase).factory']);
+const EXCLUDE_FACTORY = STAGED_PATCH_EXCLUDES[0];
 const PUSH_TIMEOUT_MS = 120_000;
 const PROVIDER_TIMEOUT_MS = 15_000;
 const MAX_PROVIDER_BYTES = 1024 * 1024;
@@ -61,12 +65,41 @@ function gitEnv(extra = {}) {
 // inside the core process at Ship time. `-c` options go before the subcommand.
 const SAFE_GIT_CONFIG = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false'];
 
+// The host's `git::base_args()` (desktop/src-tauri/src/git.rs) for the one call whose BYTES are hashed into the
+// patch id: a config difference (quotepath, an external diff driver, submodule settings, attributes) would change
+// those bytes, so the core and the host would compute different ids for the same tree. Mirrored exactly here and
+// pinned by schema/factory/staged-patch.json.
+// eslint-disable-next-line no-control-regex
+const PATCH_SAFE_GIT_CONFIG = Object.freeze([
+  '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.pager=cat', '-c', 'core.quotepath=false',
+  '-c', 'core.sshCommand=false', '-c', 'diff.external=', '-c', 'credential.helper=', '-c', 'gc.auto=0',
+  '-c', 'core.untrackedCache=false', '-c', 'core.attributesFile=/dev/null', '-c', 'submodule.recurse=false',
+  '-c', 'protocol.allow=never', '-c', 'status.submoduleSummary=false', '-c', 'maintenance.auto=false',
+  '-c', 'diff.ignoreSubmodules=dirty',
+]);
+
+/** The `git add` args that stage a worktree (the host's staged_patch starts the same way). */
+export function stagedAddArgs() {
+  return ['add', '-A', '--', '.', ...STAGED_PATCH_EXCLUDES];
+}
+
+/** The `git diff` args whose stdout bytes are hashed into the run's patch id; `{base}` is the run's base commit. */
+export function stagedDiffArgs(base, binary = true) {
+  return ['diff', '--cached', '--no-ext-diff', '--no-textconv', ...(binary ? ['--binary'] : []), base, '--', '.', ...STAGED_PATCH_EXCLUDES];
+}
+
+function sha256Hex(bytes) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
 // Never rejects: callers branch on `code`. stdout is raw, because a `-z` list must keep its bytes.
-function runGit(cwd, args, { env = {}, timeoutMs = 60_000 } = {}) {
+function runGit(cwd, args, { env = {}, timeoutMs = 60_000, config = SAFE_GIT_CONFIG, raw = false } = {}) {
   return new Promise((resolve) => {
-    execFile('git', [...SAFE_GIT_CONFIG, ...args], { cwd, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, env: gitEnv(env) }, (error, stdout, stderr) => {
+    execFile('git', [...config, ...args], {
+      cwd, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, env: gitEnv(env), encoding: raw ? 'buffer' : 'utf8',
+    }, (error, stdout, stderr) => {
       const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-      resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
+      resolve({ code, stdout: raw ? (Buffer.isBuffer(stdout) ? stdout : Buffer.alloc(0)) : String(stdout ?? ''), stderr: String(stderr ?? '') });
     });
   });
 }
@@ -130,6 +163,37 @@ export function neutraliseMentions(text) {
   return String(text ?? '').replaceAll('@', '@\u200b');
 }
 
+/**
+ * The commit a run started from: the oldest reflog entry of its branch ("branch: Created from <base>"), exactly as
+ * the host's loop_worktree::base_of does. A later Ship commit does not move it. Falls back to HEAD when reflogs are off.
+ */
+async function baseCommitOf(worktree, branch) {
+  const log = await runGit(worktree, ['reflog', 'show', '--format=%H', `refs/heads/${branch}`]);
+  if (log.code === 0) {
+    const lines = log.stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+    const oldest = lines[lines.length - 1];
+    if (oldest && /^[0-9a-f]{40,64}$/.test(oldest)) return oldest;
+  }
+  return (await runGit(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+}
+
+/** The staged patch bytes against `base`, with the exact git arguments the host hashes. Throws `commit_failed`. */
+async function stagedPatchBytes(worktree, base) {
+  const patch = await runGit(worktree, stagedDiffArgs(base, true), { config: PATCH_SAFE_GIT_CONFIG, raw: true });
+  if (patch.code !== 0) throw shipError('commit_failed', 'The staged changes could not be read.');
+  return patch.stdout;
+}
+
+/**
+ * The run's patch id: sha256 of the staged `--binary` patch against its base commit, `.factory/` excluded — the same
+ * value the host's `loop_worktree_diff` returns as `patchId`. Stages first (one shared index state), like the host.
+ */
+export async function stagedPatchId(worktree, base) {
+  const add = await runGit(worktree, stagedAddArgs(), { config: PATCH_SAFE_GIT_CONFIG });
+  if (add.code !== 0) throw shipError('commit_failed', 'The changes could not be staged.');
+  return sha256Hex(await stagedPatchBytes(worktree, base));
+}
+
 /** The checked ship body, or `{ error }` naming what is wrong. Pure; a value over a limit is refused. */
 export function parseShipBody(raw) {
   const b = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -138,24 +202,28 @@ export function parseShipBody(raw) {
   if (b.provider !== 'github' && b.provider !== 'gitlab') return { error: 'provider must be github or gitlab' };
   if (!validShipRepo(b.provider, b.repo)) return { error: 'repo must be owner/name (GitHub) or a GitLab project path' };
   if (typeof b.base !== 'string' || !b.base || b.base.length > SHIP_LIMITS.base) return { error: 'base is required' };
+  // The reviewed diff's id. It is required: without it Ship cannot prove it pushes what the user read.
+  if (typeof b.patchId !== 'string' || !/^[0-9a-f]{64}$/.test(b.patchId)) return { error: 'patchId must be 64 lowercase hex characters' };
   const title = sanitizeLine(typeof b.title === 'string' ? b.title : '', SHIP_LIMITS.title);
   if (!title) return { error: 'title is required' };
   const text = b.body == null ? '' : b.body;
   if (typeof text !== 'string' || text.length > SHIP_LIMITS.body) {
     return { error: `body must be text of at most ${SHIP_LIMITS.body} characters` };
   }
-  return { worktree: b.worktree, branch: b.branch, provider: b.provider, repo: b.repo, base: b.base, title, body: text };
+  return { worktree: b.worktree, branch: b.branch, provider: b.provider, repo: b.repo, base: b.base, title, body: text, patchId: b.patchId };
 }
 
 /**
  * Commit everything in the worktree except `.factory/`, then push the branch to `origin`.
  *
- * Throws `{ code }`: `invalid_worktree` (not on `branch`), `secret_detected` (the staged diff
- * matched scanForSecrets; nothing is committed and the index is reset), `commit_failed`,
- * `push_rejected` (the local commit stays; a re-ship pushes it). With nothing new to commit
- * it pushes the current HEAD again (the re-ship after a failed push).
+ * Throws `{ code }`: `invalid_worktree` (not on `branch`), `diff_changed` (the staged patch id is not the reviewed
+ * `patchId`; nothing is committed and the index is reset), `secret_detected` (the staged diff matched scanForSecrets;
+ * nothing is committed and the index is reset), `commit_failed`, `push_rejected` (the local commit stays; a re-ship
+ * pushes it). With nothing new to commit it pushes the current HEAD again (the re-ship after a failed push). A commit
+ * records its patch id in `factory.patchid.<sha>`, so a re-ship of that exact commit is accepted even when the client's
+ * id is the one the user reviewed before the commit existed.
  */
-export async function commitAndPush({ worktree, branch, message, author = null }) {
+export async function commitAndPush({ worktree, branch, message, author = null, patchId }) {
   if (typeof branch !== 'string' || !FACTORY_BRANCH_RE.test(branch)) {
     throw shipError('invalid_worktree', 'The branch must be factory/<run id>.');
   }
@@ -163,9 +231,28 @@ export async function commitAndPush({ worktree, branch, message, author = null }
   if (head.code !== 0 || head.stdout.trim() !== branch) {
     throw shipError('invalid_worktree', 'The worktree is not on its Factory branch.');
   }
+  if (typeof patchId !== 'string' || !/^[0-9a-f]{64}$/.test(patchId)) {
+    throw shipError('diff_changed', 'The reviewed diff id is missing; read the diff again, then ship.');
+  }
   const subject = sanitizeLine(String(message ?? ''), SHIP_LIMITS.title) || `factory: ${branch}`;
-  if ((await runGit(worktree, ['add', '-A', '--', '.', EXCLUDE_FACTORY])).code !== 0) {
+  const base = await baseCommitOf(worktree, branch);
+  if ((await runGit(worktree, stagedAddArgs(), { config: PATCH_SAFE_GIT_CONFIG })).code !== 0) {
     throw shipError('commit_failed', 'The changes could not be staged.');
+  }
+  // The one rule this route adds: it must push the diff the user read, not whatever is in the worktree now.
+  const current = sha256Hex(await stagedPatchBytes(worktree, base));
+  if (current !== patchId) {
+    // Re-ship after a commit this route already made (for example a rejected push): if HEAD holds that commit, the
+    // tree has not changed since it, and the id recorded for it is the reviewed one, the reviewed diff is what ships.
+    const headSha = (await runGit(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+    const recorded = headSha && headSha !== base
+      ? (await runGit(worktree, ['config', '--get', `factory.patchid-${headSha}`])).stdout.trim()
+      : '';
+    const clean = await runGit(worktree, ['diff', '--cached', '--quiet', 'HEAD', '--', '.', ...STAGED_PATCH_EXCLUDES]);
+    if (!(recorded === patchId && clean.code === 0)) {
+      await runGit(worktree, ['reset', '-q']);
+      throw shipError('diff_changed', 'The changes changed since you opened this review. Read the new diff, then ship again.');
+    }
   }
   const names = await runGit(worktree, ['diff', '--cached', '--name-only', '--no-renames', '-z', '--', '.', EXCLUDE_FACTORY]);
   // --text: a binary file's bytes are scanned as text too, so a token inside one is not skipped. --no-textconv: a
@@ -198,6 +285,9 @@ export async function commitAndPush({ worktree, branch, message, author = null }
     }
   }
   const sha = (await runGit(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+  // Remember which diff this commit is, before the push: a rejected push keeps the commit, and its re-ship must
+  // recognise the reviewed id instead of refusing it as stale.
+  await runGit(worktree, ['config', `factory.patchid-${sha}`, current]);
   const push = await runGit(worktree, ['push', '--no-verify', '-u', 'origin', branch], { timeoutMs: PUSH_TIMEOUT_MS });
   if (push.code !== 0) throw shipError('push_rejected', 'The remote refused the push. No pull or merge request was opened.');
   return { commit: sha, pushed: true };

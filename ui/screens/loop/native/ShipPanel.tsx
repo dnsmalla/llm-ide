@@ -44,6 +44,15 @@ export function ShipPanel({ info, item, initialDiff, passed, fs, runPrefix, onSh
   const blocked = target ? shipBlockedReason(config, target.provider) : "This repository is not in Settings → Repositories (with its clone folder), so it cannot be shipped from here.";
   const kind = target?.provider === "gitlab" ? "draft merge request" : "draft pull request";
 
+  const reloadDiff = async () => {
+    try {
+      setDiff(decodeWorktreeDiff(await invokeHost<unknown>("loop_worktree_diff", { runId: info.runId })));
+      setDiffError(null);
+    } catch (e) {
+      setDiffError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   useEffect(() => {
     let live = true;
     if (!initialDiff) {
@@ -68,7 +77,8 @@ export function ShipPanel({ info, item, initialDiff, passed, fs, runPrefix, onSh
     setMessage(null);
     let result: ShipResult;
     try {
-      const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown }>("/kb/loop/ship", { method: "POST", body: shipRequest(info, item, repo, review), timeoutMs: 5 * 60_000 });
+      if (!diff?.patchId) throw Object.assign(new Error("the reviewed diff has no patch id"), { code: "diff_changed" });
+      const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown }>("/kb/loop/ship", { method: "POST", body: shipRequest(info, item, repo, review, diff.patchId), timeoutMs: 5 * 60_000 });
       result = { ok: true, url: typeof r.url === "string" ? r.url : "", commit: typeof r.commit === "string" ? r.commit : "", reused: r.reused === true };
     } catch (e) {
       const code = typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : "error";
@@ -78,6 +88,8 @@ export function ShipPanel({ info, item, initialDiff, passed, fs, runPrefix, onSh
     }
     const state = shipState(result);
     setMessage({ severity: state === "shipped" ? "info" : state === "secret" ? "error" : "warning", text: shipCopy(result) });
+    // The worktree changed after the review: show the new diff before the user ships again.
+    if (state === "changed") await reloadDiff();
     if (result.ok) {
       if (/^https:\/\//.test(result.url)) setShippedUrl(result.url);
       onShipped({ provider: target.provider, url: result.url, commit: result.commit, reused: result.reused });
@@ -143,7 +155,7 @@ export function ShipPanel({ info, item, initialDiff, passed, fs, runPrefix, onSh
         </div>
       ) : null}
       <div className="loop-inline">
-        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || files.length === 0} onClick={() => setConfirming("ship")}>{busy ? "Working…" : "Ship as draft…"}</button>
+        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || files.length === 0} onClick={() => setConfirming("ship")}>{busy ? "Working…" : "Ship as draft…"}</button>
         {shippedUrl ? <button type="button" className="loop-btn" onClick={() => { void invokeHost("open_external_url", { url: shippedUrl }).catch(() => undefined); }}>Open {kind}</button> : null}
         <button type="button" className="loop-btn" disabled={busy} onClick={() => setConfirming("discard")}>Discard…</button>
       </div>

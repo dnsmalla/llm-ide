@@ -5,15 +5,15 @@ import type { WorkItem } from "./factory.ts";
 import type { RunInfo } from "./worktree-run.ts";
 
 /** The `POST /kb/loop/ship` body. `repo` is the provider slug (owner/name), never a path. */
-export interface ShipBody { worktree: string; branch: string; provider: "github" | "gitlab"; repo: string; base: string; title: string; body: string }
+export interface ShipBody { worktree: string; branch: string; provider: "github" | "gitlab"; repo: string; base: string; title: string; body: string; patchId: string }
 export type ShipResult = { ok: true; url: string; commit: string; reused: boolean } | { ok: false; code: string; message?: string };
-export type ShipState = "shipped" | "secret" | "rejected" | "error";
+export type ShipState = "shipped" | "secret" | "rejected" | "changed" | "error";
 export interface WorktreeDiff { text: string; truncated: boolean; patchId: string; files: string[] }
 export interface DiffFile { path: string; lines: string[] }
 
 const MAX_REVIEW_CHARS = 20_000;
 
-export function shipRequest(info: RunInfo, item: WorkItem, repo: { provider: "github" | "gitlab"; slug: string; base: string }, review: string): ShipBody {
+export function shipRequest(info: RunInfo, item: WorkItem, repo: { provider: "github" | "gitlab"; slug: string; base: string }, review: string, patchId: string): ShipBody {
   const title = item.title.replace(/\s+/g, " ").trim().slice(0, 200) || `Factory run ${info.runId}`;
   const lines: string[] = [];
   if (item.source === "issue" && item.id && /^\d+$/.test(item.id)) {
@@ -31,13 +31,14 @@ export function shipRequest(info: RunInfo, item: WorkItem, repo: { provider: "gi
     "",
     review.trim() ? review.trim().slice(0, MAX_REVIEW_CHARS) : "(no review report)",
   );
-  return { worktree: info.worktree, branch: info.branch, provider: repo.provider, repo: repo.slug, base: repo.base, title, body: lines.join("\n") };
+  return { worktree: info.worktree, branch: info.branch, provider: repo.provider, repo: repo.slug, base: repo.base, title, body: lines.join("\n"), patchId };
 }
 
 export function shipState(result: ShipResult): ShipState {
   if (result.ok) return "shipped";
   if (result.code === "secret_detected") return "secret";
   if (result.code === "push_rejected") return "rejected";
+  if (result.code === "diff_changed") return "changed";
   return "error";
 }
 
@@ -52,6 +53,8 @@ export function shipCopy(result: ShipResult): string {
       return "Ship stopped: the secret scan found what looks like a credential in the changes. Nothing was pushed. Remove it in the worktree and ship again.";
     case "rejected":
       return "The remote rejected the push. No pull request or merge request was opened. Check branch protection and your git credentials, then ship again.";
+    case "changed":
+      return "The changes changed since you opened this review. Read the new diff, then ship again.";
     default: {
       const code = (result as Extract<ShipResult, { ok: false }>).code;
       return `Ship failed (${/^[A-Za-z0-9_]{1,40}$/.test(code) ? code : "error"}). Nothing was merged.`;

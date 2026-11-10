@@ -381,12 +381,12 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
 }
 
 // POST /kb/loop/ship: the Factory's only push, from a user click in the desktop Loop screen.
-// Body { worktree, branch, provider: 'github'|'gitlab', repo, base, title, body? }
+// Body { worktree, branch, provider: 'github'|'gitlab', repo, base, title, body?, patchId }
 // → { url, commit, reused }. Commit + secret scan + push happen BEFORE any provider call, so a
 // refused scan or push never opens a PR/MR. A second ship reuses the open PR/MR.
 const SHIP_BODY_LIMIT = 64 * 1024;
 const SHIP_STATUS = Object.freeze({
-  invalid_worktree: 400, secret_detected: 422, push_rejected: 409, commit_failed: 500, provider_error: 502,
+  invalid_worktree: 400, diff_changed: 409, secret_detected: 422, push_rejected: 409, commit_failed: 500, provider_error: 502,
 });
 const SHIP_PROVIDER_NAME = Object.freeze({ github: 'GitHub', gitlab: 'GitLab' });
 
@@ -429,7 +429,7 @@ async function handleLoopShip(req, res, { userId } = {}, deps = {}) {
   if (!token) return shipFail(res, 400, `${v.provider.toUpperCase()}_TOKEN_MISSING`, `Add a ${name} token in Settings → Built-in keys first.`);
   let commit;
   try {
-    ({ commit } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title }));
+    ({ commit } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId }));
   } catch (err) {
     const known = Object.hasOwn(SHIP_STATUS, err?.code);
     return shipFail(res, known ? SHIP_STATUS[err.code] : 500, known ? err.code : 'commit_failed', known ? err.message : 'The commit could not be made.');
