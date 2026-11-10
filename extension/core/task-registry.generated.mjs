@@ -2,6 +2,41 @@
 
 export const TASKS = Object.freeze([
   {
+    "id": "knowledge.update",
+    "label": "Knowledge",
+    "group": "Maintenance",
+    "description": "Update the project knowledge base with durable facts. There is no durable writer in the core yet.",
+    "aliases": [
+      "generateKnowledge"
+    ],
+    "runner": null,
+    "input": {
+      "kind": "none",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "none",
+      "persist": "none",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": true,
+    "requiresRepo": false,
+    "requiresLocalHost": false,
+    "features": [],
+    "availability": {
+      "status": "retired",
+      "reason": "No durable memory writer exists in the core; Graph/Memory surfaces own knowledge updates."
+    },
+    "revision": 1
+  },
+  {
     "id": "loop.regression",
     "label": "Regression",
     "group": "Maintenance",
@@ -131,6 +166,7 @@ export const TASKS = Object.freeze([
 export const TASK_BY_ID = Object.freeze(Object.fromEntries(TASKS.map((t) => [t.id, t])));
 
 export const ALIASES = Object.freeze({
+  "generateKnowledge": "knowledge.update",
   "regression": "loop.regression",
   "sourceUpdate": "sources.update",
   "updatePlanStatus": "plan.status"

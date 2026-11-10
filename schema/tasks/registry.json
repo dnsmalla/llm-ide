@@ -125,6 +125,41 @@
         "reason": null
       },
       "revision": 1
+    },
+    {
+      "id": "knowledge.update",
+      "label": "Knowledge",
+      "group": "Maintenance",
+      "description": "Update the project knowledge base with durable facts. There is no durable writer in the core yet.",
+      "aliases": [
+        "generateKnowledge"
+      ],
+      "runner": null,
+      "input": {
+        "kind": "none",
+        "required": false,
+        "paths": []
+      },
+      "output": {
+        "kind": "none",
+        "persist": "none",
+        "revertWrites": false
+      },
+      "schedule": {
+        "backend": "none",
+        "defaultCron": null,
+        "schedulable": false
+      },
+      "scope": "project",
+      "readOnly": true,
+      "requiresRepo": false,
+      "requiresLocalHost": false,
+      "features": [],
+      "availability": {
+        "status": "retired",
+        "reason": "No durable memory writer exists in the core; Graph/Memory surfaces own knowledge updates."
+      },
+      "revision": 1
     }
   ]
 }
