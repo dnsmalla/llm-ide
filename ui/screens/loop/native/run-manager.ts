@@ -5,7 +5,7 @@
 import type { FsApi } from "../../explorer/fs";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { detectTestCommand } from "./environment.ts";
-import { configFor, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, type RunMode } from "./factory.ts";
+import { configFor, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type RunMode } from "./factory.ts";
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import type { LoopDefinition, LoopEngineConfig } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
@@ -96,7 +96,18 @@ async function ensureFactoryLoop(fs: FsApi): Promise<LoopDefinition | null> {
     if (ensured.error !== null) throw new Error(`The Factory loop could not be added to system/loop.json (${ensured.error}); the run did not start.`);
     r = ensured.load;
   }
-  return r.kind === "ok" ? r.store.loops.find(isFactoryLoop) ?? null : null;
+  if (r.kind !== "ok") return null;
+  const loop = r.store.loops.find(isFactoryLoop) ?? null;
+  if (!loop) return null;
+  // An existing Factory loop saved before detection existed can have an empty Verify command. Fill it once,
+  // persist it, and let the run continue instead of sending the user to the Loop page.
+  const repaired = withDetectedVerify(loop, command);
+  if (!repaired.changed) return repaired.loop;
+  const store = { ...r.store, loops: r.store.loops.map((l) => (l.id === repaired.loop.id ? repaired.loop : l)) };
+  try {
+    await saveLoops(fs, store, r.hash);
+    return repaired.loop;
+  } catch { return repaired.loop; }
 }
 
 let ensuring: Promise<unknown> = Promise.resolve();

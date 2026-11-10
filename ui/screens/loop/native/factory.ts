@@ -66,6 +66,18 @@ export function factoryVerifyProblem(config: Pick<LoopEngineConfig, "stages">): 
   return empty ? `The Factory's “${empty.name}” stage has no test command. Open Loop → Factory → ${empty.name}, enter the command that runs this repository's tests, and save.` : null;
 }
 
+/** Fill an existing Factory loop's Verify command from detection; user-set commands are never overwritten. */
+export function withDetectedVerify(loop: LoopDefinition, detected: string | null): { loop: LoopDefinition; changed: boolean } {
+  if (!detected) return { loop, changed: false };
+  let changed = false;
+  const stages = loop.config.stages.map((s) => {
+    if (factoryRole(s) !== "verify" || (s.command?.trim() && s.command !== DETECTED_TEST)) return s;
+    changed = true;
+    return { ...s, command: detected };
+  });
+  return changed ? { loop: { ...loop, config: { ...loop.config, stages } }, changed: true } : { loop, changed: false };
+}
+
 export function isFactoryLoop(loop: LoopDefinition): boolean {
   return loop.defaultKey === FACTORY_DEFAULT_KEY;
 }

@@ -282,3 +282,16 @@ test("feedbackMarkdown has no fence when CI passed and there are no comments", (
   assert.equal(md.includes("<<<BEGIN>>>"), false);
   assert.match(md, /No CI failures or review comments/);
 });
+
+test("an existing Factory loop gets its missing Verify command from detection", () => {
+  const loop = { ...structuredClone(FACTORY_TEMPLATE), id: "f", defaultKey: "factory", config: structuredClone(FACTORY_TEMPLATE.config) };
+  loop.config.stages = loop.config.stages.map((s) => (s.id === "factory/verify" ? { ...s, command: "" } : s));
+  const filled = f.withDetectedVerify(loop, "make test");
+  assert.equal(filled.changed, true);
+  assert.equal(filled.loop.config.stages.find((s) => s.id === "factory/verify").command, "make test");
+  assert.equal(filled.loop.config.stages.find((s) => s.id === "factory/verify").name, "Verify");
+  const custom = structuredClone(loop);
+  custom.config.stages = custom.config.stages.map((s) => (s.id === "factory/verify" ? { ...s, command: "npm run check" } : s));
+  assert.equal(f.withDetectedVerify(custom, "make test").changed, false, "a user-set command is never overwritten");
+  assert.equal(f.withDetectedVerify(loop, null).changed, false);
+});
