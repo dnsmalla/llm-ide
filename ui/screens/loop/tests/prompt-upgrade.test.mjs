@@ -5,7 +5,16 @@ import { decodeProjectStore, encodeProjectStore } from "../native/model.ts";
 import { sha256Hex } from "../../chat/approvals/digest.ts";
 import { taskPrompt } from "../../tasks/model.ts";
 import { initialProjectStore, ensureDefaultLoops } from "../native/templates.ts";
-import { detachedFields, promptRefOf, registrySource, shownStagePrompt, stagePromptText, upgradeDefaultStage } from "../native/default-stage.ts";
+import { detachedFields, followsRegistry, promptRefOf, registrySource, shownStagePrompt, stagePromptText, upgradeDefaultStage } from "../native/default-stage.ts";
+import { PROMPTS } from "../../tasks/prompts.generated.ts";
+
+test("the editor's registry hint shows only while the stage's prompt is unedited", () => {
+  const live = PROMPTS["loop.doc_writer"];
+  assert.equal(followsRegistry(stage({ prompt: live, promptHash: sha256Hex(live) })), true, "unedited: the hint shows");
+  assert.equal(followsRegistry(stage({ prompt: "My own doc prompt.", promptHash: sha256Hex(live) })), false, "edited: the stored hash names the registry text, not the edit");
+  assert.equal(followsRegistry(stage({ prompt: "My own doc prompt.", promptHash: null })), false, "edited, saved before hashes: no hint");
+  assert.equal(followsRegistry(stage({ prompt: live, promptRef: null, defaultKey: null })), false, "detached from the registry: no hint");
+});
 
 const OLD = "Old built-in prompt for the doc writer.";
 const NEW = "New built-in prompt for the doc writer, revision two.";

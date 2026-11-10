@@ -37,6 +37,12 @@ export function isUnedited(stage: Pick<LoopStage, "prompt" | "promptHash">, sour
   return stage.promptHash ? stage.promptHash === digest : source.knownPromptHashes.includes(digest);
 }
 
+/** True while the stage follows the registry: a registry source exists and the stage's prompt is still its text. */
+export function followsRegistry(stage: Linkable & Pick<LoopStage, "prompt" | "promptHash">): boolean {
+  const source = registrySource(stage);
+  return source !== null && isUnedited(stage, source);
+}
+
 /** The stage moved to the source's revision when it is unedited and behind it; otherwise the same object. */
 export function upgradeDefaultStage(stage: LoopStage, source: PromptSource): LoopStage {
   if (promptRefOf(stage) !== source.id) return stage;

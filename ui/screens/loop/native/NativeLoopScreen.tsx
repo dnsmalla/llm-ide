@@ -29,7 +29,7 @@ import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exe
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
-import { detachedFields, registrySource, shownStagePrompt } from "./default-stage.ts";
+import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
 import { decodeWorktreeDiff, type WorktreeDiff } from "./ship-model.ts";
 import "./native-loop.css";
 
@@ -1094,7 +1094,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
                 <label className="loop-field"><span>Skill id</span><input value={stage.skillId ?? ""} placeholder="family/skill" onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.skillId = e.target.value || null; })} /></label>
                 <label className="loop-field"><span>Target path (optional)</span><input value={stage.targetPath ?? ""} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.targetPath = e.target.value || null; })} /></label>
                 <label className="loop-field"><span>Output path (optional)</span><input value={stage.outputPath ?? ""} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.outputPath = e.target.value || null; })} /></label>
-                <label className="loop-field"><span>Prompt (optional)</span><textarea rows={3} value={shownStagePrompt(stage)} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) { s.prompt = e.target.value || null; Object.assign(s, detachedFields()); } })} />{registrySource(stage) ? <small className="loop-native-hint">Built-in prompt, revision {registrySource(stage)?.revision}. Editing it makes this stage your own.</small> : null}</label>
+                <label className="loop-field"><span>Prompt (optional)</span><textarea rows={3} value={shownStagePrompt(stage)} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) { s.prompt = e.target.value || null; Object.assign(s, detachedFields()); } })} />{followsRegistry(stage) ? <small className="loop-native-hint">Built-in prompt, revision {registrySource(stage)?.revision}. Editing it makes this stage your own.</small> : null}</label>
               </> : null}
               {stage.kind === "testMap" ? <label className="loop-field"><span>Test map operation</span><select value={stage.testOp ?? "structure"} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.testOp = e.target.value as "structure" | "map" | "ledger"; })}><option value="structure">Structure</option><option value="map">Map</option><option value="ledger">Ledger</option></select></label> : null}
               {stage.kind === "codeGraph" ? <label className="loop-field"><span>Code graph operation</span><select value={stage.graphOp ?? "snapshot"} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.graphOp = e.target.value as "snapshot" | "verify"; })}><option value="snapshot">Snapshot</option><option value="verify">Verify</option></select></label> : null}
