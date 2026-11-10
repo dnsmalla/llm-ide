@@ -209,7 +209,7 @@ export function parseShipBody(raw) {
   if (typeof text !== 'string' || text.length > SHIP_LIMITS.body) {
     return { error: `body must be text of at most ${SHIP_LIMITS.body} characters` };
   }
-  return { worktree: b.worktree, branch: b.branch, provider: b.provider, repo: b.repo, base: b.base, title, body: text, patchId: b.patchId };
+  return { worktree: b.worktree, branch: b.branch, provider: b.provider, repo: b.repo, base: b.base, title, body: text, patchId: b.patchId, allowSecret: b.allowSecret === true };
 }
 
 /**
@@ -222,7 +222,7 @@ export function parseShipBody(raw) {
  * records its patch id in `factory.patchid.<sha>`, so a re-ship of that exact commit is accepted even when the client's
  * id is the one the user reviewed before the commit existed.
  */
-export async function commitAndPush({ worktree, branch, message, author = null, patchId }) {
+export async function commitAndPush({ worktree, branch, message, author = null, patchId, allowSecret = false }) {
   if (typeof branch !== 'string' || !FACTORY_BRANCH_RE.test(branch)) {
     throw shipError('invalid_worktree', 'The branch must be factory/<run id>.');
   }
@@ -266,15 +266,17 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   // case-insensitively at any depth, so a path the pathspec somehow lists is still never committed or scanned.
   const isFactoryPath = (p) => p.split('/').some((seg) => seg.toLowerCase() === FACTORY_DIR);
   const paths = names.stdout.split('\0').filter((p) => p && !isFactoryPath(p));
+  let secretOverride = null;
   if (paths.length > 0) {
     const hit = scanForSecretsDetailed(diff.stdout);
-    if (hit) {
+    if (hit && !allowSecret) {
       await runGit(worktree, ['reset', '-q']);
       // The rule, file and line only, never the matched text.
       const err = shipError('secret_detected', `The changes appear to contain a secret (${hit.rule}${hit.file ? ` at ${hit.file}:${hit.line}` : ''}). Remove it, then Ship again.`);
       err.details = { rule: hit.rule, file: hit.file, line: hit.line };
       throw err;
     }
+    if (hit) secretOverride = { rule: hit.rule, file: hit.file, line: hit.line };
     const signing = await runGit(worktree, ['config', '--bool', '--get', 'commit.gpgsign']);
     const signArgs = signing.stdout.trim() === 'true' ? [] : ['-c', 'commit.gpgsign=false'];
     const env = author?.name && author?.email
@@ -294,7 +296,7 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   await runGit(worktree, ['config', `factory.patchid-${sha}`, current]);
   const push = await runGit(worktree, ['push', '--no-verify', '-u', 'origin', branch], { timeoutMs: PUSH_TIMEOUT_MS });
   if (push.code !== 0) throw shipError('push_rejected', 'The remote refused the push. No pull or merge request was opened.');
-  return { commit: sha, pushed: true };
+  return { commit: sha, pushed: true, ...(secretOverride ? { secretOverride } : {}) };
 }
 
 // One provider call: fixed host, no redirects (fixedHostFetch refuses a 3xx), 1 MiB cap.

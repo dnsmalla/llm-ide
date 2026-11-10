@@ -6651,6 +6651,8 @@ export type PostKbLoopShipRequest = {
     body?: string;
     /** The reviewed diff id from loop_worktree_diff.patchId: 64 lowercase hex characters, sha256 of the staged --binary patch against the run's base commit with .factory/ excluded. commitAndPush recomputes it after staging and refuses 409 diff_changed (resetting the index) when it differs (API 135) */
     patchId: string;
+    /** Only when the user explicitly confirmed the secret hit: commit and push anyway; the 200 carries secretOverride. Hard block remains the default. */
+    allowSecret?: boolean;
   };
 };
 
@@ -6662,6 +6664,12 @@ export type PostKbLoopShipResponse200 = {
   commit: string;
   /** true when an open PR/MR for the branch already existed (a re-ship) */
   reused: boolean;
+  /** Present only when allowSecret let a secret-scan hit through; rule/file/line, never the matched text. */
+  secretOverride?: {
+    rule: string;
+    file?: string | null;
+    line?: number | null;
+  };
 };
 
 export type PostKbLoopShipResponse400 = CommonError;

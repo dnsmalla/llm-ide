@@ -430,8 +430,9 @@ async function handleLoopShip(req, res, { userId } = {}, deps = {}) {
   const token = getSecret(getDb(), userId, `${v.provider}.token`);
   if (!token) return shipFail(res, 400, `${v.provider.toUpperCase()}_TOKEN_MISSING`, `Add a ${name} token in Settings → Built-in keys first.`);
   let commit;
+  let secretOverride = null;
   try {
-    ({ commit } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId }));
+    ({ commit, secretOverride } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId, allowSecret: v.allowSecret }));
   } catch (err) {
     const known = Object.hasOwn(SHIP_STATUS, err?.code);
     return shipFail(res, known ? SHIP_STATUS[err.code] : 500, known ? err.code : 'commit_failed', known ? err.message : 'The commit could not be made.', err?.details ? { details: err.details } : null);
@@ -453,6 +454,6 @@ async function handleLoopShip(req, res, { userId } = {}, deps = {}) {
     // Fixed text: createDraftPr's error carries (redacted) provider text, which never reaches the client.
     return shipFail(res, 502, 'provider_error', `The branch was pushed, but ${name} did not open the request. Check the token and the base branch, then Ship again.`);
   }
-  sendJSON(res, 200, { url, commit, reused });
+  sendJSON(res, 200, { url, commit, reused, ...(secretOverride ? { secretOverride } : {}) });
   return true;
 }

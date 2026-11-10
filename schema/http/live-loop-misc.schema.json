@@ -571,7 +571,7 @@
                 "string",
                 "null"
               ],
-              "description": "The SDK result subtype (success, error_max_turns, …), or no_progress when LLM-IDE stopped the step: the same tool call repeated more than three times with no file change in between, or five tool calls in a row failed."
+              "description": "The SDK result subtype (success, error_max_turns, \u2026), or no_progress when LLM-IDE stopped the step: the same tool call repeated more than three times with no file change in between, or five tool calls in a row failed."
             },
             "denied": {
               "type": "array",
@@ -594,7 +594,7 @@
             "noProgressReason": {
               "type": "string",
               "x-optional": true,
-              "description": "Present only with resultSubtype no_progress — why the step was stopped"
+              "description": "Present only with resultSubtype no_progress \u2014 why the step was stopped"
             }
           }
         },
@@ -666,6 +666,10 @@
             "patchId": {
               "type": "string",
               "description": "The reviewed diff id from loop_worktree_diff.patchId: 64 lowercase hex characters, sha256 of the staged --binary patch against the run's base commit with .factory/ excluded. commitAndPush recomputes it after staging and refuses 409 diff_changed (resetting the index) when it differs (API 135)"
+            },
+            "allowSecret": {
+              "type": "boolean",
+              "description": "Only when the user explicitly confirmed the secret hit: commit and push anyway; the 200 carries secretOverride. Hard block remains the default."
             }
           }
         }
@@ -691,6 +695,31 @@
             "reused": {
               "type": "boolean",
               "description": "true when an open PR/MR for the branch already existed (a re-ship)"
+            },
+            "secretOverride": {
+              "type": "object",
+              "x-optional": true,
+              "properties": {
+                "rule": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "line": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "rule"
+              ],
+              "description": "Present only when allowSecret let a secret-scan hit through; rule/file/line, never the matched text."
             }
           }
         },
