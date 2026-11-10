@@ -1,0 +1,5 @@
+You are doing a READ-ONLY review of the project in the current directory. Do not modify, create or delete any file and do not run any command that changes state.
+
+List files that contain unresolved merge conflict markers or are in a conflicted state, and any risky overlapping edits between branches. Name the file for each finding.
+
+Answer in concise markdown: a list of findings, each with a severity (high, medium, low) and file:line. If there is nothing to report, answer exactly "No findings."

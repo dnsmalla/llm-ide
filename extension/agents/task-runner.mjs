@@ -47,7 +47,18 @@ export async function runCoreTask({ taskId, userId, projectRoot, args = {}, sign
     throw new TaskCoreError('TASK_LOCAL_ONLY', `Task "${task.id}" needs the desktop app.`);
   }
   if (runner.kind === 'agent') {
-    throw new TaskCoreError('TASK_NOT_IMPLEMENTED', `The agent runner for "${task.id}" is not wired yet.`);
+    // The agent runs the registry prompt through the port the route injects; the caller never supplies a prompt.
+    const run = deps.runAgent;
+    if (typeof run !== 'function') throw new TaskCoreError('TASK_NOT_IMPLEMENTED', `The agent runner for "${task.id}" is not wired in this process.`);
+    if (signal?.aborted) return { taskId: task.id, runner: 'agent', ok: false, summary: 'cancelled', output: '', warnings: [], code: 'cancelled' };
+    try {
+      const result = await run({ task, userId, projectRoot, args, signal, emit: emit ?? (() => {}) });
+      const text = typeof result?.output === 'string' ? result.output : '';
+      return { taskId: task.id, runner: 'agent', ok: result?.ok !== false, summary: typeof result?.summary === 'string' ? result.summary : text.slice(0, 200), output: text, warnings: result?.warnings ?? [] };
+    } catch (err) {
+      const code = typeof err?.code === 'string' ? err.code : 'TASK_FAILED';
+      return { taskId: task.id, runner: 'agent', ok: false, summary: err instanceof Error ? err.message : String(err), output: '', warnings: [], code };
+    }
   }
   if (runner.kind !== 'core-route') throw new TaskCoreError('TASK_BAD_RUNNER', `Task "${task.id}" has an unknown runner.`);
 

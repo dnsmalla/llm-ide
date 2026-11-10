@@ -1,10 +1,25 @@
 // Pure selectors over the generated task catalog. Every surface asks this module, never its own table,
 // whether a task can run and which prompt it uses.
 import { ALIASES, TASKS, TASK_BY_ID, TEMPLATES } from "./registry.generated.ts";
-import { PROMPTS } from "./prompts.generated.ts";
+import { PROMPTS, PROMPT_PARTS } from "./prompts.generated.ts";
 import type { Availability, TaskDef, TaskEnv, TaskGroup } from "./types.ts";
 
 export { ALIASES, PROMPTS, TASKS, TASK_BY_ID, TEMPLATES };
+
+/** The task's own focus sentence (the part a user may override), or null for a task with no shared frame. */
+export function taskFocus(idOrAlias: string): string | null {
+  const id = resolveTaskId(idOrAlias);
+  return id !== null && Object.hasOwn(PROMPT_PARTS, id) ? PROMPT_PARTS[id]!.focus : null;
+}
+
+/** The prompt a run would send with `focusText` as the override (the frame stays). Same rule as the core. */
+export function taskPromptWithFocus(idOrAlias: string, focusText: string | null | undefined): string {
+  const id = resolveTaskId(idOrAlias);
+  const parts = id !== null && Object.hasOwn(PROMPT_PARTS, id) ? PROMPT_PARTS[id] : undefined;
+  if (!parts) return taskPrompt(idOrAlias);
+  const focus = typeof focusText === "string" && focusText.trim() !== "" ? focusText.slice(0, 4000).replace(/<\/?evidence>/gi, "") : parts.focus;
+  return parts.frame.replace("{{focus}}", () => focus);
+}
 
 /** A task prompt was requested for a task whose runner has no prompt (deterministic, retired or custom). */
 export class TaskPromptError extends Error {

@@ -41,6 +41,7 @@ export function buildRegistry() {
   const tasks = [...registry.tasks].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   const aliases = {};
   const prompts = {};
+  const promptParts = {};
   for (const task of tasks) {
     if (!task || typeof task !== 'object' || typeof task.id !== 'string') throw new Error('every task needs a string id');
     for (const alias of Array.isArray(task.aliases) ? task.aliases : []) {
@@ -51,7 +52,16 @@ export function buildRegistry() {
     if (task.runner?.kind === 'agent') {
       if (typeof task.runner.prompt !== 'string') throw new Error(`task ${task.id}: an agent runner needs a prompt path`);
       const path = join(ROOT, 'schema/tasks', task.runner.prompt);
-      prompts[task.id] = readFileSync(path, 'utf8');
+      const focus = readFileSync(path, 'utf8').trimEnd();
+      if (typeof task.runner.frame === 'string') {
+        // A shared frame (the READ-ONLY preamble and output format) holds one {{focus}} slot; the task supplies the slot.
+        const frame = readFileSync(join(ROOT, 'schema/tasks', task.runner.frame), 'utf8').trimEnd();
+        if (frame.split('{{focus}}').length !== 2) throw new Error(`task ${task.id}: frame ${task.runner.frame} needs exactly one {{focus}} slot`);
+        promptParts[task.id] = { frame, focus };
+        prompts[task.id] = frame.replace('{{focus}}', () => focus);
+      } else {
+        prompts[task.id] = focus;
+      }
     }
   }
   const templateList = [...templates.templates].sort((a, b) => String(a.id).localeCompare(String(b.id)));
@@ -60,6 +70,7 @@ export function buildRegistry() {
     tasks,
     aliases: sortObject(aliases),
     prompts: sortObject(prompts),
+    promptParts: sortObject(promptParts),
     templates: templateList,
   });
 }
@@ -82,7 +93,13 @@ export function renderUiRegistry(data) {
 }
 
 export function renderUiPrompts(data) {
-  return [HEADER, '\n', `export const PROMPTS: Readonly<Record<string, string>> = Object.freeze(${safeJson(data.prompts)});\n`].join('');
+  return [
+    HEADER,
+    '\n',
+    `export const PROMPTS: Readonly<Record<string, string>> = Object.freeze(${safeJson(data.prompts)});\n`,
+    '\n',
+    `export const PROMPT_PARTS: Readonly<Record<string, { frame: string; focus: string }>> = Object.freeze(${safeJson(data.promptParts)});\n`,
+  ].join('');
 }
 
 export function renderCoreRegistry(data) {
@@ -100,7 +117,13 @@ export function renderCoreRegistry(data) {
 }
 
 export function renderCorePrompts(data) {
-  return [HEADER, '\n', `export const PROMPTS = Object.freeze(${safeJson(data.prompts)});\n`].join('');
+  return [
+    HEADER,
+    '\n',
+    `export const PROMPTS = Object.freeze(${safeJson(data.prompts)});\n`,
+    '\n',
+    `export const PROMPT_PARTS = Object.freeze(${safeJson(data.promptParts)});\n`,
+  ].join('');
 }
 
 /** SHA-256 of a prompt, used by the conformance gate to refuse two copies of one prompt. */

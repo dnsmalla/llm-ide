@@ -23,6 +23,10 @@ export interface TaskRunnerDef {
   kind: RunnerKind;
   /** Relative to schema/tasks/, e.g. "prompts/review.code.md". Agent tasks only. */
   prompt?: string;
+  /** A shared frame with one {{focus}} slot; the task's prompt fills it. Agent tasks only. */
+  frame?: string;
+  /** Args a caller may send to the task route; every other key is refused. */
+  args?: Readonly<Record<string, { type: "string" | "string[]"; maxLength: number; maxItems?: number }>>;
   /** A fixed core adapter id, e.g. "sources-update". core-route tasks only. */
   route?: string;
   /** Loop stage metadata. shell tasks require it; agent tasks may carry it. */

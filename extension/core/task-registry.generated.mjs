@@ -159,6 +159,56 @@ export const TASKS = Object.freeze([
     "revision": 1
   },
   {
+    "id": "review.code",
+    "label": "Review Code",
+    "group": "Review",
+    "description": "Read-only review of the most recent changes for correctness, security and regressions.",
+    "aliases": [
+      "reviewCode"
+    ],
+    "runner": {
+      "kind": "agent",
+      "busKind": "review",
+      "busArgs": {
+        "focus": "code"
+      },
+      "prompt": "prompts/review.code.md",
+      "frame": "prompts/_review.frame.md",
+      "args": {
+        "focusText": {
+          "type": "string",
+          "maxLength": 4000
+        }
+      },
+      "timeoutSeconds": 1800
+    },
+    "input": {
+      "kind": "repo",
+      "required": true,
+      "paths": []
+    },
+    "output": {
+      "kind": "text",
+      "persist": "run-record",
+      "revertWrites": true
+    },
+    "schedule": {
+      "backend": "desktop",
+      "defaultCron": null,
+      "schedulable": true
+    },
+    "scope": "project",
+    "readOnly": true,
+    "requiresRepo": true,
+    "requiresLocalHost": false,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
     "id": "sources.update",
     "label": "Source Update",
     "group": "Pipeline",
@@ -206,6 +256,7 @@ export const ALIASES = Object.freeze({
   "generateDoc": "docs.generate",
   "generateKnowledge": "knowledge.update",
   "regression": "loop.regression",
+  "reviewCode": "review.code",
   "sourceUpdate": "sources.update",
   "updatePlanStatus": "plan.status"
 });

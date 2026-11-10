@@ -9209,6 +9209,7 @@ export type PostKbTasksIdRunRequest = {
     projectId?: string;
     args?: {
       sourceIds?: string[];
+      focusText?: string;
     };
   };
 };

@@ -76,6 +76,18 @@ for (const task of tasks) {
       if (runner.kind === 'agent') {
         if (typeof runner.prompt !== 'string' || !/^prompts\/[\w.-]+\.md$/.test(runner.prompt)) bad(`${at}: an agent runner needs prompts/<id>.md`);
         if (runner.route !== undefined || runner.action !== undefined) bad(`${at}: an agent runner cannot carry route/action`);
+        if (runner.frame !== undefined && (typeof runner.frame !== 'string' || !/^prompts\/_[\w.-]+\.md$/.test(runner.frame))) {
+          bad(`${at}: a frame must be prompts/_<name>.md`);
+        }
+      }
+      if (runner.args !== undefined) {
+        // Args a caller may send to the task route. Only these names pass; each is typed and size-bounded.
+        const specs = runner.args && typeof runner.args === 'object' && !Array.isArray(runner.args) ? Object.values(runner.args) : null;
+        if (!specs) bad(`${at}: runner.args must be an object of arg specs`);
+        for (const spec of specs ?? []) {
+          if (!['string', 'string[]'].includes(spec?.type)) bad(`${at}: an arg spec type must be string or string[]`);
+          if (!Number.isInteger(spec?.maxLength) || spec.maxLength < 1) bad(`${at}: an arg spec needs a positive maxLength`);
+        }
       }
       if (runner.kind === 'shell' && (typeof runner.stage?.kind !== 'string' || !runner.stage.kind)) bad(`${at}: a shell runner needs stage.kind`);
       if (runner.kind === 'shell' && runner.prompt !== undefined) bad(`${at}: a shell runner has no prompt`);

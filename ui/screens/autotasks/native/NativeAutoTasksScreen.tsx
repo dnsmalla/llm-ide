@@ -19,6 +19,8 @@ import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
 import { CUSTOM_IMPLEMENT_MESSAGE, createCustomTask, customTaskRunnable, customTaskStatus, loadCustomTasks, saveCustomTasks, updateCustomTask, validateCustomTask, type CustomAutoTask, type CustomTaskMode } from "./custom.ts";
 import { runCustomTask } from "./run-custom.ts";
 import { runTask as runRegisteredTask } from "../../tasks/runner.ts";
+import { registeredProjectId } from "../../tasks/project.ts";
+import { taskFocus, taskPromptWithFocus } from "../../tasks/model.ts";
 import { approveLoop, approveStage, approvalStatus } from "../../loop/native/approvals.ts";
 import { loadLoops } from "../../loop/native/store.ts";
 import { autoTaskBusy, releaseAutoTask, tryAcquireAutoTask } from "./lock.ts";
@@ -44,7 +46,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   /** False until the project's skills have been read, so a saved skill is not marked "not installed" too early. */
   const [skillsScanned, setSkillsScanned] = useState(false);
   const [state, setState] = useState<AutoTaskLocalState>(() => loadState());
-  const [selected, setSelected] = useState<AutoTaskId>("reviewCode");
+  const [selected, setSelected] = useState<AutoTaskId>("review.code");
   const [onlyEnabled, setOnlyEnabled] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [cronDraft, setCronDraft] = useState("");
@@ -186,7 +188,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
       const workRoot = await invokeHost<string>("loop_work_root");
       // A registered non-agent task runs its own runner: the exact Loop stage for shell, the core route for
       // core-route, or a desktop action. No invented agent prompt is involved.
-      if (registered?.runner && registered.runner.kind !== "agent") {
+      if (registered?.runner) {
         let approvalToken: string | null = null;
         if (registered.runner.kind === "shell") {
           // The host mints approvals only for a stage it resolves from system/loop.json, so use the project's
@@ -213,8 +215,12 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
             return;
           }
         }
+        // An agent task runs the registry prompt in the registered project; the user's edit (if any) is a focus override.
+        const isAgent = registered.runner.kind === "agent";
+        const focusOverride = isAgent && c.prompt.trim() !== "" && c.prompt !== (taskFocus(id) ?? "") ? c.prompt : undefined;
         const result = await runRegisteredTask(id, {
           projectRoot: projectRoot ?? "",
+          ...(isAgent ? { projectId: await registeredProjectId(core, projectRoot ?? ""), args: focusOverride ? { focusText: focusOverride } : {} } : {}),
           core,
           host: invokeHost,
           fs,
@@ -541,7 +547,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
 }
 
 /** The exact text a run sends: the same composer `runTask` uses, plus the skill it is run under. */
-function EffectivePrompt({ config, task }: { config: AutoTaskConfig; task: { label: string; readOnlyOutput?: boolean } }): ReactNode {
+function EffectivePrompt({ config, task }: { config: AutoTaskConfig; task: { id: string; label: string; readOnlyOutput?: boolean } }): ReactNode {
   const inputPath = normalizeProjectPath(config.inputPath);
   const outputPath = normalizeProjectPath(config.outputPath);
   if (inputPath === null || outputPath === null) {
@@ -550,8 +556,17 @@ function EffectivePrompt({ config, task }: { config: AutoTaskConfig; task: { lab
   const skillId = config.skillName ? skillRunId(config.skillName) : null;
   return (
     <>
-      <pre className="atn-log-pre atn-preview" aria-label={`Effective prompt for ${task.label}`}>{composeTaskMessage(config.prompt, inputPath, outputPath)}</pre>
-      <p className="atn-hint">{config.skillName ? (skillId ? `Skill: ${skillId}` : `Skill “${config.skillName}” cannot run in an Auto Task.`) : "No skill: the prompt runs on its own."}</p>
+      {taskFocus(task.id) !== null ? (
+        <>
+          <pre className="atn-log-pre atn-preview" aria-label={`Effective prompt for ${task.label}`}>{taskPromptWithFocus(task.id, config.prompt)}</pre>
+          <p className="atn-hint">The core runs this registry prompt on the bus review engine in the registered project. Your edit replaces only the focus sentence; the skill and input/output folders do not apply to this task.</p>
+        </>
+      ) : (
+        <>
+          <pre className="atn-log-pre atn-preview" aria-label={`Effective prompt for ${task.label}`}>{composeTaskMessage(config.prompt, inputPath, outputPath)}</pre>
+          <p className="atn-hint">{config.skillName ? (skillId ? `Skill: ${skillId}` : `Skill “${config.skillName}” cannot run in an Auto Task.`) : "No skill: the prompt runs on its own."}</p>
+        </>
+      )}
       {task.readOnlyOutput ? <p className="atn-hint">Read-only task: any file it changes is reverted after the run.</p> : null}
     </>
   );

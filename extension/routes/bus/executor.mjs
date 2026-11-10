@@ -2,7 +2,6 @@
 // it, runs it on the job runner and re-checks permission at execution time. HTTP lives in bus-routes.mjs; persistence in
 // kb/bus-store.mjs; engines in engines.mjs. Per user everywhere: every call takes `userId` first, from the session.
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import { createJobRunner } from '../../kb/job-runner.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { classRefusal, getMember } from '../../kb/members.mjs';
@@ -14,7 +13,7 @@ import {
 } from '../../kb/bus-store.mjs';
 import { reapOrphanedRunningSystem } from '../../kb/job-queue.mjs';
 import { resolveProjectRoot } from '../../kb/project-roots.mjs';
-import { buildTrustedRoots, isWithinRoots, isTooBroadRoot } from '../../llm_agent/tools/handlers/repo-files.mjs';
+import { scopedProjectRoot, defaultProjectAllowed } from './project-scope.mjs';
 import { redactValue } from '../../kb/bus-store.mjs';
 import { REGISTRY, COMMAND_SCHEMA, LIMITS, kindInfo, classInfo, decideReceipt, mayApprove } from './registry.mjs';
 import { validate } from './schema-validate.mjs';
@@ -97,12 +96,7 @@ export function createBus({
   const userLimit = Number.isInteger(perUserLimit) && perUserLimit > 0 ? perUserLimit : Math.max(1, maxConcurrent - 1);
   const log = (level, event, data) => { try { logger?.[level]?.(event, data); } catch { /* best effort */ } };
   const projectRootFor = deps.resolveProjectRoot ?? resolveProjectRoot;
-  const projectAllowed = deps.projectAllowed ?? ((userId, root) => {
-    let real; try { real = fs.realpathSync(root); } catch { return false; }
-    if (isTooBroadRoot(real)) return false;
-    let trusted = []; try { trusted = buildTrustedRoots(userId) || []; } catch { trusted = []; }
-    return isWithinRoots(real, trusted);
-  });
+  const projectAllowed = deps.projectAllowed ?? defaultProjectAllowed;
   const review = deps.runReview ?? runReview;
   const sourcesUpdate = deps.runSourcesUpdate ?? runSourcesUpdate;
 
@@ -136,11 +130,7 @@ export function createBus({
       const args = getCommandArgs(userId, job.id) ?? {};
       let root = null;
       if (args.projectId) {
-        try { root = projectRootFor(userId, args.projectId); } catch { fail('project_not_registered'); }
-        if (root && typeof root === 'object') root = root.root;
-        // Check and run in the SAME resolved path: a symlink swapped in after the check is never followed.
-        try { root = fs.realpathSync(root); } catch { fail('project_not_allowed'); }
-        if (!projectAllowed(userId, root)) fail('project_not_allowed');
+        try { root = scopedProjectRoot(userId, args.projectId, { resolve: projectRootFor, allowed: projectAllowed }); } catch (e) { fail(e.message); }
       }
       const emit = (type, payload) => appendEvent(userId, job.id, { type, payload });
       emit('progress', { step: 'checks passed' });

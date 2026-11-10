@@ -16391,6 +16391,8 @@ paths:
                       type: "array"
                       items:
                         type: "string"
+                    focusText:
+                      type: "string"
       responses:
         "200":
           description: "OK"

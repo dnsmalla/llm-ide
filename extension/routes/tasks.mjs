@@ -11,8 +11,27 @@ import { TASKS } from '../core/task-registry.generated.mjs';
 import { runCoreTask, TaskCoreError } from '../agents/task-runner.mjs';
 import { TASK_CLASS } from '../agents/task-classes.mjs';
 import { runSourcesUpdate } from './bus/sources-update.mjs';
+import { KIND_CLASS } from './bus/executor.mjs';
+import { runTask, engineIdFor } from './bus/engines.mjs';
+import { runGit } from './bus/git-safe.mjs';
+import { scopedProjectRoot } from './bus/project-scope.mjs';
+import { runReviewTask } from '../agents/tasks/review.mjs';
+import { runGrouped } from '../core/process-group.mjs';
 
 const BODY_KEYS = new Set(['projectId', 'args']);
+
+// The agent runner's port per bus kind: the engine, git and spawn are supplied here, never imported by agents/.
+const AGENT_PORTS = Object.freeze({
+  review: ({ task, userId, projectRoot, args, signal, emit }) => runReviewTask({
+    userId,
+    args: { ...task.runner.busArgs, ...args },
+    cwd: projectRoot,
+    signal,
+    spawn: (cmd, argv, opts = {}) => runGrouped(cmd, argv, opts),
+    emit,
+    deps: { runTask, engineIdFor, runGit },
+  }).then((r) => ({ ok: true, summary: r.text.split('\n').find((l) => l.trim()) ?? 'completed', output: r.text, warnings: r.truncated ? ['The review was truncated.'] : [] })),
+});
 
 function publicTask(task) {
   const runner = task.runner;
@@ -93,19 +112,39 @@ export async function handleTaskRoutes(req, res, ctx) {
     return failure(res, 404, 'feature_disabled', `The ${feature} feature is off.`, { feature });
   }
   if (task.availability.status !== 'available') return failure(res, 404, 'TASK_NOT_AVAILABLE', task.availability.reason ?? 'This task is not available.');
-  const allowedArgs = task.runner?.route === 'sources-update' ? new Set(['sourceIds']) : new Set();
-  for (const key of Object.keys(raw.args ?? {})) {
-    if (!allowedArgs.has(key)) return failure(res, 400, 'VALIDATION_FAILED', `unknown args field ${key.slice(0, 40)}`);
+  const argSpecs = task.runner?.args ?? {};
+  for (const [key, value] of Object.entries(raw.args ?? {})) {
+    if (key === 'sourceIds' && task.runner?.route === 'sources-update') continue; // checked above
+    const spec = argSpecs[key];
+    if (!spec) return failure(res, 400, 'VALIDATION_FAILED', `unknown args field ${key.slice(0, 40)}`);
+    const ok = spec.type === 'string'
+      ? typeof value === 'string' && value.length <= spec.maxLength
+      : Array.isArray(value) && value.length <= (spec.maxItems ?? 50) && value.every((v) => typeof v === 'string' && v.length <= spec.maxLength);
+    if (!ok) return failure(res, 400, 'VALIDATION_FAILED', `args.${key.slice(0, 40)} is not valid`);
   }
-  if (task.runner?.kind === 'core-route') {
-    const cls = TASK_CLASS[task.runner.route];
-    if (!cls) return failure(res, 400, 'TASK_BAD_ROUTE', `Task "${task.id}" has no action class.`);
+  if (task.runner?.kind === 'agent' && !raw.projectId) return failure(res, 400, 'PROJECT_REQUIRED', 'This task runs on a registered project.');
+  const cls = task.runner?.kind === 'core-route' ? TASK_CLASS[task.runner.route] : task.runner?.kind === 'agent' ? KIND_CLASS[task.runner.busKind] : null;
+  if ((task.runner?.kind === 'core-route' || task.runner?.kind === 'agent') && !cls) {
+    return failure(res, 400, 'TASK_BAD_ROUTE', `Task "${task.id}" has no action class.`);
+  }
+  if (cls) {
     const decision = authorizeAction(getDb(), userId, cls, { req, ...(raw.projectId ? { projectId: raw.projectId } : {}) });
     if (!decision.ok) return failure(res, decision.status, decision.code, decision.message);
   }
+  // An agent task runs in one registered project; the root is the same realpath-checked one a bus job runs in.
+  let projectRoot = null;
+  if (task.runner?.kind === 'agent') {
+    try { projectRoot = scopedProjectRoot(userId, raw.projectId); } catch (err) {
+      return err.message === 'project_not_registered'
+        ? failure(res, 404, 'project_not_registered', 'The project is not registered.')
+        : failure(res, 403, 'project_not_allowed', 'The project is not allowed.');
+    }
+  }
 
+  const runAgent = task.runner?.kind === 'agent' ? AGENT_PORTS[task.runner.busKind] : undefined;
   const deps = {
     runSourcesUpdate,
+    ...(runAgent ? { runAgent } : {}),
     ...(task.runner?.route === 'plan-status' ? {
       creds: {
         github: { token: getSecret(getDb(), userId, 'github.token') || undefined },
@@ -118,7 +157,7 @@ export async function handleTaskRoutes(req, res, ctx) {
     const result = await runCoreTask({
       taskId: task.id,
       userId,
-      projectRoot: null,
+      projectRoot,
       args: raw.args ?? {},
       deps,
     });
