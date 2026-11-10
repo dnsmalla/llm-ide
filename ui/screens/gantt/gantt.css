@@ -1,17 +1,17 @@
-.gnt-root { display: flex; flex-direction: column; gap: var(--tok-space-sm); height: 100%; min-height: 0; padding: var(--tok-space-md); overflow: auto; }
-.gnt-head { display: flex; align-items: flex-end; gap: var(--tok-space-sm); flex-wrap: wrap; }
-.gnt-title { margin: 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); }
+.gnt-root { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; padding: 18px 20px; overflow: auto; box-sizing: border-box; }
+.gnt-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); }
+.gnt-title { margin: 0 auto 0 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); letter-spacing: -0.01em; }
 .gnt-field { display: flex; flex-direction: column; gap: 2px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
-.gnt-field input, .gnt-field select { padding: var(--tok-space-xs); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); color: var(--tok-color-text); font: inherit; }
+.gnt-field input, .gnt-field select { padding: 5px 8px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); color: var(--tok-color-text); font: inherit; }
 .gnt-check { display: flex; align-items: center; gap: 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .gnt-zoom { display: flex; gap: 2px; }
 .gnt-zbtn { padding: var(--tok-space-xs) var(--tok-space-sm); border: 1px solid var(--tok-color-border); background: var(--tok-color-surface); color: var(--tok-color-text-muted); font: inherit; cursor: pointer; }
 .gnt-zbtn[aria-selected="true"] { background: var(--tok-color-surface2); color: var(--tok-color-text); }
-.gnt-btn { padding: var(--tok-space-xs) var(--tok-space-sm); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-surface); color: var(--tok-color-text); font: inherit; cursor: pointer; }
+.gnt-btn { padding: 6px 12px; border: 1px solid var(--tok-color-border); border-radius: 6px; background: var(--tok-color-surface); color: var(--tok-color-text); font: inherit; cursor: pointer; }
 .gnt-primary { background: var(--tok-color-accent); border-color: var(--tok-color-accent); color: var(--tok-color-body); }
 .gnt-hint { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .gnt-empty { margin: var(--tok-space-lg) 0; color: var(--tok-color-text-muted); display: flex; flex-direction: column; gap: var(--tok-space-xs); }
-.gnt-chart { display: flex; min-height: 0; flex: 1; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); overflow: hidden; background: var(--tok-color-surface); }
+.gnt-chart { display: flex; min-height: 0; flex: 1; border: 1px solid var(--tok-color-border); border-radius: 10px; overflow: hidden; background: var(--tok-color-surface); box-shadow: 0 1px 0 color-mix(in srgb, var(--tok-color-text) 4%, transparent); }
 .gnt-labels { flex: none; width: var(--gnt-label, 240px); border-right: 1px solid var(--tok-color-border); display: flex; flex-direction: column; }
 .gnt-labels-head { height: 28px; flex: none; display: flex; align-items: center; padding: 0 var(--tok-space-sm); font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid var(--tok-color-border); }
 .gnt-rowlabel { flex: none; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 var(--tok-space-sm); border: 0; border-bottom: 1px solid var(--tok-color-border); background: none; color: var(--tok-color-text); font: inherit; text-align: left; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -33,7 +33,7 @@
 .gnt-sub { margin: 0 0 var(--tok-space-xs); font-size: var(--tok-type-caption-size); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-color-text-muted); }
 .gnt-ulist { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow: auto; }
 .gnt-link { border: 0; background: none; color: var(--tok-color-accent); font: inherit; cursor: pointer; padding: 0; }
-.gnt-editor { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); padding: var(--tok-space-sm); display: flex; flex-direction: column; gap: var(--tok-space-sm); }
+.gnt-editor { border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-surface); padding: 14px; display: flex; flex-direction: column; gap: var(--tok-space-sm); }
 .gnt-editor-head { display: flex; align-items: baseline; gap: var(--tok-space-sm); }
 .gnt-spacer { flex: 1; }
 .gnt-editor-grid { display: flex; gap: var(--tok-space-sm); flex-wrap: wrap; }
@@ -50,12 +50,13 @@
 
 /* Mac-style issues list beside the timeline. */
 .gnt-labels { width: 340px; }
-.gnt-labels-head { justify-content: space-between; height: 32px; }
+.gnt-labels-head { justify-content: space-between; height: 32px; background: var(--tok-color-surface2); }
 .gnt-count { margin-left: auto; }
 .gnt-rowlabel { position: absolute; left: 0; right: 0; height: 44px; align-items: flex-start; padding: 5px 10px; }
+.gnt-rowlabel:hover { background: var(--tok-color-row-alt); }
 .gnt-rowtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; white-space: normal; font-size: 12px; }
 .gnt-status { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--tok-color-border); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; margin-top: 1px; }
-.gnt-status[data-state="closed"] { background: #2e7d4f; border-color: #2e7d4f; color: #fff; }
+.gnt-status[data-state="closed"] { background: var(--tok-color-accent3); border-color: var(--tok-color-accent3); color: var(--tok-color-body); }
 .gnt-status[data-state="open"] { color: var(--tok-color-text-muted); }
 .gnt-track { height: 44px; align-items: center; }
 .gnt-track[data-on] { background: color-mix(in srgb, var(--tok-color-accent) 8%, transparent); }
@@ -63,17 +64,17 @@
 .gnt-seg .gnt-zbtn { border-radius: 0; }
 .gnt-seg .gnt-zbtn:first-child { border-radius: var(--tok-radius-sm) 0 0 var(--tok-radius-sm); }
 .gnt-seg .gnt-zbtn:last-child { border-radius: 0 var(--tok-radius-sm) var(--tok-radius-sm) 0; }
-.gnt-bar { top: 9px; height: 26px; background: #28c76f; color: #052e16; }
-.gnt-legend [data-tone="open"] { color: #2f9e6e; }
-.gnt-legend [data-tone="closed"] { color: #b07cff; }
-.gnt-legend [data-tone="overdue"] { color: #e5484d; }
+.gnt-bar { top: 9px; height: 26px; background: color-mix(in srgb, var(--tok-color-accent) 72%, var(--tok-color-surface2)); color: var(--tok-color-text); font-weight: 600; border-radius: 6px; }
+.gnt-legend [data-tone="open"] { color: var(--tok-color-accent3); }
+.gnt-legend [data-tone="closed"] { color: var(--tok-color-accent2); }
+.gnt-legend [data-tone="overdue"] { color: var(--tok-color-danger); }
 /* The month band and day header stick to the top of the scroller, so rows scroll under them (the labels column is synced to the same scrollTop). */
 .gnt-thead { position: sticky; top: 0; z-index: 4; background: var(--tok-color-surface); }
 .gnt-header { height: 32px; }
 .gnt-counts { display: flex; gap: 14px; align-items: center; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
-.gnt-counts [data-tone="open"] { color: #2f9e6e; }
-.gnt-counts [data-tone="closed"] { color: #b07cff; }
-.gnt-counts [data-tone="overdue"] { color: #e5484d; }
+.gnt-counts [data-tone="open"] { color: var(--tok-color-accent3); }
+.gnt-counts [data-tone="closed"] { color: var(--tok-color-accent2); }
+.gnt-counts [data-tone="overdue"] { color: var(--tok-color-danger); }
 .gnt-filters { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
 .gnt-filters .gnt-grow { min-width: 240px; }
 .gnt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
