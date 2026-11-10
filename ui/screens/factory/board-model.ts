@@ -14,7 +14,7 @@ export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" 
 export interface CardView {
   key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[];
   costUsd?: number | null; durationSeconds?: number | null; progressLabel?: string | null; lastLine?: string | null;
-  verdict?: string | null; changed?: { files: number; additions: number | null; deletions: number | null } | null;
+  verdict?: string | null; changed?: { files: number; additions: number | null; deletions: number | null; truncated: boolean } | null;
   test?: { command: string | null; ok: boolean | null } | null; failingStage?: { name: string; error: string } | null;
   readiness?: string | null;
 }
@@ -26,7 +26,7 @@ export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeEx
 export function actionsFor(column: Column, note: string | null): CardAction[] {
   switch (column) {
     case "inbox": return note === NOTE.intakeReady ? ["start", "discard"] : ["start", "intake", "discard"];
-    case "needsDecision": return ["answer", "intake", "discard"];
+    case "needsDecision": return ["intake", "discard"];
     case "working": return [];
     case "needsYou":
       if (note === NOTE.interrupted) return ["resume", "discard"];
@@ -45,7 +45,7 @@ export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: f.lastRecord?.readiness ?? null });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null });
   }
   return board;
 }

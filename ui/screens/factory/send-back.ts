@@ -1,7 +1,7 @@
 // Send back: CI failures and PR/MR review comments go to the same worktree as `.factory/FEEDBACK.md`, then a sendBack
 // run repairs, verifies and reviews. A button only; there is no automatic send-back.
 import type { FsApi } from "../explorer/fs";
-import { feedbackMarkdown } from "../loop/native/factory.ts";
+import { feedbackMarkdown, neutralizeFences } from "../loop/native/factory.ts";
 import type { RunMode } from "../loop/native/run-manager.ts";
 import type { ShipStatus } from "./columns.ts";
 import type { WorkItemRecord } from "./items.ts";
@@ -53,7 +53,7 @@ export async function sendBack(deps: { fs: SendBackFs; start: StartRunFn; projec
 
 /** `.factory/DECISIONS.md`: the user's answer to a needs-decision, appended and dated, fenced as data. */
 export async function prepareAnswer(fs: SendBackFs, runRootPrefix: string, answer: string): Promise<void> {
-  const text = answer.trim().slice(0, MAX_NOTE);
+  const text = neutralizeFences(answer.trim().slice(0, MAX_NOTE));
   if (!text) throw new Error("An empty answer cannot continue the run.");
   const dir = `${runRootPrefix}/.factory`;
   const path = `${dir}/DECISIONS.md`;

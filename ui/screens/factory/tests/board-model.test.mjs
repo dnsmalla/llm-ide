@@ -36,7 +36,7 @@ test("actionsFor needsYou with Interrupted is resume, discard", () => {
 test("actionsFor covers every column and every action has a label", () => {
   assert.deepEqual(actionsFor("inbox", null), ["start", "intake", "discard"]);
   assert.deepEqual(actionsFor("inbox", "Intake ready"), ["start", "discard"]);
-  assert.deepEqual(actionsFor("needsDecision", null), ["answer", "intake", "discard"]);
+  assert.deepEqual(actionsFor("needsDecision", null), ["intake", "discard"]);
   assert.deepEqual(actionsFor("working", "Queued"), []);
   assert.deepEqual(actionsFor("needsYou", "CI failed"), ["sendBack", "openRequest", "openDiff", "discard"]);
   assert.deepEqual(actionsFor("needsYou", "New review comments"), ["sendBack", "openRequest", "openDiff", "discard"]);

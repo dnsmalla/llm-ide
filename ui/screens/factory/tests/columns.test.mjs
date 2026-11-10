@@ -110,9 +110,24 @@ test("D2a: decodeRunRecordFacts reads verdict, numstat, verify and the failing s
   };
   const f = decodeRunRecordFacts(raw);
   assert.equal(f.verdict, "Verify failed");
-  assert.deepEqual(f.changed, { files: 2, additions: 12, deletions: 3 });
+  assert.deepEqual(f.changed, { files: 2, additions: 12, deletions: 3, truncated: false });
   assert.deepEqual(f.test, { command: "make test", ok: false });
-  assert.equal(f.failingStage.name, "Verify");
-  assert.equal(f.failingStage.error, "boom\nsecond\nthird");
+  assert.equal(f.failingStage, null, "a needs-decision run has no failing stage");
   assert.equal(f.readiness, "Use Postgres?");
+  const failed = decodeRunRecordFacts({ ...raw, needsDecision: null });
+  assert.equal(failed.failingStage.name, "Verify");
+  assert.equal(failed.failingStage.error, "boom\nsecond\nthird");
+});
+
+test("R-049: the last Verify wins, and a pass or needs-decision has no failing stage", () => {
+  const raw = {
+    statusCode: "success", worktree: { runId: "r1" },
+    config: { stages: [{ id: "v", name: "Verify", kind: "shellCommand", command: "make test" }] },
+    stages: [{ stageName: "Verify", run: { exitCode: 1, stdout: "red" } }, { stageName: "Verify", run: { exitCode: 0, stdout: "green" } }],
+  };
+  const f = decodeRunRecordFacts(raw);
+  assert.deepEqual(f.test, { command: "make test", ok: true });
+  assert.equal(f.failingStage, null);
+  assert.equal(decodeRunRecordFacts({ ...raw, statusCode: "failed" }).failingStage.name, "Verify");
+  assert.equal(decodeRunRecordFacts({ ...raw, statusCode: "failed", needsDecision: "Which database?" }).failingStage, null);
 });

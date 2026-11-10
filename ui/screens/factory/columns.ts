@@ -13,7 +13,7 @@ export interface RunRecordFacts {
   ship: { provider: "github" | "gitlab"; url: string } | null;
   costUsd: number | null; durationSeconds: number | null;
   verdict: string | null;
-  changed: { files: number; additions: number | null; deletions: number | null } | null;
+  changed: { files: number; additions: number | null; deletions: number | null; truncated: boolean } | null;
   test: { command: string | null; ok: boolean | null } | null;
   failingStage: { name: string; error: string } | null;
   readiness: string | null;
@@ -58,8 +58,9 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
   const config = isRecord(raw.config) && Array.isArray(raw.config.stages) ? raw.config.stages.filter(isRecord) : [];
   const verifyConfig = config.find((st) => factoryRole(st as never) === "verify") ?? null;
   const verifyName = verifyConfig && typeof verifyConfig.name === "string" ? verifyConfig.name : null;
-  const verify = verifyName ? stages.find((st) => st.stageName === verifyName) ?? null : null;
-  const failed = stages.find((st) => isRecord(st.run) && st.run.exitCode !== 0) ?? null;
+  const verify = verifyName ? [...stages].reverse().find((st) => st.stageName === verifyName) ?? null : null;
+  const readiness = typeof raw.needsDecision === "string" && raw.needsDecision.trim() !== "" ? raw.needsDecision.slice(0, 2000) : null;
+  const failed = raw.statusCode === "success" || readiness ? null : [...stages].reverse().find((st) => isRecord(st.run) && st.run.exitCode !== 0) ?? null;
   const changedFiles = Array.isArray(d?.files) ? d.files.filter((f): f is string => typeof f === "string").length : null;
   return {
     runId,
@@ -71,10 +72,10 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     costUsd: typeof raw.costUsd === "number" && Number.isFinite(raw.costUsd) ? raw.costUsd : Array.isArray(raw.stages) ? raw.stages.reduce((n, st) => n + (typeof st?.costUsd === "number" && Number.isFinite(st.costUsd) ? st.costUsd : 0), 0) : null,
     durationSeconds: typeof raw.durationSeconds === "number" && Number.isFinite(raw.durationSeconds) ? raw.durationSeconds : null,
     verdict: typeof raw.statusSummary === "string" && raw.statusSummary.trim() !== "" ? raw.statusSummary.slice(0, 500) : null,
-    changed: changedFiles === null ? null : { files: changedFiles, additions: typeof d?.additions === "number" ? d.additions : null, deletions: typeof d?.deletions === "number" ? d.deletions : null },
+    changed: changedFiles === null ? null : { files: changedFiles, additions: typeof d?.additions === "number" ? d.additions : null, deletions: typeof d?.deletions === "number" ? d.deletions : null, truncated: d?.truncated === true },
     test: verify ? { command: typeof verifyConfig?.command === "string" ? verifyConfig.command.slice(0, 300) : null, ok: isRecord(verify.run) ? verify.run.exitCode === 0 : null } : null,
     failingStage: failed && typeof failed.stageName === "string" ? { name: failed.stageName.slice(0, 120), error: displayText(typeof (failed.run as Record<string, unknown>)?.stdout === "string" ? ((failed.run as Record<string, unknown>).stdout as string) : "").split("\n").slice(0, 3).join("\n").slice(0, 600) } : null,
-    readiness: typeof raw.needsDecision === "string" && raw.needsDecision.trim() !== "" ? raw.needsDecision.slice(0, 2000) : null,
+    readiness,
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,
     entry,
   };
