@@ -139,3 +139,12 @@ test("R-047: a quoted secret with symbols and an unquoted one with a comment sti
   assert.equal(shipScan("+PASSWORD: Zx9vQ2LmN8rT4wYb6cHd1234  # prod"), "Credential literal");
   assert.equal(shipScan("+postgres://u:real@localhost_prod.db.io/x"), "URL with credentials");
 });
+
+test("R-048 #3: call forms, shell variables and command substitution pass", () => {
+  for (const line of [
+    "+token = getTokenForUserSession2(request)",
+    "+password = hashPasswordV2(user_password_input)",
+    "+PASSWORD=$DB_PASSWORD_V2_PRODUCTION",
+    '+password: "$(openssl_rand_base64_32)"',
+  ]) assert.equal(shipScan(line), null, line);
+});
