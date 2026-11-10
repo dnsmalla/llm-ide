@@ -57,3 +57,8 @@ test("a registry task's unavailable reason is shown, not the Mac-app copy", () =
   assert.match(m.taskUnavailableReason("issues.from_notes", env), /linked repository/i, "the registry reason, not the Mac copy");
   assert.match(m.taskUnavailableReason("reviewMerge", env), /linked repository/i, "Review & Merge is a registry task: its reason, not the Mac copy");
 });
+
+test("enabledTaskOrder keeps menu order and drops disabled or unavailable tasks", () => {
+  const order = m.enabledTaskOrder(["a", "b", "c"], { a: { enabled: true }, b: { enabled: false }, c: { enabled: true } }, (id) => id !== "c");
+  assert.deepEqual(order, ["a"]);
+});

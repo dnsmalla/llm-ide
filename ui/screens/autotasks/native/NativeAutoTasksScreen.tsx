@@ -7,7 +7,7 @@ import { shellBus } from "../../shell/bus";
 import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
 import { createHostFs } from "../../explorer/fs";
-import { GROUPS, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, AUTO_TASK_ROWS, AUTO_TASK_BY_ID, composeTaskMessage, desktopRunnable, isSchedulable, takeMergedNotice, taskUnavailableReason, scheduleStatusLine, normalizeProjectPath, requiresLinkedRepo, type AutoTaskId } from "./model.ts";
+import { GROUPS, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, AUTO_TASK_ROWS, enabledTaskOrder, AUTO_TASK_BY_ID, composeTaskMessage, desktopRunnable, isSchedulable, takeMergedNotice, taskUnavailableReason, scheduleStatusLine, normalizeProjectPath, requiresLinkedRepo, type AutoTaskId } from "./model.ts";
 import { describeCron, validateCron } from "./cron.ts";
 import { addTemplate, loadTemplates, removeTemplate, saveTemplates, type PromptTemplate } from "./prompt-templates.ts";
 import { scanLibraryFolders, type LibraryFolder } from "./folders.ts";
@@ -65,6 +65,8 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const runAbortRef = useRef<AbortController | null>(null);
   const [customDeleteOpen, setCustomDeleteOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
+  const runAllRef = useRef(false);
   const [log, setLog] = useState<string[]>([]);
   const [runs, setRuns] = useState<TaskRunRecord[]>(() => readTaskRuns());
   // Runs are written by the page and by the scheduler; the list re-reads the one store when either writes.
@@ -126,6 +128,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
 
   /** Stops the running Auto Task (built-in or custom) through its abort signal. */
   const stopTask = () => {
+    runAllRef.current = false;
     runAbortRef.current?.abort();
     setNotice("Stopping the task…");
   };
@@ -136,17 +139,13 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     runAbortRef.current?.abort();
   }, []);
 
-  /** Run Now: the same registry path the scheduler uses, with the page's own approval (a person is present). */
-  const runTask = async (id: AutoTaskId = selected) => {
-    if (running) return;
+  /** One task body; the caller owns the lock and the AbortController. */
+  const executeTask = async (id: AutoTaskId, signal: AbortSignal): Promise<boolean> => {
     const t = AUTO_TASK_BY_ID[id]; const c = state.configs[id];
-    if (!desktopRunnable(id, taskEnv)) { setNotice(taskUnavailableReason(id, taskEnv) ?? "This task cannot run here."); return; }
-    if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
-    if (requiresLinkedRepo(id) && !hasRepo) { setNotice("No linked repository detected. Add one in Settings first."); return; }
-    if (!tryAcquireAutoTask()) { setNotice("Another Auto Task is running; wait for it to finish."); return; }
-    const abort = new AbortController();
-    runAbortRef.current = abort;
-    setRunning(true);
+    if (!desktopRunnable(id, taskEnv)) { setNotice(taskUnavailableReason(id, taskEnv) ?? "This task cannot run here."); return false; }
+    if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return false; }
+    if (requiresLinkedRepo(id) && !hasRepo) { setNotice("No linked repository detected. Add one in Settings first."); return false; }
+    setSelected(id);
     setLog((l) => [...l, `▶ ${t.label}`, ""]);
     const started = new Date();
     const elapsed = () => Math.round((Date.now() - started.getTime()) / 1000);
@@ -157,24 +156,65 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         scheduled: false,
         core,
         fs,
-        signal: abort.signal,
+        signal,
         log: (line) => setLog((l) => [...l, line]),
       });
-      // A user Stop (or leaving the page) aborts the call: it is logged as stopped, not as a failure to notify about.
-      const stopped = abort.signal.aborted;
+      const stopped = signal.aborted;
       const skipped = !outcome.ok && SKIP_CODES.has(outcome.code ?? "");
       const summary = stopped ? "stopped" : outcome.summary;
       appendTaskRun({ id: crypto.randomUUID(), taskId: id, task: t.label, at: started.toISOString(), ok: outcome.ok, ...(skipped ? { skipped } : {}), summary, durationSeconds: elapsed() });
       setNotice(stopped ? `${t.label} stopped.` : outcome.ok ? `${t.label} completed.` : outcome.summary);
       if (!stopped && !skipped) void notifyTask("autotask", outcome.ok);
+      return outcome.ok;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setLog((l) => [...l, message]);
-      const stopped = abort.signal.aborted;
+      const stopped = signal.aborted;
       appendTaskRun({ id: crypto.randomUUID(), taskId: id, task: t.label, at: started.toISOString(), ok: false, summary: stopped ? "stopped" : message, durationSeconds: elapsed() });
       setNotice(stopped ? `${t.label} stopped.` : message || "The task could not run.");
       if (!stopped) void notifyTask("autotask", false);
-    } finally { runAbortRef.current = null; setRunning(false); releaseAutoTask(); }
+      return false;
+    }
+  };
+
+  /** Run Now: one selected task, with the page's own approval (a person is present). */
+  const runTask = async (id: AutoTaskId = selected) => {
+    if (runningRef.current) return;
+    if (!tryAcquireAutoTask()) { setNotice("Another Auto Task is running; wait for it to finish."); return; }
+    const abort = new AbortController();
+    runAbortRef.current = abort;
+    runningRef.current = true;
+    setRunning(true);
+    try { await executeTask(id, abort.signal); }
+    finally { runAbortRef.current = null; runningRef.current = false; setRunning(false); releaseAutoTask(); }
+  };
+
+  /** Run all enabled tasks in menu order, top to bottom. */
+  const runAll = async () => {
+    if (runningRef.current) return;
+    if (!state.masterEnabled) { setNotice("Enable Auto Tasks first."); return; }
+    const ids = enabledTaskOrder(grouped.flatMap(([, list]) => list.map((t) => t.id)), state.configs, (id) => desktopRunnable(id, taskEnv));
+    if (ids.length === 0) { setNotice("No enabled task can run here."); return; }
+    if (!tryAcquireAutoTask()) { setNotice("Another Auto Task is running; wait for it to finish."); return; }
+    const abort = new AbortController();
+    runAbortRef.current = abort;
+    runningRef.current = true;
+    runAllRef.current = true;
+    setRunning(true);
+    let ok = 0;
+    try {
+      for (const id of ids) {
+        if (!runAllRef.current || abort.signal.aborted) break;
+        if (await executeTask(id, abort.signal)) ok += 1;
+      }
+      setNotice(abort.signal.aborted || !runAllRef.current ? `Run all stopped after ${ok} task${ok === 1 ? "" : "s"}.` : `Run all finished: ${ok} of ${ids.length} passed.`);
+    } finally {
+      runAllRef.current = false;
+      runAbortRef.current = null;
+      runningRef.current = false;
+      setRunning(false);
+      releaseAutoTask();
+    }
   };
 
   const openCustom = (task?: CustomAutoTask) => {
@@ -307,6 +347,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         <button type="button" className="atn-model" onClick={() => setLimitsOpen(true)}>Model &amp; Limits</button>
         <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.skipped ? "–" : r.ok ? "✓" : "✗"} {runLabel(r)}</span><span className="atn-hint">{r.skipped ? `Skipped: ${r.summary} · ` : ""}{r.durationSeconds}s · {new Date(r.at).toLocaleString()}</span></li>)}</ul>}</section>
         <section className="atn-history"><h3>Action items</h3><p className="atn-hint">No action items yet. Run Sources → Issue or record a meeting with action items.</p></section>
+        <button type="button" className="atn-btn" disabled={running || !state.masterEnabled} title="Run every enabled task from the top" onClick={() => void runAll()}>▶ Run all</button>
         <button type="button" className="atn-run-now" disabled={!running && !desktopRunnable(selected, taskEnv)} title={running ? "Stop the running task" : !desktopRunnable(selected, taskEnv) ? (selectedReason ?? undefined) : "Run the selected task now"} onClick={running ? stopTask : () => void runTask()}>{running ? "■ Stop" : "▶ Run Now"}</button>
       </aside>
 

@@ -136,3 +136,12 @@ export function scheduleStatusLine(masterEnabled: boolean, c: Pick<TaskConfig, "
   const next = nextFireAfter(c.cron, now);
   return next ? `Scheduled · next ${fireLabel(next)}` : "No upcoming fire";
 }
+
+/** The enabled, runnable tasks in the menu's top-to-bottom order. */
+export function enabledTaskOrder(
+  rows: readonly AutoTaskId[],
+  configs: Readonly<Record<string, { enabled?: boolean } | undefined>>,
+  canRun: (id: AutoTaskId) => boolean,
+): AutoTaskId[] {
+  return rows.filter((id) => configs[id]?.enabled === true && canRun(id));
+}
