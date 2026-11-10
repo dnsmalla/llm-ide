@@ -303,3 +303,13 @@ test("runs that start together in a project without a Factory loop all get the o
     assert.equal(saved[0].id, loops[0].id);
   }
 });
+
+test("a Factory run writes .factory/RUN.json and removes it after the record", async () => {
+  const marks = [];
+  setup({ fsFor: () => ({ write: async (path) => { marks.push(["write", path]); }, remove: async (path) => { marks.push(["remove", path]); } }) });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  assert.deepEqual(marks.find(([k]) => k === "write")?.[1], "system/loop-worktrees/" + a + "/.factory/RUN.json");
+  await finish(a);
+  assert.deepEqual(marks.find(([k]) => k === "remove")?.[1], "system/loop-worktrees/" + a + "/.factory/RUN.json");
+});

@@ -274,6 +274,16 @@ export function cancelRun(runId: string): void {
   emit();
 }
 
+async function writeMarker(fs: FsApi, path: string, text: string): Promise<boolean> {
+  if (typeof fs.write !== "function") return false;
+  try { await fs.write(path, text, { expected_hash: null }); return true; } catch { return false; }
+}
+
+async function clearMarker(fs: FsApi, path: string): Promise<void> {
+  if (typeof fs.remove !== "function") return;
+  await fs.remove(path).catch(() => undefined);
+}
+
 async function execute(run: ManagedRun): Promise<void> {
   const d = requireDeps();
   const started = d.now();
@@ -312,9 +322,9 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   const info = run.reuse ? await findWorktree(d, run.live.runId) : await prepareWorktree(d, run);
   if (!info) { fail(run, `The worktree of run ${run.live.runId} no longer exists; the run did not start.`); return null; }
   const marker = `${repoPrefixFor(run.live.projectRoot, info.worktree)}/.factory/RUN.json`;
-  try {
-    await fs.write(marker, JSON.stringify({ runId: run.live.runId, mode: run.live.mode, startedAt: new Date().toISOString(), itemKey: run.item.key }), { expected_hash: null });
-  } catch { log("The run marker could not be written; an interrupted run may not offer Resume."); }
+  if (!(await writeMarker(fs, marker, JSON.stringify({ runId: run.live.runId, mode: run.live.mode, startedAt: new Date().toISOString(), itemKey: run.item.key })))) {
+    log("The run marker could not be written; an interrupted run may not offer Resume.");
+  }
   const ctx: StageExecContext = {
     projectRoot: run.live.projectRoot, runId: run.live.runId, runRoot: info.worktree, fs, host: d.host, core: d.core, log,
     approvalToken: async () => token, signal: run.abort.signal,
@@ -388,7 +398,7 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
     await d.appendRecord(fs, entry, record);
     if (copy) await d.copyReadiness(fs, prefix, live.runId, ended);
     // Same write closure as the record, so flushPending also clears the marker when the project is reopened.
-    await fs.remove(marker).catch(() => undefined);
+    await clearMarker(fs, marker);
   };
   if (d.activeProject() === live.projectRoot) { await write(); return; }
   appendLog(run, "The run's project is not open; its record is saved when you open it again.");
