@@ -8,11 +8,14 @@ import type { LoopDefinition, LoopStage, LoopStageKind } from "../loop/native/mo
 import { faultPathsFromOutput, reopenFault } from "../loop/native/regression.ts";
 import { runOneStage, type StageExecContext } from "../loop/native/stage-exec.ts";
 import { resolveTaskId, taskById } from "./model.ts";
+import { selectNextReadyIssue, type IssueRow } from "./select-issues.ts";
 import type { RunnerKind, TaskDef, TaskStageDef } from "./types.ts";
 
 export interface TaskActions {
   /** Start one Factory run per issue. Implemented by the Auto Tasks/Factory wiring (Task 7). */
   startFactory?(issueIds: readonly string[], projectRoot: string): Promise<{ runIds: string[] }>;
+  /** Item keys already on the Factory board, so an issue is never started twice. */
+  factoryItemKeys?(projectRoot: string): Promise<ReadonlySet<string>>;
   /** Open the latest passed Factory run for review; never ships. Implemented in Task 8. */
   reviewPendingMerge?(projectRoot: string, runId: string | null): Promise<{ runId: string | null; reviewed: boolean }>;
 }
@@ -179,8 +182,17 @@ async function runCore(task: TaskDef, ctx: TaskRunContext): Promise<TaskResult> 
   }
 }
 
-async function runDesktopAction(task: TaskDef, _ctx: TaskRunContext): Promise<TaskResult> {
+async function runDesktopAction(task: TaskDef, ctx: TaskRunContext): Promise<TaskResult> {
   const action = task.runner?.action;
+  if (action === "factory.start") {
+    const body = await ctx.core.request<{ issues?: IssueRow[] }>("/kb/issues?state=open", { method: "GET" });
+    const taken = ctx.actions.factoryItemKeys ? await ctx.actions.factoryItemKeys(ctx.projectRoot) : new Set<string>();
+    const issue = selectNextReadyIssue(body.issues ?? [], taken);
+    if (!issue) return { taskId: task.id, ok: false, runner: "desktop-action", summary: "No ready issue.", output: "", changedPaths: [], warnings: [], code: "NO_READY_ISSUE" };
+    if (!ctx.actions.startFactory) throw new TaskRunError("TASK_NOT_IMPLEMENTED", "The Factory start action is not wired.");
+    const { runIds } = await ctx.actions.startFactory([issue.id], ctx.projectRoot);
+    return { taskId: task.id, ok: runIds.length > 0, runner: "desktop-action", summary: `Started Factory run for issue #${issue.number ?? issue.id}.`, output: runIds.join("\n"), changedPaths: [], warnings: [] };
+  }
   throw new TaskRunError("TASK_NOT_IMPLEMENTED", `Desktop action "${action ?? "(none)"}" for task "${task.id}" is not wired yet.`);
 }
 

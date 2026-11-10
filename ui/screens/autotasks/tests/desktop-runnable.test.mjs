@@ -4,10 +4,10 @@ import * as m from "../native/model.ts";
 
 // The Mac's structural tasks (AutoTask.isStructural) run deterministic code; the desktop must never send them to the agent.
 test("Mac structural tasks are not runnable; Regression now runs via the task registry", () => {
-  const mac = ["sourcesToIssue", "implementIssues", "reviewMerge"];
+  const mac = ["sourcesToIssue", "reviewMerge"];
   assert.deepEqual([...m.MAC_ONLY_TASK_IDS].sort(), [...mac].sort());
   for (const id of mac) assert.equal(m.desktopRunnable(id), false, id);
-  for (const id of ["sourceUpdate", "updatePlanStatus", "reviewCode", "reviewDoc", "reviewConflicts", "updateIssues"]) assert.equal(m.desktopRunnable(id), true, id);
+  for (const id of ["sourceUpdate", "updatePlanStatus", "reviewCode", "reviewDoc", "reviewConflicts", "updateIssues", "implementIssues"]) assert.equal(m.desktopRunnable(id), true, id);
   assert.equal(m.desktopRunnable("generateKnowledge"), false);
   assert.equal(m.desktopRunnable("generateDoc"), false);
   assert.match(m.MAC_ONLY_MESSAGE, /^This task runs deterministic code in the Mac app; the desktop does not run it yet\.$/);
@@ -16,6 +16,7 @@ test("Mac structural tasks are not runnable; Regression now runs via the task re
   assert.equal(m.TASKS.some((t) => t.id === "regression"), false, "the legacy Regression row is gone");
   assert.equal(m.TASKS.some((t) => t.id === "sourceUpdate"), false, "the legacy Source Update row is gone");
   assert.equal(m.TASKS.some((t) => t.id === "updatePlanStatus"), false, "the legacy Update Plan Status row is gone");
+  assert.equal(m.TASKS.some((t) => t.id === "implementIssues"), false, "the legacy Implement Issues row is gone");
   assert.equal(m.desktopRunnable("regression"), true, "the alias resolves to the runnable registry task");
 });
 

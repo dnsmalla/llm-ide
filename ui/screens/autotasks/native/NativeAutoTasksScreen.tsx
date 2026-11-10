@@ -249,7 +249,31 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           approvalToken: async () => approvalToken,
           changedPaths: changedPathsNow,
           revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
-          actions: {},
+          actions: {
+            factoryItemKeys: async () => {
+              const { readItems } = await import("../../factory/items.ts");
+              return new Set((await readItems(createHostFs())).map((i) => i.key));
+            },
+            startFactory: async (issueIds) => {
+              const [{ startRun }, host, intake, items] = await Promise.all([
+                import("../../loop/native/run-manager.ts"),
+                import("../../loop/native/run-manager-host.ts"),
+                import("../../factory/intake.ts"),
+                import("../../factory/items.ts"),
+              ]);
+              host.installRunManagerHost();
+              const body = await core.request<{ issues?: Array<{ id: string; number: number | null; title: string; body: string; state: string; isPR: boolean; labels?: unknown }> }>("/kb/issues?state=open", { method: "GET" });
+              const wanted = new Set(issueIds);
+              const runIds: string[] = [];
+              for (const issue of (body.issues ?? []).filter((i) => wanted.has(i.id))) {
+                const { record } = await items.addItem(createHostFs(), intake.workItemFromIssue(issue as never));
+                const runId = startRun(projectRoot ?? "", record, "full");
+                await items.attachRun(createHostFs(), record.key, runId);
+                runIds.push(runId);
+              }
+              return { runIds };
+            },
+          },
         });
         setLog((l) => [...l, result.output]);
         setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: result.ok, summary: result.summary, durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));

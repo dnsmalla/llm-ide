@@ -36,7 +36,6 @@ const RETIRED_DEFAULT_PROMPTS: Readonly<Record<string, string>> = {
 
 const LEGACY_TASKS: readonly AutoTaskDef[] = [
   { id: "sourcesToIssue", label: "Sources → Issue", group: "Pipeline", prompt: "Turn the unresolved action items in the latest sources into tracked issues. Report every issue you create." },
-  { id: "implementIssues", label: "Implement Issues", group: "Pipeline", prompt: "Pick the next open issue that is ready to implement, implement it, and report the changed files and test result." },
   { id: "reviewMerge", label: "Review & Merge", group: "Pipeline", prompt: "Review the pending merge request for bugs, missing tests and unintended changes. Report findings; do not merge." },
   { id: "updateIssues", label: "Update Issues", group: "Automation", prompt: "Update the tracked issues with the current status and evidence from the repository. Report every issue you change." },
 ];
@@ -101,7 +100,7 @@ export function saveState(s: AutoTaskLocalState, storage: Storage | undefined = 
  *  run deterministic code in the Mac app; the desktop has no such code, so it must never send them to the agent as an
  *  invented prompt. They stay listed, but are not runnable here, and a schedule never fires them. */
 export const MAC_ONLY_TASK_IDS: ReadonlySet<AutoTaskId> = new Set<AutoTaskId>([
-  "sourcesToIssue", "implementIssues", "reviewMerge",
+  "sourcesToIssue", "reviewMerge",
 ]);
 export const MAC_ONLY_MESSAGE = "This task runs deterministic code in the Mac app; the desktop does not run it yet.";
 

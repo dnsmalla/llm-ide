@@ -40,6 +40,46 @@ export const TASKS: readonly TaskDef[] = [
     "revision": 1
   },
   {
+    "id": "issues.implement",
+    "label": "Implement Issues",
+    "group": "Pipeline",
+    "description": "Start one Factory run for the oldest ready issue with no Factory card; never types an agent prompt.",
+    "aliases": [
+      "implementIssues"
+    ],
+    "runner": {
+      "kind": "desktop-action",
+      "action": "factory.start"
+    },
+    "input": {
+      "kind": "issues",
+      "required": true,
+      "selector": "next-ready"
+    },
+    "output": {
+      "kind": "text",
+      "persist": "run-record",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [
+      "gantt_issues"
+    ],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
     "id": "knowledge.update",
     "label": "Knowledge",
     "group": "Maintenance",
@@ -397,6 +437,7 @@ export const TASK_BY_ID: Readonly<Record<string, TaskDef>> = Object.freeze(Objec
 export const ALIASES: Readonly<Record<string, string>> = Object.freeze({
   "generateDoc": "docs.generate",
   "generateKnowledge": "knowledge.update",
+  "implementIssues": "issues.implement",
   "regression": "loop.regression",
   "reviewCode": "review.code",
   "reviewConflicts": "review.conflicts",
