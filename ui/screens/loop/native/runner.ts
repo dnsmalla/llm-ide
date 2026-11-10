@@ -61,7 +61,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     const reason = deps.halt?.();
     if (!reason) return null;
     const errored = deps.haltIsError?.() === true;
-    return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: reason, ...(errored ? { errored: true } : { blocked: true }) };
+    return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: reason, ...(errored ? { errored: true } : { blocked: true }) };
   };
   const heldOutcome = async (): Promise<LoopRunOutcome | null> => {
     if (!deps.holdWhilePaused) return null;
@@ -70,14 +70,14 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     pausedMs += Date.now() - since;
     if (result !== "timedOut") return null;
     deps.log("pause timed out without a resume; the run is aborted to release the loop");
-    return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "pause timed out without a resume; the run was aborted", cancelled: true };
+    return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "pause timed out without a resume; the run was aborted", cancelled: true };
   };
 
   for (let iteration = 1; iteration <= Math.max(1, config.maxIterations); iteration++) {
     const heldAtStart = await heldOutcome();
     if (heldAtStart) return heldAtStart;
-    if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
-    if (expired()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
+    if (deps.isCancelled?.()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
+    if (expired()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
     const haltAtStart = haltedOutcome();
     if (haltAtStart) return haltAtStart;
     iterationsUsed = iteration;
@@ -91,8 +91,8 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       }
       const heldAtStage = await heldOutcome();
       if (heldAtStage) return heldAtStage;
-      if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
-      if (expired()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
+      if (deps.isCancelled?.()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
+      if (expired()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
       const haltAtStage = haltedOutcome();
       if (haltAtStage) return haltAtStage;
       const result = await deps.runStage(stage, outcomes);
@@ -116,20 +116,20 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     // A halt raised by the blocking stage itself (its agent call wrote something it must not) ends the run before any repair.
     const haltAfterFailure = haltedOutcome();
     if (haltAfterFailure) { iterations.push({ index: iteration, stages: iterationOutcomes, repair: null }); return haltAfterFailure; }
-    if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
+    if (deps.isCancelled?.()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     const used = repairs.get(failed.stage.id) ?? 0;
     if (!failed.stage.allowsRepair) {
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
-      return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair is disabled for this stage` };
+      return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair is disabled for this stage` };
     }
     if (used >= Math.max(1, config.maxRepairsPerStage)) {
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
-      return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair budget exhausted` };
+      return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair budget exhausted` };
     }
     // Pause holds before a repair attempt too, as it does between stages; Stop while paused ends the run here.
     const heldBeforeRepair = await heldOutcome();
     if (heldBeforeRepair) return heldBeforeRepair;
-    if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
+    if (deps.isCancelled?.()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     deps.log(`↻ repairing ${failed.stage.name} (attempt ${used + 1} of ${Math.max(1, config.maxRepairsPerStage)})`);
     const repair = await deps.repair(failed.stage, failed.output, used + 1);
     spentUsd += repair.usage?.costUsd ?? 0;
@@ -140,19 +140,19 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     iterations.push({ index: iteration, stages: iterationOutcomes, repair: { stageId: failed.stage.id, attempt: used + 1, ok: repair.ok } });
     const haltAfterRepair = haltedOutcome();
     if (haltAfterRepair) return haltAfterRepair;
-    if (deps.isCancelled?.()) return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
+    if (deps.isCancelled?.()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     if (!repair.ok) {
-      return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair did not complete` };
+      return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair did not complete` };
     }
     const signature = failed.output.trim().slice(0, 2000);
     if (signature === lastFailure) nonImproving += 1; else nonImproving = 1;
     lastFailure = signature;
     if (nonImproving >= Math.max(1, config.consecutiveFailureStop)) {
-      return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed ${nonImproving} times without improvement` };
+      return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed ${nonImproving} times without improvement` };
     }
   }
   const last = outcomes[outcomes.length - 1] ?? null;
-  return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: last?.stage ?? null, statusSummary: `max iterations (${iterationsUsed}) reached` };
+  return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: last?.stage ?? null, statusSummary: `max iterations (${iterationsUsed}) reached` };
 }
 
 /**

@@ -248,3 +248,12 @@ export function cleanupPlan(
   }
   return { remove, keep };
 }
+
+/** Human duration for a card: 45s, 5m, 1h 30m. */
+export function formatDuration(seconds: number): string {
+  const n = Math.max(0, Math.round(seconds));
+  if (n < 60) return `${n}s`;
+  const minutes = Math.floor(n / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}

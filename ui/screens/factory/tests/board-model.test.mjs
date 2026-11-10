@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -165,4 +165,10 @@ test("cleanup keeps a live Loop-page run and an orphan with unshipped changes", 
   assert.equal(marked.remove.length, 0);
   assert.equal(marked.keep[0].runId, "r-loop");
   assert.ok(plan.keep.some((k) => k.runId === "r-dirty" && /Discard/.test(k.reason)));
+});
+
+test("formatDuration is human, not raw seconds", () => {
+  assert.equal(formatDuration(45), "45s");
+  assert.equal(formatDuration(300), "5m");
+  assert.equal(formatDuration(5400), "1h 30m");
 });
