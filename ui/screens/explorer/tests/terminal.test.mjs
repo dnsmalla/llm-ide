@@ -246,7 +246,7 @@ test("screen: explorer renders the panel switcher, search panel and terminal str
   assert.match(out, /id="ex-panel-search"[^>]*hidden/);
   assert.doesNotMatch(out, /id="ex-panel-explorer"[^>]*hidden/);
   assert.match(out, /role="searchbox"/);
-  assert.match(out, /aria-expanded="false"[^>]*>Terminal</);
+  assert.match(out, /aria-expanded="false"[^>]*>[\s\S]*?Terminal</);
   assert.equal(host.spawns, 0);
 });
 

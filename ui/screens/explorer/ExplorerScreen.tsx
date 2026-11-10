@@ -2,7 +2,7 @@
 // `controller.ts` and the pure models, which are tested without a DOM.
 import { shellBus } from "../shell/bus";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Chip, Icon, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
+import { Chip, Icon, ResizableDivider, StatusBanner, TerminalIcon } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
 import { ExplorerController } from "./controller";
 import { ConfirmDialog, ProjectFoldersDialog, PromptDialog, UnsavedDialog, type ProjectFolderRow } from "./Dialogs";
@@ -498,8 +498,9 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
         {TERMINAL_BUILT && dockEver && !runtime && dockOpen && <p className="tm-empty" role="status">Loading terminal…</p>}
         <div className="tm-strip">
           {TERMINAL_BUILT ? (
-            <button type="button" className="ex-link tm-toggle" aria-expanded={dockOpen} aria-controls="tm-dock" title="Toggle terminal (Ctrl+`)" onClick={() => openDock(!dockOpen)}>
-              Terminal
+            <button type="button" className="ex-tool tm-toggle" aria-expanded={dockOpen} aria-controls="tm-dock" title={dockOpen ? "Hide terminal (Ctrl+`)" : "Show terminal (Ctrl+`)"} onClick={() => openDock(!dockOpen)} data-open={dockOpen || undefined}>
+              <TerminalIcon />
+              <span>Terminal</span>
             </button>
           ) : null}
           <span className="ex-spacer" />

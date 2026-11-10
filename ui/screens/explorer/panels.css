@@ -37,7 +37,10 @@
 .sx-mark { background: color-mix(in srgb, var(--tok-color-warning) 40%, transparent); color: inherit; border-radius: 2px; }
 
 /* ---- terminal dock ---- */
-.tm-strip { flex: none; display: flex; align-items: center; border-top: 1px solid var(--tok-color-border); padding: 2px var(--tok-space-sm); background: var(--tok-color-surface); }
+.tm-strip { flex: none; display: flex; align-items: center; border-top: 1px solid var(--tok-color-border); padding: 5px 12px; background: var(--tok-color-surface); }
+.tm-toggle { display: inline-flex; align-items: center; gap: 6px; }
+.tm-toggle[data-open] { border-color: var(--tok-color-accent); color: var(--tok-color-text); background: color-mix(in srgb, var(--tok-color-accent) 12%, var(--tok-color-surface2)); }
+.tm-toggle svg { width: 13px; height: 13px; }
 .tm-dock { flex: none; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--tok-color-border); background: var(--tok-color-body); }
 .tm-dock[hidden] { display: none; }
 .tm-resizer { height: 5px; margin-top: -3px; cursor: ns-resize; flex: none; }
