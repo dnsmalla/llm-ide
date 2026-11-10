@@ -12,7 +12,7 @@ import { core } from "../../shell/runtime";
 import { isBatchSkill, isManualOnly, loadLoops, macBatchReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
 import { detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
@@ -24,7 +24,7 @@ import { cronMatches, describeCron, validateCron } from "../../autotasks/native/
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
-import { FACTORY_DEFAULT_KEY, FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, factoryTestCommand, isFactoryLoop, needsDecisionSummary, taskMarkdown, withSetupCommand, type WorkItem } from "./factory.ts";
+import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
@@ -349,15 +349,26 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   };
 
   const addLoopFromTemplate = (t: LoopTemplate) => {
-    const factory = t.id === FACTORY_TEMPLATE.id;
-    const command = factory ? factoryTestCommand(testCommand, (m, d) => window.prompt(m, d)) : testCommand;
-    if (factory && !command) { setNotice("The Factory needs a test command for its Verify stage."); return; }
+    if (t.id === FACTORY_TEMPLATE.id) {
+      // The Factory is a default loop and runs use the project's one Factory loop, so the template opens it.
+      const existing = store?.loops.find(isFactoryLoop) ?? null;
+      if (existing) {
+        setSelectedLoopId(existing.id);
+        setSelectedStageId(existing.config.stages[0]?.id ?? null);
+        setNotice(factoryVerifyProblem(existing.config) ?? "This project already has its Factory loop.");
+        return;
+      }
+      const added = factoryLoop(testCommand, loopDefaults);
+      mutateStore((s) => { s.loops.push(added); });
+      setSelectedLoopId(added.id);
+      setSelectedStageId(null);
+      return;
+    }
     const id = crypto.randomUUID();
     mutateStore((s) => {
       s.loops.push({
         id, name: t.name, isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [],
-        defaultKey: factory ? FACTORY_DEFAULT_KEY : null, runsOnSchedule: false,
-        config: factory ? withSetupCommand(applyTemplate(t, command), command) : applyTemplate(t, command),
+        defaultKey: null, runsOnSchedule: false, config: applyTemplate(t, testCommand),
       });
     });
     setSelectedLoopId(id);
@@ -377,7 +388,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   };
 
   const deleteLoop = () => {
-    if (!store || !loop || (loop.defaultKey !== null && !isFactoryLoop(loop)) || store.loops.length <= 1) return;
+    if (!store || !loop || loop.defaultKey !== null || store.loops.length <= 1) return;
     if (!window.confirm(`Delete “${loop.name}”? Its stages stay in loop.json but the loop disappears from this project.`)) return;
     mutateStore((s) => {
       s.loops = s.loops.filter((l) => l.id !== loop.id);
@@ -517,6 +528,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     // A loop.json from a cloned repo can mark a code-applying loop runsOnSchedule; it still never runs unattended.
     // A Factory run needs a picked work item; the schedule and the queue never have one.
     if (isFactoryLoop(target) && !start) { setNotice(`“${target.name}” is a Factory loop: start it with ▶ Run and pick a work item.`); return; }
+    const verifyProblem = isFactoryLoop(target) ? factoryVerifyProblem(target.config) : null;
+    if (verifyProblem) { setNotice(verifyProblem); return; }
     if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
     const batchBlock = macBatchReason(target);
     if (batchBlock) { setNotice(batchBlock); return; }
@@ -840,14 +853,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <button type="button" className="loop-btn" disabled={loop.isPrimary} onClick={setPrimary}>★ Primary</button>
           <button type="button" className="loop-btn" disabled={isManualOnly(loop)} title={isManualOnly(loop) ? "Manual-only: it applies code" : "Include in the scheduled run"} onClick={() => patchLoop((l) => { l.runsOnSchedule = !l.runsOnSchedule; })}>{loop.runsOnSchedule ? "◷ Scheduled" : "◷ Schedule"}</button>
           <button type="button" className="loop-btn" onClick={duplicateLoop}>Duplicate</button>
-          {(loop.defaultKey === null || isFactoryLoop(loop)) && store.loops.length > 1 ? <button type="button" className="loop-btn" onClick={deleteLoop}>Delete</button> : null}
+          {loop.defaultKey === null && store.loops.length > 1 ? <button type="button" className="loop-btn" onClick={deleteLoop}>Delete</button> : null}
         </div>
         <ul className="loop-list">
           {store.loops.map((l) => (
             <li key={l.id}>
               <button type="button" className="loop-row" data-on={l.id === loop.id || undefined} onClick={() => selectLoop(l)}>
                 <span className="loop-row-name">{l.name}</span>
-                <span className="loop-row-icons">{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}{l.defaultKey !== null && !isFactoryLoop(l) ? <span className="loop-lock" title="Built-in loop: it can't be deleted">{LOCK_ICON}</span> : null}</span>
+                <span className="loop-row-icons">{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}{l.defaultKey !== null ? <span className="loop-lock" title="Built-in loop: it can't be deleted">{LOCK_ICON}</span> : null}</span>
                 <span className="loop-row-menu" aria-hidden="true">⋯</span>
               </button>
             </li>
@@ -973,7 +986,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <button type="button" className="loop-btn" onClick={() => {
               const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === templateId);
               if (!t) return;
-              if (t.id === FACTORY_TEMPLATE.id) { setNotice("Add the Factory as a new loop from “＋ New loop…”; it cannot be applied over an existing loop."); return; }
+              if (t.id === FACTORY_TEMPLATE.id) { setNotice("The Factory is its own loop in the list on the left; it cannot be applied over another loop."); return; }
               const config = applyTemplate(t, testCommand);
               if (config.stages.length === 0) { setNotice("This recipe needs a detected test command; none was found."); return; }
               patchLoop((l) => { l.config = config; });

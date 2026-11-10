@@ -4,7 +4,7 @@ import type { LoopDefinition, LoopEngineConfig, LoopProjectStore, LoopStage } fr
 import type { LoopDefaults } from "../../shell/host-prefs.ts";
 import { DETECTED_TEST } from "./environment.ts";
 import { DEFAULT_LOOP_SPECS } from "./defaults.ts";
-import { FACTORY_TEMPLATE } from "./factory.ts";
+import { FACTORY_DEFAULT_KEY, FACTORY_TEMPLATE, withSetupCommand } from "./factory.ts";
 
 export interface LoopTemplate {
   id: string;
@@ -70,18 +70,29 @@ BUILT_IN_TEMPLATES.push(
   FACTORY_TEMPLATE,
 );
 
-/** Apply a recipe to a repo: new stage ids, resolved test commands, and no Mac "default" identities. */
-export function applyTemplate(t: LoopTemplate, detected: string | null): LoopEngineConfig {
+/** Apply a recipe to a repo: new stage ids, resolved test commands, and no Mac "default" identities. A test stage
+ *  with no detected command is dropped, or kept with an empty command when `keepUndetected` (the Factory's Verify). */
+export function applyTemplate(t: LoopTemplate, detected: string | null, keepUndetected = false): LoopEngineConfig {
   const c = structuredClone(t.config);
   c.stages = c.stages.flatMap((s) => {
     const copy = { ...s, id: crypto.randomUUID(), isDefault: false, defaultKey: null };
     if (copy.command === DETECTED_TEST) {
-      if (!detected) return [];
-      copy.command = detected;
+      if (!detected && !keepUndetected) return [];
+      copy.command = detected ?? "";
     }
     return [copy];
   }).map((s, i) => ({ ...s, order: i }));
   return c;
+}
+
+/** The project's Factory loop, a default loop. Without a detected test command Verify keeps an empty command, so the
+ *  loop exists everywhere and a run names the missing command (`factoryVerifyProblem`) instead of skipping the tests. */
+export function factoryLoop(testCommand: string | null, defaults?: LoopDefaults): LoopDefinition {
+  return {
+    id: crypto.randomUUID(), name: FACTORY_TEMPLATE.name, isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [],
+    defaultKey: FACTORY_DEFAULT_KEY, runsOnSchedule: false,
+    config: applyLoopDefaults(withSetupCommand(applyTemplate(FACTORY_TEMPLATE, testCommand, true), testCommand), defaults),
+  };
 }
 
 // User recipes are app-wide like the Mac's LoopTemplateStore, not project state. Stored locally; built-ins are
@@ -173,6 +184,7 @@ export function initialProjectStore(testCommand: string | null, defaults?: LoopD
     loop.config = applyLoopDefaults(loop.config, defaults);
     return loop;
   });
+  loops.push(factoryLoop(testCommand, defaults));
   const first = loops.find((l) => l.defaultKey === "regression") ?? loops[0];
   if (first && !loops.some((l) => l.isPrimary)) first.isPrimary = true;
   return { schemaVersion: 2 as const, loops };
@@ -220,6 +232,10 @@ export function ensureDefaultLoops(store: LoopProjectStore, testCommand: string 
     if (loops.some((l) => l.isPrimary)) loop.isPrimary = false;
     loops.push(loop);
     added.push(spec.name);
+  }
+  if (!have.has(FACTORY_DEFAULT_KEY)) {
+    loops.push(factoryLoop(testCommand, defaults));
+    added.push(FACTORY_TEMPLATE.name);
   }
   return { store: { ...store, loops }, added };
 }

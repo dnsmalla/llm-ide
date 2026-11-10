@@ -3,22 +3,41 @@ import assert from "node:assert/strict";
 import * as f from "../native/factory.ts";
 // The Phase B tests below use these names directly; the namespace import above stays for the Phase A tests.
 import { FACTORY_TEMPLATE, configFor, factoryRole, feedbackMarkdown } from "../native/factory.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate } from "../native/templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, ensureDefaultLoops, factoryLoop, initialProjectStore } from "../native/templates.ts";
 import { DETECTED_TEST } from "../native/environment.ts";
 import { decodeRepoConfig } from "../../settings/repo-config.ts";
 import { DEFAULT_LOOP_SPECS } from "../native/defaults.ts";
 
-test("the Factory asks once for a test command when none was detected", () => {
-  const asked = [];
-  const custom = f.factoryTestCommand(null, (message, fallback) => { asked.push([message, fallback]); return "  ./scripts/test.sh  "; });
-  assert.equal(custom, "./scripts/test.sh");
-  assert.equal(asked.length, 1);
-  assert.equal(f.factoryTestCommand("npm test", () => { throw new Error("must not ask when detected"); }), "npm test");
-  assert.equal(f.factoryTestCommand(null, () => null), null);
+test("the Factory is a default loop of every project, with or without a detected test command", () => {
+  // Not a Mac starter spec: it is built from FACTORY_TEMPLATE.
+  assert.doesNotMatch(JSON.stringify(DEFAULT_LOOP_SPECS), /factory/i);
+  for (const command of ["npm test", null]) {
+    const loops = initialProjectStore(command).loops.filter(f.isFactoryLoop);
+    assert.equal(loops.length, 1);
+    assert.equal(loops[0].isPrimary, false);
+    const verify = loops[0].config.stages.find((s) => f.factoryRole(s) === "verify");
+    assert.equal(verify.command, command ?? "", "Verify is kept, never dropped");
+    assert.equal(verify.enabled, true);
+    assert.equal(loops[0].config.stages.length, 8);
+  }
 });
 
-test("the factory is not one of the starter loops seeded into every project", () => {
-  assert.doesNotMatch(JSON.stringify(DEFAULT_LOOP_SPECS), /factory/i);
+test("an existing project gets the Factory loop once, and an existing one is left alone", () => {
+  const before = { schemaVersion: 2, loops: initialProjectStore("npm test").loops.filter((l) => !f.isFactoryLoop(l)) };
+  const r = ensureDefaultLoops(before, null);
+  assert.deepEqual(r.added, ["Factory"]);
+  const again = ensureDefaultLoops(r.store, "npm test");
+  assert.deepEqual(again.added, []);
+  assert.equal(again.store.loops.filter(f.isFactoryLoop).length, 1);
+});
+
+test("a Factory whose Verify has no command names the stage instead of running without tests", () => {
+  const none = factoryLoop(null).config;
+  assert.match(f.factoryVerifyProblem(none), /“Verify” stage has no test command/);
+  assert.equal(f.factoryVerifyProblem(factoryLoop("npm test").config), null);
+  // intakeOnly never runs Verify, so it may start; a Verify the user switched off is their choice.
+  assert.equal(f.factoryVerifyProblem(configFor("intakeOnly", none)), null);
+  assert.equal(f.factoryVerifyProblem({ stages: none.stages.map((s) => (f.factoryRole(s) === "verify" ? { ...s, enabled: false } : s)) }), null);
 });
 
 test("factory template has the 8 stages in order with runOnce and gates as specified", () => {

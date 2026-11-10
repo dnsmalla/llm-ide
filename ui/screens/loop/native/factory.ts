@@ -61,11 +61,10 @@ export const FACTORY_TEMPLATE: LoopTemplate = {
 };
 
 
-/** The Factory needs a Verify command. Use the detected one, or ask once for a custom runner. */
-export function factoryTestCommand(detected: string | null, ask: (message: string, fallback: string) => string | null): string | null {
-  if (detected) return detected;
-  const entered = ask("The Factory needs a test command for its Verify stage. Enter one:", "npm test");
-  return entered?.trim() || null;
+/** Why these Factory stages cannot run: an enabled Verify stage has no command (none was detected for the project). */
+export function factoryVerifyProblem(config: Pick<LoopEngineConfig, "stages">): string | null {
+  const empty = config.stages.find((s) => s.enabled && factoryRole(s) === "verify" && !s.command?.trim());
+  return empty ? `The Factory's “${empty.name}” stage has no test command. Open Loop → Factory → ${empty.name}, enter the command that runs this repository's tests, and save.` : null;
 }
 
 export function isFactoryLoop(loop: LoopDefinition): boolean {

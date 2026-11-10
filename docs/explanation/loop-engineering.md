@@ -155,6 +155,14 @@ the TEMPLATE section now warns that applying replaces and saves.
 
 ### The Factory template
 
+The Factory is a default loop: every project gets one (`defaultKey` `factory`),
+added to `system/loop.json` when the Loop page opens or when the first Factory
+run starts, and like the other default loops it cannot be deleted. Its Verify
+stage takes the project's detected test command. When none is detected the
+stage is kept with an empty command, and a run that needs Verify does not start
+until the command is entered in Loop → Factory → Verify; the tests are never
+skipped silently.
+
 The Factory template runs one work item (an issue, a file under `llm-doc/`, or
 free text) in its own git worktree at `<project>/system/loop-worktrees/<run_id>`,
 on branch `factory/<run_id>`. The work item is written to `.factory/TASK.md`,

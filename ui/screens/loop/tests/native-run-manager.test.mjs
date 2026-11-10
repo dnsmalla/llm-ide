@@ -275,6 +275,15 @@ test("an issue's repo is mapped through repoForSlug; an unmapped repo does not s
   assert.equal(rm.takeRunNotice(), null, "a notice is taken once");
 });
 
+test("a Factory loop whose Verify has no command does not start and says where to set it", async () => {
+  const noCommand = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: FACTORY_TEMPLATE.config.stages.map((s) => (s.name === "Verify" ? { ...s, command: "" } : s)) } };
+  setup({ loadFactoryLoop: async () => noCommand });
+  rm.startRun("/p", item(1), "full");
+  await settle();
+  assert.match(rm.takeRunNotice(), /“Verify” stage has no test command.*did not start/);
+  assert.equal(world.hostCalls.some(([c]) => c === "loop_worktree_prepare"), false, "no worktree is cut");
+});
+
 test("a project without a Factory loop leaves a notice", async () => {
   setup({ loadFactoryLoop: async () => null });
   rm.startRun("/p", item(1), "full");

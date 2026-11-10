@@ -3,13 +3,16 @@
 // `concurrency()` runs execute at once; the rest wait in a FIFO queue. No React and no runtime imports here: the real
 // host, core and project store are wired in by run-manager-host.ts, so node tests can load this module.
 import type { FsApi } from "../../explorer/fs";
-import { configFor, isFactoryLoop, needsDecisionSummary, taskMarkdown, type RunMode } from "./factory.ts";
+import { persistEnsuredDefaults } from "./defaults-save.ts";
+import { detectTestCommand } from "./environment.ts";
+import { configFor, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, type RunMode } from "./factory.ts";
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import type { LoopDefinition, LoopEngineConfig } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
 import { runNativeLoop, runStatusCode, type LoopRunOutcome } from "./runner.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
-import { loadLoops } from "./store.ts";
+import { loadLoops, saveLoops } from "./store.ts";
+import { initialProjectStore } from "./templates.ts";
 import { newRunId, repoPrefixFor } from "./worktree-run.ts";
 
 export type { RunMode } from "./factory.ts";
@@ -66,8 +69,20 @@ const MAX_LOG_LINES = 500;
 const REQUIRED = ["host", "core", "fsFor", "approve", "activeProject", "subscribeProject"] as const;
 
 const PURE_DEFAULTS: Partial<RunManagerDeps> = {
+  // The Factory is a default loop: a project whose Loop page was never opened gets it (and loop.json) written here.
   loadFactoryLoop: async (fs) => {
-    const r = await loadLoops(fs);
+    let r = await loadLoops(fs);
+    if (r.kind === "corrupt") return null;
+    const command = (await detectTestCommand(fs).catch(() => null))?.command ?? null;
+    if (r.kind === "missing") {
+      const store = initialProjectStore(command);
+      r = { kind: "ok", store, hash: (await saveLoops(fs, store, null)).hash };
+    } else {
+      const ensured = await persistEnsuredDefaults(fs, r, command);
+      // An unsaved Factory loop cannot be approved or run by the host, which reads loop.json.
+      if (ensured.error !== null) throw new Error(`The Factory loop could not be added to system/loop.json (${ensured.error}); the run did not start.`);
+      r = ensured.load;
+    }
     return r.kind === "ok" ? r.store.loops.find(isFactoryLoop) ?? null : null;
   },
   createStageDeps,
@@ -270,7 +285,10 @@ async function execute(run: ManagedRun): Promise<void> {
 async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Promise<Finished | null> {
   const log = (line: string) => appendLog(run, line);
   const loop = await d.loadFactoryLoop(fs);
-  if (!loop) { fail(run, "This project has no Factory loop (add one from Loop → ＋ New loop… → Factory); the run did not start."); return null; }
+  if (!loop) { fail(run, "This project has no Factory loop (system/loop.json could not be read); the run did not start."); return null; }
+  const config = configFor(run.live.mode, loop.config);
+  const verifyProblem = factoryVerifyProblem(config);
+  if (verifyProblem) { fail(run, `${verifyProblem} The run did not start.`); return null; }
   const token = await d.approve(loop.id);
   if (token === null) { fail(run, "The Factory loop's commands were not approved; the run did not start."); return null; }
   if (run.cancelled) { log("Run cancelled before it started."); return null; }
@@ -281,7 +299,6 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     approvalToken: async () => token, signal: run.abort.signal,
     isCancelled: () => run.cancelled, markCancelled: () => { run.cancelled = true; },
   };
-  const config = configFor(run.live.mode, loop.config);
   log(`▶ ${loop.name} (${run.live.mode})`);
   const outcome = await d.runLoop(config, { ...d.createStageDeps(ctx, loop), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run) });
   log(outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`);
