@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LLM-IDE task registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "tasks"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "label", "group", "description", "aliases", "runner", "input", "output",
+          "schedule", "scope", "readOnly", "requiresRepo", "requiresLocalHost", "features",
+          "availability", "revision"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9]+)+$" },
+          "label": { "type": "string", "minLength": 1 },
+          "group": { "enum": ["Pipeline", "Review", "Automation", "Maintenance", "Factory", "Loop"] },
+          "description": { "type": "string" },
+          "aliases": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+          "runner": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind"],
+                "properties": {
+                  "kind": { "enum": ["agent", "shell", "core-route", "desktop-action"] },
+                  "prompt": { "type": "string" },
+                  "route": { "type": "string" },
+                  "stage": { "type": "object" },
+                  "action": { "type": "string" },
+                  "busKind": { "type": "string" },
+                  "busArgs": { "type": "object" },
+                  "engine": { "type": "object" },
+                  "timeoutSeconds": { "type": "integer", "minimum": 1 },
+                  "deterministicFirst": { "type": "string" }
+                }
+              }
+            ]
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "required"],
+            "properties": {
+              "kind": { "enum": ["repo", "project", "notes", "issues", "doc", "none"] },
+              "required": { "type": "boolean" },
+              "paths": { "type": "array", "items": { "type": "string" } },
+              "selector": { "type": "string" }
+            }
+          },
+          "output": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "persist", "revertWrites"],
+            "properties": {
+              "kind": { "enum": ["text", "file", "fault-report", "issue", "pr", "run-record", "none"] },
+              "persist": { "enum": ["log", "run-record", "note", "tracker", "file", "none"] },
+              "revertWrites": { "type": "boolean" }
+            }
+          },
+          "schedule": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["backend", "defaultCron", "schedulable"],
+            "properties": {
+              "backend": { "enum": ["none", "desktop", "bus"] },
+              "defaultCron": { "type": ["string", "null"] },
+              "schedulable": { "type": "boolean" }
+            }
+          },
+          "scope": { "enum": ["project", "app"] },
+          "readOnly": { "type": "boolean" },
+          "requiresRepo": { "type": "boolean" },
+          "requiresLocalHost": { "type": "boolean" },
+          "features": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "availability": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "reason"],
+            "properties": {
+              "status": { "enum": ["available", "unported", "retired", "alias"] },
+              "reason": { "type": ["string", "null"] }
+            }
+          },
+          "aliasOf": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}

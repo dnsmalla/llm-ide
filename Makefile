@@ -153,6 +153,7 @@ contract-gates:
 	# The bus modules load core/config.mjs; a throwaway data dir keeps this static check off the real data and clear of
 	# the legacy kb/ tripwire.
 	d=$$(mktemp -d) && LLMIDE_DATA_DIR="$$d" node scripts/conformance-bus.mjs; s=$$?; rm -rf "$$d"; exit $$s
+	node scripts/conformance-tasks.mjs
 	$(MAKE) host-api-check
 	$(MAKE) relay-check
 	node scripts/gen-api-types.mjs --check
