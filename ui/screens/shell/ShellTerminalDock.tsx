@@ -13,6 +13,8 @@ export function ShellTerminalDock({ activeSection, projectRoot, projectName, ope
   const initial = readTerminalPrefs();
   const [height, setHeight] = useState(clampDock(initial.height, typeof window === "undefined" ? 1000 : window.innerHeight));
   const [runtime, setRuntime] = useState<TerminalRuntime | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [ever, setEver] = useState(open);
   const terminal = sharedTerminalManager();
 
@@ -22,9 +24,9 @@ export function ShellTerminalDock({ activeSection, projectRoot, projectName, ope
   useEffect(() => {
     if (!open || runtime) return;
     let live = true;
-    void loadTerminalRuntime().then((r) => { if (live) setRuntime(r); }, () => undefined);
+    void loadTerminalRuntime().then((r) => { if (live) { setRuntime(r); setLoadError(null); } }, (e: unknown) => { if (live) setLoadError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
-  }, [open, runtime]);
+  }, [open, runtime, attempt]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -39,7 +41,9 @@ export function ShellTerminalDock({ activeSection, projectRoot, projectName, ope
   if (!TERMINAL_BUILT || activeSection === "explorer") return null;
   if (!ever) return null;
   if (!runtime) {
-    return open ? <p className="sh-panel-text sh-muted" role="status">Loading terminal…</p> : null;
+    if (!open) return null;
+    if (loadError) return <div className="sh-panel-text" role="alert">The terminal could not load: {loadError} <button type="button" className="sh-button" onClick={() => { setLoadError(null); setAttempt((n) => n + 1); }}>Retry</button></div>;
+    return <p className="sh-panel-text sh-muted" role="status">Loading terminal…</p>;
   }
   return (
     <TerminalDock

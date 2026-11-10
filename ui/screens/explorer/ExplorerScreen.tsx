@@ -130,6 +130,8 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   useEffect(() => { if (dockOpen) setDockEver(true); }, [dockOpen]);
   const [dockHeight, setDockHeight] = useState(DOCK_DEFAULT);
   const [runtime, setRuntime] = useState<TerminalRuntime | null>(deps?.terminal?.runtime ?? null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [runtimeAttempt, setRuntimeAttempt] = useState(0);
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [folders, setFolders] = useState<{ root: string; rows: ProjectFolderRow[] } | null>(null);
   const [foldersError, setFoldersError] = useState<string | null>(null);
@@ -158,11 +160,11 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
   useEffect(() => {
     if (!dockEver || runtime) return;
     let live = true;
-    void loadDefaultRuntime().then((r) => live && setRuntime(r)).catch(() => undefined);
+    void loadDefaultRuntime().then((r) => { if (live) { setRuntime(r); setRuntimeError(null); } }, (e: unknown) => { if (live) setRuntimeError(e instanceof Error ? e.message : String(e)); });
     return () => {
       live = false;
     };
-  }, [dockEver, runtime]);
+  }, [dockEver, runtime, runtimeAttempt]);
 
   // No shell may outlive its project (the shell's cwd is the project root); search results are per project too.
   useEffect(() => {
@@ -493,7 +495,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
             onClose={() => openDock(false)}
           />
         )}
-        {TERMINAL_BUILT && dockEver && !runtime && dockOpen && <p className="tm-empty" role="status">Loading terminal…</p>}
+        {TERMINAL_BUILT && dockEver && !runtime && dockOpen ? <p className="tm-empty" role={runtimeError ? "alert" : "status"}>{runtimeError ? `The terminal could not load: ${runtimeError} ` : "Loading terminal…"}{runtimeError ? <button type="button" className="ex-tool" onClick={() => { setRuntimeError(null); setRuntimeAttempt((n) => n + 1); }}>Retry</button> : null}</p> : null}
 
       </div>
       {chatVisible && (

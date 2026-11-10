@@ -10,7 +10,9 @@ export const TERMINAL_BUILT: boolean = typeof __FEATURE_TERMINAL__ === "undefine
 type DockModule = typeof import("../../../../desktop/src/terminal/dockRuntime");
 let dockModule: Promise<DockModule> | null = null;
 const loadDock = (): Promise<DockModule> =>
-  TERMINAL_BUILT ? (dockModule ??= import("../../../../desktop/src/terminal/dockRuntime")) : Promise.reject(new Error("Terminal is not part of this build"));
+  TERMINAL_BUILT
+    ? (dockModule ??= import("../../../../desktop/src/terminal/dockRuntime").catch((e) => { dockModule = null; throw e; }))
+    : Promise.reject(new Error("Terminal is not part of this build"));
 
 const lazyHost: TermHost = {
   status: async () => (await loadDock()).hostTerminal.status(),
@@ -24,6 +26,9 @@ export function sharedTerminalManager(): TerminalManager {
 }
 
 export async function loadTerminalRuntime(): Promise<TerminalRuntime> {
-  const m = await loadDock();
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error("the terminal runtime did not load within 15s")), 15_000);
+  });
+  const m = await Promise.race([loadDock(), timeout]);
   return { create: (el, o) => m.createTermView(el, o), openUrl: (u) => m.hostTerminal.openUrl(u) };
 }
