@@ -4,10 +4,12 @@ import * as m from "../native/model.ts";
 
 // The Mac's structural tasks (AutoTask.isStructural) run deterministic code; the desktop must never send them to the agent.
 test("Mac structural tasks are not runnable; Regression now runs via the task registry", () => {
-  const mac = ["sourcesToIssue", "implementIssues", "reviewMerge", "generateKnowledge"];
+  const mac = ["sourcesToIssue", "implementIssues", "reviewMerge"];
   assert.deepEqual([...m.MAC_ONLY_TASK_IDS].sort(), [...mac].sort());
   for (const id of mac) assert.equal(m.desktopRunnable(id), false, id);
-  for (const id of ["sourceUpdate", "updatePlanStatus", "reviewCode", "reviewDoc", "reviewConflicts", "updateIssues", "generateDoc"]) assert.equal(m.desktopRunnable(id), true, id);
+  for (const id of ["sourceUpdate", "updatePlanStatus", "reviewCode", "reviewDoc", "reviewConflicts", "updateIssues"]) assert.equal(m.desktopRunnable(id), true, id);
+  assert.equal(m.desktopRunnable("generateKnowledge"), false);
+  assert.equal(m.desktopRunnable("generateDoc"), false);
   assert.match(m.MAC_ONLY_MESSAGE, /^This task runs deterministic code in the Mac app; the desktop does not run it yet\.$/);
   assert.equal(m.TASK_BY_ID["loop.regression"].prompt, "", "the old Regression prompt is gone");
   assert.equal(m.TASK_BY_ID["sources.update"].prompt, "", "the old Source Update prompt is gone");

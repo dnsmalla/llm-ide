@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as m from "../native/model.ts";
 import * as sk from "../native/skills.ts";
+import { TASK_BY_ID as REGISTRY } from "../../tasks/registry.generated.ts";
 
 test("only Source Update runs without a linked repository, as on the Mac", () => {
   assert.equal(m.requiresLinkedRepo("sourceUpdate"), false);
@@ -12,7 +13,7 @@ test("only Source Update runs without a linked repository, as on the Mac", () =>
 test("task labels match the Mac catalog", () => {
   assert.equal(m.TASK_BY_ID.sourcesToIssue.label, "Sources → Issue");
   assert.equal(m.TASK_BY_ID.reviewMerge.label, "Review & Merge");
-  assert.equal(m.TASK_BY_ID.generateDoc.label, "Generate Documentation");
+  assert.equal(REGISTRY["docs.generate"].label, "Generate Documentation");
 });
 
 test("input and output folders must be project-relative", () => {
