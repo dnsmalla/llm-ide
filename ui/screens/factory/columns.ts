@@ -10,7 +10,7 @@ export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; 
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
 export interface RunRecordFacts {
   runId: string; mode: RunMode; statusCode: string; needsDecision: string | null;
-  ship: { provider: "github" | "gitlab"; url: string } | null;
+  ship: { provider: "github" | "gitlab"; url: string; secretOverride?: { rule: string; file: string | null; line: number | null; at: string } | null } | null;
   costUsd: number | null; durationSeconds: number | null;
   verdict: string | null;
   changed: { files: number; additions: number | null; deletions: number | null; truncated: boolean } | null;
@@ -49,7 +49,12 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
   if (isRecord(raw.ship)) {
     const provider = raw.ship.provider;
     const url = httpsUrl(raw.ship.url);
-    if ((provider === "github" || provider === "gitlab") && url) ship = { provider, url };
+    if ((provider === "github" || provider === "gitlab") && url) {
+      const so = isRecord(raw.ship) && isRecord(raw.ship.secretOverride) && typeof raw.ship.secretOverride.rule === "string"
+        ? { rule: raw.ship.secretOverride.rule, file: typeof raw.ship.secretOverride.file === "string" ? raw.ship.secretOverride.file : null, line: typeof raw.ship.secretOverride.line === "number" ? raw.ship.secretOverride.line : null, at: typeof raw.ship.secretOverride.at === "string" ? raw.ship.secretOverride.at : "" }
+        : null;
+      ship = { provider, url, ...(so ? { secretOverride: so } : {}) };
+    }
   }
   const mode = typeof raw.factoryMode === "string" && RUN_MODES.includes(raw.factoryMode) ? (raw.factoryMode as RunMode) : "full";
   const d = isRecord(raw.diffSummary) ? raw.diffSummary : null;

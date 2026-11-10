@@ -1,7 +1,7 @@
 // Review, Ship and Discard for a finished Factory run (spec A4). The diff is the run's worktree against HEAD with
 // .factory/ excluded (host loop_worktree_diff). Ship is the one human approval: the core route POST /kb/loop/ship
 // commits, scans for secrets, pushes and opens a DRAFT pull/merge request. Discard removes the worktree and branch.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { FsApi } from "../../explorer/fs";
 import { displayText } from "../../explorer/scm/model";
@@ -30,7 +30,7 @@ export interface ShipPanelProps {
   fs: Pick<FsApi, "read" | "gitStatus">;
   /** Project-relative folder of the run's worktree: `system/loop-worktrees/<run id>`. */
   runPrefix: string;
-  onShipped(result: { provider: "github" | "gitlab"; url: string; commit: string; reused: boolean }): void;
+  onShipped(result: { provider: "github" | "gitlab"; url: string; commit: string; reused: boolean; secretOverride?: { rule: string; file: string | null; line: number | null; at: string } | null }): void;
   onDiscarded(): void;
   onClose(): void;
 }
@@ -43,6 +43,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [split, setSplit] = useState(false);
+  const edited = useRef(false);
   const [busy, setBusy] = useState(false);
   // In-app confirm bar. `window.confirm` is not used anywhere in this app and is unreliable in the Tauri webview.
   const [confirming, setConfirming] = useState<"ship" | "discard" | "anyway" | null>(null);
@@ -60,14 +61,14 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
   useEffect(() => {
     if (!target || diff === null) return;
     const req = shipRequest(info, item, { provider: target.provider, slug: target.slug, base: base.trim() || "main" }, review, diff.patchId);
-    setTitle((t) => t || req.title);
-    setBody((b) => b || req.body);
+    if (!edited.current) { setTitle(req.title); setBody(req.body); }
   }, [target, diff, info, item, review, base]);
 
   const reloadDiff = async () => {
     try {
       setDiff(decodeWorktreeDiff(await invokeHost<unknown>("loop_worktree_diff", { runId: info.runId })));
       setDiffError(null);
+      setSecretHit(null);
     } catch (e) {
       setDiffError(e instanceof Error ? e.message : String(e));
     }
@@ -99,7 +100,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
     try {
       if (!diff?.patchId) throw Object.assign(new Error("the reviewed diff has no patch id"), { code: "diff_changed" });
       const baseReq = shipRequest(info, item, repo, review, diff.patchId);
-      if (!title.trim()) throw Object.assign(new Error("the request title is empty"), { code: "validation" });
+      if (!title.trim()) { setMessage({ severity: "warning", text: "Enter a title first." }); return; }
       const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown; secretOverride?: unknown }>("/kb/loop/ship", { method: "POST", body: { ...baseReq, title: title.trim(), body, ...(allowSecret ? { allowSecret: true } : {}) }, timeoutMs: 5 * 60_000 });
       const so = r.secretOverride && typeof r.secretOverride === "object" ? r.secretOverride as Record<string, unknown> : null;
       result = { ok: true, url: typeof r.url === "string" ? r.url : "", commit: typeof r.commit === "string" ? r.commit : "", reused: r.reused === true, ...(so && typeof so.rule === "string" ? { secretOverride: { rule: so.rule, file: typeof so.file === "string" ? so.file : null, line: typeof so.line === "number" ? so.line : null } } : {}) };
@@ -118,7 +119,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
     if (state === "changed") await reloadDiff();
     if (result.ok) {
       if (/^https:\/\//.test(result.url)) setShippedUrl(result.url);
-      onShipped({ provider: target.provider, url: result.url, commit: result.commit, reused: result.reused });
+      onShipped({ provider: target.provider, url: result.url, commit: result.commit, reused: result.reused, ...(result.secretOverride ? { secretOverride: { ...result.secretOverride, at: new Date().toISOString() } } : {}) });
     }
   };
 
@@ -186,8 +187,8 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       <label className="loop-field"><span>Target branch</span><input value={base} disabled={busy} onChange={(e) => setBase(e.target.value)} /></label>
       {requestProvider ? <p className="loop-native-hint">The existing draft keeps its text.</p> : (
         <>
-          <label className="loop-field"><span>Title</span><input value={title} maxLength={200} disabled={busy} onChange={(e) => setTitle(e.target.value)} /></label>
-          <label className="loop-field"><span>Description</span><textarea rows={4} maxLength={20000} value={body} disabled={busy} onChange={(e) => setBody(e.target.value)} /></label>
+          <label className="loop-field"><span>Title</span><input value={title} maxLength={200} disabled={busy} onChange={(e) => { edited.current = true; setTitle(e.target.value); }} /></label>
+          <label className="loop-field"><span>Description</span><textarea rows={4} maxLength={20000} value={body} disabled={busy} onChange={(e) => { edited.current = true; setBody(e.target.value); }} /></label>
         </>
       )}
       {sensitive.length > 0 ? (
@@ -225,7 +226,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       ) : null}
       <div className="loop-inline">
         <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={() => setConfirming("ship")}>{busy ? "Working…" : "Ship as draft…"}</button>
-        {secretHit ? <button type="button" className="loop-btn" disabled={busy} onClick={() => setConfirming("anyway")}>Ship anyway…</button> : null}
+        {secretHit && secretHit.rule ? <button type="button" className="loop-btn" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={() => setConfirming("anyway")}>Ship anyway…</button> : null}
         {shippedUrl ? <button type="button" className="loop-btn" onClick={() => { void invokeHost("open_external_url", { url: shippedUrl }).catch(() => undefined); }}>Open {kind}</button> : null}
         <button type="button" className="loop-btn" disabled={busy} onClick={openDiscard}>Discard…</button>
       </div>

@@ -141,7 +141,7 @@ export function iterationRecordsWithScores(iterations: readonly LoopIterationOut
 export interface FactoryRunFields {
   workItem: { source: "issue" | "spec" | "text"; id: string | null; title: string } | null;
   worktree: { runId: string; branch: string; baseCommit: string; repo: string } | null;
-  ship: { provider: "github" | "gitlab"; url: string; commit: string; reused: boolean } | null;
+  ship: { provider: "github" | "gitlab"; url: string; commit: string; reused: boolean; secretOverride?: { rule: string; file: string | null; line: number | null; at: string } | null } | null;
   needsDecision: string | null;
   diffSummary: { files: string[]; truncated: boolean; patchId: string | null } | null;
 }
@@ -160,8 +160,9 @@ export function decodeFactoryFields(record: Record<string, unknown> | null): Fac
     ? { runId: t.runId, branch: t.branch, baseCommit: t.baseCommit, repo: t.repo } : null;
   const s = isRecord(r.ship) ? r.ship : null;
   const provider = s?.provider;
+  const so = s && isRecord(s.secretOverride) && typeof s.secretOverride.rule === "string" ? { rule: s.secretOverride.rule, file: typeof s.secretOverride.file === "string" ? s.secretOverride.file : null, line: typeof s.secretOverride.line === "number" ? s.secretOverride.line : null, at: typeof s.secretOverride.at === "string" ? s.secretOverride.at : "" } : null;
   const ship: FactoryRunFields["ship"] = s && (provider === "github" || provider === "gitlab") && typeof s.url === "string" && typeof s.commit === "string"
-    ? { provider, url: s.url, commit: s.commit, reused: s.reused === true } : null;
+    ? { provider, url: s.url, commit: s.commit, reused: s.reused === true, ...(so ? { secretOverride: so } : {}) } : null;
   const d = isRecord(r.diffSummary) ? r.diffSummary : null;
   const diffSummary = d && Array.isArray(d.files)
     ? { files: d.files.filter((f): f is string => typeof f === "string"), truncated: d.truncated === true, patchId: typeof d.patchId === "string" && /^[0-9a-f]{64}$/.test(d.patchId) ? d.patchId : null }

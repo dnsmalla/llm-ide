@@ -95,3 +95,8 @@ test("factory fields decode to null for a plain run and for malformed values", a
   assert.equal(h.decodeFactoryFields({ diffSummary: { files: [], truncated: false, patchId: "short" } }).diffSummary.patchId, null);
   assert.equal(await h.setRunRecordShip(journalFs(), factoryEntry, { provider: "github", url: "u", commit: "c", reused: false }), false, "a missing record is not created");
 });
+
+test("R-050: a ship override is recorded with rule, file, line and time", () => {
+  const f = h.decodeFactoryFields({ ship: { provider: "github", url: "https://github.com/o/r/pull/1", commit: "abc", reused: false, secretOverride: { rule: "GitHub token", file: "src/a.ts", line: 2, at: "2026-11-10T09:00:00.000Z" } } });
+  assert.deepEqual(f.ship.secretOverride, { rule: "GitHub token", file: "src/a.ts", line: 2, at: "2026-11-10T09:00:00.000Z" });
+});

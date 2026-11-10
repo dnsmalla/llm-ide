@@ -17,6 +17,7 @@ export interface CardView {
   verdict?: string | null; changed?: { files: number; additions: number | null; deletions: number | null; truncated: boolean } | null;
   test?: { command: string | null; ok: boolean | null } | null; failingStage?: { name: string; error: string } | null;
   readiness?: string | null;
+  shipOverride?: { rule: string; file: string | null; line: number | null } | null;
 }
 export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", intake: "Run intake", answer: "Answer & continue" };
 export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> = { issue: "Issue", spec: "Spec", text: "Text" };
@@ -45,7 +46,7 @@ export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null });
   }
   return board;
 }
