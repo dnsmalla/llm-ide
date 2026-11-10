@@ -14,7 +14,7 @@ import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
 import { sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
@@ -363,6 +363,9 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
               <>
                 <p className="fx-hint">Run {selLive.runId} · {selLive.state}</p>
                 <button type="button" className="fx-btn" onClick={() => cancelRun(selLive.runId)}>Stop run</button>
+                <ul className="fx-timeline" aria-label="Stage timeline">
+                  {stageTimeline(selLive).map((row) => <li key={row.name} className={`fx-stage fx-stage-${row.state}`}>{row.name} <span>{row.state}</span></li>)}
+                </ul>
                 <pre className="fx-log">{selLive.log.slice(-200).join("\n")}</pre>
               </>
             ) : selFacts?.lastRecord ? (

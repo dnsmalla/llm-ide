@@ -271,3 +271,24 @@ export function progressLabel(
   if (Number.isFinite(started) && nowMs > started) parts.push(formatDuration((nowMs - started) / 1000));
   return parts.join(" · ");
 }
+
+export type StageState = "passed" | "failed" | "repaired" | "skipped" | "running";
+export interface StageTimelineRow { name: string; state: StageState }
+
+/** One row per stage a live run has touched, in first-seen order, from the typed current stage and the log markers. */
+export function stageTimeline(live: { log: readonly string[]; progress?: { stageName: string | null } | null }): StageTimelineRow[] {
+  const rows = new Map<string, StageState>();
+  for (const line of live.log) {
+    const started = /^\$ (.+)$/.exec(line);
+    if (started) { if (!rows.has(started[1])) rows.set(started[1], "running"); continue; }
+    const result = /^([✓✗]) (.+?): (passed|failed)$/.exec(line);
+    if (result) { rows.set(result[2], result[1] === "✓" ? "passed" : "failed"); continue; }
+    const repair = /^↻ repairing (.+?) \(/.exec(line);
+    if (repair) { if (rows.get(repair[1]) !== "passed") rows.set(repair[1], "repaired"); continue; }
+    const skipped = /^↷ (.+?): passed earlier in this run$/.exec(line);
+    if (skipped) rows.set(skipped[1], "skipped");
+  }
+  const current = live.progress?.stageName;
+  if (current && !rows.has(current)) rows.set(current, "running");
+  return [...rows].map(([name, state]) => ({ name, state }));
+}

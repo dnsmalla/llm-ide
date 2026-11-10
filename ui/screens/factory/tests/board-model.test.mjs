@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, progressLabel, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -179,4 +179,10 @@ test("a live card shows the typed stage and elapsed time", () => {
   assert.deepEqual(board.working[0].progressLabel, "Implement · 3 of 8 · iter 2 · repair 1 · 4m 12s");
   assert.equal(board.working[0].lastLine, "wrote tests");
   assert.equal(progressLabel({ stageName: null, stageIndex: 0, stageCount: 8, iteration: 0, repairs: 0, startedAt: null }), "Starting");
+});
+
+test("stageTimeline reads the log markers and the typed current stage", () => {
+  const rows = stageTimeline({ log: ["$ Intake", "✓ Intake: passed", "$ Implement", "✗ Implement: failed", "↻ repairing Implement (attempt 1 of 3)", "$ Implement", "✓ Implement: passed", "$ Plan", "↷ Plan: passed earlier in this run"], progress: { stageName: "Implement" } });
+  assert.deepEqual(rows.map((r) => [r.name, r.state]), [["Intake", "passed"], ["Implement", "passed"], ["Plan", "skipped"]]);
+  assert.deepEqual(stageTimeline({ log: [], progress: { stageName: "Verify" } }), [{ name: "Verify", state: "running" }]);
 });
