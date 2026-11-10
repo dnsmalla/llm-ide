@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 import { sanitizeLine } from '../core/utils.mjs';
-import { scanForSecrets } from './github-pr.mjs';
+import { scanForSecretsDetailed } from './github-pr.mjs';
 
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const FACTORY_BRANCH_RE = /^factory\/[A-Za-z0-9_-]{1,64}$/;
@@ -154,7 +154,7 @@ export function scanShipText(title, body) {
   // '+ ' (not '+'): scanForSecrets skips lines starting with '+++', so a text line starting with '++' would
   // otherwise be read as diff metadata and never scanned.
   const added = `${title}\n${body}`.split('\n').map((l) => `+ ${l}`).join('\n');
-  return scanForSecrets(added);
+  return scanForSecretsDetailed(added)?.rule ?? null;
 }
 
 /** Inserts a zero-width space after every `@` so the provider does not notify the person or team it names. */
@@ -267,11 +267,13 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   const isFactoryPath = (p) => p.split('/').some((seg) => seg.toLowerCase() === FACTORY_DIR);
   const paths = names.stdout.split('\0').filter((p) => p && !isFactoryPath(p));
   if (paths.length > 0) {
-    const hit = scanForSecrets(diff.stdout);
+    const hit = scanForSecretsDetailed(diff.stdout);
     if (hit) {
       await runGit(worktree, ['reset', '-q']);
-      // The rule NAME only, never the matched text.
-      throw shipError('secret_detected', `The changes appear to contain a secret (${hit}). Remove it, then Ship again.`);
+      // The rule, file and line only, never the matched text.
+      const err = shipError('secret_detected', `The changes appear to contain a secret (${hit.rule}${hit.file ? ` at ${hit.file}:${hit.line}` : ''}). Remove it, then Ship again.`);
+      err.details = { rule: hit.rule, file: hit.file, line: hit.line };
+      throw err;
     }
     const signing = await runGit(worktree, ['config', '--bool', '--get', 'commit.gpgsign']);
     const signArgs = signing.stdout.trim() === 'true' ? [] : ['-c', 'commit.gpgsign=false'];

@@ -88,20 +88,41 @@ async function inferDefaultBranch(repoPath) {
 const SECRET_RULES = SECRET_SHAPES;
 
 export function scanForSecrets(diffText) {
+  return scanForSecretsDetailed(diffText)?.rule ?? null;
+}
+
+/** True for a host a test fixture may plausibly use; a real host still blocks. */
+function localOrExampleHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.example.com') || h.endsWith('.test');
+}
+
+/**
+ * The first gated hit with file and line (never the text), or null. Lines are added diff lines; the line number
+ * comes from the hunk header and advances for context and added lines, not for removals.
+ */
+export function scanForSecretsDetailed(diffText) {
   if (!diffText) return null;
-  // File headers (`diff --git` up to the first `@@`) are metadata; a content line that merely begins with '++' is not.
+  let file = null;
+  let line = 0;
   let inHeader = false;
   for (const rawLine of diffText.split('\n')) {
-    if (rawLine.startsWith('diff --git ')) { inHeader = true; continue; }
-    if (inHeader) {
-      if (rawLine.startsWith('@@')) inHeader = false;
-      continue;
-    }
-    if (rawLine[0] !== '+') continue;
-    const added = rawLine.slice(1);
-    for (const { name, re, gate } of SECRET_RULES) {
-      if (gate === false) continue; // redaction-only heuristic: not a hard Ship gate
-      if (re.test(added)) return name;
+    if (rawLine.startsWith('diff --git ')) { file = null; line = 0; inHeader = true; continue; }
+    if (inHeader && rawLine.startsWith('+++ ')) { file = rawLine.slice(4).replace(/^b\//, '').split('\t')[0] || null; continue; }
+    if (rawLine.startsWith('@@')) { inHeader = false; const m = /\+(\d+)/.exec(rawLine); line = m ? Number(m[1]) : 0; continue; }
+    if (rawLine[0] === '-') continue;
+    if (rawLine[0] === ' ' || rawLine[0] === '+') {
+      if (rawLine[0] === '+') {
+        const added = rawLine.slice(1);
+        const cred = /[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@([^\s/]+)/i.exec(added);
+        const local = cred && localOrExampleHost(cred[1].split(':')[0]);
+        for (const { name, re, gate } of SECRET_RULES) {
+          if (gate === false) continue; // redaction-only heuristic: not a hard Ship gate
+          if (name === 'URL with credentials' && local) continue;
+          if (re.test(added)) return { rule: name, file, line };
+        }
+      }
+      line += 1;
     }
   }
   return null;

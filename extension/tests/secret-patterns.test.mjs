@@ -7,7 +7,7 @@ import { SECRET_SHAPES } from '../core/secret-patterns.mjs';
 import { redactSecrets, hasSecretShape } from '../core/redact-secrets.mjs';
 import { SECRET_PATTERNS } from '../guardrails/rules.mjs';
 import { scanForSecrets as guardScan } from '../guardrails/scan.mjs';
-import { scanForSecrets as shipScan } from '../agents/github-pr.mjs';
+import { scanForSecrets as shipScan, scanForSecretsDetailed } from '../agents/github-pr.mjs';
 
 test('the redactor and the guardrails use the exact core list, not a copy', () => {
   assert.equal(SECRET_PATTERNS, SECRET_SHAPES);
@@ -36,7 +36,7 @@ const POSITIVE = [
   { name: 'Stripe live key', value: `rk_live_${'b2'.repeat(12)}` },
   { name: 'npm token', value: `npm_${'c3'.repeat(18)}` },
   { name: 'Slack webhook URL', value: `https://hooks.slack.com/services/${'T0/B0'}/${'x9'.repeat(10)}` },
-  { name: 'URL with credentials', value: `postgres://alice:s3cret@db.example.com/app` },
+  { name: 'URL with credentials', value: `postgres://alice:s3cret@db.acme.internal/app` },
 ];
 
 test('every new shape is caught by redaction, the guardrails and the Ship scan', () => {
@@ -76,4 +76,25 @@ test("redaction-only heuristics do not block Ship on ordinary code", () => {
     "+Authorization: Bearer YOUR_ACCESS_TOKEN_GOES_HERE",
     "+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExamplePublicKeyMaterialForAFixtureOnly12345",
   ]) assert.equal(shipScan(line), null, line);
+});
+
+test("credential literals still gate, but identifier/call forms do not (R-044 #1)", () => {
+  for (const line of [
+    "+const password = \"hunter2hunter2hunter2xx\";",
+    "+api_key = \"abcd1234abcd1234abcd\"",
+    "+client_secret: 9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+  ]) assert.equal(shipScan(line), "Credential literal", line);
+  for (const line of ["+const token = generateHostApprovalToken(user);", "+apiKey=opts.apiKey"]) assert.equal(shipScan(line), null, line);
+});
+
+test("a loopback/example URL is not gated; a real host is (R-044 #2)", () => {
+  assert.equal(shipScan("+postgres://test:test@localhost:5432/db"), null);
+  assert.equal(shipScan("+postgres://alice:s3cret@db.example.com/app"), null);
+  assert.equal(shipScan("+postgres://alice:s3cret@db.acme.internal/app"), "URL with credentials");
+});
+
+test("a diff hit reports rule, file and line, never the text (R-044 #3)", () => {
+  const fake = `ghp_${'Ab1'.repeat(12)}`;
+  const diff = ["diff --git a/src/a.ts b/src/a.ts", "--- a/src/a.ts", "+++ b/src/a.ts", "@@ -0,0 +1,2 @@", "+safe", `+${fake}`].join("\n");
+  assert.deepEqual(scanForSecretsDetailed(diff), { rule: "GitHub token", file: "src/a.ts", line: 2 });
 });

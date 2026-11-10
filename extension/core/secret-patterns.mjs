@@ -46,6 +46,9 @@ export const SECRET_SHAPES = Object.freeze([
   // A long base64-looking blob right after a key-named field (needs a digit, so a long plain word is not caught).
   { name: 'Generic key field', re: /\b[A-Za-z0-9_-]{0,40}key["']?\s*[:=]\s*["']?(?=[A-Za-z0-9+/_-]*\d)[A-Za-z0-9+/_-]{40,}={0,2}/i },
   // password: … / token: … in a config or log line.
+  // Config-style credential literals stay a HARD gate (R-044 #1): a keyword followed by a quoted 20+ value, or an
+  // unquoted value ending the line. Identifier/call forms (`const token = generate...`) are left to redaction.
+  { name: 'Credential literal', re: /(?:client[_-]?secret|api[_-]?key|secret[_-]?key|access[_-]?token|password|passwd)\s*[:=]\s*(?:"[^"]{20,}"|'[^']{20,}'|[A-Za-z0-9/+_-]{20,}\s*$)/i },
   { name: 'Generic credential', gate: false, re: /(?:secret|token|password|passwd)["'\s:=]+[A-Za-z0-9/+_-]{20,}/i },
   { name: 'Bearer token', gate: false, re: /Bearer\s+[A-Za-z0-9._-]{20,}/i },
   { name: 'apiKey parameter', gate: false, re: /apiKey=[A-Za-z0-9_-]+/i },
