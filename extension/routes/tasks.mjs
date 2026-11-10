@@ -4,7 +4,6 @@
 import { getDb } from '../kb/db.mjs';
 import { randomUUID } from 'node:crypto';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
-import { recordUsage } from '../kb/usage.mjs';
 import { resolveProjectRoot } from '../kb/project-roots.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { authorizeAction } from '../server/route-authority.mjs';
@@ -16,6 +15,7 @@ import { TASK_CLASS } from '../agents/task-classes.mjs';
 import { runSourcesUpdate } from './bus/sources-update.mjs';
 import { KIND_CLASS } from './bus/executor.mjs';
 import { runTask, engineIdFor } from './bus/engines.mjs';
+import { meterAgentRun } from './bus/metering.mjs';
 import { runGit } from './bus/git-safe.mjs';
 import { scopedProjectRoot, scopedRepoRoot, defaultProjectAllowed } from './bus/project-scope.mjs';
 import { runReviewTask } from '../agents/tasks/review.mjs';
@@ -46,29 +46,6 @@ const DEFAULT_PORTS = Object.freeze({
 
 const MODEL_RE = /^[A-Za-z0-9._:/[\]-]{1,128}$/;
 
-/**
- * Ledger rows for one agent task run, the same rule the Loop route meters by: one row per model the run used, with
- * the run's cost and turns on the primary model's row only. `source: 'auto-task'` and `endpoint: 'auto-task:<id>'`
- * are what the usage report reads. Best effort: the answer never depends on the write.
- */
-function meterTaskRun({ userId, taskId, projectId, run, requestId }) {
-  const usage = run?.usage;
-  if (!usage) return;
-  try {
-    const rows = Array.isArray(run.byModel) && run.byModel.length ? run.byModel : [{ model: run.model ?? 'unknown', ...usage }];
-    const primary = Math.max(0, rows.findIndex((row) => row.model === run.model));
-    const runCost = Number(usage.costUsd);
-    const turns = Number(usage.numTurns) > 0 ? Number(usage.numTurns) : null;
-    rows.forEach((row, index) => recordUsage(getDb(), {
-      userId, provider: 'anthropic', model: row.model, source: 'auto-task', endpoint: `auto-task:${taskId}`, requestId,
-      inputTokens: row.inputTokens, outputTokens: row.outputTokens,
-      cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
-      projectId: projectId ?? null,
-      ...(index === primary ? { turns, stopReason: run.stopReason ?? null, costUsd: runCost > 0 ? runCost : null } : {}),
-    }));
-  } catch { /* metering is best-effort */ }
-}
-
 // The agent runner's port per bus kind: the engine, git and spawn come from `ports`; agents/ never imports them.
 const AGENT_PORTS = Object.freeze({
   review: async ({ task, userId, projectRoot, projectId, args, signal, emit, ports }) => {
@@ -95,7 +72,7 @@ const AGENT_PORTS = Object.freeze({
         runGit: ports.runGit,
       },
     });
-    if (run) meterTaskRun({ userId, taskId: task.id, projectId, run, requestId: `task-${randomUUID()}` });
+    if (run) meterAgentRun({ userId, run, source: 'auto-task', endpoint: `auto-task:${task.id}`, projectId: projectId ?? null, requestId: `task-${randomUUID()}` });
     return { ok: true, summary: r.text.split('\n').find((l) => l.trim()) ?? 'completed', output: r.text, warnings: r.truncated ? ['The review was truncated.'] : [] };
   },
 });

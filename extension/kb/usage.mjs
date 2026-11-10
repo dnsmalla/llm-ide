@@ -75,7 +75,7 @@ export function fastModelFor(provider) {
 }
 const VALID_UNITS = new Set(['runs', 'tokens']);
 const VALID_WINDOWS = new Set(['daily', 'monthly']);
-const VALID_SOURCES = new Set(['api', 'cli', 'auto-task']);
+const VALID_SOURCES = new Set(['api', 'cli', 'auto-task', 'bus']);
 
 // A default (uncustomised) chain entry: enabled, no cap, run-based, daily,
 // switch at 90%. limit_value 0 means "unlimited" so nothing blocks until the
