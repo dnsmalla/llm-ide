@@ -623,6 +623,78 @@
         "reason": null
       },
       "revision": 2
+    },
+    {
+      "id": "loop.plan_structure_index",
+      "label": "Plan structure index",
+      "group": "Maintenance",
+      "description": "Loop stage: keep the folder, file and function indexes and the plan registry current.",
+      "aliases": [],
+      "runner": {
+        "kind": "agent",
+        "prompt": "prompts/loop.plan_structure_index.md"
+      },
+      "input": {
+        "kind": "project",
+        "required": false,
+        "paths": []
+      },
+      "output": {
+        "kind": "file",
+        "persist": "file",
+        "revertWrites": false
+      },
+      "schedule": {
+        "backend": "none",
+        "defaultCron": null,
+        "schedulable": false
+      },
+      "scope": "project",
+      "readOnly": false,
+      "requiresRepo": true,
+      "requiresLocalHost": true,
+      "features": [],
+      "availability": {
+        "status": "available",
+        "reason": null
+      },
+      "revision": 2
+    },
+    {
+      "id": "loop.plan_director",
+      "label": "Plan director",
+      "group": "Maintenance",
+      "description": "Loop stage: consolidate the collected plans into one hierarchical master plan with stable task ids.",
+      "aliases": [],
+      "runner": {
+        "kind": "agent",
+        "prompt": "prompts/loop.plan_director.md"
+      },
+      "input": {
+        "kind": "project",
+        "required": false,
+        "paths": []
+      },
+      "output": {
+        "kind": "file",
+        "persist": "file",
+        "revertWrites": false
+      },
+      "schedule": {
+        "backend": "none",
+        "defaultCron": null,
+        "schedulable": false
+      },
+      "scope": "project",
+      "readOnly": false,
+      "requiresRepo": true,
+      "requiresLocalHost": true,
+      "features": [],
+      "availability": {
+        "status": "available",
+        "reason": null
+      },
+      "revision": 2
     }
   ]
 }

@@ -13,6 +13,8 @@ const templatesJson = JSON.parse(readFileSync(new URL("../../../../schema/tasks/
 const MOVED = [
   ["test", "test-setup", "loop.test_structure_setup"],
   ["test", "test-write", "loop.test_gap_writer"],
+  ["plan", "plan-structure-index", "loop.plan_structure_index"],
+  ["plan", "plan-director", "loop.plan_director"],
 ];
 
 for (const [spec, stageKey, taskId] of MOVED) {
