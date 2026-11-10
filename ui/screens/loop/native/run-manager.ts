@@ -38,6 +38,7 @@ export interface LiveRun {
     stageCount: number;
     iteration: number;
     repairs: number;
+    stages: { id: string; name: string; state: "running" | "passed" | "failed" | "repaired" | "skipped" }[];
     startedAt: string | null;
   } | null;
 }
@@ -340,13 +341,26 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     isCancelled: () => run.cancelled, markCancelled: () => { run.cancelled = true; },
   };
   log(`▶ ${loop.name} (${run.live.mode})`);
-  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, repairs: 0, startedAt: run.live.startedAt };
+  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, repairs: 0, stages: [], startedAt: run.live.startedAt };
   run.live.progress = progress;
   const onProgress = (e: RunProgressEvent) => {
     if (e.type === "iteration") progress.iteration = e.iteration;
-    else if (e.type === "stage-start") { progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration; }
-    else if (e.type === "stage-skipped") { progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration; }
-    else if (e.type === "repair") { progress.repairs += 1; }
+    else if (e.type === "stage-start") {
+      progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
+      const row = progress.stages.find((r) => r.id === e.stage.id);
+      if (row) row.state = "running"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "running" });
+    } else if (e.type === "stage-result") {
+      const row = progress.stages.find((r) => r.id === e.stage.id);
+      if (row) row.state = e.ok ? "passed" : "failed";
+    } else if (e.type === "stage-skipped") {
+      progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
+      const row = progress.stages.find((r) => r.id === e.stage.id);
+      if (row) row.state = "skipped"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "skipped" });
+    } else if (e.type === "repair") {
+      progress.repairs += 1;
+      const row = progress.stages.find((r) => r.id === e.stage.id);
+      if (row && row.state !== "passed") row.state = "repaired";
+    }
     emit();
   };
   const outcome = await d.runLoop(config, { ...d.createStageDeps(ctx, loop), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress });

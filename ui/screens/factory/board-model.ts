@@ -273,10 +273,11 @@ export function progressLabel(
 }
 
 export type StageState = "passed" | "failed" | "repaired" | "skipped" | "running";
-export interface StageTimelineRow { name: string; state: StageState }
+export interface StageTimelineRow { id: string; name: string; state: StageState }
 
 /** One row per stage a live run has touched, in first-seen order, from the typed current stage and the log markers. */
-export function stageTimeline(live: { log: readonly string[]; progress?: { stageName: string | null } | null }): StageTimelineRow[] {
+export function stageTimeline(live: { log: readonly string[]; progress?: { stageName: string | null; stages?: readonly { id: string; name: string; state: StageState }[] } | null }): StageTimelineRow[] {
+  if (live.progress?.stages && live.progress.stages.length > 0) return live.progress.stages.map((r) => ({ id: r.id, name: r.name, state: r.state }));
   const rows = new Map<string, StageState>();
   for (const line of live.log) {
     const started = /^\$ (.+)$/.exec(line);
@@ -290,5 +291,5 @@ export function stageTimeline(live: { log: readonly string[]; progress?: { stage
   }
   const current = live.progress?.stageName;
   if (current && !rows.has(current)) rows.set(current, "running");
-  return [...rows].map(([name, state]) => ({ name, state }));
+  return [...rows].map(([name, state]) => ({ id: name, name, state }));
 }

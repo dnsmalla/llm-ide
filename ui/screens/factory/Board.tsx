@@ -364,7 +364,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                 <p className="fx-hint">Run {selLive.runId} · {selLive.state}</p>
                 <button type="button" className="fx-btn" onClick={() => cancelRun(selLive.runId)}>Stop run</button>
                 <ul className="fx-timeline" aria-label="Stage timeline">
-                  {stageTimeline(selLive).map((row) => <li key={row.name} className={`fx-stage fx-stage-${row.state}`}>{row.name} <span>{row.state}</span></li>)}
+                  {stageTimeline(selLive).map((row) => <li key={row.id} className={`fx-stage fx-stage-${row.state}`}>{row.name} <span>{row.state}</span></li>)}
                 </ul>
                 <pre className="fx-log">{selLive.log.slice(-200).join("\n")}</pre>
               </>

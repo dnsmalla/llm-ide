@@ -184,5 +184,12 @@ test("a live card shows the typed stage and elapsed time", () => {
 test("stageTimeline reads the log markers and the typed current stage", () => {
   const rows = stageTimeline({ log: ["$ Intake", "✓ Intake: passed", "$ Implement", "✗ Implement: failed", "↻ repairing Implement (attempt 1 of 3)", "$ Implement", "✓ Implement: passed", "$ Plan", "↷ Plan: passed earlier in this run"], progress: { stageName: "Implement" } });
   assert.deepEqual(rows.map((r) => [r.name, r.state]), [["Intake", "passed"], ["Implement", "passed"], ["Plan", "skipped"]]);
-  assert.deepEqual(stageTimeline({ log: [], progress: { stageName: "Verify" } }), [{ name: "Verify", state: "running" }]);
+  assert.deepEqual(stageTimeline({ log: [], progress: { stageName: "Verify" } }), [{ id: "Verify", name: "Verify", state: "running" }]);
+});
+
+test("R-048: a typed timeline keeps early stages and resets a repeated stage to running", () => {
+  const rows = stageTimeline({ log: [], progress: { stageName: "Implement", stages: [{ id: "i", name: "Implement", state: "running" }, { id: "v", name: "Verify", state: "passed" }] } });
+  assert.deepEqual(rows, [{ id: "i", name: "Implement", state: "running" }, { id: "v", name: "Verify", state: "passed" }]);
+  const collapsed = stageTimeline({ log: ["$ Same", "$ Same"], progress: null });
+  assert.deepEqual(collapsed.map((r) => r.id), ["Same"], "old-image fallback still merges by name; typed runs do not");
 });
