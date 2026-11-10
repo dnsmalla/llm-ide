@@ -272,11 +272,14 @@ export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pi
   const halt: HaltState = { reason: null, isError: false };
   return {
     async runStage(s, prior) {
+      const started = Date.now();
       const r = await runOneStage(ctx, s, loop, prior, halt);
+      const elapsed = Date.now() - started;
+      const timed = { ...r, ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : elapsed > 0 ? { durationMs: elapsed } : {}) };
       ctx.log(`$ ${s.name}`);
-      ctx.log(r.output);
+      ctx.log(timed.output);
       ctx.log("");
-      return r;
+      return timed;
     },
     repair: (s, output, attempt) => repairStage(ctx, s, output, attempt, loop, halt),
     halt: () => halt.reason,
