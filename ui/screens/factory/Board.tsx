@@ -52,6 +52,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [textBody, setTextBody] = useState("");
   const [addIntake, setAddIntake] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   // Refs so the 5-minute timer reads the latest facts without being re-created on every load.
   const itemsRef = useRef<WorkItemRecord[]>([]);
@@ -163,6 +164,14 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     return m;
   }, [items, live, records, worktrees, ship, projectRoot]);
   const board = useMemo(() => buildBoard(items, facts), [items, facts]);
+  // Worktrees safe to remove: no card references them (orphaned), or their PR/MR is merged. Nothing unshipped.
+  const cleanupIds = useMemo(() => {
+    const referenced = new Set(items.flatMap((i) => i.runIds));
+    const orphan = [...worktrees.keys()].filter((id) => !referenced.has(id) && !live.some((r) => r.runId === id));
+    const merged = items.filter((i) => facts.get(i.key)?.ship?.state === "merged").flatMap((i) => i.runIds.filter((id) => worktrees.has(id)));
+    return [...new Set([...orphan, ...merged])];
+  }, [items, worktrees, live, facts]);
+
   useEffect(() => {
     lastKnown.current = lastKnownFrom(board);
   }, [board]);
@@ -261,8 +270,23 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         {elsewhere ? <span className="fx-hint" role="status">{elsewhere}</span> : null}
         <span className="fx-spacer" />
         <button type="button" className="fx-btn fx-primary" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>Add</button>
+        <button type="button" className="fx-btn" onClick={() => setCleanupOpen((v) => !v)} aria-expanded={cleanupOpen} disabled={cleanupIds.length === 0}>Clean up…</button>
         <button type="button" className="fx-btn" onClick={() => void loadFacts().then(() => refreshStatus(true))}>Refresh</button>
       </header>
+      {cleanupOpen ? (
+        <div className="loop-confirm" role="alertdialog" aria-label="Confirm worktree clean-up">
+          <p>Remove {cleanupIds.length} worktree{cleanupIds.length === 1 ? "" : "s"} with no card or a merged PR/MR? Unshipped worktrees are never removed here.</p>
+          <div className="atn-modal-actions">
+            <button type="button" className="fx-btn" onClick={() => setCleanupOpen(false)}>Cancel</button>
+            <button type="button" className="fx-btn fx-primary" onClick={() => void act(async () => {
+              for (const runId of cleanupIds) await invokeHost("loop_worktree_remove", { runId });
+              setCleanupOpen(false);
+              setNotice(`Removed ${cleanupIds.length} worktree${cleanupIds.length === 1 ? "" : "s"}.`);
+              await loadFacts();
+            })}>Remove</button>
+          </div>
+        </div>
+      ) : null}
       {error ? <StatusBanner severity="error" message={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} /> : null}
       {addOpen ? (
