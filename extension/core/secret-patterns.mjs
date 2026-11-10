@@ -23,7 +23,7 @@ export const SECRET_SHAPES = Object.freeze([
   // Anthropic / OpenAI before the generic sk- rule, so a specific key is reported under its own name.
   { name: 'Anthropic API key', re: /\bsk-ant-[A-Za-z0-9-]{10,}\b/ },
   { name: 'OpenAI project key', re: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/ },
-  { name: 'OpenAI API key', re: /\bsk-(?!ant-|proj-)[A-Za-z0-9]{32,}\b/ },
+  { name: 'OpenAI API key', re: /\bsk-(?!ant-|proj-)[A-Za-z0-9]{20,}\b/ },
   { name: 'Google API key', re: /\bAIza[0-9A-Za-z\-_]{35}\b/ },
   // AWS: long-lived AKIA, temporary ASIA/ABIA/ACCA, and the secret/session values written next to a key name.
   { name: 'AWS access key id', re: /\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b/ },
