@@ -1,3 +1,5 @@
+import { taskById } from "./model.ts";
+
 // The one run list for registry tasks, manual and scheduled. Records keep the label they ran under (`task`) for display
 // and the registry id (`taskId`) so a later rename does not orphan history. Written from the scheduler as well as the page,
 // so the page re-reads it on TASK_RUNS_EVENT rather than keeping its own copy.
@@ -36,4 +38,9 @@ export function appendTaskRun(run: TaskRunRecord, storage: Storage | undefined =
   try { storage?.setItem(TASK_RUNS_KEY, JSON.stringify(next)); } catch { /* session only */ }
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(TASK_RUNS_EVENT));
   return next;
+}
+
+/** The label a run is shown under: the registry's current label for its id, else the label it ran under. */
+export function runLabel(r: Pick<TaskRunRecord, "task" | "taskId">): string {
+  return (r.taskId !== undefined ? taskById(r.taskId)?.label : undefined) ?? r.task;
 }

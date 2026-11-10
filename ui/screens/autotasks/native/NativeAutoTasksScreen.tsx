@@ -18,7 +18,7 @@ import { runCustomTask } from "./run-custom.ts";
 import { taskFocus, taskPromptWithFocus } from "../../tasks/model.ts";
 import { hasLinkedRepo, runRegisteredTask } from "../../tasks/run-registered.ts";
 import { loadTaskState, saveTaskState, takeTaskNotices, type TaskConfig, type TaskState } from "../../tasks/store.ts";
-import { appendTaskRun, readTaskRuns, TASK_RUNS_EVENT, type TaskRunRecord } from "../../tasks/run-history.ts";
+import { appendTaskRun, readTaskRuns, runLabel, TASK_RUNS_EVENT, type TaskRunRecord } from "../../tasks/run-history.ts";
 import { SKIP_CODES } from "../../tasks/schedule.ts";
 import { releaseAutoTask, tryAcquireAutoTask } from "./lock.ts";
 import { appendCustomRun, CUSTOM_RUNS_EVENT, readCustomRuns, type CustomTaskRun } from "./custom-schedule.ts";
@@ -305,7 +305,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           {customRuns.length ? <section className="atn-history"><h3>Recent custom runs</h3><ul>{customRuns.slice(0, 3).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{new Date(r.at).toLocaleString()}</span></li>)}</ul></section> : null}
         </section>
         <button type="button" className="atn-model" onClick={() => setLimitsOpen(true)}>Model &amp; Limits</button>
-        <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.skipped ? "–" : r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{r.skipped ? `Skipped: ${r.summary} · ` : ""}{r.durationSeconds}s · {new Date(r.at).toLocaleString()}</span></li>)}</ul>}</section>
+        <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.skipped ? "–" : r.ok ? "✓" : "✗"} {runLabel(r)}</span><span className="atn-hint">{r.skipped ? `Skipped: ${r.summary} · ` : ""}{r.durationSeconds}s · {new Date(r.at).toLocaleString()}</span></li>)}</ul>}</section>
         <section className="atn-history"><h3>Action items</h3><p className="atn-hint">No action items yet. Run Sources → Issue or record a meeting with action items.</p></section>
         <button type="button" className="atn-run-now" disabled={!running && !desktopRunnable(selected, taskEnv)} title={running ? "Stop the running task" : !desktopRunnable(selected, taskEnv) ? (selectedReason ?? MAC_ONLY_MESSAGE) : "Run the selected task now"} onClick={running ? stopTask : () => void runTask()}>{running ? "■ Stop" : "▶ Run Now"}</button>
       </aside>
