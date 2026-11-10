@@ -13,7 +13,7 @@ import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
-import { detectTestCommand } from "./environment.ts";
+import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
@@ -179,11 +179,19 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       let saved = false;
       let saveError: string | null = null;
       if (r.kind === "ok") {
-        const env = await detectTestCommand(fs).catch(() => ({ command: null, reason: "" }));
+        const env = await detectProjectTestCommand(fs).catch(() => ({ command: null, reason: "", prefix: "" }));
         if (!live) return;
         const persisted = await persistEnsuredDefaults(fs, r, env.command, defaults);
         if (!live) return;
         next = persisted.load;
+        if (next.kind === "ok" && env.command) {
+          const factory = next.store.loops.find(isFactoryLoop) ?? null;
+          const filled = factory ? withDetectedVerify(factory, env.command) : null;
+          if (filled?.changed) {
+            const store = { ...next.store, loops: next.store.loops.map((l) => (l.id === filled.loop.id ? filled.loop : l)) };
+            next = { ...next, store };
+          }
+        }
         added = persisted.added;
         saved = persisted.saved;
         saveError = persisted.error;

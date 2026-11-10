@@ -105,3 +105,17 @@ test("detectTestCommand reads a run worktree when given a prefix", async () => {
   const fs = { async read(path) { if (path === `${prefix}/Makefile`) return { status: "ok", text: "test:\n\tnpm test\n" }; throw Object.assign(new Error("missing"), { code: "missing" }); } };
   assert.deepEqual(await e.detectTestCommand(fs, prefix), { command: "make test", reason: "Makefile has a test target." });
 });
+
+test("detectProjectTestCommand falls back to the first linked clone under code/", async () => {
+  const fs = {
+    async read(path) {
+      if (path === "code/llm-ide/Makefile") return { status: "ok", text: "test:\n\tnpm test\n" };
+      throw Object.assign(new Error("missing"), { code: "missing" });
+    },
+    async list(path) {
+      if (path === "code") return { entries: [{ name: "llm-ide", kind: "dir" }, { name: "notes", kind: "file" }] };
+      throw Object.assign(new Error("missing"), { code: "missing" });
+    },
+  };
+  assert.deepEqual(await e.detectProjectTestCommand(fs), { command: "make test", reason: "Makefile has a test target.", prefix: "code/llm-ide" });
+});

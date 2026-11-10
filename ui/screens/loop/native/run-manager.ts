@@ -4,7 +4,7 @@
 // host, core and project store are wired in by run-manager-host.ts, so node tests can load this module.
 import type { FsApi } from "../../explorer/fs";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
-import { detectTestCommand } from "./environment.ts";
+import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
 import { configFor, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type RunMode } from "./factory.ts";
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import type { LoopDefinition, LoopEngineConfig } from "./model.ts";
@@ -86,7 +86,7 @@ const REQUIRED = ["host", "core", "fsFor", "approve", "activeProject", "subscrib
 async function ensureFactoryLoop(fs: FsApi): Promise<LoopDefinition | null> {
   let r = await loadLoops(fs);
   if (r.kind === "corrupt") return null;
-  const command = (await detectTestCommand(fs).catch(() => null))?.command ?? null;
+  const command = (await detectProjectTestCommand(fs).catch(() => null))?.command ?? null;
   if (r.kind === "missing") {
     const store = initialProjectStore(command);
     r = { kind: "ok", store, hash: (await saveLoops(fs, store, null)).hash };

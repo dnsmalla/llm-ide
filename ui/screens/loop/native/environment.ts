@@ -2,7 +2,7 @@
 // from the project's manifest; it never runs a command. Running is a separate approval-gated host feature.
 import type { FsApi } from "../../explorer/fs";
 
-export type DetectFs = Pick<FsApi, "read">;
+export type DetectFs = Pick<FsApi, "read"> & Partial<Pick<FsApi, "list">>;
 export const DETECTED_TEST = "<detected-test-command>";
 
 function codeOf(e: unknown): string {
@@ -44,4 +44,20 @@ export async function detectTestCommand(fs: DetectFs, prefix = ""): Promise<{ co
 
 export function applyDetected(command: string | null, configured: string | null): string | null {
   return configured === DETECTED_TEST ? command : configured;
+}
+
+/** Detect the test command at the project root, else in the first linked clone under code/. */
+export async function detectProjectTestCommand(fs: DetectFs): Promise<{ command: string | null; reason: string; prefix: string }> {
+  const root = await detectTestCommand(fs);
+  if (root.command) return { ...root, prefix: "" };
+  if (!fs.list) return { ...root, prefix: "" };
+  try {
+    const entries = (await fs.list("code")).entries;
+    for (const e of entries) {
+      if (e.kind !== "dir") continue;
+      const found = await detectTestCommand(fs, `code/${e.name}`);
+      if (found.command) return { ...found, prefix: `code/${e.name}` };
+    }
+  } catch { /* no code folder */ }
+  return { ...root, prefix: "" };
 }
