@@ -76,3 +76,12 @@ test("the worktree diff is decoded and split per file", () => {
   assert.deepEqual(["+++ b/x", "--- a/x", "+new", "-old", "@@ -1 +1 @@", " same"].map(m.diffLineKind), ["ctx", "ctx", "add", "del", "hunk", "ctx"]);
   assert.deepEqual(m.splitDiffByFile(""), []);
 });
+
+test("A4: the recorded review patch id warns and blocks Ship when the diff changed", () => {
+  const reviewed = "a".repeat(64);
+  assert.equal(m.reviewedPatchIdWarning(reviewed, reviewed), null);
+  assert.equal(m.reviewedPatchIdWarning(reviewed, "b".repeat(64)), "The changes changed since Review passed. Re-run Review (send the run back or continue it), read the new verdict, then ship.");
+  assert.equal(m.reviewedPatchIdWarning(null, "b".repeat(64)), null, "an older record has no id to compare");
+  assert.equal(m.reviewedPatchIdWarning(reviewed, ""), null, "a diff still loading is not a mismatch");
+  assert.equal(m.reviewedPatchIdWarning("not-a-patch-id", "b".repeat(64)), null, "a malformed recorded value is ignored");
+});

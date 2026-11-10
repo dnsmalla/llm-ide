@@ -28,7 +28,7 @@ function setup(over = {}) {
       if (command === "loop_worktree_prepare") return { runId: args.runId, project: world.active, repo: world.active, worktree: `${world.active}/system/loop-worktrees/${args.runId}`, branch: `factory/${args.runId}`, baseCommit: "abc1234def" };
       if (command === "loop_work_root") return world.active;
       if (command === "loop_worktree_list") return world.list;
-      if (command === "loop_worktree_diff") return { text: "", truncated: false, files: ["src/a.ts"] };
+      if (command === "loop_worktree_diff") return { text: "", truncated: false, patchId: "c".repeat(64), files: ["src/a.ts"] };
       if (command === "loop_changed_paths") return [];
       return null;
     },
@@ -183,7 +183,7 @@ test("a finished run is removed from liveRuns and its record is appended once", 
   assert.deepEqual(record.worktree, { runId: a, branch: `factory/${a}`, baseCommit: "abc1234def", repo: "/p" });
   assert.equal(record.ship, null);
   assert.equal(record.needsDecision, null);
-  assert.deepEqual(record.diffSummary, { files: ["src/a.ts"], truncated: false });
+  assert.deepEqual(record.diffSummary, { files: ["src/a.ts"], truncated: false, patchId: "c".repeat(64) });
   assert.equal(record.gitRoot, `/p/system/loop-worktrees/${a}`);
   assert.deepEqual(world.copies.map((x) => [x.prefix, x.runId]), [[`system/loop-worktrees/${a}`, a]]);
   await settle();

@@ -143,7 +143,7 @@ export interface FactoryRunFields {
   worktree: { runId: string; branch: string; baseCommit: string; repo: string } | null;
   ship: { provider: "github" | "gitlab"; url: string; commit: string; reused: boolean } | null;
   needsDecision: string | null;
-  diffSummary: { files: string[]; truncated: boolean } | null;
+  diffSummary: { files: string[]; truncated: boolean; patchId: string | null } | null;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -163,7 +163,9 @@ export function decodeFactoryFields(record: Record<string, unknown> | null): Fac
   const ship: FactoryRunFields["ship"] = s && (provider === "github" || provider === "gitlab") && typeof s.url === "string" && typeof s.commit === "string"
     ? { provider, url: s.url, commit: s.commit, reused: s.reused === true } : null;
   const d = isRecord(r.diffSummary) ? r.diffSummary : null;
-  const diffSummary = d && Array.isArray(d.files) ? { files: d.files.filter((f): f is string => typeof f === "string"), truncated: d.truncated === true } : null;
+  const diffSummary = d && Array.isArray(d.files)
+    ? { files: d.files.filter((f): f is string => typeof f === "string"), truncated: d.truncated === true, patchId: typeof d.patchId === "string" && /^[0-9a-f]{64}$/.test(d.patchId) ? d.patchId : null }
+    : null;
   return { workItem, worktree, ship, needsDecision: typeof r.needsDecision === "string" ? r.needsDecision : null, diffSummary };
 }
 

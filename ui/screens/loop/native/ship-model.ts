@@ -99,6 +99,20 @@ export function decodeWorktreeDiff(raw: unknown): WorktreeDiff {
   };
 }
 
+const PATCH_ID_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * A4: the Review that passed read the diff whose id the record stored. When the worktree now has a different diff,
+ * Ship is refused until the user re-runs Review (a send-back or a continue), so the ship request carries the id of
+ * the diff Review actually approved. Null when there is nothing to compare (an older record, or a diff still loading).
+ */
+export function reviewedPatchIdWarning(reviewed: string | null | undefined, current: string | null | undefined): string | null {
+  if (typeof reviewed !== "string" || !PATCH_ID_RE.test(reviewed)) return null;
+  if (typeof current !== "string" || current === "") return null;
+  if (current === reviewed) return null;
+  return "The changes changed since Review passed. Re-run Review (send the run back or continue it), read the new verdict, then ship.";
+}
+
 /** Splits a `git diff` text at each `diff --git a/… b/…` header; text before any header is one "(changes)" entry. */
 export function splitDiffByFile(text: string): DiffFile[] {
   const files: DiffFile[] = [];

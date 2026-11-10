@@ -320,6 +320,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                 info={selInfo}
                 item={toWorkItem(selected)}
                 passed={selFacts?.lastRecord?.statusCode === "success"}
+                reviewedPatchId={selFacts?.lastRecord?.reviewedPatchId ?? null}
                 fs={fs}
                 runPrefix={repoPrefixFor(projectRoot, selInfo.worktree)}
                 onShipped={(r) => {

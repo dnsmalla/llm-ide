@@ -6,7 +6,7 @@ export type Column = "inbox" | "needsDecision" | "working" | "needsYou" | "ready
 export interface ShipComment { author: string; body: string; at: string }
 export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; ci: "none" | "pending" | "success" | "failed"; ciSummary: string | null; comments: ShipComment[] }
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
-export interface RunRecordFacts { runId: string; mode: RunMode; statusCode: string; needsDecision: string | null; ship: { provider: "github" | "gitlab"; url: string } | null; endedAt: string | null; entry: { id: string; startedAt: string } | null }
+export interface RunRecordFacts { runId: string; mode: RunMode; statusCode: string; needsDecision: string | null; ship: { provider: "github" | "gitlab"; url: string } | null; reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null }
 
 export interface ItemFacts { live: LiveRun | null; lastRecord: RunRecordFacts | null; worktreeExists: boolean; ship: ShipStatus | null; shipStatusError: boolean; lastKnownColumn: Column | null }
 
@@ -40,12 +40,15 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     if ((provider === "github" || provider === "gitlab") && url) ship = { provider, url };
   }
   const mode = typeof raw.factoryMode === "string" && RUN_MODES.includes(raw.factoryMode) ? (raw.factoryMode as RunMode) : "full";
+  const d = isRecord(raw.diffSummary) ? raw.diffSummary : null;
+  const reviewedPatchId = typeof d?.patchId === "string" && /^[0-9a-f]{64}$/.test(d.patchId) ? d.patchId : null;
   return {
     runId,
     mode,
     statusCode: typeof raw.statusCode === "string" ? raw.statusCode : "",
     needsDecision: typeof raw.needsDecision === "string" && raw.needsDecision.trim() !== "" ? raw.needsDecision.slice(0, 500) : null,
     ship,
+    reviewedPatchId,
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,
     entry,
   };

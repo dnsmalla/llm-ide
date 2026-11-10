@@ -353,8 +353,12 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
   const { live, item } = run;
   const ended = d.now();
   const changedPaths = await d.host<string[]>("loop_changed_paths", { runId: live.runId }).catch(() => [] as string[]);
-  const diff = await d.host<{ files?: unknown; truncated?: unknown } | null>("loop_worktree_diff", { runId: live.runId }).catch(() => null);
-  const diffSummary = { files: Array.isArray(diff?.files) ? diff.files.filter((p): p is string => typeof p === "string") : [], truncated: diff?.truncated === true };
+  const diff = await d.host<{ files?: unknown; truncated?: unknown; patchId?: unknown } | null>("loop_worktree_diff", { runId: live.runId }).catch(() => null);
+  const diffSummary = {
+    files: Array.isArray(diff?.files) ? diff.files.filter((p): p is string => typeof p === "string") : [],
+    truncated: diff?.truncated === true,
+    patchId: typeof diff?.patchId === "string" ? diff.patchId : null,
+  };
   // factoryRunId + factoryMode: the Factory board finds a card's last run through these two fields in BOTH the month
   // index line and the record.
   const entry: LoopRunIndexEntry & { factoryRunId: string; factoryMode: RunMode } = { id: d.newId(), loopId: f.loop.id, loopName: f.loop.name, startedAt: started.toISOString(), durationSeconds: (ended.getTime() - started.getTime()) / 1000, iterationsUsed: f.outcome.iterationsUsed, statusCode: runStatusCode(f.outcome), statusSummary: f.outcome.statusSummary, trigger: "manual", factoryRunId: live.runId, factoryMode: live.mode };

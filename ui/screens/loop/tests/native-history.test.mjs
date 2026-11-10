@@ -65,7 +65,7 @@ test("run record keeps factory fields through the journal round trip", async () 
     worktree: { runId: "20261109-100000-abc123", branch: "factory/20261109-100000-abc123", baseCommit: "0123456789abcdef", repo: "/p/code/web" },
     ship: null,
     needsDecision: "needs decision: see .factory/READINESS.md",
-    diffSummary: { files: ["src/a.ts"], truncated: false },
+    diffSummary: { files: ["src/a.ts"], truncated: false, patchId: "e".repeat(64) },
   };
   await h.appendRunRecord(fs, factoryEntry, { ...factoryEntry, ...fields });
   assert.deepEqual(h.decodeFactoryFields(await h.loadRunRecord(fs, "r1", factoryEntry.startedAt)), fields);
@@ -91,6 +91,7 @@ test("factory fields decode to null for a plain run and for malformed values", a
     needsDecision: 7,
     diffSummary: { files: "nope" },
   }), empty);
-  assert.deepEqual(h.decodeFactoryFields({ diffSummary: { files: ["a", 2], truncated: "yes" } }).diffSummary, { files: ["a"], truncated: false });
+  assert.deepEqual(h.decodeFactoryFields({ diffSummary: { files: ["a", 2], truncated: "yes" } }).diffSummary, { files: ["a"], truncated: false, patchId: null });
+  assert.equal(h.decodeFactoryFields({ diffSummary: { files: [], truncated: false, patchId: "short" } }).diffSummary.patchId, null);
   assert.equal(await h.setRunRecordShip(journalFs(), factoryEntry, { provider: "github", url: "u", commit: "c", reused: false }), false, "a missing record is not created");
 });

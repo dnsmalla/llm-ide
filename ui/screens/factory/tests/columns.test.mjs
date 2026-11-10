@@ -76,7 +76,10 @@ test("a passed intake-only run goes back to Inbox, ready to start", () => {
 test("decodeRunRecordFacts reads the factory fields and rejects other records", () => {
   const raw = { id: "e1", statusCode: "success", endedAt: "2026-11-09T10:00:00.000Z", factoryMode: "intakeOnly", worktree: { runId: "r1", branch: "factory/r1", baseCommit: "abc", repo: "code/web" }, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3", commit: "def", reused: false }, needsDecision: null };
   const entry = { id: "e1", startedAt: "2026-11-09T09:00:00.000Z" };
-  assert.deepEqual(decodeRunRecordFacts(raw, entry), { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3" }, endedAt: "2026-11-09T10:00:00.000Z", entry });
+  assert.deepEqual(decodeRunRecordFacts(raw, entry), { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3" }, reviewedPatchId: null, endedAt: "2026-11-09T10:00:00.000Z", entry });
+  const reviewed = "d".repeat(64);
+  assert.equal(decodeRunRecordFacts({ ...raw, diffSummary: { files: ["src/a.ts"], truncated: false, patchId: reviewed } }).reviewedPatchId, reviewed);
+  assert.equal(decodeRunRecordFacts({ ...raw, diffSummary: { files: [], truncated: false, patchId: "short" } }).reviewedPatchId, null, "a malformed id never becomes a comparison");
   assert.equal(decodeRunRecordFacts(raw).entry, null, "no entry given: null");
   assert.equal(decodeRunRecordFacts({ id: "e2", statusCode: "success" }), null, "a non-factory record has no worktree run id");
   assert.equal(decodeRunRecordFacts({ ...raw, worktree: { runId: "../x" } }), null);

@@ -9,7 +9,7 @@ import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
 import { readRepoConfig } from "../../settings/repo-config.ts";
 import type { WorkItem } from "./factory.ts";
-import { decodeWorktreeDiff, diffLineKind, shipBlockedReason, shipCopy, shipRequest, shipState, shipTarget, splitDiffByFile, type ShipResult, type WorktreeDiff } from "./ship-model.ts";
+import { decodeWorktreeDiff, diffLineKind, reviewedPatchIdWarning, shipBlockedReason, shipCopy, shipRequest, shipState, shipTarget, splitDiffByFile, type ShipResult, type WorktreeDiff } from "./ship-model.ts";
 import type { RunInfo } from "./worktree-run.ts";
 
 const PREVIEW_LINES = 400;
@@ -21,6 +21,8 @@ export interface ShipPanelProps {
   initialDiff?: WorktreeDiff;
   /** Ship is offered only after a passed run; Discard always. */
   passed: boolean;
+  /** The patch id the passing Review read (the run record's diffSummary.patchId), if that run recorded one. */
+  reviewedPatchId?: string | null;
   fs: Pick<FsApi, "read" | "gitStatus">;
   /** Project-relative folder of the run's worktree: `system/loop-worktrees/<run id>`. */
   runPrefix: string;
@@ -29,7 +31,7 @@ export interface ShipPanelProps {
   onClose(): void;
 }
 
-export function ShipPanel({ info, item, initialDiff, passed, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
+export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = null, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
   const [diff, setDiff] = useState<WorktreeDiff | null>(initialDiff ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [review, setReview] = useState("");
@@ -43,6 +45,7 @@ export function ShipPanel({ info, item, initialDiff, passed, fs, runPrefix, onSh
   const target = shipTarget(info, config);
   const blocked = target ? shipBlockedReason(config, target.provider) : "This repository is not in Settings → Repositories (with its clone folder), so it cannot be shipped from here.";
   const kind = target?.provider === "gitlab" ? "draft merge request" : "draft pull request";
+  const staleReview = reviewedPatchIdWarning(reviewedPatchId, diff?.patchId ?? null);
 
   const reloadDiff = async () => {
     try {
@@ -133,6 +136,7 @@ export function ShipPanel({ info, item, initialDiff, passed, fs, runPrefix, onSh
         ))}
       </ul>
       {diff?.truncated ? <p className="loop-warn">The diff is too large to show in full. Ship commits every change, including the part not shown.</p> : null}
+      {staleReview ? <p className="loop-warn" role="alert">{staleReview}</p> : null}
       {!passed ? <p className="loop-native-hint">Ship is offered only after a passed run. You can still discard this worktree.</p> : null}
       {passed && blocked ? <p className="loop-warn">{blocked}</p> : null}
       <label className="loop-field"><span>Target branch</span><input value={base} disabled={busy} onChange={(e) => setBase(e.target.value)} /></label>
@@ -155,7 +159,7 @@ export function ShipPanel({ info, item, initialDiff, passed, fs, runPrefix, onSh
         </div>
       ) : null}
       <div className="loop-inline">
-        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || files.length === 0} onClick={() => setConfirming("ship")}>{busy ? "Working…" : "Ship as draft…"}</button>
+        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={() => setConfirming("ship")}>{busy ? "Working…" : "Ship as draft…"}</button>
         {shippedUrl ? <button type="button" className="loop-btn" onClick={() => { void invokeHost("open_external_url", { url: shippedUrl }).catch(() => undefined); }}>Open {kind}</button> : null}
         <button type="button" className="loop-btn" disabled={busy} onClick={() => setConfirming("discard")}>Discard…</button>
       </div>
