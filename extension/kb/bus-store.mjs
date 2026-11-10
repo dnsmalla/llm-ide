@@ -315,7 +315,7 @@ export function terminalFor(state, result, error) {
 /** Terminal events for every finished bus job that lacks one (run at boot after the sweep). */
 // ---------- desktop-claimed commands (B5, migration 0076) ----------
 
-const LEASE_MS = 90_000;
+const LEASE_MS = 300_000;
 const MIN_LEASE_MS = 5_000;
 const tokenHashOf = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 const tokenMatches = (stored, token) => {

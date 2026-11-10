@@ -1529,4 +1529,8 @@ test('runLoopAgent: R-034 #6 the run carries the same USD budget as a chat turn,
   const none = {};
   await runLoopAgent({ message: 'x', root: REPO, userId: user.id, budget: () => null, queryFactory: toolPlayingQuery(none, []) }, noSkill);
   assert.equal('maxBudgetUsd' in none.options, false, 'no cap → no budget option');
+  await assert.rejects(
+    runLoopAgent({ message: 'x', root: REPO, userId: user.id, budget: () => { throw new Error('db down'); }, queryFactory: toolPlayingQuery(none, []) }, noSkill),
+    (e) => e.code === 'BUDGET_UNAVAILABLE',
+  );
 }));

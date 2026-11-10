@@ -360,6 +360,8 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       sendJSON(res, 400, { error: { code: err.code, message: err.message } });
     } else if (err?.code === 'NO_KEY') {
       sendJSON(res, 503, { error: { code: 'NO_KEY', message: err.message } });
+    } else if (err?.code === 'BUDGET_UNAVAILABLE') {
+      sendJSON(res, 503, { error: { code: 'BUDGET_UNAVAILABLE', message: err.message } });
     } else {
       process.stderr.write(`[loop-agent] run failed: ${err?.message || err}\n`);
       sendJSON(res, 502, {

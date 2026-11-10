@@ -688,7 +688,16 @@ export async function runLoopAgent(
   // R-034 #6: the same spend bound as a chat turn (per-model cap, member month, project month). The
   // ledger row is written after the run, so without this a Loop could spend past every cap in one run.
   let maxBudgetUsd = null;
-  try { maxBudgetUsd = userId ? budget(userId, model, { provider: provider || AGENT_SDK_PROVIDER, projectId }) : null; } catch { maxBudgetUsd = null; }
+  if (userId) {
+    try { maxBudgetUsd = budget(userId, model, { provider: provider || AGENT_SDK_PROVIDER, projectId }); }
+    catch (err) {
+      // A budget read failure must not become an uncapped run (R-036 C1).
+      const e = new Error('The spend budget could not be read, so the run was refused.');
+      e.code = 'BUDGET_UNAVAILABLE';
+      e.cause = err;
+      throw e;
+    }
+  }
   const q = queryFactory(safeMessage, {
     cwd: root,
     additionalDirectories: roots.slice(1),

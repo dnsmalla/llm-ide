@@ -201,6 +201,13 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     });
     return () => { live = false; stop?.(); };
   }, [projectRoot, session.signedIn, gate, features.usable]);
+  // Factory runs and the phone-command poller start with the app, not only when the Factory/Issues screen is opened.
+  useEffect(() => {
+    if (!projectRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("conflicts", features.usable)) return undefined;
+    if (typeof __FEATURE_AUTO_TASKS__ === "boolean" && !__FEATURE_AUTO_TASKS__) return undefined;
+    void import("../loop/native/run-manager-host.ts").then((m) => m.installRunManagerHost());
+    return undefined;
+  }, [projectRoot, session.signedIn, gate, features.usable]);
   // The command-bus scheduler (docs/spec/command-bus.md section 9): not tied to a project or a feature, idle on a core
   // that does not see this UI as the desktop class.
   useEffect(() => {
