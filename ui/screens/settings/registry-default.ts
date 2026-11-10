@@ -28,7 +28,6 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   providers: dflt(() => import("./sections/ProvidersSection.tsx")),
   "model-routing": dflt(() => import("./sections/RoutingSection.tsx")),
   "loop-defaults": dflt(() => import("./sections/LoopDefaultsSection.tsx")),
-  "doc-gen": dflt(() => import("./sections/DocGenFilesSection.tsx")),
   "agent-history": dflt(() => import("./sections/AgentHistorySection.tsx")),
   "folder-trust": named(trust, "TrustedFolders"),
   "extension-sources": named(trust, "Allowlist"),

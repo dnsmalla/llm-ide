@@ -42,7 +42,6 @@ export const APP_GROUPS: readonly GroupDef[] = [
   { id: "providers", title: "Providers", sf: "key.horizontal", icon: "key-round", status: "works", band: "app" },
   { id: "model-routing", title: "Model routing", sf: "dial.medium", icon: "gauge", status: "works", band: "app" },
   { id: "loop-defaults", title: "Loop defaults", sf: "repeat", icon: "repeat", status: "works", band: "app" },
-  { id: "doc-gen", title: "Doc Gen files", sf: "server.rack", icon: "hard-drive", status: "partial", band: "app" },
   { id: "agent-history", title: "Agent history", sf: "clock.arrow.circlepath", icon: "rotate-ccw-clock", status: "works", band: "app" },
   { id: "folder-trust", title: "Folder trust", sf: "lock.shield", icon: "shield-check", status: "works", band: "app" },
   { id: "extension-sources", title: "Extension sources", sf: "checklist", icon: "list-checks", status: "works", band: "app" },
@@ -60,7 +59,7 @@ export const PROJECT_GROUPS: readonly GroupDef[] = [
 export const ALL_GROUPS: readonly GroupDef[] = [...APP_GROUPS, ...PROJECT_GROUPS];
 
 /** Settings groups that read the local filesystem or run local host processes: hidden in remote mode. */
-export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "token-saving", "paths", "repositories", "memory", "code-graph", "doc-gen", "optional-components", "self-heal"];
+export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "token-saving", "paths", "repositories", "memory", "code-graph", "optional-components", "self-heal"];
 
 /** Mac cards that are not groups on the desktop because the desktop folds them into another group. */
 export const MERGED_MAC_CARDS: Readonly<Record<string, string>> = {
