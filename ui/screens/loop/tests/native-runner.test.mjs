@@ -137,3 +137,14 @@ test("a failed runOnce stage is re-run in the next iteration", async () => {
   assert.deepEqual(calls, ["A", "A"]);
   assert.equal(out.passed, true);
 });
+
+test("native runner stops at the per-run USD ceiling and keeps the spent amount", async () => {
+  const out = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")], { maxCostUsd: 1 }), {
+    async runStage() { return { ok: true, output: "", usage: { costUsd: 1.25 } }; },
+    async repair() { throw new Error("no repair"); }, log() {},
+  });
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /cost ceiling/);
+  assert.equal(out.costUsd, 1.25);
+  assert.equal(out.stages.length, 1, "it stops before the next stage");
+});

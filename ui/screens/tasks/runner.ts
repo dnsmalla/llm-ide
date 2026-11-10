@@ -109,7 +109,7 @@ function shellLoop(task: TaskDef, stage: LoopStage): LoopDefinition {
       useWorktreesForConcurrentRuns: false,
       alwaysUseWorktree: false,
       openMergeRequest: false,
-      refactorBatchesPerRun: null,
+      refactorBatchesPerRun: null, maxCostUsd: null,
     },
   };
 }

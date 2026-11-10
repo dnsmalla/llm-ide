@@ -57,7 +57,7 @@ export const FACTORY_TEMPLATE: LoopTemplate = {
     maxIterations: 10, consecutiveFailureStop: 2, wallClockBudgetSeconds: 7200, pauseTimeoutSeconds: 1800,
     maxRepairsPerStage: 3, repairModel: null, protectedPathPolicy: "revert", writeSummaryNote: false,
     extraProtectedGlobs: [], useWorktreesForConcurrentRuns: false, alwaysUseWorktree: true, openMergeRequest: true,
-    refactorBatchesPerRun: null,
+    refactorBatchesPerRun: null, maxCostUsd: 10,
   },
 };
 

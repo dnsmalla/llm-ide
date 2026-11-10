@@ -383,7 +383,7 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
   // factoryRunId + factoryMode: the Factory board finds a card's last run through these two fields in BOTH the month
   // index line and the record.
   const entry: LoopRunIndexEntry & { factoryRunId: string; factoryMode: RunMode } = { id: d.newId(), loopId: f.loop.id, loopName: f.loop.name, startedAt: started.toISOString(), durationSeconds: (ended.getTime() - started.getTime()) / 1000, iterationsUsed: f.outcome.iterationsUsed, statusCode: runStatusCode(f.outcome), statusSummary: f.outcome.statusSummary, trigger: "manual", factoryRunId: live.runId, factoryMode: live.mode };
-  const stages = f.outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
+  const stages = f.outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, costUsd: o.usage?.costUsd ?? null, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: o.durationMs ?? 0 } }));
   const record = {
     ...entry, endedAt: ended.toISOString(), gitRoot: f.info.worktree, config: f.config, changedPaths, summaryPath: null, stages,
     iterations: iterationRecordsWithScores(f.outcome.iterations),

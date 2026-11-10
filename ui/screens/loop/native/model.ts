@@ -63,6 +63,8 @@ export interface LoopEngineConfig {
   alwaysUseWorktree: boolean;
   openMergeRequest: boolean;
   refactorBatchesPerRun: number | null;
+  /** A per-run USD ceiling; null = no ceiling. Factory loops set 10. */
+  maxCostUsd: number | null;
 }
 
 export interface LoopDefinition {
@@ -143,6 +145,7 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     alwaysUseWorktree: bool(o.alwaysUseWorktree, false),
     openMergeRequest: bool(o.openMergeRequest, true),
     refactorBatchesPerRun: num(o.refactorBatchesPerRun),
+    maxCostUsd: num(o.maxCostUsd),
   };
 }
 
@@ -231,5 +234,6 @@ function encodeConfig(c: LoopEngineConfig): Record<string, unknown> {
     openMergeRequest: c.openMergeRequest,
     ...(c.repairModel !== null ? { repairModel: c.repairModel } : {}),
     ...(c.refactorBatchesPerRun !== null ? { refactorBatchesPerRun: c.refactorBatchesPerRun } : {}),
+    ...(c.maxCostUsd !== null ? { maxCostUsd: c.maxCostUsd } : {}),
   };
 }

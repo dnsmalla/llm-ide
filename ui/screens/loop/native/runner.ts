@@ -3,7 +3,7 @@
 // up to maxRepairsPerStage; the run ends at a repair budget, the consecutive non-improving stop, or maxIterations.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
 
-export interface StageRunResult { ok: boolean; output: string }
+export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 export interface RunnerDeps {
   /** Execute one stage once. `prior` is every outcome so far (including earlier iterations). Throws for an unsupported kind. */
   runStage(stage: LoopStage, prior: readonly StageOutcome[]): Promise<StageRunResult>;
@@ -22,13 +22,14 @@ export interface RunnerDeps {
    */
   holdWhilePaused?(timeoutSeconds: number): Promise<"ok" | "timedOut">;
 }
-export interface StageOutcome { stage: LoopStage; ok: boolean; output: string }
+export interface StageOutcome { stage: LoopStage; ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 export interface LoopIterationOutcome { index: number; stages: StageOutcome[]; repair: { stageId: string; attempt: number; ok: boolean } | null }
 export interface LoopRunOutcome {
   passed: boolean;
   iterationsUsed: number;
   stages: StageOutcome[];
   iterations: LoopIterationOutcome[];
+  costUsd?: number;
   /** The blocking stage that ended the run, when it failed. */
   failedStage: LoopStage | null;
   statusSummary: string;
@@ -55,6 +56,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   // Paused time does not count toward the wall-clock budget (the Mac's pausedSeconds).
   let pausedMs = 0;
   const expired = () => budgetMs !== null && Date.now() - started - pausedMs >= budgetMs;
+  let spentUsd = 0;
   const haltedOutcome = (): LoopRunOutcome | null => {
     const reason = deps.halt?.();
     if (!reason) return null;
@@ -94,18 +96,22 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       const haltAtStage = haltedOutcome();
       if (haltAtStage) return haltAtStage;
       const result = await deps.runStage(stage, outcomes);
-      const outcome = { stage, ok: result.ok, output: result.output };
+      const outcome = { stage, ok: result.ok, output: result.output, durationMs: result.durationMs, usage: result.usage };
+      spentUsd += result.usage?.costUsd ?? 0;
       outcomes.push(outcome);
       iterationOutcomes.push(outcome);
       deps.log(`${result.ok ? "✓" : "✗"} ${stage.name}: ${result.ok ? "passed" : "failed"}`);
       if (result.ok && stage.runOnce) passedOnce.add(stage.id);
+      if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {
+        return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: stage, statusSummary: `cost ceiling reached ($${spentUsd.toFixed(2)} of $${config.maxCostUsd})`, costUsd: spentUsd };
+      }
       if (!result.ok && stage.severity === "blocking") { failed = outcome; break; }
       const haltAfterStage = haltedOutcome();
       if (haltAfterStage) return haltAfterStage;
     }
     if (!failed) {
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
-      return { passed: true, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: `passed after ${iterationsUsed} iteration${iterationsUsed === 1 ? "" : "s"}` };
+      return { passed: true, iterationsUsed, stages: outcomes, iterations, failedStage: null, costUsd: spentUsd, statusSummary: `passed after ${iterationsUsed} iteration${iterationsUsed === 1 ? "" : "s"}` };
     }
     // A halt raised by the blocking stage itself (its agent call wrote something it must not) ends the run before any repair.
     const haltAfterFailure = haltedOutcome();

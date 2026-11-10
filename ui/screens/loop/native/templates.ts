@@ -24,7 +24,7 @@ function config(stages: Partial<LoopStage>[], overrides: Partial<LoopEngineConfi
     maxIterations: 10, consecutiveFailureStop: 3, wallClockBudgetSeconds: null, pauseTimeoutSeconds: 1800,
     maxRepairsPerStage: 3, repairModel: null, protectedPathPolicy: "revert", writeSummaryNote: false,
     extraProtectedGlobs: [], useWorktreesForConcurrentRuns: false, alwaysUseWorktree: false,
-    openMergeRequest: true, refactorBatchesPerRun: null, ...overrides,
+    openMergeRequest: true, refactorBatchesPerRun: null, maxCostUsd: null, ...overrides,
   };
 }
 

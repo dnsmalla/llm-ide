@@ -22,7 +22,7 @@ export type HostInvoke = <T>(command: string, args?: Record<string, unknown>) =>
 /** The one core-client method stage execution uses. */
 export type CoreFetch = Pick<CoreClient, "request">;
 /** The `/kb/loop/agent-run` answer fields the Loop reads. */
-export type AgentRunReply = AgentWrites & { reply?: string; ran?: boolean; unresolvedSkills?: string[]; resultSubtype?: string | null };
+export type AgentRunReply = AgentWrites & { reply?: string; ran?: boolean; unresolvedSkills?: string[]; resultSubtype?: string | null; usage?: { costUsd?: number } };
 
 export interface StageExecContext {
   /** Absolute root of the project the run started in. */
@@ -180,7 +180,7 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
 function skillResult(r: AgentRunReply): StageRunResult {
   const ok = agentRunSucceeded(r);
   const why = ok ? [] : r.unresolvedSkills?.length ? ["the skill could not be found, so it did not run"] : r.ran === false ? ["the skill did not run"] : [`the agent run did not finish (${r.resultSubtype ?? "no result"})`];
-  return { ok, output: [...why, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n") };
+  return { ok, output: [...why, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n"), ...(typeof r.usage?.costUsd === "number" ? { usage: { costUsd: r.usage.costUsd } } : {}) };
 }
 
 async function runLedger(ctx: StageExecContext, prior: Prior, prefix: string): Promise<StageRunResult> {

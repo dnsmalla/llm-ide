@@ -53,7 +53,7 @@ function loopConfigTemplate() {
     pauseTimeoutSeconds: 1800, maxRepairsPerStage: 3, repairModel: null,
     protectedPathPolicy: "revert" as const, writeSummaryNote: false, extraProtectedGlobs: [],
     useWorktreesForConcurrentRuns: false, alwaysUseWorktree: false, openMergeRequest: true,
-    refactorBatchesPerRun: null,
+    refactorBatchesPerRun: null, maxCostUsd: null,
   };
 }
 
