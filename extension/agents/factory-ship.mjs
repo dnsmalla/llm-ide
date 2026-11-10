@@ -69,7 +69,6 @@ const SAFE_GIT_CONFIG = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor
 // patch id: a config difference (quotepath, an external diff driver, submodule settings, attributes) would change
 // those bytes, so the core and the host would compute different ids for the same tree. Mirrored exactly here and
 // pinned by schema/factory/staged-patch.json.
-// eslint-disable-next-line no-control-regex
 const PATCH_SAFE_GIT_CONFIG = Object.freeze([
   '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.pager=cat', '-c', 'core.quotepath=false',
   '-c', 'core.sshCommand=false', '-c', 'diff.external=', '-c', 'credential.helper=', '-c', 'gc.auto=0',
