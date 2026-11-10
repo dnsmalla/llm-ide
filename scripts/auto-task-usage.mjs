@@ -47,12 +47,24 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Every built-in task id (AutoTask.swift) so a never-run task still shows as 0. */
-export const BUILT_IN_TASKS = [
-  'sourceUpdate', 'sourcesToIssue', 'implementIssues', 'reviewMerge', 'reviewCode',
-  'reviewDoc', 'reviewConflicts', 'regression', 'generateKnowledge', 'generateDoc',
-  'updateIssues', 'updatePlanStatus', 'loopEngineering',
-];
+/** The task registry (schema/tasks/registry.json): ledger endpoints and run history resolve to its ids. */
+const REGISTRY = JSON.parse(fs.readFileSync(path.join(ROOT, 'schema', 'tasks', 'registry.json'), 'utf8'));
+const REGISTRY_IDS = new Set(REGISTRY.tasks.map((t) => t.id));
+/** Every legacy name (an alias) and alias task id, mapped to the canonical id it resolves to. */
+const ALIAS_TO_ID = new Map();
+for (const t of REGISTRY.tasks) {
+  const canonical = t.availability.status === 'alias' ? t.aliasOf : t.id;
+  for (const a of t.aliases ?? []) ALIAS_TO_ID.set(a, canonical);
+}
+
+/** The canonical registry id for a task name (an id, a legacy alias, or an unknown name returned as it is). */
+export function canonicalTaskId(name) {
+  if (REGISTRY_IDS.has(name)) return name;
+  return ALIAS_TO_ID.get(name) ?? name;
+}
+
+/** Every registry task that is not an alias, so a never-run task still shows as 0 (Mac-only legacy names are not listed). */
+export const BUILT_IN_TASKS = REGISTRY.tasks.filter((t) => t.availability.status !== 'alias').map((t) => t.id);
 
 /** Ledger endpoints use the log suffix (AutoTask.logSuffix), not the enum id. */
 const SUFFIX_TO_ID = {
@@ -117,8 +129,11 @@ const iso = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 export function taskFromEndpoint(endpoint) {
   if (typeof endpoint !== 'string' || !endpoint.startsWith('auto-task:')) return null;
   const rest = endpoint.slice('auto-task:'.length);
-  if (/^issue-\d+$/.test(rest)) return 'implementIssues';
-  return SUFFIX_TO_ID[rest] ?? `custom:${rest}`;
+  if (/^issue-\d+$/.test(rest)) return canonicalTaskId('implementIssues');
+  if (Object.hasOwn(SUFFIX_TO_ID, rest)) return canonicalTaskId(SUFFIX_TO_ID[rest]);
+  // A task run since Task 15 is metered as `auto-task:<registry id>`.
+  if (REGISTRY_IDS.has(rest) || ALIAS_TO_ID.has(rest)) return canonicalTaskId(rest);
+  return `custom:${rest}`;
 }
 
 /**
@@ -144,7 +159,8 @@ export function readHistory(file) {
   const by = new Map();
   for (const r of records) {
     if (!r || typeof r.taskId !== 'string') continue;
-    const row = by.get(r.taskId) ?? {
+    const taskId = canonicalTaskId(r.taskId);
+    const row = by.get(taskId) ?? {
       runs: 0, success: 0, failed: 0, cancelled: 0, skipped: 0, last: null,
       byTrigger: { manual: 0, cron: 0, pipeline: 0, phone: 0 },
     };
@@ -153,7 +169,7 @@ export function readHistory(file) {
     if (TRIGGERS.has(r.trigger)) row.byTrigger[r.trigger] += 1;
     const t = Date.parse(r.finishedAt ?? r.startedAt);
     if (Number.isFinite(t) && (row.last == null || t > row.last)) row.last = t;
-    by.set(r.taskId, row);
+    by.set(taskId, row);
   }
   return { total: records.length, by };
 }

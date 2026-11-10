@@ -49,8 +49,13 @@ function fixture() {
 }
 
 test('taskFromEndpoint maps log suffixes, issue runs and custom tasks', () => {
-  assert.equal(taskFromEndpoint('auto-task:review-code'), 'reviewCode');
-  assert.equal(taskFromEndpoint('auto-task:issue-7'), 'implementIssues');
+  // Legacy log suffixes and issue runs resolve to the registry id they were renamed to.
+  assert.equal(taskFromEndpoint('auto-task:review-code'), 'review.code');
+  assert.equal(taskFromEndpoint('auto-task:issue-7'), 'issues.implement');
+  // Runs metered since Task 15 carry the registry id itself.
+  assert.equal(taskFromEndpoint('auto-task:review.code'), 'review.code');
+  assert.equal(taskFromEndpoint('auto-task:sources.update'), 'sources.update');
+  assert.equal(taskFromEndpoint('auto-task:sourceUpdate'), 'sources.update');
   assert.equal(taskFromEndpoint('auto-task:my-task'), 'custom:my-task');
   assert.equal(taskFromEndpoint('chat'), null);
 });
@@ -61,17 +66,18 @@ test('summarize counts runs, last date and success rate from both sources', () =
     const s = summarize({ historyPath: history, dbPath });
     assert.equal(s.historyFound, true);
     assert.equal(s.ledgerFound, true);
-    const rc = s.rows.find((r) => r.task === 'reviewCode');
+    const rc = s.rows.find((r) => r.task === 'review.code');
     assert.equal(rc.historyRuns, 3);
     assert.equal(rc.lastRun, '2026-10-30');
     assert.equal(rc.successRate, 50); // skipped is not a finished run
     assert.equal(rc.cronRuns, 2);
     assert.equal(rc.ledgerRuns, 2);
     assert.equal(rc.ledgerLast, '2026-10-30');
-    assert.equal(s.rows.find((r) => r.task === 'regression').phoneRuns, 1);
-    assert.equal(s.rows.find((r) => r.task === 'implementIssues').ledgerRuns, 1);
-    assert.equal(s.rows.find((r) => r.task === 'generateDoc').ledgerRuns, 0); // source != auto-task
-    assert.equal(s.rows.find((r) => r.task === 'reviewMerge').historyRuns, 0); // never-run built-in listed
+    assert.equal(s.rows.find((r) => r.task === 'loop.regression').phoneRuns, 1);
+    assert.equal(s.rows.find((r) => r.task === 'issues.implement').ledgerRuns, 1);
+    assert.equal(s.rows.find((r) => r.task === 'docs.generate').ledgerRuns, 0); // source != auto-task
+    assert.equal(s.rows.find((r) => r.task === 'review.merge').historyRuns, 0); // never-run built-in listed
+    assert.equal(s.rows.some((r) => r.task === 'reviewCode'), false, 'a legacy name is reported under its registry id');
     assert.ok(s.rows.some((r) => r.task === 'custom-abc'));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -90,7 +96,7 @@ test('the CLI prints counts only and leaves the database untouched', () => {
   try {
     const before = fs.readFileSync(dbPath);
     const out = execFileSync(process.execPath, [SCRIPT, '--history', history, '--db', dbPath], { encoding: 'utf8' });
-    assert.match(out, /reviewCode/);
+    assert.match(out, /review\.code/);
     assert.ok(!out.includes(SECRET), 'no summary, label or project text may be printed');
     assert.deepEqual(fs.readFileSync(dbPath), before);
     assert.deepEqual(fs.readdirSync(dir).sort(), ['auto-task-runs.json', 'data.db']);
