@@ -284,21 +284,7 @@ export interface StageTimelineRow { id: string; name: string; state: StageState 
 
 /** One row per stage a live run has touched, in first-seen order, from the typed current stage and the log markers. */
 export function stageTimeline(live: { log: readonly string[]; progress?: { stageName: string | null; stages?: readonly { id: string; name: string; state: StageState }[] } | null }): StageTimelineRow[] {
-  if (live.progress?.stages && live.progress.stages.length > 0) return live.progress.stages.map((r) => ({ id: r.id, name: r.name, state: r.state }));
-  const rows = new Map<string, StageState>();
-  for (const line of live.log) {
-    const started = /^\$ (.+)$/.exec(line);
-    if (started) { if (!rows.has(started[1])) rows.set(started[1], "running"); continue; }
-    const result = /^([✓✗]) (.+?): (passed|failed)$/.exec(line);
-    if (result) { rows.set(result[2], result[1] === "✓" ? "passed" : "failed"); continue; }
-    const repair = /^↻ repairing (.+?) \(/.exec(line);
-    if (repair) { if (rows.get(repair[1]) !== "passed") rows.set(repair[1], "repaired"); continue; }
-    const skipped = /^↷ (.+?): passed earlier in this run$/.exec(line);
-    if (skipped) rows.set(skipped[1], "skipped");
-  }
-  const current = live.progress?.stageName;
-  if (current && !rows.has(current)) rows.set(current, "running");
-  return [...rows].map(([name, state]) => ({ id: name, name, state }));
+  return (live.progress?.stages ?? []).map((r) => ({ id: r.id, name: r.name, state: r.state }));
 }
 
 /** The card key after `key` in column order, or the first/last when key is null. */
