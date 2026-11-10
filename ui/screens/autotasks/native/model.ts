@@ -35,7 +35,6 @@ const LEGACY_TASKS: readonly AutoTaskDef[] = [
   { id: "reviewDoc", label: "Review Doc", group: "Review", readOnlyOutput: true, prompt: "Review the project's documentation against the code and recent changes. Report inaccurate, missing or stale sections; do not edit files." },
   { id: "reviewConflicts", label: "Review Conflicts", group: "Review", prompt: "Review conflict markers and divergent changes. Explain the conflicting intents and propose a resolution without applying it." },
   { id: "updateIssues", label: "Update Issues", group: "Automation", prompt: "Update the tracked issues with the current status and evidence from the repository. Report every issue you change." },
-  { id: "generateDoc", label: "Generate Documentation", group: "Automation", prompt: "Generate the requested project document from the current sources and repository state." },
 ];
 
 export const GROUPS: readonly AutoTaskGroup[] = ["Pipeline", "Review", "Automation", "Maintenance"];

@@ -3,6 +3,43 @@ import type { LoopTemplateDef, TaskDef } from "./types.ts";
 
 export const TASKS: readonly TaskDef[] = [
   {
+    "id": "docs.generate",
+    "label": "Generate Documentation",
+    "group": "Automation",
+    "description": "Generate a document through Doc Gen. The Doc Gen screen and POST /generate-doc own it.",
+    "aliases": [
+      "generateDoc"
+    ],
+    "runner": null,
+    "input": {
+      "kind": "doc",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": false,
+    "requiresLocalHost": true,
+    "features": [
+      "doc_gen"
+    ],
+    "availability": {
+      "status": "retired",
+      "reason": "Generate Documentation needs a template and sources; the Doc Gen screen and POST /generate-doc own it."
+    },
+    "revision": 1
+  },
+  {
     "id": "knowledge.update",
     "label": "Knowledge",
     "group": "Maintenance",
@@ -167,6 +204,7 @@ export const TASKS: readonly TaskDef[] = [
 export const TASK_BY_ID: Readonly<Record<string, TaskDef>> = Object.freeze(Object.fromEntries(TASKS.map((t) => [t.id, t])));
 
 export const ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  "generateDoc": "docs.generate",
   "generateKnowledge": "knowledge.update",
   "regression": "loop.regression",
   "sourceUpdate": "sources.update",

@@ -160,6 +160,43 @@
         "reason": "No durable memory writer exists in the core; Graph/Memory surfaces own knowledge updates."
       },
       "revision": 1
+    },
+    {
+      "id": "docs.generate",
+      "label": "Generate Documentation",
+      "group": "Automation",
+      "description": "Generate a document through Doc Gen. The Doc Gen screen and POST /generate-doc own it.",
+      "aliases": [
+        "generateDoc"
+      ],
+      "runner": null,
+      "input": {
+        "kind": "doc",
+        "required": false,
+        "paths": []
+      },
+      "output": {
+        "kind": "file",
+        "persist": "file",
+        "revertWrites": false
+      },
+      "schedule": {
+        "backend": "none",
+        "defaultCron": null,
+        "schedulable": false
+      },
+      "scope": "project",
+      "readOnly": false,
+      "requiresRepo": false,
+      "requiresLocalHost": true,
+      "features": [
+        "doc_gen"
+      ],
+      "availability": {
+        "status": "retired",
+        "reason": "Generate Documentation needs a template and sources; the Doc Gen screen and POST /generate-doc own it."
+      },
+      "revision": 1
     }
   ]
 }
