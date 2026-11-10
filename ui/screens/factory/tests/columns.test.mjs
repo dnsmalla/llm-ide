@@ -93,3 +93,9 @@ test("a run marker with no live run is Interrupted, whatever older record exists
   assert.deepEqual(columnFor(facts({ interrupted: true })), { column: "needsYou", note: NOTE.interrupted });
   assert.deepEqual(columnFor(facts({ interrupted: true, lastRecord: record({ statusCode: "success" }), worktreeExists: true })), { column: "needsYou", note: NOTE.interrupted });
 });
+
+test("a record's total cost includes repairs and wins over the stage sum", () => {
+  const raw = { statusCode: "success", worktree: { runId: "r1" }, costUsd: 6.1, stages: [{ costUsd: 0.1 }] };
+  assert.equal(decodeRunRecordFacts(raw).costUsd, 6.1);
+  assert.equal(decodeRunRecordFacts({ ...raw, costUsd: undefined }).costUsd, 0.1, "old records fall back to stages");
+});

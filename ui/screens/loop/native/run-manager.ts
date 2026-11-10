@@ -389,7 +389,7 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
     iterations: iterationRecordsWithScores(f.outcome.iterations),
     workItem: { source: item.source, id: item.id, title: item.title },
     worktree: { runId: live.runId, branch: f.info.branch, baseCommit: f.info.baseCommit, repo: f.info.repo },
-    ship: null, needsDecision: needsDecisionSummary(f.outcome), diffSummary,
+    ship: null, needsDecision: needsDecisionSummary(f.outcome), diffSummary, costUsd: f.outcome.costUsd ?? stages.reduce((n, st) => n + (st.costUsd ?? 0), 0),
   };
   const copy = live.mode === "full" || live.mode === "intakeOnly";
   const prefix = repoPrefixFor(live.projectRoot, f.info.worktree);

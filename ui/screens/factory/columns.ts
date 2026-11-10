@@ -49,7 +49,7 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     needsDecision: typeof raw.needsDecision === "string" && raw.needsDecision.trim() !== "" ? raw.needsDecision.slice(0, 500) : null,
     ship,
     reviewedPatchId,
-    costUsd: Array.isArray(raw.stages) ? raw.stages.reduce((n, st) => n + (typeof st?.costUsd === "number" && Number.isFinite(st.costUsd) ? st.costUsd : 0), 0) : null,
+    costUsd: typeof raw.costUsd === "number" && Number.isFinite(raw.costUsd) ? raw.costUsd : Array.isArray(raw.stages) ? raw.stages.reduce((n, st) => n + (typeof st?.costUsd === "number" && Number.isFinite(st.costUsd) ? st.costUsd : 0), 0) : null,
     durationSeconds: typeof raw.durationSeconds === "number" && Number.isFinite(raw.durationSeconds) ? raw.durationSeconds : null,
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,
     entry,

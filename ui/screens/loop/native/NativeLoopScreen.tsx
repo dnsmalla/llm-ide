@@ -679,9 +679,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         needsDecision,
         diffSummary,
       };
-      const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
+      const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, costUsd: o.usage?.costUsd ?? null, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
       // Awaited: Ship's record update (setRunRecordShip) needs the record on disk, so the panel opens only after it.
-      await appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      await appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
       if (isFactoryLoop(target) && activeRun && start && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) setShipRun({ info: activeRun, item: start.item, entry, passed: true, reviewedPatchId: diffSummary?.patchId ?? null, requestProvider: null, ...(worktreeDiff ? { diff: worktreeDiff } : {}) });
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
