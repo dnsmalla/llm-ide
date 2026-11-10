@@ -1,0 +1,13 @@
+{
+  "endpoint": "GET /kb/tasks",
+  "status": 401,
+  "request": {
+    "query": {}
+  },
+  "response": {
+    "error": {
+      "code": "UNAUTHORIZED",
+      "message": "Sign in first"
+    }
+  }
+}

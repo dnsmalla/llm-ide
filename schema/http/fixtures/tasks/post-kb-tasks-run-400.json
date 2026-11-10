@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/tasks/:id/run",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "sources.update"
+    },
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "prompt is not accepted"
+    }
+  }
+}

@@ -10,7 +10,7 @@ export type AutoTaskId =
   | "sourceUpdate" | "sourcesToIssue" | "implementIssues" | "reviewMerge"
   | "reviewCode" | "reviewDoc" | "reviewConflicts"
   | "updateIssues" | "updatePlanStatus" | "generateDoc" | "regression" | "generateKnowledge"
-  | "loop.regression";
+  | "loop.regression" | "sources.update" | "plan.status";
 
 export type AutoTaskGroup = "Pipeline" | "Review" | "Automation" | "Maintenance";
 export interface AutoTaskDef { id: AutoTaskId; label: string; group: AutoTaskGroup; prompt: string; readOnlyOutput?: boolean }
@@ -28,7 +28,6 @@ export interface AutoTaskConfig {
 export interface AutoTaskLocalState { masterEnabled: boolean; configs: Record<string, AutoTaskConfig>; }
 
 const LEGACY_TASKS: readonly AutoTaskDef[] = [
-  { id: "sourceUpdate", label: "Source Update", group: "Pipeline", prompt: "Update the project's source notes from the latest captured sources. Record what changed and where it was written." },
   { id: "sourcesToIssue", label: "Sources → Issue", group: "Pipeline", prompt: "Turn the unresolved action items in the latest sources into tracked issues. Report every issue you create." },
   { id: "implementIssues", label: "Implement Issues", group: "Pipeline", prompt: "Pick the next open issue that is ready to implement, implement it, and report the changed files and test result." },
   { id: "reviewMerge", label: "Review & Merge", group: "Pipeline", prompt: "Review the pending merge request for bugs, missing tests and unintended changes. Report findings; do not merge." },
@@ -36,7 +35,6 @@ const LEGACY_TASKS: readonly AutoTaskDef[] = [
   { id: "reviewDoc", label: "Review Doc", group: "Review", readOnlyOutput: true, prompt: "Review the project's documentation against the code and recent changes. Report inaccurate, missing or stale sections; do not edit files." },
   { id: "reviewConflicts", label: "Review Conflicts", group: "Review", prompt: "Review conflict markers and divergent changes. Explain the conflicting intents and propose a resolution without applying it." },
   { id: "updateIssues", label: "Update Issues", group: "Automation", prompt: "Update the tracked issues with the current status and evidence from the repository. Report every issue you change." },
-  { id: "updatePlanStatus", label: "Update Plan Status", group: "Automation", prompt: "Update the project plan status from the current repository state. Report which plan items moved." },
   { id: "generateDoc", label: "Generate Documentation", group: "Automation", prompt: "Generate the requested project document from the current sources and repository state." },
   { id: "generateKnowledge", label: "Knowledge", group: "Maintenance", prompt: "Update the project knowledge base with durable facts learned from the recent work." },
 ];
@@ -91,7 +89,7 @@ export function saveState(s: AutoTaskLocalState, storage: Storage | undefined = 
  *  run deterministic code in the Mac app; the desktop has no such code, so it must never send them to the agent as an
  *  invented prompt. They stay listed, but are not runnable here, and a schedule never fires them. */
 export const MAC_ONLY_TASK_IDS: ReadonlySet<AutoTaskId> = new Set<AutoTaskId>([
-  "sourceUpdate", "sourcesToIssue", "implementIssues", "reviewMerge", "updatePlanStatus", "generateKnowledge",
+  "sourcesToIssue", "implementIssues", "reviewMerge", "generateKnowledge",
 ]);
 export const MAC_ONLY_MESSAGE = "This task runs deterministic code in the Mac app; the desktop does not run it yet.";
 
@@ -111,6 +109,8 @@ export function scheduledRunAllowed(id: AutoTaskId, c: AutoTaskConfig | undefine
 
 /** Mac parity (`AutoTask.requiresLinkedRepo`): only Source Update runs without a linked repository. */
 export function requiresLinkedRepo(id: AutoTaskId): boolean {
+  const registered = taskById(id);
+  if (registered) return registered.requiresRepo;
   return id !== "sourceUpdate";
 }
 

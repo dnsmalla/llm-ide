@@ -88,6 +88,13 @@ for (const [key, { spec }] of endpoints) for (const s of Object.keys(spec.respon
 // endpoints whose success path is skipped.
 const SKIP_RULES = [
   {
+    // Task registry runs: the route needs the desktop's bus host proof, which a replayed fixture cannot send.
+    // The 403 (no proof) replays live; the catalog and the run result are covered by tests/task-routes.test.mjs
+    // and tests/task-runner-*.test.mjs with the real handler.
+    why: 'task registry run: needs the desktop host proof; covered by tests/task-routes.test.mjs',
+    when: (fx) => fx.endpoint === 'POST /kb/tasks/:id/run' && fx.status !== 401 && fx.status !== 403,
+  },
+  {
     // Project roles: the replay user has no registered project row, so every id-addressed project route
     // answers 404 before its own status. Covered end to end by tests/project-e2e.test.mjs (a real server
     // that registers a project and grants roles); GET /projects itself still replays.

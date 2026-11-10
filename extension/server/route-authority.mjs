@@ -177,6 +177,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/auth/reset-request',
   ]),
   ...rules('self.read', 'GET', [
+    '/kb/tasks',
     '/projects',
     '/projects/:id/plan-tasks',
     '/agent/v2/session/route',
@@ -369,6 +370,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/agent/ask',
   ]),
   ...rules('model.read', 'POST', [
+    '/kb/tasks/:id/run',
     '/bus/commands',
     '/extract-entities',
     '/generate-doc',

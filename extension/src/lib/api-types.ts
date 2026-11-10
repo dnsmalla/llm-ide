@@ -2306,6 +2306,60 @@ export type EncryptedSyncStatus = {
   passwordChangedAt?: number | null;
 };
 
+export type Available = {
+  status: "available" | "unported" | "retired" | "alias";
+  reason: string | null;
+};
+
+export type TasksTask = {
+  id: string;
+  label: string;
+  group: string;
+  description: string;
+  aliases: string[];
+  runner: {
+    kind: "agent" | "shell" | "core-route" | "desktop-action";
+    route?: string;
+    busKind?: string;
+    action?: string;
+    stage?: Record<string, unknown>;
+    timeoutSeconds?: number;
+  } | null;
+  input: {
+    kind: string;
+    required: boolean;
+    paths?: string[];
+    selector?: string;
+  };
+  output: {
+    kind: string;
+    persist: string;
+    revertWrites: boolean;
+  };
+  schedule: {
+    backend: string;
+    defaultCron: string | null;
+    schedulable: boolean;
+  };
+  scope: string;
+  readOnly: boolean;
+  requiresRepo: boolean;
+  requiresLocalHost: boolean;
+  features: string[];
+  availability: Available;
+  revision: number;
+};
+
+export type TaskResult = {
+  taskId: string;
+  ok: boolean;
+  runner: string;
+  summary: string;
+  output: string;
+  warnings: string[];
+  code?: string;
+};
+
 export type TeamMember = {
   userId: string;
   email: string;
@@ -9127,6 +9181,40 @@ export type PostKbSyncPasswordChangedRequest = {
 
 export type PostKbSyncPasswordChangedResponse200 = EncryptedSyncStatus;
 
+/** Request parts for `GET /kb/tasks` (schema/http/tasks.schema.json). */
+export type GetKbTasksRequest = {
+  query: Record<string, unknown>;
+};
+
+export type GetKbTasksResponse200 = {
+  tasks: TasksTask[];
+};
+
+export type GetKbTasksResponse401 = CommonError;
+
+/** Request parts for `POST /kb/tasks/:id/run` (schema/http/tasks.schema.json). */
+export type PostKbTasksIdRunRequest = {
+  params: {
+    id: string;
+  };
+  body: {
+    projectId?: string;
+    args?: {
+      sourceIds?: string[];
+    };
+  };
+};
+
+export type PostKbTasksIdRunResponse200 = TaskResult;
+
+export type PostKbTasksIdRunResponse400 = CommonError;
+
+export type PostKbTasksIdRunResponse401 = CommonError;
+
+export type PostKbTasksIdRunResponse403 = CommonError;
+
+export type PostKbTasksIdRunResponse404 = CommonError;
+
 /** Request parts for `GET /admin/members` (schema/http/team.schema.json). */
 export type GetAdminMembersRequest = Record<string, never>;
 
@@ -11901,6 +11989,23 @@ export interface ApiEndpoints {
     request: PostKbSyncPasswordChangedRequest;
     responses: {
       200: PostKbSyncPasswordChangedResponse200;
+    };
+  };
+  "GET /kb/tasks": {
+    request: GetKbTasksRequest;
+    responses: {
+      200: GetKbTasksResponse200;
+      401: GetKbTasksResponse401;
+    };
+  };
+  "POST /kb/tasks/:id/run": {
+    request: PostKbTasksIdRunRequest;
+    responses: {
+      200: PostKbTasksIdRunResponse200;
+      400: PostKbTasksIdRunResponse400;
+      401: PostKbTasksIdRunResponse401;
+      403: PostKbTasksIdRunResponse403;
+      404: PostKbTasksIdRunResponse404;
     };
   };
   "GET /admin/members": {

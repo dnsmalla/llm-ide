@@ -142,7 +142,7 @@ try {
   for (const [path, text] of Object.entries(rendered)) {
     let current = null;
     try { current = readFileSync(path, 'utf8'); } catch { /* missing is stale */ }
-    if (current !== text) bad(`generated copy is stale: ${path} (run: node scripts/gen-task-registry.mjs)`);
+    if (current === null || current.replace(/\r\n/g, '\n') !== text.replace(/\r\n/g, '\n')) bad(`generated copy is stale: ${path} (run: node scripts/gen-task-registry.mjs)`);
   }
 } catch (err) {
   bad(`could not build the registry: ${err instanceof Error ? err.message : String(err)}`);

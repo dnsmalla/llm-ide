@@ -123,7 +123,7 @@ function checkOrWrite(write) {
   for (const [path, text] of Object.entries(rendered)) {
     let current = null;
     try { current = readFileSync(path, 'utf8'); } catch { /* missing counts as stale */ }
-    if (current === text) continue;
+    if (current !== null && current.replace(/\r\n/g, '\n') === text.replace(/\r\n/g, '\n')) continue;
     if (!write) { stale.push(relative(ROOT, path)); continue; }
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, text);

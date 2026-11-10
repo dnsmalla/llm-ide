@@ -47,8 +47,12 @@ export const FEATURE_ROUTE_GROUPS = Object.freeze({
   // Loop / Auto-Tasks / Self-Heal headless agent step (Features/Loop +
   // Features/AutoTask). The largest group: llm_agent/sdk/loop-agent.mjs.
   auto_tasks: Object.freeze({
-    prefixes: Object.freeze(['/kb/loop/']),
-    load: async () => (await import('./loop-agent.mjs')).handleLoopAgentRoutes,
+    prefixes: Object.freeze(['/kb/loop/', '/kb/tasks']),
+    load: async () => {
+      const loop = (await import('./loop-agent.mjs')).handleLoopAgentRoutes;
+      const tasks = (await import('./tasks.mjs')).handleTaskRoutes;
+      return async (req, res, ctx) => (await loop(req, res, ctx)) || (await tasks(req, res, ctx));
+    },
   }),
 });
 

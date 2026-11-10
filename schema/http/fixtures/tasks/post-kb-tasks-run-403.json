@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/tasks/:id/run",
+  "status": 403,
+  "request": {
+    "params": {
+      "id": "sources.update"
+    },
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "This route is for the desktop app only"
+    }
+  }
+}

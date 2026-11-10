@@ -1,0 +1,323 @@
+{
+  "description": "The unified task registry's desktop route (feature auto_tasks). Rows: GET /kb/tasks (the catalog the desktop may run; prompts are omitted), POST /kb/tasks/:id/run (one task; the registry fixes the prompt/route and the body may carry only projectId and args). Both are feature-owned: with auto_tasks off they answer 404 {error:'feature_disabled',feature:'auto_tasks'}. The run route requires the bus host proof first (403 HOST_PROOF_REQUIRED for a JWT-only or hub caller), so it is not a remote task API; remote clients keep using the command bus. The fixtures are transcribed from routes/tasks.mjs and tests/task-runner-sources.test.mjs; no model call and no live source sync.",
+  "$defs": {
+    "Available": {
+      "type": "object",
+      "required": [
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "unported",
+            "retired",
+            "alias"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Task": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "group",
+        "description",
+        "aliases",
+        "runner",
+        "input",
+        "output",
+        "schedule",
+        "scope",
+        "readOnly",
+        "requiresRepo",
+        "requiresLocalHost",
+        "features",
+        "availability",
+        "revision"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "runner": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "shell",
+                "core-route",
+                "desktop-action"
+              ]
+            },
+            "route": {
+              "type": "string",
+              "x-optional": true
+            },
+            "busKind": {
+              "type": "string",
+              "x-optional": true
+            },
+            "action": {
+              "type": "string",
+              "x-optional": true
+            },
+            "stage": {
+              "type": "object",
+              "x-optional": true
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "x-optional": true
+            }
+          }
+        },
+        "input": {
+          "type": "object",
+          "required": [
+            "kind",
+            "required"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "x-optional": true
+            },
+            "selector": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "required": [
+            "kind",
+            "persist",
+            "revertWrites"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "persist": {
+              "type": "string"
+            },
+            "revertWrites": {
+              "type": "boolean"
+            }
+          }
+        },
+        "schedule": {
+          "type": "object",
+          "required": [
+            "backend",
+            "defaultCron",
+            "schedulable"
+          ],
+          "properties": {
+            "backend": {
+              "type": "string"
+            },
+            "defaultCron": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "schedulable": {
+              "type": "boolean"
+            }
+          }
+        },
+        "scope": {
+          "type": "string"
+        },
+        "readOnly": {
+          "type": "boolean"
+        },
+        "requiresRepo": {
+          "type": "boolean"
+        },
+        "requiresLocalHost": {
+          "type": "boolean"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "availability": {
+          "$ref": "#/$defs/Available"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      }
+    },
+    "TaskResult": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "ok",
+        "runner",
+        "summary",
+        "output",
+        "warnings"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "runner": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "code": {
+          "type": "string",
+          "x-optional": true
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /kb/tasks": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "tasks"
+          ],
+          "properties": {
+            "tasks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Task"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/tasks/:id/run": {
+      "request": {
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "x-optional": true
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sourceIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "x-optional": true
+                }
+              }
+            }
+          }
+        },
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/TaskResult"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

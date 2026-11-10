@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/tasks/:id/run",
+  "status": 200,
+  "description": "Transcribed from tests/task-runner-sources.test.mjs with a fake sources adapter: the task result envelope, no model call and no live source sync.",
+  "request": {
+    "params": { "id": "sources.update" },
+    "body": { "args": { "sourceIds": ["gcal:aaaaaaaaaaaa"] } }
+  },
+  "response": {
+    "taskId": "sources.update",
+    "runner": "core-route",
+    "ok": true,
+    "summary": "Synced 1 of 1 sources.",
+    "output": "Synced 1 of 1 sources.",
+    "warnings": []
+  }
+}

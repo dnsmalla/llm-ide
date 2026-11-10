@@ -5,6 +5,7 @@ import * as sk from "../native/skills.ts";
 
 test("only Source Update runs without a linked repository, as on the Mac", () => {
   assert.equal(m.requiresLinkedRepo("sourceUpdate"), false);
+  assert.equal(m.requiresLinkedRepo("sources.update"), false);
   assert.equal(m.requiresLinkedRepo("reviewCode"), true);
 });
 

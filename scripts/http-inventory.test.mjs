@@ -27,6 +27,7 @@ const FILES = {
   '/kb/self-heal/runs/:id/outcome',
   '/kb/self-heal/runs/:id/resolve',
   '/projects/:id/plan-tasks',
+  '/kb/tasks/:id/run',
 ];
 
 export function route(url, method) {

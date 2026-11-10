@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/tasks/:id/run",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "nope"
+    },
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "TASK_NOT_FOUND",
+      "message": "Unknown task \"nope\"."
+    }
+  }
+}

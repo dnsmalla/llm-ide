@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 135
+  x-api-version: 136
 servers:
   - url: "https://{host}"
     variables:
@@ -41,6 +41,7 @@ tags:
   - name: "review"
   - name: "self-heal"
   - name: "sync"
+  - name: "tasks"
   - name: "team"
 paths:
   /:
@@ -16319,6 +16320,89 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/tasks:
+    get:
+      tags:
+        - "tasks"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "tasks"
+                properties:
+                  tasks:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TasksTask"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/tasks/{id}/run:
+    post:
+      tags:
+        - "tasks"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              additionalProperties: false
+              properties:
+                projectId:
+                  type: "string"
+                args:
+                  type: "object"
+                  additionalProperties: false
+                  properties:
+                    sourceIds:
+                      type: "array"
+                      items:
+                        type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/TaskResult"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/usage/limits:
     get:
       summary: "Read the user's per-model usage caps (built-in chains merged with overrides)"
@@ -18447,6 +18531,23 @@ components:
             - "string"
             - "null"
         userAgent:
+          type:
+            - "string"
+            - "null"
+    Available:
+      type: "object"
+      required:
+        - "status"
+        - "reason"
+      properties:
+        status:
+          type: "string"
+          enum:
+            - "available"
+            - "unported"
+            - "retired"
+            - "alias"
+        reason:
           type:
             - "string"
             - "null"
@@ -23131,6 +23232,148 @@ components:
           type:
             - "number"
             - "null"
+    TaskResult:
+      type: "object"
+      required:
+        - "taskId"
+        - "ok"
+        - "runner"
+        - "summary"
+        - "output"
+        - "warnings"
+      properties:
+        taskId:
+          type: "string"
+        ok:
+          type: "boolean"
+        runner:
+          type: "string"
+        summary:
+          type: "string"
+        output:
+          type: "string"
+        warnings:
+          type: "array"
+          items:
+            type: "string"
+        code:
+          type: "string"
+    TasksTask:
+      type: "object"
+      required:
+        - "id"
+        - "label"
+        - "group"
+        - "description"
+        - "aliases"
+        - "runner"
+        - "input"
+        - "output"
+        - "schedule"
+        - "scope"
+        - "readOnly"
+        - "requiresRepo"
+        - "requiresLocalHost"
+        - "features"
+        - "availability"
+        - "revision"
+      properties:
+        id:
+          type: "string"
+        label:
+          type: "string"
+        group:
+          type: "string"
+        description:
+          type: "string"
+        aliases:
+          type: "array"
+          items:
+            type: "string"
+        runner:
+          type:
+            - "object"
+            - "null"
+          required:
+            - "kind"
+          properties:
+            kind:
+              type: "string"
+              enum:
+                - "agent"
+                - "shell"
+                - "core-route"
+                - "desktop-action"
+            route:
+              type: "string"
+            busKind:
+              type: "string"
+            action:
+              type: "string"
+            stage:
+              type: "object"
+            timeoutSeconds:
+              type: "integer"
+        input:
+          type: "object"
+          required:
+            - "kind"
+            - "required"
+          properties:
+            kind:
+              type: "string"
+            required:
+              type: "boolean"
+            paths:
+              type: "array"
+              items:
+                type: "string"
+            selector:
+              type: "string"
+        output:
+          type: "object"
+          required:
+            - "kind"
+            - "persist"
+            - "revertWrites"
+          properties:
+            kind:
+              type: "string"
+            persist:
+              type: "string"
+            revertWrites:
+              type: "boolean"
+        schedule:
+          type: "object"
+          required:
+            - "backend"
+            - "defaultCron"
+            - "schedulable"
+          properties:
+            backend:
+              type: "string"
+            defaultCron:
+              type:
+                - "string"
+                - "null"
+            schedulable:
+              type: "boolean"
+        scope:
+          type: "string"
+        readOnly:
+          type: "boolean"
+        requiresRepo:
+          type: "boolean"
+        requiresLocalHost:
+          type: "boolean"
+        features:
+          type: "array"
+          items:
+            type: "string"
+        availability:
+          "$ref": "#/components/schemas/Available"
+        revision:
+          type: "integer"
     TeamMember:
       type: "object"
       required:

@@ -24,5 +24,5 @@ test("the schedule status line follows the Mac's order of checks", () => {
   assert.equal(m.scheduleStatusLine(false, on, "reviewCode", now), "Auto Tasks paused — master switch off");
   assert.equal(m.scheduleStatusLine(true, { ...on, enabled: false }, "reviewCode", now), "Task disabled — won't run");
   assert.match(m.scheduleStatusLine(true, on, "reviewCode", now), /^Scheduled · next \S+ 10:00$/);
-  assert.match(m.scheduleStatusLine(true, on, "sourceUpdate", now), /Mac app only/);
+  assert.match(m.scheduleStatusLine(true, on, "sourcesToIssue", now), /Mac app only/);
 });

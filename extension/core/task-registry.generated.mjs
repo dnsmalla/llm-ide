@@ -46,13 +46,94 @@ export const TASKS = Object.freeze([
       "reason": null
     },
     "revision": 1
+  },
+  {
+    "id": "plan.status",
+    "label": "Update Plan Status",
+    "group": "Automation",
+    "description": "Refresh the tracked outcomes and plan-task status from the connected trackers.",
+    "aliases": [
+      "updatePlanStatus"
+    ],
+    "runner": {
+      "kind": "core-route",
+      "route": "plan-status",
+      "timeoutSeconds": 1800
+    },
+    "input": {
+      "kind": "none",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "none",
+      "persist": "run-record",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "desktop",
+      "defaultCron": null,
+      "schedulable": true
+    },
+    "scope": "app",
+    "readOnly": false,
+    "requiresRepo": false,
+    "requiresLocalHost": false,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
+    "id": "sources.update",
+    "label": "Source Update",
+    "group": "Pipeline",
+    "description": "Sync the connected server-side sources into the Library and record what changed.",
+    "aliases": [
+      "sourceUpdate"
+    ],
+    "runner": {
+      "kind": "core-route",
+      "route": "sources-update",
+      "busKind": "sources.update",
+      "timeoutSeconds": 1800
+    },
+    "input": {
+      "kind": "project",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "text",
+      "persist": "run-record",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "desktop",
+      "defaultCron": null,
+      "schedulable": true
+    },
+    "scope": "app",
+    "readOnly": false,
+    "requiresRepo": false,
+    "requiresLocalHost": false,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
   }
 ]);
 
 export const TASK_BY_ID = Object.freeze(Object.fromEntries(TASKS.map((t) => [t.id, t])));
 
 export const ALIASES = Object.freeze({
-  "regression": "loop.regression"
+  "regression": "loop.regression",
+  "sourceUpdate": "sources.update",
+  "updatePlanStatus": "plan.status"
 });
 
 export const TEMPLATES = Object.freeze([
