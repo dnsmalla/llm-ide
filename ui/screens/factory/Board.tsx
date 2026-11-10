@@ -351,7 +351,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" } as const;
           const cardKey = t.closest("[data-key]")?.getAttribute("data-key") ?? selectedKey;
           const dir = map[e.key as keyof typeof map];
-          if (!dir) { if ((e.key === "Enter" || e.key === " ") && cardKey) { e.preventDefault(); setSelectedKey(cardKey); } return; }
+          // Enter/Space are left alone: the card title is a button that opens the panel, and every other button keeps its own click.
+          if (!dir) return;
           const next = nextCardKey(board, cardKey, dir);
           if (!next) return;
           e.preventDefault();

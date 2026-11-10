@@ -310,15 +310,15 @@ export function nextCardKey(board: Record<Column, CardView[]>, key: string | nul
   if (!current) return flat[0]?.key ?? null;
   const allCols = COLUMNS;
   const ci = allCols.indexOf(current.col);
+  const row = board[current.col].findIndex((v) => v.key === key);
   if (direction === "left" || direction === "right") {
     for (let i = ci + (direction === "right" ? 1 : -1); i >= 0 && i < allCols.length; i += direction === "right" ? 1 : -1) {
       const col = board[allCols[i]];
-      if (col.length) return col[Math.min(i, col.length - 1)].key;
+      if (col.length) return col[Math.min(row, col.length - 1)].key;
     }
     return current.key;
   }
   const col = board[current.col];
-  const i = col.findIndex((v) => v.key === key);
-  const next = direction === "down" ? i + 1 : i - 1;
+  const next = direction === "down" ? row + 1 : row - 1;
   return col[Math.max(0, Math.min(col.length - 1, next))].key;
 }

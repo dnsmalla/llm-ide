@@ -201,6 +201,12 @@ test("D4: nextCardKey moves within a column and into the next non-empty column",
   assert.equal(nextCardKey(board, "c", "left"), "a");
   assert.equal(nextCardKey(board, "b", "down"), "b");
   assert.equal(nextCardKey(board, null, "down"), "a");
+  // Left/right keep the row (clamped to the target column's length), not the column number.
+  const tall = { inbox: [{ key: "a" }, { key: "b" }], needsDecision: [], working: [], needsYou: [{ key: "x" }, { key: "y" }, { key: "z" }], readyToShip: [], shipped: [], done: [{ key: "d" }] };
+  assert.equal(nextCardKey(tall, "a", "right"), "x");
+  assert.equal(nextCardKey(tall, "b", "right"), "y");
+  assert.equal(nextCardKey(tall, "z", "left"), "b");
+  assert.equal(nextCardKey(tall, "z", "right"), "d");
 });
 
 test("D4: the board markup uses a region, labelled lists and a log", async () => {
