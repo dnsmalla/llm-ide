@@ -117,7 +117,7 @@ export function scanForSecretsDetailed(diffText) {
     if (rawLine[0] === ' ' || rawLine[0] === '+') {
       if (rawLine[0] === '+') {
         const added = rawLine.slice(1);
-        const creds = [...added.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@["']?(\[[^\]]+\]|[A-Za-z0-9.-]+)/gi)];
+        const creds = [...added.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@["']?(\[[^\]]+\]|[A-Za-z0-9.-]+)(?=[:/?#"'(),\s]|$)/gi)];
         const local = creds.length > 0 && creds.every((m) => localOrExampleHost(m[1]));
         for (const { name, re, gate } of SECRET_RULES) {
           if (gate === false) continue; // redaction-only heuristic: not a hard Ship gate

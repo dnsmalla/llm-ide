@@ -181,8 +181,7 @@ async function errorFromResponse(res: Response): Promise<CoreError> {
       if (typeof env.code === "string") code = env.code;
       else if (typeof b.error === "string") code = b.error;
       if (typeof env.message === "string") message = env.message;
-      const ed = env.details && typeof env.details === 'object' ? env.details as Record<string, unknown> : {};
-      details = { rule: ed.rule, file: ed.file, line: ed.line };
+      if (env.details && typeof env.details === 'object') details = env.details as Record<string, unknown>;
     }
   } catch {
     // not JSON: keep the generic message

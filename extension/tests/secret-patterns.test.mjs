@@ -133,3 +133,9 @@ test("R-046 #3: quoted/bracketed/multiple local URLs are exempt only when every 
   ]) assert.equal(shipScan(line), null, line);
   assert.equal(shipScan("+a=postgres://u:p@localhost/db b=postgres://u:real@prod.db.io/x"), "URL with credentials");
 });
+
+test("R-047: a quoted secret with symbols and an unquoted one with a comment still block", () => {
+  assert.equal(shipScan('+password: "Zx9vQ2LmN8rT4wYb6cHd!@#"'), "Credential literal");
+  assert.equal(shipScan("+PASSWORD: Zx9vQ2LmN8rT4wYb6cHd1234  # prod"), "Credential literal");
+  assert.equal(shipScan("+postgres://u:real@localhost_prod.db.io/x"), "URL with credentials");
+});
