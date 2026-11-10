@@ -567,10 +567,10 @@ export const DEFAULT_LOOP_SPECS = [
           "name": "Doc Index",
           "order": 0,
           "outputPath": "llm-doc/loop/docs/INDEX.md",
-          "prompt": "Write or update the doc index file at the Output path for the code under the Input. Resolve the Input and the Output path against the repo root only (never the project root), creating the Output's directory there when missing: the docs must be inside the git tree so the code graph scans and links them. The index lists the areas of the codebase, for each area the doc page that will describe it (beside the index), and the key files and symbols that page must cover. Code is cited only as a backticked repo-relative path (`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify with the check-citations / find-code tools when available, else by reading the file). Rewrite only the drifted sections, keep the index within 300 lines, and never edit hand-written docs.",
           "severity": "blocking",
           "skillId": "skills/doc-structure-index",
-          "targetPath": "."
+          "targetPath": ".",
+          "prompt": "Write or update the doc index file at the Output path for the code under the Input. Resolve the Input and the Output path against the repo root only (never the project root), creating the Output's directory there when missing: the docs must be inside the git tree so the code graph scans and links them. The index lists the areas of the codebase, for each area the doc page that will describe it (beside the index), and the key files and symbols that page must cover. Code is cited only as a backticked repo-relative path (`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify with the check-citations / find-code tools when available, else by reading the file). Rewrite only the drifted sections, keep the index within 300 lines, and never edit hand-written docs."
         },
         {
           "defaultKey": "doc-writer",
@@ -582,10 +582,10 @@ export const DEFAULT_LOOP_SPECS = [
           "name": "Doc Writer",
           "order": 1,
           "outputPath": "llm-doc/loop/docs",
-          "prompt": "For every page listed in the doc index at the Input, write or update that page in the Output directory: purpose, how it works (the logic, step by step), key files and functions, invariants, how to change it safely, and related pages. Resolve the Input and the Output path against the repo root only (never the project root), creating the Output's directory there when missing: the docs must be inside the git tree so the code graph scans and links them. Code is cited only as a backticked repo-relative path (`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify with the check-citations / find-code tools when available, else by reading the file). Update only drifted sections; never delete a page the index still lists; keep each page within 250 lines. Write only inside the Output directory — never edit code, hand-written docs, or the index.",
           "severity": "blocking",
           "skillId": "skills/doc-writer",
-          "targetPath": "llm-doc/loop/docs/INDEX.md"
+          "targetPath": "llm-doc/loop/docs/INDEX.md",
+          "prompt": "For every page listed in the doc index at the Input, write or update that page in the Output directory: purpose, how it works (the logic, step by step), key files and functions, invariants, how to change it safely, and related pages. Resolve the Input and the Output path against the repo root only (never the project root), creating the Output's directory there when missing: the docs must be inside the git tree so the code graph scans and links them. Code is cited only as a backticked repo-relative path (`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify with the check-citations / find-code tools when available, else by reading the file). Update only drifted sections; never delete a page the index still lists; keep each page within 250 lines. Write only inside the Output directory — never edit code, hand-written docs, or the index."
         },
         {
           "check": {

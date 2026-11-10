@@ -839,6 +839,78 @@
         "reason": null
       },
       "revision": 1
+    },
+    {
+      "id": "loop.doc_structure_index",
+      "label": "Doc structure index",
+      "group": "Maintenance",
+      "description": "Loop stage: map the codebase areas to doc pages with the key files and symbols each page covers.",
+      "aliases": [],
+      "runner": {
+        "kind": "agent",
+        "prompt": "prompts/loop.doc_structure_index.md"
+      },
+      "input": {
+        "kind": "project",
+        "required": false,
+        "paths": []
+      },
+      "output": {
+        "kind": "file",
+        "persist": "file",
+        "revertWrites": false
+      },
+      "schedule": {
+        "backend": "none",
+        "defaultCron": null,
+        "schedulable": false
+      },
+      "scope": "project",
+      "readOnly": false,
+      "requiresRepo": true,
+      "requiresLocalHost": true,
+      "features": [],
+      "availability": {
+        "status": "available",
+        "reason": null
+      },
+      "revision": 2
+    },
+    {
+      "id": "loop.doc_writer",
+      "label": "Doc writer",
+      "group": "Maintenance",
+      "description": "Loop stage: write or update each generated doc page with every code claim cited.",
+      "aliases": [],
+      "runner": {
+        "kind": "agent",
+        "prompt": "prompts/loop.doc_writer.md"
+      },
+      "input": {
+        "kind": "project",
+        "required": false,
+        "paths": []
+      },
+      "output": {
+        "kind": "file",
+        "persist": "file",
+        "revertWrites": false
+      },
+      "schedule": {
+        "backend": "none",
+        "defaultCron": null,
+        "schedulable": false
+      },
+      "scope": "project",
+      "readOnly": false,
+      "requiresRepo": true,
+      "requiresLocalHost": true,
+      "features": [],
+      "availability": {
+        "status": "available",
+        "reason": null
+      },
+      "revision": 2
     }
   ]
 }
