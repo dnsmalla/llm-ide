@@ -177,3 +177,13 @@ test("a skipped timer tick is covered by the next stage-boundary poll", async ()
   assert.equal(out.progressed, 1);
   assert.deepEqual(posts(w, "/events").at(-1), { claimToken: "tok-c1", type: "progress", payload: { step: "stage: Verify" } });
 });
+
+test("progress prefers the typed stage over the log line", async () => {
+  const w = world();
+  w.claimable = [command("c1")];
+  await pollOnce(w.deps);
+  w.liveRuns = [{ runId: "run-i-c1", projectRoot: "/p", log: ["$ Review"], progress: { stageName: "Implement" } }];
+  w.nowMs += 31_000;
+  await pollOnce(w.deps);
+  assert.deepEqual(posts(w, "/events").at(-1).payload, { step: "stage: Implement" });
+});

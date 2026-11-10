@@ -4,6 +4,13 @@
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
 
 export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
+export type ProgressEvent =
+  | { type: "iteration"; iteration: number }
+  | { type: "stage-start"; stage: LoopStage; index: number; count: number; iteration: number }
+  | { type: "stage-result"; stage: LoopStage; ok: boolean; iteration: number }
+  | { type: "stage-skipped"; stage: LoopStage; iteration: number }
+  | { type: "repair"; stage: LoopStage; attempt: number }
+  | { type: "paused"; paused: boolean };
 export interface RunnerDeps {
   /** Execute one stage once. `prior` is every outcome so far (including earlier iterations). Throws for an unsupported kind. */
   runStage(stage: LoopStage, prior: readonly StageOutcome[]): Promise<StageRunResult>;
@@ -21,6 +28,8 @@ export interface RunnerDeps {
    * next check reports) and "timedOut" when the pause outlasted `timeoutSeconds` (0 = no limit) without a resume.
    */
   holdWhilePaused?(timeoutSeconds: number): Promise<"ok" | "timedOut">;
+  /** Typed run progress for the board; never parsed out of the log. */
+  onProgress?(event: ProgressEvent): void;
 }
 export interface StageOutcome { stage: LoopStage; ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 export interface LoopIterationOutcome { index: number; stages: StageOutcome[]; repair: { stageId: string; attempt: number; ok: boolean } | null }
@@ -66,7 +75,9 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   const heldOutcome = async (): Promise<LoopRunOutcome | null> => {
     if (!deps.holdWhilePaused) return null;
     const since = Date.now();
+    deps.onProgress?.({ type: "paused", paused: true });
     const result = await deps.holdWhilePaused(config.pauseTimeoutSeconds);
+    deps.onProgress?.({ type: "paused", paused: false });
     pausedMs += Date.now() - since;
     if (result !== "timedOut") return null;
     deps.log("pause timed out without a resume; the run is aborted to release the loop");
@@ -82,11 +93,13 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     if (haltAtStart) return haltAtStart;
     iterationsUsed = iteration;
     deps.log(`— iteration ${iteration} of ${Math.max(1, config.maxIterations)} —`);
+    deps.onProgress?.({ type: "iteration", iteration });
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
     for (const stage of stages) {
       if (stage.runOnce && passedOnce.has(stage.id)) {
         deps.log(`↷ ${stage.name}: passed earlier in this run`);
+        deps.onProgress?.({ type: "stage-skipped", stage, iteration });
         continue;
       }
       const heldAtStage = await heldOutcome();
@@ -95,12 +108,14 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       if (expired()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
       const haltAtStage = haltedOutcome();
       if (haltAtStage) return haltAtStage;
+      deps.onProgress?.({ type: "stage-start", stage, index: stages.indexOf(stage) + 1, count: stages.length, iteration });
       const t0 = Date.now();
       const result = await deps.runStage(stage, outcomes);
       const outcome = { stage, ok: result.ok, output: result.output, durationMs: result.durationMs ?? Date.now() - t0, usage: result.usage };
       spentUsd += result.usage?.costUsd ?? 0;
       outcomes.push(outcome);
       iterationOutcomes.push(outcome);
+      deps.onProgress?.({ type: "stage-result", stage, ok: result.ok, iteration });
       deps.log(`${result.ok ? "✓" : "✗"} ${stage.name}: ${result.ok ? "passed" : "failed"}`);
       if (result.ok && stage.runOnce) passedOnce.add(stage.id);
       if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {
@@ -131,6 +146,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     const heldBeforeRepair = await heldOutcome();
     if (heldBeforeRepair) return heldBeforeRepair;
     if (deps.isCancelled?.()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
+    deps.onProgress?.({ type: "repair", stage: failed.stage, attempt: used + 1 });
     deps.log(`↻ repairing ${failed.stage.name} (attempt ${used + 1} of ${Math.max(1, config.maxRepairsPerStage)})`);
     const repair = await deps.repair(failed.stage, failed.output, used + 1);
     spentUsd += repair.usage?.costUsd ?? 0;

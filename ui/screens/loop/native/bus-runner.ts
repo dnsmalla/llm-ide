@@ -115,8 +115,12 @@ async function finishClaim(deps: BusRunnerDeps, claim: Claim): Promise<boolean> 
 }
 
 /** Reports one progress step when it changed or the heartbeat is due (the report renews the lease). */
-async function reportProgress(deps: BusRunnerDeps, claim: Claim, live: readonly { runId: string; log: readonly string[] }[]): Promise<boolean> {
-  const step = claim.runIds.map((id) => lastStep(live.find((r) => r.runId === id)?.log ?? [])).find((s) => s !== null) ?? null;
+async function reportProgress(deps: BusRunnerDeps, claim: Claim, live: readonly { runId: string; log: readonly string[]; progress?: { stageName: string | null } | null }[]): Promise<boolean> {
+  const step = claim.runIds.map((id) => {
+    const run = live.find((r) => r.runId === id);
+    if (run?.progress?.stageName) return `stage: ${run.progress.stageName.slice(0, 120)}`;
+    return lastStep(run?.log ?? []);
+  }).find((s) => s !== null) ?? null;
   const now = deps.now();
   if (step === claim.lastStep && now - claim.lastProgressAt < PROGRESS_EVERY_MS) return false;
   const r = await post(deps, `/bus/commands/${claim.command.id}/events`, { claimToken: claim.token, type: "progress", payload: { step: step ?? "run started" } });

@@ -9,7 +9,7 @@ import { configFor, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, t
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import type { LoopDefinition, LoopEngineConfig } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
-import { runNativeLoop, runStatusCode, type LoopRunOutcome } from "./runner.ts";
+import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent } from "./runner.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
@@ -31,6 +31,16 @@ export interface LiveRun {
   /** "Waiting for its project" while held, else null. */
   note: string | null;
   log: string[];
+  /** Typed progress from the runner; null before the run starts. Elapsed is computed by the board from startedAt. */
+  progress: {
+    stageName: string | null;
+    stageIndex: number;
+    stageCount: number;
+    iteration: number;
+    repairs: number;
+    lastLine: string | null;
+    startedAt: string | null;
+  } | null;
 }
 
 export interface RunManagerDeps {
@@ -227,7 +237,7 @@ export function startRun(projectRoot: string, item: RunItem, mode: RunMode, opts
   const runId = opts.runId ?? newRunId(d.now(), d.rand);
   if (runs.has(runId)) return runId;
   runs.set(runId, {
-    live: { runId, itemKey: item.key, projectRoot, mode, state: "queued", startedAt: null, note: null, log: [] },
+    live: { runId, itemKey: item.key, projectRoot, mode, state: "queued", startedAt: null, note: null, log: [], progress: null },
     item, reuse: opts.runId !== undefined, cancelled: false, abort: new AbortController(),
   });
   queue.push(runId);
@@ -331,7 +341,19 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     isCancelled: () => run.cancelled, markCancelled: () => { run.cancelled = true; },
   };
   log(`▶ ${loop.name} (${run.live.mode})`);
-  const outcome = await d.runLoop(config, { ...d.createStageDeps(ctx, loop), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run) });
+  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, repairs: 0, lastLine: null, startedAt: run.live.startedAt };
+  run.live.progress = progress;
+  const emitProgress = () => { progress.lastLine = run.live.log.at(-1) ?? null; emit(); };
+  const onProgress = (e: RunProgressEvent) => {
+    if (e.type === "iteration") progress.iteration = e.iteration;
+    else if (e.type === "stage-start") { progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration; }
+    else if (e.type === "stage-result") { progress.repairs = progress.repairs; }
+    else if (e.type === "stage-skipped") { progress.stageName = e.stage.name; progress.lastLine = `skipped ${e.stage.name}`; }
+    else if (e.type === "repair") { progress.repairs += 1; progress.lastLine = `repair ${e.stage.name} (${e.attempt})`; }
+    else if (e.type === "paused") { progress.lastLine = e.paused ? "paused" : "resumed"; }
+    emitProgress();
+  };
+  const outcome = await d.runLoop(config, { ...d.createStageDeps(ctx, loop), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress });
   log(outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`);
   return { loop, info, config, outcome };
 }

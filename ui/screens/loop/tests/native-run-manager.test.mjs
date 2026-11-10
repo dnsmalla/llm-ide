@@ -313,3 +313,18 @@ test("a Factory run writes .factory/RUN.json and removes it after the record", a
   await finish(a);
   assert.deepEqual(marks.find(([k]) => k === "remove")?.[1], "system/loop-worktrees/" + a + "/.factory/RUN.json");
 });
+
+test("LiveRun.progress follows the runner events", async () => {
+  let emit;
+  setup({ runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  emit({ type: "iteration", iteration: 2 });
+  emit({ type: "stage-start", stage: { id: "s1", name: "Implement" }, index: 3, count: 8, iteration: 2 });
+  await settle();
+  const p = rm.liveRuns().find((r) => r.runId === a).progress;
+  assert.deepEqual([p.stageName, p.stageIndex, p.stageCount, p.iteration, p.repairs], ["Implement", 3, 8, 2, 0]);
+  emit({ type: "repair", stage: { id: "s1", name: "Implement" }, attempt: 1 });
+  await settle();
+  assert.equal(rm.liveRuns().find((r) => r.runId === a).progress.repairs, 1);
+});

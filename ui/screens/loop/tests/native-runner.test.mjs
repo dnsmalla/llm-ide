@@ -158,3 +158,20 @@ test("repairs count toward the USD ceiling", async () => {
   assert.match(out.statusSummary, /cost ceiling/);
   assert.equal(out.costUsd, 6.1);
 });
+
+test("onProgress reports iteration, stage start/result and repair", async () => {
+  const events = [];
+  const out = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")]), {
+    async runStage(s) { return { ok: s.id !== "a" || events.some(([t]) => t === "repair"), output: "" }; },
+    async repair(s, _o, attempt) { events.push(["repair", s.id, attempt]); return { ok: true, output: "fixed" }; },
+    log() {}, onProgress(e) { events.push([e.type, e.iteration ?? null, e.stage?.id ?? null, e.index ?? null, e.count ?? null]); },
+  });
+  assert.equal(out.passed, true);
+  assert.deepEqual(events.slice(0, 4), [
+    ["iteration", 1, null, null, null],
+    ["stage-start", 1, "a", 1, 2],
+    ["stage-result", 1, "a", null, null],
+    ["repair", null, "a", null, null],
+  ]);
+  assert.ok(events.some(([t, , id]) => t === "stage-start" && id === "b"));
+});
