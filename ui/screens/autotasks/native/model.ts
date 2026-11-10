@@ -69,7 +69,7 @@ export function saveState(s: AutoTaskLocalState, storage: Storage | undefined = 
  *  run deterministic code in the Mac app; the desktop has no such code, so it must never send them to the agent as an
  *  invented prompt. They stay listed, but are not runnable here, and a schedule never fires them. */
 export const MAC_ONLY_TASK_IDS: ReadonlySet<AutoTaskId> = new Set<AutoTaskId>([
-  "sourceUpdate", "sourcesToIssue", "implementIssues", "reviewMerge", "updatePlanStatus", "regression", "generateKnowledge",
+  "sourceUpdate", "sourcesToIssue", "implementIssues", "reviewMerge", "updatePlanStatus", "generateKnowledge",
 ]);
 export const MAC_ONLY_MESSAGE = "This task runs deterministic code in the Mac app; the desktop does not run it yet.";
 

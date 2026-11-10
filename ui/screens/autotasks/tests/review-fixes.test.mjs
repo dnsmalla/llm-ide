@@ -28,7 +28,7 @@ test("Save writes only the providers the user changed", () => {
 test("a Mac-only task says so first, whatever its schedule flags", () => {
   const now = new Date(2026, 10, 2, 9, 30);
   const off = { enabled: false, inputPath: "", outputPath: "", skillName: "", template: "builtin", prompt: "", cron: "0 * * * *", scheduleActive: false };
-  assert.match(m.scheduleStatusLine(true, off, "regression", now), /^Mac app only/);
+  assert.match(m.scheduleStatusLine(true, off, "sourceUpdate", now), /^Mac app only/);
   assert.match(m.scheduleStatusLine(false, { ...off, scheduleActive: true }, "sourceUpdate", now), /^Mac app only/);
 });
 

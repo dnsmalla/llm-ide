@@ -19,7 +19,7 @@ function config(stages: Partial<LoopStage>[], overrides: Partial<LoopEngineConfi
       id: crypto.randomUUID(), name: s.name ?? `Stage ${i + 1}`, kind: s.kind ?? "shellCommand", command: s.command ?? null,
       order: i, skillId: null, targetPath: null, outputPath: null, prompt: null, isDefault: false, enabled: true,
       defaultKey: null, severity: s.severity ?? "blocking", timeoutSeconds: null, detectedCommand: null, check: null,
-      testOp: null, graphOp: null, allowsRepair: true, runOnce: s.runOnce ?? false, defaultRevision: null, disabledByDetection: null, raw: null,
+      testOp: null, graphOp: null, allowsRepair: true, runOnce: s.runOnce ?? false, defaultRevision: null, disabledByDetection: null, raw: null, taskId: s.taskId ?? null,
     })),
     maxIterations: 10, consecutiveFailureStop: 3, wallClockBudgetSeconds: null, pauseTimeoutSeconds: 1800,
     maxRepairsPerStage: 3, repairModel: null, protectedPathPolicy: "revert", writeSummaryNote: false,
@@ -30,19 +30,19 @@ function config(stages: Partial<LoopStage>[], overrides: Partial<LoopEngineConfi
 
 export const BUILT_IN_TEMPLATES: LoopTemplate[] = [
   { id: "test-and-fix", name: "Test & Fix", summary: "Re-check known faults, then the test suite, repairing until both are green.",
-    config: config([{ name: "Regression", kind: "regressionSweep" }, { name: "Test", command: DETECTED_TEST }]) },
+    config: config([{ name: "Regression", kind: "regressionSweep", taskId: "loop.regression" }, { name: "Test", command: DETECTED_TEST }]) },
   { id: "regression", name: "Regression", summary: "Re-check known faults only.",
-    config: config([{ name: "Regression", kind: "regressionSweep" }], { maxIterations: 5 }) },
+    config: config([{ name: "Regression", kind: "regressionSweep", taskId: "loop.regression" }], { maxIterations: 5 }) },
   { id: "test", name: "Test", summary: "Run just the test suite, repairing until green.",
     config: config([{ name: "Test", command: DETECTED_TEST }]) },
   { id: "full-verify", name: "Full Verify", summary: "Lint (advisory), tests, then the fault sweep.",
-    config: config([{ name: "Lint", command: "make lint", severity: "advisory" }, { name: "Test", command: DETECTED_TEST }, { name: "Regression", kind: "regressionSweep" }]) },
+    config: config([{ name: "Lint", command: "make lint", severity: "advisory" }, { name: "Test", command: DETECTED_TEST }, { name: "Regression", kind: "regressionSweep", taskId: "loop.regression" }]) },
 ];
 
 BUILT_IN_TEMPLATES.push(
-  { id: "skill-loop", name: "Skill Loop", summary: "Run a chosen skill as a generate step, gated by tests and the fault sweep.", config: config([{ name: "Apply skill", kind: "skill" }, { name: "Test", command: DETECTED_TEST }, { name: "Regression", kind: "regressionSweep" }], { maxIterations: 6 }) },
+  { id: "skill-loop", name: "Skill Loop", summary: "Run a chosen skill as a generate step, gated by tests and the fault sweep.", config: config([{ name: "Apply skill", kind: "skill" }, { name: "Test", command: DETECTED_TEST }, { name: "Regression", kind: "regressionSweep", taskId: "loop.regression" }], { maxIterations: 6 }) },
   { id: "docs-refresh", name: "Docs Refresh", summary: "Regenerate documentation with a skill, then run the project docs check.", config: config([{ name: "Write docs", kind: "skill" }, { name: "Docs check", command: "make docs-check" }], { maxIterations: 4, maxRepairsPerStage: 2 }) },
-  { id: "operation-diagnosis", name: "Operation App Diagnosis", summary: "Check the local server responds and the extension and Mac app build cleanly, then the fault sweep.", config: config([{ name: "Server health", command: "curl -sf http://127.0.0.1:3456/health" }, { name: "Extension build", command: "cd extension && npm run build" }, { name: "Mac app build", command: "cd mac && swift build" }, { name: "Regression", kind: "regressionSweep" }], { maxIterations: 6 }) },
+  { id: "operation-diagnosis", name: "Operation App Diagnosis", summary: "Check the local server responds and the extension and Mac app build cleanly, then the fault sweep.", config: config([{ name: "Server health", command: "curl -sf http://127.0.0.1:3456/health" }, { name: "Extension build", command: "cd extension && npm run build" }, { name: "Mac app build", command: "cd mac && swift build" }, { name: "Regression", kind: "regressionSweep", taskId: "loop.regression" }], { maxIterations: 6 }) },
   { id: "system-check", name: "System Check", summary: "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the Mac app and known faults.", config: config([
     { name: "Skills", command: "cd extension && node --test tests/agent-skills.test.mjs tests/agent-skill-telemetry.test.mjs tests/skill-library.test.mjs tests/install-project-skills.test.mjs tests/task-skill-routing.test.mjs" },
     { name: "Plugins", command: "cd extension && node --test tests/plugins-loader.test.mjs tests/plugins-installer.test.mjs" },
@@ -52,7 +52,7 @@ BUILT_IN_TEMPLATES.push(
     { name: "Backend", command: "cd extension && npm test" },
     { name: "iOS ↔ Mac shared protocol", command: "make test-shared-protocol" },
     { name: "Mac app", command: "cd mac && swift test" },
-    { name: "Regression", kind: "regressionSweep" },
+    { name: "Regression", kind: "regressionSweep", taskId: "loop.regression" },
   ], { maxIterations: 8 }) },
 );
 

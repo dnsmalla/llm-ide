@@ -18,6 +18,8 @@ import { scanProjectSkills, skillOptionLabel, skillRunId, type ProjectSkill } fr
 import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
 import { CUSTOM_IMPLEMENT_MESSAGE, createCustomTask, customTaskRunnable, customTaskStatus, loadCustomTasks, saveCustomTasks, updateCustomTask, validateCustomTask, type CustomAutoTask, type CustomTaskMode } from "./custom.ts";
 import { runCustomTask } from "./run-custom.ts";
+import { runTask as runRegisteredTask } from "../../tasks/runner.ts";
+import { approveStage } from "../../loop/native/approvals.ts";
 import { autoTaskBusy, releaseAutoTask, tryAcquireAutoTask } from "./lock.ts";
 import { appendCustomRun, CUSTOM_RUNS_EVENT, readCustomRuns, type CustomTaskRun } from "./schedule.ts";
 import { decideRun, resolvePath, type Resolve } from "./usage.ts";
@@ -178,6 +180,28 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
     const started = new Date();
     try {
       const workRoot = await invokeHost<string>("loop_work_root");
+      // A registered shell task (Regression today) runs the exact Loop stage, not an invented agent prompt.
+      if (id === "regression") {
+        const approval = await approveStage("loop.regression", null);
+        if (!approval) throw new Error("Regression needs the native shell approval for its fault verify commands.");
+        const result = await runRegisteredTask("loop.regression", {
+          projectRoot: projectRoot ?? "",
+          core,
+          host: invokeHost,
+          fs,
+          log: (line) => setLog((l) => [...l, line]),
+          signal: abort.signal,
+          approvalToken: async () => approval.token,
+          changedPaths: changedPathsNow,
+          revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
+          actions: {},
+        });
+        setLog((l) => [...l, result.output]);
+        setRuns((xs) => [{ id: crypto.randomUUID(), task: t.label, at: started.toISOString(), ok: result.ok, summary: result.summary, durationSeconds: Math.round((Date.now() - started.getTime()) / 1000) }, ...xs].slice(0, 50));
+        setNotice(result.ok ? `${t.label} completed.` : result.summary);
+        void notifyTask("autotask", result.ok);
+        return;
+      }
       // The server's model caps apply here: a paused chain stops the run, and an engaged one picks the model. As on
       // the Mac, a failed check does not block the run (an older server or a blip would stop every night run); the
       // log says so.

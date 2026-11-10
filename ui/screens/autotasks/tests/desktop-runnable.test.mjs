@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import * as m from "../native/model.ts";
 
 // The Mac's structural tasks (AutoTask.isStructural) run deterministic code; the desktop must never send them to the agent.
-test("the seven Mac structural tasks are not runnable on the desktop; prompt tasks are", () => {
-  const mac = ["sourceUpdate", "sourcesToIssue", "implementIssues", "reviewMerge", "updatePlanStatus", "regression", "generateKnowledge"];
+test("Mac structural tasks are not runnable; Regression now runs via the task registry", () => {
+  const mac = ["sourceUpdate", "sourcesToIssue", "implementIssues", "reviewMerge", "updatePlanStatus", "generateKnowledge"];
   assert.deepEqual([...m.MAC_ONLY_TASK_IDS].sort(), [...mac].sort());
   for (const id of mac) assert.equal(m.desktopRunnable(id), false, id);
   for (const id of ["reviewCode", "reviewDoc", "reviewConflicts", "updateIssues", "generateDoc"]) assert.equal(m.desktopRunnable(id), true, id);
@@ -13,7 +13,7 @@ test("the seven Mac structural tasks are not runnable on the desktop; prompt tas
 
 test("a schedule never fires a Mac-only task, even when armed and enabled", () => {
   const armed = { enabled: true, scheduleActive: true };
-  assert.equal(m.scheduledRunAllowed("regression", armed, true), false);
+  assert.equal(m.scheduledRunAllowed("sourceUpdate", armed, true), false);
   assert.equal(m.scheduledRunAllowed("sourceUpdate", armed, true), false);
   assert.equal(m.scheduledRunAllowed("reviewCode", armed, true), true);
   assert.equal(m.scheduledRunAllowed("reviewCode", { enabled: true, scheduleActive: false }, true), false);

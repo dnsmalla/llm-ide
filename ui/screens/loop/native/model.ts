@@ -20,6 +20,8 @@ export function isNativeRunnable(stage: Pick<LoopStage, "kind" | "testOp">): boo
 
 export interface LoopStage {
   id: string;
+  /** The registry task this stage is, when it is one (e.g. "loop.regression"). */
+  taskId?: string | null;
   name: string;
   kind: LoopStageKind;
   command: string | null;
@@ -94,6 +96,7 @@ export function decodeStage(v: unknown): LoopStage | null {
   const severity = v.severity === "advisory" ? "advisory" : "blocking";
   return {
     id: str(v.id) ?? crypto.randomUUID(),
+    taskId: str(v.taskId),
     name: v.name,
     kind,
     command: str(v.command),
@@ -190,7 +193,7 @@ export function encodeProjectStore(store: LoopProjectStore): string {
 function encodeStage(s: LoopStage): Record<string, unknown> {
   if (s.kind === "unsupported" && s.raw) return s.raw;
   return {
-    id: s.id, name: s.name, kind: s.kind,
+    id: s.id, ...(s.taskId ? { taskId: s.taskId } : {}), name: s.name, kind: s.kind,
     ...(s.command !== null ? { command: s.command } : {}),
     order: s.order,
     ...(s.skillId !== null ? { skillId: s.skillId } : {}),

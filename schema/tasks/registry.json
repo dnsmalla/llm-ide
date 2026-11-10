@@ -1,4 +1,47 @@
 {
   "version": 1,
-  "tasks": []
+  "tasks": [
+    {
+      "id": "loop.regression",
+      "label": "Regression",
+      "group": "Maintenance",
+      "description": "Re-check every status:fixed fault report and reopen the ones that no longer verify.",
+      "aliases": ["regression"],
+      "runner": {
+        "kind": "shell",
+        "stage": {
+          "kind": "regressionSweep",
+          "name": "Regression",
+          "severity": "blocking",
+          "allowsRepair": true
+        },
+        "timeoutSeconds": 1800
+      },
+      "input": {
+        "kind": "project",
+        "required": true,
+        "paths": ["system/faults"]
+      },
+      "output": {
+        "kind": "fault-report",
+        "persist": "run-record",
+        "revertWrites": false
+      },
+      "schedule": {
+        "backend": "desktop",
+        "defaultCron": null,
+        "schedulable": true
+      },
+      "scope": "project",
+      "readOnly": false,
+      "requiresRepo": true,
+      "requiresLocalHost": true,
+      "features": [],
+      "availability": {
+        "status": "available",
+        "reason": null
+      },
+      "revision": 1
+    }
+  ]
 }

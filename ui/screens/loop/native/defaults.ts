@@ -19,6 +19,7 @@ export const DEFAULT_LOOP_SPECS = [
           "id": "1BEEEB4F-76D9-45D9-8DEC-CA60987C8790",
           "isDefault": true,
           "kind": "regressionSweep",
+          "taskId": "loop.regression",
           "name": "Regression",
           "order": 0,
           "severity": "blocking"
