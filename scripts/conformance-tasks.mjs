@@ -158,16 +158,35 @@ for (const task of tasks) {
   if (typeof rel !== 'string' || !promptNames.includes(rel.slice('prompts/'.length))) bad(`task ${task.id}: prompt ${rel} is missing`);
 }
 
-// Templates: every stage taskId exists; no removed Mac app command.
-for (const template of Array.isArray(templates?.templates) ? templates.templates : []) {
-  const at = `template ${template?.id ?? '<missing id>'}`;
-  if (!template || typeof template !== 'object' || typeof template.id !== 'string' || !template.id) { bad('a template has no id'); continue; }
-  if (typeof template.name !== 'string' || !template.name.trim()) bad(`${at}: name is required`);
-  if (!['starter', 'recipe'].includes(template.kind)) bad(`${at}: kind must be starter or recipe`);
-  if (!Array.isArray(template.stages)) bad(`${at}: stages must be an array`);
-  for (const stage of Array.isArray(template.stages) ? template.stages : []) {
+// Loop templates: every stage taskId exists; no removed Mac app command, in a starter or a recipe.
+const starters = Array.isArray(templates?.starters) ? templates.starters : [];
+const recipes = Array.isArray(templates?.templates) ? templates.templates : [];
+const starterKeys = new Set(starters.map((s) => s?.defaultKey).filter((k) => typeof k === 'string'));
+// Known debt, removed by Task 14e together with the stages: these two recipes still run `cd mac`.
+const STALE_MAC_TEMPLATES = new Set(['operation-diagnosis', 'system-check']);
+const checkStages = (at, stages, macDebt = false) => {
+  if (!Array.isArray(stages)) { bad(`${at}: stages must be an array`); return; }
+  for (const stage of stages) {
     if (typeof stage?.taskId === 'string' && !ids.has(stage.taskId)) bad(`${at}: stage task ${stage.taskId} does not exist`);
-    if (typeof stage?.command === 'string' && /\bcd\s+mac\b/.test(stage.command)) bad(`${at}: stage command still runs the removed Mac app`);
+    if (!macDebt && typeof stage?.command === 'string' && /\bcd\s+mac\b/.test(stage.command)) bad(`${at}: stage command still runs the removed Mac app`);
+  }
+};
+for (const starter of starters) {
+  if (typeof starter?.name !== 'string' || !starter.name.trim()) bad('a starter loop has no name');
+  if (starter?.defaultKey !== null && typeof starter?.defaultKey !== 'string') bad(`starter ${starter?.name}: defaultKey must be a string or null`);
+  checkStages(`starter ${starter?.name}`, starter?.config?.stages);
+}
+const recipeIds = new Set();
+for (const template of recipes) {
+  const at = `template ${template?.id ?? '<missing id>'}`;
+  if (typeof template?.id !== 'string' || !template.id) { bad('a template has no id'); continue; }
+  if (recipeIds.has(template.id)) bad(`${at}: duplicate id`);
+  recipeIds.add(template.id);
+  if (typeof template.name !== 'string' || !template.name.trim()) bad(`${at}: name is required`);
+  if (template.configFrom !== undefined) {
+    if (!starterKeys.has(template.configFrom)) bad(`${at}: configFrom ${template.configFrom} is not a starter`);
+  } else {
+    checkStages(at, template.stages, STALE_MAC_TEMPLATES.has(template.id));
   }
 }
 

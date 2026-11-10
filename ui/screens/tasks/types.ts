@@ -90,33 +90,6 @@ export interface TaskDef {
   revision: number;
 }
 
-export interface LoopTemplateStageDef {
-  taskId?: string;
-  kind?: string;
-  name?: string;
-  command?: string;
-  severity?: "blocking" | "advisory";
-  testOp?: "structure" | "map" | "ledger";
-  graphOp?: "snapshot" | "verify";
-  check?: Record<string, unknown>;
-  runOnce?: boolean;
-  enabled?: boolean;
-  [key: string]: unknown;
-}
-
-export interface LoopTemplateDef {
-  id: string;
-  name: string;
-  summary: string;
-  kind: "starter" | "recipe";
-  defaultKey?: string | null;
-  isPrimary?: boolean;
-  goal?: string | null;
-  acceptanceCriteria?: string | null;
-  stages: readonly LoopTemplateStageDef[];
-  config?: Record<string, unknown>;
-}
-
 export interface TaskEnv {
   /** Enabled feature keys from the host pref set; null = every feature. */
   features: ReadonlySet<string> | null;

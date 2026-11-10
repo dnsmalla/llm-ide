@@ -8,8 +8,9 @@ stable; a label is copy. A task has exactly one runner kind:
 - `core-route` — a fixed core adapter (source sync, outcomes refresh, issue extraction).
 - `desktop-action` — a host/Factory/Ship action the Node core cannot run.
 
-`registry.json` holds `{ version, tasks }`; `templates.json` holds Loop templates whose stages reference
-task ids or a raw shell/check stage. A prompt exists only for an `agent` runner and only under
+`registry.json` holds `{ version, tasks }`; `templates.json` holds `starters` (the six Mac starter loops, verbatim)
+and `templates` (the built-in recipes: sparse `stages`, or `configFrom` a starter). Stages reference task ids or a
+raw shell/check stage; the generator fills the Loop's default fields. A prompt exists only for an `agent` runner and only under
 `prompts/`. A `retired` or `alias` task has no runner; its aliases keep stored history readable.
 
 ## Editing

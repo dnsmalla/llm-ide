@@ -1,10 +1,10 @@
 // Pure selectors over the generated task catalog. Every surface asks this module, never its own table,
 // whether a task can run and which prompt it uses.
-import { ALIASES, TASKS, TASK_BY_ID, TEMPLATES } from "./registry.generated.ts";
+import { ALIASES, TASKS, TASK_BY_ID } from "./registry.generated.ts";
 import { PROMPTS, PROMPT_PARTS } from "./prompts.generated.ts";
 import type { Availability, TaskDef, TaskEnv, TaskGroup } from "./types.ts";
 
-export { ALIASES, PROMPTS, TASKS, TASK_BY_ID, TEMPLATES };
+export { ALIASES, PROMPTS, TASKS, TASK_BY_ID };
 
 /** The task's own focus sentence (the part a user may override), or null for a task with no shared frame. */
 export function taskFocus(idOrAlias: string): string | null {
