@@ -277,6 +277,150 @@ export const TASKS = Object.freeze([
     "revision": 2
   },
   {
+    "id": "loop.refactor_apply",
+    "label": "Refactor apply",
+    "group": "Maintenance",
+    "description": "Loop stage: apply the next todo refactor batch behaviour-preservingly and mark it done or skipped.",
+    "aliases": [],
+    "runner": {
+      "kind": "agent",
+      "prompt": "prompts/loop.refactor_apply.md"
+    },
+    "input": {
+      "kind": "project",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 4
+  },
+  {
+    "id": "loop.refactor_conform",
+    "label": "Refactor conform",
+    "group": "Maintenance",
+    "description": "Loop stage: fix any RULES.md violation the applied batch introduced, scoped to that batch's files.",
+    "aliases": [],
+    "runner": {
+      "kind": "agent",
+      "prompt": "prompts/loop.refactor_conform.md"
+    },
+    "input": {
+      "kind": "project",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1
+  },
+  {
+    "id": "loop.refactor_planner",
+    "label": "Refactor planner",
+    "group": "Maintenance",
+    "description": "Loop stage: write a batched, ordered, behaviour-preserving refactor plan without touching code.",
+    "aliases": [],
+    "runner": {
+      "kind": "agent",
+      "prompt": "prompts/loop.refactor_planner.md"
+    },
+    "input": {
+      "kind": "project",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 4
+  },
+  {
+    "id": "loop.refactor_test_gap_writer",
+    "label": "Refactor test gap writer",
+    "group": "Maintenance",
+    "description": "Loop stage: add behaviour tests for the files a refactor batch marks as missing tests.",
+    "aliases": [],
+    "runner": {
+      "kind": "agent",
+      "prompt": "prompts/loop.refactor_test_gap_writer.md"
+    },
+    "input": {
+      "kind": "project",
+      "required": false,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 2
+  },
+  {
     "id": "loop.regression",
     "label": "Regression",
     "group": "Maintenance",

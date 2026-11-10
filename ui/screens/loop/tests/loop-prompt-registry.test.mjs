@@ -15,6 +15,11 @@ const MOVED = [
   ["test", "test-write", "loop.test_gap_writer"],
   ["plan", "plan-structure-index", "loop.plan_structure_index"],
   ["plan", "plan-director", "loop.plan_director"],
+  ["refactor", "refactor-setup", "loop.test_structure_setup"],
+  ["refactor", "refactor-plan", "loop.refactor_planner"],
+  ["refactor", "refactor-test-write", "loop.refactor_test_gap_writer"],
+  ["refactor", "refactor-apply", "loop.refactor_apply"],
+  ["refactor", "refactor-conform", "loop.refactor_conform"],
 ];
 
 for (const [spec, stageKey, taskId] of MOVED) {

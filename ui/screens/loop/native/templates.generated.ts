@@ -953,10 +953,10 @@ export const BUILT_IN_TEMPLATES = [
           "name": "Refactor Setup",
           "order": 1,
           "outputPath": ".",
-          "prompt": "Read the test-structure report at the Input. If it says the structure is missing, create the smallest working test layout for ONE package under the Output path, following the repo's language conventions; for Python use tests/unit/ mirroring the source package, with pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add one real test of an existing public behaviour; never edit application source and never add dependencies. If it says ok, change nothing.",
           "severity": "blocking",
           "skillId": "skills/test-structure-setup",
-          "targetPath": "llm-doc/loop/test/TEST-STRUCTURE.md"
+          "targetPath": "llm-doc/loop/test/TEST-STRUCTURE.md",
+          "prompt": "Read the test-structure report at the Input. If it says the structure is missing, create the smallest working test layout for ONE package under the Output path, following the repo's language conventions; for Python use tests/unit/ mirroring the source package, with pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add one real test of an existing public behaviour; never edit application source and never add dependencies. If it says ok, change nothing."
         },
         {
           "defaultKey": "refactor-structure-check",
@@ -1004,10 +1004,10 @@ export const BUILT_IN_TEMPLATES = [
           "name": "Refactor Plan",
           "order": 5,
           "outputPath": "llm-doc/loop/refactor/REFACTOR.md",
-          "prompt": "Write or update the refactor plan at the Output path for the code under the Input, driven by the code-graph snapshot, the test map and the rules digest (RULES.md) the loop wrote beside it (read all three first). Classify the Input as a file, a folder or a repo; for a folder or repo with more than one top-level area, give each batch an `- Area:` line. Rank batches by measured structure — cycles, files over 500 lines, high fan-in files mixing roles — then naming and docs; a RULES.md violation found in the Input is itself a batch candidate. Every batch carries a stable ID, a status, its files, the symbols it moves, which of its files still lack tests, its intent, its risk, an Expect line naming the graph counter it will reduce, and a `- Rules:` line naming the rule sources it touches or fixes (or `none found`). Write each batch as a heading `### R<n> <title> (status: todo)`, and no other headings may start with `### R`; mark a batch the runner could not finish safely `(status: blocked)` with a `- Blocked:` line under it — never retry a blocked batch as-is, instead append smaller batch(es) that first remove the blocker, each carrying `- Replaces: R<n>`. Under each heading give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack them), `- Intent:`, `- Risk:`, `- Expect:` and `- Rules:` lines, plus `- Area:` when classified above. If an existing `done`, `skipped` or `blocked` batch lacks `- Rules:`, add `- Rules: none found` to it — this is the only edit ever allowed to a non-todo batch's content. Keep batches small and behaviour-preserving, ordered by value then by fewest dependants first (GRAPH.md `usedBy`) — safest first. When the plan nears 250 lines, move its done, skipped and blocked batches to REFACTOR-DONE.md beside it, keeping IDs unique across both files. Never edit code.",
           "severity": "blocking",
           "skillId": "skills/refactor-planner",
-          "targetPath": "."
+          "targetPath": ".",
+          "prompt": "Write or update the refactor plan at the Output path for the code under the Input, driven by the code-graph snapshot, the test map and the rules digest (RULES.md) the loop wrote beside it (read all three first). Classify the Input as a file, a folder or a repo; for a folder or repo with more than one top-level area, give each batch an `- Area:` line. Rank batches by measured structure — cycles, files over 500 lines, high fan-in files mixing roles — then naming and docs; a RULES.md violation found in the Input is itself a batch candidate. Every batch carries a stable ID, a status, its files, the symbols it moves, which of its files still lack tests, its intent, its risk, an Expect line naming the graph counter it will reduce, and a `- Rules:` line naming the rule sources it touches or fixes (or `none found`). Write each batch as a heading `### R<n> <title> (status: todo)`, and no other headings may start with `### R`; mark a batch the runner could not finish safely `(status: blocked)` with a `- Blocked:` line under it — never retry a blocked batch as-is, instead append smaller batch(es) that first remove the blocker, each carrying `- Replaces: R<n>`. Under each heading give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack them), `- Intent:`, `- Risk:`, `- Expect:` and `- Rules:` lines, plus `- Area:` when classified above. If an existing `done`, `skipped` or `blocked` batch lacks `- Rules:`, add `- Rules: none found` to it — this is the only edit ever allowed to a non-todo batch's content. Keep batches small and behaviour-preserving, ordered by value then by fewest dependants first (GRAPH.md `usedBy`) — safest first. When the plan nears 250 lines, move its done, skipped and blocked batches to REFACTOR-DONE.md beside it, keeping IDs unique across both files. Never edit code."
         },
         {
           "check": {
@@ -1056,10 +1056,10 @@ export const BUILT_IN_TEMPLATES = [
           "name": "Refactor Test Write",
           "order": 7,
           "outputPath": ".",
-          "prompt": "Read the next refactor batch at the Input. First make sure the integration tests (tests/integration/ in a layered layout, else the test root) hold one before/after-equality test that runs the pipeline end to end on the smallest input that reaches the final output; create it if missing. Then, for EVERY file the batch lists as missing tests, create a new test file under the Output path, at the path the test-structure report gives, that pins the file's current observable outputs through public calls only — never pin private helpers or internal state. Never edit the source, existing tests or build config. End with one `Covered: <path> — <behaviours>` line per file.",
           "severity": "blocking",
           "skillId": "skills/test-gap-writer",
-          "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md"
+          "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md",
+          "prompt": "Read the next refactor batch at the Input. First make sure the integration tests (tests/integration/ in a layered layout, else the test root) hold one before/after-equality test that runs the pipeline end to end on the smallest input that reaches the final output; create it if missing. Then, for EVERY file the batch lists as missing tests, create a new test file under the Output path, at the path the test-structure report gives, that pins the file's current observable outputs through public calls only — never pin private helpers or internal state. Never edit the source, existing tests or build config. End with one `Covered: <path> — <behaviours>` line per file."
         },
         {
           "allowsRepair": false,
@@ -1085,10 +1085,10 @@ export const BUILT_IN_TEMPLATES = [
           "name": "Refactor Apply",
           "order": 9,
           "outputPath": ".",
-          "prompt": "Apply exactly the FIRST todo batch of the plan at the Input to the code under the Output path, using the graph snapshot beside the plan to find every dependant of the files you move or split. Read the rules digest (RULES.md) beside the plan before editing: the result must satisfy it for every file the batch touches. Preserve every listed symbol, update every import, reference and build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never touch more than that batch, never commit. End with `Applied: R<n>`.",
           "severity": "blocking",
           "skillId": "skills/refactor-apply",
-          "targetPath": "llm-doc/loop/refactor/REFACTOR.md"
+          "targetPath": "llm-doc/loop/refactor/REFACTOR.md",
+          "prompt": "Apply exactly the FIRST todo batch of the plan at the Input to the code under the Output path, using the graph snapshot beside the plan to find every dependant of the files you move or split. Read the rules digest (RULES.md) beside the plan before editing: the result must satisfy it for every file the batch touches. Preserve every listed symbol, update every import, reference and build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never touch more than that batch, never commit. End with `Applied: R<n>`."
         },
         {
           "defaultKey": "refactor-conform",
@@ -1100,10 +1100,10 @@ export const BUILT_IN_TEMPLATES = [
           "name": "Refactor Conform",
           "order": 10,
           "outputPath": ".",
-          "prompt": "Read the refactor rules (RULES.md) and the batch just applied, both beside the Input, then look at the code it touched under the Output path. For every file the batch lists, and any file it created, fix violations of those rules behaviour-preservingly — never widen the change to any other file, and never edit tests or build config. Write each fix as one line, `file:line — rule source — what`, to the rule-review file (RULE-REVIEW.md) beside the Input. End with `Conformed: R<n> — <k> fixes`.",
           "severity": "blocking",
           "skillId": "skills/refactor-conform",
-          "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md"
+          "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md",
+          "prompt": "Read the refactor rules (RULES.md) and the batch just applied, both beside the Input, then look at the code it touched under the Output path. For every file the batch lists, and any file it created, fix violations of those rules behaviour-preservingly — never widen the change to any other file, and never edit tests or build config. Write each fix as one line, `file:line — rule source — what`, to the rule-review file (RULE-REVIEW.md) beside the Input. End with `Conformed: R<n> — <k> fixes`."
         },
         {
           "command": "<detected-test-command>",
