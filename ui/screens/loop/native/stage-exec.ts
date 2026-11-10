@@ -117,8 +117,31 @@ async function runRegressionStage(ctx: StageExecContext, s: LoopStage, prefix: s
   return { ok: r.passed, output: r.checked === 0 ? "No fixed faults to re-check." : [...r.notes, ...r.failures].join("\n") };
 }
 
+/** A `.factory/` report path a stage must write, else null. Only these are cleared before the stage runs. */
+function factoryReportPath(s: LoopStage): string | null {
+  return s.outputPath && s.outputPath.startsWith(".factory/") ? s.outputPath : null;
+}
+
+const normaliseRel = (p: string): string => p.replace(/\\/g, "/").replace(/^\.\//, "");
+
+/** The report is written only when the agent run itself reports the path (a stale file must never decide a gate). */
+function wroteReport(r: AgentRunReply, path: string): boolean {
+  const want = normaliseRel(path);
+  return [...(r.changedPaths ?? []), ...(r.createdPaths ?? [])].some((p) => normaliseRel(p) === want);
+}
+
 async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinition, halt: HaltState): Promise<StageRunResult> {
   if (!s.skillId) return { ok: false, output: "This skill stage has no skill id." };
+  const report = factoryReportPath(s);
+  if (report) {
+    // Host side and run scoped: a send-back or resume reuses the worktree, so an earlier PASSED report would still end
+    // in the gate's exact verdict line. Remove it before the agent call; the stage fails if the agent does not rewrite it.
+    try {
+      await ctx.host("loop_clear_factory_output", { path: report, ...stageHostArgs(ctx.runId) });
+    } catch (e) {
+      return { ok: false, output: `the old report could not be cleared before the stage (${e instanceof Error ? e.message : String(e)})` };
+    }
+  }
   const parts = [s.prompt?.trim() || `Run the ${s.name} skill for this loop.`];
   if (target.goal) parts.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
@@ -147,6 +170,10 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   });
   const stop = stopReason(g);
   if (g.result === null || stop !== null) return haltOn(ctx, halt, g.violation, stop);
+  // A succeeded agent call that did not write its report is a failed stage, not a pass on the file just deleted.
+  if (report && !wroteReport(g.result, report)) {
+    return { ok: false, output: `the report was not written: ${report}. The stage failed instead of reading an older report.` };
+  }
   return skillResult(g.result);
 }
 

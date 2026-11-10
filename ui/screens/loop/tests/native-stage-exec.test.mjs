@@ -158,6 +158,77 @@ test("in a factory loop the Implement stage may write tests; a repair may not", 
   assert.ok(calls.some(([c]) => c === "loop_revert_paths"));
 });
 
+test("A1: a skill stage with a .factory output clears that file before the agent runs", async () => {
+  const order = [];
+  const calls = [];
+  const host = async (command, args) => {
+    calls.push([command, args]);
+    order.push(command);
+    if (command === "loop_changed_paths") return [];
+    if (command === "loop_worktree_diff") return { text: "", truncated: false };
+    if (command === "loop_clear_factory_output") return null;
+    return null;
+  };
+  const core = {
+    async request() {
+      order.push("agent-run");
+      return { reply: "wrote it", resultSubtype: "success", changedPaths: [".factory/REVIEW.md"], createdPaths: [] };
+    },
+  };
+  const { ctx } = ctxOf({ host, core });
+  const review = stage({ id: "s7", name: "Review", kind: "skill", command: null, skillId: "skills/factory-review", outputPath: ".factory/REVIEW.md" });
+  const r = await createStageDeps(ctx, loopOf([review])).runStage(review, []);
+  assert.equal(r.ok, true);
+  assert.equal(order[0], "loop_clear_factory_output", "the stale report is removed first");
+  assert.ok(order.indexOf("loop_clear_factory_output") < order.indexOf("agent-run"), "the stale report is removed before the agent call");
+  assert.deepEqual(calls.find(([c]) => c === "loop_clear_factory_output"), ["loop_clear_factory_output", { path: ".factory/REVIEW.md", runId: "r1" }]);
+});
+
+test("A1: a stage whose .factory output the agent did not write fails even when the agent run succeeded", async () => {
+  const { host } = fakeHost({ loop_clear_factory_output: null, loop_worktree_diff: { text: "", truncated: false } });
+  const { core } = fakeCore({ reply: "nothing to do", resultSubtype: "success", changedPaths: ["src/a.ts"], createdPaths: [] });
+  const { ctx } = ctxOf({ host, core });
+  const review = stage({ id: "s7", name: "Review", kind: "skill", command: null, skillId: "skills/factory-review", outputPath: ".factory/REVIEW.md" });
+  const deps = createStageDeps(ctx, loopOf([review]));
+  const r = await deps.runStage(review, []);
+  assert.equal(r.ok, false);
+  assert.match(r.output, /report was not written: \.factory\/REVIEW\.md/);
+  assert.equal(deps.halt(), null, "a missing report is a stage failure, not a run halt");
+});
+
+test("A1: send-back Review with a stale approve report fails and never reaches the review gate", async () => {
+  const { runNativeLoop } = await import("../native/runner.ts");
+  const { configFor } = await import("../native/factory.ts");
+  const files = { "system/loop-worktrees/r1/.factory/REVIEW.md": "old findings\nVerdict: approve\n" };
+  const { fs } = fakeFs(files);
+  const removals = [];
+  const host = async (command, args) => {
+    if (command === "loop_changed_paths") return [];
+    if (command === "loop_clear_factory_output") { removals.push(args.path); delete files[`system/loop-worktrees/r1/${args.path}`]; return null; }
+    return null;
+  };
+  const { core } = fakeCore({ reply: "done", resultSubtype: "success", changedPaths: ["src/a.ts"], createdPaths: [] });
+  const { ctx } = ctxOf({ host, core, fs });
+  const review = stage({ id: "s7", name: "Review", kind: "skill", command: null, skillId: "skills/factory-review", allowsRepair: false, outputPath: ".factory/REVIEW.md" });
+  const gate = stage({ id: "g2", name: "Review gate", kind: "artifactCheck", command: null, allowsRepair: false, check: { verdict: { path: ".factory/REVIEW.md", line: "Verdict: approve" } } });
+  const deps = createStageDeps(ctx, loopOf([review, gate]));
+  const outcome = await runNativeLoop(configFor("sendBack", loopOf([review, gate]).config), { ...deps, log() {} });
+  assert.deepEqual(removals, [".factory/REVIEW.md"]);
+  assert.equal(outcome.passed, false);
+  assert.equal(outcome.failedStage?.id, "s7", "Review failed before the gate ran");
+  assert.deepEqual(outcome.stages.map((o) => o.stage.id), ["s7"]);
+});
+
+test("A1: a resumed Intake that writes nothing fails instead of passing on the old READINESS.md", async () => {
+  const { host } = fakeHost({ loop_clear_factory_output: null });
+  const { core } = fakeCore({ reply: "read only", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+  const { ctx } = ctxOf({ host, core });
+  const intake = stage({ id: "s2", name: "Intake", kind: "skill", command: null, skillId: "skills/factory-intake", allowsRepair: false, outputPath: ".factory/READINESS.md" });
+  const r = await createStageDeps(ctx, loopOf([intake])).runStage(intake, []);
+  assert.equal(r.ok, false);
+  assert.match(r.output, /report was not written: \.factory\/READINESS\.md/);
+});
+
 test("the Review stage prompt carries the worktree diff, read by run id, and a repair carries the factory hint", async () => {
   const { host, calls } = fakeHost({ loop_worktree_diff: { text: "+added line", truncated: false } });
   const { core, calls: coreCalls } = fakeCore({ reply: "ok", resultSubtype: "success", changedPaths: [".factory/REVIEW.md"], createdPaths: [] });

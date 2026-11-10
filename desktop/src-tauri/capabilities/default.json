@@ -44,6 +44,7 @@
     "allow-loop-worktree-diff",
     "allow-loop-worktree-remove",
     "allow-loop-worktree-list",
+    "allow-loop-clear-factory-output",
     "allow-repo-clone",
     "allow-feature-rebuild",
     "allow-core-log-read",

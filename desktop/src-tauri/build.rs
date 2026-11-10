@@ -33,6 +33,7 @@ const COMMANDS: &[&str] = &[
     "loop_worktree_diff",
     "loop_worktree_remove",
     "loop_worktree_list",
+    "loop_clear_factory_output",
     "repo_clone",
     "feature_rebuild",
     "core_log_read",

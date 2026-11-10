@@ -378,6 +378,59 @@ pub fn diff_in(info: &RunInfo) -> Result<WorktreeDiff, String> {
     Ok(WorktreeDiff { text: text_out, truncated, patch_id: sha256_hex(&patch), files })
 }
 
+/// True when `rel` is a plain path under the literal `.factory/` folder (no absolute path, no `..`, no root/prefix).
+fn is_factory_output_rel(rel: &str) -> bool {
+    if !rel.starts_with(".factory/") || rel.contains('\\') {
+        return false;
+    }
+    Path::new(rel)
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Removes one report at `<work>/.factory/<...>` before a stage runs, so a stale verdict from an earlier run can never
+/// pass a gate. Run-scoped by the caller. A missing file is fine. Only a file or a symlink is removed (never a folder,
+/// never through a link: `symlink_metadata` judges the entry itself, and a `.factory` that is a link is refused).
+pub fn clear_factory_output_in(work: &Path, rel: &str) -> Result<(), String> {
+    if !is_factory_output_rel(rel) {
+        return Err("only a .factory/ report path can be cleared".into());
+    }
+    let work = work.canonicalize().map_err(|e| format!("cannot resolve the worktree: {e}"))?;
+    let factory = work.join(FACTORY_DIR);
+    match std::fs::symlink_metadata(&factory) {
+        Ok(m) if m.file_type().is_symlink() => return Err("the worktree's .factory/ is a link; refusing to clear a report".into()),
+        Ok(m) if !m.is_dir() => return Err("the worktree's .factory/ is not a folder; refusing to clear a report".into()),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("cannot read the worktree's .factory/: {e}")),
+    }
+    let target = work.join(rel);
+    match std::fs::symlink_metadata(&target) {
+        Ok(m) if m.is_dir() => return Err(format!("{rel} is a folder; refusing to clear it")),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("cannot read {rel}: {e}")),
+    }
+    let parent = target.parent().ok_or_else(|| format!("{rel} has no parent folder"))?;
+    let real_parent = parent.canonicalize().map_err(|e| format!("cannot resolve {rel}: {e}"))?;
+    let real_factory = factory.canonicalize().map_err(|e| format!("cannot resolve .factory/: {e}"))?;
+    if !real_parent.starts_with(&real_factory) {
+        return Err(format!("{rel} is not inside .factory/; refusing to clear it"));
+    }
+    std::fs::remove_file(&target).map_err(|e| format!("cannot clear {rel}: {e}"))
+}
+
+/// `loop_clear_factory_output` without Tauri: the legacy work root, or the run's worktree when `run_id` is given.
+pub(crate) fn clear_factory_output_for(run_id: Option<&str>, rel: &str) -> Result<(), String> {
+    let (_, work) = crate::loop_runner::root_for(run_id)?;
+    clear_factory_output_in(&work, rel)
+}
+
+#[tauri::command]
+pub async fn loop_clear_factory_output(path: String, run_id: Option<String>) -> Result<(), String> {
+    blocking(move || clear_factory_output_for(run_id.as_deref(), &path)).await
+}
+
 /// Removes the run's worktree (dirty or not) and its branch, and forgets the run. Harmless when already gone.
 /// Only ever removes `<project>/system/loop-worktrees/<run_id>`.
 pub fn remove_in(info: &RunInfo) -> Result<(), String> {
@@ -817,6 +870,56 @@ mod tests {
         write_task_file(&wt, "task").unwrap();
         assert_eq!(std::fs::read_to_string(wt.join(TASK_REL)).unwrap(), "task");
         let _ = std::fs::remove_dir_all(&wt);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clear_factory_output_removes_only_a_factory_report() {
+        let p = project_repo("clear-output");
+        let info = prepare_in(&p, &p, "clr1", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(wt.join(".factory/REVIEW.md"), "Verdict: approve\n").unwrap();
+        clear_factory_output_in(&wt, ".factory/REVIEW.md").unwrap();
+        assert!(!wt.join(".factory/REVIEW.md").exists());
+        clear_factory_output_in(&wt, ".factory/REVIEW.md").unwrap(); // already gone: harmless
+        for bad in [".factory", ".factory/", "/.factory/x", "src/a.txt", ".FACTORY/x", ".factory/../a.txt", ".factory/a/../../a.txt"] {
+            assert!(clear_factory_output_in(&wt, bad).is_err(), "{bad}");
+        }
+        std::fs::create_dir_all(wt.join(".factory/sub")).unwrap();
+        assert!(clear_factory_output_in(&wt, ".factory/sub").unwrap_err().contains("folder"));
+        // A symlink report is removed itself, never its target.
+        let outside = temp("clear-output-outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep.md"), "keep\n").unwrap();
+        std::os::unix::fs::symlink(outside.join("keep.md"), wt.join(".factory/PLAN.md")).unwrap();
+        clear_factory_output_in(&wt, ".factory/PLAN.md").unwrap();
+        assert!(!wt.join(".factory/PLAN.md").exists());
+        assert_eq!(std::fs::read_to_string(outside.join("keep.md")).unwrap(), "keep\n");
+        // A .factory that is itself a link is refused, so nothing outside is deleted.
+        let linked = temp("clear-output-linked");
+        std::fs::create_dir_all(linked.join(".factory")).unwrap();
+        std::fs::write(linked.join(".factory/REVIEW.md"), "x\n").unwrap();
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&linked);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clear_factory_output_with_run_id_touches_only_that_worktree() {
+        let p = project_repo("clear-run");
+        let info = prepare_in(&p, &p, "clr2", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::create_dir_all(p.join(".factory")).unwrap();
+        std::fs::write(p.join(".factory/REVIEW.md"), "main tree\n").unwrap();
+        std::fs::write(wt.join(".factory/REVIEW.md"), "worktree\n").unwrap();
+        clear_factory_output_for(Some("clr2"), ".factory/REVIEW.md").unwrap();
+        assert!(!wt.join(".factory/REVIEW.md").exists());
+        assert_eq!(std::fs::read_to_string(p.join(".factory/REVIEW.md")).unwrap(), "main tree\n");
+        assert!(clear_factory_output_for(Some("clr2"), ".factory/../../x").is_err());
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
     }
 
     #[cfg(unix)]
