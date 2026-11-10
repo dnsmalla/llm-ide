@@ -215,3 +215,35 @@ export function sendBackAllowed(facts: ItemFacts): boolean {
   const s = facts.ship;
   return facts.worktreeExists && !facts.shipStatusError && s !== null && (s.ci === "failed" || s.comments.length > 0);
 }
+
+/** Status of one worktree for clean-up (loop_worktree_status). */
+export interface CleanupStatus { changedFiles: number; localCommits: number }
+export interface CleanupPlan { remove: string[]; keep: { runId: string; reason: string }[] }
+
+/**
+ * Worktrees safe to remove: a merged PR/MR, or an orphan (no card) whose status says no unshipped changes.
+ * A live run, an interrupted marker, a card's unshipped run and a missing status are always kept.
+ */
+export function cleanupPlan(
+  items: readonly { runIds: readonly string[] }[],
+  worktrees: ReadonlyMap<string, unknown>,
+  live: readonly { runId: string }[],
+  interrupted: ReadonlySet<string>,
+  merged: ReadonlySet<string>,
+  statuses: ReadonlyMap<string, CleanupStatus>,
+): CleanupPlan {
+  const referenced = new Set(items.flatMap((i) => i.runIds));
+  const busy = new Set(live.map((r) => r.runId));
+  const remove: string[] = [];
+  const keep: { runId: string; reason: string }[] = [];
+  for (const runId of worktrees.keys()) {
+    if (busy.has(runId) || interrupted.has(runId)) { keep.push({ runId, reason: "a run is still active or was interrupted" }); continue; }
+    if (merged.has(runId)) { remove.push(runId); continue; }
+    const status = statuses.get(runId);
+    if (!status) { keep.push({ runId, reason: "its status could not be read; use Discard" }); continue; }
+    if (referenced.has(runId)) { keep.push({ runId, reason: "it belongs to a card waiting for Ship; use Discard" }); continue; }
+    if (status.changedFiles > 0 || status.localCommits > 0) { keep.push({ runId, reason: "it has unshipped changes; use Discard" }); continue; }
+    remove.push(runId);
+  }
+  return { remove, keep };
+}

@@ -14,7 +14,7 @@ import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
 import { sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
@@ -52,7 +52,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [textBody, setTextBody] = useState("");
   const [addIntake, setAddIntake] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanup, setCleanup] = useState<CleanupPlan | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   // Refs so the 5-minute timer reads the latest facts without being re-created on every load.
   const itemsRef = useRef<WorkItemRecord[]>([]);
@@ -164,13 +164,14 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     return m;
   }, [items, live, records, worktrees, ship, projectRoot]);
   const board = useMemo(() => buildBoard(items, facts), [items, facts]);
-  // Worktrees safe to remove: no card references them (orphaned), or their PR/MR is merged. Nothing unshipped.
-  const cleanupIds = useMemo(() => {
-    const referenced = new Set(items.flatMap((i) => i.runIds));
-    const orphan = [...worktrees.keys()].filter((id) => !referenced.has(id) && !live.some((r) => r.runId === id));
-    const merged = items.filter((i) => facts.get(i.key)?.ship?.state === "merged").flatMap((i) => i.runIds.filter((id) => worktrees.has(id)));
-    return [...new Set([...orphan, ...merged])];
-  }, [items, worktrees, live, facts]);
+  const openCleanup = async () => {
+    const merged = new Set(items.filter((i) => facts.get(i.key)?.ship?.state === "merged").flatMap((i) => i.runIds));
+    const statuses = new Map();
+    for (const runId of worktrees.keys()) {
+      try { statuses.set(runId, await invokeHost("loop_worktree_status", { runId })); } catch { /* status missing -> kept */ }
+    }
+    setCleanup(cleanupPlan(items, worktrees, live, interrupted, merged, statuses));
+  };
 
   useEffect(() => {
     lastKnown.current = lastKnownFrom(board);
@@ -270,18 +271,19 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         {elsewhere ? <span className="fx-hint" role="status">{elsewhere}</span> : null}
         <span className="fx-spacer" />
         <button type="button" className="fx-btn fx-primary" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>Add</button>
-        <button type="button" className="fx-btn" onClick={() => setCleanupOpen((v) => !v)} aria-expanded={cleanupOpen} disabled={cleanupIds.length === 0}>Clean up…</button>
+        <button type="button" className="fx-btn" onClick={() => void (cleanup ? setCleanup(null) : openCleanup())} aria-expanded={cleanup !== null} disabled={worktrees.size === 0}>Clean up…</button>
         <button type="button" className="fx-btn" onClick={() => void loadFacts().then(() => refreshStatus(true))}>Refresh</button>
       </header>
-      {cleanupOpen ? (
+      {cleanup ? (
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm worktree clean-up">
-          <p>Remove {cleanupIds.length} worktree{cleanupIds.length === 1 ? "" : "s"} with no card or a merged PR/MR? Unshipped worktrees are never removed here.</p>
+          <p>Remove {cleanup.remove.length} worktree{cleanup.remove.length === 1 ? "" : "s"}? Kept: {cleanup.keep.length} (unshipped changes, a card waiting for Ship, a live run or an unreadable status).</p>
+          <ul>{cleanup.remove.map((id) => <li key={id}><code>{worktrees.get(id)?.branch ?? id}</code></li>)}</ul>
           <div className="atn-modal-actions">
-            <button type="button" className="fx-btn" onClick={() => setCleanupOpen(false)}>Cancel</button>
-            <button type="button" className="fx-btn fx-primary" onClick={() => void act(async () => {
-              for (const runId of cleanupIds) await invokeHost("loop_worktree_remove", { runId });
-              setCleanupOpen(false);
-              setNotice(`Removed ${cleanupIds.length} worktree${cleanupIds.length === 1 ? "" : "s"}.`);
+            <button type="button" className="fx-btn" onClick={() => setCleanup(null)}>Cancel</button>
+            <button type="button" className="fx-btn fx-primary" disabled={cleanup.remove.length === 0} onClick={() => void act(async () => {
+              for (const runId of cleanup.remove) await invokeHost("loop_worktree_remove", { runId });
+              setNotice(`Removed ${cleanup.remove.length} worktree${cleanup.remove.length === 1 ? "" : "s"}; kept ${cleanup.keep.length}.`);
+              setCleanup(null);
               await loadFacts();
             })}>Remove</button>
           </div>

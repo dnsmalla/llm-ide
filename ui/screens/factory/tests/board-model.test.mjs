@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -149,4 +149,17 @@ test("other-project runs, request URLs, focus anchors and the work item view", (
   assert.equal(focusKeyFromAnchor(undefined), null);
   assert.equal(STATUS_REFRESH_MS, 300000);
   assert.deepEqual(toWorkItem(item("issue:a", { repo: "acme/web", runIds: ["r1"] })), { source: "issue", id: "a", title: "Title issue:a", body: "", repo: "acme/web" });
+});
+
+test("cleanup keeps a live Loop-page run and an orphan with unshipped changes", () => {
+  const worktrees = new Map([["r-live", {}], ["r-dirty", {}], ["r-clean", {}], ["r-merged", {}]]);
+  const plan = cleanupPlan(
+    [{ runIds: ["r-merged"] }], worktrees,
+    [{ runId: "r-live" }], new Set(),
+    new Set(["r-merged"]),
+    new Map([["r-live", { changedFiles: 0, localCommits: 0 }], ["r-dirty", { changedFiles: 2, localCommits: 0 }], ["r-clean", { changedFiles: 0, localCommits: 0 }], ["r-merged", { changedFiles: 1, localCommits: 1 }]]),
+  );
+  assert.deepEqual(plan.remove.sort(), ["r-clean", "r-merged"]);
+  assert.ok(plan.keep.some((k) => k.runId === "r-live"));
+  assert.ok(plan.keep.some((k) => k.runId === "r-dirty" && /Discard/.test(k.reason)));
 });

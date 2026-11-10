@@ -285,11 +285,7 @@ async function execute(run: ManagedRun): Promise<void> {
     fail(run, e instanceof Error ? e.message : String(e));
   }
   if (finished) {
-    try {
-      await saveRecord(d, run, fs, finished, started);
-      const marker = `${repoPrefixFor(run.live.projectRoot, finished.info.worktree)}/.factory/RUN.json`;
-      await fs.remove(marker).catch(() => undefined);
-    }
+    try { await saveRecord(d, run, fs, finished, started); }
     catch (e) { appendLog(run, `run record not written: ${e instanceof Error ? e.message : String(e)}`); }
     try {
       d.onRunFinished?.({ runId: run.live.runId, itemKey: run.item.key, projectRoot: run.live.projectRoot, mode: run.live.mode, statusCode: runStatusCode(finished.outcome), statusSummary: finished.outcome.statusSummary });
@@ -387,9 +383,12 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
   };
   const copy = live.mode === "full" || live.mode === "intakeOnly";
   const prefix = repoPrefixFor(live.projectRoot, f.info.worktree);
+  const marker = `${prefix}/.factory/RUN.json`;
   const write = async () => {
     await d.appendRecord(fs, entry, record);
     if (copy) await d.copyReadiness(fs, prefix, live.runId, ended);
+    // Same write closure as the record, so flushPending also clears the marker when the project is reopened.
+    await fs.remove(marker).catch(() => undefined);
   };
   if (d.activeProject() === live.projectRoot) { await write(); return; }
   appendLog(run, "The run's project is not open; its record is saved when you open it again.");

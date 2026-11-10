@@ -15,6 +15,7 @@ import { configureRunManager, concurrency, liveRuns, projectGuardedFs, startRun 
 let installed = false;
 let busRunnerInstalled = false;
 let busDeps: Parameters<typeof pollOnce>[0] | null = null;
+let polling = false;
 const BUS_POLL_MS = 60_000;
 
 export function installRunManagerHost(): void {
@@ -31,7 +32,7 @@ export function installRunManagerHost(): void {
     repoForSlug: (provider, slug, projectRoot) => repoForIssue({ provider, repo: slug }, readRepoConfig().saved, projectRoot),
     activeProject,
     // A stage boundary renews the phone command's lease instead of waiting for the 60 s tick.
-    onStage: () => { if (busDeps) void pollOnce(busDeps); },
+    onStage: () => { if (busDeps) kickPoll(busDeps); },
     subscribeProject: (listener) => projectStore.subscribe(listener),
     // The bus runner reports a finished Factory run to the phone's claimed command (B5).
     onRunFinished: (info) => noteRunFinished(info.runId, info.statusCode, info.statusSummary),
@@ -43,6 +44,12 @@ export function installRunManagerHost(): void {
  * Starts the 60 s poll for desktop-claimed bus commands (`issues.implement`). The desktop's Factory runs the
  * work; the core created the job on the phone's T2 approval and never runs it. Idempotent: one timer per app.
  */
+function kickPoll(deps: Parameters<typeof pollOnce>[0]): void {
+  if (polling) return; // one poll at a time: a stage boundary and the timer must not race a claim
+  polling = true;
+  void pollOnce(deps).catch(() => undefined).finally(() => { polling = false; });
+}
+
 function installBusRunner(hostFs: FsApi): void {
   if (busRunnerInstalled) return;
   busRunnerInstalled = true;
@@ -73,6 +80,6 @@ function installBusRunner(hostFs: FsApi): void {
       },
   };
   busDeps = deps;
-  const timer = setInterval(() => { void pollOnce(deps); }, BUS_POLL_MS);
+  const timer = setInterval(() => kickPoll(deps), BUS_POLL_MS);
   (timer as unknown as { unref?: () => void }).unref?.();
 }
