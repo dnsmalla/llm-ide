@@ -63,6 +63,22 @@ export default function ServerSection() {
   }, [log, follow]);
   const rows = serverRows(info, health);
 
+  /** After start/restart the host returns before /health answers; poll briefly instead of showing "unreachable". */
+  const refreshWhenReady = async () => {
+    for (let attempt = 0; attempt < 24; attempt++) {
+      try {
+        const body = await call(client, "GET", "/health");
+        setHealth(decodeHealth(body));
+        setError(null);
+        setLoaded(true);
+        return;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+    load();
+  };
+
   const coreAction = async (what: "start" | "stop" | "restart") => {
     const fn = what === "start" ? host.coreStart : what === "stop" ? host.coreStop : host.coreRestart;
     if (!fn) return;
@@ -71,8 +87,14 @@ export default function ServerSection() {
     setNotice(null);
     try {
       await fn();
-      setNotice(what === "stop" ? "Core stopped." : what === "restart" ? "Core restarted." : "Core starting…");
-      load();
+      if (what === "stop") {
+        setNotice("Core stopped.");
+        load();
+      } else {
+        await refreshWhenReady();
+        setNotice(what === "restart" ? "Core restarted." : "Core started.");
+      }
+      void loadLog();
     } catch (e) {
       setError(componentError(e));
     } finally {
