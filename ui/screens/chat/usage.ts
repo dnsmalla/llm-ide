@@ -71,14 +71,16 @@ export interface ChatTotalLabel { text: string; title: string; ariaLabel: string
 
 /** The header's chat total. Counts come from live `usage` events and from persisted `metadata.tokenUsage` on
  *  history rows; when some loaded/unloaded replies have no count the label says the total covers part of the chat. */
-export function chatTotalLabel(messages: readonly { role: string; status?: string; usage?: UsageCounts }[], hasMoreOlder: boolean): ChatTotalLabel | null {
+export function chatTotalLabel(messages: readonly { role: string; status?: string; usage?: UsageCounts; costUsd?: number | null }[], hasMoreOlder: boolean): ChatTotalLabel | null {
   const replies = messages.filter((m) => m.role === "assistant" && m.status !== "streaming");
   const total = sessionUsage(replies.flatMap((m) => (m.usage ? [m.usage] : [])));
   if (!total) return null;
   const uncounted = replies.filter((m) => !m.usage).length;
   const partial = hasMoreOlder || uncounted > 0;
   const n = billableTokens(total);
+  const cost = replies.reduce((sum, m) => sum + (typeof m.costUsd === "number" && m.costUsd > 0 ? m.costUsd : 0), 0);
+  const costText = cost > 0 ? ` · $${cost.toFixed(2)}` : "";
   return partial
-    ? { text: `${compactTokenCount(n)} tokens`, title: `Replies since this chat was opened (earlier replies have no count): ${usageTooltip(total)}`, ariaLabel: `Replies since this chat was opened used ${n} tokens` }
-    : { text: `${compactTokenCount(n)} tokens`, title: `This chat: ${usageTooltip(total)}`, ariaLabel: `This chat used ${n} tokens` };
+    ? { text: `${compactTokenCount(n)} tokens${costText}`, title: `Replies since this chat was opened (earlier replies have no count): ${usageTooltip(total)}`, ariaLabel: `Replies since this chat was opened used ${n} tokens` }
+    : { text: `${compactTokenCount(n)} tokens${costText}`, title: `This chat: ${usageTooltip(total)}`, ariaLabel: `This chat used ${n} tokens` };
 }

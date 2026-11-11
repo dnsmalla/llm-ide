@@ -156,4 +156,6 @@ test("the header total never calls a partial sum \"This chat\" (reloaded replies
   assert.doesNotMatch(c.chatTotalLabel([reply("new", u)], true).title, /^This chat/, "older pages not loaded");
   const live = c.chatTotalLabel([reply("a", u), { ...reply("b", u), status: "streaming" }], false);
   assert.equal(live.ariaLabel, "This chat used 500 tokens", "an in-flight reply is not counted yet");
+  const costed = c.chatTotalLabel([{ ...reply("a", u), costUsd: 0.01 }, { ...reply("b", u), costUsd: 0.02 }], false);
+  assert.equal(costed.text, "1.0K tokens · $0.03", "the header sums reported reply costs");
 });
