@@ -451,6 +451,9 @@ test("Routing: the 'Turn on the session router' button calls its handler, and Ro
   const src = readFileSync(new URL("../sections/RoutingSection.tsx", import.meta.url), "utf8");
   assert.match(src, /onTurnOnRouter=\{setPrefs && prefs \? \(\) => save\(\{ router: true, cap: prefs\.cap \}\) : undefined\}/, "the button saves router on through the existing prefs path");
   assert.match(src, /const save = \(next: \{ router: boolean; cap: boolean \}\) => \{ setLocal\(next\); void setPrefs\?\.\(next\); \};/);
+  assert.match(src, /EXTRA_TIERS/);
+  assert.match(src, /aria-label="Media and decision models"/);
+  assert.match(src, /<option value="">None<\/option>/);
 });
 
 test("Server & Backend: the log has an Auto-scroll checkbox that starts on, and the group re-reads the log while open", () => {

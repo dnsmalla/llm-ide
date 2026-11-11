@@ -21,7 +21,10 @@ import { readBody, parseJSON, sendJSON } from '../core/utils.mjs';
 const FLAG = 'routing.tiers';
 const MAX_BODY_BYTES = 20_000;
 
-export const ROUTING_TIERS = Object.freeze(['strong', 'standard', 'cheap']);
+export const ROUTING_TIERS = Object.freeze(['strong', 'standard', 'cheap', 'image', 'video', 'decision']);
+// `image`, `video` and `decision` are optional media/decision models. Unset means none: no default model is
+// invented for them. `decision` can be selected by the `decisions` role; image/video are read by their future
+// generation routes (no generation provider is wired yet).
 // `decisions` (API v73) — the `decide` tool and other calibrated
 // yes/no / pick-one / score calls (llm_agent/tools/decide.mjs). The only
 // feature a decision-only (jev) tier may serve; see providers/tier-routing.mjs.

@@ -16,6 +16,14 @@ export const ROLES: readonly { id: string; label: string }[] = [
   { id: "subagents", label: "Sub-agents" },
   { id: "internal", label: "Internal tasks" },
   { id: "loop", label: "Loop" },
+  { id: "decisions", label: "Decision" },
+];
+
+/** Optional media models. None is the default; the server stores a choice only when the user makes one. */
+export const EXTRA_TIERS: readonly { id: string; label: string; hint: string }[] = [
+  { id: "image", label: "Image", hint: "Image generation. None by default." },
+  { id: "video", label: "Video", hint: "Video generation. None by default." },
+  { id: "decision", label: "Decision", hint: "Calibrated yes/no and pick-one calls. None by default." },
 ];
 
 /** Notes next to switches that only apply when the backend next starts (a restart would end a running turn). */

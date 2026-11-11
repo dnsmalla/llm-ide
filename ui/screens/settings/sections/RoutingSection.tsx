@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { cleanFallback, rowsFromCatalog } from "../providers-model.ts";
-import { MIGRATION_TEXT, RoutingModel, ROLES, SWITCH_TEXT, TIERS, isDirty, tierStatusText } from "../routing-model.ts";
+import { EXTRA_TIERS, MIGRATION_TEXT, RoutingModel, ROLES, SWITCH_TEXT, TIERS, isDirty, tierStatusText } from "../routing-model.ts";
 import { sharedProvidersModel, useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import type { CatalogMigration, ProviderSettings } from "../decoders.ts";
 import type { SettingsHost } from "../host.ts";
@@ -40,7 +40,7 @@ export default function RoutingSection() {
                     <th scope="row">{t.label}<div className="st-hint">{t.hint}</div></th>
                     <td>
                       <select className="st-select" aria-label={`${t.label} provider`} value={c?.provider ?? ""} onChange={(e) => routing.setTier(t.id, e.target.value ? { provider: e.target.value, model: c?.model ?? "" } : null)}>
-                        <option value="">(not set)</option>
+                        <option value="">None</option>
                         {c && !options.some((o) => o.id === c.provider) ? <option value={c.provider}>{c.provider}</option> : null}
                         {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                       </select>
@@ -49,6 +49,31 @@ export default function RoutingSection() {
                       <input className="st-input" aria-label={`${t.label} model`} value={c?.model ?? ""} disabled={!c} autoComplete="off" spellCheck={false} onChange={(e) => c && routing.setTier(t.id, { provider: c.provider, model: e.target.value })} />
                     </td>
                     <td className="st-hint">{tierStatusText(r.loaded?.status[t.id])}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="st-hint">Media and decision models are optional. None is the default: nothing runs on them until you choose one.</p>
+          <table className="st-table" aria-label="Media and decision models">
+            <thead><tr><th scope="col">Model</th><th scope="col">Provider</th><th scope="col">Model id</th><th scope="col">Status</th></tr></thead>
+            <tbody>
+              {EXTRA_TIERS.map((t) => {
+                const c = r.draft!.tiers[t.id];
+                return (
+                  <tr key={t.id}>
+                    <th scope="row">{t.label}<div className="st-hint">{t.hint}</div></th>
+                    <td>
+                      <select className="st-select" aria-label={`${t.label} provider`} value={c?.provider ?? ""} onChange={(e) => routing.setTier(t.id, e.target.value ? { provider: e.target.value, model: c?.model ?? "" } : null)}>
+                        <option value="">None</option>
+                        {c && !options.some((o) => o.id === c.provider) ? <option value={c.provider}>{c.provider}</option> : null}
+                        {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      <input className="st-input" aria-label={`${t.label} model id`} value={c?.model ?? ""} disabled={!c} placeholder="Model id" autoComplete="off" spellCheck={false} onChange={(e) => c && routing.setTier(t.id, { provider: c.provider, model: e.target.value })} />
+                    </td>
+                    <td className="st-hint">{c ? tierStatusText(r.loaded?.status[t.id]) : "None"}</td>
                   </tr>
                 );
               })}
@@ -63,7 +88,7 @@ export default function RoutingSection() {
                   <td>
                     <select className="st-select" aria-label={`${role.label} tier`} value={r.draft!.features[role.id] ?? ""} onChange={(e) => routing.setRole(role.id, e.target.value || null)}>
                       <option value="">Default</option>
-                      {TIERS.filter((t) => t.id in r.draft!.tiers).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                      {(role.id === "decisions" ? EXTRA_TIERS.filter((t) => t.id === "decision") : TIERS).filter((t) => t.id in r.draft!.tiers).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                     </select>
                   </td>
                   <td className="st-hint">{tierStatusText(r.loaded?.featureStatus[role.id])}</td>

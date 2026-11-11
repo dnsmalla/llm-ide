@@ -15077,12 +15077,12 @@ paths:
                           description: "anthropic | openai | google | deepseek | jev | custom:<id>"
                         model:
                           type: "string"
-                    description: "Keys strong | standard | cheap."
+                    description: "Keys strong | standard | cheap | image | video | decision."
                   features:
                     type: "object"
                     additionalProperties:
                       type: "string"
-                      description: "strong | standard | cheap"
+                      description: "strong | standard | cheap | image | video | decision"
                     description: "Role -> tier."
                   status:
                     type: "object"
@@ -15153,7 +15153,7 @@ paths:
                         description: "anthropic | openai | google | deepseek | jev | custom:<id>"
                       model:
                         type: "string"
-                  description: "Keys strong | standard | cheap"
+                  description: "Keys strong | standard | cheap | image | video | decision"
                 features:
                   type: "object"
                   additionalProperties:

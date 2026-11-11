@@ -8460,7 +8460,7 @@ export type GetKbRoutingTiersRequest = Record<string, never>;
 
 /** The stored tier routing (tiers, features) plus each tier's usability by the server's own resolver (status) and each configured role's (featureStatus). A keyless openai or google tier answers after a short CLI health probe. */
 export type GetKbRoutingTiersResponse200 = {
-  /** Keys strong | standard | cheap. */
+  /** Keys strong | standard | cheap | image | video | decision. */
   tiers: Record<string, {
       /** anthropic | openai | google | deepseek | jev | custom:<id> */
       provider: string;
@@ -8492,7 +8492,7 @@ export type GetKbRoutingTiersResponse401 = CommonError;
 /** Request parts for `POST /kb/routing-tiers` (schema/http/providers-usage.schema.json). */
 export type PostKbRoutingTiersRequest = {
   body: {
-    /** Keys strong | standard | cheap */
+    /** Keys strong | standard | cheap | image | video | decision */
     tiers?: Record<string, {
         /** anthropic | openai | google | deepseek | jev | custom:<id> */
         provider: string;

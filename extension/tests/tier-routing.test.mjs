@@ -98,6 +98,24 @@ test('syncTierRouting keeps valid entries and drops invalid ones', () => {
   assert.deepEqual(cfg.features, { subagents: 'cheap', loop: 'standard', quickChat: 'strong' });
 });
 
+test('syncTierRouting stores image, video and decision models only when chosen', () => {
+  const userId = freshUser();
+  syncTierRouting({ tiers: {
+    image: { provider: 'google', model: 'imagen-4.0-generate-001' },
+    video: { provider: 'google', model: 'veo-3.1-fast' },
+    decision: { provider: 'anthropic', model: 'claude-haiku-5-5' },
+  } }, userId);
+  assert.deepEqual(getTierRoutingConfig(userId).tiers, {
+    image: { provider: 'google', model: 'imagen-4.0-generate-001' },
+    video: { provider: 'google', model: 'veo-3.1-fast' },
+    decision: { provider: 'anthropic', model: 'claude-haiku-5-5' },
+  });
+  // Unset stays unset: no default model is invented for any of them.
+  const empty = freshUser();
+  syncTierRouting({ tiers: {} }, empty);
+  assert.deepEqual(getTierRoutingConfig(empty).tiers, {});
+});
+
 test('syncTierRouting rejects unsafe model ids and oversized custom ids', () => {
   const userId = freshUser();
   syncTierRouting({
