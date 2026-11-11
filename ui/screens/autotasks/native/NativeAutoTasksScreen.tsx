@@ -12,7 +12,6 @@ import { describeCron, validateCron } from "./cron.ts";
 import { addTemplate, loadTemplates, removeTemplate, saveTemplates, type PromptTemplate } from "./prompt-templates.ts";
 import { scanLibraryFolders, type LibraryFolder } from "./folders.ts";
 import { scanProjectSkills, skillOptionLabel, skillRunId, type ProjectSkill } from "./skills.ts";
-import { ModelLimitsPanel } from "./ModelLimitsPanel.tsx";
 import { CUSTOM_IMPLEMENT_MESSAGE, createCustomTask, customTaskRunnable, customTaskStatus, loadCustomTasks, saveCustomTasks, updateCustomTask, validateCustomTask, type CustomAutoTask, type CustomTaskMode } from "./custom.ts";
 import { runCustomTask } from "./run-custom.ts";
 import { taskFocus, taskPromptWithFocus } from "../../tasks/model.ts";
@@ -51,7 +50,6 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const [templateOpen, setTemplateOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const [limitsOpen, setLimitsOpen] = useState(false);
   const [customTasks, setCustomTasks] = useState<CustomAutoTask[]>(() => projectRoot ? loadCustomTasks(projectRoot) : []);
   const [customEdit, setCustomEdit] = useState<CustomAutoTask | "new" | null>(null);
   const [customDraft, setCustomDraft] = useState({ name: "", prompt: "", mode: "review" as CustomTaskMode, cron: "", enabled: true });
@@ -344,11 +342,9 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
           )}
           {customRuns.length ? <section className="atn-history"><h3>Recent custom runs</h3><ul>{customRuns.slice(0, 3).map((r) => <li key={r.id}><span>{r.ok ? "✓" : "✗"} {r.task}</span><span className="atn-hint">{new Date(r.at).toLocaleString()}</span></li>)}</ul></section> : null}
         </section>
-        <button type="button" className="atn-model" onClick={() => setLimitsOpen(true)}>Model &amp; Limits</button>
         <section className="atn-history"><h3>Recent runs</h3>{runs.length === 0 ? <p className="atn-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><span>{r.skipped ? "–" : r.ok ? "✓" : "✗"} {runLabel(r)}</span><span className="atn-hint">{r.skipped ? `Skipped: ${r.summary} · ` : ""}{r.durationSeconds}s · {new Date(r.at).toLocaleString()}</span></li>)}</ul>}</section>
         <section className="atn-history"><h3>Action items</h3><p className="atn-hint">No action items yet. Run Sources → Issue or record a meeting with action items.</p></section>
         <button type="button" className="atn-btn" disabled={running || !state.masterEnabled} title="Run every enabled task from the top" onClick={() => void runAll()}>▶ Run all</button>
-        <button type="button" className="atn-run-now" disabled={!running && !desktopRunnable(selected, taskEnv)} title={running ? "Stop the running task" : !desktopRunnable(selected, taskEnv) ? (selectedReason ?? undefined) : "Run the selected task now"} onClick={running ? stopTask : () => void runTask()}>{running ? "■ Stop" : "▶ Run Now"}</button>
       </aside>
 
       <main className="atn-main">
@@ -405,7 +401,6 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
 
         <section className="atn-card atn-log"><header><h2>Log <span className="atn-hint">live</span></h2><span className="atn-spacer" /><button type="button" className="atn-link" onClick={() => setLog([])}>Clear</button></header>{log.length === 0 ? <p className="atn-hint">No log lines yet.</p> : <pre className="atn-log-pre">{log.join("\n")}</pre>}</section>
       </main>
-      {limitsOpen ? <ModelLimitsPanel onClose={() => setLimitsOpen(false)} /> : null}
       {customEdit ? (
         <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-custom-title">
           <div className="atn-modal-card atn-custom-editor">
