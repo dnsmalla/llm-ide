@@ -431,6 +431,116 @@ public struct HostApiHostSnapshotResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiLoopCancelRequest: Codable, Equatable, Sendable {
+    public var id: String
+
+    public init(id: String) {
+        self.id = id
+    }
+}
+
+public struct HostApiLoopCancelResult: Codable, Equatable, Sendable {
+    public var cancelled: Bool
+
+    public init(cancelled: Bool) {
+        self.cancelled = cancelled
+    }
+}
+
+public struct HostApiLoopIssuesRequest: Codable, Equatable, Sendable {
+    public var limit: Int?
+    public var projectId: String?
+
+    public init(limit: Int? = nil, projectId: String? = nil) {
+        self.limit = limit
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiLoopIssuesResultIssuesItem: Codable, Equatable, Sendable {
+    public var id: String
+    public var number: Int?
+    public var provider: String?
+    public var repo: String?
+    public var title: String
+
+    public init(id: String, number: Int? = nil, provider: String? = nil, repo: String? = nil, title: String) {
+        self.id = id
+        self.number = number
+        self.provider = provider
+        self.repo = repo
+        self.title = title
+    }
+}
+
+public struct HostApiLoopIssuesResult: Codable, Equatable, Sendable {
+    public var issues: [HostApiLoopIssuesResultIssuesItem]
+
+    public init(issues: [HostApiLoopIssuesResultIssuesItem]) {
+        self.issues = issues
+    }
+}
+
+public struct HostApiLoopListRequest: Codable, Equatable, Sendable {
+    public var projectId: String?
+
+    public init(projectId: String? = nil) {
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiLoopListResultRunsItem: Codable, Equatable, Sendable {
+    public var createdAt: String
+    public var errorCode: String?
+    public var finishedAt: String?
+    public var id: String
+    public var issueCount: Int
+    public var readyToShip: Bool?
+    public var state: String
+    public var step: String?
+    public var summary: String?
+
+    public init(createdAt: String, errorCode: String? = nil, finishedAt: String? = nil, id: String, issueCount: Int, readyToShip: Bool? = nil, state: String, step: String? = nil, summary: String? = nil) {
+        self.createdAt = createdAt
+        self.errorCode = errorCode
+        self.finishedAt = finishedAt
+        self.id = id
+        self.issueCount = issueCount
+        self.readyToShip = readyToShip
+        self.state = state
+        self.step = step
+        self.summary = summary
+    }
+}
+
+public struct HostApiLoopListResult: Codable, Equatable, Sendable {
+    public var runs: [HostApiLoopListResultRunsItem]
+
+    public init(runs: [HostApiLoopListResultRunsItem]) {
+        self.runs = runs
+    }
+}
+
+public struct HostApiLoopStartRequest: Codable, Equatable, Sendable {
+    public var issueIds: [String]
+    public var projectId: String
+
+    public init(issueIds: [String], projectId: String) {
+        self.issueIds = issueIds
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiLoopStartResult: Codable, Equatable, Sendable {
+    public var id: String
+    public var state: String
+
+    public init(id: String, state: String) {
+        self.id = id
+        self.state = state
+    }
+}
+
 public struct HostApiProjectsListRequest: Codable, Equatable, Sendable {
 
     public init() {

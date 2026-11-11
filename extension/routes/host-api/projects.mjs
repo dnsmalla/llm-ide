@@ -20,6 +20,9 @@ export const PROJECT_FRAME_CLASS = Object.freeze({
   'chat.options': 'self.read',
   'approvals.answer': 'model.ask',
   'toolApprovals.answer': 'model.exec',
+  'loop.issues': 'self.read',
+  'loop.list': 'self.read',
+  'loop.start': 'model.exec',
 });
 
 /** The `projects.list` result: id, name, the caller's effective role/mode/cap and permissions. */

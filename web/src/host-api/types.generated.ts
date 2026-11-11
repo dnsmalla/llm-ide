@@ -26,6 +26,10 @@ export const HOST_API_COMMANDS = {
   "host.hello": { capability: "host", idempotent: true },
   "host.ping": { capability: "host", idempotent: true },
   "host.snapshot": { capability: "host", idempotent: true },
+  "loop.cancel": { capability: "compose", idempotent: true },
+  "loop.issues": { capability: "read", idempotent: true },
+  "loop.list": { capability: "read", idempotent: true },
+  "loop.start": { capability: "compose", idempotent: false },
   "projects.list": { capability: "host", idempotent: true },
   "push.config": { capability: "push", idempotent: true },
   "push.register": { capability: "push", idempotent: true },
@@ -57,6 +61,10 @@ export interface HostApiCommandMap {
   "host.hello": { request: { apiVersions: Array<number>; clientName: string; clientVersion: string; platform: "ios" | "web" | "desktop" | "mac" }; result: { apiVersion: 1; apiVersions: Array<number>; capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push">; certificateFingerprint?: string; hostKind: "mac" | "desktop" | "hub"; hostName: string; protocolVersion: number; requiresAuth: boolean } };
   "host.ping": { request: Record<string, never>; result: Record<string, never> };
   "host.snapshot": { request: { topics: Array<"chat" | "status" | "autotasks" | "loop"> }; result: { snapshots: Record<string, Record<string, unknown>> } };
+  "loop.cancel": { request: { id: string }; result: { cancelled: boolean } };
+  "loop.issues": { request: { limit?: number; projectId?: string }; result: { issues: Array<{ id: string; number?: number; provider?: string; repo?: string; title: string }> } };
+  "loop.list": { request: { projectId?: string }; result: { runs: Array<{ createdAt: string; errorCode?: string; finishedAt?: string; id: string; issueCount: number; readyToShip?: boolean; state: "awaiting_approval" | "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "denied" | "expired"; step?: string; summary?: string }> } };
+  "loop.start": { request: { issueIds: Array<string>; projectId: string }; result: { id: string; state: "awaiting_approval" | "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "denied" | "expired" } };
   "projects.list": { request: Record<string, never>; result: { projects: Array<{ id: string; maxMode: "none" | "read_only" | "execute"; name: string; permissions: Array<string>; role: "viewer" | "member" | "admin" | "owner"; usdCapMonth: number }> } };
   "push.config": { request: Record<string, never>; result: { apns: boolean; registered: "none" | "webpush" | "apns"; webPushKey: string } };
   "push.register": { request: { auth?: string; endpoint?: string; environment?: "sandbox" | "production"; kind: "webpush" | "apns"; p256dh?: string; token?: string }; result: { registered: boolean } };

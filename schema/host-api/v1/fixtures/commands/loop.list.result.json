@@ -1,0 +1,11 @@
+{
+  "runs": [
+    {
+      "id": "cmd-00001",
+      "state": "running",
+      "createdAt": "2026-11-12T01:00:00.000Z",
+      "issueCount": 1,
+      "step": "stage: Review"
+    }
+  ]
+}

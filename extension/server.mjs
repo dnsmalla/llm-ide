@@ -706,7 +706,7 @@ function ensureHostApiGateway() {
     const { sharedAuditSink } = await import('./routes/host-api/audit.mjs');
     const audit = sharedAuditSink();
     const gateway = createGateway({ hostName: () => hostname(), log: (l) => logger.info(l), certificateFingerprint: () => hostApi?.fingerprint ?? null,
-      audit: (event, fields) => audit.record(event, fields), ...sessionTransport });
+      audit: (event, fields) => audit.record(event, fields), bus: () => bus, ...sessionTransport });
     hostApi ??= { gateway, listener: null, fingerprint: null };
     hostApi.gateway = gateway;
     return gateway;

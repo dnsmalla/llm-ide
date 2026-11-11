@@ -35,7 +35,7 @@ as `minLenght` fails the gate instead of being silently ignored.
 
 ## Commands
 
-All 28 commands are listed below.
+All 32 commands are listed below.
 
 | Command | Capability | Idempotent | v2 tag |
 |---|---|---|---|
@@ -66,9 +66,13 @@ All 28 commands are listed below.
 | `tasks.run` | compose | no | — |
 | `tasks.status` | compose | yes | — |
 | `tasks.cancel` | compose | yes | — |
+| `loop.issues` | read | yes | — |
+| `loop.list` | read | yes | — |
+| `loop.start` | compose | no | — |
+| `loop.cancel` | compose | yes | — |
 | `projects.list` | host | yes | — |
 
-`read` (tier R in the command bus spec) is the read-only slice: the user's chat list, one chat's history, and the usage and limits summary. It is served only when the host enables it (desktop: `LLMIDE_HOST_API_READ=1`, default off) and only to a device paired while it was served. The Tauri app passes only `LLMIDE_HOST_API_TLS` and `LLMIDE_HOST_API_WEB_ORIGINS` to a core it starts (`desktop/src-tauri/src/core_env.rs` drops every other `LLMIDE_*`), so `read` works only on a core you start yourself (`cd extension && LLMIDE_HOST_API_READ=1 npm run server`), which the app then adopts; it fails closed otherwise. The remaining spec domains (Explorer, Auto Tasks, Loop, projects, files, SCM, issues, Self-Heal, generation, Library, activity) are added by later plans using the same envelope and registry machinery.
+`read` (tier R in the command bus spec) is the read-only slice: the user's chat list, one chat's history, and the usage and limits summary. It is served only when the host enables it (desktop: `LLMIDE_HOST_API_READ=1`, default off) and only to a device paired while it was served. The Tauri app passes `LLMIDE_HOST_API_TLS`, `LLMIDE_HOST_API_WEB_ORIGINS` and (fixed) `LLMIDE_HOST_API_READ=1` / `LLMIDE_HOST_API_COMPOSE=1` to a core it starts; an adopted core keeps its own env. The remaining spec domains (Explorer, Auto Tasks, Loop, projects, files, SCM, issues, Self-Heal, generation, Library, activity) are added by later plans using the same envelope and registry machinery.
 
 `projects.list` returns the paired device's projects and its effective role on each (`id`, `name`, `role`, `maxMode`, `usdCapMonth`, `permissions`). A project-scoped command (`chat.send`, `chat.new`, `chat.snapshot`, `chat.sessions`, `chat.history`, `chat.history.clear`, `chat.cancel`, `chat.options`, `approvals.answer`, `toolApprovals.answer`) may carry `projectId`; the host checks the fresh project grant on every frame, and an unassigned device is a viewer on that project (Ask only). A frame with no `projectId` keeps the legacy/global chat, so existing pairings keep working. One current chat is kept per (user, project): `chat.sessions` without a project is only the project_id NULL set, and `chat.history` refuses another project's session. On a hub every project-scoped frame needs a project (`PROJECT_REQUIRED`).
 

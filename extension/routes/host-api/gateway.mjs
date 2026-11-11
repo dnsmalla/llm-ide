@@ -16,6 +16,8 @@ import { getDb } from '../../kb/db.mjs';
 import { deleteChatSession } from '../../kb/chat-sessions.mjs';
 import { config } from '../../core/config.mjs';
 import { getMember, classRefusal } from '../../kb/members.mjs';
+import { listCommands, getCommand, getCommandArgs, listEvents, lastSeq, expireStale } from '../../kb/bus-store.mjs';
+import { listTicketSources } from '../../kb/sources.mjs';
 import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
 import { projectsListResult, projectFrameAuthority } from './projects.mjs';
 import { busHostProof } from '../../core/host-approval.mjs';
@@ -84,6 +86,10 @@ export const COMMAND_CLASS = Object.freeze({
   'tasks.run': 'self.write',
   'tasks.status': 'self.read',
   'tasks.cancel': 'self.write',
+  'loop.issues': 'self.read',
+  'loop.list': 'self.read',
+  'loop.start': 'model.exec',
+  'loop.cancel': 'self.write',
 });
 
 export function hostApiCapabilities(env = process.env) {
@@ -103,6 +109,8 @@ function defaultDeps() {
     capabilities: () => hostApiCapabilities(),
     // The paired user's authority row (ADR 0021), read fresh at pairing and at every token re-auth.
     member: (userId) => getMember(getDb(), userId),
+    // The command bus (server.mjs passes it once started); null while it is off, which refuses Loop commands.
+    bus: () => null,
     chatClearEnabled: () => process.env.LLMIDE_HOST_API_CHAT_CLEAR === '1',
     turn: async (args) => (await agentV2()).startHostTurn(args),
     cancel: async (userId, chatSessionId) => (await agentV2()).cancelChatTurn(userId, chatSessionId),
@@ -740,6 +748,56 @@ export function createGateway(overrides) {
         const job = taskJobFor(entry.state.deviceId, p.runId);
         if (!job) return respond(s, id, command, { cancelled: false });
         if (job.status === 'running') { job.controller.abort(); job.status = 'cancelled'; job.error = 'Cancelled.'; }
+        return respond(s, id, command, { cancelled: true });
+      }
+      // Loop: the phone starts, watches and cancels Factory runs through the command bus (kind issues.implement). The
+      // phone is the `ios-native` class: a start waits for a desktop approval (T2), the desktop claims and runs it, and
+      // Ship stays a desktop click. Nothing here runs code or reads a prompt from the phone.
+      case 'loop.issues': {
+        if (readRefused(s, entry, id)) return;
+        const rows = ['github', 'gitlab'].flatMap((provider) => listTicketSources(userId, { provider, repo: null, state: 'open', limit: p.limit ?? 50, offset: 0 }).rows);
+        const issues = rows.filter((r) => /^[A-Za-z0-9_-]{8,64}$/.test(String(r.id)) && r.meta?.isPR !== true).slice(0, p.limit ?? 50)
+          .map((r) => ({ id: String(r.id), title: clamp(String(r.title ?? ''), 300), ...(r.meta?.provider ? { provider: clamp(String(r.meta.provider), 40) } : {}),
+            ...(r.meta?.repo ? { repo: clamp(String(r.meta.repo), 200) } : {}), ...(Number.isInteger(r.meta?.number) && r.meta.number >= 0 ? { number: r.meta.number } : {}) }));
+        return respond(s, id, command, { issues });
+      }
+      case 'loop.list': {
+        if (readRefused(s, entry, id)) return;
+        expireStale(userId);
+        const runs = listCommands(userId, { limit: 50 }).filter((c) => c.kind === 'issues.implement')
+          .filter((c) => !p.projectId || getCommandArgs(userId, c.id)?.projectId === p.projectId)
+          .map((c) => {
+            const args = getCommandArgs(userId, c.id) ?? {};
+            const last = lastSeq(userId, c.id);
+            const step = listEvents(userId, c.id, Math.max(0, last - 30), 50).reverse().find((e) => e.type === 'progress' && typeof e.payload?.step === 'string')?.payload.step;
+            const done = !['awaiting_approval', 'queued', 'running'].includes(c.state);
+            return { id: c.id, state: c.state, createdAt: String(c.createdAt), ...(c.finishedAt ? { finishedAt: String(c.finishedAt) } : {}),
+              issueCount: Array.isArray(args.issueIds) ? args.issueIds.length : 0, ...(step ? { step: clamp(step, 200) } : {}),
+              ...(done && c.result?.readyToShip === true ? { readyToShip: true } : {}), ...(done && typeof c.result?.summary === 'string' ? { summary: clamp(c.result.summary, 500) } : {}) };
+          });
+        return respond(s, id, command, { runs });
+      }
+      case 'loop.start': {
+        if (composeRefused(s, entry, id)) return;
+        if (!executeAllowed(entry)) return fail(s, id, 'denied', 'This account or project cannot start runs from the phone.');
+        const bus = deps.bus();
+        if (!bus) return fail(s, id, 'capability_unavailable', 'The command bus is off on this computer.');
+        const wait = rate.turn(entry.state.deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        try {
+          const out = bus.receive(userId, { v: 1, kind: 'issues.implement', idem: `loop-${randomUUID()}`, args: { projectId: p.projectId, issueIds: p.issueIds } }, { client: 'ios-native' });
+          audit('loop_start', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `issues=${p.issueIds.length}`, dedupeKey: `${entry.state.deviceId}:loop_start` });
+          return respond(s, id, command, { id: out.command.id, state: out.command.state });
+        } catch (e) { return fail(s, id, e?.status === 403 ? 'denied' : e?.status === 404 ? 'not_found' : 'invalid_payload', clamp(String(e?.message || 'The run could not be queued.'), 300)); }
+      }
+      case 'loop.cancel': {
+        if (composeRefused(s, entry, id)) return;
+        const bus = deps.bus();
+        if (!bus) return fail(s, id, 'capability_unavailable', 'The command bus is off on this computer.');
+        const c = getCommand(userId, p.id);
+        if (!c || c.kind !== 'issues.implement') return fail(s, id, 'not_found', 'That run is not on this computer.');
+        try { bus.cancel(userId, p.id); } catch (e) { if (e?.code !== 'ALREADY_FINISHED') return fail(s, id, 'invalid_payload', clamp(String(e?.message || 'The run could not be cancelled.'), 300)); return respond(s, id, command, { cancelled: false }); }
+        audit('loop_cancel', { peer: entry.peer, userId, deviceId: entry.state.deviceId, dedupeKey: `${entry.state.deviceId}:loop_cancel` });
         return respond(s, id, command, { cancelled: true });
       }
       case 'host.snapshot': {

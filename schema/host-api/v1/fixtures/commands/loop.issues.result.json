@@ -1,0 +1,11 @@
+{
+  "issues": [
+    {
+      "id": "issue-0001",
+      "title": "Fix the login redirect",
+      "provider": "github",
+      "repo": "o/r",
+      "number": 12
+    }
+  ]
+}
