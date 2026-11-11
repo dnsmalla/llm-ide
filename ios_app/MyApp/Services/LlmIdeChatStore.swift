@@ -175,6 +175,20 @@ final class LlmIdeChatStore: ObservableObject {
         }
     }
 
+    /// Start a fresh phone chat on the desktop and clear this transcript. The old chat stays in History.
+    func newChat() {
+        guard !isStreaming, let host = connection?.host else { return }
+        Task { [weak self] in
+            do {
+                _ = try await host.send(.chatNew, HostApiChatNewRequest(), as: HostApiChatNewResult.self)
+                self?.llmIdeMessages.removeAll()
+                self?.approvalNotice = nil
+            } catch {
+                if let rejection = error as? HostApiRejection { self?.connection?.errorMessage = rejection.message }
+            }
+        }
+    }
+
     /// Cancel the in-flight chat turn on the host.
     func cancelStreaming() {
         // `Set.first` is nondeterministic — with two ids in flight Stop could

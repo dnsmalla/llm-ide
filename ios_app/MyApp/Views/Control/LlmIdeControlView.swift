@@ -66,6 +66,10 @@ struct LlmIdeControlView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button {
+                            llmIdeStore.newChat()
+                        } label: { Label("New chat", systemImage: "square.and.pencil") }
+                            .disabled(llmIdeStore.isStreaming || !connection.supports(HostApiCommand.chatNew.capability))
                         // This also clears the desktop's shared transcript
                         // (`chat.history.clear`) and cannot be undone, so it
                         // sits behind a menu AND a confirmation.
