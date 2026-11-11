@@ -24,6 +24,7 @@ test("resolveAnchor: ids, settings:<id>, old anchors; hostile or unknown input i
   assert.equal(resolveAnchor("agent-sdk"), "server");
   assert.equal(resolveAnchor("model-limits"), "model-routing");
   assert.equal(resolveAnchor("tool-permissions"), "trust");
+  assert.equal(resolveAnchor("code-graph"), "memory");
   for (const bad of ["", "settings:", "nope", "../x", "__proto__", "constructor", "settings:__proto__", "x".repeat(100), null, undefined]) {
     assert.equal(resolveAnchor(bad as string | null | undefined), null, String(bad));
   }

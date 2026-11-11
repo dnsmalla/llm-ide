@@ -24,8 +24,7 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   "self-heal": dflt(() => import("./sections/SelfHealSection.tsx")),
   paths: dflt(() => import("./sections/PathsSection.tsx")),
   repositories: dflt(() => import("./sections/RepositoriesSection.tsx")),
-  memory: dflt(() => import("./sections/MemorySection.tsx")),
-  "code-graph": dflt(() => import("./sections/CodeGraphSection.tsx")),
+  memory: dflt(() => import("./sections/MemoryGroup.tsx")),
 };
 
 export function createSettingsRegistry(): SettingsRegistry<SectionComponent> {

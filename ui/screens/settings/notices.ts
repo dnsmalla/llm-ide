@@ -22,18 +22,14 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {};
 
 /** Groups that are only partly implemented keep a short note for the part that is not. */
 export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
-  connections:
-    "Connector credentials and fetch actions live in Library → Connections; this group mirrors the catalog and its selection.",
-  "code-graph":
-    "The host refreshes the code graph on project open or switch and on every configured interval. File-watch debouncing is not enabled.",
+  memory:
+    "The knowledge graph and agent memory files are read-only here. The host refreshes the graph on project open or switch and on the configured interval; file edits are not watched yet, so use Generate in Graph for an immediate rebuild.",
   repositories:
     "GitLab and GitHub tabs, write-only tokens, automation switches and saved repositories are here, with clone destinations defaulting to the code/ folder shown in Settings → Paths. Clone repository is real (token optional for public repos, used from memory for private ones), and Check token verifies the saved one for github.com or the configured public GitLab instance. Pull/re-sync and resolve are not available yet.",
   paths:
     "The project folder layout is owned by the project on both apps; this group lists the folders (present or missing), reveals them in Finder and re-creates missing ones. Changing the layout itself is not offered on either side.",
   workspace:
     "This group shows the open project, the notes folder, the Home page choice and the full feature profile (presets, switches and per-section toolbar visibility).",
-  build:
-    "Apply & Rebuild needs a source checkout and the Rust/Node toolchains; a distributed build has no source tree, so the button is absent there. It rebuilds the app and restarts it when ready.",
   server:
     "The app starts and supervises the core: status, log, Start, Stop and Kill & Restart. A source checkout can set its Node binary, project folder and loopback port; editing the server URL of an external core is not offered.",
   updates:

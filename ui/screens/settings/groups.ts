@@ -47,8 +47,7 @@ export const APP_GROUPS: readonly GroupDef[] = [
 export const PROJECT_GROUPS: readonly GroupDef[] = [
   { id: "paths", title: "Paths", sf: "folder.badge.gearshape", icon: "folder-cog", status: "partial", band: "project", keywords: "paths folders notes export project" },
   { id: "repositories", title: "Repositories", sf: "arrow.triangle.branch", icon: "git-branch", status: "partial", band: "project", keywords: "repositories git github gitlab tokens issues" },
-  { id: "memory", title: "Memory", sf: "brain", icon: "brain", status: "works", band: "project", keywords: "memory facts graph brain" },
-  { id: "code-graph", title: "Code Graph", sf: "cube.transparent", icon: "network", status: "partial", band: "project", keywords: "code graph generate auto update" },
+  { id: "memory", title: "Memory & graph", sf: "brain", icon: "brain", status: "partial", band: "project", keywords: "memory facts graph brain code graph generate refresh index" },
 ];
 
 export const ALL_GROUPS: readonly GroupDef[] = [...APP_GROUPS, ...PROJECT_GROUPS];
@@ -61,7 +60,7 @@ export function settingsMatch(title: string, keywords: string | undefined, query
 }
 
 /** Settings groups that read the local filesystem or run local host processes: hidden in remote mode. */
-export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "paths", "repositories", "memory", "code-graph", "optional-components", "self-heal", "trust"];
+export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "paths", "repositories", "memory", "optional-components", "self-heal", "trust"];
 
 /** Mac cards that are not groups on the desktop because the desktop folds them into another group. */
 export const MERGED_MAC_CARDS: Readonly<Record<string, string>> = {
@@ -76,6 +75,7 @@ const LEGACY_ANCHORS: Readonly<Record<string, string>> = {
   "build": "workspace",
   "tool-permissions": "trust",
   "token-saving": "optional-components",
+  "code-graph": "memory",
   "extensions-trust": "trust",
   "folder-trust": "trust",
   "extension-sources": "trust",
