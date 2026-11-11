@@ -13,7 +13,7 @@ public final class SyncHttpsClient: SyncRemoteStore {
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
     }
-    private static let urlSession: URLSession = {
+    nonisolated private static let urlSession: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
         c.timeoutIntervalForRequest = 30; c.timeoutIntervalForResource = 60
@@ -21,7 +21,7 @@ public final class SyncHttpsClient: SyncRemoteStore {
         c.httpCookieAcceptPolicy = .never
         return URLSession(configuration: c, delegate: NoRedirect(), delegateQueue: nil)
     }()
-    public static let urlSessionTransport: Transport = { request in
+    nonisolated(unsafe) public static let urlSessionTransport: Transport = { request in
         let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw Failure.http(0) }
         return (data, http)

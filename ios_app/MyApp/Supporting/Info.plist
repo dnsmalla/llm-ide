@@ -20,62 +20,44 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<!-- Export compliance. The app uses only the encryption built into iOS:
-	     CryptoKit (AES-GCM, ECDSA/ECDH P-256, HKDF, HMAC, SHA-256), CommonCrypto
-	     (AES, PBKDF2) and the Keychain / Secure Enclave, through Apple's own APIs,
-	     with standard algorithms. It bundles no crypto library. NO here matches the
-	     "only encryption within Apple's operating system" answer. Re-check with
-	     counsel before each submission that changes crypto. -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- ATS is on. Every remote peer is TLS: the paired desktop over Host API v1
-	     wss:// (its self-signed P-256 certificate is pinned to the QR's h1fp by a
-	     custom server-trust decision, HostApiPinnedTrust, which replaces system
-	     trust), offline sync over https (MEGA with ssl=2, the user's own server,
-	     Box) and direct reads over https (Box, GitLab; code also refuses any
-	     non-https URL). NSAllowsLocalNetworking is the only exemption: the DEBUG
-	     dev listener is plaintext ws://127.0.0.1 (HostApiEndpoint allows ws://
-	     on loopback only), and it is the fallback the TLS design names should
-	     iOS refuse a pinned self-signed wss:// to a LAN address. It never
-	     relaxes ATS for internet hosts. NSAllowsArbitraryLoads stays false: it
-	     existed only for the retired cleartext ws:// Mac link. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
-		<!-- Direct reads (SP7): ATS stays fully on for Box and GitLab, TLS 1.2 or later. -->
 		<key>NSExceptionDomains</key>
 		<dict>
 			<key>box.com</key>
 			<dict>
-				<key>NSIncludesSubdomains</key>
-				<true/>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<false/>
 				<key>NSExceptionMinimumTLSVersion</key>
 				<string>TLSv1.2</string>
+				<key>NSIncludesSubdomains</key>
+				<true/>
 			</dict>
 			<key>boxcloud.com</key>
 			<dict>
-				<key>NSIncludesSubdomains</key>
-				<true/>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<false/>
 				<key>NSExceptionMinimumTLSVersion</key>
 				<string>TLSv1.2</string>
+				<key>NSIncludesSubdomains</key>
+				<true/>
 			</dict>
 			<key>gitlab.com</key>
 			<dict>
-				<key>NSIncludesSubdomains</key>
-				<true/>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<false/>
 				<key>NSExceptionMinimumTLSVersion</key>
 				<string>TLSv1.2</string>
+				<key>NSIncludesSubdomains</key>
+				<true/>
 			</dict>
 		</dict>
 	</dict>
@@ -100,6 +82,13 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>

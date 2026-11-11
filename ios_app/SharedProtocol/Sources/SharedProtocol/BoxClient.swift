@@ -18,7 +18,7 @@ public final class BoxClient: SyncRemoteStore {
     public enum Failure: Error, Equatable, Sendable { case authFailed, badClient, rateLimited, quota, tooLarge, missing, badResponse, http(Int) }
     public typealias Transport = (URLRequest) async throws -> (Data, HTTPURLResponse)
 
-    public static let redirectURI = "llmide-box://oauth"
+    nonisolated public static let redirectURI = "llmide-box://oauth"
     static let api = "https://api.box.com/2.0"
     static let uploadURL = URL(string: "https://upload.box.com/api/2.0/files/content")!
     static let tokenURL = URL(string: "https://api.box.com/oauth2/token")!
@@ -26,15 +26,15 @@ public final class BoxClient: SyncRemoteStore {
     static let authorizeBase = URL(string: "https://account.box.com/api/oauth2/authorize")!
 
     /// Where a Box response may land: SP7's Box hosts (API, the two pre-signed download hosts) plus the upload host.
-    public static let allowedHosts: Set<String> = SourceHTTP.allowedHosts.subtracting(["gitlab.com"]).union(["upload.box.com"])
+    nonisolated public static let allowedHosts: Set<String> = SourceHTTP.allowedHosts.subtracting(["gitlab.com"]).union(["upload.box.com"])
     nonisolated public static func isAllowed(_ u: URL) -> Bool {
         u.scheme == "https" && u.user == nil && u.password == nil && (u.port == nil || u.port == 443) && allowedHosts.contains(u.host ?? "")
     }
     /// Largest body read: a sync file is at most SyncPath.maxFileBytes; a 1000-entry folder listing is far smaller.
-    public static let readCap = 4 * 1_048_576
+    nonisolated public static let readCap = 4 * 1_048_576
     /// SP7's guarded session: ephemeral, 20 s / 60 s timeouts, redirects only to its allowed hosts and never with the bearer
     /// off the host it was sent to, and the body read capped while it streams.
-    public static let urlSessionTransport: Transport = { request in
+    nonisolated(unsafe) public static let urlSessionTransport: Transport = { request in
         let (data, http, truncated) = try await SourceHTTP.urlSessionTransport(request, readCap)
         if truncated { throw Failure.tooLarge }
         return (data, http)

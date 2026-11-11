@@ -15,14 +15,14 @@ public final class MegaClient: SyncRemoteStore {
     public typealias Transport = (URLRequest) async throws -> (Data, HTTPURLResponse)
     public typealias Sleep = (UInt64) async throws -> Void
 
-    public static let defaultGateway = URL(string: "https://g.api.mega.co.nz/")!
-    private static let urlSession = URLSession(configuration: .ephemeral)
-    public static let urlSessionTransport: Transport = { request in
+    nonisolated public static let defaultGateway = URL(string: "https://g.api.mega.co.nz/")!
+    nonisolated private static let urlSession = URLSession(configuration: .ephemeral)
+    nonisolated(unsafe) public static let urlSessionTransport: Transport = { request in
         let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw Failure.badResponse }
         return (data, http)
     }
-    public static let realSleep: Sleep = { try await Task.sleep(nanoseconds: $0) }
+    nonisolated(unsafe) public static let realSleep: Sleep = { try await Task.sleep(nanoseconds: $0) }
     static let maxUpload = 131_072
 
     public let folder: String
