@@ -10,10 +10,10 @@ import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { safeAudit, clientIp } from '../server/route-http.mjs';
-import { NAME, WEB_ORIGIN, parseIssueWrite, callProvider, onceForIdem } from '../agents/issue-writer.mjs';
+import { NAME, WEB_ORIGIN, parseIssueWrite, parseIssueUpdate, updateIssue, callProvider, onceForIdem } from '../agents/issue-writer.mjs';
 
 // The writer lives in agents/ (the Sources -> Issue task calls it too); these names keep their old import path.
-export { ISSUE_LIMITS, IDEM_TTL_MS, parseIssueWrite, providerCall, mapProviderFailure, onceForIdem, _resetIssueWriteIdemForTests } from '../agents/issue-writer.mjs';
+export { ISSUE_LIMITS, IDEM_TTL_MS, parseIssueWrite, parseIssueUpdate, providerCall, mapProviderFailure, onceForIdem, _resetIssueWriteIdemForTests } from '../agents/issue-writer.mjs';
 const fail = (res, status, code, message) => { sendJSON(res, status, { error: { code, message } }); return true; };
 
 /** POST /kb/issues/{create,comment,close}. false for anything else (the caller keeps dispatching). */
@@ -21,7 +21,8 @@ export async function handleIssueWriteRoutes(req, res, { userId, url }) {
   const path = String(url || '').split('?')[0];
   const op = req.method === 'POST' && path === '/kb/issues/create' ? 'create'
     : req.method === 'POST' && path === '/kb/issues/comment' ? 'comment'
-      : req.method === 'POST' && path === '/kb/issues/close' ? 'close' : null;
+      : req.method === 'POST' && path === '/kb/issues/close' ? 'close'
+      : req.method === 'POST' && path === '/kb/issues/update' ? 'update' : null;
   if (!op) return false;
   const audit = (outcome, resource, detail) => safeAudit(kb.getDb(), {
     userId, ip: clientIp(req), userAgent: String(req.headers?.['user-agent'] ?? '').slice(0, 200) || null,
@@ -41,7 +42,7 @@ export async function handleIssueWriteRoutes(req, res, { userId, url }) {
     const decision = authorizeAction(kb.getDb(), userId, 'external.write', { projectId, req });
     if (!decision.ok) { sendJSON(res, decision.status, { error: { code: decision.code, message: decision.message } }); return true; }
   }
-  const w = parseIssueWrite(op, raw);
+  const w = op === 'update' ? parseIssueUpdate(raw) : parseIssueWrite(op, raw);
   if (w.error) { sendJSON(res, 400, w); return true; }
   const resource = `${w.provider}:${w.repo}${w.number ? `#${w.number}` : ''}`;
   const known = kb.findTicket(userId, { provider: w.provider, repo: w.repo, number: w.number ?? null, origin: WEB_ORIGIN[w.provider] });
@@ -54,8 +55,9 @@ export async function handleIssueWriteRoutes(req, res, { userId, url }) {
   if (w.number && known.isPR) return fail(res, 400, 'NOT_AN_ISSUE', 'Pull requests and merge requests are not written from the Issues board.');
   const token = getSecret(kb.getDb(), userId, `${w.provider}.token`);
   if (!token) return fail(res, 400, `${w.provider.toUpperCase()}_TOKEN_MISSING`, `Add a ${NAME[w.provider]} token in Settings → Built-in keys first.`);
-  const out = op === 'create' ? await onceForIdem(userId, w, () => callProvider(w, token)) : await callProvider(w, token);
-  if (op === 'close' && out.status === 200) kb.setTicketState(userId, { provider: w.provider, repo: w.repo, number: w.number, state: 'closed' });
+  const out = op === 'update' ? await updateIssue(w, token) : op === 'create' ? await onceForIdem(userId, w, () => callProvider(w, token)) : await callProvider(w, token);
+  if ((op === 'close' || (op === 'update' && w.state === 'closed')) && out.status === 200) kb.setTicketState(userId, { provider: w.provider, repo: w.repo, number: w.number, state: 'closed' });
+  if (op === 'update' && w.state === 'open' && out.status === 200) kb.setTicketState(userId, { provider: w.provider, repo: w.repo, number: w.number, state: 'open' });
   audit(out.status === 200 ? 'success' : 'failure', resource, {
     status: out.status, code: out.body?.error?.code ?? null, ...(op === 'create' && out.status === 200 ? { deduped: out.body.deduped } : {}),
   });

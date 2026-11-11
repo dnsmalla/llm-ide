@@ -14,7 +14,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DB = path.join(HERE, "_issue-writes-test.db");
 process.env.LLMIDE_DB_PATH = DB;
 
-const { parseIssueWrite, providerCall, mapProviderFailure, onceForIdem, IDEM_TTL_MS, _resetIssueWriteIdemForTests } = await import("../routes/issue-writes.mjs");
+const { parseIssueWrite, parseIssueUpdate, providerCall, mapProviderFailure, onceForIdem, IDEM_TTL_MS, _resetIssueWriteIdemForTests } = await import("../routes/issue-writes.mjs");
 
 const IDEM = "A".repeat(20);
 
@@ -250,4 +250,16 @@ test("provider refusals map to stable codes and a missing token is 400", async (
   setSecret(db.getDb(), u, "github.token", "");
   assert.equal((await call(u, "/kb/issues/comment", comment)).body.error.code, "GITHUB_TOKEN_MISSING");
   assert.equal((await call(u, "/kb/issues/comment", { ...comment, body: "x".repeat(20_001) })).body.error.details.field, "body");
+});
+
+test("issue edit: every field is checked; an empty edit and a bad date are refused", () => {
+  const base = { provider: "gitlab", repo: "g/p", number: 7 };
+  assert.equal(parseIssueUpdate(base).error.code, "VALIDATION_FAILED", "nothing to update");
+  const ok = parseIssueUpdate({ ...base, title: " New ", body: "x", state: "closed", labels: ["a"], milestoneId: 3, assigneeIds: [9], dueDate: "2026-12-01" });
+  assert.equal(ok.title, "New");
+  assert.equal(ok.state, "closed");
+  assert.equal(parseIssueUpdate({ ...base, title: "" }).error.details.field, "title");
+  assert.equal(parseIssueUpdate({ ...base, state: "done" }).error.details.field, "state");
+  assert.equal(parseIssueUpdate({ ...base, dueDate: "tomorrow" }).error.details.field, "dueDate");
+  assert.equal(parseIssueUpdate({ ...base, labels: [""] }).error.details.field, "labels");
 });

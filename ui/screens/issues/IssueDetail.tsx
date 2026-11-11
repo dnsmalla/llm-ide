@@ -19,8 +19,9 @@ export function gitlabOriginFromConfig(): string | null {
 }
 
 export interface IssueDetailView {
-  issue?: { state?: string | null; title?: string; body?: string; labels?: string[]; milestone?: { title?: string; dueOn?: string | null } | null; assignees?: string[]; author?: string | null; createdAt?: string | null; updatedAt?: string | null; webUrl?: string | null } | null;
+  issue?: { state?: string | null; title?: string; body?: string; labels?: string[]; milestone?: { title?: string; dueOn?: string | null; id?: number | null } | null; milestoneId?: number | null; assignees?: string[]; assigneeIds?: number[]; dueDate?: string | null; author?: string | null; createdAt?: string | null; updatedAt?: string | null; webUrl?: string | null } | null;
   comments?: { id?: number | null; author: string; body: string; at?: string | null }[];
+  choices?: { labels?: string[]; milestones?: { id: number; title: string }[]; assignees?: { id: number; name: string }[] } | null;
 }
 
 export interface IssueDetailDeps {
@@ -55,6 +56,20 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
   const [confirmClose, setConfirmClose] = useState(false);
   const [detail, setDetail] = useState<IssueDetailView | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [edit, setEdit] = useState({ title: "", body: "", state: "open", labels: [] as string[], milestoneId: null as number | null, assigneeIds: [] as number[], dueDate: "" });
+  useEffect(() => {
+    if (!detail?.issue) return;
+    setEdit({
+      title: detail.issue.title ?? issue.title,
+      body: detail.issue.body ?? issue.body,
+      state: detail.issue.state === "closed" ? "closed" : "open",
+      labels: detail.issue.labels ?? issue.labels,
+      milestoneId: detail.issue.milestoneId ?? detail.issue.milestone?.id ?? null,
+      assigneeIds: detail.issue.assigneeIds ?? [],
+      dueDate: detail.issue.dueDate ?? "",
+    });
+  }, [detail, issue]);
 
   const loadDetail = useCallback(async () => {
     if (!issue.number) return;
@@ -129,7 +144,36 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
         </header>
         <div className="iss-detail-grid">
           <div className="iss-detail-main">
-            <pre className="iss-body">{detail?.issue?.body ?? issue.body ?? "No description."}</pre>
+            {editOpen ? (
+              <form className="iss-edit-form" aria-label="Edit issue" onSubmit={(e) => {
+                e.preventDefault();
+                if (writeBusy) return;
+                const assignees = (detail?.choices?.assignees ?? []).filter((a) => edit.assigneeIds.includes(a.id)).map((a) => a.name);
+                void write("/kb/issues/update", {
+                  title: edit.title,
+                  body: edit.body,
+                  state: edit.state,
+                  labels: Array.from(new Set(edit.labels)),
+                  milestoneId: edit.milestoneId,
+                  assignees: edit.state === "closed" ? undefined : assignees,
+                  assigneeIds: edit.assigneeIds,
+                  ...(issue.provider === "gitlab" ? { dueDate: edit.dueDate || null } : {}),
+                }, "Issue updated.").then((ok) => { if (ok) { setEditOpen(false); void loadDetail(); onChanged?.(); } });
+              }}>
+                <label className="iss-field"><span>Title</span><input className="iss-input" value={edit.title} maxLength={255} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></label>
+                <label className="iss-field"><span>Description</span><textarea rows={8} value={edit.body} maxLength={20000} onChange={(e) => setEdit({ ...edit, body: e.target.value })} /></label>
+                <div className="iss-edit-grid">
+                  <label className="iss-field"><span>Status</span><select value={edit.state} onChange={(e) => setEdit({ ...edit, state: e.target.value })}><option value="open">Open</option><option value="closed">Closed</option></select></label>
+                  <label className="iss-field"><span>Milestone</span><select value={edit.milestoneId ?? ""} onChange={(e) => setEdit({ ...edit, milestoneId: e.target.value === "" ? null : Number(e.target.value) })}><option value="">None</option>{(detail?.choices?.milestones ?? []).map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}</select></label>
+                  {issue.provider === "gitlab" ? <label className="iss-field"><span>Due date</span><input className="iss-input" type="date" value={edit.dueDate} onChange={(e) => setEdit({ ...edit, dueDate: e.target.value })} /></label> : null}
+                </div>
+                <fieldset className="iss-edit-set"><legend>Labels</legend>{(detail?.choices?.labels ?? []).length ? (detail?.choices?.labels ?? []).map((l) => <label key={l} className="iss-check"><input type="checkbox" checked={edit.labels.includes(l)} onChange={(e) => setEdit({ ...edit, labels: e.target.checked ? [...edit.labels, l] : edit.labels.filter((x) => x !== l) })} />{l}</label>) : <span className="iss-hint">No labels available.</span>}</fieldset>
+                <fieldset className="iss-edit-set"><legend>Assignees</legend>{(detail?.choices?.assignees ?? []).length ? (detail?.choices?.assignees ?? []).map((a) => <label key={a.id} className="iss-check"><input type="checkbox" checked={edit.assigneeIds.includes(a.id)} onChange={(e) => setEdit({ ...edit, assigneeIds: e.target.checked ? [...edit.assigneeIds, a.id] : edit.assigneeIds.filter((x) => x !== a.id) })} />{a.name}</label>) : <span className="iss-hint">No assignees available.</span>}</fieldset>
+                <div className="iss-detail-actions"><button type="submit" className="iss-btn iss-primary" disabled={writeBusy || edit.title.trim() === ""}>{writeBusy ? "Saving…" : "Save changes"}</button><button type="button" className="iss-btn" onClick={() => setEditOpen(false)} disabled={writeBusy}>Cancel</button></div>
+              </form>
+            ) : (
+              <pre className="iss-body">{detail?.issue?.body ?? issue.body ?? "No description."}</pre>
+            )}
             <section className="iss-comments" aria-label="Comments">
               <h3 className="iss-col-title">Comments</h3>
               {detailError ? <p className="iss-hint">{detailError}</p> : null}
@@ -197,6 +241,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
             ) : null}
 
             <div className="iss-detail-actions">
+              <button type="button" className="iss-btn" disabled={writeBusy || detail === null} onClick={() => setEditOpen((v) => !v)}>{editOpen ? "Cancel edit" : "Edit issue"}</button>
               <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
               {onSendToFactory ? <button type="button" className="iss-btn" onClick={onSendToFactory}>Send to Factory</button> : null}
             </div>

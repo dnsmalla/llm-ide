@@ -143,12 +143,21 @@ export async function readIssueDetail({ provider, repo, number, token }) {
     : { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'llm-ide-desktop', Authorization: `Bearer ${token}` };
   const fetchPinned = makePinnedFetch();
   try {
-    const [issueRes, commentsRes] = await Promise.all([
+    const meta = gl
+      ? [`${API_BASE.gitlab}/projects/${encodeURIComponent(repo)}/labels?per_page=100`, `${API_BASE.gitlab}/projects/${encodeURIComponent(repo)}/milestones?per_page=100`, `${API_BASE.gitlab}/projects/${encodeURIComponent(repo)}/members/all?per_page=100`]
+      : [`${API_BASE.github}/repos/${repo}/labels?per_page=100`, `${API_BASE.github}/repos/${repo}/milestones?state=all&per_page=100`, `${API_BASE.github}/repos/${repo}/assignees?per_page=100`];
+    const [issueRes, commentsRes, labelsRes, milestonesRes, peopleRes] = await Promise.all([
       fetchPinned(`${issues}/${number}`, { headers, signal: AbortSignal.timeout(15_000) }),
       fetchPinned(`${issues}/${number}/${gl ? 'notes' : 'comments'}?per_page=100`, { headers, signal: AbortSignal.timeout(15_000) }),
+      fetchPinned(meta[0], { headers, signal: AbortSignal.timeout(15_000) }),
+      fetchPinned(meta[1], { headers, signal: AbortSignal.timeout(15_000) }),
+      fetchPinned(meta[2], { headers, signal: AbortSignal.timeout(15_000) }),
     ]);
     const issue = await issueRes.json().catch(() => ({}));
     const comments = await commentsRes.json().catch(() => []);
+    const labelRows = await labelsRes.json().catch(() => []);
+    const milestoneRows = await milestonesRes.json().catch(() => []);
+    const peopleRows = await peopleRes.json().catch(() => []);
     if (!issueRes.ok) {
       const f = mapProviderFailure(provider, issueRes.status, issue);
       return { status: f.status, body: { error: { code: f.code, message: f.message } } };
@@ -163,13 +172,21 @@ export async function readIssueDetail({ provider, repo, number, token }) {
         body: gl ? (typeof issue.description === 'string' ? issue.description : '') : (typeof issue.body === 'string' ? issue.body : ''),
         labels: Array.isArray(issue.labels) ? issue.labels.map(label).filter(Boolean) : [],
         milestone: issue.milestone && typeof issue.milestone === 'object'
-          ? { title: typeof issue.milestone.title === 'string' ? issue.milestone.title : '', dueOn: typeof issue.milestone.due_date === 'string' ? issue.milestone.due_date : null }
+          ? { title: typeof issue.milestone.title === 'string' ? issue.milestone.title : '', dueOn: typeof issue.milestone.due_date === 'string' ? issue.milestone.due_date : null, id: Number.isSafeInteger(issue.milestone.id) ? issue.milestone.id : null }
           : null,
+        milestoneId: issue.milestone && Number.isSafeInteger(issue.milestone.id) ? issue.milestone.id : null,
         assignees: Array.isArray(issue.assignees) ? issue.assignees.map(person).filter(Boolean) : [],
+        assigneeIds: Array.isArray(issue.assignees) ? issue.assignees.map((a) => Number.isSafeInteger(a?.id) ? a.id : null).filter((x) => x !== null) : [],
+        dueDate: typeof issue.due_date === 'string' ? issue.due_date : null,
         author: person(issue.author) || person(issue.user) || null,
         createdAt: typeof issue.created_at === 'string' ? issue.created_at : null,
         updatedAt: typeof issue.updated_at === 'string' ? issue.updated_at : null,
         webUrl: typeof issue.web_url === 'string' ? issue.web_url : typeof issue.html_url === 'string' ? issue.html_url : null,
+      },
+      choices: {
+        labels: (Array.isArray(labelRows) ? labelRows : []).map(label).filter(Boolean).slice(0, 100),
+        milestones: (Array.isArray(milestoneRows) ? milestoneRows : []).filter((m) => Number.isSafeInteger(m?.id) && typeof m?.title === 'string').map((m) => ({ id: m.id, title: m.title })).slice(0, 100),
+        assignees: (Array.isArray(peopleRows) ? peopleRows : []).filter((a) => Number.isSafeInteger(a?.id)).map((a) => ({ id: a.id, name: person(a) })).filter((a) => a.name !== '').slice(0, 100),
       },
       comments: (Array.isArray(comments) ? comments : []).filter((c) => !c?.system).slice(0, 100).map((c) => ({
         id: Number.isSafeInteger(c?.id) ? c.id : null,
@@ -181,5 +198,79 @@ export async function readIssueDetail({ provider, repo, number, token }) {
     return { status: 200, body };
   } catch {
     return { status: 502, body: { error: { code: 'PROVIDER_UNREACHABLE', message: `${NAME[provider]} could not be reached. Check the connection and try again.` } } };
+  }
+}
+
+/** The checked issue edit. Every field is optional, but at least one must be present. */
+export function parseIssueUpdate(body) {
+  const b = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const provider = b.provider;
+  if (provider !== 'github' && provider !== 'gitlab') return invalid('provider', 'provider must be github or gitlab');
+  const repo = typeof b.repo === 'string' ? b.repo : '';
+  if (repo.length > ISSUE_LIMITS.repo || !REPO_SHAPE[provider].test(repo) || repo.split('/').some((s) => s === '.' || s === '..')) {
+    return invalid('repo', provider === 'github' ? 'repo must be owner/name' : 'repo must be a GitLab project path');
+  }
+  const number = b.number;
+  if (!Number.isSafeInteger(number) || number <= 0) return invalid('number', 'number must be a positive integer');
+  const out = { provider, repo, number };
+  let changed = false;
+  if (b.title !== undefined) {
+    const title = typeof b.title === 'string' ? b.title.trim() : '';
+    if (!title || title.length > ISSUE_LIMITS.title) return invalid('title', `title must be 1 to ${ISSUE_LIMITS.title} characters`);
+    out.title = title; changed = true;
+  }
+  if (b.body !== undefined) {
+    if (typeof b.body !== 'string' || b.body.length > ISSUE_LIMITS.body) return invalid('body', `body must be text of at most ${ISSUE_LIMITS.body} characters`);
+    out.body = b.body; changed = true;
+  }
+  if (b.state !== undefined) {
+    if (b.state !== 'open' && b.state !== 'closed') return invalid('state', 'state must be open or closed');
+    out.state = b.state; changed = true;
+  }
+  if (b.labels !== undefined) {
+    if (!Array.isArray(b.labels) || b.labels.length > 50 || b.labels.some((l) => typeof l !== 'string' || l.length === 0 || l.length > 100)) return invalid('labels', 'labels must be up to 50 short names');
+    out.labels = b.labels; changed = true;
+  }
+  if (b.milestoneId !== undefined) {
+    if (b.milestoneId !== null && (!Number.isSafeInteger(b.milestoneId) || b.milestoneId <= 0)) return invalid('milestoneId', 'milestoneId must be a positive integer or null');
+    out.milestoneId = b.milestoneId; changed = true;
+  }
+  if (b.assignees !== undefined || b.assigneeIds !== undefined) {
+    if (b.assignees !== undefined && (!Array.isArray(b.assignees) || b.assignees.length > 20 || b.assignees.some((n) => typeof n !== 'string' || n.length === 0 || n.length > 100))) return invalid('assignees', 'assignees must be up to 20 names');
+    if (b.assigneeIds !== undefined && (!Array.isArray(b.assigneeIds) || b.assigneeIds.length > 20 || b.assigneeIds.some((n) => !Number.isSafeInteger(n) || n <= 0))) return invalid('assigneeIds', 'assigneeIds must be positive integers');
+    out.assignees = b.assignees ?? []; out.assigneeIds = b.assigneeIds ?? []; changed = true;
+  }
+  if (b.dueDate !== undefined) {
+    if (b.dueDate !== null && (typeof b.dueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate))) return invalid('dueDate', 'dueDate must be YYYY-MM-DD or null');
+    out.dueDate = b.dueDate; changed = true;
+  }
+  return changed ? out : invalid('body', 'nothing to update');
+}
+
+/** Update one hosted issue. GitLab takes ids for milestone/assignees; GitHub takes names for assignees. */
+export async function updateIssue(w, token) {
+  const gl = w.provider === 'gitlab';
+  const base = gl ? `${API_BASE.gitlab}/projects/${encodeURIComponent(w.repo)}/issues` : `${API_BASE.github}/repos/${w.repo}/issues`;
+  const payload = {};
+  if (w.title !== undefined) payload.title = w.title;
+  if (w.body !== undefined) { if (gl) payload.description = w.body; else payload.body = w.body; }
+  if (w.state !== undefined) { if (gl) payload.state_event = w.state === 'closed' ? 'close' : 'reopen'; else payload.state = w.state; }
+  if (w.labels !== undefined) payload.labels = gl ? w.labels.join(',') : w.labels;
+  if (w.milestoneId !== undefined) { if (gl) payload.milestone_id = w.milestoneId; else payload.milestone = w.milestoneId; }
+  if (w.assignees !== undefined || w.assigneeIds !== undefined) { if (gl) payload.assignee_ids = w.assigneeIds; else payload.assignees = w.assignees; }
+  if (w.dueDate !== undefined && gl) payload.due_date = w.dueDate;
+  const headers = gl
+    ? { 'User-Agent': 'llm-ide-desktop', 'PRIVATE-TOKEN': token, 'Content-Type': 'application/json' }
+    : { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'llm-ide-desktop', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  try {
+    const r = await makePinnedFetch()(`${base}/${w.number}`, { method: gl ? 'PUT' : 'PATCH', headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(15_000) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const f = mapProviderFailure(w.provider, r.status, data);
+      return { status: f.status, body: { error: { code: f.code, message: f.message } } };
+    }
+    return { status: 200, body: { ok: true, state: typeof data.state === 'string' ? data.state : null, url: typeof data.web_url === 'string' ? data.web_url : typeof data.html_url === 'string' ? data.html_url : null } };
+  } catch {
+    return { status: 502, body: { error: { code: 'PROVIDER_UNREACHABLE', message: `${NAME[w.provider]} could not be reached. Check the connection and try again.` } } };
   }
 }

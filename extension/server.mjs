@@ -501,6 +501,7 @@ const ALL_ENDPOINTS = [
   '/kb/issues/create',
   '/kb/issues/comment',
   '/kb/issues/close',
+  '/kb/issues/update',
   '/kb/meeting/:id',
   '/kb/entity/:id',
   '/kb/project/:id/export',
@@ -800,7 +801,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/dispatch')            return 'dispatch';
   if (url === '/kb/repos/check-token')   return 'dispatch';   // one outbound provider /user call
   if (url === '/kb/loop/ship-status')    return 'dispatch';   // reads GitHub / GitLab PR or MR status
-  if (url === '/kb/issues/create' || url === '/kb/issues/comment' || url === '/kb/issues/close') return 'dispatch';   // one outbound GitHub/GitLab write
+  if (url === '/kb/issues/create' || url === '/kb/issues/comment' || url === '/kb/issues/close' || url === '/kb/issues/update') return 'dispatch';   // one outbound GitHub/GitLab write
   if (url.startsWith('/bus/'))           return 'kbWrite';        // command bus: enqueue, cancel, approve, deny
   if (url === '/host-api/pin')           return 'kbWrite';        // Host API pairing PIN mint
   if (url === '/kb/sync/test' || url === '/kb/sync/publish') return 'dispatch';
