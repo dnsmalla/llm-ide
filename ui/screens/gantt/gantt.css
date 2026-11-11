@@ -50,27 +50,27 @@
 
 /* Mac-style issues list beside the timeline. */
 .gnt-labels { width: 340px; }
-.gnt-labels-head { justify-content: space-between; height: 32px; background: var(--tok-color-surface2); }
+.gnt-labels-head { justify-content: space-between; height: 36px; background: var(--tok-color-surface2); }
 .gnt-count { margin-left: auto; }
-.gnt-rowlabel { position: absolute; left: 0; right: 0; height: 44px; align-items: flex-start; padding: 5px 10px; }
+.gnt-rowlabel { position: absolute; left: 0; right: 0; height: 56px; align-items: flex-start; padding: 8px 10px; }
 .gnt-rowlabel:hover { background: var(--tok-color-row-alt); }
 .gnt-rowtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; white-space: normal; font-size: 12px; }
 .gnt-status { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--tok-color-border); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; margin-top: 1px; }
 .gnt-status[data-state="closed"] { background: var(--tok-color-accent3); border-color: var(--tok-color-accent3); color: var(--tok-color-body); }
 .gnt-status[data-state="open"] { color: var(--tok-color-text-muted); }
-.gnt-track { height: 44px; align-items: center; }
+.gnt-track { height: 56px; align-items: center; }
 .gnt-track[data-on] { background: color-mix(in srgb, var(--tok-color-accent) 8%, transparent); }
 .gnt-seg { display: flex; gap: 2px; }
 .gnt-seg .gnt-zbtn { border-radius: 0; }
 .gnt-seg .gnt-zbtn:first-child { border-radius: var(--tok-radius-sm) 0 0 var(--tok-radius-sm); }
 .gnt-seg .gnt-zbtn:last-child { border-radius: 0 var(--tok-radius-sm) var(--tok-radius-sm) 0; }
-.gnt-bar { top: 9px; height: 26px; background: color-mix(in srgb, var(--tok-color-accent) 72%, var(--tok-color-surface2)); color: var(--tok-color-text); font-weight: 600; border-radius: 6px; }
+.gnt-bar { top: 14px; height: 30px; background: color-mix(in srgb, var(--tok-color-accent) 72%, var(--tok-color-surface2)); color: var(--tok-color-text); font-weight: 600; border-radius: 6px; }
 .gnt-legend [data-tone="open"] { color: var(--tok-color-accent3); }
 .gnt-legend [data-tone="closed"] { color: var(--tok-color-accent2); }
 .gnt-legend [data-tone="overdue"] { color: var(--tok-color-danger); }
 /* The month band and day header stick to the top of the scroller, so rows scroll under them (the labels column is synced to the same scrollTop). */
 .gnt-thead { position: sticky; top: 0; z-index: 4; background: var(--tok-color-surface); }
-.gnt-header { height: 32px; }
+.gnt-header { height: 36px; }
 .gnt-counts { display: flex; gap: 14px; align-items: center; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .gnt-counts [data-tone="open"] { color: var(--tok-color-accent3); }
 .gnt-counts [data-tone="closed"] { color: var(--tok-color-accent2); }
@@ -82,7 +82,7 @@
 .gnt-month { flex: none; display: flex; align-items: center; padding-left: 8px; border-right: 1px solid var(--tok-color-border); color: var(--tok-color-text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .gnt-labels-rows { flex: 1 1 0; min-height: 0; overflow: hidden; position: relative; }
 .gnt-labels-spacer { position: relative; }
-.gnt-rowitem { position: absolute; left: 0; right: 0; height: 44px; }
+.gnt-rowitem { position: absolute; left: 0; right: 0; height: 56px; }
 /* No global border-box reset: without this the 1px borders make the head 54px and each track 45px, so rows drift off
    HEAD_H/ROW_H (GanttChart.tsx), labels sit 2px below their bars and the sticky head covers the first row's top; and
    each day/month cell is 1px wider than dayWidth, so the header drifts a pixel a day off the grid, bars and Today. */
@@ -92,7 +92,7 @@
 .gnt-empty-dates { display: none; }
 .gnt-day { font-size: 10px; white-space: nowrap; overflow: hidden; }
 .gnt-chart { position: relative; }
-.gnt-no-bars { position: absolute; z-index: 2; top: 72px; right: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px; color: var(--tok-color-text-muted); pointer-events: none; }
+.gnt-no-bars { position: absolute; z-index: 2; top: 80px; right: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px; color: var(--tok-color-text-muted); pointer-events: none; }
 .gnt-no-bars strong { color: var(--tok-color-text); font-size: 13px; font-weight: 600; }
 .gnt-no-bars span { font-size: 11px; }
 

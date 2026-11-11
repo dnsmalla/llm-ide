@@ -21,8 +21,8 @@ import {
 import { AssigneeAvatars } from "../issues/AssigneeAvatars.tsx";
 
 /** Mirror gantt.css: the month band (20px) + day header (32px) above the rows, and each row's height. */
-export const HEAD_H = 52;
-export const ROW_H = 44;
+export const HEAD_H = 56;
+export const ROW_H = 56;
 const DAY_MS = 86_400_000;
 /** The viewport height assumed before the scroller is measured (server render and the first paint). */
 const DEFAULT_VIEWPORT_H = 600;

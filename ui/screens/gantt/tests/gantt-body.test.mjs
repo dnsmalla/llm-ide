@@ -156,7 +156,7 @@ test("every --tok-color token the Gantt uses is defined (an undefined one voids 
   }
 });
 
-test("head and rows are border-box, so HEAD_H (52) and ROW_H (44) are the real heights", () => {
+test("head and rows are border-box, so HEAD_H (56) and ROW_H (56) are the real heights", () => {
   const css = readFileSync(join(GANTT, "gantt.css"), "utf8");
   const rule = css.match(/\n(\.gnt-months,[^{]*)\{\s*box-sizing: border-box;\s*\}/)?.[1] ?? "";
   for (const c of [".gnt-months", ".gnt-header", ".gnt-labels-head", ".gnt-month-pad", ".gnt-track", ".gnt-day", ".gnt-month"]) {
