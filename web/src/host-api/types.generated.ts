@@ -27,6 +27,10 @@ export const HOST_API_COMMANDS = {
   "push.config": { capability: "push", idempotent: true },
   "push.register": { capability: "push", idempotent: true },
   "push.unregister": { capability: "push", idempotent: true },
+  "tasks.cancel": { capability: "compose", idempotent: true },
+  "tasks.list": { capability: "read", idempotent: true },
+  "tasks.run": { capability: "compose", idempotent: false },
+  "tasks.status": { capability: "compose", idempotent: true },
   "toolApprovals.answer": { capability: "tool_approvals", idempotent: false },
   "usage.get": { capability: "read", idempotent: true },
 } as const;
@@ -51,6 +55,10 @@ export interface HostApiCommandMap {
   "push.config": { request: Record<string, never>; result: { apns: boolean; registered: "none" | "webpush" | "apns"; webPushKey: string } };
   "push.register": { request: { auth?: string; endpoint?: string; environment?: "sandbox" | "production"; kind: "webpush" | "apns"; p256dh?: string; token?: string }; result: { registered: boolean } };
   "push.unregister": { request: Record<string, never>; result: { removed: boolean } };
+  "tasks.cancel": { request: { runId: string }; result: { cancelled: boolean } };
+  "tasks.list": { request: Record<string, never>; result: { tasks: Array<{ available: boolean; description: string; group: string; id: string; label: string; requiresRepo?: boolean; scope: "project" | "repo" | "global" }> } };
+  "tasks.run": { request: { projectId?: string; taskId: string }; result: { runId: string } };
+  "tasks.status": { request: { runId: string }; result: { error?: string; output?: string; status: "running" | "completed" | "failed" | "cancelled"; summary?: string } };
   "toolApprovals.answer": { request: { commandId: string; decision: "allow_once" | "deny"; projectId?: string; requestId: string }; result: { accepted: boolean } };
   "usage.get": { request: Record<string, never>; result: { providers: Array<{ activeModel?: string; models: Array<{ label?: string; limit: number; model: string; pct?: number; resetAt: number; state: "ok" | "warning" | "exhausted"; unit: "runs" | "tokens"; used: number; window: "daily" | "monthly" }>; provider: string; status: "ok" | "degraded" | "paused" | "unconfigured" }> } };
 }

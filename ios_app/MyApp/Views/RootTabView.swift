@@ -13,7 +13,7 @@ struct RootTabView: View {
     @EnvironmentObject var projectsStore: ProjectsStore
     @EnvironmentObject var connectionStore: ConnectionStore
 
-    enum Tab: Hashable { case chat, history, settings }
+    enum Tab: Hashable { case chat, tasks, history, settings }
     @State private var selection: Tab = .chat
     @State private var showLiveScanner = false
 
@@ -33,6 +33,12 @@ struct RootTabView: View {
             .badge(llmIdeStore.pendingApproval == nil ? 0 : 1)
             .tag(Tab.chat)
 
+            if connection.hostCapabilities?.contains("compose") == true, connection.hostCapabilities?.contains("read") == true {
+                NavigationStack { TasksView() }
+                    .tabItem { Label("Auto Tasks", systemImage: "checklist") }
+                    .tag(Tab.tasks)
+            }
+
             if connection.servesV1Read || syncStore.phase != .off {
                 NavigationStack { ReadChatsView() }
                     .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
@@ -44,6 +50,9 @@ struct RootTabView: View {
                 .tag(Tab.settings)
         }
         .tint(DesignSystem.Colors.primary)
+        .onChange(of: connection.hostCapabilities) { _ in
+            if !(connection.hostCapabilities?.contains("compose") == true && connection.hostCapabilities?.contains("read") == true), selection == .tasks { selection = .chat }
+        }
         .sheet(isPresented: $showLiveScanner) {
             QRScannerSheet { scan in
                 guard let info = scan.desktop else { return }

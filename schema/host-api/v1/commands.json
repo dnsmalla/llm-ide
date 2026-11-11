@@ -1162,6 +1162,192 @@
           }
         }
       }
+    },
+    "tasks.list": {
+      "capability": "read",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tasks"
+        ],
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "label",
+                "group",
+                "description",
+                "scope",
+                "available"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.:-]{1,120}$"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "group": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "project",
+                    "repo",
+                    "global"
+                  ]
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "requiresRepo": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tasks.run": {
+      "capability": "compose",
+      "direction": "client_to_host",
+      "idempotent": false,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "taskId"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]{1,120}$"
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          }
+        }
+      }
+    },
+    "tasks.status": {
+      "capability": "compose",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "output": {
+            "type": "string",
+            "maxLength": 100000
+          },
+          "error": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      }
+    },
+    "tasks.cancel": {
+      "capability": "compose",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cancelled"
+        ],
+        "properties": {
+          "cancelled": {
+            "type": "boolean"
+          }
+        }
+      }
     }
   }
 }

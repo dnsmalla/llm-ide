@@ -439,6 +439,96 @@ public struct HostApiPushUnregisterResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiTasksCancelRequest: Codable, Equatable, Sendable {
+    public var runId: String
+
+    public init(runId: String) {
+        self.runId = runId
+    }
+}
+
+public struct HostApiTasksCancelResult: Codable, Equatable, Sendable {
+    public var cancelled: Bool
+
+    public init(cancelled: Bool) {
+        self.cancelled = cancelled
+    }
+}
+
+public struct HostApiTasksListRequest: Codable, Equatable, Sendable {
+
+    public init() {
+    }
+}
+
+public struct HostApiTasksListResultTasksItem: Codable, Equatable, Sendable {
+    public var available: Bool
+    public var description: String
+    public var group: String
+    public var id: String
+    public var label: String
+    public var requiresRepo: Bool?
+    public var scope: String
+
+    public init(available: Bool, description: String, group: String, id: String, label: String, requiresRepo: Bool? = nil, scope: String) {
+        self.available = available
+        self.description = description
+        self.group = group
+        self.id = id
+        self.label = label
+        self.requiresRepo = requiresRepo
+        self.scope = scope
+    }
+}
+
+public struct HostApiTasksListResult: Codable, Equatable, Sendable {
+    public var tasks: [HostApiTasksListResultTasksItem]
+
+    public init(tasks: [HostApiTasksListResultTasksItem]) {
+        self.tasks = tasks
+    }
+}
+
+public struct HostApiTasksRunRequest: Codable, Equatable, Sendable {
+    public var projectId: String?
+    public var taskId: String
+
+    public init(projectId: String? = nil, taskId: String) {
+        self.projectId = projectId
+        self.taskId = taskId
+    }
+}
+
+public struct HostApiTasksRunResult: Codable, Equatable, Sendable {
+    public var runId: String
+
+    public init(runId: String) {
+        self.runId = runId
+    }
+}
+
+public struct HostApiTasksStatusRequest: Codable, Equatable, Sendable {
+    public var runId: String
+
+    public init(runId: String) {
+        self.runId = runId
+    }
+}
+
+public struct HostApiTasksStatusResult: Codable, Equatable, Sendable {
+    public var error: String?
+    public var output: String?
+    public var status: String
+    public var summary: String?
+
+    public init(error: String? = nil, output: String? = nil, status: String, summary: String? = nil) {
+        self.error = error
+        self.output = output
+        self.status = status
+        self.summary = summary
+    }
+}
+
 public struct HostApiToolApprovalsAnswerRequest: Codable, Equatable, Sendable {
     public var commandId: String
     public var decision: String

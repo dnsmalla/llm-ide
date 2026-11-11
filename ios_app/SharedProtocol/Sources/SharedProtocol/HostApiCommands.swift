@@ -33,6 +33,10 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
     case pushConfig = "push.config"
     case pushRegister = "push.register"
     case pushUnregister = "push.unregister"
+    case tasksCancel = "tasks.cancel"
+    case tasksList = "tasks.list"
+    case tasksRun = "tasks.run"
+    case tasksStatus = "tasks.status"
     case toolApprovalsAnswer = "toolApprovals.answer"
     case usageGet = "usage.get"
 
@@ -57,6 +61,10 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .pushConfig: return "push"
         case .pushRegister: return "push"
         case .pushUnregister: return "push"
+        case .tasksCancel: return "compose"
+        case .tasksList: return "read"
+        case .tasksRun: return "compose"
+        case .tasksStatus: return "compose"
         case .toolApprovalsAnswer: return "tool_approvals"
         case .usageGet: return "read"
         }
@@ -83,6 +91,10 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .pushConfig: return true
         case .pushRegister: return true
         case .pushUnregister: return true
+        case .tasksCancel: return true
+        case .tasksList: return true
+        case .tasksRun: return false
+        case .tasksStatus: return true
         case .toolApprovalsAnswer: return false
         case .usageGet: return true
         }
@@ -112,6 +124,10 @@ public enum HostApi {
         "push.config": .pushConfig,
         "push.register": .pushRegister,
         "push.unregister": .pushUnregister,
+        "tasks.cancel": .tasksCancel,
+        "tasks.list": .tasksList,
+        "tasks.run": .tasksRun,
+        "tasks.status": .tasksStatus,
         "toolApprovals.answer": .toolApprovalsAnswer,
         "usage.get": .usageGet
     ]

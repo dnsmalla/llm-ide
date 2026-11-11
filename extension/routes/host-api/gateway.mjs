@@ -17,6 +17,9 @@ import { config } from '../../core/config.mjs';
 import { getMember, classRefusal } from '../../kb/members.mjs';
 import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
 import { projectsListResult, projectFrameAuthority } from './projects.mjs';
+import { signAccessToken } from '../../server/jwt.mjs';
+import { busHostProof } from '../../core/host-approval.mjs';
+import { randomUUID } from 'node:crypto';
 
 // ADR 0021 hub: the cap belongs to ONE member (their phones and browsers), not to the whole install. The
 // global ceiling is hub-sized so a team's members do not shut each other out; it still bounds the core.
@@ -146,6 +149,41 @@ export function messagesOf(lines, limit) {
     start -= 1;
   }
   return recent.slice(start);
+}
+
+// The desktop task routes are host-proof only. The gateway runs in the same core, so it reuses that route with a
+// short-lived user token and the in-process host proof instead of duplicating task validation. The phone only ever
+// names a registry task id and an optional project; it never supplies a command, prompt, or repository path.
+const taskJobs = new Map();
+const TASK_JOB_TTL_MS = 60 * 60 * 1000;
+
+async function internalTaskRequest(userId, path, init, signal) {
+  const token = signAccessToken({ userId });
+  const proof = busHostProof();
+  if (!proof) throw new Error('host proof is unavailable');
+  const res = await fetch(`http://127.0.0.1:${config.port}${path}`, {
+    ...init,
+    signal,
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${token}`,
+      'x-llmide-host-nonce': proof,
+      ...(init?.headers ?? {}),
+    },
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = body && typeof body.error === 'object' ? body.error : null;
+    throw new Error(typeof err?.message === 'string' ? err.message : `task request failed (${res.status})`);
+  }
+  return body;
+}
+
+function taskJobFor(deviceId, runId) {
+  const key = `${deviceId}:${runId}`;
+  const job = taskJobs.get(key);
+  if (job && Date.now() - job.startedAt > TASK_JOB_TTL_MS) { taskJobs.delete(key); return null; }
+  return job ?? null;
 }
 
 export function createGateway(overrides) {
@@ -576,6 +614,58 @@ export function createGateway(overrides) {
       }
       case 'host.ping':
         return respond(s, id, command, {});
+      case 'tasks.list': {
+        if (readRefused(s, entry, id)) return;
+        const body = await internalTaskRequest(userId, '/kb/tasks', { method: 'GET' });
+        const tasks = (Array.isArray(body?.tasks) ? body.tasks : []).map((t) => ({
+          id: String(t.id), label: String(t.label), group: String(t.group ?? ''),
+          description: String(t.description ?? ''), scope: String(t.scope ?? 'project'),
+          available: t.availability?.status === 'available', requiresRepo: t.requiresRepo === true,
+        }));
+        return respond(s, id, command, { tasks });
+      }
+      case 'tasks.run': {
+        const wait = rate.turn(entry.state.deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        const runId = randomUUID();
+        const deviceId = entry.state.deviceId;
+        const controller = new AbortController();
+        const key = `${deviceId}:${runId}`;
+        taskJobs.set(key, { runId, status: 'running', startedAt: Date.now(), controller, summary: null, output: null, error: null });
+        void internalTaskRequest(userId, `/kb/tasks/${encodeURIComponent(p.taskId)}/run`, {
+          method: 'POST',
+          body: JSON.stringify({ ...(p.projectId ? { projectId: p.projectId } : {}) }),
+        }, controller.signal).then((r) => {
+          const job = taskJobs.get(key);
+          if (!job) return;
+          job.status = r?.ok === false ? 'failed' : 'completed';
+          job.summary = typeof r?.summary === 'string' ? r.summary : null;
+          job.output = typeof r?.output === 'string' ? r.output.slice(0, 100_000) : null;
+          if (r?.ok === false) job.error = typeof r?.summary === 'string' ? r.summary.slice(0, 2_000) : 'The task failed.';
+        }).catch((e) => {
+          const job = taskJobs.get(key);
+          if (!job) return;
+          job.status = controller.signal.aborted ? 'cancelled' : 'failed';
+          job.error = controller.signal.aborted ? 'Cancelled.' : String(e?.message || e).slice(0, 2_000);
+        });
+        return respond(s, id, command, { runId });
+      }
+      case 'tasks.status': {
+        const job = taskJobFor(entry.state.deviceId, p.runId);
+        if (!job) return fail(s, id, 'not_found', 'That task run is no longer available.');
+        return respond(s, id, command, {
+          status: job.status,
+          ...(job.summary ? { summary: job.summary } : {}),
+          ...(job.output ? { output: job.output } : {}),
+          ...(job.error ? { error: job.error } : {}),
+        });
+      }
+      case 'tasks.cancel': {
+        const job = taskJobFor(entry.state.deviceId, p.runId);
+        if (!job) return respond(s, id, command, { cancelled: false });
+        if (job.status === 'running') { job.controller.abort(); job.status = 'cancelled'; job.error = 'Cancelled.'; }
+        return respond(s, id, command, { cancelled: true });
+      }
       case 'host.snapshot': {
         if (!p.topics.every((t) => t === 'chat')) {
           return fail(s, id, 'capability_unavailable', 'This computer serves only the chat snapshot.', { hint: 'Served topics: chat' });

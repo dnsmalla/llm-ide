@@ -7,16 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA0000000000000000000101 /* TasksStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000102 /* TasksStore.swift */; };
+		AA0000000000000000000201 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000202 /* TasksView.swift */; };
 		060280FFDE8EBB4735C43370 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1050205A71E402C9809036C3 /* LoginView.swift */; };
 		86D51A8F64D3F1F7AF72109E /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6619B48C5ED4564AD23384A1 /* DesignSystem.swift */; };
 		A1B2C3D4E5F60718293A4B02 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B01 /* RootTabView.swift */; };
 		A1B2C3D4E5F607890A1B2C01 /* ConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */; };
-		A1C0FF1CE0000000000000P2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */; };
-		A1C0FF1CE0000000000000N2 /* PushRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000N1 /* PushRegistrar.swift */; };
 		A1C0FF1CE0000000000000L2 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000L1 /* Localizable.strings */; };
+		A1C0FF1CE0000000000000N2 /* PushRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000N1 /* PushRegistrar.swift */; };
+		A1C0FF1CE0000000000000P2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */; };
 		A351D57F1B94C3E6FBB89A9B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A7138E88C6309A4CC79A8F /* SettingsView.swift */; };
 		A7B80010CC00000000000001 /* ConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000002 /* ConnectionService.swift */; };
 		A7B80010CC00000000000003 /* LlmIdeChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000004 /* LlmIdeChatStore.swift */; };
+		A9C1E2F3B4D5061728394A01 /* ProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */; };
+		A9C1E2F3B4D5061728394B01 /* ProjectPickerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C1E2F3B4D5061728394B02 /* ProjectPickerBar.swift */; };
 		AC1BAD40D67DE71FEE09690F /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36F27BA352AF7FF9AA51012 /* HelpView.swift */; };
 		B6CF935AF507506E25C1EA4A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 995B956852311CF170F73894 /* ContentView.swift */; };
 		B7C8D9E0F1A203040B7C8D01 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */; };
@@ -27,11 +31,11 @@
 		C0DE10A2B3C4D5E6F7081902 /* LlmIdeControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */; };
 		C2E0A1B2C3D4E5F600000002 /* ReadChatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */; };
 		C2E0A1B2C3D4E5F6000000A2 /* SyncStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A1 /* SyncStore.swift */; };
-		C2E0A1B2C3D4E5F6000000AB /* BoxAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000AC /* BoxAuth.swift */; };
-		C2E0A1B2C3D4E5F6000000A8 /* SourceReadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */; };
-		C2E0A1B2C3D4E5F6000000AA /* SourceReadViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A9 /* SourceReadViews.swift */; };
 		C2E0A1B2C3D4E5F6000000A4 /* SyncEnrollSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A3 /* SyncEnrollSheet.swift */; };
 		C2E0A1B2C3D4E5F6000000A6 /* SyncOfflineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A5 /* SyncOfflineViews.swift */; };
+		C2E0A1B2C3D4E5F6000000A8 /* SourceReadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */; };
+		C2E0A1B2C3D4E5F6000000AA /* SourceReadViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000A9 /* SourceReadViews.swift */; };
+		C2E0A1B2C3D4E5F6000000AB /* BoxAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E0A1B2C3D4E5F6000000AC /* BoxAuth.swift */; };
 		C9D0E1F2A3B405060C9D0E01 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */; };
 		D3D6F9A8DB516321EA005C39 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA5ED588DFDB7A34E47E6C36 /* Assets.xcassets */; };
 		F0A1B2C3D4E5F607180A0002 /* ChatBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A0001 /* ChatBubble.swift */; };
@@ -41,12 +45,12 @@
 		F0A1B2C3D4E5F607180A000A /* ViewExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A0009 /* ViewExtensions.swift */; };
 		F0A1B2C3D4E5F607180A000C /* ChatMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A000B /* ChatMarkdown.swift */; };
 		F0A1B2C3D4E5F607180A00A2 /* ApprovalQuestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A00A1 /* ApprovalQuestionCard.swift */; };
-		A9C1E2F3B4D5061728394A01 /* ProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */; };
-		A9C1E2F3B4D5061728394B01 /* ProjectPickerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C1E2F3B4D5061728394B02 /* ProjectPickerBar.swift */; };
 		FCA16A9A87B1018E6AC5A76C /* MyAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CD17436AE4D69811BA8EDA /* MyAppApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		AA0000000000000000000102 /* TasksStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksStore.swift; sourceTree = "<group>"; };
+		AA0000000000000000000202 /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
 		0F05147F87FAE3E4689CB880 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		1050205A71E402C9809036C3 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		237B2E48D363E5FB9B47CB07 /* MyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -56,12 +60,14 @@
 		995B956852311CF170F73894 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B01 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStore.swift; sourceTree = "<group>"; };
-		A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		A1C0FF1CE0000000000000N1 /* PushRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrar.swift; sourceTree = "<group>"; };
 		A1C0FF1CE0000000000000L1 /* Localizable.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; path = Localizable.strings; sourceTree = "<group>"; };
+		A1C0FF1CE0000000000000N1 /* PushRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrar.swift; sourceTree = "<group>"; };
+		A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A36F27BA352AF7FF9AA51012 /* HelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000002 /* ConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionService.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000004 /* LlmIdeChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeChatStore.swift; sourceTree = "<group>"; };
+		A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsStore.swift; sourceTree = "<group>"; };
+		A9C1E2F3B4D5061728394B02 /* ProjectPickerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectPickerBar.swift; sourceTree = "<group>"; };
 		AA5ED588DFDB7A34E47E6C36 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageStore.swift; sourceTree = "<group>"; };
 		B7B42519A1A96C933AE2D988 /* ToolApprovalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolApprovalCard.swift; sourceTree = "<group>"; };
@@ -70,11 +76,11 @@
 		C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeControlView.swift; sourceTree = "<group>"; };
 		C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadChatsView.swift; sourceTree = "<group>"; };
 		C2E0A1B2C3D4E5F6000000A1 /* SyncStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStore.swift; sourceTree = "<group>"; };
-		C2E0A1B2C3D4E5F6000000AC /* BoxAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoxAuth.swift; sourceTree = "<group>"; };
-		C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceReadStore.swift; sourceTree = "<group>"; };
 		C2E0A1B2C3D4E5F6000000A3 /* SyncEnrollSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEnrollSheet.swift; sourceTree = "<group>"; };
 		C2E0A1B2C3D4E5F6000000A5 /* SyncOfflineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncOfflineViews.swift; sourceTree = "<group>"; };
+		C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceReadStore.swift; sourceTree = "<group>"; };
 		C2E0A1B2C3D4E5F6000000A9 /* SourceReadViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceReadViews.swift; sourceTree = "<group>"; };
+		C2E0A1B2C3D4E5F6000000AC /* BoxAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoxAuth.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A0001 /* ChatBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBubble.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A0003 /* ChatInputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInputBar.swift; sourceTree = "<group>"; };
@@ -83,8 +89,6 @@
 		F0A1B2C3D4E5F607180A0009 /* ViewExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewExtensions.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A000B /* ChatMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMarkdown.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A00A1 /* ApprovalQuestionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalQuestionCard.swift; sourceTree = "<group>"; };
-		A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsStore.swift; sourceTree = "<group>"; };
-		A9C1E2F3B4D5061728394B02 /* ProjectPickerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectPickerBar.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -174,6 +178,7 @@
 			children = (
 				B7CC02D68D4369B858A43C3C /* UsageView.swift */,
 				C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */,
+				AA0000000000000000000202 /* TasksView.swift */,
 				C2E0A1B2C3D4E5F6000000A3 /* SyncEnrollSheet.swift */,
 				C2E0A1B2C3D4E5F6000000A5 /* SyncOfflineViews.swift */,
 				C2E0A1B2C3D4E5F6000000A9 /* SourceReadViews.swift */,
@@ -211,7 +216,7 @@
 			children = (
 				C2E0A1B2C3D4E5F6000000A1 /* SyncStore.swift */,
 				C2E0A1B2C3D4E5F6000000AC /* BoxAuth.swift */,
-		C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */,
+				C2E0A1B2C3D4E5F6000000A7 /* SourceReadStore.swift */,
 				B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */,
 				A1C0FF1CE0000000000000N1 /* PushRegistrar.swift */,
 				A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */,
@@ -219,6 +224,7 @@
 				A7B80010CC00000000000002 /* ConnectionService.swift */,
 				A7B80010CC00000000000004 /* LlmIdeChatStore.swift */,
 				A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */,
+				AA0000000000000000000102 /* TasksStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -314,9 +320,11 @@
 				B8B42519A1A96C933AE2D988 /* ToolApprovalCard.swift in Sources */,
 				B8CC02D68D4369B858A43C3C /* UsageView.swift in Sources */,
 				C2E0A1B2C3D4E5F600000002 /* ReadChatsView.swift in Sources */,
+				AA0000000000000000000101 /* TasksStore.swift in Sources */,
+				AA0000000000000000000201 /* TasksView.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000A2 /* SyncStore.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000AB /* BoxAuth.swift in Sources */,
-		C2E0A1B2C3D4E5F6000000A8 /* SourceReadStore.swift in Sources */,
+				C2E0A1B2C3D4E5F6000000A8 /* SourceReadStore.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000A4 /* SyncEnrollSheet.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000A6 /* SyncOfflineViews.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000AA /* SourceReadViews.swift in Sources */,
