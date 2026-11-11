@@ -79,6 +79,31 @@ flowchart LR
 
 **Custom Auto Tasks** — create your own name + prompt; choose **Review** (discard edits) or **Implement** (commit on `fix/custom-*` branch); optional **cron** per task.
 
+### Factory board, with demo data
+
+Factory turns issues, specs and free text into cards that move through seven columns. The column is derived from the item's last run, its worktree and the PR/MR status — never stored on the card.
+
+A demo fixture with one card per column:
+
+| Column | Demo card | What the card offers | Result |
+|--------|-----------|----------------------|--------|
+| Inbox | Demo 101 | Start · Run intake · Discard | no run yet |
+| Needs decision | Demo 102 | Run intake · Discard; answer form | Intake stopped for a decision |
+| Working | Free text idea | live progress and last log line | run is live |
+| Needs you | Demo 104 | Resume · Open diff · Discard | last run failed |
+| Ready to ship | Demo 105 | Open diff · Ship · Discard | run passed, no PR/MR |
+| Shipped | Demo 106 | Open PR/MR · Open diff | PR open, CI running |
+| Done | Demo 107 | Open PR/MR · Discard | PR merged |
+
+The same fixture is a regression test — one item per column, with assertions for actions, notes and ship state:
+
+```bash
+cd desktop
+node --test --experimental-strip-types ../ui/screens/factory/tests/demo-board.test.mjs
+```
+
+See the test at [`ui/screens/factory/tests/demo-board.test.mjs`](ui/screens/factory/tests/demo-board.test.mjs).
+
 **Integrations (opt-in dispatch):** GitHub · GitLab · Backlog · Linear · Slack · **MCP-backed connectors** · **user plugins** (skills, slash commands, subagents).
 
 ## Architecture
