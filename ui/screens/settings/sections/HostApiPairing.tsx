@@ -1,4 +1,4 @@
-// Settings → Mobile Control: pairing a Host API v1 client (iPhone or web) with THIS desktop's core
+// Settings → Phone and browser → Live Chat pairing: a Host API v1 client (iPhone or web) with THIS desktop's core
 // (routes POST /host-api/pin, GET /host-api/devices, DELETE /host-api/devices/:id; contract schema/http/host-api.schema.json).
 // The routes need the bus host proof, which the shell's core client attaches; a core started without
 // LLMIDE_HOST_API_TLS=1 or LLMIDE_HOST_API_DEV=1 answers 404 HOST_API_DISABLED and an adopted core (no proof) 403 HOST_PROOF_REQUIRED:
@@ -125,7 +125,7 @@ export function HostApiPairingView({ devices, pin, now, busy, error, confirming,
   const qr = live ? pairingPayload(live) : null;
   return (
     <div className="st-stack" role="group" aria-label="Host API pairing">
-      <span className="st-label">Pair a phone or web client with this desktop</span>
+      <span className="st-label">Live Chat pairing (desktop must be on)</span>
       {live ? (
         <div className="st-stack" role="status">
           <p className="st-pre" aria-label="Pairing PIN"><strong>{live.pin}</strong></p>

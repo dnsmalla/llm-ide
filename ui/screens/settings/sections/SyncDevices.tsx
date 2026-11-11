@@ -53,11 +53,11 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
 
   return (
     <div className="st-stack" role="group" aria-label="Sync devices">
-      <span className="st-label">Add a phone or browser</span>
+      <span className="st-label">Add a device for offline sync (read-only)</span>
       {screen === "start" || !start ? (
         <div className="st-row">
-          <Button tone="primary" disabled={busy} onClick={() => void begin("ios")}>iPhone app</Button>
-          <Button disabled={busy} onClick={() => void begin("web")}>Browser</Button>
+          <Button tone="primary" disabled={busy} onClick={() => void begin("ios")}>Add iPhone for offline sync</Button>
+          <Button disabled={busy} onClick={() => void begin("web")}>Add browser for offline sync</Button>
         </div>
       ) : screen === "confirm" && poll ? (
         <div className="st-stack" role="status">

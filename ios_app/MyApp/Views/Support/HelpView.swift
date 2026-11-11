@@ -17,7 +17,7 @@ struct HelpView: View {
                     HelpSection(
                         title: "Pair with your desktop",
                         content: """
-                        1. On the desktop: LLM-IDE → Settings → Mobile Control → "Pair a phone or web client". It shows a QR code and a PIN.
+                        1. On the desktop: LLM-IDE → Settings → Phone and browser → "Live Chat pairing". It shows a QR code and a PIN.
                         2. On iPhone: tap Scan QR Code and point it at that QR. The QR carries the desktop's address and its security identity, which this iPhone pins.
                         3. When status shows Live, use the Chat tab. History lists the desktop's chats read-only.
                         """
@@ -25,7 +25,7 @@ struct HelpView: View {
                     HelpSection(
                         title: "Offline sync",
                         content: """
-                        • On the desktop: Settings → Mobile Control → Phone and web sync → Add a phone or browser shows an enrollment QR.
+                        • On the desktop: Settings → Phone and browser → Offline sync → Add a device for offline sync shows an enrollment QR.
                         • On iPhone: Settings → Sync → Scan a sync code. Chats, meetings and plans then arrive through the storage you chose (MEGA, your own server or Box), even while the desktop is off.
                         """
                     )

@@ -177,7 +177,7 @@ final class ConnectionService: ObservableObject {
         }
         // The endpoint exists only after a QR scan stored the host's pin (or a DEBUG dev URL).
         guard let endpoint = connectionStore?.hostApiEndpoint else {
-            errorMessage = "Scan the pairing QR code in the desktop's Settings → Mobile Control. This iPhone learns the desktop's security identity from the QR only."
+            errorMessage = "Scan the pairing QR code in the desktop's Settings → Phone and browser → Live Chat pairing. This iPhone learns the desktop's security identity from the QR only."
             connectionStatus = .disconnected
             return
         }

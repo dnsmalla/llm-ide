@@ -3,9 +3,9 @@ import SharedProtocol
 import AVFoundation
 
 struct ScanResult {
-    /// The desktop's Host API pairing (Settings → Mobile Control → Pair a phone or web client).
+    /// The desktop's Host API pairing (Settings → Phone and browser → Live Chat pairing).
     let desktop: PairingInfo?
-    /// An offline sync enrollment (Settings → Mobile Control → Phone and web sync → Add a phone or browser).
+    /// An offline sync enrollment (Settings → Phone and browser → Offline sync → Add a device for offline sync).
     let sync: SyncPair?
     init?(_ code: String) {
         desktop = PairingInfo(from: code)
@@ -53,7 +53,7 @@ struct QRScannerSheet: View {
                                 // so say so — the scanner keeps running.
                                 guard !code.isEmpty, rejectionNotice == nil else { return }
                                 UINotificationFeedbackGenerator().notificationOccurred(.error)
-                                rejectionNotice = "That isn't an LLM-IDE pairing code. Scan the QR in the desktop's Settings → Mobile Control (Pair a phone, or Phone and web sync → Add a phone or browser)."
+                                rejectionNotice = "That isn't an LLM-IDE pairing code. Scan the QR in the desktop's Settings → Phone and browser (Live Chat pairing, or Offline sync → Add a device for offline sync)."
                                 return
                             }
                             UINotificationFeedbackGenerator().notificationOccurred(.success)

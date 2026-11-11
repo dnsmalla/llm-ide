@@ -43,7 +43,7 @@ export default function SyncSection(): ReactNode {
   const working = kind === "sftp" ? "Your server answers." : kind === "box" ? "Box connection works." : "MEGA connection works.";
   return (
     <section className="st-stack" aria-labelledby="sync-title">
-      <span className="st-label" id="sync-title">Phone and web sync</span>
+      <span className="st-label" id="sync-title">Offline sync (read-only)</span>
       <p className="st-hint">With the desktop off, the phone and web app read an encrypted copy of your chats, meetings, plans and usage from your sync storage, and queue chat prompts that run when the desktop is back. The storage only ever holds ciphertext.</p>
       <fieldset className="st-store-picker">
         <legend className="st-label">Storage</legend>

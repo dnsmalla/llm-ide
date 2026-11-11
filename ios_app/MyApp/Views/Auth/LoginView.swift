@@ -134,7 +134,7 @@ struct ConnectView: View {
             Text("Connect to Your Desktop")
                 .font(DesignSystem.Typography.titleFont.weight(.bold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
-            Text("On the desktop, open LLM-IDE → Settings → Mobile Control and scan its pairing QR — or a Phone and web sync code to read your chats offline.")
+            Text("On the desktop, open LLM-IDE → Settings → Phone and browser → Live Chat pairing, and scan its QR. An Offline sync code only adds read-only history.")
                 .font(DesignSystem.Typography.bodyFont)
                 .foregroundColor(DesignSystem.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -191,7 +191,7 @@ struct ConnectView: View {
                     return
                 }
                 guard PairingInfo.isWellFormedPin(code) else {
-                    errorMessage = "The PIN is the 6 digits shown in the desktop's Settings → Mobile Control."
+                    errorMessage = "The PIN is the 6 digits shown in the desktop's Settings → Phone and browser → Live Chat pairing."
                     return
                 }
                 errorMessage = nil

@@ -11,17 +11,23 @@ struct RootTabView: View {
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
     @EnvironmentObject var usageStore: UsageStore
     @EnvironmentObject var projectsStore: ProjectsStore
+    @EnvironmentObject var connectionStore: ConnectionStore
 
     enum Tab: Hashable { case chat, history, settings }
     @State private var selection: Tab = .chat
+    @State private var showLiveScanner = false
 
     var body: some View {
         TabView(selection: $selection) {
             NavigationStack {
-                LlmIdeControlView(embedded: true)
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        ContextBar(deviceName: deviceName)
-                    }
+                if connectionStore.hasDevice {
+                    LlmIdeControlView(embedded: true)
+                        .safeAreaInset(edge: .top, spacing: 0) {
+                            ContextBar(deviceName: deviceName)
+                        }
+                } else {
+                    LiveChatPairingView { showLiveScanner = true }
+                }
             }
             .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
             .badge(llmIdeStore.pendingApproval == nil ? 0 : 1)
@@ -38,6 +44,13 @@ struct RootTabView: View {
                 .tag(Tab.settings)
         }
         .tint(DesignSystem.Colors.primary)
+        .sheet(isPresented: $showLiveScanner) {
+            QRScannerSheet { scan in
+                guard let info = scan.desktop else { return }
+                connectionStore.save(ip: info.ip, pin: info.pin, hostApiOffer: info.hostApiOffer, source: .qrScan)
+                connection.connect(ip: info.ip, pin: info.pin)
+            }
+        }
         .onAppear { refreshHostData() }
         .onChange(of: connection.connectionStatus) { status in
             if status == .connected { refreshHostData() }
@@ -66,6 +79,40 @@ struct RootTabView: View {
         guard connection.servesV1Read else { return }
         usageStore.refresh()
         Task { await connection.reads.refresh() }
+    }
+}
+
+/// Shown on the Chat tab when only offline sync is enrolled: sync is read-only, so live Chat needs a Host API pairing.
+struct LiveChatPairingView: View {
+    let onScan: () -> Void
+    var body: some View {
+        VStack(spacing: DesignSystem.Spacing.lg) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 40))
+                .foregroundColor(DesignSystem.Colors.primary)
+            Text("Live Chat needs the desktop")
+                .font(DesignSystem.Typography.titleFont.weight(.bold))
+                .foregroundColor(DesignSystem.Colors.textPrimary)
+                .multilineTextAlignment(.center)
+            Text("Offline sync only copies chats and history to this iPhone. To send messages, questions and approvals, pair the desktop's live connection.")
+                .font(DesignSystem.Typography.bodyFont)
+                .foregroundColor(DesignSystem.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+            Button(action: onScan) {
+                Label("Scan live pairing QR", systemImage: "qrcode.viewfinder")
+                    .font(DesignSystem.Typography.bodyFont.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.borderedProminent)
+            Text("Desktop: Settings → Phone and browser → Live Chat pairing.")
+                .font(DesignSystem.Typography.captionFont)
+                .foregroundColor(DesignSystem.Colors.textTertiary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(DesignSystem.Layout.marginMobile)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DesignSystem.Colors.background)
     }
 }
 
