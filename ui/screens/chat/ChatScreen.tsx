@@ -402,10 +402,10 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
         />
         {notice && <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} />}
         {state.budget && (budgetPercent(state.budget) >= 80 || state.budget.level === "warning" || state.budget.level === "exceeded") ? (
-          <p className="chat-budget-warning" role="status">
-            Token budget {budgetPercent(state.budget)}% used · {state.budget.remaining.toLocaleString("en-US")} left.
-            {state.budget.level === "exceeded" ? " This chat is at its limit; raise it in Settings → Model routing or start a fresh chat." : " The next turn may stop at the limit."}
-          </p>
+          <div className="chat-budget-warning" role="status">
+            <span>Token budget {budgetPercent(state.budget)}% used · {state.budget.remaining.toLocaleString("en-US")} left. {state.budget.level === "exceeded" ? "This chat is at its limit." : "The next turn may stop at the limit."}</span>
+            <button type="button" className="chat-btn" onClick={() => void newChat()}>Start a fresh chat</button>
+          </div>
         ) : null}
         {listError && <StatusBanner severity="error" message={listError} onDismiss={() => setListError(null)} />}
         {persistFailure && <StatusBanner severity="error" message={persistFailure} onDismiss={() => controller.dismissPersistFailure()} />}
