@@ -52,6 +52,13 @@ NEW="$STAGE/LLM-IDE.app"
 kill -TERM "$PID" 2>/dev/null || true
 for _ in $(seq 1 60); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
 kill -KILL "$PID" 2>/dev/null || true
+# The app's Node core is a separate process. A SIGKILL of the app can orphan it, and a new app then
+# finds :3456 busy and spawns on :3457 while the old backend keeps serving the old code. Stop the
+# bundled core explicitly before swapping the bundle, then wait for the port to be released.
+CORE="$APP/Contents/Resources/core/node"
+pkill -TERM -f "$CORE" 2>/dev/null || true
+for _ in $(seq 1 20); do pgrep -f "$CORE" >/dev/null || break; sleep 0.25; done
+pkill -KILL -f "$CORE" 2>/dev/null || true
 sleep 1
 
 rm -rf "$APP.bak"
