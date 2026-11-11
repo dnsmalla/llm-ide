@@ -47,9 +47,28 @@ const freezeSafeMonaco = (): Plugin => ({
   },
 });
 
+
+// xterm (and its WebGL addon) evaluates `namespace.toString = fn` on a plain `{}`. Tauri freezes
+// Object.prototype, so the inherited `toString` is read-only and the whole lazy terminal chunk throws
+// "Attempted to assign to readonly property." Define the own property instead (same technique as Monaco).
+const patchXtermFreeze = (code: string): string =>
+  code.replace(/([A-Za-z_$][\w$]*)\.toString=([A-Za-z_$][\w$]*)/g, 'Object.defineProperty($1,"toString",{value:$2,writable:true,configurable:true})');
+
+const xtermFile = (id: string): boolean => /node_modules[\\/]@xterm[\\/](xterm|addon-webgl)[\\/]lib[\\/].*\.m?js$/.test(id);
+
+const freezeSafeXterm = (): Plugin => ({
+  name: "llmide-xterm-frozen-prototype",
+  enforce: "pre",
+  transform(code, id) {
+    if (!xtermFile(id)) return null;
+    const next = patchXtermFreeze(code);
+    return next === code ? null : { code: next, map: null };
+  },
+});
+
 // Tauri expects a fixed dev port (see src-tauri/tauri.conf.json devUrl).
 export default defineConfig(({ mode }) => ({
-  plugins: [useNpmDompurify(), freezeSafeMonaco(), react()],
+  plugins: [useNpmDompurify(), freezeSafeMonaco(), freezeSafeXterm(), react()],
   resolve: {
     // @llmide/ui-kit is consumed from source (../ui/kit): one React for kit and app.
     alias: [
@@ -89,6 +108,15 @@ export default defineConfig(({ mode }) => ({
               if (!needsPatch(args.path)) return null;
               const src = readFileSync(args.path, "utf8");
               return { contents: patchMonacoSource(src, baseName(args.path)), loader: "js" };
+            });
+          },
+        },
+        {
+          // Same frozen-prototype rewrite for xterm in the dev pre-bundle.
+          name: "llmide-xterm-frozen-prototype",
+          setup(build) {
+            build.onLoad({ filter: /@xterm[\\/](xterm|addon-webgl)[\\/]lib[\\/].*\.m?js$/ }, (args) => {
+              return { contents: patchXtermFreeze(readFileSync(args.path, "utf8")), loader: "js" };
             });
           },
         },
