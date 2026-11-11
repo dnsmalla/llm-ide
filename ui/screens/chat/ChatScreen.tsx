@@ -481,7 +481,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               meter={<><BudgetMeter budget={state.budget} /><ContextMeter usage={state.context} onNewChat={() => void newChat()} /></>}
               controls={<>
                 <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} modes={modeOptions} />
-                <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}
+                <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route} onConnectProvider={() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" })}
                   onChange={pickModel} addGroup={addTargetGroup(groups, current.provider)} onAdd={addModel}
                   userModels={userModels} onRemove={removeModel} />
                 <EffortPicker levels={effortLevels} value={effectiveEffort(effortPick, effortLevels)} onChange={effortStore.set} />

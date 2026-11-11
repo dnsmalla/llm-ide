@@ -21,7 +21,7 @@ export function ModePicker({ value, resolved, onChange, disabled, modes = MODES 
   );
 }
 
-export function ModelPicker({ groups, provider, model, onChange, plainChat, loading, route, addGroup, onAdd, userModels, onRemove }: {
+export function ModelPicker({ groups, provider, model, onChange, plainChat, loading, route, addGroup, onAdd, userModels, onRemove, onConnectProvider }: {
   groups: readonly ModelGroup[]; provider: string | null; model: string | null;
   onChange: (provider: string, model: string) => void; plainChat?: PlainChatReason | null; loading?: boolean;
   /** The chat's route: with the router on, an unpinned chat shows "Not pinned (the composer's model)". */
@@ -30,9 +30,14 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
   addGroup?: ModelGroup | null; onAdd?: (groupId: string, id: string) => void;
   /** The user's added ids; the selected one can be removed (a refused id is dropped this way). */
   userModels?: UserModels; onRemove?: (groupId: string, id: string) => void;
+  /** No model is available: open Settings → Providers to add a key. */
+  onConnectProvider?: () => void;
 }) {
   const value = modelPickerValue(route, provider, model);
   const listed = groups.flatMap((g) => g.models);
+  if (!loading && listed.length === 0 && onConnectProvider) {
+    return <div className="chat-model-empty"><button type="button" className="chat-btn" onClick={onConnectProvider}>Connect a provider</button><span className="chat-muted">Add a model key in Settings → Providers.</span></div>;
+  }
   const removable = groups.find((g) => g.provider === provider && (userModels?.[g.id] ?? []).includes(model ?? ""));
   const composerLabel = provider && model ? (listed.find((m) => m.provider === provider && m.model === model)?.label ?? model) : null;
   // A pinned model that is not in the lists (a retired id) still shows as chosen, as the Mac's "Current" group does.
