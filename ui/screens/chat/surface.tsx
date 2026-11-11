@@ -8,6 +8,7 @@ import { coreTransportFrom } from "./adapter";
 import type { ChatHost } from "./ChatScreen";
 import { ChatController } from "./controller";
 import { HttpChatStore, type ChatStore } from "./store";
+import { CoreMirrorChatStore } from "./merged-store.ts";
 import { TauriChatStore } from "./tauri-store";
 import { coreStatusStore } from "../shell/runtime";
 import { safeHref } from "./markdown";
@@ -64,7 +65,9 @@ export function chatRuntime(surface = "chat"): ChatRuntime {
   // Capability choice: inside the desktop app the chat file store (Mac format, live-then-archive) is the one copy;
   // in a plain browser (vite dev, the extension) the core's own chat routes are.
   const remote = coreStatusStore.getSnapshot().status?.mode === "remote";
-  const store: ChatStore = shellHost.isAvailable() && !remote ? new TauriChatStore({ invoke: invokeHost, ready: () => chatBinding.whenBound() }) : new HttpChatStore(transport);
+  const store: ChatStore = shellHost.isAvailable() && !remote
+    ? new CoreMirrorChatStore(new TauriChatStore({ invoke: invokeHost, ready: () => chatBinding.whenBound() }), transport)
+    : new HttpChatStore(transport);
   // Bypass approval gate: only in the desktop app (the host signs the approval); a plain browser has none, so Bypass
   // is refused there. The token lives inside this gate's memory only.
   const bypass = shellHost.isAvailable()
