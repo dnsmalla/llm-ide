@@ -39,7 +39,7 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
     if (!start) return;
     return pollEnrollSerially(client, setPoll, (e) => setError(describeError(e)));
   }, [client, start]);
-  const stop = () => { setStart(null); setPoll(null); setShowLink(false); };
+  const stop = () => { setStart(null); setPoll(null); setShowLink(false); setError(null); };
   const begin = (tier: "web" | "ios") => run(async () => { setPoll(null); setStart(await startEnroll(client, tier)); });
   const screen = enrollScreen(start, poll);
   useEffect(() => {
