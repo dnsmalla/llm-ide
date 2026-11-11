@@ -7,8 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA0000000000000000000301 /* FilesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000302 /* FilesStore.swift */; };
-		AA0000000000000000000401 /* ExplorerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000402 /* ExplorerView.swift */; };
 		AA0000000000000000000101 /* TasksStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000102 /* TasksStore.swift */; };
 		AA0000000000000000000201 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000202 /* TasksView.swift */; };
 		060280FFDE8EBB4735C43370 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1050205A71E402C9809036C3 /* LoginView.swift */; };
@@ -51,8 +49,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		AA0000000000000000000302 /* FilesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesStore.swift; sourceTree = "<group>"; };
-		AA0000000000000000000402 /* ExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000102 /* TasksStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksStore.swift; sourceTree = "<group>"; };
 		AA0000000000000000000202 /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
 		0F05147F87FAE3E4689CB880 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -183,7 +179,6 @@
 				B7CC02D68D4369B858A43C3C /* UsageView.swift */,
 				C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */,
 				AA0000000000000000000202 /* TasksView.swift */,
-				AA0000000000000000000402 /* ExplorerView.swift */,
 				C2E0A1B2C3D4E5F6000000A3 /* SyncEnrollSheet.swift */,
 				C2E0A1B2C3D4E5F6000000A5 /* SyncOfflineViews.swift */,
 				C2E0A1B2C3D4E5F6000000A9 /* SourceReadViews.swift */,
@@ -230,7 +225,6 @@
 				A7B80010CC00000000000004 /* LlmIdeChatStore.swift */,
 				A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */,
 				AA0000000000000000000102 /* TasksStore.swift */,
-				AA0000000000000000000302 /* FilesStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -327,9 +321,7 @@
 				B8CC02D68D4369B858A43C3C /* UsageView.swift in Sources */,
 				C2E0A1B2C3D4E5F600000002 /* ReadChatsView.swift in Sources */,
 				AA0000000000000000000101 /* TasksStore.swift in Sources */,
-				AA0000000000000000000301 /* FilesStore.swift in Sources */,
 				AA0000000000000000000201 /* TasksView.swift in Sources */,
-				AA0000000000000000000401 /* ExplorerView.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000A2 /* SyncStore.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000AB /* BoxAuth.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000A8 /* SourceReadStore.swift in Sources */,

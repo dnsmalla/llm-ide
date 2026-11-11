@@ -11,7 +11,6 @@ struct MyAppApp: App {
     @StateObject private var syncStore: SyncStore
     @StateObject private var sourceReadStore: SourceReadStore
     @StateObject private var tasksStore: TasksStore
-    @StateObject private var filesStore: FilesStore
 
     init() {
         // ConnectionService is created first; each store it routes to registers itself with it on init.
@@ -29,7 +28,6 @@ struct MyAppApp: App {
         _syncStore = StateObject(wrappedValue: SyncStore())
         _sourceReadStore = StateObject(wrappedValue: SourceReadStore())
         _tasksStore = StateObject(wrappedValue: TasksStore(connection: connection))
-        _filesStore = StateObject(wrappedValue: FilesStore(connection: connection))
     }
 
     var body: some Scene {
@@ -43,7 +41,6 @@ struct MyAppApp: App {
                 .environmentObject(syncStore)
                 .environmentObject(sourceReadStore)
                 .environmentObject(tasksStore)
-                .environmentObject(filesStore)
         }
     }
 }
