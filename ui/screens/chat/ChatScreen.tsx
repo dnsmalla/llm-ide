@@ -30,6 +30,7 @@ import {
   restoreFailedPick, routeRereadDue, type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import { memoryClient } from "./memory-client";
+import { factText, loadMemory } from "../explorer/memory/memory-model.ts";
 import { ProjectMemoryView } from "../explorer/memory/ProjectMemoryView";
 import type { ChatState } from "./state";
 import { createChatUiStore, type ChatPrefs, type ChatUiStore } from "./ui-state";
@@ -139,6 +140,21 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const coreRestarts = useSyncExternalStore(coreStatusStore.subscribe, () => coreStatusStore.getSnapshot().status?.restarts ?? 0, () => 0);
   const plans = useMemo(() => new PlanController(host.compose?.project ?? null), [host.compose?.project]);
   const [refineNonce, setRefineNonce] = useState(0);
+  /** Local context pack: put the facts the core already remembers into the draft instead of making the model re-read files. */
+  const addMemoryToDraft = useCallback(async () => {
+    const chatId = activeId;
+    if (!chatId) return;
+    try {
+      const m = await loadMemory(memoryCore, { repos: [], workspaceRoot: host.projectRoot?.() ?? null, sessionId: chatId });
+      const facts = [...m.session, ...(m.project?.facts ?? [])].map(factText).filter(Boolean).slice(0, 40);
+      if (facts.length === 0) { setNotice("No project or session memory yet."); return; }
+      const block = `Use this local project memory as context. Do not ask me to repeat it.\n\n${facts.map((f) => `- ${f}`).join("\n")}`.slice(0, 4000);
+      const current = controller.getView(chatId).draft;
+      controller.setView(chatId, { draft: current.trim() ? `${current.trim()}\n\n${block}` : block });
+      setRefineNonce((n) => n + 1);
+      setMemoryOpen(false);
+    } catch { setNotice("Project memory could not be read."); }
+  }, [activeId, controller, host, memoryCore]);
   useControllerVersion(controller); // re-render when any chat's busy flag changes
 
   // Sessions: first page now, more on demand.
@@ -456,7 +472,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                 <button ref={memoryChip} type="button" className="chat-icon-btn" aria-label={state.memory ? `Session memory ${state.memory.approxTokens} tokens` : "Memory"} aria-haspopup="dialog" aria-expanded={memoryOpen} title="Session memory" onClick={() => setMemoryOpen((v) => !v)}>
                   <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="2" fill="none" stroke="currentColor" strokeWidth="1.3"/><path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
                 </button>
-                {memoryOpen ? <div role="dialog" aria-label="Session memory" className="chat-popover chat-memory-popover" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setMemoryOpen(false); } }}>{state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}<button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button></div> : null}
+                {memoryOpen ? <div role="dialog" aria-label="Session memory" className="chat-popover chat-memory-popover" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setMemoryOpen(false); } }}>{state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}<button type="button" className="chat-btn" onClick={() => void addMemoryToDraft()}>Add memory to prompt</button>
+                  <button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button></div> : null}
               </>}
               onSend={(text, extra) => { if (!busy) setPlanRunChat(null); controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments, effort: turnEffort(effortPick, effortLevels) }); touchSession(activeId); }}
               onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={sendBlock}
