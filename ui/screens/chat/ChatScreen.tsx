@@ -337,6 +337,14 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       bumpSessions();
     } catch (e) { reportStoreError(e); }
   }, [state.messages, store, controller, bumpSessions, reportStoreError]);
+  // A side dock starts its own chat instead of opening the latest one the main Chat tab has open.
+  const dockNewRef = useRef(false);
+  useEffect(() => {
+    if (!dock || activeId || dockNewRef.current) return;
+    dockNewRef.current = true;
+    void newChat();
+  }, [dock, activeId, newChat]);
+
   const busy = state.phase === "streaming" || state.phase === "aborting";
   const persistFailure = controller.getPersistFailure();
   // The chat whose plan card started the current plan run (the Mac's PlanExecutionTracker); a new ordinary message ends it.

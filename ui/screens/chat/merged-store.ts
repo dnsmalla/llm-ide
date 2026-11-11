@@ -7,10 +7,12 @@ import type { CoreTransport } from "./transport";
 
 export class CoreMirrorChatStore implements ChatStore {
   private readonly core: HttpChatStore;
+  private readonly transport: CoreTransport;
   private coreIds = new Set<string>();
 
   constructor(private readonly native: ChatStore, transport: CoreTransport) {
     this.core = new HttpChatStore(transport);
+    this.transport = transport;
   }
 
   listHealth(): ListHealth { return this.native.listHealth?.() ?? { unreadable: 0, unsupported: 0 }; }
@@ -41,8 +43,12 @@ export class CoreMirrorChatStore implements ChatStore {
     return this.coreIds.has(id) ? this.core.renameSession(id, title, signal) : this.native.renameSession(id, title, signal);
   }
 
-  deleteSession(id: string, signal?: AbortSignal): Promise<void> {
-    return this.coreIds.has(id) ? this.core.deleteSession(id, signal) : this.native.deleteSession(id, signal);
+  async deleteSession(id: string, signal?: AbortSignal): Promise<void> {
+    // A desktop chat is a file in the native store, but the core also holds its SDK session,
+    // route, memory and continuation under the same id. Delete the file, then clear core state.
+    if (!this.coreIds.has(id)) await this.native.deleteSession(id, signal);
+    try { await this.transport.json("DELETE", "/agent/v2/session", { chatSessionId: id }, signal); } catch { /* best-effort: the transcript is gone */ }
+    try { await this.core.deleteSession(id, signal); } catch { /* no core row (native-only chat) */ }
   }
 
   loadMessages(id: string, opts: { limit: number; beforeSeq?: number }, signal?: AbortSignal): Promise<MessagePage> {
