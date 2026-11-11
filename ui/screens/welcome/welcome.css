@@ -77,3 +77,12 @@
 .help-step + .help-step::before { content: "→"; margin-right: 6px; color: var(--tok-color-text-muted); }
 .help-settings { display: grid; grid-template-columns: 1fr 1fr; }
 @media (max-width: 760px) { .help-body { grid-template-columns: 1fr; } .help-nav { border-right: 0; border-bottom: 1px solid var(--tok-color-border); max-height: 170px; } }
+
+.help-nav-row { display: flex; align-items: center; gap: 2px; }
+.help-nav-row .help-nav-item { flex: 1; }
+.help-nav-go { flex: none; font: inherit; font-size: 11px; border: 0; background: none; color: var(--tok-color-text-muted); cursor: pointer; padding: 4px 6px; border-radius: 5px; }
+.help-nav-go:hover { background: var(--tok-color-row-alt); color: var(--tok-color-accent); }
+.help-open { align-self: flex-start; margin-top: 14px; font: inherit; font-size: 12px; font-weight: 600; color: var(--tok-color-body); background: var(--tok-color-accent); border: 0; border-radius: 7px; padding: 8px 12px; cursor: pointer; }
+.help-open:hover { filter: brightness(1.06); }
+.help-svg { display: block; width: 100%; height: auto; margin: 14px 0 4px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-body); }
+.help-svg text { font-family: var(--tok-type-sans-family); }

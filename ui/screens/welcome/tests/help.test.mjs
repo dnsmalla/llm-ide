@@ -23,3 +23,12 @@ test("Help topics are unique, grouped and every step is actionable", () => {
     assert.ok(t.example, `${t.id} needs an example`);
   }
 });
+
+test("every Screen and Settings topic can jump to its page; diagrams cover the main flows", () => {
+  for (const t of HELP_TOPICS) {
+    if (t.group === "Screens" || t.group === "Settings") assert.ok(t.target, `${t.id} needs a navigation target`);
+  }
+  for (const kind of ["map", "project", "factory", "settings", "issue", "terminal"]) {
+    assert.ok(HELP_TOPICS.some((t) => t.diagram === kind), `missing ${kind} diagram`);
+  }
+});

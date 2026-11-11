@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { FolderIcon, ChatIcon } from "@llmide/ui-kit";
 import type { ProjectInfo, RecentEntry, RecentList } from "../shell/host";
 import { safeText } from "../shell/safe-text";
@@ -34,47 +34,71 @@ export interface WelcomeProps {
 const dateless = (s: string, max: number) => safeText(s, max);
 
 function HelpDiagram({ kind }: { kind: NonNullable<HelpTopic["diagram"]> }) {
+  const box = (x: number, y: number, w: number, h: number, text: string, accent = false) => (
+    <g key={`${x}-${y}-${text}`}>
+      <rect x={x} y={y} width={w} height={h} rx="8" fill={accent ? "color-mix(in srgb, var(--tok-color-accent) 18%, var(--tok-color-surface2))" : "var(--tok-color-surface2)"} stroke={accent ? "var(--tok-color-accent)" : "var(--tok-color-border)"} />
+      <text x={x + w / 2} y={y + h / 2 + 4 - (text.split("\n").length - 1) * 7} textAnchor="middle" fontSize="11" fill={accent ? "var(--tok-color-accent)" : "var(--tok-color-text)"}>
+        {text.split("\n").map((line, i) => <tspan key={line} x={x + w / 2} dy={i === 0 ? 0 : 14}>{line}</tspan>)}
+      </text>
+    </g>
+  );
+  const arrow = (x1: number, y1: number, x2: number, y2: number) => (
+    <line key={`${x1}-${y1}-${x2}-${y2}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="var(--tok-color-text-muted)" strokeWidth="1.5" markerEnd="url(#help-arrow)" />
+  );
+  const frame = (label: string, children: ReactNode) => (
+    <svg className="help-svg" viewBox="0 0 720 210" role="img" aria-label={label}>
+      <defs><marker id="help-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--tok-color-text-muted)" /></marker></defs>
+      {children}
+    </svg>
+  );
   if (kind === "project") {
-    return (
-      <div className="help-diagram help-project" aria-hidden="true">
-        <span className="help-box help-box-main">project/</span>
-        <span className="help-box">source/</span>
-        <span className="help-box">code/</span>
-        <span className="help-box">data/</span>
-        <span className="help-box help-box-accent">llm-doc/ notes &amp; plans</span>
-        <span className="help-box help-box-muted">system/ settings &amp; cache</span>
-      </div>
-    );
+    return frame("Project folder layout: source, code, data, llm-doc and system", <>
+      {box(20, 76, 120, 46, "project/", true)}
+      {box(190, 16, 150, 40, "source/")}{box(190, 68, 150, 40, "code/")}{box(190, 120, 150, 40, "data/")}
+      {box(390, 68, 190, 40, "llm-doc/ notes & plans", true)}{box(390, 120, 190, 40, "system/ settings", false)}
+      {arrow(140, 99, 190, 36)}{arrow(140, 99, 190, 88)}{arrow(140, 99, 190, 140)}{arrow(340, 88, 390, 88)}
+    </>);
   }
   if (kind === "factory") {
-    return (
-      <div className="help-diagram help-flow" aria-hidden="true">
-        {["Inbox", "Needs decision", "Working", "Needs you", "Ready to ship", "Shipped", "Done"].map((label) => <span key={label} className="help-step">{label}</span>)}
-      </div>
-    );
+    const labels = ["Inbox", "Needs decision", "Working", "Needs you", "Ready to ship", "Shipped", "Done"];
+    return frame("Factory flow: Inbox to Needs decision, Working, Needs you, Ready to ship, Shipped, Done", <>
+      {labels.map((label, i) => box(16 + (i % 4) * 172, i < 4 ? 44 : 118, 150, 42, label, i === 6))}
+      {[0, 1, 2, 3, 4, 5].map((i) => arrow(166 + (i % 4) * 172, (i < 4 ? 65 : 139), 188 + (i % 4) * 172, (i < 4 ? 65 : 139)))}
+    </>);
   }
   if (kind === "settings") {
-    return (
-      <div className="help-diagram help-settings" aria-hidden="true">
-        <span className="help-box help-box-accent">App settings (everywhere)</span>
-        <span className="help-box help-box-muted">Project settings (this folder)</span>
-      </div>
-    );
+    return frame("App settings apply everywhere; project settings apply to this folder", <>
+      {box(40, 40, 300, 130, "App settings\nworkspace · providers · models", true)}
+      {box(380, 40, 300, 130, "Project settings\npaths · repos · memory · graph", false)}
+      {arrow(340, 105, 380, 105)}
+    </>);
   }
-  return (
-    <div className="help-diagram help-map" aria-hidden="true">
-      <span className="help-box help-box-accent">Project</span>
-      <span className="help-arrow">→</span>
-      <span className="help-box">Library / Explorer</span>
-      <span className="help-arrow">→</span>
-      <span className="help-box">Chat · Graph · Issues</span>
-      <span className="help-arrow">→</span>
-      <span className="help-box help-box-muted">Loop · Factory</span>
-    </div>
-  );
+  if (kind === "issue") {
+    return frame("Issue page: discussion on the left, editable settings on the right", <>
+      {box(24, 28, 400, 152, "Issue\ncomments · description", true)}
+      {box(470, 28, 220, 152, "Settings\nstatus · labels · milestone\nassignees · dates", false)}
+      {arrow(424, 104, 470, 104)}
+    </>);
+  }
+  if (kind === "terminal") {
+    return frame("Terminal dock inside the project", <>
+      <rect x="30" y="26" width="660" height="158" rx="10" fill="var(--tok-color-body)" stroke="var(--tok-color-border)" />
+      <circle cx="52" cy="48" r="4" fill="var(--tok-color-danger)" /><circle cx="68" cy="48" r="4" fill="var(--tok-color-accent4)" /><circle cx="84" cy="48" r="4" fill="var(--tok-color-accent3)" />
+      <text x="48" y="92" fontFamily="var(--tok-type-mono-family)" fontSize="13" fill="var(--tok-color-text)">$ npm test</text>
+      <text x="48" y="118" fontFamily="var(--tok-type-mono-family)" fontSize="13" fill="var(--tok-color-accent3)">✓ 397 tests passed</text>
+      <text x="48" y="158" fontFamily="var(--tok-type-mono-family)" fontSize="12" fill="var(--tok-color-text-muted)">$ █</text>
+    </>);
+  }
+  return frame("Workspace flow: project to Library and Explorer, to Chat, Graph and Issues, to Loop and Factory", <>
+    {box(18, 80, 120, 46, "Project", true)}
+    {box(180, 80, 160, 46, "Library / Explorer")}
+    {box(382, 80, 160, 46, "Chat · Graph · Issues")}
+    {box(584, 80, 118, 46, "Loop · Factory", false)}
+    {arrow(138, 103, 180, 103)}{arrow(340, 103, 382, 103)}{arrow(542, 103, 584, 103)}
+  </>);
 }
 
-export function GuideDialog({ onClose }: { onClose: () => void }) {
+export function GuideDialog({ onClose, onNavigate }: { onClose: () => void; onNavigate?: (target: NonNullable<HelpTopic["target"]>) => void }) {
   const close = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState(HELP_TOPICS[0]!.id);
@@ -112,7 +136,10 @@ export function GuideDialog({ onClose }: { onClose: () => void }) {
                   <h3 className="help-nav-title">{group}</h3>
                   <ul>
                     {list.filter((t) => topics.includes(t)).map((t) => (
-                      <li key={t.id}><button type="button" className="help-nav-item" aria-current={active?.id === t.id ? "page" : undefined} onClick={() => setActiveId(t.id)}>{t.title}</button></li>
+                      <li key={t.id} className="help-nav-row">
+                        <button type="button" className="help-nav-item" aria-current={active?.id === t.id ? "page" : undefined} onClick={() => setActiveId(t.id)}>{t.title}</button>
+                        {t.target && onNavigate ? <button type="button" className="help-nav-go" aria-label={`Open ${t.title}`} title={`Open ${t.title}`} onClick={() => onNavigate(t.target!)}>↗</button> : null}
+                      </li>
                     ))}
                   </ul>
                 </section>
@@ -130,6 +157,7 @@ export function GuideDialog({ onClose }: { onClose: () => void }) {
                 <h4 className="help-h4">Try it</h4>
                 <ol className="help-steps">{active.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
                 {active.example ? <p className="help-example"><strong>Example:</strong> {active.example}</p> : null}
+                {active.target && onNavigate ? <button type="button" className="help-open" onClick={() => onNavigate(active.target!)}>{active.group === "Settings" ? "Open Settings" : `Open ${active.title}`} →</button> : null}
               </>
             ) : null}
           </article>

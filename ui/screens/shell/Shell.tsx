@@ -414,7 +414,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         chatActive={nav.active === "chat"}
         terminalItem={<ShellTerminalItem built={TERMINAL_BUILT} open={terminalOpen} onToggle={toggleTerminalDock} />}
       /> : null}
-      {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} /> : null}
+      {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} onNavigate={(section) => { setGuideOpen(false); onSelect(section); }} /> : null}
       {permissionsOpen ? <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-permissions-title"><div className="sh-modal-card"><h2 id="sh-permissions-title" className="sh-panel-title">Permissions</h2><p className="sh-panel-text">Accessibility, Screen Recording and Microphone permissions belong to the Mac app’s live-capture engine. The desktop has no capture engine, so there is nothing to grant here.</p><div className="sh-form-actions"><button type="button" className="sh-button" onClick={() => setPermissionsOpen(false)}>Close</button></div></div></div> : null}
       {quickOpen ? <QuickSwitchDialog recent={recentAll.entries} activeRoot={project?.root ?? null} onOpen={(i) => { setQuickOpen(false); void openRecent(i); }} onClose={() => setQuickOpen(false)} /> : null}
     </div>
