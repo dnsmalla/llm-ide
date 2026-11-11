@@ -18,7 +18,7 @@ test("the empty state has the Mac's title, line and four suggestions", () => {
 
 test("a suggestion fills the draft through the controller's view and re-mounts the composer; it does not send", () => {
   const screen = readFileSync(join(CHAT, "ChatScreen.tsx"), "utf8");
-  assert.match(screen, /empty=\{<EmptyChat onPick=\{\(text\) => \{ controller\.setView\(activeId, \{ draft: text \}\); setRefineNonce\(\(n\) => n \+ 1\); \}\} \/>\}/);
+  assert.match(screen, /empty=\{<EmptyChat readOnly=\{\["ask", "review", "document", "plan", "assist_plan"\]\.includes\(current\.mode\)\} onPick=/);
 });
 
 test("the composer's empty-field prompt is the Mac's", () => {
@@ -26,4 +26,11 @@ test("the composer's empty-field prompt is the Mac's", () => {
   const noop = () => {};
   const out = html(h(c.Composer, { draft: "", onDraft: noop, busy: false, aborting: false, queue: [], history: [], onSend: noop, onStop: noop, onDropQueued: noop }));
   assert.match(out, /placeholder="Ask Claude about the attached code…"/);
+});
+
+test("read-only modes do not offer edit suggestions", () => {
+  const out = html(h(c.EmptyChat, { readOnly: true, onPick: () => {} }));
+  for (const s of c.READ_ONLY_SUGGESTIONS) assert.match(out, new RegExp(`>${s}</button>`));
+  assert.doesNotMatch(out, /Refactor for readability|Add unit tests/);
+  assert.match(out, /Read-only: this mode explains and reviews but never edits/);
 });

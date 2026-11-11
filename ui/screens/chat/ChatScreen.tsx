@@ -467,7 +467,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               initialScrollTop={controller.getView(activeId).stickToBottom ? null : controller.getView(activeId).scrollTop}
               onScrollState={onScrollState} onOpenLink={host.openLink} onCopy={host.copy} files={host.files} onRetry={() => controller.retry(activeId)}
               onFullHistoryNext={onFullHistoryNext}
-              empty={<EmptyChat onPick={(text) => { controller.setView(activeId, { draft: text }); setRefineNonce((n) => n + 1); }} />}
+              empty={<EmptyChat readOnly={["ask", "review", "document", "plan", "assist_plan"].includes(current.mode)} onPick={(text) => { controller.setView(activeId, { draft: text }); setRefineNonce((n) => n + 1); }} />}
             />
             {showsPlanProgress(planRunChat, activeId, state.tasks) && <PlanProgress tasks={state.tasks} />}
             {state.tasks.length > 0 && (
