@@ -37,15 +37,11 @@ export const APP_GROUPS: readonly GroupDef[] = [
   { id: "team", title: "Team", sf: "person.3", icon: "circle-user", status: "works", band: "app" },
   { id: "general", title: "General", sf: "globe", icon: "globe", status: "partial", band: "app" },
   { id: "tool-permissions", title: "Tool permissions", sf: "hand.raised", icon: "hand", status: "works", band: "app" },
-  { id: "agent-sdk", title: "Claude Agent SDK", sf: "shippingbox", icon: "package", status: "works", band: "app" },
   { id: "token-saving", title: "Token Saving", sf: "leaf", icon: "leaf", status: "works", band: "app" },
   { id: "providers", title: "Providers", sf: "key.horizontal", icon: "key-round", status: "works", band: "app" },
   { id: "model-routing", title: "Model routing", sf: "dial.medium", icon: "gauge", status: "works", band: "app" },
-  { id: "model-limits", title: "Models & limits", sf: "gauge", icon: "gauge", status: "works", band: "app" },
-  { id: "loop-defaults", title: "Loop defaults", sf: "repeat", icon: "repeat", status: "works", band: "app" },
   { id: "agent-history", title: "Agent history", sf: "clock.arrow.circlepath", icon: "rotate-ccw-clock", status: "works", band: "app" },
-  { id: "folder-trust", title: "Folder trust", sf: "lock.shield", icon: "shield-check", status: "works", band: "app" },
-  { id: "extension-sources", title: "Extension sources", sf: "checklist", icon: "list-checks", status: "works", band: "app" },
+  { id: "trust", title: "Trust & sources", sf: "lock.shield", icon: "shield-check", status: "works", band: "app" },
   { id: "optional-components", title: "Optional components", sf: "puzzlepiece.extension", icon: "puzzle", status: "works", band: "app" },
   { id: "self-heal", title: "Self-Heal", sf: "stethoscope", icon: "stethoscope", status: "dev-only", band: "app" },
 ];
@@ -60,7 +56,7 @@ export const PROJECT_GROUPS: readonly GroupDef[] = [
 export const ALL_GROUPS: readonly GroupDef[] = [...APP_GROUPS, ...PROJECT_GROUPS];
 
 /** Settings groups that read the local filesystem or run local host processes: hidden in remote mode. */
-export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "token-saving", "paths", "repositories", "memory", "code-graph", "optional-components", "self-heal"];
+export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "token-saving", "paths", "repositories", "memory", "code-graph", "optional-components", "self-heal", "trust"];
 
 /** Mac cards that are not groups on the desktop because the desktop folds them into another group. */
 export const MERGED_MAC_CARDS: Readonly<Record<string, string>> = {
@@ -70,7 +66,11 @@ export const MERGED_MAC_CARDS: Readonly<Record<string, string>> = {
 /** Anchors the app used before the Mac layout (and short forms the shell may send) -> group id. */
 const LEGACY_ANCHORS: Readonly<Record<string, string>> = {
   routing: "model-routing",
-  "extensions-trust": "folder-trust",
+  "agent-sdk": "server",
+  "model-limits": "model-routing",
+  "extensions-trust": "trust",
+  "folder-trust": "trust",
+  "extension-sources": "trust",
   about: "updates",
   account: "general",
   appearance: "general",

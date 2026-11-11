@@ -6,32 +6,24 @@ import { SettingsRegistry, type Loader } from "./registry.ts";
 
 export type SectionComponent = ComponentType<Record<string, never>>;
 
-const named = (file: () => Promise<Record<string, unknown>>, pick: string): Loader<SectionComponent> => () =>
-  file().then((m) => ({ default: m[pick] as SectionComponent }));
 const dflt = (file: () => Promise<{ default: unknown }>): Loader<SectionComponent> => () =>
   file().then((m) => ({ default: m.default as SectionComponent }));
-
-const trust = () => import("./sections/ExtensionsTrustSection.tsx");
 
 const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   workspace: dflt(() => import("./sections/WorkspaceGroup.tsx")),
   build: dflt(() => import("./sections/BuildSection.tsx")),
-  server: dflt(() => import("./sections/ServerSection.tsx")),
+  server: dflt(() => import("./sections/ServerGroup.tsx")),
   connections: dflt(() => import("./sections/ConnectionsSection.tsx")),
   updates: dflt(() => import("./sections/UpdatesSection.tsx")),
   mobile: dflt(() => import("./sections/MobileBridge.tsx")),
   team: dflt(() => import("./sections/TeamSection.tsx")),
   general: dflt(() => import("./sections/GeneralSection.tsx")),
   "tool-permissions": dflt(() => import("./sections/ToolPermissionsSection.tsx")),
-  "agent-sdk": dflt(() => import("./sections/AgentSdkSection.tsx")),
   "token-saving": dflt(() => import("./sections/TokenSavingSection.tsx")),
   providers: dflt(() => import("./sections/ProvidersSection.tsx")),
-  "model-routing": dflt(() => import("./sections/RoutingSection.tsx")),
-  "model-limits": dflt(() => import("./sections/ModelLimitsSection.tsx")),
-  "loop-defaults": dflt(() => import("./sections/LoopDefaultsSection.tsx")),
+  "model-routing": dflt(() => import("./sections/ModelsGroup.tsx")),
   "agent-history": dflt(() => import("./sections/AgentHistorySection.tsx")),
-  "folder-trust": named(trust, "TrustedFolders"),
-  "extension-sources": named(trust, "Allowlist"),
+  trust: dflt(() => import("./sections/TrustGroup.tsx")),
   "optional-components": dflt(() => import("./sections/OptionalComponentsSection.tsx")),
   "self-heal": dflt(() => import("./sections/SelfHealSection.tsx")),
   paths: dflt(() => import("./sections/PathsSection.tsx")),

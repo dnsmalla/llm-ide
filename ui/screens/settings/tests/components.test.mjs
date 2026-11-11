@@ -127,8 +127,9 @@ test("SettingsScreen: a deep link (id, settings:<id>, or an old anchor) opens th
   const out = html(h(m.screen.SettingsScreen, { env: env({}), registry: reg, initialSection: "providers", expanded: new m.groups.ExpandedGroups(memStore()) }));
   assert.match(out, /id="st-group-providers"/);
   assert.match(out, /aria-controls="st-group-b-providers"/);
-  assert.equal(m.screen.targetGroup(reg, "settings:folder-trust"), "folder-trust");
-  assert.equal(m.screen.targetGroup(reg, "extensions-trust"), "folder-trust");
+  assert.equal(m.screen.targetGroup(reg, "settings:trust"), "trust");
+  assert.equal(m.screen.targetGroup(reg, "extensions-trust"), "trust");
+  assert.equal(m.screen.targetGroup(reg, "folder-trust"), "trust");
   assert.equal(m.screen.targetGroup(reg, "nope"), null);
 });
 
@@ -139,7 +140,7 @@ test("SettingsScreen: the real registry renders the live App groups in order; Te
   // Team is visible to every signed-in member: the project picker is per project (ADR 0022).
   const alwaysVisible = m.groups.APP_GROUPS.filter((g) => g.status !== "mac-only" && g.status !== "dev-only");
   assert.deepEqual(titles, alwaysVisible.map((g) => g.title));
-  assert.equal(titles.length, 19);
+  assert.equal(titles.length, 15);
   assert.ok(titles.includes("Phone and browser"), "phone and browser pairing is reachable");
   assert.ok(titles.includes("Team"), "Team is visible so a project admin can manage that project");
   assert.ok(!out.includes("st-band-project"));
