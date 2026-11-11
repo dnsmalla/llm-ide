@@ -20,6 +20,10 @@ import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
 import { projectsListResult, projectFrameAuthority } from './projects.mjs';
 import { busHostProof } from '../../core/host-approval.mjs';
 import { handleTaskRoutes } from '../tasks.mjs';
+import { scopedProjectRoot } from '../bus/project-scope.mjs';
+import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
@@ -73,6 +77,8 @@ export const COMMAND_CLASS = Object.freeze({
   'toolApprovals.answer': 'model.exec',
   // ADR 0022: every project-scoped command may carry projectId; checked on every frame.
   'projects.list': 'self.read',
+  'files.list': 'self.read',
+  'files.read': 'self.read',
   'tasks.list': 'self.read',
   'tasks.run': 'self.write',
   'tasks.status': 'self.read',
@@ -157,6 +163,22 @@ export function messagesOf(lines, limit) {
     start -= 1;
   }
   return recent.slice(start);
+}
+
+// Read-only project files: the phone sees only regular files inside the registered project's realpath, never a
+// denied secret path and never a directory outside it. Paths are project-relative and resolved through realpath.
+function projectFile(userId, projectId, rel, { directory = false } = {}) {
+  if (typeof rel !== 'string' || rel.length > 4096 || path.isAbsolute(rel)) throw Object.assign(new Error('The path is not valid.'), { code: 'invalid' });
+  const parts = rel.replaceAll('\\', '/').split('/');
+  if (parts.some((x) => x === '..')) throw Object.assign(new Error('The path is not valid.'), { code: 'invalid' });
+  const root = scopedProjectRoot(userId, projectId);
+  let real;
+  try { real = fs.realpathSync(path.resolve(root, rel || '.')); } catch { throw Object.assign(new Error('That path does not exist.'), { code: 'not_found' }); }
+  if (real !== root && !real.startsWith(root + path.sep)) throw Object.assign(new Error('That path is outside the project.'), { code: 'denied' });
+  if (isDeniedPath(real)) throw Object.assign(new Error('That path is not readable.'), { code: 'denied' });
+  const st = fs.statSync(real);
+  if (directory ? !st.isDirectory() : !st.isFile()) throw Object.assign(new Error('That path has the wrong kind.'), { code: 'invalid' });
+  return { root, real, st };
 }
 
 // The desktop task routes are host-proof only. The gateway runs in the same core, so it reuses that route with a
@@ -625,6 +647,33 @@ export function createGateway(overrides) {
       }
       case 'host.ping':
         return respond(s, id, command, {});
+      case 'files.list': {
+        if (readRefused(s, entry, id)) return;
+        try {
+          const { root, real } = projectFile(userId, p.projectId, p.path ?? '', { directory: true });
+          const entries = fs.readdirSync(real, { withFileTypes: true }).slice(0, 500).flatMap((d) => {
+            const abs = path.join(real, d.name);
+            if (isDeniedPath(abs)) return [];
+            let size;
+            if (d.isFile()) { try { size = fs.statSync(abs).size; } catch { return []; } }
+            return [{ name: d.name, path: path.relative(root, abs).split(path.sep).join('/'), kind: d.isDirectory() ? 'dir' : 'file', ...(size !== undefined ? { size } : {}) }];
+          });
+          return respond(s, id, command, { entries });
+        } catch (e) { return fail(s, id, e.code === 'not_found' ? 'not_found' : e.code === 'invalid' ? 'invalid_payload' : 'denied', String(e.message || e)); }
+      }
+      case 'files.read': {
+        if (readRefused(s, entry, id)) return;
+        try {
+          const max = Math.min(Math.max(1, Number(p.maxBytes) || 200_000), 262_144);
+          const { real, st } = projectFile(userId, p.projectId, p.path);
+          const fd = fs.openSync(real, 'r');
+          let buf;
+          try { buf = Buffer.alloc(Math.min(st.size, max + 1)); fs.readSync(fd, buf, 0, buf.length, 0); } finally { fs.closeSync(fd); }
+          if (buf.includes(0)) return fail(s, id, 'denied', 'That file is not text.');
+          const truncated = st.size > max;
+          return respond(s, id, command, { text: buf.subarray(0, max).toString('utf8'), size: st.size, truncated });
+        } catch (e) { return fail(s, id, e.code === 'not_found' ? 'not_found' : e.code === 'invalid' ? 'invalid_payload' : 'denied', String(e.message || e)); }
+      }
       case 'tasks.list': {
         if (readRefused(s, entry, id)) return;
         const body = await internalTaskRequest(userId, '/kb/tasks', { method: 'GET' });

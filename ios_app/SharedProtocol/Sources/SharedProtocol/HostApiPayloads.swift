@@ -253,6 +253,62 @@ public struct HostApiChatSnapshotResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiFilesListRequest: Codable, Equatable, Sendable {
+    public var path: String?
+    public var projectId: String
+
+    public init(path: String? = nil, projectId: String) {
+        self.path = path
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiFilesListResultEntriesItem: Codable, Equatable, Sendable {
+    public var kind: String
+    public var name: String
+    public var path: String
+    public var size: Int?
+
+    public init(kind: String, name: String, path: String, size: Int? = nil) {
+        self.kind = kind
+        self.name = name
+        self.path = path
+        self.size = size
+    }
+}
+
+public struct HostApiFilesListResult: Codable, Equatable, Sendable {
+    public var entries: [HostApiFilesListResultEntriesItem]
+
+    public init(entries: [HostApiFilesListResultEntriesItem]) {
+        self.entries = entries
+    }
+}
+
+public struct HostApiFilesReadRequest: Codable, Equatable, Sendable {
+    public var maxBytes: Int?
+    public var path: String
+    public var projectId: String
+
+    public init(maxBytes: Int? = nil, path: String, projectId: String) {
+        self.maxBytes = maxBytes
+        self.path = path
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiFilesReadResult: Codable, Equatable, Sendable {
+    public var size: Int
+    public var text: String
+    public var truncated: Bool
+
+    public init(size: Int, text: String, truncated: Bool) {
+        self.size = size
+        self.text = text
+        self.truncated = truncated
+    }
+}
+
 public struct HostApiHostAuthPairRequest: Codable, Equatable, Sendable {
     public var pin: String
 

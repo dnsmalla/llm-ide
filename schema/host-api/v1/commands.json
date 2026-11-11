@@ -1425,6 +1425,123 @@
           }
         }
       }
+    },
+    "files.list": {
+      "capability": "read",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "path",
+                "kind"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "path": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "dir"
+                  ]
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "files.read": {
+      "capability": "read",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectId",
+          "path"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "maxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 262144
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "text",
+          "size",
+          "truncated"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      }
     }
   }
 }

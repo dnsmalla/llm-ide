@@ -35,7 +35,7 @@ as `minLenght` fails the gate instead of being silently ignored.
 
 ## Commands
 
-All 26 commands are listed below.
+All 28 commands are listed below.
 
 | Command | Capability | Idempotent | v2 tag |
 |---|---|---|---|
@@ -60,6 +60,8 @@ All 26 commands are listed below.
 | `push.config` | push | yes | — |
 | `push.register` | push | yes | — |
 | `push.unregister` | push | yes | — |
+| `files.list` | read | yes | — |
+| `files.read` | read | yes | — |
 | `tasks.list` | read | yes | — |
 | `tasks.run` | compose | no | — |
 | `tasks.status` | compose | yes | — |

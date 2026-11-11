@@ -18,6 +18,8 @@ export const HOST_API_COMMANDS = {
   "chat.send": { capability: "chat", idempotent: false },
   "chat.sessions": { capability: "read", idempotent: true },
   "chat.snapshot": { capability: "chat", idempotent: true },
+  "files.list": { capability: "read", idempotent: true },
+  "files.read": { capability: "read", idempotent: true },
   "host.auth.pair": { capability: "host", idempotent: false },
   "host.auth.revoke": { capability: "host", idempotent: true },
   "host.auth.token": { capability: "host", idempotent: true },
@@ -47,6 +49,8 @@ export interface HostApiCommandMap {
   "chat.send": { request: { attachments?: Array<{ name: string; text: string }>; mode?: "auto" | "ask" | "plan" | "assist_plan" | "review" | "document"; model?: string; projectId?: string; text: string }; result: { accepted: boolean; requestId?: string } };
   "chat.sessions": { request: { limit?: number; offset?: number; projectId?: string }; result: { nextOffset?: number; sessions: Array<{ id: string; phoneChat?: boolean; title: string; updatedAt: number }> } };
   "chat.snapshot": { request: { limit?: number; projectId?: string }; result: { messages: Array<{ content: string; role: "user" | "assistant" }> } };
+  "files.list": { request: { path?: string; projectId: string }; result: { entries: Array<{ kind: "file" | "dir"; name: string; path: string; size?: number }> } };
+  "files.read": { request: { maxBytes?: number; path: string; projectId: string }; result: { size: number; text: string; truncated: boolean } };
   "host.auth.pair": { request: { pin: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push">; token: string } };
   "host.auth.revoke": { request: { token: string }; result: { revoked: boolean } };
   "host.auth.token": { request: { token: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push"> } };
