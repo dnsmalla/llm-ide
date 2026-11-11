@@ -2,6 +2,7 @@
 // untrusted file, so they are only ever rendered as React text children.
 import { useEffect, useState } from "react";
 import { invokeHost } from "../shell/host";
+import { shellBus } from "../shell/bus";
 import { MarkdownView } from "../library/MarkdownView";
 import type { Adjacency } from "./filters.ts";
 import type { GraphModel, LayoutResult } from "./model.ts";
@@ -76,6 +77,11 @@ export function NodeDetails({ model, layout, adj, node, onSelect, onOpenFile, on
         {path !== null && <span className="gr-file-kind">{path.split(".").pop()?.toUpperCase() ?? "FILE"}{preview ? ` · ${formatBytes(preview.size)}` : ""}</span>}
         <span className="gr-spacer" />
         {path !== null && onOpenFile && <button type="button" className="gr-btn" onClick={() => onOpenFile(path)}>Open</button>}
+        <button type="button" className="gr-btn" onClick={() => {
+          const prompt = `Explain this code-graph node and how it is used in the project. Use the graph and code tools.\n\nNode: ${model.titles[node]}\nKind: ${model.nodeKinds[model.kindOf[node]]}\n${path ? `File: ${path}\n` : ""}Connections: ${layout.degree[node]}`;
+          shellBus.publish({ type: "goto-section", section: "chat" });
+          shellBus.publish({ type: "ask-chat", prompt });
+        }}>Ask in Chat</button>
         <button type="button" className="gr-btn" onClick={onClose} aria-label="Close details">Close</button>
       </div>
       <dl className="gr-dl">

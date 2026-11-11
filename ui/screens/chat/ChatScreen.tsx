@@ -2,6 +2,7 @@
 // modules (events, state, controller, route, virtual, markdown) and is tested without a DOM.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
+import { shellBus } from "../shell/bus";
 import { Composer, type ComposerProps } from "./Composer";
 import { ComposerWithExtras } from "./slash/ComposerWithExtras";
 import type { ComposeServices } from "./slash/extras";
@@ -155,6 +156,19 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   useEffect(() => {
     if (!activeId && sessions.length > 0) setActiveId(sessions[0]!.id);
   }, [activeId, sessions, setActiveId]);
+
+  // Graph/memory "Ask in Chat": put the prepared prompt in this chat's composer. The event is sticky, so it
+  // survives the section mount that happens after the sender's goto-section.
+  useEffect(() => {
+    if (!activeId) return undefined;
+    const take = (ev: { prompt: string } | null) => {
+      if (!ev) return;
+      controller.setView(activeId, { draft: ev.prompt });
+      setRefineNonce((n) => n + 1);
+    };
+    take(shellBus.takePending("ask-chat"));
+    return shellBus.subscribe("ask-chat", take);
+  }, [activeId, controller]);
 
   // Model list once per screen and after every core restart.
   useEffect(() => {

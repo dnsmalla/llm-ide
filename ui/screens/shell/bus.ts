@@ -12,6 +12,8 @@ export type ShellEvent =
   | { type: "open-file"; path: string; line?: number }
   /** Switch section; `anchor` is a section-specific sub-page id (Settings: "about", "providers", ...). */
   | { type: "goto-section"; section: SectionId; anchor?: string }
+  /** Open Chat with a prepared prompt (Graph node, memory). */
+  | { type: "ask-chat"; prompt: string }
   /** The project's files or cached repository issues changed (clone, import); owners reload. */
   | { type: "project-changed" }
   /** Start or stop live capture (the tray's quick action); the Live screen toggles its own Start/Stop. */
@@ -23,7 +25,7 @@ type Handler<T extends ShellEventType> = (ev: Extract<ShellEvent, { type: T }>) 
 /** A pending request older than this is stale (the user moved on). */
 export const PENDING_TTL_MS = 10_000;
 
-const STICKY: ReadonlySet<ShellEventType> = new Set<ShellEventType>(["open-file", "goto-section", "live-capture"]);
+const STICKY: ReadonlySet<ShellEventType> = new Set<ShellEventType>(["open-file", "goto-section", "live-capture", "ask-chat"]);
 
 /** Project-relative path check: no absolute form, no `..`, no NUL, bounded. Returns the normalised path or null. */
 export function safeRelativePath(raw: string): string | null {
@@ -75,6 +77,11 @@ export function createShellBus(now: () => number = Date.now): ShellBus {
         const path = safeRelativePath(ev.path);
         if (path === null) return;
         ev = { ...ev, path };
+      }
+      if (ev.type === "ask-chat") {
+        const prompt = typeof ev.prompt === "string" ? ev.prompt.trim().slice(0, 4000) : "";
+        if (prompt === "") return;
+        ev = { ...ev, prompt };
       }
       const subs = handlers.get(ev.type);
       if (STICKY.has(ev.type)) pending.set(ev.type, { ev, at: now() });

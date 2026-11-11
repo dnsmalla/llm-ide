@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import type { ProjectMemory } from "../host.ts";
 import { MEMORY_TEXT, bytesLabel, projectError } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
+import { shellBus } from "../../shell/bus";
 import { Button, ErrorText, NeedsHost } from "../ui.tsx";
 
 /**
@@ -39,6 +40,10 @@ export default function MemorySection() {
   return (
     <div className="st-stack">
       <p className="st-hint">{MEMORY_TEXT.hint}</p>
+      <div className="st-row"><Button onClick={() => {
+        shellBus.publish({ type: "goto-section", section: "chat" });
+        shellBus.publish({ type: "ask-chat", prompt: "Summarize this project's memory and code graph for a new teammate. Use the memory and graph tools. Name the main areas, the files that connect them, and what is missing or stale." });
+      }}>Ask Chat about memory</Button></div>
       <ErrorText text={error} />
       {data === null && !error ? <p className="st-hint" role="status">Loading project memory...</p> : null}
       {data ? (
