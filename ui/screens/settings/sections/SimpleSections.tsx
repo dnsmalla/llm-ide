@@ -15,8 +15,8 @@ export function WorkspaceSection() {
     <div className="st-stack">
       <div className="st-info-card"><span className="st-label">Active project</span>{host.activeProjectPath ? <p>{project ?? "No project is open."}</p> : <NeedsHost what="The active project" />}</div>
       <div className="st-row">
-        <Button onClick={() => shellBus.publish({ type: "goto-section", section: "library" })}>Open Library connectors</Button>
-        <span className="st-hint">Source credentials and syncing live in Library, not duplicated here.</span>
+        <Button onClick={() => shellBus.publish({ type: "goto-section", section: "library" })}>Open Library</Button>
+        <span className="st-hint">Choose Connectors in the Library sidebar for source credentials and syncing; they are not duplicated here.</span>
       </div>
       <label className="st-field">
         <span className="st-label">Home page</span>
