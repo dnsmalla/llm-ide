@@ -698,6 +698,7 @@ export function createGateway(overrides) {
       }
       case 'tasks.run': {
         if (composeRefused(s, entry, id)) return;
+        if (!executeAllowed(entry)) return fail(s, id, 'denied', 'This account or project cannot run tasks from the phone.');
         const wait = rate.turn(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         const runId = randomUUID();
