@@ -4,7 +4,7 @@ import SharedProtocol
 /// Transcript + send/handle logic for the Chat tab, spoken over `ConnectionService.host` (Host API v1).
 /// Holds a weak reference to the `ConnectionService`.
 @MainActor
-final class LlmIdeChatStore: ObservableObject {
+class LlmIdeChatStore: ObservableObject {
     /// Transcript for the llm-ide chat sheet.
     @Published var llmIdeMessages: [ChatMessage] = []
     /// True while a streamed reply for THIS surface is in flight. Replaces the
@@ -38,10 +38,16 @@ final class LlmIdeChatStore: ObservableObject {
 
     weak var connection: ConnectionService?
 
-    init(connection: ConnectionService) {
+    /// "ask" (the Chat tab) or "execute" (the Execute tab): each is its own chat on the desktop, with its own
+    /// transcript, new-chat and delete. Only "execute" is named on the wire; the default keeps the legacy chat.
+    let surface: String
+    private var wireSurface: String? { surface == "execute" ? "execute" : nil }
+
+    init(connection: ConnectionService, surface: String = "ask") {
         self.connection = connection
+        self.surface = surface
         // Register so ConnectionService can route this slice's `HostEvent`s here.
-        connection.llmIdeStore = self
+        if surface == "execute" { connection.executeStore = self } else { connection.llmIdeStore = self }
     }
 
     /// The project every project-scoped frame names (ADR 0022); nil keeps the v1 team behavior.
@@ -94,6 +100,7 @@ final class LlmIdeChatStore: ObservableObject {
         case .refuse(let message): connection?.errorMessage = message; return false
         }
         request.mode = mode ?? "ask"
+        request.surface = wireSurface
         // The host's own session store is the transcript: the phone sends only the new text (and files).
         let id = mintStreamingTurn(messages: &llmIdeMessages, commandIds: &llmIdeCommandIds, userText: text)
         isStreaming = true
@@ -136,7 +143,7 @@ final class LlmIdeChatStore: ObservableObject {
             let projectId = await self.scopedProjectId()
             do {
                 let result = try await self.connection?.host.send(
-                    .chatSnapshot, HostApiChatSnapshotRequest(limit: 50, projectId: projectId),
+                    .chatSnapshot, HostApiChatSnapshotRequest(limit: 50, projectId: projectId, surface: self.wireSurface),
                     as: HostApiChatSnapshotResult.self)
                 guard ticket == self.historyTicket else { return } // a newer project's load won
                 if let result { self.applySnapshot(result) }
@@ -162,7 +169,7 @@ final class LlmIdeChatStore: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let request = HostApiChatHistoryClearRequest(projectId: self.selectedProjectId)
+                let request = HostApiChatHistoryClearRequest(projectId: self.selectedProjectId, surface: self.wireSurface)
                 if try await self.connection?.host.send(.chatHistoryClear, request,
                                                         as: HostApiChatHistoryClearResult.self).cleared == true {
                     self.llmIdeMessages.removeAll()
@@ -181,7 +188,7 @@ final class LlmIdeChatStore: ObservableObject {
         guard !isStreaming, let host = connection?.host else { return }
         Task { [weak self] in
             do {
-                _ = try await host.send(.chatNew, HostApiChatNewRequest(), as: HostApiChatNewResult.self)
+                _ = try await host.send(.chatNew, HostApiChatNewRequest(surface: self?.wireSurface), as: HostApiChatNewResult.self)
                 self?.llmIdeMessages.removeAll()
                 self?.approvalNotice = nil
             } catch {
@@ -438,4 +445,10 @@ final class LlmIdeChatStore: ObservableObject {
             self.sendCancel(commandId)
         }
     }
+}
+
+/// The Execute tab's chat: a distinct type so SwiftUI can hand the view its own store next to the Chat tab's.
+@MainActor
+final class ExecuteChatStore: LlmIdeChatStore {
+    init(connection: ConnectionService) { super.init(connection: connection, surface: "execute") }
 }

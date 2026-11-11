@@ -6,6 +6,7 @@ struct MyAppApp: App {
     @StateObject private var connectionStore: ConnectionStore
     @StateObject private var connection: ConnectionService
     @StateObject private var llmIdeStore: LlmIdeChatStore
+    @StateObject private var executeStore: ExecuteChatStore
     @StateObject private var usageStore: UsageStore
     @StateObject private var projectsStore: ProjectsStore
     @StateObject private var syncStore: SyncStore
@@ -23,6 +24,7 @@ struct MyAppApp: App {
         PushRegistrar.shared.connection = connection
 
         _llmIdeStore = StateObject(wrappedValue: LlmIdeChatStore(connection: connection))
+        _executeStore = StateObject(wrappedValue: ExecuteChatStore(connection: connection))
         _usageStore = StateObject(wrappedValue: UsageStore(connection: connection))
         _projectsStore = StateObject(wrappedValue: ProjectsStore(connection: connection, connectionStore: connectionStore))
         _syncStore = StateObject(wrappedValue: SyncStore())
@@ -36,6 +38,7 @@ struct MyAppApp: App {
                 .environmentObject(connectionStore)
                 .environmentObject(connection)
                 .environmentObject(llmIdeStore)
+                .environmentObject(executeStore)
                 .environmentObject(usageStore)
                 .environmentObject(projectsStore)
                 .environmentObject(syncStore)

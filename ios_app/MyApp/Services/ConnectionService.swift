@@ -81,7 +81,7 @@ final class ConnectionService: ObservableObject {
             // raised on the old connection can never be answered — a card left up would accept a tap
             // and look approved when nothing was.
             if connectionStatus != .connected, oldValue == .connected {
-                llmIdeStore?.clearPendingPrompts()
+                chatStores.forEach { $0.clearPendingPrompts() }
             }
         }
     }
@@ -125,6 +125,9 @@ final class ConnectionService: ObservableObject {
 
     // Weak back-references to the stores (the app owns them via `@StateObject`).
     weak var llmIdeStore: LlmIdeChatStore?
+    /// The Execute tab's own chat; it receives the same host events and keeps only the turns it started.
+    weak var executeStore: LlmIdeChatStore?
+    private var chatStores: [LlmIdeChatStore] { [llmIdeStore, executeStore].compactMap { $0 } }
     weak var usageStore: UsageStore?
     weak var projectsStore: ProjectsStore?
     /// Set at app launch: the pairing (address, pin, token) and the host name.
@@ -256,29 +259,29 @@ final class ConnectionService: ObservableObject {
         case .capabilities(let caps):
             hostCapabilities = caps
             if !servesV1Read { reads.reset() }   // `read` revoked: clear what is on screen now
-            llmIdeStore?.handle(event)
+            chatStores.forEach { $0.handle(event) }
             PushRegistrar.shared.hostReady()
         case .disconnected(let reason):
             if !reason.retryable { return handleRefusal(reason) }
             if errorMessage == nil { errorMessage = "Disconnected from the desktop. Retrying…" }
             // v1 has no replay: no event for a turn on the old session can arrive, so end them all now.
-            llmIdeStore?.handleChatError()
+            chatStores.forEach { $0.handleChatError() }
             invalidateSocket()
             connectionStatus = .disconnected
             scheduleReconnect(retryAfterMs: reason.retryAfterMs)
         case .resync:
-            llmIdeStore?.handle(event)
+            chatStores.forEach { $0.handle(event) }
             projectsStore?.refresh()
             if servesV1Read { Task { await reads.refresh() } }
         case .event:
-            llmIdeStore?.handle(event)
+            chatStores.forEach { $0.handle(event) }
         }
     }
 
     /// Wipe every mirrored surface so a newly paired host starts from a blank
     /// slate. Also the single place the "Forget" call sites use.
     func resetStoresForNewDevice() {
-        llmIdeStore?.resetForNewDevice()
+        chatStores.forEach { $0.resetForNewDevice() }
         usageStore?.resetForNewDevice()
         projectsStore?.resetForNewDevice()
         reads.reset()
@@ -304,7 +307,7 @@ final class ConnectionService: ObservableObject {
         reconnectTask?.cancel()
         reconnectTask = nil
         if clearDirect { directIP = nil; directPIN = nil }
-        llmIdeStore?.handleChatError()
+        chatStores.forEach { $0.handleChatError() }
         invalidateSocket()
         connectionStatus = .disconnected
     }
