@@ -3,6 +3,7 @@ import type { ComponentStatus } from "../host.ts";
 import { MERMAID_TEXT, componentError, componentStateLabel, sizeLabel } from "../components-model.ts";
 import { useEnv } from "../context.tsx";
 import { Button, ErrorText, NeedsHost } from "../ui.tsx";
+import TokenSavingSection from "./TokenSavingSection.tsx";
 
 /**
  * The Mac's "Optional components" group: the on-demand Mermaid diagram renderer, with Install and Remove.
@@ -69,6 +70,10 @@ export default function OptionalComponentsSection() {
         </div>
         {notice ? <p className="st-ok" role="status">{notice}</p> : null}
         <ErrorText text={error} />
+      </div>
+      <div className="st-stack">
+        <span className="st-label">Token Saving</span>
+        <TokenSavingSection />
       </div>
     </div>
   );

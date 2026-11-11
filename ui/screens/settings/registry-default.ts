@@ -17,7 +17,6 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   team: dflt(() => import("./sections/TeamSection.tsx")),
   general: dflt(() => import("./sections/GeneralSection.tsx")),
   "tool-permissions": dflt(() => import("./sections/ToolPermissionsSection.tsx")),
-  "token-saving": dflt(() => import("./sections/TokenSavingSection.tsx")),
   providers: dflt(() => import("./sections/ProvidersSection.tsx")),
   "model-routing": dflt(() => import("./sections/ModelsGroup.tsx")),
   "agent-history": dflt(() => import("./sections/AgentHistorySection.tsx")),
