@@ -167,3 +167,4 @@
 .sh-tool[data-tb-id]:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--tb, var(--tok-color-text)) 10%, transparent); }
 .sh-tool[data-tb-id][aria-current="page"] { background: color-mix(in srgb, var(--tb, var(--tok-color-accent)) 18%, transparent); color: var(--tb, var(--tok-color-accent)); }
 .sh-tool[data-tb-id][aria-current="page"] svg { opacity: 1; }
+.sh-statusbar-help { color: var(--tok-color-accent2); }

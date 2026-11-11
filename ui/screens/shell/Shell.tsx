@@ -412,6 +412,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         theme={theme}
         onTheme={onTheme}
         chatActive={nav.active === "chat"}
+        onHelp={() => setGuideOpen(true)}
         terminalItem={<ShellTerminalItem built={TERMINAL_BUILT} open={terminalOpen} onToggle={toggleTerminalDock} />}
       /> : null}
       {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} onNavigate={(section) => { setGuideOpen(false); onSelect(section); }} /> : null}

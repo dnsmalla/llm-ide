@@ -1,5 +1,5 @@
 import { memo, useState, type ReactNode } from "react";
-import { ChatBubbleIcon, ChevronIcon, FolderIcon, THEMES, type ThemeId } from "@llmide/ui-kit";
+import { ChatBubbleIcon, ChevronIcon, FolderIcon, Icon, THEMES, type ThemeId } from "@llmide/ui-kit";
 import { ActivityBell } from "./ActivityBell";
 import { BusInbox } from "./approvals/BusInbox";
 import { MenuButton, type MenuItem } from "./MenuButton";
@@ -190,9 +190,11 @@ interface Props {
   /** The Chat section is showing (the item is marked current). */
   chatActive?: boolean;
   onTheme: (id: ThemeId) => void;
+  /** Opens Help & Support (bottom bar, always visible). */
+  onHelp?: () => void;
 }
 
-export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onTheme, chatActive = false, terminalItem = null }: Props) {
+export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onTheme, chatActive = false, terminalItem = null, onHelp }: Props) {
   const { signedIn } = useCoreSession();
   const themeLabel = THEMES.find((t) => t.id === theme)?.label ?? theme;
   return (
@@ -212,6 +214,7 @@ export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onT
           <ChevronIcon />
         </span>
       </MenuButton>
+      {onHelp ? <button type="button" className="sh-statusbar-item sh-statusbar-help" onClick={onHelp} title="Help & Support (Ctrl+/)" aria-label="Help & Support"><Icon name="info" size={13} /><span>Help</span></button> : null}
       {terminalItem}
       <BusInbox />
       <ActivityBell />

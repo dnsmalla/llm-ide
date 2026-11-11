@@ -109,7 +109,7 @@ test("Welcome: reset notice (corrupt recents) with reassurance; current project 
 test("Guide dialog: searchable beginner guide with screens, settings and recipes, modal semantics", () => {
   const out = welcome({ guideOpen: true });
   assert.match(out, /role="dialog" aria-modal="true" aria-labelledby="wc-guide-title"/);
-  for (const t of ["Help &amp; Guide", "Your first 10 minutes", "Explorer", "Factory", "Settings overview", "Providers"]) assert.match(out, new RegExp(t));
+  for (const t of ["Help &amp; Support", "Your first 10 minutes", "Explorer", "Factory", "Settings overview", "Providers"]) assert.match(out, new RegExp(t));
   assert.match(out, /Search screens, settings or a recipe/);
   assert.match(out, /Try it/);
   assert.equal(html(h(GuideDialog, { onClose() {} })).includes("Close"), true);

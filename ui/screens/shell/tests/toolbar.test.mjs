@@ -21,7 +21,7 @@ test("toolbar sections follow TOOLBAR_IDS; developer tools append Spike", () => 
 });
 
 test("account menu rows and their order", () => {
-  const macRows = ["Settings…", "Help & Guide", "Permissions…"];
+  const macRows = ["Settings…", "Help & Support", "Permissions…"];
   const noop = () => {};
   const items = accountMenuItems({ id: "1", email: "a@b.c", displayName: "Ada" }, { openSettings: noop, openHelp: noop, openPermissions: noop, askSignOut: noop }, true);
   const actions = items.filter((i) => !("kind" in i)).map((i) => i.label);

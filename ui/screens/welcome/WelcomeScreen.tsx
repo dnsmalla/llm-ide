@@ -118,7 +118,7 @@ export function GuideDialog({ onClose, onNavigate }: { onClose: () => void; onNa
       <div className="wc-modal-card help-card">
         <div className="wc-modal-head">
           <div>
-            <h2 id="wc-guide-title" className="wc-h2">Help &amp; Guide</h2>
+            <h2 id="wc-guide-title" className="wc-h2">Help &amp; Support</h2>
             <p className="help-sub">Every screen and every setting, in beginner steps.</p>
           </div>
           <button ref={close} type="button" className="sh-button" onClick={onClose}>Close</button>

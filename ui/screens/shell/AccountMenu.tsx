@@ -1,4 +1,4 @@
-// The account menu at the right of the toolbar (Mac `HeaderAccountMenu`): who is signed in, Settings, Help & Guide,
+// The account menu at the right of the toolbar (Mac `HeaderAccountMenu`): who is signed in, Settings, Help & Support,
 // Permissions, Sign out (confirmed). Only shown while signed in, like the Mac. Name and email are server text: shown as text.
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@llmide/ui-kit";
@@ -31,7 +31,7 @@ export function accountMenuItems(user: SessionUser, a: Pick<AccountActions, "ope
     { id: "email", kind: "label", label: safeText(user.email, 120), muted: true },
     { id: "sep1", kind: "separator" },
     { id: "settings", label: "Settings…", hint: `${mod},`, onSelect: a.openSettings },
-    { id: "help", label: "Help & Guide", hint: `${mod}/`, onSelect: a.openHelp },
+    { id: "help", label: "Help & Support", hint: `${mod}/`, onSelect: a.openHelp },
     { id: "permissions", label: "Permissions…", onSelect: a.openPermissions },
     { id: "sep2", kind: "separator" },
     { id: "signout", label: "Sign out", onSelect: a.askSignOut },
