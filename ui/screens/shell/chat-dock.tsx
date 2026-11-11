@@ -15,6 +15,8 @@ export interface ChatDockProps {
   surface?: string;
   /** Hides the dock; the dock's header shows a button when given. */
   onCollapse?: () => void;
+  /** Read-only modes only (the floating chat popup). */
+  readOnly?: boolean;
 }
 
 type Loader = () => Promise<{ default: ComponentType<ChatDockProps> }>;

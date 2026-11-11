@@ -27,7 +27,7 @@ import { useChatState, useControllerVersion } from "./hooks";
 import { chatApprovalStore } from "../shell/chat-approvals";
 import { chatOutputStore } from "../shell/chat-output";
 import {
-  AUTO_MODE, MODES, PROVIDER_BLOCKED_NOTE, defaultModelForMode, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
+  AUTO_MODE, MODES, READ_ONLY_MODES, PROVIDER_BLOCKED_NOTE, defaultModelForMode, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
   restoreFailedPick, routeRereadDue, type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import { memoryClient } from "./memory-client";
@@ -93,12 +93,14 @@ export interface ChatScreenProps {
   /** Dock only: hides the dock (the header shows the button when this is given). */
   onCollapse?: () => void;
   /** Which surface owns this chat list; each dock sees only the chats it created. */
+  /** Offers only the read-only modes (Ask, Plan, Review, Document) and starts on Ask; no Auto, no Execute. */
+  readOnly?: boolean;
   surface?: string;
 }
 
 const SESSION_PAGE = 100;
 
-export function ChatScreen({ controller, store, core, host, initialSessionId = null, approvals, banner, noProject = false, shared, active = false, dock = false, onCollapse, surface = "chat" }: ChatScreenProps) {
+export function ChatScreen({ controller, store, core, host, initialSessionId = null, approvals, banner, noProject = false, shared, active = false, dock = false, onCollapse, surface = "chat", readOnly = false }: ChatScreenProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -247,7 +249,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     const text = last.parts.map((p) => (p.kind === "text" ? p.sealed.join("") + p.open : "")).join("").trim();
     if (text) chatOutputStore.set({ title: "Latest chat reply", text: text.slice(0, 80_000), at: Date.now() });
   }, [state.messages]);
-  const current: ChatPrefs = (activeId && prefs[activeId]) || { mode: pickerModeAfterSessionChange(), provider: null, model: null };
+  const current: ChatPrefs = (activeId && prefs[activeId]) || { mode: readOnly ? "ask" : pickerModeAfterSessionChange(), provider: null, model: null };
   const setCurrent = (patch: Partial<ChatPrefs>) => { if (activeId) setPrefs((p) => ({ ...p, [activeId]: { ...current, ...patch } })); };
   // A chat with no explicit model starts on the mode's default: cheap for Ask/Document/Review, strong for
   // Plan/Execute. A saved pick (or a pinned route) always wins.
@@ -259,9 +261,9 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [activeId, groupsLoaded, groups, current.mode, current.provider, current.model, route?.pinned]);
 
   // A viewer has exactly one permitted mode (Ask): the picker never shows Auto and the chat runs as Ask.
-  const modeOptions = useMemo(() => allowedModes(perms, MODES), [perms]);
+  const modeOptions = useMemo(() => allowedModes(perms, MODES).filter((m) => !readOnly || READ_ONLY_MODES.has(m.id)), [perms, readOnly]);
   useEffect(() => {
-    if (activeId && modeOptions.length === 1 && current.mode !== modeOptions[0]!.id) setCurrent({ mode: "ask" });
+    if (activeId && (modeOptions.length === 1 || readOnly) && !modeOptions.some((m) => m.id === current.mode)) setCurrent({ mode: "ask" });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, modeOptions]);
 
@@ -487,7 +489,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               chatId={activeId} state={state} mode={current.mode} plans={plans} onOpenLink={host.openLink} onCopy={host.copy} onOpenFile={host.files?.open}
               onRefine={(title) => { controller.setView(activeId, { draft: refineSeed(title) }); setRefineNonce((n) => n + 1); }}
               onExecute={(turn) => {
-                if (sendBlock) return; // the same reason the composer shows (no project, ended chat, no permission)
+                if (sendBlock || readOnly) return; // the same reason the composer shows (no project, ended chat, no permission)
                 setCurrent({ mode: "execute" });
                 setPlanRunChat(activeId);
                 controller.send(activeId, turn.text, { ...turn.options, model: current.model, provider: current.provider, permissionMode: permission, effort: turnEffort(effortPick, effortLevels) });

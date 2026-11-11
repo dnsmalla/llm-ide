@@ -9,8 +9,8 @@ import type { ChatDockProps } from "@llmide/screens/shell";
 import { ChatScreen } from "./ChatScreen";
 import { useChatSurface } from "./surface";
 
-export default function ChatDock({ active, projectRoot, initialPath = null, surface = "explorer", onCollapse }: ChatDockProps) {
+export default function ChatDock({ active, projectRoot, initialPath = null, surface = "explorer", onCollapse, readOnly = false }: ChatDockProps) {
   const { rt, host, approvals, banner } = useChatSurface(projectRoot, active, initialPath, surface);
   if (projectRoot === null) return <p className="chat-muted chat-pad" role="status">Open a project to use the Code Assistant.</p>;
-  return <ChatScreen dock onCollapse={onCollapse} controller={rt.controller} store={rt.store} core={rt.transport} host={host} approvals={approvals} banner={banner} shared={rt.ui} noProject={false} active={active} surface={surface} />;
+  return <ChatScreen dock onCollapse={onCollapse} controller={rt.controller} store={rt.store} core={rt.transport} host={host} approvals={approvals} banner={banner} shared={rt.ui} noProject={false} active={active} surface={surface} readOnly={readOnly} />;
 }

@@ -17,6 +17,8 @@ export const MODES: readonly ModeOption[] = [
   { id: "document", label: "Document", hint: "Write documentation in the reply; no file edits or commands" },
   { id: "execute", label: "Execute", hint: "Today's full agentic behaviour: file edits, commands, tools" },
 ];
+/** Modes that never edit files or run commands (the popup chat offers only these). */
+export const READ_ONLY_MODES: ReadonlySet<string> = new Set(["ask", "plan", "assist_plan", "review", "document"]);
 export const KNOWN_MODES: ReadonlySet<string> = new Set(MODES.map((m) => m.id));
 
 /** Only Auto follows the server's resolved mode; a hand-picked mode is never moved. */

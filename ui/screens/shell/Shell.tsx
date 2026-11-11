@@ -84,6 +84,18 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   }, []);
   const [assistant, setAssistant] = useState({ open: false, fits: true });
   const [sideChat, setSideChat] = useState(false);
+  const [popupSize, setPopupSize] = useState({ w: 420, h: 560 });
+  // Drag the top-left corner: the popup is pinned bottom-right, so dragging up/left grows it.
+  const startPopupResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const x0 = e.clientX, y0 = e.clientY, { w, h } = popupSize;
+    const move = (ev: PointerEvent) => setPopupSize({
+      w: Math.min(Math.max(w + x0 - ev.clientX, 320), window.innerWidth - 32),
+      h: Math.min(Math.max(h + y0 - ev.clientY, 300), window.innerHeight - 80),
+    });
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
   const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? getTheme());
   const terminalOpen = useTerminalDockOpen();
   const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
@@ -344,17 +356,6 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           <HomeIcon />
         </button>
         <SectionToolbar active={nav.active} onSelect={onSelect} devTools={devToolsEnabled()} />
-        <button
-          type="button"
-          className="sh-icon-button sh-side-chat-toggle"
-          aria-label="Toggle Chat panel"
-          aria-controls="sh-side-chat"
-          aria-expanded={sideChat}
-          title={sideChat ? "Hide Chat panel" : "Show Chat panel"}
-          onClick={() => setSideChat((v) => !v)}
-        >
-          <Icon name="message-square" size={16} />
-        </button>
         {nav.active === "explorer" && (
           <button
             type="button"
@@ -420,10 +421,15 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         />
         </div>
         {sideChat ? (
-          <aside id="sh-side-chat" className="sh-side-chat" aria-label="Chat panel">
-            <ChatDockSlot active={gate === "open"} projectRoot={project?.root ?? null} surface="side" onCollapse={() => setSideChat(false)} />
+          <aside id="sh-side-chat" className="sh-side-chat" aria-label="Chat popup" style={{ width: popupSize.w, height: popupSize.h }}>
+            <div className="sh-side-chat-resize" onPointerDown={startPopupResize} title="Drag to resize" aria-hidden="true" />
+            <ChatDockSlot active={gate === "open"} projectRoot={project?.root ?? null} surface="side" readOnly onCollapse={() => setSideChat(false)} />
           </aside>
-        ) : null}
+        ) : (
+          <button type="button" className="sh-chat-launcher" aria-label="Open Chat (read-only)" title="Chat (read-only)" onClick={() => setSideChat(true)}>
+            <Icon name="message-square" size={22} />
+          </button>
+        )}
       </div>
       {gate === "open" ? <StatusBar
         apiWarning={apiWarning}
