@@ -113,8 +113,8 @@ test("hostile titles and frontmatter are text: no markup survives in the list or
 test("Library is the Mac search bar over one list, with no desktop filter/action presets", async () => {
   const { host, store } = await mkStore((hh) => hh.add("a.md", L.meetingText(1)));
   const out = html(screen(store, host));
-  assert.match(out, /<input type="search"[^>]*aria-label="Filter and search notes"/);
-  assert.match(out, /placeholder="Search meetings…"/);
+  assert.match(out, /<input type="search"[^>]*aria-label="Search the Library"/);
+  assert.match(out, /placeholder="Search Library…"/);
   assert.ok(!out.includes("lib-chips"), "no filter presets");
   assert.ok(!out.includes("New note"), "no New note row in the Mac list");
   assert.ok(!out.includes("Select notes"), "no Select notes row in the Mac list");
@@ -139,7 +139,7 @@ test("sort, group, source and date controls are real and drive the store", async
 test("empty folder and listing states are announced politely", async () => {
   const { host, store } = await mkStore();
   const out = html(screen(store, host));
-  assert.match(out, /role="status"[\s\S]*No Meetings Yet/);
+  assert.match(out, /role="status"[\s\S]*No items in this section/);
 });
 
 test("Extensions entries: a supplied render replaces the placeholder (S-J seam)", async () => {

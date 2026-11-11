@@ -192,3 +192,14 @@
 .lib-ext-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--tok-color-border); }
 .lib-ext-title { font-size: 12px; font-weight: 600; color: var(--tok-color-text-muted); text-transform: uppercase; letter-spacing: .05em; }
 .lib-ext > :not(.lib-ext-head) { min-height: 0; }
+
+/* Premium Library list header: calmer, denser and clearly separated from the rows. */
+.lib-list-head { gap: 10px; padding: 12px 14px; background: linear-gradient(180deg, var(--tok-color-surface2), var(--tok-color-surface)); }
+.lib-search { height: 36px; border-radius: 9px; background: var(--tok-color-body); }
+.lib-search:focus-within { border-color: color-mix(in srgb, var(--tok-color-accent) 55%, var(--tok-color-border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tok-color-accent) 10%, transparent); }
+.lib-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lib-controls .lib-select { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--tok-color-text-muted); }
+.lib-controls .lib-select select { max-width: 130px; padding: 4px 6px; border: 1px solid var(--tok-color-border); border-radius: 6px; background: var(--tok-color-body); color: var(--tok-color-text); font: inherit; font-size: 11px; }
+.lib-controls .lib-link-btn { padding: 4px 8px; border: 1px solid var(--tok-color-border); border-radius: 999px; text-decoration: none; font-size: 11px; color: var(--tok-color-text-muted); }
+.lib-controls .lib-link-btn[aria-pressed="true"] { color: var(--tok-color-accent); border-color: color-mix(in srgb, var(--tok-color-accent) 45%, var(--tok-color-border)); background: color-mix(in srgb, var(--tok-color-accent) 10%, transparent); }
+.lib-empty-hint { margin: 24px 14px; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); text-align: center; }
