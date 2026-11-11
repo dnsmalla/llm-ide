@@ -7,7 +7,7 @@ export default function ServerGroup() {
     <div className="st-stack">
       <ServerSection />
       <div className="st-stack">
-        <span className="st-label">Agent engine</span>
+        <span className="st-label">Claude Agent SDK</span>
         <AgentSdkSection />
       </div>
     </div>

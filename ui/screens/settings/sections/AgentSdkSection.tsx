@@ -69,7 +69,7 @@ export default function AgentSdkSection() {
       {s.updating ? <p className="st-hint" role="status">Updating. Downloading can take a few minutes...</p> : null}
       <div className="st-row">
         <Button label="Check now" disabled={s.checking || s.updating} onClick={() => void m.load(true)}>Check now</Button>
-        {st?.updateAvailable && st.canUpdate ? <Button tone="primary" disabled={s.updating} onClick={() => setConfirming(true)}>{`Update to ${v(st.latest)}...`}</Button> : null}
+        {st?.updateAvailable && st.canUpdate ? <Button tone="primary" disabled={s.updating} onClick={() => setConfirming(true)}>{`Update Agent SDK to ${v(st.latest)}...`}</Button> : null}
       </div>
       {confirming ? (
         <TypedConfirm
