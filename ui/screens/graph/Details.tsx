@@ -70,6 +70,7 @@ export function NodeDetails({ model, layout, adj, node, onSelect, onOpenFile, on
     items.push({ other: adj.nbr[k], dir: model.from[e] === node ? "out" : "in", kind, conf: model.conf[e], w: edgeWeight(kind, model.conf[e]) });
   }
   items.sort((a, b) => b.w - a.w || a.other - b.other);
+  const neighbourLines = items.slice(0, 8).map((i) => `- ${model.titles[i.other]} (${model.nodeKinds[model.kindOf[i.other]]}, ${i.dir}, ${i.kind})${model.paths[i.other] ? ` at ${model.paths[i.other]}` : ""}`);
   return (
     <aside className="gr-details" aria-label={`Details for ${model.titles[node]}`}>
       <div className="gr-details-head">
@@ -78,7 +79,7 @@ export function NodeDetails({ model, layout, adj, node, onSelect, onOpenFile, on
         <span className="gr-spacer" />
         {path !== null && onOpenFile && <button type="button" className="gr-btn" onClick={() => onOpenFile(path)}>Open</button>}
         <button type="button" className="gr-btn" onClick={() => {
-          const prompt = `Explain this code-graph node and how it is used in the project. Use the graph and code tools.\n\nNode: ${model.titles[node]}\nKind: ${model.nodeKinds[model.kindOf[node]]}\n${path ? `File: ${path}\n` : ""}Connections: ${layout.degree[node]}`;
+          const prompt = `Explain this code-graph node and how it is used in the project. Use the graph and code tools.\n\nNode: ${model.titles[node]}\nKind: ${model.nodeKinds[model.kindOf[node]]}\n${path ? `File: ${path}\n` : ""}Connections: ${layout.degree[node]}${neighbourLines.length ? `\n\nConnected nodes:\n${neighbourLines.join("\n")}` : ""}`;
           shellBus.publish({ type: "goto-section", section: "chat" });
           shellBus.publish({ type: "ask-chat", prompt });
         }}>Ask in Chat</button>

@@ -12,5 +12,12 @@ export function summarizeGraph(raw: unknown): string | null {
     .slice(0, 8)
     .map((f) => (f && typeof f === "object" && typeof (f as { path?: unknown }).path === "string" ? (f as { path: string }).path : ""))
     .filter(Boolean);
-  return `Project graph: ${count} files/nodes, ${edges.length} edges.${top.length ? ` Main files: ${top.join(", ")}.` : ""}`;
+  const kinds = new Map<string, number>();
+  for (const row of [...files, ...nodes]) {
+    if (!row || typeof row !== "object") continue;
+    const k = (row as { kind?: unknown }).kind;
+    if (typeof k === "string" && k) kinds.set(k, (kinds.get(k) ?? 0) + 1);
+  }
+  const kindText = [...kinds.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, n]) => `${k} ${n}`).join(", ");
+  return `Project graph: ${count} files/nodes, ${edges.length} edges.${kindText ? ` Kinds: ${kindText}.` : ""}${top.length ? ` Main files: ${top.join(", ")}.` : ""}`;
 }
