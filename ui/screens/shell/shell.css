@@ -168,3 +168,6 @@
 .sh-tool[data-tb-id][aria-current="page"] { background: color-mix(in srgb, var(--tb, var(--tok-color-accent)) 18%, transparent); color: var(--tb, var(--tok-color-accent)); }
 .sh-tool[data-tb-id][aria-current="page"] svg { opacity: 1; }
 .sh-statusbar-help { color: var(--tok-color-accent2); }
+.sh-side-chat { width: 380px; min-width: 300px; flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--tok-color-border); background: var(--tok-color-surface); }
+.sh-side-chat > * { min-height: 0; flex: 1 1 auto; }
+.sh-side-chat-toggle[aria-expanded="true"] { color: var(--tok-color-accent); background: color-mix(in srgb, var(--tok-color-accent) 12%, transparent); }

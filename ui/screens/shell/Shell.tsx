@@ -16,6 +16,7 @@ import { dismissCrashNotice, loadCrashNotice, type CrashNotice } from "./crash-r
 import { StatusBar } from "./StatusBar";
 import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
 import { chatApprovalStore } from "./chat-approvals";
+import { ChatDockSlot } from "./chat-dock";
 import { menuAction } from "./menu-model";
 import { useSyncExternalStore } from "react";
 import { TERMINAL_BUILT } from "../explorer/terminal/shared";
@@ -82,6 +83,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     return () => globalThis.removeEventListener?.("llmide:code-assistant-state", onState);
   }, []);
   const [assistant, setAssistant] = useState({ open: false, fits: true });
+  const [sideChat, setSideChat] = useState(false);
   const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? getTheme());
   const terminalOpen = useTerminalDockOpen();
   const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
@@ -342,6 +344,17 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           <HomeIcon />
         </button>
         <SectionToolbar active={nav.active} onSelect={onSelect} devTools={devToolsEnabled()} />
+        <button
+          type="button"
+          className="sh-icon-button sh-side-chat-toggle"
+          aria-label="Toggle Chat panel"
+          aria-controls="sh-side-chat"
+          aria-expanded={sideChat}
+          title={sideChat ? "Hide Chat panel" : "Show Chat panel"}
+          onClick={() => setSideChat((v) => !v)}
+        >
+          <Icon name="message-square" size={16} />
+        </button>
         {nav.active === "explorer" && (
           <button
             type="button"
@@ -406,6 +419,11 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           onToggle={(open) => setTerminalDockOpen(open)}
         />
         </div>
+        {sideChat ? (
+          <aside id="sh-side-chat" className="sh-side-chat" aria-label="Chat panel">
+            <ChatDockSlot active={gate === "open"} projectRoot={project?.root ?? null} surface="side" onCollapse={() => setSideChat(false)} />
+          </aside>
+        ) : null}
       </div>
       {gate === "open" ? <StatusBar
         apiWarning={apiWarning}
