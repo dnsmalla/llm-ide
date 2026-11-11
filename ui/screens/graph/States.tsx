@@ -70,8 +70,8 @@ export function NoProjectState() {
 export function TooLargeState({ onOpen }: { onOpen: (p: string) => boolean }) {
   return (
     <div className="gr-state">
-      <h2 className="gr-state-title">graph.json is larger than the 32 MB limit</h2>
-      <p>The desktop host refuses to read graph files above 32 MB so a hostile file cannot exhaust memory. The limit is a constant in the host (<code>GRAPH_FILE_MAX_BYTES</code>); raising it, or paging the read, is a host change that has not been made yet.</p>
+      <h2 className="gr-state-title">graph.json is larger than the 128 MB limit</h2>
+      <p>The desktop host refuses to read graph files above 128 MB so a hostile file cannot exhaust memory. The limit is <code>GRAPH_FILE_MAX_BYTES</code> in the host. The screen itself shows a progressive overview: main communities and edges first; click a node to reveal its neighbourhood.</p>
       <p className="gr-muted">Meanwhile, a smaller graph (fewer files, or one repository of the project) can be opened below.</p>
       <OpenPath onOpen={onOpen} />
     </div>

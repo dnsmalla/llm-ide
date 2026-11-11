@@ -1,5 +1,5 @@
 // Where the graph comes from: `graph.json` inside the open project, read ONLY through the host command
-// `read_graph_file` (root-confined, no symlink following, 32 MB cap; all enforced in Rust). The webview
+// `read_graph_file` (root-confined, no symlink following, 128 MB cap; all enforced in Rust). The webview
 // builds absolute candidate paths from the project root the shell gave it; the host re-checks every one
 // and refuses anything outside the root or not named graph.json.
 import { relativePath } from "./decode.ts";

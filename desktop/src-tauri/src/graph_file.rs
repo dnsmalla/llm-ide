@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 /// Upper bound on a graph file the webview may load (the real graph is ~1 MB).
-pub const GRAPH_FILE_MAX_BYTES: u64 = 32 * 1024 * 1024;
+pub const GRAPH_FILE_MAX_BYTES: u64 = 128 * 1024 * 1024;
 
 /// Used when neither `LLMIDE_POC_PROJECT_ROOT` nor `LLMIDE_POC_GRAPH` is set: the
 /// spike's default project (the frontend's default graph path lives under it).
@@ -307,7 +307,7 @@ mod tests {
         fs::write(&g, vec![b'a'; 100]).unwrap();
         assert!(read_within_limited(&root, g.to_str().unwrap(), 99).is_err());
         assert_eq!(read_within_limited(&root, g.to_str().unwrap(), 100).unwrap().len(), 100);
-        assert_eq!(GRAPH_FILE_MAX_BYTES, 32 * 1024 * 1024);
+        assert_eq!(GRAPH_FILE_MAX_BYTES, 128 * 1024 * 1024);
     }
 
     #[cfg(unix)]

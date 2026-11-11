@@ -31,7 +31,7 @@ test("empty state gives the Mac's three-mode message and no preset controls", ()
 });
 
 test("too large, no project, loading and error states are announced and have a next step", () => {
-  assert.match(html(h(G.TooLargeState, { onOpen: () => true })), /32 MB limit[\s\S]*GRAPH_FILE_MAX_BYTES/);
+  assert.match(html(h(G.TooLargeState, { onOpen: () => true })), /128 MB limit[\s\S]*GRAPH_FILE_MAX_BYTES/);
   assert.match(html(h(G.NoProjectState)), /Open or create a project to see the code graph/);
   const l = html(h(G.LoadingState, { stage: "Laying out the graph", onCancel: noop }));
   assert.match(l, /role="status"[^>]*aria-live="polite"/);
@@ -136,7 +136,7 @@ test("screen states by phase: empty, no project, too large, error, loading", asy
   const n = mk(async () => ""); await n.load(null);
   assert.match(render(n), /Open or create a project to see the code graph/);
   const t = mk(async () => { throw new Error("graph.json is not a regular file within the size limit"); }); await t.load("/p");
-  assert.match(render(t), /32 MB limit/);
+  assert.match(render(t), /128 MB limit/);
   const bad = mk(async () => "{}"); await bad.load("/p");
   assert.match(render(bad), /could not be shown/);
   assert.match(render(mk(async () => "")), /Loading the code graph/);
@@ -154,7 +154,7 @@ test("a cancelled load offers Reload instead of a spinner; too-large and error k
   assert.doesNotMatch(cancelled, /Working/);
   const t = mk(async () => { throw new Error("graph.json is not a regular file within the size limit"); }); await t.load("/p");
   const tooLarge = render(t);
-  assert.match(tooLarge, /32 MB limit/);
+  assert.match(tooLarge, /128 MB limit/);
   assert.match(tooLarge, /Generate Code Graph/, "a too-large graph can be regenerated from here");
   assert.match(tooLarge, /Open graph\.json/);
   const bad = mk(async () => "{}"); await bad.load("/p");

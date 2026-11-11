@@ -12,6 +12,7 @@ import { CancelledState, EmptyState, ErrorState, LoadingState, NoProjectState, T
 import { FullPageGraph } from "./FullPage.tsx";
 import { buildAdjacency, communitySummary, countOnes, docSplit, isDocKind, nodeMask, setSymbolsShown, symbolKinds, symbolsShown } from "./filters.ts";
 import { DOC_LEGEND, kindColor } from "./colors.ts";
+import { NODE_BUDGET } from "./lod.ts";
 import { searchNodes } from "./search.ts";
 import type { GraphStore } from "./store.ts";
 import { graphCandidates } from "./source.ts";
@@ -226,7 +227,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     <div className="gr-root" data-active={active}>
       <header className="gr-top">
         <h2 className="gr-title">Code Graph</h2>
-        <p className="gr-summary" role="status">{num(model.n)} nodes, {num(model.m)} edges, {num(layout.communityCount)} communities{split && split.doc > 0 ? ` · ${num(split.code)} code · ${num(split.doc)} doc` : ""}</p>
+        <p className="gr-summary" role="status">{num(model.n)} nodes, {num(model.m)} edges, {num(layout.communityCount)} communities{split && split.doc > 0 ? ` · ${num(split.code)} code · ${num(split.doc)} doc` : ""}{model.n > NODE_BUDGET ? " · overview: click a node to reveal its neighbours" : ""}</p>
         <div className="gr-canvas-tools" role="group" aria-label="Graph display">
           {hasSymbols ? (
             <button type="button" className="gr-btn" aria-pressed={symbolsOn} onClick={() => store.setFilters({ hiddenKinds: setSymbolsShown(model, s.filters, !symbolsOn) })}>Symbols</button>

@@ -7,8 +7,8 @@
 //   nodes   : at most NODE_BUDGET on screen; far out, each community keeps only its top-ranked members
 //   edges   : at most EDGE_BUDGET on screen; far out, only the strongest weight buckets
 //   labels  : at most LABEL_BUDGET, by global importance rank (sigma's own density culling then applies)
-export const NODE_BUDGET = 15_000;
-export const EDGE_BUDGET = 60_000;
+export const NODE_BUDGET = 8_000;
+export const EDGE_BUDGET = 30_000;
 export const LABEL_BUDGET = 250;
 /** Weight histogram resolution: bucket b holds edges whose weight is in [b/100, (b+1)/100). */
 export const WEIGHT_BUCKETS = 101;
