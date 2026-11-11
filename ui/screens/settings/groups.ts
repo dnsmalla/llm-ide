@@ -41,6 +41,7 @@ export const APP_GROUPS: readonly GroupDef[] = [
   { id: "token-saving", title: "Token Saving", sf: "leaf", icon: "leaf", status: "works", band: "app" },
   { id: "providers", title: "Providers", sf: "key.horizontal", icon: "key-round", status: "works", band: "app" },
   { id: "model-routing", title: "Model routing", sf: "dial.medium", icon: "gauge", status: "works", band: "app" },
+  { id: "model-limits", title: "Models & limits", sf: "gauge", icon: "gauge", status: "works", band: "app" },
   { id: "loop-defaults", title: "Loop defaults", sf: "repeat", icon: "repeat", status: "works", band: "app" },
   { id: "agent-history", title: "Agent history", sf: "clock.arrow.circlepath", icon: "rotate-ccw-clock", status: "works", band: "app" },
   { id: "folder-trust", title: "Folder trust", sf: "lock.shield", icon: "shield-check", status: "works", band: "app" },

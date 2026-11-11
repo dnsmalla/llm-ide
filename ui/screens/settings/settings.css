@@ -141,3 +141,17 @@
 .st-team-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .st-token { display: block; padding: var(--tok-space-sm); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); overflow-wrap: anywhere; }
 @media (max-width: 720px) { .st-team-fields { grid-template-columns: 1fr; } }
+/* Embedded Model & Limits (shared panel from Auto Tasks). */
+.atn-limits-embed { display: flex; flex-direction: column; gap: 12px; }
+.atn-limits-embed .atn-hint { color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); margin: 0; }
+.atn-limits-embed .atn-group { margin: 12px 0 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--tok-color-accent2); }
+.atn-limits-embed .atn-limit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--tok-color-border); font-size: var(--tok-type-caption-size); }
+.atn-limits-embed .atn-limit-row input[type="number"] { width: 76px; }
+.atn-limits-embed .atn-inline { display: inline-flex; align-items: center; gap: 6px; }
+.atn-limits-embed .atn-rate { margin: 0; padding-left: 16px; font-size: var(--tok-type-caption-size); }
+.atn-limits-embed .atn-modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 8px; }
+.atn-limits-embed .atn-btn { padding: 6px 12px; border: 1px solid var(--tok-color-border); border-radius: 6px; background: var(--tok-color-surface2); color: var(--tok-color-text); font: inherit; cursor: pointer; }
+.atn-limits-embed .atn-primary { background: var(--tok-color-accent); color: var(--tok-color-body); border-color: var(--tok-color-accent); }
+.atn-limits-embed .atn-error { color: var(--tok-color-danger); }
+.atn-limits-embed .atn-notice { color: var(--tok-color-accent3); }
+.atn-limits-embed .atn-icon { border: 0; background: none; color: inherit; cursor: pointer; }

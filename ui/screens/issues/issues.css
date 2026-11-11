@@ -79,3 +79,6 @@
 .iss-side-actions { display: flex; gap: 6px; align-items: center; }
 .iss-side-block .iss-edit-set { max-height: 180px; overflow: auto; }
 .iss-side-block textarea.iss-input { font-family: var(--tok-type-sans-family); resize: vertical; }
+.iss-body, .iss-comment-body { white-space: normal; line-height: 1.6; }
+.iss-body p, .iss-comment-body p { margin: 0 0 8px; }
+.iss-body > :last-child, .iss-comment-body > :last-child { margin-bottom: 0; }

@@ -8,7 +8,7 @@ const RATE_LABELS: Array<[keyof Omit<RateSnapshot, "capturedAt" | "provider" | "
   ["requests", "Requests"], ["tokens", "Tokens"], ["inputTokens", "Input tokens"], ["outputTokens", "Output tokens"],
 ];
 
-export function ModelLimitsPanel({ onClose }: { onClose: () => void }): ReactNode {
+export function ModelLimitsPanel({ onClose, embedded = false }: { onClose: () => void; embedded?: boolean }): ReactNode {
   const [rows, setRows] = useState<Record<string, ChainRow[]>>({});
   const [summary, setSummary] = useState<Summary | null>(null);
   const [rate, setRate] = useState<RateSnapshot | null>(null);
@@ -65,10 +65,8 @@ export function ModelLimitsPanel({ onClose }: { onClose: () => void }): ReactNod
     } finally { setBusy(false); }
   };
 
-  return (
-    <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-limits-title">
-      <div className="atn-modal-card atn-limits">
-        <header><h2 id="atn-limits-title">Model &amp; Limits</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Close model limits" onClick={onClose}>×</button></header>
+  const body = (
+    <>
         <p className="atn-hint">Models are tried in this order. When a model reaches its cap, the next enabled one is used. A task does not run when every model is at its cap.</p>
         {error ? <p className="atn-error" role="alert">{error}</p> : null}
         {saved ? <p className="atn-notice" role="status">{saved}</p> : null}
@@ -101,9 +99,17 @@ export function ModelLimitsPanel({ onClose }: { onClose: () => void }): ReactNod
         </section>
         <div className="atn-modal-actions">
           <button type="button" className="atn-btn" disabled={busy} onClick={() => void load()}>Refresh</button>
-          <button type="button" className="atn-btn" onClick={onClose}>Close</button>
+          {embedded ? null : <button type="button" className="atn-btn" onClick={onClose}>Close</button>}
           <button type="button" className="atn-btn atn-primary" disabled={busy || dirty.size === 0} onClick={() => void save()}>Save</button>
         </div>
+    </>
+  );
+  if (embedded) return <div className="atn-limits-embed">{body}</div>;
+  return (
+    <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-limits-title">
+      <div className="atn-modal-card atn-limits">
+        <header><h2 id="atn-limits-title">Model &amp; Limits</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Close model limits" onClick={onClose}>×</button></header>
+        {body}
       </div>
     </div>
   );

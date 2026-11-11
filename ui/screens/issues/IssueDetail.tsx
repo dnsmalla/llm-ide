@@ -6,7 +6,12 @@ import { issueNumber, issueOpenUrl, openedAgo, type Issue } from "./issues-model
 import { DETAIL_NESTED_HINT, issueDatesView, localDatesNote, readIssueSchedule, type Schedule } from "../gantt/gantt-model.ts";
 import { normalizeBase, readRepoConfig } from "../settings/repo-config.ts";
 import { ScheduleEditor } from "../gantt/ScheduleEditor.tsx";
+import { MarkdownView } from "../library/MarkdownView.tsx";
 import "./issues.css";
+
+/** A short-lived cache: opening the same issue twice does not repeat five provider requests. */
+const DETAIL_CACHE = new Map<string, { at: number; data: IssueDetailView }>();
+const DETAIL_TTL_MS = 60_000;
 
 /** The saved GitLab base's origin (Settings -> Repositories), the only origin a GitLab issue link may open on. */
 export function gitlabOriginFromConfig(): string | null {
@@ -81,17 +86,22 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
     });
   }, [detail, issue]);
 
+  const cacheKey = `${issue.provider}\u0000${issue.repo}\u0000${issue.number}`;
   const loadDetail = useCallback(async () => {
     if (!issue.number) return;
+    const hit = DETAIL_CACHE.get(cacheKey);
+    if (hit && Date.now() - hit.at < DETAIL_TTL_MS) { setDetail(hit.data); setDetailError(null); return; }
     const q = new URLSearchParams({ provider: issue.provider, repo: issue.repo, number: String(issue.number) });
     try {
       const r = await deps.request("GET", `/kb/issues/detail?${q.toString()}`);
       if (r.status === 200 && r.body && typeof r.body === "object") {
-        setDetail(r.body as IssueDetailView);
+        const data = r.body as IssueDetailView;
+        DETAIL_CACHE.set(cacheKey, { at: Date.now(), data });
+        setDetail(data);
         setDetailError(null);
       } else setDetailError("Comments are not available for this issue.");
     } catch { setDetailError("The core could not be reached for comments."); }
-  }, [deps, issue.provider, issue.repo, issue.number]);
+  }, [deps, issue.provider, issue.repo, issue.number, cacheKey]);
 
   useEffect(() => { void loadDetail(); }, [loadDetail]);
 
@@ -170,7 +180,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
         </header>
         <div className="iss-detail-grid">
           <div className="iss-detail-main">
-            <pre className="iss-body">{detail?.issue?.body ?? issue.body ?? "No description."}</pre>
+            <div className="iss-body"><MarkdownView text={detail?.issue?.body ?? issue.body ?? "No description."} baseRel={null} initialSections={20} onOpenExternal={(url) => void deps.openExternal(url).catch(() => onNotice("That link could not be opened."))} /></div>
             <section className="iss-comments" aria-label="Comments">
               <h3 className="iss-col-title">Comments</h3>
               {detailError ? <p className="iss-hint">{detailError}</p> : null}
@@ -182,12 +192,13 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
                       <span className="iss-comment-avatar" aria-hidden="true">{c.author.slice(0, 1).toUpperCase()}</span>
                       <div>
                         <p className="iss-comment-head"><strong>{c.author}</strong>{c.at ? <time dateTime={c.at}>{openedAgo(c.at)}</time> : null}</p>
-                        <pre className="iss-comment-body">{c.body}</pre>
+                        <div className="iss-comment-body"><MarkdownView text={c.body} baseRel={null} initialSections={20} onOpenExternal={(url) => void deps.openExternal(url).catch(() => onNotice("That link could not be opened."))} /></div>
                       </div>
                     </li>
                   ))}
                 </ol>
               ) : detail?.comments?.length === 0 ? <p className="iss-hint">No comments yet.</p> : null}
+              {detail?.comments && detail.comments.length >= 100 ? <p className="iss-hint">Showing the newest 100 comments.</p> : null}
             </section>
             {writeError ? <p className="iss-error" role="alert">{writeError}</p> : null}
             {issue.state !== "closed" ? (

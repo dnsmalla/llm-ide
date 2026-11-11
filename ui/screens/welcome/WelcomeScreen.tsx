@@ -98,7 +98,7 @@ function HelpDiagram({ kind }: { kind: NonNullable<HelpTopic["diagram"]> }) {
   </>);
 }
 
-export function GuideDialog({ onClose, onNavigate }: { onClose: () => void; onNavigate?: (target: NonNullable<HelpTopic["target"]>) => void }) {
+export function GuideDialog({ onClose, onNavigate }: { onClose: () => void; onNavigate?: (target: NonNullable<HelpTopic["target"]>, settingsGroup?: string) => void }) {
   const close = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState(HELP_TOPICS[0]!.id);
@@ -138,7 +138,7 @@ export function GuideDialog({ onClose, onNavigate }: { onClose: () => void; onNa
                     {list.filter((t) => topics.includes(t)).map((t) => (
                       <li key={t.id} className="help-nav-row">
                         <button type="button" className="help-nav-item" aria-current={active?.id === t.id ? "page" : undefined} onClick={() => setActiveId(t.id)}>{t.title}</button>
-                        {t.target && onNavigate ? <button type="button" className="help-nav-go" aria-label={`Open ${t.title}`} title={`Open ${t.title}`} onClick={() => onNavigate(t.target!)}>↗</button> : null}
+                        {t.target && onNavigate ? <button type="button" className="help-nav-go" aria-label={`Open ${t.title}`} title={`Open ${t.title}`} onClick={() => onNavigate(t.target!, t.settingsGroup)}>↗</button> : null}
                       </li>
                     ))}
                   </ul>
@@ -157,7 +157,7 @@ export function GuideDialog({ onClose, onNavigate }: { onClose: () => void; onNa
                 <h4 className="help-h4">Try it</h4>
                 <ol className="help-steps">{active.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
                 {active.example ? <p className="help-example"><strong>Example:</strong> {active.example}</p> : null}
-                {active.target && onNavigate ? <button type="button" className="help-open" onClick={() => onNavigate(active.target!)}>{active.group === "Settings" ? "Open Settings" : `Open ${active.title}`} →</button> : null}
+                {active.target && onNavigate ? <button type="button" className="help-open" onClick={() => onNavigate(active.target!, active.settingsGroup)}>{active.group === "Settings" ? "Open Settings" : `Open ${active.title}`} →</button> : null}
               </>
             ) : null}
           </article>
