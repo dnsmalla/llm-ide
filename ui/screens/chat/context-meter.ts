@@ -8,6 +8,9 @@ export interface ContextUsage { totalTokens: number; maxTokens: number; percenta
 export const CONTEXT_WARN_PERCENT = 80;
 
 export const contextWarns = (u: ContextUsage): boolean => u.percentage >= CONTEXT_WARN_PERCENT;
+/** From here the popover suggests a fresh chat: cost grows with every re-sent token. */
+export const CONTEXT_ADVICE_PERCENT = 65;
+export const contextAdvises = (u: ContextUsage): boolean => u.percentage >= CONTEXT_ADVICE_PERCENT;
 export const contextPercentLabel = (u: ContextUsage): string => `${u.percentage}%`;
 export const contextTokensLabel = (u: ContextUsage): string => `${u.totalTokens.toLocaleString("en-US")} / ${u.maxTokens.toLocaleString("en-US")} tokens`;
 

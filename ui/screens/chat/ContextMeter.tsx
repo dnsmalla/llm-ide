@@ -1,12 +1,12 @@
 // The Mac's context ring in the composer bar: a ring and the percentage of the last turn's context window; the
 // popover lists the SDK's categories. Nothing until a turn has reported one (a new chat, an older core).
 import { useState } from "react";
-import { contextPercentLabel, contextRows, contextShare, contextTokensLabel, contextWarns, type ContextUsage } from "./context-meter";
+import { contextAdvises, contextPercentLabel, contextRows, contextShare, contextTokensLabel, contextWarns, type ContextUsage } from "./context-meter";
 
 const R = 5;
 const RING = 2 * Math.PI * R;
 
-export function ContextMeter({ usage }: { usage: ContextUsage | null }) {
+export function ContextMeter({ usage, onNewChat }: { usage: ContextUsage | null; onNewChat?: () => void }) {
   const [open, setOpen] = useState(false);
   if (!usage) return null;
   const rows = contextRows(usage);
@@ -29,6 +29,12 @@ export function ContextMeter({ usage }: { usage: ContextUsage | null }) {
           <p className="chat-context-total">{contextTokensLabel(usage)}</p>
           <ul className="chat-context-list">{rows.used.map((c) => row(c, false))}</ul>
           {rows.other.length > 0 ? <ul className="chat-context-list">{rows.other.map((c) => row(c, true))}</ul> : null}
+          {contextAdvises(usage) ? (
+            <div className="chat-context-advice">
+              <p>This chat is getting expensive: every new turn re-sends the whole context.</p>
+              {onNewChat ? <button type="button" className="chat-btn" onClick={() => { setOpen(false); onNewChat(); }}>Start a fresh chat</button> : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

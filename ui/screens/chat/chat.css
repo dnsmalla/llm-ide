@@ -202,3 +202,6 @@
 .chat-dock-mode .chat-composer-bar .chat-error { grid-column: 1 / -1; }
 .chat-options-toggle[hidden] { display: none; }
 .chat-dock-mode .chat-options-toggle { justify-self: start; }
+.chat-context-advice { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--tok-color-border); }
+.chat-context-advice p { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); line-height: 1.4; }
+.chat-context-advice .chat-btn { align-self: flex-start; }

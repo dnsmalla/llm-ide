@@ -459,7 +459,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               compose={host.compose} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
-              meter={<ContextMeter usage={state.context} />}
+              meter={<ContextMeter usage={state.context} onNewChat={() => void newChat()} />}
               controls={<>
                 <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} modes={modeOptions} />
                 <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}

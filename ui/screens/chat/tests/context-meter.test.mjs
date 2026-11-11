@@ -21,6 +21,8 @@ test("labels and rows follow the Mac's ContextUsagePresentation", () => {
   assert.equal(c.contextShare(U.categories[0], { ...U, maxTokens: 0 }), "–");
   assert.equal(c.contextWarns(U), false);
   assert.equal(c.contextWarns({ ...U, percentage: 80 }), true, "warning from 80 percent");
+  assert.equal(c.contextAdvises({ ...U, percentage: 64 }), false, "no advice before 65");
+  assert.equal(c.contextAdvises({ ...U, percentage: 65 }), true, "fresh-chat advice from 65");
 });
 
 test("the meter renders nothing before a turn reports usage, and a ring with the percentage after", () => {
@@ -35,5 +37,5 @@ test("the meter renders nothing before a turn reports usage, and a ring with the
 
 test("the chat screen hands the meter to the composer bar", () => {
   const screen = readFileSync(join(CHAT, "ChatScreen.tsx"), "utf8");
-  assert.match(screen, /meter=\{<ContextMeter usage=\{state\.context\} \/>\}/);
+  assert.match(screen, /meter=\{<ContextMeter usage=\{state\.context\} onNewChat=/);
 });
