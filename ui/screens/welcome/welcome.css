@@ -86,3 +86,23 @@
 .help-open:hover { filter: brightness(1.06); }
 .help-svg { display: block; width: 100%; height: auto; margin: 14px 0 4px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-body); }
 .help-svg text { font-family: var(--tok-type-sans-family); }
+
+/* Premium home: a soft stage, one strong hero and calmer action cards. */
+.wc { background: radial-gradient(ellipse at 50% -10%, color-mix(in srgb, var(--tok-color-accent) 10%, var(--tok-color-body)) 0%, var(--tok-color-body) 55%) no-repeat; background-attachment: fixed; }
+.wc-inner { max-width: 960px; padding-top: 34px; gap: 20px; }
+.wc-hero { position: relative; overflow: hidden; padding: 34px 28px 28px; border: 1px solid color-mix(in srgb, var(--tok-color-accent) 22%, var(--tok-color-border)); border-radius: 18px; background: linear-gradient(150deg, color-mix(in srgb, var(--tok-color-accent) 12%, var(--tok-color-surface)), var(--tok-color-surface) 62%); box-shadow: 0 18px 48px color-mix(in srgb, var(--tok-color-body) 55%, transparent); }
+.wc-hero::after { content: ""; position: absolute; width: 260px; height: 260px; right: -70px; top: -90px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--tok-color-accent2) 22%, transparent), transparent 68%); pointer-events: none; }
+.wc-logo { width: 72px; height: 72px; border-radius: 20px; background: linear-gradient(145deg, color-mix(in srgb, var(--tok-color-accent) 28%, var(--tok-color-surface2)), color-mix(in srgb, var(--tok-color-accent2) 18%, var(--tok-color-surface))); border: 1px solid color-mix(in srgb, var(--tok-color-accent) 35%, var(--tok-color-border)); color: var(--tok-color-accent); box-shadow: 0 8px 24px color-mix(in srgb, var(--tok-color-accent) 12%, transparent); }
+.wc-logo svg { width: 34px; height: 34px; }
+.wc-h1 { font-size: 34px; letter-spacing: -0.03em; }
+.wc-lead { max-width: 620px; font-size: 14px; line-height: 1.65; }
+.wc-features { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 8px; }
+.wc-features span { padding: 5px 10px; border: 1px solid var(--tok-color-border); border-radius: 999px; background: color-mix(in srgb, var(--tok-color-surface2) 80%, transparent); color: var(--tok-color-text-muted); font-size: 11px; }
+.wc-cards { gap: 14px; }
+.wc-card { padding: 18px; border-radius: 14px; background: linear-gradient(160deg, var(--tok-color-surface2), var(--tok-color-surface)); box-shadow: 0 1px 0 color-mix(in srgb, var(--tok-color-text) 4%, transparent); transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease; }
+.wc-card:hover, .wc-card:focus-within { transform: translateY(-1px); box-shadow: 0 10px 28px color-mix(in srgb, var(--tok-color-body) 45%, transparent); }
+.wc-card .sh-button-primary { width: 100%; }
+.wc-explainer { border-radius: 12px; padding: 14px 16px; }
+.wc-current { border-radius: 12px; background: linear-gradient(150deg, color-mix(in srgb, var(--tok-color-accent3) 8%, var(--tok-color-surface)), var(--tok-color-surface)); }
+.wc-recent-open { border-radius: 12px; }
+.wc-recent-open:hover:not(:disabled) { border-color: color-mix(in srgb, var(--tok-color-accent) 40%, var(--tok-color-border)); }

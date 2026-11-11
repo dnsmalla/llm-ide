@@ -23,7 +23,6 @@ import type { FsApi } from "../explorer/fs";
 import { chatOutputStore } from "../shell/chat-output";
 import { ChatDockSlot } from "../shell/chat-dock";
 import { ChatDockToggle } from "../shell/ChatDockToggle";
-import { MediaStudio } from "./MediaStudio.tsx";
 
 export interface DocGenScreenProps {
   store: DocGenStore;
@@ -185,7 +184,6 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
               ))}
             </ol>
           </section>
-          {store.surface === "visual" ? <MediaStudio /> : null}
           <div className="dg-tabs" role="tablist" aria-label="Output">
             <button type="button" role="tab" id="dg-out-result" aria-selected={view === "result"} aria-controls="dg-out-pane" tabIndex={view === "result" ? 0 : -1} className="dg-tab" onClick={() => setView("result")}>Result</button>
             <button type="button" role="tab" id="dg-out-history" aria-selected={view === "history"} aria-controls="dg-out-pane" tabIndex={view === "history" ? 0 : -1} className="dg-tab" onClick={() => setView("history")}>History</button>

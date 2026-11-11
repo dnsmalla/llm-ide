@@ -241,6 +241,9 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
           <span className="wc-logo" aria-hidden="true"><ChatIcon /></span>
           <h1 className="wc-h1">LLM-IDE</h1>
           <p className="wc-lead">Meeting intelligence and project control. Each project lives in its own folder: meetings, notes, plans and code, side by side.</p>
+          <div className="wc-features" aria-label="What the workspace includes">
+            <span>Meetings & notes</span><span>Code & graph</span><span>AI runs & factory</span>
+          </div>
         </header>
 
         {recent.reset && !resetDismissed && (
