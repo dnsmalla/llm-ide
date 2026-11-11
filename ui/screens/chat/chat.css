@@ -207,3 +207,4 @@
 .chat-context-advice .chat-btn { align-self: flex-start; }
 .chat-budget { font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); font-variant-numeric: tabular-nums; padding: 0 var(--tok-space-xs); white-space: nowrap; }
 .chat-budget[data-warn] { color: var(--tok-color-accent4); }
+.chat-budget-warning { margin: 0; padding: 6px var(--tok-space-md); border-bottom: 1px solid color-mix(in srgb, var(--tok-color-accent4) 30%, var(--tok-color-border)); background: color-mix(in srgb, var(--tok-color-accent4) 8%, transparent); color: var(--tok-color-accent4); font-size: var(--tok-type-caption-size); }

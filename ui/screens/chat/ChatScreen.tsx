@@ -12,7 +12,7 @@ import { HeaderBadges } from "./badges/HeaderBadges";
 import { ENDED_REASON, isEndedChat } from "./badges/Badges";
 import { MessageList } from "./MessageList";
 import { ContextMeter } from "./ContextMeter";
-import { BudgetMeter } from "./BudgetMeter";
+import { BudgetMeter, budgetPercent } from "./BudgetMeter";
 import { EmptyChat } from "./EmptyChat";
 import { PlanSwitchNotice } from "./plan/PlanSwitchNotice";
 import { EffortPicker, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
@@ -401,6 +401,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
           onSetLimit={async (limit) => { if (!activeId) return; const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }}
         />
         {notice && <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} />}
+        {state.budget && (budgetPercent(state.budget) >= 80 || state.budget.level === "warning" || state.budget.level === "exceeded") ? (
+          <p className="chat-budget-warning" role="status">
+            Token budget {budgetPercent(state.budget)}% used · {state.budget.remaining.toLocaleString("en-US")} left.
+            {state.budget.level === "exceeded" ? " This chat is at its limit; raise it in Settings → Model routing or start a fresh chat." : " The next turn may stop at the limit."}
+          </p>
+        ) : null}
         {listError && <StatusBanner severity="error" message={listError} onDismiss={() => setListError(null)} />}
         {persistFailure && <StatusBanner severity="error" message={persistFailure} onDismiss={() => controller.dismissPersistFailure()} />}
         <ModeBanner mode={permission} bypassLive={permission !== "bypass" || !gate || bypassLive} />
