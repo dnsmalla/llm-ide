@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import qrcode from "qrcode-generator";
 import { ApiError, call, type CoreClient } from "../core-api.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
+import { shellBus } from "../../shell/bus";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText, Switch } from "../ui.tsx";
 
@@ -244,7 +245,10 @@ export default function HostApiPairing(): ReactNode {
     <div className="st-stack">
       {prefs && host.getExtraPrefs ? <HostApiSettingsView prefs={prefs} onSave={(patch) => void savePrefs(patch)} /> : null}
       {devices === null
-        ? <p className="st-hint" role="status">{PAIRING_UNAVAILABLE_HINT}</p>
+        ? <div className="st-stack" role="status">
+            <p className="st-hint">{prefs?.hostApiTls ? "The pairing listener is saved on, but the running core was started before that. Restart the core to apply it." : PAIRING_UNAVAILABLE_HINT}</p>
+            {prefs?.hostApiTls ? <div className="st-row"><Button onClick={() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "server" })}>Open Server &amp; Backend</Button></div> : null}
+          </div>
         : <HostApiPairingView
             devices={devices} pin={pin} now={now} busy={busy} error={error} confirming={confirming}
             onShowPin={() => void run(async () => { const p = await mintPin(client); setNow(Date.now()); setPin(p); })}
