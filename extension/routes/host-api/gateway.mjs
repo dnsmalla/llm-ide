@@ -17,9 +17,11 @@ import { config } from '../../core/config.mjs';
 import { getMember, classRefusal } from '../../kb/members.mjs';
 import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
 import { projectsListResult, projectFrameAuthority } from './projects.mjs';
-import { signAccessToken } from '../../server/jwt.mjs';
 import { busHostProof } from '../../core/host-approval.mjs';
+import { handleTaskRoutes } from '../tasks.mjs';
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 
 // ADR 0021 hub: the cap belongs to ONE member (their phones and browsers), not to the whole install. The
 // global ceiling is hub-sized so a team's members do not shut each other out; it still bounds the core.
@@ -69,6 +71,10 @@ export const COMMAND_CLASS = Object.freeze({
   'toolApprovals.answer': 'model.exec',
   // ADR 0022: every project-scoped command may carry projectId; checked on every frame.
   'projects.list': 'self.read',
+  'tasks.list': 'self.read',
+  'tasks.run': 'self.write',
+  'tasks.status': 'self.read',
+  'tasks.cancel': 'self.write',
 });
 
 export function hostApiCapabilities(env = process.env) {
@@ -158,25 +164,28 @@ const taskJobs = new Map();
 const TASK_JOB_TTL_MS = 60 * 60 * 1000;
 
 async function internalTaskRequest(userId, path, init, signal) {
-  const token = signAccessToken({ userId });
-  const proof = busHostProof();
-  if (!proof) throw new Error('host proof is unavailable');
-  const res = await fetch(`http://127.0.0.1:${config.port}${path}`, {
-    ...init,
-    signal,
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${token}`,
-      'x-llmide-host-nonce': proof,
-      ...(init?.headers ?? {}),
-    },
+  const bodyText = typeof init?.body === 'string' ? init.body : '';
+  const req = Readable.from(bodyText ? [bodyText] : []);
+  req.method = init?.method ?? 'GET';
+  req.url = path;
+  req.headers = { 'content-type': 'application/json', 'x-llmide-host-nonce': busHostProof() ?? '' };
+  const res = new EventEmitter();
+  res.statusCode = 200;
+  res.setHeader = () => {};
+  res.writeHead = (status) => { res.statusCode = status; };
+  const done = new Promise((resolve, reject) => {
+    res.end = (text) => {
+      try { resolve({ status: res.statusCode, body: JSON.parse(String(text ?? '')) }); }
+      catch { reject(new Error('task route returned a malformed answer')); }
+    };
+    res.on('error', reject);
+    if (signal) signal.addEventListener('abort', () => reject(Object.assign(new Error('Cancelled.'), { name: 'AbortError' })), { once: true });
   });
-  const body = await res.json().catch(() => null);
-  if (!res.ok) {
-    const err = body && typeof body.error === 'object' ? body.error : null;
-    throw new Error(typeof err?.message === 'string' ? err.message : `task request failed (${res.status})`);
-  }
-  return body;
+  const handled = await handleTaskRoutes(req, res, { userId, url: path, signal });
+  if (!handled) throw new Error('task route did not handle the request');
+  const out = await done;
+  if (out.status >= 400) throw new Error(out.body?.error?.message ?? `task request failed (${out.status})`);
+  return out.body;
 }
 
 function taskJobFor(deviceId, runId) {
@@ -625,6 +634,7 @@ export function createGateway(overrides) {
         return respond(s, id, command, { tasks });
       }
       case 'tasks.run': {
+        if (composeRefused(s, entry, id)) return;
         const wait = rate.turn(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         const runId = randomUUID();
@@ -651,6 +661,7 @@ export function createGateway(overrides) {
         return respond(s, id, command, { runId });
       }
       case 'tasks.status': {
+        if (composeRefused(s, entry, id)) return;
         const job = taskJobFor(entry.state.deviceId, p.runId);
         if (!job) return fail(s, id, 'not_found', 'That task run is no longer available.');
         return respond(s, id, command, {
@@ -661,6 +672,7 @@ export function createGateway(overrides) {
         });
       }
       case 'tasks.cancel': {
+        if (composeRefused(s, entry, id)) return;
         const job = taskJobFor(entry.state.deviceId, p.runId);
         if (!job) return respond(s, id, command, { cancelled: false });
         if (job.status === 'running') { job.controller.abort(); job.status = 'cancelled'; job.error = 'Cancelled.'; }

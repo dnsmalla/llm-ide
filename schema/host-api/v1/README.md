@@ -35,7 +35,7 @@ as `minLenght` fails the gate instead of being silently ignored.
 
 ## Commands
 
-All 21 commands are listed below.
+All 25 commands are listed below.
 
 | Command | Capability | Idempotent | v2 tag |
 |---|---|---|---|
@@ -59,6 +59,10 @@ All 21 commands are listed below.
 | `push.config` | push | yes | — |
 | `push.register` | push | yes | — |
 | `push.unregister` | push | yes | — |
+| `tasks.list` | read | yes | — |
+| `tasks.run` | compose | no | — |
+| `tasks.status` | compose | yes | — |
+| `tasks.cancel` | compose | yes | — |
 | `projects.list` | host | yes | — |
 
 `read` (tier R in the command bus spec) is the read-only slice: the user's chat list, one chat's history, and the usage and limits summary. It is served only when the host enables it (desktop: `LLMIDE_HOST_API_READ=1`, default off) and only to a device paired while it was served. The Tauri app passes only `LLMIDE_HOST_API_TLS` and `LLMIDE_HOST_API_WEB_ORIGINS` to a core it starts (`desktop/src-tauri/src/core_env.rs` drops every other `LLMIDE_*`), so `read` works only on a core you start yourself (`cd extension && LLMIDE_HOST_API_READ=1 npm run server`), which the app then adopts; it fails closed otherwise. The remaining spec domains (Explorer, Auto Tasks, Loop, projects, files, SCM, issues, Self-Heal, generation, Library, activity) are added by later plans using the same envelope and registry machinery.

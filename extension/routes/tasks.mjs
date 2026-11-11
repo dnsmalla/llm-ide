@@ -191,6 +191,8 @@ export async function handleTaskRoutes(req, res, ctx) {
   // The run stops when the client goes away before the answer is sent (the desktop's Stop, or a closed app).
   const ac = new AbortController();
   onClientDisconnect(req, res, () => ac.abort());
+  // The Host API gateway calls this handler in-process and asks for a cancellable run; a phone's Stop aborts it.
+  if (ctx.signal) ctx.signal.addEventListener('abort', () => ac.abort(), { once: true });
   const port = task.runner?.kind === 'agent' ? AGENT_PORTS[task.runner.busKind] : undefined;
   const deps = {
     runSourcesUpdate,
