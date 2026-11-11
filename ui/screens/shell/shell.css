@@ -171,5 +171,3 @@
 .sh-side-chat { position: fixed; right: 16px; bottom: 40px; z-index: 50; max-width: calc(100vw - 32px); display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--tok-color-border); border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,.35); overflow: hidden; background: var(--tok-color-surface); }
 .sh-side-chat-resize { position: absolute; top: 0; left: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 2; touch-action: none; }
 .sh-side-chat > * { min-height: 0; flex: 1 1 auto; }
-.sh-chat-launcher { position: fixed; right: 16px; bottom: 40px; z-index: 50; width: 48px; height: 48px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; background: var(--tok-color-accent); color: var(--tok-color-surface); box-shadow: 0 4px 16px rgba(0,0,0,.35); }
-.sh-chat-launcher:hover { filter: brightness(1.1); }

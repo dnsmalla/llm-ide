@@ -425,17 +425,14 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
             <div className="sh-side-chat-resize" onPointerDown={startPopupResize} title="Drag to resize" aria-hidden="true" />
             <ChatDockSlot active={gate === "open"} projectRoot={project?.root ?? null} surface="side" readOnly onCollapse={() => setSideChat(false)} />
           </aside>
-        ) : (
-          <button type="button" className="sh-chat-launcher" aria-label="Open Chat (read-only)" title="Chat (read-only)" onClick={() => setSideChat(true)}>
-            <Icon name="message-square" size={22} />
-          </button>
-        )}
+        ) : null}
       </div>
       {gate === "open" ? <StatusBar
         apiWarning={apiWarning}
         theme={theme}
         onTheme={onTheme}
-        chatActive={nav.active === "chat"}
+        chatActive={sideChat}
+        onChat={() => setSideChat((v) => !v)}
         onHelp={() => setGuideOpen(true)}
         terminalItem={<ShellTerminalItem built={TERMINAL_BUILT} open={terminalOpen} onToggle={toggleTerminalDock} />}
       /> : null}

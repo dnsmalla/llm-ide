@@ -165,15 +165,15 @@ export function ServerOutdatedChip({ warning }: { warning: string }) {
 }
 
 /** The Mac's "llm-chat" badge: Chat is reachable from every screen. Signed-in only, like the Mac's whole bar. */
-const ChatItem = memo(function ChatItem({ active }: { active: boolean }) {
+const ChatItem = memo(function ChatItem({ active, onToggle }: { active: boolean; onToggle: () => void }) {
   return (
     <button
       type="button"
       className="sh-statusbar-item"
-      aria-label="Open Chat"
-      aria-current={active ? "page" : undefined}
-      title="Chat (Ctrl/Cmd+1)"
-      onClick={() => shellBus.publish({ type: "goto-section", section: "chat" })}
+      aria-label="Chat popup"
+      aria-pressed={active}
+      title="Chat (read-only popup)"
+      onClick={onToggle}
     >
       <ChatBubbleIcon size={12} />
       Chat
@@ -187,14 +187,16 @@ interface Props {
   /** Status-bar terminal toggle (non-Explorer sections). */
   terminalItem?: ReactNode | null;
   theme: ThemeId;
-  /** The Chat section is showing (the item is marked current). */
+  /** The chat popup is open (the item is marked pressed). */
   chatActive?: boolean;
+  /** Opens or closes the chat popup. */
+  onChat?: () => void;
   onTheme: (id: ThemeId) => void;
   /** Opens Help & Support (bottom bar, always visible). */
   onHelp?: () => void;
 }
 
-export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onTheme, chatActive = false, terminalItem = null, onHelp }: Props) {
+export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onTheme, chatActive = false, onChat, terminalItem = null, onHelp }: Props) {
   const { signedIn } = useCoreSession();
   const themeLabel = THEMES.find((t) => t.id === theme)?.label ?? theme;
   return (
@@ -218,7 +220,7 @@ export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onT
       {terminalItem}
       <BusInbox />
       <ActivityBell />
-      {signedIn && <ChatItem active={chatActive} />}
+      {signedIn && onChat ? <ChatItem active={chatActive} onToggle={onChat} /> : null}
     </footer>
   );
 });
