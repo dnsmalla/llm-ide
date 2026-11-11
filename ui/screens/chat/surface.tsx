@@ -24,6 +24,7 @@ import { describeError, type CoreTransport } from "./transport";
 import { createChatUiStore, type ChatUiStore } from "./ui-state";
 import { sessionVisible } from "./surface-sessions";
 import { reportUiIncident } from "../shell/self-heal";
+import { summarizeGraph } from "./project-graph-summary.ts";
 
 /** Opens an allowlisted URL. The host command is not in the Rust host yet (blocked-by, see the checklist): until it
  *  lands the desktop app ignores the click rather than navigating the webview; a plain browser opens a new tab. */
@@ -157,6 +158,21 @@ export function useChatSurface(projectRoot: string | null, active: boolean, init
       // Bypass needs the host's signed, default-Cancel approval (`bypass_confirm_signed`); without the host it fails closed.
       ...(bypass ? { bypass } : {}),
       projectRoot: () => rt.root.current,
+      graphSummary: async () => {
+        if (!shellHost.isAvailable()) return null;
+        try {
+          const mem = await invokeHost<unknown>("project_memory");
+          const o = mem && typeof mem === "object" ? (mem as Record<string, unknown>) : {};
+          const g = o.graph && typeof o.graph === "object" ? (o.graph as Record<string, unknown>) : null;
+          const path = g && typeof g.path === "string" ? g.path : null;
+          const size = g && typeof g.sizeBytes === "number" ? g.sizeBytes : 0;
+          if (!path) return null;
+          if (size > 8_000_000) return `Project graph: ${Math.round(size / 1_000_000)} MB on disk (large; open Graph for the interactive view).`;
+          const text = await invokeHost<unknown>("read_graph_file", { path });
+          if (typeof text !== "string") return null;
+          return summarizeGraph(JSON.parse(text));
+        } catch { return null; }
+      },
       files: {
         resolve: (raw) => relativeToProject(raw, rt.root.current),
         open: (rel) => shellBus.publish({ type: "open-file", path: rel }),

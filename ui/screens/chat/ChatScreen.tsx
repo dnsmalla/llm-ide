@@ -64,6 +64,8 @@ export interface ChatHost {
   bypass?: BypassGate;
   /** The open project folder (named in the dialog's summary). */
   projectRoot?: () => string | null;
+  /** A compact summary of the project graph, or null when there is no graph. */
+  graphSummary?: () => Promise<string | null>;
 }
 
 export interface ChatScreenProps {
@@ -148,8 +150,9 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     try {
       const m = await loadMemory(memoryCore, { repos: [], workspaceRoot: host.projectRoot?.() ?? null, sessionId: chatId });
       const facts = [...m.session, ...(m.project?.facts ?? [])].map(factText).filter(Boolean).slice(0, 40);
-      if (facts.length === 0) { setNotice("No project or session memory yet."); return; }
-      const block = `Use this local project memory as context. Do not ask me to repeat it.\n\n${facts.map((f) => `- ${f}`).join("\n")}`.slice(0, 4000);
+      const graph = host.graphSummary ? await host.graphSummary().catch(() => null) : null;
+      if (facts.length === 0 && !graph) { setNotice("No project or session memory yet."); return; }
+      const block = `Use this local project context. Do not ask me to repeat it.\n\n${graph ? `${graph}\n\n` : ""}${facts.map((f) => `- ${f}`).join("\n")}`.slice(0, 4000);
       const current = controller.getView(chatId).draft;
       controller.setView(chatId, { draft: current.trim() ? `${current.trim()}\n\n${block}` : block });
       setRefineNonce((n) => n + 1);
