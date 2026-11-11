@@ -4,6 +4,7 @@ import { load, React, renderToStaticMarkup } from "../../shell/tests/helpers.mjs
 
 const h = React.createElement;
 const model = await load("../welcome/model.ts");
+const help = await load("../welcome/help.ts");
 const { WelcomeScreen, GuideDialog } = await load("../welcome/WelcomeScreen.tsx");
 const { NoProjectCard } = await load("NoProjectCard.tsx");
 const html = (el) => renderToStaticMarkup(el);
@@ -105,14 +106,14 @@ test("Welcome: reset notice (corrupt recents) with reassurance; current project 
   assert.doesNotMatch(welcome(), /was reset/);
 });
 
-test("Guide dialog: condensed Mac guide as plain text (capture, notes, projects), modal semantics", () => {
+test("Guide dialog: searchable beginner guide with screens, settings and recipes, modal semantics", () => {
   const out = welcome({ guideOpen: true });
   assert.match(out, /role="dialog" aria-modal="true" aria-labelledby="wc-guide-title"/);
-  for (const t of ["What LLM-IDE does", "Capture", "Notes and the Library", "Projects", "First steps"]) assert.match(out, new RegExp(t));
-  assert.match(out, /system\/ holds the data LLM-IDE manages for itself/);
-  assert.match(out, /never deletes anything on disk/);
+  for (const t of ["Help &amp; Guide", "Your first 10 minutes", "Explorer", "Factory", "Settings overview", "Providers"]) assert.match(out, new RegExp(t));
+  assert.match(out, /Search screens, settings or a recipe/);
+  assert.match(out, /Try it/);
   assert.equal(html(h(GuideDialog, { onClose() {} })).includes("Close"), true);
-  for (const g of model.GUIDE) assert.ok(!/[<>]/.test(JSON.stringify(g)), "guide text has no markup");
+  assert.ok(!/[<>]/.test(JSON.stringify(help.HELP_TOPICS)), "help text has no markup");
 });
 
 test("NoProjectCard: one title, two buttons, text only", () => {

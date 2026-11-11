@@ -3,7 +3,8 @@ import { FolderIcon, ChatIcon } from "@llmide/ui-kit";
 import type { ProjectInfo, RecentEntry, RecentList } from "../shell/host";
 import { safeText } from "../shell/safe-text";
 import { openedAgo } from "../shell/relative-time";
-import { GUIDE, NAME_MAX, PROJECT_EXPLAINER, validateProjectName } from "./model";
+import { NAME_MAX, PROJECT_EXPLAINER, validateProjectName } from "./model";
+import { HELP_GROUPS, HELP_TOPICS, type HelpTopic } from "./help";
 
 /** What the Welcome page needs from the shell. Every function is host- or core-backed in the app and a fake in tests. */
 export interface WelcomeActions {
@@ -32,8 +33,51 @@ export interface WelcomeProps {
 
 const dateless = (s: string, max: number) => safeText(s, max);
 
+function HelpDiagram({ kind }: { kind: NonNullable<HelpTopic["diagram"]> }) {
+  if (kind === "project") {
+    return (
+      <div className="help-diagram help-project" aria-hidden="true">
+        <span className="help-box help-box-main">project/</span>
+        <span className="help-box">source/</span>
+        <span className="help-box">code/</span>
+        <span className="help-box">data/</span>
+        <span className="help-box help-box-accent">llm-doc/ notes &amp; plans</span>
+        <span className="help-box help-box-muted">system/ settings &amp; cache</span>
+      </div>
+    );
+  }
+  if (kind === "factory") {
+    return (
+      <div className="help-diagram help-flow" aria-hidden="true">
+        {["Inbox", "Needs decision", "Working", "Needs you", "Ready to ship", "Shipped", "Done"].map((label) => <span key={label} className="help-step">{label}</span>)}
+      </div>
+    );
+  }
+  if (kind === "settings") {
+    return (
+      <div className="help-diagram help-settings" aria-hidden="true">
+        <span className="help-box help-box-accent">App settings (everywhere)</span>
+        <span className="help-box help-box-muted">Project settings (this folder)</span>
+      </div>
+    );
+  }
+  return (
+    <div className="help-diagram help-map" aria-hidden="true">
+      <span className="help-box help-box-accent">Project</span>
+      <span className="help-arrow">→</span>
+      <span className="help-box">Library / Explorer</span>
+      <span className="help-arrow">→</span>
+      <span className="help-box">Chat · Graph · Issues</span>
+      <span className="help-arrow">→</span>
+      <span className="help-box help-box-muted">Loop · Factory</span>
+    </div>
+  );
+}
+
 export function GuideDialog({ onClose }: { onClose: () => void }) {
   const close = useRef<HTMLButtonElement>(null);
+  const [query, setQuery] = useState("");
+  const [activeId, setActiveId] = useState(HELP_TOPICS[0]!.id);
   useEffect(() => {
     close.current?.focus();
     const onKey = (e: KeyboardEvent) => {
@@ -42,21 +86,53 @@ export function GuideDialog({ onClose }: { onClose: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  const q = query.trim().toLowerCase();
+  const topics = q === "" ? HELP_TOPICS : HELP_TOPICS.filter((t) => `${t.title} ${t.what} ${t.steps.join(" ")} ${t.example ?? ""}`.toLowerCase().includes(q));
+  const active = topics.find((t) => t.id === activeId) ?? topics[0] ?? null;
   return (
     <div className="wc-modal" role="dialog" aria-modal="true" aria-labelledby="wc-guide-title" data-testid="guide">
-      <div className="wc-modal-card">
+      <div className="wc-modal-card help-card">
         <div className="wc-modal-head">
-          <h2 id="wc-guide-title" className="wc-h2">How LLM-IDE works</h2>
+          <div>
+            <h2 id="wc-guide-title" className="wc-h2">Help &amp; Guide</h2>
+            <p className="help-sub">Every screen and every setting, in beginner steps.</p>
+          </div>
           <button ref={close} type="button" className="sh-button" onClick={onClose}>Close</button>
         </div>
-        <div className="wc-modal-body">
-          {GUIDE.map((g) => (
-            <section key={g.id} aria-labelledby={`wc-g-${g.id}`}>
-              <h3 id={`wc-g-${g.id}`} className="wc-h3">{g.title}</h3>
-              {g.paragraphs.map((p, i) => <p key={i} className="wc-text">{p}</p>)}
-              {g.steps && <ol className="wc-steps">{g.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
-            </section>
-          ))}
+        <div className="help-search">
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search screens, settings or a recipe…" aria-label="Search help" autoComplete="off" />
+        </div>
+        <div className="help-body">
+          <nav className="help-nav" aria-label="Help topics">
+            {HELP_GROUPS.map((group) => {
+              const list = HELP_TOPICS.filter((t) => t.group === group);
+              if (list.length === 0 || (q !== "" && !list.some((t) => topics.includes(t)))) return null;
+              return (
+                <section key={group}>
+                  <h3 className="help-nav-title">{group}</h3>
+                  <ul>
+                    {list.filter((t) => topics.includes(t)).map((t) => (
+                      <li key={t.id}><button type="button" className="help-nav-item" aria-current={active?.id === t.id ? "page" : undefined} onClick={() => setActiveId(t.id)}>{t.title}</button></li>
+                    ))}
+                  </ul>
+                </section>
+              );
+            })}
+            {topics.length === 0 ? <p className="help-empty">No topic matches “{query.trim()}”.</p> : null}
+          </nav>
+          <article className="help-content" aria-live="polite">
+            {active ? (
+              <>
+                <p className="help-kicker">{active.group}</p>
+                <h3 className="help-title">{active.title}</h3>
+                <p className="help-what">{active.what}</p>
+                {active.diagram ? <HelpDiagram kind={active.diagram} /> : null}
+                <h4 className="help-h4">Try it</h4>
+                <ol className="help-steps">{active.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+                {active.example ? <p className="help-example"><strong>Example:</strong> {active.example}</p> : null}
+              </>
+            ) : null}
+          </article>
         </div>
       </div>
     </div>
