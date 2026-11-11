@@ -6,8 +6,8 @@ export default function TrustGroup() {
   return (
     <div className="st-stack">
       <div className="st-stack"><span className="st-label">Tools</span><ToolPermissionsSection /></div>
-      <TrustedFolders />
-      <Allowlist />
+      <div className="st-stack"><span className="st-label">Folder trust</span><TrustedFolders /></div>
+      <div className="st-stack"><span className="st-label">Extension sources</span><Allowlist /></div>
     </div>
   );
 }
