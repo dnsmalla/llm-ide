@@ -15,11 +15,11 @@ export function attachmentsToFiles(list) {
 }
 
 /** The modes a `compose` client may pick; the same list as HOST_TURN_MODES in routes/agent-v2.mjs (tested equal). */
-export const COMPOSE_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_plan', 'review', 'document']);
+export const COMPOSE_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_plan', 'review', 'document', 'execute']);
 const MAX_MODELS = 50;
 const MODEL_RE = /^[A-Za-z0-9_.:[\]-]{1,200}$/; // the wire pattern of chat.send.model / chat.options models
 /** chat.options from listSdkModels' entries: the account's Claude models, first = the SDK default. */
-export function optionsOf(entries) {
+export function optionsOf(entries, allowExecute = false) {
   const seen = new Set(); const models = [];
   for (const e of Array.isArray(entries) ? entries : []) {
     const id = e?.id;
@@ -29,6 +29,6 @@ export function optionsOf(entries) {
     models.push({ model: id, ...(label ? { label } : {}) });
     if (models.length === MAX_MODELS) break;
   }
-  return { modes: [...COMPOSE_MODES], models };
+  return { modes: COMPOSE_MODES.filter((m) => m !== 'execute' || allowExecute), models };
 }
 export const offersModel = (entries, id) => optionsOf(entries).models.some((m) => m.model === id);

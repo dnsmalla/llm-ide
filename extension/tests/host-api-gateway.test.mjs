@@ -577,7 +577,7 @@ test('compose: served and granted — chat.options lists the read-only modes and
   const t = harness({ compose: true }); const s = {}; await t.paired(s);
   assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals', 'compose']);
   await t.g.receive(s, req('c-1', 'chat.options', {}));
-  assert.deepEqual(t.last().result, { modes: ['auto', 'ask', 'plan', 'assist_plan', 'review', 'document'], models: [{ model: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }] });
+  assert.deepEqual(t.last().result, { modes: ['auto', 'ask', 'plan', 'assist_plan', 'review', 'document', 'execute'], models: [{ model: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }] });
   await t.g.receive(s, req('c-2', 'chat.options', {}));
   const rows = t.audits.filter(([e]) => e === 'chat_options');
   assert.equal(rows.length, 2, 'the sink de-duplicates; the gateway passes a dedupeKey'); assert.equal(rows[0][1].dedupeKey, rows[0][1].deviceId);
@@ -627,10 +627,10 @@ test('compose send: a model the desktop does not list is denied, no turn starts'
   await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', model: 'claude-opus-9' }));
   assert.equal(t.lastError(), 'denied'); assert.equal(t.turns.length, 0);
 });
-test('compose send: execute never passes the schema', async () => {
+test('compose send: execute reaches the turn for an owner with execute authority', async () => {
   const t = harness({ compose: true }); const s = {}; await t.paired(s);
-  await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', mode: 'execute' }));
-  assert.equal(t.lastError(), 'invalid_payload'); assert.equal(t.turns.length, 0);
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', mode: 'execute' })); await flush();
+  assert.equal(t.lastError(), undefined); assert.equal(t.turns.length, 1); assert.equal(t.turns[0].mode, 'execute'); assert.equal(t.turns[0].allowExecute, true);
 });
 test('chat.send: an image attachment is invalid_payload and no turn starts', async () => {
   const t = harness(); const s = {}; await t.paired(s);

@@ -424,6 +424,11 @@ export function createGateway(overrides) {
 
   // A chat.send that picks a mode or model needs `compose` (served ∩ granted), like a command of that capability.
   // Returns true when it refused (the frame is answered).
+  function executeAllowed(entry) {
+    const m = deps.member(entry.state.userId);
+    return Boolean(m) && m.teamRole !== 'viewer' && m.maxMode !== 'read_only' && m.maxMode !== 'none';
+  }
+
   function composeRefused(s, entry, id) {
     if (entry.grants?.has('compose') && deps.capabilities().includes('compose')) return false;
     if (!deps.capabilities().includes('compose')) { fail(s, id, 'capability_unavailable', 'This computer does not serve compose right now.'); return true; }
@@ -480,7 +485,7 @@ export function createGateway(overrides) {
       } catch (e) { deps.log(`Host API v1 engine event ${ev?.type ?? '?'} dropped (${e?.code ?? 'error'})`); }
     };
     Promise.resolve()
-      .then(() => deps.turn({ userId: o.userId, chatSessionId, message: p.text, files: attachmentsToFiles(p.attachments), mode: p.mode ?? 'auto', model: p.model ?? null, projectId: p.projectId ?? null, onEvent }))
+      .then(() => deps.turn({ userId: o.userId, chatSessionId, message: p.text, files: attachmentsToFiles(p.attachments), mode: p.mode ?? 'auto', model: p.model ?? null, projectId: p.projectId ?? null, allowExecute: executeAllowed(entry), onEvent }))
       // An aborted turn resolves without a terminal event: end it here (a cancelled done when the client asked).
       .then(() => push({ type: 'error', message: 'The turn ended without a reply.', retryable: true }))
       .catch((err) => {
@@ -755,6 +760,7 @@ export function createGateway(overrides) {
         if ((p.attachments ?? []).some(isBinaryAttachment)) return fail(s, id, 'invalid_payload', 'Attachments must be plain text; images are not accepted.');
         const picks = p.mode !== undefined || p.model !== undefined;
         if (picks && composeRefused(s, entry, id)) return;
+        if (p.mode === 'execute' && !executeAllowed(entry)) return fail(s, id, 'denied', 'This account or project cannot run code changes from the phone.');
         const wait = rate.turn(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         if (owned.has(internalId(entry.num, id))) return fail(s, id, 'busy', 'That request id is still running.');
@@ -774,7 +780,7 @@ export function createGateway(overrides) {
       case 'chat.options': {
         if (readRefused(s, entry, id)) return;
         audit('chat_options', { peer: entry.peer, userId, deviceId: entry.state.deviceId, dedupeKey: entry.state.deviceId });
-        return respond(s, id, command, optionsOf(await modelsFor(userId)));
+        return respond(s, id, command, optionsOf(await modelsFor(userId), executeAllowed(entry)));
       }
       case 'chat.cancel': {
         const mine = [...owned.values()].filter((o) => o.session === s && !o.zombie);

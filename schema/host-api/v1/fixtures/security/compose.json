@@ -6,10 +6,10 @@
       "plan",
       "assist_plan",
       "review",
-      "document"
+      "document",
+      "execute"
     ],
     "refused": [
-      "execute",
       "bypass",
       "accept-edits",
       "auto_read_only",

@@ -45,8 +45,8 @@ export interface HostApiCommandMap {
   "chat.history": { request: { beforeSeq?: number; limit?: number; projectId?: string; sessionId: string }; result: { messages: Array<{ content: string; role: "user" | "assistant"; seq: number }>; nextBeforeSeq?: number } };
   "chat.history.clear": { request: { projectId?: string }; result: { cleared: boolean } };
   "chat.new": { request: { projectId?: string }; result: { sessionId: string } };
-  "chat.options": { request: { projectId?: string }; result: { models: Array<{ label?: string; model: string }>; modes: Array<"auto" | "ask" | "plan" | "assist_plan" | "review" | "document"> } };
-  "chat.send": { request: { attachments?: Array<{ name: string; text: string }>; mode?: "auto" | "ask" | "plan" | "assist_plan" | "review" | "document"; model?: string; projectId?: string; text: string }; result: { accepted: boolean; requestId?: string } };
+  "chat.options": { request: { projectId?: string }; result: { models: Array<{ label?: string; model: string }>; modes: Array<"auto" | "ask" | "plan" | "assist_plan" | "review" | "document" | "execute"> } };
+  "chat.send": { request: { attachments?: Array<{ name: string; text: string }>; mode?: "auto" | "ask" | "plan" | "assist_plan" | "review" | "document" | "execute"; model?: string; projectId?: string; text: string }; result: { accepted: boolean; requestId?: string } };
   "chat.sessions": { request: { limit?: number; offset?: number; projectId?: string }; result: { nextOffset?: number; sessions: Array<{ id: string; phoneChat?: boolean; title: string; updatedAt: number }> } };
   "chat.snapshot": { request: { limit?: number; projectId?: string }; result: { messages: Array<{ content: string; role: "user" | "assistant" }> } };
   "files.list": { request: { path?: string; projectId: string }; result: { entries: Array<{ kind: "file" | "dir"; name: string; path: string; size?: number }> } };

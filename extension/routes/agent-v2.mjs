@@ -1310,7 +1310,7 @@ export function clearChatSessionState(userId, chatSessionId) {
 }
 
 /** The modes a Host API client may ask for: `auto` (run as auto_read_only) and the tool-restricted modes. Never execute. */
-export const HOST_TURN_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_plan', 'review', 'document']);
+export const HOST_TURN_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_plan', 'review', 'document', 'execute']);
 
 /**
  * Runs one Agent v2 turn in process, exactly as POST /agent/v2/stream would for a read-only client (the Host
@@ -1320,11 +1320,13 @@ export const HOST_TURN_MODES = Object.freeze(['auto', 'ask', 'plan', 'assist_pla
  * refusal the route answers with 409/503/402 (TURN_IN_PROGRESS, SDK_UPDATING, PLUGIN_UPDATING, SESSION_TOKEN_LIMIT,
  * ROUTE_UNAVAILABLE) rejects with an Error carrying that `code`.
  */
-export async function startHostTurn({ userId, chatSessionId, message, files = [], mode = 'auto', model = null, projectId = null, onEvent, deps = {} }) {
+export async function startHostTurn({ userId, chatSessionId, message, files = [], mode = 'auto', model = null, projectId = null, onEvent, deps = {}, allowExecute = false }) {
   // One scratch folder per member (R-034 #4): two people's phone/browser chats must not share a
   // workspace, and the folder is server-owned so it can never name another project's files.
   const agentContext = { chatSessionId, workspaceRoot: extensionChatWorkspace(config.dataDir, userId), surface: 'host-api' };
-  const hostMode = mode !== 'auto' && HOST_TURN_MODES.includes(mode) ? clampToReadOnly(mode) : AUTO_READ_ONLY;
+  const hostMode = mode === 'execute' && allowExecute
+    ? 'execute'
+    : mode !== 'auto' && HOST_TURN_MODES.includes(mode) ? clampToReadOnly(mode) : AUTO_READ_ONLY;
   const body = {
     message, mode: hostMode, agentContext, attachments: files,
     ...(typeof model === 'string' && model ? { model } : {}),
