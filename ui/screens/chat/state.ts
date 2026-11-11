@@ -56,6 +56,8 @@ export interface AssistantMessage {
   status: MessageStatus;
   /** This reply's token counts once the core reports them (live turns; the Mac labels each reply with them). */
   usage?: UsageCounts;
+  /** The provider's reported cost for this reply, when it sends one. */
+  costUsd?: number | null;
   /** The mode the server ran this reply in (`mode_set`), shown as the Mac's ModeBadge. Live turns only. */
   mode?: string;
   /** The stream died mid-reply (core restart, engine death); the text is what arrived before it. */
@@ -494,6 +496,7 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
       case "result":
         next.phase = "idle";
         next.pendingApprovals = [];
+        if (target && ev.costUsd !== null && Number.isFinite(ev.costUsd)) target.costUsd = ev.costUsd;
         if (target && target.status === "streaming") target.status = "done";
         break;
       case "error":

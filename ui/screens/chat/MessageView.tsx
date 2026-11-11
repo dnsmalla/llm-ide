@@ -184,7 +184,7 @@ function Assistant({ m, host, collapsed, collapsible, onToggle }: { m: Assistant
         {m.interrupted && <p className="chat-muted" role="status">Interrupted.</p>}
         {m.status === "aborted" && <p className="chat-muted">Stopped.</p>}
         {m.status === "error" && host.onRetry ? <button type="button" className="chat-link-btn" onClick={host.onRetry}>Retry this turn</button> : null}
-        {m.usage && !live && <p className="chat-muted" title={usageTooltip(m.usage)}>{compactTokenCount(billableTokens(m.usage))} tokens</p>}
+        {m.usage && !live ? <p className="chat-muted" title={usageTooltip(m.usage)}>{compactTokenCount(billableTokens(m.usage))} tokens{m.costUsd != null && m.costUsd > 0 ? ` · $${m.costUsd.toFixed(4)}` : ""}</p> : null}
         {collapsible && onToggle && !fold && !live && <button type="button" className="chat-link-btn" aria-expanded={true} aria-label="Collapse this reply" onClick={() => onToggle(m.id, false)}>Collapse</button>}
       </div>
     </article>
