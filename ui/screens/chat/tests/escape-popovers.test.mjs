@@ -11,7 +11,3 @@ test("the session-memory popover closes on Esc and stops it reaching the stop li
   assert.match(screen, /aria-label="Session memory"[^>]*onKeyDown=\{\(e\) => \{ if \(e\.key === "Escape"\) \{ e\.stopPropagation\(\); setMemoryOpen\(false\); \} \}\}/);
 });
 
-test("the Library picker closes on Esc and stops it reaching the stop listener", () => {
-  const picker = readFileSync(join(CHAT, "LibraryNotePicker.tsx"), "utf8");
-  assert.match(picker, /role="dialog" aria-label="Add from Library"[^>]*onKeyDown=\{\(e\) => \{ if \(e\.key === "Escape"\) \{ e\.stopPropagation\(\); onClose\(\); \} \}\}/);
-});

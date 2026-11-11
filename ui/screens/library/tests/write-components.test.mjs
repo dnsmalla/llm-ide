@@ -156,19 +156,6 @@ test("list in selection mode: multiselectable listbox, aria-selected is membersh
   assert.ok(!plain.includes("aria-multiselectable"));
 });
 
-test("bulk bar: toolbar with a live count, select-all offers the view size, actions disabled with nothing selected", async () => {
-  const { store, write } = await mkStore(5);
-  const sel = L.selectAll(["a.md", "b.md", "c.md"]);
-  const out = html(h(L.BulkBar, { store, write, selection: sel, viewCount: 5, onSelectAll: noop, onClear: noop, onDone: noop, onChanged: noop }));
-  assert.match(out, /role="toolbar" aria-label="Selected notes"/);
-  assert.match(out, /role="status" aria-live="polite">3 selected/);
-  assert.match(out, />Select all 5<\/button>/);
-  assert.ok(!/<button[^>]*disabled=""[^>]*>Delete…/.test(out));
-  const none = html(h(L.BulkBar, { store, write, selection: L.EMPTY_SELECTION, viewCount: 5, onSelectAll: noop, onClear: noop, onDone: noop, onChanged: noop }));
-  assert.match(none, /<button[^>]*disabled=""[^>]*>Delete…<\/button>/);
-  assert.match(none, /<button[^>]*disabled=""[^>]*>Tag…<\/button>/);
-});
-
 test("store select guard: a dirty editor vetoes navigation until the user discards; proceed bypasses the guard once", async () => {
   const { store } = await mkStore(3);
   const [a, b] = ["source/meetings/2026/10/n0.md", "source/meetings/2026/10/n1.md"];

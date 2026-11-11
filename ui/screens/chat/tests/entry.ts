@@ -11,7 +11,6 @@ export * from "../bypass";
 export * from "../MarkdownView";
 export * from "../MessageView";
 export * from "../MessageList";
-export * from "../SessionList";
 export * from "../Composer";
 export * from "../Pickers";
 export * from "../context-meter";

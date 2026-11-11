@@ -107,7 +107,4 @@ test("approvals in a background chat are named in the history menu and the heade
   assert.match(out, /1 chat needs approval/);
   assert.equal(c.historyOptions(sess(3), "s1", new Set(), new Set(["s2"])).find((o) => o.id === "s2").text, "Chat 2 (needs approval)");
   assert.doesNotMatch(html(h(c.DockHeader, { ...props, approvalIds: new Set(["s1"]) })), /need approval/, "the open chat's own card is shown in the chat");
-  const list = html(h(c.SessionList, { sessions: sess(2), activeId: null, busyIds: new Set(["s1"]), approvalIds: new Set(["s0"]), hasMore: false, onLoadMore: noop, onSelect: noop, onNew: noop, onRename: noop, onDelete: noop, nowMs: 1.7e12 }));
-  assert.match(list, /Needs approval/);
-  assert.match(list, /Running/, "a running chat without an approval keeps its chip");
 });

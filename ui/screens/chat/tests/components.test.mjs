@@ -10,31 +10,6 @@ const noop = () => {};
 const sessions = (n) => Array.from({ length: n }, (_, i) => ({ id: `s${i}`, title: `Chat ${i}`, surface: "any", mode: null, projectId: null, createdAt: 1e9 - i, updatedAt: 1.7e9 - i * 3600 }));
 const listProps = (n, extra = {}) => ({ sessions: sessions(n), activeId: "s3", busyIds: new Set(["s2"]), hasMore: false, onLoadMore: noop, onSelect: noop, onNew: noop, onRename: noop, onDelete: noop, nowMs: 1.7e12, ...extra });
 
-test("SessionList: 2,000 chats render a bounded window with named controls", () => {
-  const out = html(h(c.SessionList, listProps(2000)));
-  assert.match(out, /<nav[^>]*aria-label="Chats"/);
-  assert.match(out, /role="list"[^>]*aria-label="2000 chats"/);
-  assert.ok(count(out, /role="listitem"/g) <= 30, `rendered ${count(out, /role="listitem"/g)} rows`);
-  assert.match(out, /aria-label="Search chats"/);
-  assert.match(out, /aria-label="New chat"/);
-  assert.match(out, /aria-label="Rename Chat 0"/);
-  assert.match(out, /aria-label="Delete Chat 0"/);
-  assert.match(out, /aria-current="true"/);
-  assert.match(out, /Running/);                           // busy chat is flagged
-});
-
-test("SessionList: empty and filtered states, untitled chats get a name", () => {
-  assert.match(html(h(c.SessionList, listProps(0))), /No chats yet/);
-  const untitled = html(h(c.SessionList, listProps(1, { sessions: [{ ...sessions(1)[0], title: "" }] })));
-  assert.match(untitled, /Rename Untitled chat/);
-  assert.deepEqual(c.filterSessions(sessions(5), "chat 3").map((s) => s.id), ["s3"]);
-});
-
-test("SessionList titles are escaped text", () => {
-  const out = html(h(c.SessionList, listProps(1, { sessions: [{ ...sessions(1)[0], title: "<img src=x onerror=alert(1)>" }] })));
-  assert.ok(!out.includes("<img"));
-});
-
 const asst = (over = {}) => ({ role: "assistant", id: "a1", status: "done", notices: [], parts: [], ...over });
 
 test("MessageView: user text is escaped; assistant is an article with busy state while streaming", () => {
@@ -210,12 +185,6 @@ test("windowBlocks: a message renders within the cap, cut at a line end, the res
   assert.deepEqual(c.windowBlocks(["x".repeat(50)], 20), { blocks: ["x".repeat(20)], hidden: 30 }, "one long line is cut at the limit");
   const big = c.windowBlocks(["y\n".repeat(2_000_000)], c.RENDER_CAP_CHARS);
   assert.ok(big.blocks[0].length <= c.RENDER_CAP_CHARS && big.hidden > 0);
-});
-
-test("SessionList: the unreadable footer row renders when the host reports unreadable chats", () => {
-  const out = html(h(c.SessionList, listProps(1, { unreadableNotice: "3 chats could not be read (not touched)" })));
-  assert.match(out, /3 chats could not be read \(not touched\)/);
-  assert.doesNotMatch(html(h(c.SessionList, listProps(1))), /could not be read/);
 });
 
 test("MessageView: a chat_continued notice offers the full history only when the host can send it", () => {

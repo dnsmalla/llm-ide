@@ -9,7 +9,6 @@ import { ComposerModel, type ComposerActions } from "./model";
 import { runBuiltin } from "./builtin-actions";
 import type { CatalogLoader } from "./loader";
 import type { MentionSearch } from "../mentions";
-import type { NotesHost } from "../../library/host.ts";
 import { MODES } from "../route";
 import type { ModelGroupLike } from "./items";
 
@@ -18,8 +17,6 @@ export interface ComposeServices {
   catalog: CatalogLoader;
   mentions: MentionSearch | null;
   attachHost: AttachHost | null;
-  /** The desktop notes folder: "Add from Library" attaches one note as text. */
-  notesHost?: NotesHost | null;
   /** The open project's root-confined fs (mentions, plan saving); null without a project or the desktop host. */
   project: ProjectFs | null;
   blobs?: BlobUrls | null;

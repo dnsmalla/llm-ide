@@ -55,7 +55,7 @@ test("delete-chat confirmation uses the Mac's title and sentence in both the doc
   const { readFileSync } = await import("node:fs");
   const { join } = await import("node:path");
   const dir = join(import.meta.dirname, "..");
-  for (const f of ["DockHeader.tsx", "SessionList.tsx"]) {
+  for (const f of ["DockHeader.tsx"]) {
     const src = readFileSync(join(dir, f), "utf8");
     assert.match(src, /DELETE_CHAT_DETAIL/, `${f} shows the detail sentence`);
     assert.match(src, /DELETE_CHAT_TITLE/, `${f} shows the title`);
