@@ -497,6 +497,7 @@ const ALL_ENDPOINTS = [
   '/kb/ingest',
   '/kb/search',
   '/kb/issues',
+  '/kb/issues/detail',
   '/kb/issues/create',
   '/kb/issues/comment',
   '/kb/issues/close',

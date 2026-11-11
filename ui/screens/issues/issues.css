@@ -40,3 +40,23 @@
 .iss-error { color: var(--tok-color-danger, #e5484d); font-size: var(--tok-type-caption-size); }
 .iss-check { display: inline-flex; align-items: center; gap: 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .iss-pick { margin: 0; }
+
+/* GitLab-style issue sheet: a main discussion column and a settings sidebar. */
+.iss-detail { width: min(960px, 96vw); }
+.iss-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 24px; align-items: start; }
+.iss-detail-main, .iss-detail-side { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.iss-detail-side { padding: 14px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-surface2); }
+.iss-side-block { display: flex; flex-direction: column; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--tok-color-border); font-size: 12px; }
+.iss-side-label { color: var(--tok-color-text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.iss-state { align-self: flex-start; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--tok-color-border); font-size: 11px; }
+.iss-state[data-state="open"] { color: var(--tok-color-accent3); border-color: color-mix(in srgb, var(--tok-color-accent3) 45%, var(--tok-color-border)); }
+.iss-state[data-state="closed"] { color: var(--tok-color-accent2); }
+.iss-comments { display: flex; flex-direction: column; gap: 10px; }
+.iss-comment-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.iss-comment { display: flex; gap: 10px; align-items: flex-start; }
+.iss-comment-avatar { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--tok-color-accent2) 20%, var(--tok-color-surface2)); color: var(--tok-color-accent2); font-weight: 700; font-size: 11px; }
+.iss-comment-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 2px; font-size: 12px; }
+.iss-comment-head time { color: var(--tok-color-text-muted); font-size: 11px; }
+.iss-comment-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--tok-type-sans-family); font-size: 13px; line-height: 1.55; }
+.iss-side-confirm { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+@media (max-width: 760px) { .iss-detail-grid { grid-template-columns: minmax(0, 1fr); } }

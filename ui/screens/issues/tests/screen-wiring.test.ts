@@ -25,7 +25,8 @@ test("the detail opens only the vetted URL, and shows milestone and assignees as
   assert.match(detail, /void deps\.openExternal\(openUrl\)/);
   assert.equal(detail.includes("deps.openExternal(issue.url)"), false, "the raw stored URL is never opened");
   assert.match(detail, /disabled=\{!openUrl\}/);
-  assert.match(detail, /Assigned to \{issue\.assignees\.join\(", "\)\}/);
+  assert.match(detail, /\(detail\?\.issue\?\.assignees \?\? issue\.assignees\)/);
+  assert.match(detail, /\.join\(", "\)/);
   assert.equal(/dangerouslySetInnerHTML|<a\s[^>]*href=\{.*login/i.test(detail), false, "logins are never links or HTML");
 });
 
@@ -70,7 +71,7 @@ test("the detail dialog shows the row as the latest reload has it, by id, not th
 
 test("a successful close closes the dialog; the write resolves to whether it succeeded", () => {
   const detail = read("../IssueDetail.tsx");
-  assert.match(detail, /write\("\/kb\/issues\/close", \{\}, "Issue closed\."\)\.then\(\(ok\) => \{ if \(ok\) onClose\(\); \}\)/);
+  assert.match(detail, /write\("\/kb\/issues\/close", \{\}, "Issue closed\."\)\.then\(\(ok\) => \{ if \(ok\) \{ onChanged\?\.\(\); onClose\(\); \} \}\)/);
 });
 
 test("the board says it is per user, and project switches remount the section (so filters and selection reset)", () => {

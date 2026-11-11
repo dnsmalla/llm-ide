@@ -1,6 +1,6 @@
 // The read-only issue detail dialog, shared by the Issues board and the Gantt's row details (the Mac's
-// RepoIssueDetailSheet, read side). For GitHub issues it also shows the schedule overlay's dates and edits them with
-// the Gantt's ScheduleEditor. Comments and close call the core's GitHub write routes; GitLab writes are refused by the core.
+// RepoIssueDetailSheet, read side). It also shows the schedule overlay's dates and edits them with the Gantt's
+// ScheduleEditor. Comments, settings and close use the core's issue routes for GitHub and GitLab.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatDueDate, issueNumber, issueOpenUrl, openedAgo, type Issue } from "./issues-model.ts";
 import { DETAIL_NESTED_HINT, issueDatesView, localDatesNote, readIssueSchedule, type Schedule } from "../gantt/gantt-model.ts";
@@ -16,6 +16,11 @@ export function gitlabOriginFromConfig(): string | null {
   } catch {
     return null;
   }
+}
+
+export interface IssueDetailView {
+  issue?: { state?: string | null; title?: string; body?: string; labels?: string[]; milestone?: { title?: string; dueOn?: string | null } | null; assignees?: string[]; author?: string | null; createdAt?: string | null; updatedAt?: string | null; webUrl?: string | null } | null;
+  comments?: { id?: number | null; author: string; body: string; at?: string | null }[];
 }
 
 export interface IssueDetailDeps {
@@ -48,6 +53,22 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
   const [writeBusy, setWriteBusy] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [detail, setDetail] = useState<IssueDetailView | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  const loadDetail = useCallback(async () => {
+    if (!issue.number) return;
+    const q = new URLSearchParams({ provider: issue.provider, repo: issue.repo, number: String(issue.number) });
+    try {
+      const r = await deps.request("GET", `/kb/issues/detail?${q.toString()}`);
+      if (r.status === 200 && r.body && typeof r.body === "object") {
+        setDetail(r.body as IssueDetailView);
+        setDetailError(null);
+      } else setDetailError("Comments are not available for this issue.");
+    } catch { setDetailError("The core could not be reached for comments."); }
+  }, [deps, issue.provider, issue.repo, issue.number]);
+
+  useEffect(() => { void loadDetail(); }, [loadDetail]);
 
   const loadSchedule = useCallback(async () => {
     const r = await readIssueSchedule(deps.request, { provider: issue.provider, repo: issue.repo, number: issue.number });
@@ -106,61 +127,88 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
           </div>
           <button type="button" className="iss-btn" onClick={onClose}>Close</button>
         </header>
-        {issue.labels.length ? <div className="iss-labels">{issue.labels.map((l) => <span key={l} className="iss-label">{l}</span>)}</div> : null}
-        {issue.milestone ? (
-          <p className="iss-hint">Milestone: {issue.milestone.title}{formatDueDate(issue.milestone.dueOn) ? ` · due ${formatDueDate(issue.milestone.dueOn)}` : ""}</p>
-        ) : null}
-        {issue.assignees.length ? <p className="iss-hint">Assigned to {issue.assignees.join(", ")}</p> : null}
-        <pre className="iss-body">{issue.body || "No description."}</pre>
+        <div className="iss-detail-grid">
+          <div className="iss-detail-main">
+            <pre className="iss-body">{detail?.issue?.body ?? issue.body ?? "No description."}</pre>
+            <section className="iss-comments" aria-label="Comments">
+              <h3 className="iss-col-title">Comments</h3>
+              {detailError ? <p className="iss-hint">{detailError}</p> : null}
+              {detail === null && !detailError ? <p className="iss-hint">Loading comments…</p> : null}
+              {detail?.comments?.length ? (
+                <ol className="iss-comment-list">
+                  {detail.comments.map((c, i) => (
+                    <li key={c.id ?? i} className="iss-comment">
+                      <span className="iss-comment-avatar" aria-hidden="true">{c.author.slice(0, 1).toUpperCase()}</span>
+                      <div>
+                        <p className="iss-comment-head"><strong>{c.author}</strong>{c.at ? <time dateTime={c.at}>{openedAgo(c.at)}</time> : null}</p>
+                        <pre className="iss-comment-body">{c.body}</pre>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              ) : detail?.comments?.length === 0 ? <p className="iss-hint">No comments yet.</p> : null}
+            </section>
+            {writeError ? <p className="iss-error" role="alert">{writeError}</p> : null}
+            {issue.state !== "closed" ? (
+              <section className="iss-write" aria-label="Comment on this issue">
+                <label className="iss-field"><span>Comment</span><textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} disabled={writeBusy} placeholder="Write a comment…" /></label>
+                <div className="iss-detail-actions">
+                  <button type="button" className="iss-btn iss-primary" disabled={writeBusy || comment.trim() === ""} onClick={() => { const body = comment.trim(); void write("/kb/issues/comment", { body }, "Comment posted.").then((ok) => { if (ok) { setComment(""); void loadDetail(); } }); }}>{writeBusy ? "Posting…" : "Comment"}</button>
+                </div>
+              </section>
+            ) : <p className="iss-hint">This issue is closed.</p>}
+          </div>
+          <aside className="iss-detail-side" aria-label="Issue settings">
+            <h3 className="iss-col-title">Issue settings</h3>
+            <div className="iss-side-block"><span className="iss-side-label">Status</span><span className="iss-state" data-state={issue.state}>{issue.state === "closed" ? "Closed" : "Open"}</span></div>
+            <div className="iss-side-block"><span className="iss-side-label">Labels</span><div className="iss-labels">{(detail?.issue?.labels ?? issue.labels).length ? (detail?.issue?.labels ?? issue.labels).map((l) => <span key={l} className="iss-label">{l}</span>) : <span className="iss-hint">None</span>}</div></div>
+            <div className="iss-side-block"><span className="iss-side-label">Milestone</span><span>{detail?.issue?.milestone?.title ?? issue.milestone?.title ?? "None"}</span>{formatDueDate(detail?.issue?.milestone?.dueOn ?? issue.milestone?.dueOn ?? null) ? <span className="iss-hint">due {formatDueDate(detail?.issue?.milestone?.dueOn ?? issue.milestone?.dueOn ?? null)}</span> : null}</div>
+            <div className="iss-side-block"><span className="iss-side-label">Assignees</span><span>{(detail?.issue?.assignees ?? issue.assignees).length ? (detail?.issue?.assignees ?? issue.assignees).join(", ") : "None"}</span></div>
+            <div className="iss-side-block"><span className="iss-side-label">Author</span><span>{detail?.issue?.author ?? issue.author ?? "Unknown"}{ago ? ` · ${ago}` : ""}</span></div>
+            <div className="iss-side-block"><span className="iss-side-label">Repository</span><span>{issue.repo}</span></div>
 
-        {schedulable ? (
-          <section className="iss-dates" aria-label="Dates">
-            <h3 className="iss-col-title">Dates</h3>
-            {localDatesNote(issue) ? <p className="iss-hint" role="note">{localDatesNote(issue)}</p> : null}
-            {scheduleError ? <p className="iss-hint">{scheduleError}</p> : schedule === undefined ? <p className="iss-hint">Loading dates…</p> : (
-              <p className="iss-dates-line">
-                Start {schedule?.startDate ?? "None"} · Due {schedule?.dueDate ?? "None"}
-                {schedule?.estimateDays ? ` · ${schedule.estimateDays} days` : ""}
-                {schedule?.dependsOn.length ? ` · Depends on #${schedule.dependsOn.join(", #")}` : ""}
-              </p>
-            )}
-            {schedule !== undefined && !editing ? <button type="button" className="iss-btn" onClick={() => setEditing(true)}>Edit schedule</button> : null}
-            {editing && schedule !== undefined ? (
-              <ScheduleEditor
-                issue={issue}
-                schedule={schedule}
-                deps={deps}
-                onClose={() => setEditing(false)}
-                onSaved={(message) => {
-                  setEditing(false);
-                  onNotice(message);
-                  void loadSchedule();
-                  onScheduleChanged?.();
-                }}
-              />
+            {schedulable ? (
+              <section className="iss-dates" aria-label="Dates">
+                <h3 className="iss-col-title">Dates</h3>
+                {localDatesNote(issue) ? <p className="iss-hint" role="note">{localDatesNote(issue)}</p> : null}
+                {scheduleError ? <p className="iss-hint">{scheduleError}</p> : schedule === undefined ? <p className="iss-hint">Loading dates…</p> : (
+                  <p className="iss-dates-line">
+                    Start {schedule?.startDate ?? "None"} · Due {schedule?.dueDate ?? "None"}
+                    {schedule?.estimateDays ? ` · ${schedule.estimateDays} days` : ""}
+                    {schedule?.dependsOn.length ? ` · Depends on #${schedule.dependsOn.join(", #")}` : ""}
+                  </p>
+                )}
+                {schedule !== undefined && !editing ? <button type="button" className="iss-btn" onClick={() => setEditing(true)}>Edit schedule</button> : null}
+                {editing && schedule !== undefined ? (
+                  <ScheduleEditor
+                    issue={issue}
+                    schedule={schedule}
+                    deps={deps}
+                    onClose={() => setEditing(false)}
+                    onSaved={(message) => {
+                      setEditing(false);
+                      onNotice(message);
+                      void loadSchedule();
+                      onScheduleChanged?.();
+                    }}
+                  />
+                ) : null}
+              </section>
             ) : null}
-          </section>
-        ) : null}
 
-        <div className="iss-detail-actions">
-          <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>{onSendToFactory ? <button type="button" className="iss-btn" onClick={onSendToFactory}>Send to Factory</button> : null}
-        </div>
-        {writeError ? <p className="iss-error" role="alert">{writeError}</p> : null}
-        {issue.state !== "closed" ? (
-          <section className="iss-write" aria-label="Comment on this issue">
-            <label className="iss-field"><span>Comment</span><textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} disabled={writeBusy} placeholder="Write a comment…" /></label>
             <div className="iss-detail-actions">
-              <button type="button" className="iss-btn iss-primary" disabled={writeBusy || comment.trim() === ""} onClick={() => { const body = comment.trim(); void write("/kb/issues/comment", { body }, "Comment posted.").then((ok) => { if (ok) setComment(""); }); }}>{writeBusy ? "Posting…" : "Comment"}</button>
-              {!confirmClose ? <button type="button" className="iss-btn" disabled={writeBusy} onClick={() => setConfirmClose(true)}>Close issue</button> : (
-                <>
-                  <span className="iss-hint">Close this issue on GitHub?</span>
-                  <button type="button" className="iss-btn iss-danger" disabled={writeBusy} onClick={() => void write("/kb/issues/close", {}, "Issue closed.").then((ok) => { if (ok) onClose(); })}>Close issue</button>
-                  <button type="button" className="iss-btn" disabled={writeBusy} onClick={() => setConfirmClose(false)}>Cancel</button>
-                </>
-              )}
+              <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
+              {onSendToFactory ? <button type="button" className="iss-btn" onClick={onSendToFactory}>Send to Factory</button> : null}
             </div>
-          </section>
-        ) : <p className="iss-hint">This issue is closed.</p>}
+            {issue.state !== "closed" ? (!confirmClose ? <button type="button" className="iss-btn" disabled={writeBusy} onClick={() => setConfirmClose(true)}>Close issue</button> : (
+              <div className="iss-side-confirm">
+                <span className="iss-hint">Close this issue on {issue.provider === "gitlab" ? "GitLab" : "GitHub"}?</span>
+                <button type="button" className="iss-btn iss-danger" disabled={writeBusy} onClick={() => void write("/kb/issues/close", {}, "Issue closed.").then((ok) => { if (ok) { onChanged?.(); onClose(); } })}>Close issue</button>
+                <button type="button" className="iss-btn" disabled={writeBusy} onClick={() => setConfirmClose(false)}>Cancel</button>
+              </div>
+            )) : null}
+          </aside>
+        </div>
         {nestedHint ? <p className="iss-hint">{nestedHint}</p> : null}
         <p className="iss-hint">Writes use the token saved in Settings → Built-in keys for the issue’s provider.</p>
       </section>

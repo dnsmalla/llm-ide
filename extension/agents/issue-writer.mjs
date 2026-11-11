@@ -133,3 +133,53 @@ export async function createIssue({ userId, provider, repo, title, body: text, i
 export function repoOnBoard(userId, provider, repo) {
   return !!kb.findTicket(userId, { provider, repo, number: null, origin: WEB_ORIGIN[provider] });
 }
+
+/** Read one hosted issue with its comments (GitHub issue/comments, GitLab issue/notes) for the detail window. */
+export async function readIssueDetail({ provider, repo, number, token }) {
+  const gl = provider === 'gitlab';
+  const issues = gl ? `${API_BASE.gitlab}/projects/${encodeURIComponent(repo)}/issues` : `${API_BASE.github}/repos/${repo}/issues`;
+  const headers = gl
+    ? { 'User-Agent': 'llm-ide-desktop', 'PRIVATE-TOKEN': token }
+    : { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'llm-ide-desktop', Authorization: `Bearer ${token}` };
+  const fetchPinned = makePinnedFetch();
+  try {
+    const [issueRes, commentsRes] = await Promise.all([
+      fetchPinned(`${issues}/${number}`, { headers, signal: AbortSignal.timeout(15_000) }),
+      fetchPinned(`${issues}/${number}/${gl ? 'notes' : 'comments'}?per_page=100`, { headers, signal: AbortSignal.timeout(15_000) }),
+    ]);
+    const issue = await issueRes.json().catch(() => ({}));
+    const comments = await commentsRes.json().catch(() => []);
+    if (!issueRes.ok) {
+      const f = mapProviderFailure(provider, issueRes.status, issue);
+      return { status: f.status, body: { error: { code: f.code, message: f.message } } };
+    }
+    const label = (x) => (typeof x === 'string' ? x : typeof x?.name === 'string' ? x.name : '');
+    const person = (x) => (typeof x?.username === 'string' ? x.username : typeof x?.login === 'string' ? x.login : typeof x?.name === 'string' ? x.name : '');
+    const body = {
+      ok: true,
+      issue: {
+        state: issue.state === 'opened' ? 'open' : typeof issue.state === 'string' ? issue.state : null,
+        title: typeof issue.title === 'string' ? issue.title : '',
+        body: gl ? (typeof issue.description === 'string' ? issue.description : '') : (typeof issue.body === 'string' ? issue.body : ''),
+        labels: Array.isArray(issue.labels) ? issue.labels.map(label).filter(Boolean) : [],
+        milestone: issue.milestone && typeof issue.milestone === 'object'
+          ? { title: typeof issue.milestone.title === 'string' ? issue.milestone.title : '', dueOn: typeof issue.milestone.due_date === 'string' ? issue.milestone.due_date : null }
+          : null,
+        assignees: Array.isArray(issue.assignees) ? issue.assignees.map(person).filter(Boolean) : [],
+        author: person(issue.author) || person(issue.user) || null,
+        createdAt: typeof issue.created_at === 'string' ? issue.created_at : null,
+        updatedAt: typeof issue.updated_at === 'string' ? issue.updated_at : null,
+        webUrl: typeof issue.web_url === 'string' ? issue.web_url : typeof issue.html_url === 'string' ? issue.html_url : null,
+      },
+      comments: (Array.isArray(comments) ? comments : []).filter((c) => !c?.system).slice(0, 100).map((c) => ({
+        id: Number.isSafeInteger(c?.id) ? c.id : null,
+        author: person(c?.author) || person(c?.user) || 'unknown',
+        body: typeof c?.body === 'string' ? c.body.slice(0, 20_000) : '',
+        at: typeof c?.created_at === 'string' ? c.created_at : null,
+      })),
+    };
+    return { status: 200, body };
+  } catch {
+    return { status: 502, body: { error: { code: 'PROVIDER_UNREACHABLE', message: `${NAME[provider]} could not be reached. Check the connection and try again.` } } };
+  }
+}

@@ -237,6 +237,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/index/status',
     '/kb/issue-schedule',
     '/kb/issues',
+    '/kb/issues/detail',
     '/kb/live/:id',
     '/kb/live/:id/capture',
     '/kb/live/:id/status',

@@ -28,6 +28,7 @@ import { recordFinishedRun } from '../kb/agent-runs.mjs';
 import { randomUUID } from 'node:crypto';
 import { handleChatRoutes } from './chat.mjs';
 import { handleIndexRoutes } from './index-routes.mjs';
+import { handleIssueDetailRoute } from './issue-detail.mjs';
 const CLIENT_REFUSAL_CODES = new Set([
   'PAYLOAD_TOO_LARGE', 'BATCH_TOO_LARGE', 'ACK_MISMATCH', 'UNACKED_CAPTURE', 'TOO_MANY_UNACKED',
   'SCAN_INCOMPLETE', 'SCAN_LIMIT', 'SCAN_TOTAL_MISMATCH', 'EMPTY_SCAN_REFUSED', 'EMPTY_MANIFEST_REFUSED',
@@ -380,6 +381,8 @@ export async function handleKB(req, res) {
     // List GitHub issues (and other tickets) from the KB. Filtering, ordering and
     // paging run in SQL (kb.listTicketSources): offset/limit page through the
     // user's own ticket rows, newest update first. Absent offset is the first page.
+    if (await handleIssueDetailRoute(req, res, { userId, url })) return true;
+
     if (req.method === 'GET' && url.startsWith('/kb/issues')) {
       const u = new URL(url, 'http://127.0.0.1');
       const repo = u.searchParams.get('repo') || '';
