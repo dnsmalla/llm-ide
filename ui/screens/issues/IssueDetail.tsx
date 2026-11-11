@@ -2,7 +2,7 @@
 // RepoIssueDetailSheet, read side). It also shows the schedule overlay's dates and edits them with the Gantt's
 // ScheduleEditor. Comments, settings and close use the core's issue routes for GitHub and GitLab.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { formatDueDate, issueNumber, issueOpenUrl, openedAgo, type Issue } from "./issues-model.ts";
+import { issueNumber, issueOpenUrl, openedAgo, type Issue } from "./issues-model.ts";
 import { DETAIL_NESTED_HINT, issueDatesView, localDatesNote, readIssueSchedule, type Schedule } from "../gantt/gantt-model.ts";
 import { normalizeBase, readRepoConfig } from "../settings/repo-config.ts";
 import { ScheduleEditor } from "../gantt/ScheduleEditor.tsx";
@@ -16,6 +16,16 @@ export function gitlabOriginFromConfig(): string | null {
   } catch {
     return null;
   }
+}
+
+function SideField({ label, editing, busy, onEdit, onCancel, onSave, children }: { label: string; editing: boolean; busy: boolean; onEdit: () => void; onCancel: () => void; onSave: () => void; children: ReactNode }) {
+  return (
+    <div className="iss-side-block">
+      <div className="iss-side-head"><span className="iss-side-label">{label}</span>{editing ? null : <button type="button" className="iss-side-edit" onClick={onEdit} aria-label={`Edit ${label.toLowerCase()}`}>Edit</button>}</div>
+      {children}
+      {editing ? <div className="iss-side-actions"><button type="button" className="iss-btn iss-primary" disabled={busy} onClick={onSave}>{busy ? "Saving…" : "Save"}</button><button type="button" className="iss-btn" disabled={busy} onClick={onCancel}>Cancel</button></div> : null}
+    </div>
+  );
 }
 
 export interface IssueDetailView {
@@ -56,7 +66,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
   const [confirmClose, setConfirmClose] = useState(false);
   const [detail, setDetail] = useState<IssueDetailView | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [editOpen, setEditOpen] = useState(false);
+  const [editField, setEditField] = useState<"title" | "description" | "status" | "labels" | "milestone" | "assignees" | "due" | null>(null);
   const [edit, setEdit] = useState({ title: "", body: "", state: "open", labels: [] as string[], milestoneId: null as number | null, assigneeIds: [] as number[], dueDate: "" });
   useEffect(() => {
     if (!detail?.issue) return;
@@ -129,6 +139,22 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
     } finally { setWriteBusy(false); }
   };
 
+  const saveField = async (field: "title" | "description" | "status" | "labels" | "milestone" | "assignees" | "due") => {
+    if (writeBusy) return;
+    const body: Record<string, unknown> = {};
+    if (field === "title") body.title = edit.title.trim();
+    else if (field === "description") body.body = edit.body;
+    else if (field === "status") body.state = edit.state;
+    else if (field === "labels") body.labels = Array.from(new Set(edit.labels));
+    else if (field === "milestone") body.milestoneId = edit.milestoneId;
+    else if (field === "assignees") {
+      body.assigneeIds = edit.assigneeIds;
+      body.assignees = (detail?.choices?.assignees ?? []).filter((a) => edit.assigneeIds.includes(a.id)).map((a) => a.name);
+    } else if (field === "due") body.dueDate = edit.dueDate || null;
+    const ok = await write("/kb/issues/update", body, "Issue updated.");
+    if (ok) { setEditField(null); onChanged?.(); void loadDetail(); }
+  };
+
   return (
     <div className="iss-detail-backdrop" role="presentation" onClick={onClose}>
       <section className="iss-detail" role="dialog" aria-modal="true" aria-label="Issue details" onClick={(e) => e.stopPropagation()}>
@@ -144,36 +170,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
         </header>
         <div className="iss-detail-grid">
           <div className="iss-detail-main">
-            {editOpen ? (
-              <form className="iss-edit-form" aria-label="Edit issue" onSubmit={(e) => {
-                e.preventDefault();
-                if (writeBusy) return;
-                const assignees = (detail?.choices?.assignees ?? []).filter((a) => edit.assigneeIds.includes(a.id)).map((a) => a.name);
-                void write("/kb/issues/update", {
-                  title: edit.title,
-                  body: edit.body,
-                  state: edit.state,
-                  labels: Array.from(new Set(edit.labels)),
-                  milestoneId: edit.milestoneId,
-                  assignees: edit.state === "closed" ? undefined : assignees,
-                  assigneeIds: edit.assigneeIds,
-                  ...(issue.provider === "gitlab" ? { dueDate: edit.dueDate || null } : {}),
-                }, "Issue updated.").then((ok) => { if (ok) { setEditOpen(false); void loadDetail(); onChanged?.(); } });
-              }}>
-                <label className="iss-field"><span>Title</span><input className="iss-input" value={edit.title} maxLength={255} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></label>
-                <label className="iss-field"><span>Description</span><textarea rows={8} value={edit.body} maxLength={20000} onChange={(e) => setEdit({ ...edit, body: e.target.value })} /></label>
-                <div className="iss-edit-grid">
-                  <label className="iss-field"><span>Status</span><select value={edit.state} onChange={(e) => setEdit({ ...edit, state: e.target.value })}><option value="open">Open</option><option value="closed">Closed</option></select></label>
-                  <label className="iss-field"><span>Milestone</span><select value={edit.milestoneId ?? ""} onChange={(e) => setEdit({ ...edit, milestoneId: e.target.value === "" ? null : Number(e.target.value) })}><option value="">None</option>{(detail?.choices?.milestones ?? []).map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}</select></label>
-                  {issue.provider === "gitlab" ? <label className="iss-field"><span>Due date</span><input className="iss-input" type="date" value={edit.dueDate} onChange={(e) => setEdit({ ...edit, dueDate: e.target.value })} /></label> : null}
-                </div>
-                <fieldset className="iss-edit-set"><legend>Labels</legend>{(detail?.choices?.labels ?? []).length ? (detail?.choices?.labels ?? []).map((l) => <label key={l} className="iss-check"><input type="checkbox" checked={edit.labels.includes(l)} onChange={(e) => setEdit({ ...edit, labels: e.target.checked ? [...edit.labels, l] : edit.labels.filter((x) => x !== l) })} />{l}</label>) : <span className="iss-hint">No labels available.</span>}</fieldset>
-                <fieldset className="iss-edit-set"><legend>Assignees</legend>{(detail?.choices?.assignees ?? []).length ? (detail?.choices?.assignees ?? []).map((a) => <label key={a.id} className="iss-check"><input type="checkbox" checked={edit.assigneeIds.includes(a.id)} onChange={(e) => setEdit({ ...edit, assigneeIds: e.target.checked ? [...edit.assigneeIds, a.id] : edit.assigneeIds.filter((x) => x !== a.id) })} />{a.name}</label>) : <span className="iss-hint">No assignees available.</span>}</fieldset>
-                <div className="iss-detail-actions"><button type="submit" className="iss-btn iss-primary" disabled={writeBusy || edit.title.trim() === ""}>{writeBusy ? "Saving…" : "Save changes"}</button><button type="button" className="iss-btn" onClick={() => setEditOpen(false)} disabled={writeBusy}>Cancel</button></div>
-              </form>
-            ) : (
-              <pre className="iss-body">{detail?.issue?.body ?? issue.body ?? "No description."}</pre>
-            )}
+            <pre className="iss-body">{detail?.issue?.body ?? issue.body ?? "No description."}</pre>
             <section className="iss-comments" aria-label="Comments">
               <h3 className="iss-col-title">Comments</h3>
               {detailError ? <p className="iss-hint">{detailError}</p> : null}
@@ -204,47 +201,53 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
           </div>
           <aside className="iss-detail-side" aria-label="Issue settings">
             <h3 className="iss-col-title">Issue settings</h3>
-            <div className="iss-side-block"><span className="iss-side-label">Status</span><span className="iss-state" data-state={issue.state}>{issue.state === "closed" ? "Closed" : "Open"}</span></div>
-            <div className="iss-side-block"><span className="iss-side-label">Labels</span><div className="iss-labels">{(detail?.issue?.labels ?? issue.labels).length ? (detail?.issue?.labels ?? issue.labels).map((l) => <span key={l} className="iss-label">{l}</span>) : <span className="iss-hint">None</span>}</div></div>
-            <div className="iss-side-block"><span className="iss-side-label">Milestone</span><span>{detail?.issue?.milestone?.title ?? issue.milestone?.title ?? "None"}</span>{formatDueDate(detail?.issue?.milestone?.dueOn ?? issue.milestone?.dueOn ?? null) ? <span className="iss-hint">due {formatDueDate(detail?.issue?.milestone?.dueOn ?? issue.milestone?.dueOn ?? null)}</span> : null}</div>
-            <div className="iss-side-block"><span className="iss-side-label">Assignees</span><span>{(detail?.issue?.assignees ?? issue.assignees).length ? (detail?.issue?.assignees ?? issue.assignees).join(", ") : "None"}</span></div>
-            <div className="iss-side-block"><span className="iss-side-label">Author</span><span>{detail?.issue?.author ?? issue.author ?? "Unknown"}{ago ? ` · ${ago}` : ""}</span></div>
-            <div className="iss-side-block"><span className="iss-side-label">Repository</span><span>{issue.repo}</span></div>
-
+            <SideField label="Title" editing={editField === "title"} onEdit={() => setEditField("title")} onCancel={() => setEditField(null)} onSave={() => void saveField("title")} busy={writeBusy}>
+              <span className="iss-side-value">{detail?.issue?.title ?? issue.title}</span>
+              {editField === "title" ? <input className="iss-input" value={edit.title} maxLength={255} autoFocus onChange={(e) => setEdit({ ...edit, title: e.target.value })} /> : null}
+            </SideField>
+            <SideField label="Description" editing={editField === "description"} onEdit={() => setEditField("description")} onCancel={() => setEditField(null)} onSave={() => void saveField("description")} busy={writeBusy}>
+              <span className="iss-side-value iss-side-clamp">{detail?.issue?.body ?? issue.body ?? "No description."}</span>
+              {editField === "description" ? <textarea className="iss-input" rows={6} maxLength={20000} value={edit.body} autoFocus onChange={(e) => setEdit({ ...edit, body: e.target.value })} /> : null}
+            </SideField>
+            <SideField label="Status" editing={editField === "status"} onEdit={() => setEditField("status")} onCancel={() => setEditField(null)} onSave={() => void saveField("status")} busy={writeBusy}>
+              <span className="iss-state" data-state={detail?.issue?.state ?? issue.state}>{(detail?.issue?.state ?? issue.state) === "closed" ? "Closed" : "Open"}</span>
+              {editField === "status" ? <select className="iss-input" value={edit.state} onChange={(e) => setEdit({ ...edit, state: e.target.value })}><option value="open">Open</option><option value="closed">Closed</option></select> : null}
+            </SideField>
+            <SideField label="Labels" editing={editField === "labels"} onEdit={() => setEditField("labels")} onCancel={() => setEditField(null)} onSave={() => void saveField("labels")} busy={writeBusy}>
+              <div className="iss-labels">{(detail?.issue?.labels ?? issue.labels).length ? (detail?.issue?.labels ?? issue.labels).map((l) => <span key={l} className="iss-label">{l}</span>) : <span className="iss-hint">None</span>}</div>
+              {editField === "labels" ? <fieldset className="iss-edit-set">{(detail?.choices?.labels ?? []).map((l) => <label key={l} className="iss-check"><input type="checkbox" checked={edit.labels.includes(l)} onChange={(e) => setEdit({ ...edit, labels: e.target.checked ? [...edit.labels, l] : edit.labels.filter((x) => x !== l) })} />{l}</label>)}</fieldset> : null}
+            </SideField>
+            <SideField label="Milestone" editing={editField === "milestone"} onEdit={() => setEditField("milestone")} onCancel={() => setEditField(null)} onSave={() => void saveField("milestone")} busy={writeBusy}>
+              <span className="iss-side-value">{detail?.issue?.milestone?.title ?? issue.milestone?.title ?? "None"}</span>
+              {editField === "milestone" ? <select className="iss-input" value={edit.milestoneId ?? ""} onChange={(e) => setEdit({ ...edit, milestoneId: e.target.value === "" ? null : Number(e.target.value) })}><option value="">None</option>{(detail?.choices?.milestones ?? []).map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}</select> : null}
+            </SideField>
+            <SideField label="Assignees" editing={editField === "assignees"} onEdit={() => setEditField("assignees")} onCancel={() => setEditField(null)} onSave={() => void saveField("assignees")} busy={writeBusy}>
+              <span className="iss-side-value">{(detail?.issue?.assignees ?? issue.assignees).length ? (detail?.issue?.assignees ?? issue.assignees).join(", ") : "None"}</span>
+              {editField === "assignees" ? <fieldset className="iss-edit-set">{(detail?.choices?.assignees ?? []).map((a) => <label key={a.id} className="iss-check"><input type="checkbox" checked={edit.assigneeIds.includes(a.id)} onChange={(e) => setEdit({ ...edit, assigneeIds: e.target.checked ? [...edit.assigneeIds, a.id] : edit.assigneeIds.filter((x) => x !== a.id) })} />{a.name}</label>)}</fieldset> : null}
+            </SideField>
+            {issue.provider === "gitlab" ? (
+              <SideField label="Due date" editing={editField === "due"} onEdit={() => setEditField("due")} onCancel={() => setEditField(null)} onSave={() => void saveField("due")} busy={writeBusy}>
+                <span className="iss-side-value">{detail?.issue?.dueDate ?? "None"}</span>
+                {editField === "due" ? <input className="iss-input" type="date" value={edit.dueDate} onChange={(e) => setEdit({ ...edit, dueDate: e.target.value })} /> : null}
+              </SideField>
+            ) : null}
+            <div className="iss-detail-actions">
+              <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
+              {onSendToFactory ? <button type="button" className="iss-btn" onClick={onSendToFactory}>Send to Factory</button> : null}
+            </div>
             {schedulable ? (
               <section className="iss-dates" aria-label="Dates">
                 <h3 className="iss-col-title">Dates</h3>
                 {localDatesNote(issue) ? <p className="iss-hint" role="note">{localDatesNote(issue)}</p> : null}
                 {scheduleError ? <p className="iss-hint">{scheduleError}</p> : schedule === undefined ? <p className="iss-hint">Loading dates…</p> : (
-                  <p className="iss-dates-line">
-                    Start {schedule?.startDate ?? "None"} · Due {schedule?.dueDate ?? "None"}
-                    {schedule?.estimateDays ? ` · ${schedule.estimateDays} days` : ""}
-                    {schedule?.dependsOn.length ? ` · Depends on #${schedule.dependsOn.join(", #")}` : ""}
-                  </p>
+                  <p className="iss-dates-line">Start {schedule?.startDate ?? "None"} · Due {schedule?.dueDate ?? "None"}{schedule?.estimateDays ? ` · ${schedule.estimateDays} days` : ""}{schedule?.dependsOn.length ? ` · Depends on #${schedule.dependsOn.join(", #")}` : ""}</p>
                 )}
                 {schedule !== undefined && !editing ? <button type="button" className="iss-btn" onClick={() => setEditing(true)}>Edit schedule</button> : null}
                 {editing && schedule !== undefined ? (
-                  <ScheduleEditor
-                    issue={issue}
-                    schedule={schedule}
-                    deps={deps}
-                    onClose={() => setEditing(false)}
-                    onSaved={(message) => {
-                      setEditing(false);
-                      onNotice(message);
-                      void loadSchedule();
-                      onScheduleChanged?.();
-                    }}
-                  />
+                  <ScheduleEditor issue={issue} schedule={schedule} deps={deps} onClose={() => setEditing(false)} onSaved={(message) => { setEditing(false); onNotice(message); void loadSchedule(); onScheduleChanged?.(); }} />
                 ) : null}
               </section>
             ) : null}
-
-            <div className="iss-detail-actions">
-              <button type="button" className="iss-btn" disabled={writeBusy || detail === null} onClick={() => setEditOpen((v) => !v)}>{editOpen ? "Cancel edit" : "Edit issue"}</button>
-              <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
-              {onSendToFactory ? <button type="button" className="iss-btn" onClick={onSendToFactory}>Send to Factory</button> : null}
-            </div>
             {issue.state !== "closed" ? (!confirmClose ? <button type="button" className="iss-btn" disabled={writeBusy} onClick={() => setConfirmClose(true)}>Close issue</button> : (
               <div className="iss-side-confirm">
                 <span className="iss-hint">Close this issue on {issue.provider === "gitlab" ? "GitLab" : "GitHub"}?</span>

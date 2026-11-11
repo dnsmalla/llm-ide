@@ -69,3 +69,13 @@
 .iss-edit-set { margin: 0; padding: 8px 10px; border: 1px solid var(--tok-color-border); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .iss-edit-set legend { padding: 0 4px; color: var(--tok-color-text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; }
 @media (max-width: 760px) { .iss-edit-grid { grid-template-columns: 1fr; } }
+
+/* GitLab-style per-field editors in the settings sidebar. */
+.iss-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.iss-side-edit { font: inherit; font-size: 11px; border: 0; background: none; color: var(--tok-color-accent2); cursor: pointer; padding: 0; }
+.iss-side-edit:hover { text-decoration: underline; }
+.iss-side-value { display: block; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.iss-side-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.iss-side-actions { display: flex; gap: 6px; align-items: center; }
+.iss-side-block .iss-edit-set { max-height: 180px; overflow: auto; }
+.iss-side-block textarea.iss-input { font-family: var(--tok-type-sans-family); resize: vertical; }
