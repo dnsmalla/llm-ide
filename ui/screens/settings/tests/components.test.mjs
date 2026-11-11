@@ -210,6 +210,7 @@ test("Server & Backend: the log viewer is a labelled, read-only block when the h
   assert.match(out, /Start backend/, "before the diagnostics load the safe action is Start");
   assert.match(out, /Kill &amp; Restart/);
   assert.doesNotMatch(out, /<input/, "the desktop backend is managed; no dead config fields");
+  assert.doesNotMatch(out, /Old Mac app data|legacy import/i, "the retired Mac import is gone");
 });
 
 test("Connections: the catalog card explains selection vs credentials and has no credential inputs", () => {
@@ -220,7 +221,7 @@ test("Connections: the catalog card explains selection vs credentials and has no
   assert.match(out, /Loading the catalog/);
   assert.match(out, /Refresh catalog/);
   assert.ok(!/<input|<textarea|<select/.test(out), "no credential fields in this group");
-  assert.match(out, /On the Mac this group also holds/);
+  assert.match(out, /Connector credentials and fetch actions live in Library/);
 });
 
 test("Repositories: the Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repos", () => {

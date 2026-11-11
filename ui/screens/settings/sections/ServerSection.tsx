@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { call } from "../core-api.ts";
 import { decodeHealth, type Health } from "../decoders.ts";
-import type { BackendConfig, CoreLogText, DiagnosticsInfo, LegacyImportReport, LegacyImportStatus, SettingsHost } from "../host.ts";
-import { canOfferImport, legacyImportSummary } from "../legacy-import-model.ts";
+import type { BackendConfig, CoreLogText, DiagnosticsInfo, SettingsHost } from "../host.ts";
 import { describeError } from "../errors.ts";
 import { LOG_POLL_MS, LOG_TEXT, componentError, shortPath, singleFlight } from "../components-model.ts";
 import { parseBackendUrl } from "../project-model.ts";
@@ -125,8 +124,7 @@ export default function ServerSection() {
         ) : <p className="st-hint">Server URL: starting…</p>}
         <p className="st-hint">
           The default backend is the core bundled inside the app. Turn on a source checkout to run the core from a
-          checkout with its own Node binary, project folder and loopback port — the same layout the Mac's Backend
-          card edits. Changes to those paths apply on Kill &amp; Restart; the launch toggle applies on the next app start.
+          checkout with its own Node binary, project folder and loopback port. Changes to those paths apply on Kill &amp; Restart; the launch toggle applies on the next app start.
         </p>
         {host.coreStart || host.coreStop || host.coreRestart ? (
           <div className="st-row">
@@ -146,7 +144,6 @@ export default function ServerSection() {
 
       <RemoteServerCard />
 
-      {serverMode !== "remote" ? <LegacyImportCard host={host} /> : null}
 
       {host.coreLog ? (
         <div className="st-stack">
@@ -181,7 +178,7 @@ export default function ServerSection() {
 }
 
 
-/** The Mac's editable backend fields: source checkout, node, extension folder, loopback URL and launch toggle. */
+/** The editable backend fields: source checkout, node, extension folder, loopback URL and launch toggle. */
 function BackendForm({ host, onSaved }: { host: SettingsHost; onSaved: () => void }) {
   const [cfg, setCfg] = useState<BackendConfig | null>(null);
   const [url, setUrl] = useState("http://127.0.0.1:3457");
@@ -258,84 +255,6 @@ function BackendForm({ host, onSaved }: { host: SettingsHost; onSaved: () => voi
         <Button disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save backend settings"}</Button>
       </div>
       {notice ? <p className="st-ok" role="status">{notice}</p> : null}
-      <ErrorText text={error} />
-    </div>
-  );
-}
-
-
-/**
- * Settings → Server & Backend → "Old Mac app data": the explicit, one-time import of the retired
- * Mac app's data folder. Read-only status first; the button is the only way in. Replacing a
- * non-empty desktop folder asks for a native confirmation in the host (and the helper writes a
- * verified backup before the switch). Nothing here imports on its own.
- */
-function LegacyImportCard({ host }: { host: SettingsHost }) {
-  const [status, setStatus] = useState<LegacyImportStatus | null>(null);
-  const [report, setReport] = useState<LegacyImportReport | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    if (!host.legacyImportStatus) return;
-    host.legacyImportStatus().then(
-      (v) => { setStatus(v); setError(null); },
-      (e) => setError(componentError(e)),
-    );
-  }, [host]);
-  useEffect(load, [load]);
-
-  if (!host.legacyImportStatus || !host.runLegacyImport) return null;
-  const shown = report ?? status;
-  const summary = shown ? legacyImportSummary(shown) : null;
-  const offer = canOfferImport(shown) && !busy;
-  const replacing = shown?.action === "force";
-
-  const run = async (force: boolean) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await host.runLegacyImport!(force);
-      setReport(r);
-      setStatus(r);
-      // A completed import changed the DB; the backend status above is now stale.
-      if (r.status === "completed") load();
-    } catch (e) {
-      setError(componentError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="st-note">
-      <span className="st-label">Old Mac app data</span>
-      {summary ? (
-        <p className="st-row" role="status">
-          <span className="st-status" data-tone={summary.tone === "ok" ? "ok" : summary.tone === "muted" ? undefined : "warning"}>{summary.title}</span>
-          <span className="st-hint st-grow">{summary.detail}</span>
-        </p>
-      ) : <p className="st-hint" role="status">Reading the old data folder...</p>}
-      {shown?.legacy.path ? <p className="st-hint">From {shown.legacy.path}{shown.target.path ? ` to ${shown.target.path}` : ""}</p> : null}
-      {shown?.notes?.length ? <p className="st-hint">{shown.notes.join(" ")}</p> : null}
-      {report?.keychainBackup ? <p className="st-hint">Previous keychain secrets backed up to {report.keychainBackup}.</p> : null}
-      <div className="st-row">
-        {offer ? (
-          <Button
-            tone={replacing ? "danger" : "primary"}
-            disabled={busy}
-            onClick={() => void run(Boolean(replacing))}
-          >
-            {busy ? "Importing…" : replacing ? "Replace with old Mac app data…" : "Import old Mac app data…"}
-          </Button>
-        ) : null}
-        <Button disabled={busy} onClick={load}>{busy ? "Working…" : "Refresh"}</Button>
-        <span className="st-hint">
-          {replacing
-            ? "The desktop database is backed up first; the old folder is never changed."
-            : "Runs once. The old folder is never changed; the desktop core restarts afterwards."}
-        </span>
-      </div>
       <ErrorText text={error} />
     </div>
   );

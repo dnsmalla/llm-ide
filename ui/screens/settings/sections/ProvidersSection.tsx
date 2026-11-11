@@ -76,7 +76,7 @@ export default function ProvidersSection() {
                 </div>
                 <span className="st-status" data-tone={r.hasKey || !r.keyRequired ? "ok" : "warning"}>{keyStatusLabel(r.hasKey, r.keyRequired)}</span>
                 {r.readOnly ? (
-                  <span className="st-hint" title="This endpoint comes from your Mac app's custom providers. Change or remove it there.">Synced from the Mac app (read-only)</span>
+                  <span className="st-hint" title="This endpoint was imported from older settings. Change or remove it here.">Imported (read-only)</span>
                 ) : (
                   <>
                     <Button label={`Test ${r.name}`} disabled={busy} onClick={() => void model.test(r)}>Test</Button>
@@ -258,7 +258,7 @@ function EditConnection({ row, onSave, onCancel }: { row: ProviderRow; onSave: (
         <Field label="Name"><input className="st-input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="Address" hint="The full endpoint address. Leave unchanged unless the gateway moved."><input className="st-input" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} spellCheck={false} /></Field>
         <Switch label="This address is on my own network" checked={allowPrivate} onChange={setAllowPrivate} />
-        <p className="st-hint">The API key is write-only and is kept unchanged. Rotate it by reconnecting the provider, or clear it on the Mac.</p>
+        <p className="st-hint">The API key is write-only and is kept unchanged. Rotate it by reconnecting the provider, or remove it.</p>
         <div className="st-row">
           <Button tone="primary" disabled={busy || name.trim() === ""} onClick={() => { setBusy(true); void onSave({ name, baseURL, allowPrivate }).finally(() => setBusy(false)); }}>{busy ? "Saving…" : "Save changes"}</Button>
           <Button onClick={onCancel}>Cancel</Button>

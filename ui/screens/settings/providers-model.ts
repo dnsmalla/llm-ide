@@ -134,7 +134,7 @@ export function addChoices(catalog: Catalog, claudeSupported = false): AddChoice
     id: CLAUDE_COMPATIBLE_ID,
     name: "Claude-compatible endpoint",
     available: claudeSupported,
-    ...(claudeSupported ? {} : { unavailableReason: "This core is too old to save Anthropic-style endpoints. Update the app's core (API 99), or add it in the Mac app." }),
+    ...(claudeSupported ? {} : { unavailableReason: "This core is too old to save Anthropic-style endpoints. Update the app's core (API 99), or add it as a custom provider." }),
     kindLabel: CLAUDE_KIND_LABEL,
   });
   return out;

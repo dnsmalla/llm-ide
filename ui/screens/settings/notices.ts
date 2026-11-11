@@ -6,7 +6,7 @@ import type { Health } from "./decoders.ts";
 import type { DiagnosticsInfo } from "./host.ts";
 import { coreTrustLabel } from "./misc-model.ts";
 
-export type NoticeStatus = "Managed in the Mac app" | "Planned";
+export type NoticeStatus = "Planned";
 
 export interface GroupNotice {
   /** One sentence: what the Mac offers in this group. */
@@ -23,23 +23,23 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {};
 /** Groups that are only partly implemented keep a short note for the part that is not. */
 export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   connections:
-    "On the Mac this group also holds each connector's credentials and fetch actions. On the desktop those live in Library → Connections; this group mirrors the catalog and its selection.",
+    "Connector credentials and fetch actions live in Library → Connections; this group mirrors the catalog and its selection.",
   "code-graph":
-    "The host refreshes the code graph on project open/switch and every configured interval; automatic memory-graph refreshes, file-watch debouncing and the truncation upload banner remain Mac-only.",
+    "The host refreshes the code graph on project open or switch and on every configured interval. File-watch debouncing is not enabled.",
   repositories:
-    "The Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repositories are here, with clone destinations defaulting to the code/ folder shown in Settings → Paths. Clone repository is real (token optional for public repos, used from memory for private ones), and Check token verifies the saved one for github.com or the configured public GitLab instance; pull/re-sync and the Mac's resolve step are not available in the desktop yet.",
+    "GitLab and GitHub tabs, write-only tokens, automation switches and saved repositories are here, with clone destinations defaulting to the code/ folder shown in Settings → Paths. Clone repository is real (token optional for public repos, used from memory for private ones), and Check token verifies the saved one for github.com or the configured public GitLab instance. Pull/re-sync and resolve are not available yet.",
   paths:
     "The project folder layout is owned by the project on both apps; this group lists the folders (present or missing), reveals them in Finder and re-creates missing ones. Changing the layout itself is not offered on either side.",
   workspace:
-    "On the Mac this group also holds per-section toolbar toggles. The desktop shows the open project, the notes folder, the Home page choice and the full feature profile (presets, switches and per-section toolbar visibility).",
+    "This group shows the open project, the notes folder, the Home page choice and the full feature profile (presets, switches and per-section toolbar visibility).",
   build:
     "Apply & Rebuild needs a source checkout and the Rust/Node toolchains; a distributed build has no source tree, so the button is absent there. It rebuilds the app and restarts it when ready.",
   server:
-    "On the Mac this group also edits the server URL and the Node and project paths. Here the app starts and supervises the core: status, log, Start, Stop and Kill & Restart are real. A source checkout edits its Node binary, project folder and loopback port here; editing the server URL of an external core is not offered.",
+    "The app starts and supervises the core: status, log, Start, Stop and Kill & Restart. A source checkout can set its Node binary, project folder and loopback port; editing the server URL of an external core is not offered.",
   updates:
     "Updates come from signed LLM-IDE releases only: the host checks once a day when the switch is on and never installs without asking. A local or test build has no update channel. A .deb install is updated by the package manager, not here.",
   general:
-    "The Mac hides its bilingual switch; the desktop does not show one either. The menu-bar icon switch is real here (the host shows or hides the tray icon, and hiding it turns close-to-tray off).",
+    "The menu-bar icon switch is real (the host shows or hides the tray icon, and hiding it turns close-to-tray off).",
 };
 
 // ---- Server & Backend rows (pure; the section renders them) -------------------------------------------

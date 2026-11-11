@@ -105,12 +105,12 @@ export function folderNote(name: string): string | null {
 }
 
 export const PATHS_TEXT = {
-  hint: "The folders the project uses on disk. The layout is read-only: it is fixed by the project, and changing it from Settings is a Mac feature the desktop does not offer. Missing folders can be re-created here.",
+  hint: "The folders the project uses on disk. The layout is read-only: it is fixed by the project. Changing it from Settings is not supported. Missing folders can be re-created here.",
   missing: "Missing",
   present: "Present",
   reveal: "Show in Finder",
   partial:
-    "On the Mac this group can also change the project's folder layout with a native dialog and rebuild the notes search index. The desktop shows the layout, opens it in Finder, re-creates missing folders, and links to Library for the index rebuild; editing the layout is not offered.",
+    "The layout is read-only here. This group shows the folders, opens them in Finder, re-creates missing folders, and links to Library for the index rebuild.",
   noProject: "Open a project to see its folders.",
 } as const;
 
