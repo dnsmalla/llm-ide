@@ -16,7 +16,6 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   mobile: dflt(() => import("./sections/MobileBridge.tsx")),
   team: dflt(() => import("./sections/TeamSection.tsx")),
   general: dflt(() => import("./sections/GeneralSection.tsx")),
-  "tool-permissions": dflt(() => import("./sections/ToolPermissionsSection.tsx")),
   providers: dflt(() => import("./sections/ProvidersSection.tsx")),
   "model-routing": dflt(() => import("./sections/ModelsGroup.tsx")),
   "agent-history": dflt(() => import("./sections/AgentHistorySection.tsx")),

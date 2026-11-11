@@ -34,11 +34,10 @@ export const APP_GROUPS: readonly GroupDef[] = [
   // unless `/auth/me.member.teamRole` is admin or owner; the body re-checks the same role.
   { id: "team", title: "Team", sf: "person.3", icon: "circle-user", status: "works", band: "app" },
   { id: "general", title: "General", sf: "globe", icon: "globe", status: "partial", band: "app" },
-  { id: "tool-permissions", title: "Tool permissions", sf: "hand.raised", icon: "hand", status: "works", band: "app" },
   { id: "providers", title: "Providers", sf: "key.horizontal", icon: "key-round", status: "works", band: "app" },
   { id: "model-routing", title: "Model routing", sf: "dial.medium", icon: "gauge", status: "works", band: "app" },
   { id: "agent-history", title: "Agent history", sf: "clock.arrow.circlepath", icon: "rotate-ccw-clock", status: "works", band: "app" },
-  { id: "trust", title: "Trust & sources", sf: "lock.shield", icon: "shield-check", status: "works", band: "app" },
+  { id: "trust", title: "Trust & permissions", sf: "lock.shield", icon: "shield-check", status: "works", band: "app" },
   { id: "optional-components", title: "Optional components", sf: "puzzlepiece.extension", icon: "puzzle", status: "works", band: "app" },
   { id: "self-heal", title: "Self-Heal", sf: "stethoscope", icon: "stethoscope", status: "dev-only", band: "app" },
 ];
@@ -66,6 +65,7 @@ const LEGACY_ANCHORS: Readonly<Record<string, string>> = {
   "agent-sdk": "server",
   "model-limits": "model-routing",
   "build": "workspace",
+  "tool-permissions": "trust",
   "token-saving": "optional-components",
   "extensions-trust": "trust",
   "folder-trust": "trust",
