@@ -110,3 +110,29 @@
 
 .gnt-bar { touch-action: pan-y; user-select: none; }
 .gnt-bar[data-dragging] { cursor: grabbing; z-index: 4; }
+
+/* Equal-height top controls: the header reads as one row instead of a set of mismatched fields. */
+.gnt-head > * { min-height: 32px; }
+.gnt-field input, .gnt-field select { height: 32px; box-sizing: border-box; }
+.gnt-btn { height: 32px; display: inline-flex; align-items: center; justify-content: center; }
+.gnt-check { height: 32px; }
+.gnt-zbtn { height: 32px; display: inline-flex; align-items: center; }
+.gnt-zoom { align-items: stretch; }
+
+/* Colour: bars carry state, the grid carries light. */
+.gnt-bar { background: var(--tok-color-accent); color: var(--tok-color-body); }
+.gnt-bar[data-state="closed"] { background: var(--tok-color-accent3); }
+.gnt-bar[data-overdue] { background: var(--tok-color-accent4); }
+.gnt-bar[data-selected] { outline-color: var(--tok-color-text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tok-color-accent) 22%, transparent); }
+.gnt-labels-head { color: var(--tok-color-accent2); background: color-mix(in srgb, var(--tok-color-accent2) 9%, var(--tok-color-surface2)); }
+.gnt-months { background: linear-gradient(90deg, color-mix(in srgb, var(--tok-color-accent2) 12%, var(--tok-color-surface2)), var(--tok-color-surface2)); }
+.gnt-month:nth-child(even) { background: color-mix(in srgb, var(--tok-color-accent3) 7%, transparent); }
+.gnt-day[data-weekend] { background: color-mix(in srgb, var(--tok-color-accent2) 6%, transparent); }
+.gnt-day[data-today] { color: var(--tok-color-accent4); background: color-mix(in srgb, var(--tok-color-accent4) 10%, transparent); }
+.gnt-rowlabel:nth-child(even) { background: var(--tok-color-row-alt); }
+.gnt-no-bars { border: 1px solid var(--tok-color-border); border-radius: 10px; background: color-mix(in srgb, var(--tok-color-surface2) 88%, transparent); padding: 24px 22px; }
+.gnt-no-bars strong { color: var(--tok-color-accent2); }
+.iss-avatars { gap: 0; vertical-align: middle; }
+.iss-avatar { display: inline-grid; place-items: center; border-radius: 50%; color: var(--tok-color-body); font-weight: 700; border: 1px solid var(--tok-color-surface); margin-left: -4px; flex: none; }
+.iss-avatar:first-child { margin-left: 0; }
+.iss-avatar-more { background: var(--tok-color-surface2); color: var(--tok-color-text-muted); }

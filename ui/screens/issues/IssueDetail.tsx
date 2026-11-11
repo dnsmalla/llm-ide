@@ -7,6 +7,7 @@ import { DETAIL_NESTED_HINT, issueDatesView, localDatesNote, readIssueSchedule, 
 import { normalizeBase, readRepoConfig } from "../settings/repo-config.ts";
 import { ScheduleEditor } from "../gantt/ScheduleEditor.tsx";
 import { MarkdownView } from "../library/MarkdownView.tsx";
+import { AssigneeAvatars } from "./AssigneeAvatars.tsx";
 import "./issues.css";
 
 /** A short-lived cache: opening the same issue twice does not repeat five provider requests. */
@@ -233,7 +234,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
               {editField === "milestone" ? <select className="iss-input" value={edit.milestoneId ?? ""} onChange={(e) => setEdit({ ...edit, milestoneId: e.target.value === "" ? null : Number(e.target.value) })}><option value="">None</option>{(detail?.choices?.milestones ?? []).map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}</select> : null}
             </SideField>
             <SideField label="Assignees" editing={editField === "assignees"} onEdit={() => setEditField("assignees")} onCancel={() => setEditField(null)} onSave={() => void saveField("assignees")} busy={writeBusy}>
-              <span className="iss-side-value">{(detail?.issue?.assignees ?? issue.assignees).length ? (detail?.issue?.assignees ?? issue.assignees).join(", ") : "None"}</span>
+              <span className="iss-side-value">{(detail?.issue?.assignees ?? issue.assignees).length ? <AssigneeAvatars names={detail?.issue?.assignees ?? issue.assignees} size={22} max={4} /> : "None"}</span>
               {editField === "assignees" ? <fieldset className="iss-edit-set">{(detail?.choices?.assignees ?? []).map((a) => <label key={a.id} className="iss-check"><input type="checkbox" checked={edit.assigneeIds.includes(a.id)} onChange={(e) => setEdit({ ...edit, assigneeIds: e.target.checked ? [...edit.assigneeIds, a.id] : edit.assigneeIds.filter((x) => x !== a.id) })} />{a.name}</label>)}</fieldset> : null}
             </SideField>
             {issue.provider === "gitlab" ? (

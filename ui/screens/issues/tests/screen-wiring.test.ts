@@ -26,7 +26,7 @@ test("the detail opens only the vetted URL, and shows milestone and assignees as
   assert.equal(detail.includes("deps.openExternal(issue.url)"), false, "the raw stored URL is never opened");
   assert.match(detail, /disabled=\{!openUrl\}/);
   assert.match(detail, /\(detail\?\.issue\?\.assignees \?\? issue\.assignees\)/);
-  assert.match(detail, /\.join\(", "\)/);
+  assert.match(detail, /<AssigneeAvatars names=\{detail\?\.issue\?\.assignees \?\? issue\.assignees\}/);
   assert.equal(/dangerouslySetInnerHTML|<a\s[^>]*href=\{.*login/i.test(detail), false, "logins are never links or HTML");
 });
 

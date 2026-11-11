@@ -82,3 +82,8 @@
 .iss-body, .iss-comment-body { white-space: normal; line-height: 1.6; }
 .iss-body p, .iss-comment-body p { margin: 0 0 8px; }
 .iss-body > :last-child, .iss-comment-body > :last-child { margin-bottom: 0; }
+.iss-avatars { gap: 0; vertical-align: middle; }
+.iss-avatar { display: inline-grid; place-items: center; border-radius: 50%; color: var(--tok-color-body); font-weight: 700; border: 1px solid var(--tok-color-surface); margin-left: -4px; flex: none; }
+.iss-avatar:first-child { margin-left: 0; }
+.iss-avatar-more { background: var(--tok-color-surface2); color: var(--tok-color-text-muted); }
+.iss-avatar-names { margin-left: 6px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

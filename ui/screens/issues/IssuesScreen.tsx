@@ -4,9 +4,9 @@
 import { shellBus } from "../shell/bus";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
+import { AssigneeAvatars } from "./AssigneeAvatars.tsx";
 import type { SectionProps } from "../shell/sections";
 import {
-  assigneeSummary,
   columnsFor,
   createFingerprint,
   errorMessageOf,
@@ -328,7 +328,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
                       <span>{i.state}</span>
                     </div>
                     {i.labels.length ? <div className="iss-labels">{i.labels.slice(0, 4).map((l) => <span key={l} className="iss-label">{l}</span>)}</div> : null}
-                    {i.assignees.length ? <div className="iss-meta"><span title="Assignees">{assigneeSummary(i.assignees)}</span></div> : null}
+                    {i.assignees.length ? <div className="iss-meta"><span title="Assignees"><AssigneeAvatars names={i.assignees} size={18} max={3} /></span></div> : null}
                   </li>
                 ))}
               </ul>

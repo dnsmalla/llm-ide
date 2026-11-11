@@ -18,6 +18,7 @@ import {
   type GanttRow,
   type TimelineRange,
 } from "./gantt-model.ts";
+import { AssigneeAvatars } from "../issues/AssigneeAvatars.tsx";
 
 /** Mirror gantt.css: the month band (20px) + day header (32px) above the rows, and each row's height. */
 export const HEAD_H = 52;
@@ -102,7 +103,7 @@ const GanttLabel = memo(function GanttLabel({ row, index, count, selected, onAct
       title={`${row.issue.title}\nOpen details`}
     >
       <span className="gnt-status" data-state={row.issue.state === "closed" ? "closed" : "open"} aria-hidden="true">{row.issue.state === "closed" ? "✓" : "○"}</span>
-      <span className="gnt-rowtext"><span className="gnt-num">{row.issue.number !== null ? `#${row.issue.number}` : ""}</span> {issueTitleBody(row.issue)}<span className="gnt-rowdates">{barDates(row)}</span></span>
+      <span className="gnt-rowtext"><span className="gnt-num">{row.issue.number !== null ? `#${row.issue.number}` : ""}</span> {issueTitleBody(row.issue)}<span className="gnt-rowdates">{barDates(row)}</span></span>{row.issue.assignees.length ? <AssigneeAvatars names={row.issue.assignees} size={14} max={2} label={false} /> : null}
     </button>
     </div>
   );
@@ -111,9 +112,10 @@ const GanttLabel = memo(function GanttLabel({ row, index, count, selected, onAct
 interface TrackProps extends RowProps {
   range: TimelineRange;
   dayWidth: number;
+  today: number;
 }
 
-const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWidth, onActivate, onFocusRow, onShift }: TrackProps) {
+const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWidth, today, onActivate, onFocusRow, onShift }: TrackProps) {
   const g = barGeometry(row, range, dayWidth);
   const [dx, setDx] = useState(0);
   const drag = useRef<{ x: number; moved: boolean } | null>(null);
@@ -137,6 +139,8 @@ const GanttTrack = memo(function GanttTrack({ row, index, selected, range, dayWi
           className="gnt-bar"
           style={{ left: g.left, width: g.width, transform: dx ? `translateX(${dx}px)` : undefined }}
           data-selected={selected || undefined}
+          data-state={row.issue.state}
+          data-overdue={row.issue.state !== "closed" && row.end !== null && row.end < today || undefined}
           data-dragging={dx !== 0 || undefined}
           title={`${row.issue.title}\n${barDates(row)}\n${canShift ? "Drag to move; Alt+Left/Right for one day" : "Edit schedule"}`}
           onFocus={() => onFocusRow(index)}
@@ -298,7 +302,7 @@ export const GanttChart = memo(function GanttChart(p: GanttChartProps) {
             </div>
           </div>
           {visibleIdx.map((i) => (
-            <GanttTrack key={rows[i]!.issue.id} row={rows[i]!} index={i} selected={rows[i]!.issue.id === p.selectedId} range={range} dayWidth={dayWidth} onActivate={onActivate} onFocusRow={onFocusRow} onShift={onShift} />
+            <GanttTrack key={rows[i]!.issue.id} row={rows[i]!} index={i} selected={rows[i]!.issue.id === p.selectedId} range={range} dayWidth={dayWidth} today={today} onActivate={onActivate} onFocusRow={onFocusRow} onShift={onShift} />
           ))}
         </div>
       </div>
