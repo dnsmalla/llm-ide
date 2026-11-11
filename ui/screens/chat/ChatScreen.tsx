@@ -27,7 +27,7 @@ import { useChatState, useControllerVersion } from "./hooks";
 import { chatApprovalStore } from "../shell/chat-approvals";
 import { chatOutputStore } from "../shell/chat-output";
 import {
-  AUTO_MODE, MODES, PROVIDER_BLOCKED_NOTE, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
+  AUTO_MODE, MODES, PROVIDER_BLOCKED_NOTE, defaultModelForMode, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
   restoreFailedPick, routeRereadDue, type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import { memoryClient } from "./memory-client";
@@ -246,6 +246,15 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [state.messages]);
   const current: ChatPrefs = (activeId && prefs[activeId]) || { mode: pickerModeAfterSessionChange(), provider: null, model: null };
   const setCurrent = (patch: Partial<ChatPrefs>) => { if (activeId) setPrefs((p) => ({ ...p, [activeId]: { ...current, ...patch } })); };
+  // A chat with no explicit model starts on the mode's default: cheap for Ask/Document/Review, strong for
+  // Plan/Execute. A saved pick (or a pinned route) always wins.
+  useEffect(() => {
+    if (!activeId || !groupsLoaded || current.provider || current.model || route?.pinned) return;
+    const pick = defaultModelForMode(groups, current.mode);
+    if (pick) setCurrent({ provider: pick.provider, model: pick.model });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, groupsLoaded, groups, current.mode, current.provider, current.model, route?.pinned]);
+
   // A viewer has exactly one permitted mode (Ask): the picker never shows Auto and the chat runs as Ask.
   const modeOptions = useMemo(() => allowedModes(perms, MODES), [perms]);
   useEffect(() => {

@@ -337,3 +337,23 @@ export function planProgress(tasks: readonly { status: string }[]): { total: num
   const current = Math.min(done + running, total);
   return { total, done, current, percent: total > 0 ? Math.round((done / total) * 100) : 0 };
 }
+
+/** Chat modes that should prefer a cheap model; everything else prefers the strongest listed model. */
+const CHEAP_MODES: ReadonlySet<string> = new Set(["ask", "document", "review"]);
+const CHEAP = /(haiku|mini|flash|small|nano|lite|8b|7b)/i;
+const STRONG = /(opus|sonnet|pro|max|large|gpt-5|o3|o4|4\.1)/i;
+
+/**
+ * The model a chat starts on when the user has not picked one. Ask/Document/Review prefer a cheap model;
+ * Plan/Execute/Auto prefer the strongest listed one (tools-capable when the mode needs tools). A user pick is
+ * stored in the chat prefs and this helper is never consulted for it. Pure.
+ */
+export function defaultModelForMode(groups: readonly ModelGroup[], mode: string): ModelChoice | null {
+  const models = groups.flatMap((g) => g.models);
+  if (models.length === 0) return null;
+  const cheap = CHEAP_MODES.has(mode);
+  const match = models.find((m) => (cheap ? CHEAP : STRONG).test(`${m.model} ${m.label}`));
+  if (match) return match;
+  // No name hint: the first model of the first group is the provider's own default.
+  return models[0] ?? null;
+}
