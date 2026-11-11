@@ -18,6 +18,8 @@ export interface BusRunnerDeps {
   /** Store the issues as Factory cards and start one `full` run each; returns the run ids it started. */
   sendItems(projectRoot: string, issueIds: readonly string[]): Promise<{ runIds: string[]; missing: string[] }>;
   now(): number;
+  /** Stops a live run (the run manager's cancelRun); the phone's Cancel reaches the desktop through this. */
+  cancelRun?(runId: string): void;
   /** A message for the board (a claim that could not start, a missing issue). */
   notice?(message: string): void;
 }
@@ -114,6 +116,20 @@ async function finishClaim(deps: BusRunnerDeps, claim: Claim): Promise<boolean> 
   return false;
 }
 
+/** A command the phone cancelled stops its runs; any other lost lease leaves them running. */
+async function stopIfCancelled(deps: BusRunnerDeps, claim: Claim): Promise<void> {
+  if (!deps.cancelRun) return;
+  let state: unknown = null;
+  try {
+    const got = await deps.requestRaw(`/bus/commands/${claim.command.id}`, { method: "GET" });
+    const command = isRecord(got.body) && isRecord(got.body.command) ? got.body.command : null;
+    state = command?.state ?? null;
+  } catch { return; }
+  if (state !== "cancelled") return;
+  for (const runId of claim.runIds) deps.cancelRun(runId);
+  deps.notice?.("A run was cancelled from the phone.");
+}
+
 /** Reports one progress step when it changed or the heartbeat is due (the report renews the lease). */
 async function reportProgress(deps: BusRunnerDeps, claim: Claim, live: readonly { runId: string; log: readonly string[]; progress?: { stageName: string | null } | null }[]): Promise<boolean> {
   const step = claim.runIds.map((id) => {
@@ -129,7 +145,12 @@ async function reportProgress(deps: BusRunnerDeps, claim: Claim, live: readonly 
     claim.lastStep = step;
     return true;
   }
-  if (r.status === 409) claims.delete(claim.command.id); // the lease is gone; the sweep will interrupt it
+  if (r.status === 409) {
+    // The lease is gone: the phone cancelled the command (stop its runs now), or the lease expired (the runs finish
+    // on their own and the sweep interrupts the command).
+    await stopIfCancelled(deps, claim);
+    claims.delete(claim.command.id);
+  }
   return false;
 }
 

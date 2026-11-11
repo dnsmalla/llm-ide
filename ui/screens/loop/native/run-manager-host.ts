@@ -10,7 +10,7 @@ import { core } from "../../shell/runtime";
 import { readRepoConfig } from "../../settings/repo-config";
 import { approveLoop } from "./approvals.ts";
 import { repoForIssue } from "./factory.ts";
-import { configureRunManager, concurrency, liveRuns, projectGuardedFs, startRun } from "./run-manager.ts";
+import { cancelRun, configureRunManager, concurrency, liveRuns, projectGuardedFs, startRun } from "./run-manager.ts";
 
 let installed = false;
 let busRunnerInstalled = false;
@@ -88,6 +88,7 @@ function installBusRunner(): void {
       concurrency: () => concurrency(),
       now: () => Date.now(),
       sendItems: startIssueRuns,
+      cancelRun,
   };
   busDeps = deps;
   const timer = setInterval(() => kickPoll(deps), BUS_POLL_MS);

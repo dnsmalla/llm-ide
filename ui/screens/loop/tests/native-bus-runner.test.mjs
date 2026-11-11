@@ -187,3 +187,24 @@ test("progress prefers the typed stage over the log line", async () => {
   await pollOnce(w.deps);
   assert.deepEqual(posts(w, "/events").at(-1).payload, { step: "stage: Implement" });
 });
+
+test("a command the phone cancelled stops its runs; a merely expired lease does not", async () => {
+  for (const [state, stopped] of [["cancelled", true], ["interrupted", false]]) {
+    resetBusRunnerForTests();
+    const w = world();
+    const stops = [];
+    const base = w.deps.requestRaw;
+    w.deps.cancelRun = (id) => stops.push(id);
+    w.deps.requestRaw = async (path, opts = {}) => {
+      if (path.endsWith("/events")) return { status: 409, body: { error: { code: "LEASE_LOST" } } };
+      if (path === "/bus/commands/c1") return { status: 200, body: { command: { id: "c1", state } } };
+      return base(path, opts);
+    };
+    w.claimable = [command("c1")];
+    await pollOnce(w.deps);
+    w.nowMs += 31_000; // the heartbeat is due, so a progress report is attempted
+    await pollOnce(w.deps);
+    assert.deepEqual(stops, stopped ? ["run-i-c1"] : []);
+    assert.deepEqual(activeClaims(), []);
+  }
+});
