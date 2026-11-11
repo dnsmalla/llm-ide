@@ -46,7 +46,7 @@ const REFUSALS = Object.freeze({
 export const PROJECT_WORK_ROUTES = Object.freeze([
   'POST /agent/v2/stream', 'POST /kb/agent/ask', 'POST /kb/loop/agent-run', 'POST /kb/providers/turn',
   'POST /kb/generate-code', 'POST /kb/project/install-skills',
-  'POST /kb/issues/create', 'POST /kb/issues/comment', 'POST /kb/issues/close',
+  'POST /kb/issues/create', 'POST /kb/issues/comment', 'POST /kb/issues/close', 'POST /kb/issues/update',
 ]);
 
 /** The refusal for a hub request that acts on a folder (Loop, codegen, install-skills), or null off a hub. */
@@ -237,7 +237,6 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/index/status',
     '/kb/issue-schedule',
     '/kb/issues',
-    '/kb/issues/update',
     '/kb/issues/detail',
     '/kb/live/:id',
     '/kb/live/:id/capture',
@@ -462,6 +461,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/issues/close',
     '/kb/issues/comment',
     '/kb/issues/create',
+    '/kb/issues/update',
     '/kb/loop/ship',
     '/kb/dispatch',
     '/kb/notify/slack',

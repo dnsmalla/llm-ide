@@ -48,6 +48,7 @@ test('a method + path has exactly one rule', () => {
 
 test('a literal path wins over a parameter path; the query string is ignored', () => {
   assert.equal(routeAuthorityFor('POST', '/kb/loop/agent-run?x=1').cls, 'model.exec');
+  assert.equal(routeAuthorityFor('POST', '/kb/issues/update').cls, 'external.write', 'issue update is a write, not a read');
   assert.equal(routeAuthorityFor('GET', '/kb/no-such-route'), null);
   assert.equal(routeAuthorityFor('GET', '/kb/loop/agent-run'), null, 'only the declared method');
 });
