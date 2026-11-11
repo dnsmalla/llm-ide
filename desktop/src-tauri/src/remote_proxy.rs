@@ -23,19 +23,19 @@ use crate::remote_tls::hub_agent;
 
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_HEADERS: usize = 64 * 1024;
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub struct ProxyHandle {
     pub url: String,
+    #[allow(dead_code)] // kept for the launch diagnostics and the no-token-in-display test
     pub token: String,
-    hub: String,
     stop: Arc<AtomicBool>,
     port: u16,
 }
 
 impl ProxyHandle {
     /// The base URL without the token, for display/diagnostics.
+    #[cfg(test)]
     pub fn display_url(&self) -> String { format!("http://127.0.0.1:{}", self.port) }
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
@@ -242,7 +242,7 @@ fn start_on(agent: ureq::Agent, hub_url: &str, ports: &[u16]) -> Result<ProxyHan
             std::thread::spawn(move || handle(stream, &agent, &hub, &token));
         }
     });
-    Ok(ProxyHandle { url: format!("http://127.0.0.1:{port}/{token}"), token, hub, stop, port })
+    Ok(ProxyHandle { url: format!("http://127.0.0.1:{port}/{token}"), token, stop, port })
 }
 
 #[cfg(test)]

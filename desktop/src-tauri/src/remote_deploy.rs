@@ -33,16 +33,18 @@ pub const STAGES: &[&str] = &[
     "uninstall-purge",
 ];
 
-pub const HELPER: &str = include_str!("../../../deploy/hub/llmide-deploy");
+#[cfg(test)]
 pub const UNIT: &str = include_str!("../../../deploy/hub/llmide-core.service");
-pub const BACKUP_UNIT: &str = include_str!("../../../deploy/hub/llmide-backup.service");
+
+pub const HELPER: &str = include_str!("../../../deploy/hub/llmide-deploy");
+#[cfg(test)]
 pub const BACKUP_TIMER: &str = include_str!("../../../deploy/hub/llmide-backup.timer");
-pub const LOGROTATE: &str = include_str!("../../../deploy/hub/logrotate");
 pub const VHOST_TEMPLATE: &str = include_str!("../../../deploy/hub/llm-ide-hub.nginx.template");
 pub const SETUP_HTML: &str = include_str!("../../../deploy/hub/setup.html");
 
 pub const MIN_DISK_MB: u64 = 2048;
 /// Bumped when the helper's stage set/semantics changes; a mismatch reinstalls it.
+
 pub const HELPER_VERSION: &str = "5";
 const MAX_DOMAIN: usize = 253;
 const PLAN_TTL_MS: u64 = 30 * 60 * 1000;
@@ -479,7 +481,6 @@ fn wait_healthy<H: HealthProbe>(health: &H, url: &str) -> bool {
 pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
     runner: &R, health: &H, target: &PreparedTarget, plan: &DeployPlan, secrets: &DeploySecrets, bundle: &[u8],
 ) -> Result<DeployReport, FsError> {
-    let staging = staging_for(&target.user);
     let current_version = runner.run(target, &stage_command("check").unwrap(), None).ok()
         .and_then(|o| o.stdout.lines().find_map(|l| l.trim().strip_prefix("version=")).map(str::to_string));
     let mut switched = false;
@@ -709,8 +710,7 @@ pub async fn remote_update(target: SshTarget, version: String, confirmation: Str
         let Some(bundle) = bundle_path(&version) else { return Err(herr("bundle_missing", "the staged hub bundle is missing; run node desktop/scripts/stage-hub-core.mjs")); };
         let bytes = std::fs::read(&bundle).map_err(|e| herr("bundle_missing", format!("cannot read the bundle: {e}")))?;
         if bytes.len() > 256 * 1024 * 1024 { return Err(herr("bundle_too_large", "the hub bundle is larger than 256 MB")); }
-        let staging = staging_for(&target.user);
-        let sha = hex(&Sha256::digest(&bytes));
+            let sha = hex(&Sha256::digest(&bytes));
         upload_staging(&SystemDeploy, &prepared, "bundle.tar.gz", &bytes)?;
         upload_staging(&SystemDeploy, &prepared, "bundle.sha256", format!("{sha}  bundle.tar.gz\n").as_bytes())?;
         upload_staging(&SystemDeploy, &prepared, "VERSION", format!("{version}\n").as_bytes())?;

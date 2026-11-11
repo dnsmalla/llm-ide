@@ -179,6 +179,7 @@ pub(crate) fn resolve_stage(root: &Path, stage_id: &str, loop_id: Option<&str>) 
 }
 
 /// The command of a shell stage, retained for the stage-only path and tests. No command is accepted from the caller.
+#[cfg(test)]
 pub(crate) fn stage_command(root: &Path, stage_id: &str) -> Result<String, String> {
     let s = resolve_stage(root, stage_id, None)?;
     if s.kind != "shellCommand" { return Err("only shellCommand stages can run in this slice".into()); }

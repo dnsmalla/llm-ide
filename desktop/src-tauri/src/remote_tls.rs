@@ -7,7 +7,7 @@
 //!
 //! The minimal DER walker below extracts only SubjectPublicKeyInfo; it is not a general X.509 parser.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;

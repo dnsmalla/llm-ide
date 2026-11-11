@@ -68,6 +68,7 @@ pub fn clear(b: &dyn SecretBackend) -> Result<(), FsError> {
     b.set(ACCOUNT_HUB_SESSION, "").map_err(|e| herr("keychain_unavailable", e.to_string()))
 }
 
+#[cfg(test)]
 pub fn stored_present(b: &dyn SecretBackend) -> bool {
     b.get(ACCOUNT_HUB_SESSION).ok().flatten().is_some_and(|v| !v.is_empty())
 }

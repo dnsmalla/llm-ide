@@ -260,6 +260,7 @@ pub fn prepare(target: &SshTarget) -> Result<PreparedTarget, FsError> {
 }
 
 /// The argv after `ssh`: a fixed option list, then `user@host`, then one remote command. No shell.
+#[cfg(test)]
 pub fn ssh_args_with(target: &PreparedTarget, command: &str) -> Vec<String> {
     vec![
         "-v".to_string(),
@@ -281,6 +282,7 @@ pub fn ssh_args_with(target: &PreparedTarget, command: &str) -> Vec<String> {
 }
 
 /// The argv for the fixed Phase-1 probe. Deploy uses [`ssh_args_with`] with a constant stage command.
+#[cfg(test)]
 pub fn ssh_args(target: &PreparedTarget) -> Vec<String> {
     ssh_args_with(target, REMOTE_COMMAND)
 }
