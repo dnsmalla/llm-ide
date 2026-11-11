@@ -23,33 +23,42 @@ export interface GroupDef {
   status: GroupStatus;
   /** "app" groups always show; "project" groups only while a project is open (like the Mac). */
   band: "app" | "project";
+  /** Extra words the search matches: merged cards keep their old names discoverable. */
+  keywords?: string;
 }
 
 export const APP_GROUPS: readonly GroupDef[] = [
-  { id: "workspace", title: "Workspace", sf: "slider.horizontal.3", icon: "sliders-horizontal", status: "partial", band: "app" },
-  { id: "server", title: "Server & Backend", sf: "server.rack", icon: "server", status: "partial", band: "app" },
-  { id: "updates", title: "Updates & About", sf: "arrow.down.circle", icon: "circle-arrow-down", status: "partial", band: "app" },
-  { id: "mobile", title: "Phone and browser", sf: "iphone", icon: "smartphone", status: "works", band: "app" },
+  { id: "workspace", title: "Workspace", sf: "slider.horizontal.3", icon: "sliders-horizontal", status: "partial", band: "app", keywords: "project home features build toolbar" },
+  { id: "server", title: "Server & Backend", sf: "server.rack", icon: "server", status: "partial", band: "app", keywords: "core backend server log sdk agent engine restart" },
+  { id: "updates", title: "Updates & About", sf: "arrow.down.circle", icon: "circle-arrow-down", status: "partial", band: "app", keywords: "about version update release" },
+  { id: "mobile", title: "Phone and browser", sf: "iphone", icon: "smartphone", status: "works", band: "app", keywords: "phone browser pairing device" },
   // Team Hub (ADR 0021 H2 local part): members and invites over API 123. SettingsScreen hides this row
   // unless `/auth/me.member.teamRole` is admin or owner; the body re-checks the same role.
-  { id: "team", title: "Team", sf: "person.3", icon: "circle-user", status: "works", band: "app" },
-  { id: "general", title: "General", sf: "globe", icon: "globe", status: "partial", band: "app" },
-  { id: "providers", title: "Providers", sf: "key.horizontal", icon: "key-round", status: "works", band: "app" },
-  { id: "model-routing", title: "Model routing", sf: "dial.medium", icon: "gauge", status: "works", band: "app" },
-  { id: "agent-history", title: "Agent history", sf: "clock.arrow.circlepath", icon: "rotate-ccw-clock", status: "works", band: "app" },
-  { id: "trust", title: "Security", sf: "lock.shield", icon: "shield-check", status: "works", band: "app" },
-  { id: "optional-components", title: "Optional components", sf: "puzzlepiece.extension", icon: "puzzle", status: "works", band: "app" },
+  { id: "team", title: "Team", sf: "person.3", icon: "circle-user", status: "works", band: "app", keywords: "members roles invites team" },
+  { id: "general", title: "General", sf: "globe", icon: "globe", status: "partial", band: "app", keywords: "theme appearance language tray account terminal developer" },
+  { id: "providers", title: "Providers", sf: "key.horizontal", icon: "key-round", status: "works", band: "app", keywords: "provider key api model connection" },
+  { id: "model-routing", title: "Model routing", sf: "dial.medium", icon: "gauge", status: "works", band: "app", keywords: "model routing image video decision limits tiers roles" },
+  { id: "agent-history", title: "Agent history", sf: "clock.arrow.circlepath", icon: "rotate-ccw-clock", status: "works", band: "app", keywords: "history storage retention clear compact archive" },
+  { id: "trust", title: "Security", sf: "lock.shield", icon: "shield-check", status: "works", band: "app", keywords: "security tool permissions tools always allow trust folders extensions sources allowlist" },
+  { id: "optional-components", title: "Optional components", sf: "puzzlepiece.extension", icon: "puzzle", status: "works", band: "app", keywords: "mermaid diagram rtk token saving install" },
   { id: "self-heal", title: "Self-Heal", sf: "stethoscope", icon: "stethoscope", status: "dev-only", band: "app" },
 ];
 
 export const PROJECT_GROUPS: readonly GroupDef[] = [
-  { id: "paths", title: "Paths", sf: "folder.badge.gearshape", icon: "folder-cog", status: "partial", band: "project" },
-  { id: "repositories", title: "Repositories", sf: "arrow.triangle.branch", icon: "git-branch", status: "partial", band: "project" },
-  { id: "memory", title: "Memory", sf: "brain", icon: "brain", status: "works", band: "project" },
-  { id: "code-graph", title: "Code Graph", sf: "cube.transparent", icon: "network", status: "partial", band: "project" },
+  { id: "paths", title: "Paths", sf: "folder.badge.gearshape", icon: "folder-cog", status: "partial", band: "project", keywords: "paths folders notes export project" },
+  { id: "repositories", title: "Repositories", sf: "arrow.triangle.branch", icon: "git-branch", status: "partial", band: "project", keywords: "repositories git github gitlab tokens issues" },
+  { id: "memory", title: "Memory", sf: "brain", icon: "brain", status: "works", band: "project", keywords: "memory facts graph brain" },
+  { id: "code-graph", title: "Code Graph", sf: "cube.transparent", icon: "network", status: "partial", band: "project", keywords: "code graph generate auto update" },
 ];
 
 export const ALL_GROUPS: readonly GroupDef[] = [...APP_GROUPS, ...PROJECT_GROUPS];
+
+/** Search over the title plus the merged-card keywords. Empty query matches everything. */
+export function settingsMatch(title: string, keywords: string | undefined, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return `${title} ${keywords ?? ""}`.toLowerCase().includes(q);
+}
 
 /** Settings groups that read the local filesystem or run local host processes: hidden in remote mode. */
 export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "paths", "repositories", "memory", "code-graph", "optional-components", "self-heal", "trust"];

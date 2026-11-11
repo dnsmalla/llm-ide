@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALL_GROUPS, ExpandedGroups, NO_SEARCH_TOGGLES, expandedKey, keepMounted, resolveAnchor, toggleSearchMatch } from "../groups.ts";
+import { ALL_GROUPS, ExpandedGroups, NO_SEARCH_TOGGLES, expandedKey, keepMounted, resolveAnchor, settingsMatch, toggleSearchMatch } from "../groups.ts";
 import { NOTICES, PARTIAL_NOTES } from "../notices.ts";
 test("group ids are unique and storage-safe; every non-working group has a notice, every partial one a note", () => {
   const ids = ALL_GROUPS.map((g) => g.id);
@@ -107,4 +107,11 @@ test("a search match shown open never mounts its body; a user-opened group stays
   assert.equal(keepMounted(kept, "server", true, true), true);
   assert.equal(keepMounted(kept, "server", false, false), true);
   assert.equal(keepMounted(kept, "other", false, false), false, "other groups are unaffected");
+});
+
+test("search finds merged cards by their old names", () => {
+  assert.equal(settingsMatch("Security", "security tool permissions", "tool permissions"), true, "security");
+  assert.equal(settingsMatch("Optional components", "mermaid rtk token saving", "token saving"), true, "optional");
+  assert.equal(settingsMatch("Model routing", "image video limits", "video"), true, "routing");
+  assert.equal(settingsMatch("Workspace", "project build", "loop defaults"), false, "workspace");
 });
