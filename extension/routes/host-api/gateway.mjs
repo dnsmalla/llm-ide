@@ -20,6 +20,7 @@ import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
 import { projectsListResult, projectFrameAuthority } from './projects.mjs';
 import { busHostProof } from '../../core/host-approval.mjs';
 import { handleTaskRoutes } from '../tasks.mjs';
+import { TASKS } from '../../core/task-registry.generated.mjs';
 import { scopedProjectRoot } from '../bus/project-scope.mjs';
 import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 import fs from 'node:fs';
@@ -677,14 +678,17 @@ export function createGateway(overrides) {
       case 'tasks.list': {
         if (readRefused(s, entry, id)) return;
         const body = await internalTaskRequest(userId, '/kb/tasks', { method: 'GET' });
-        const tasks = (Array.isArray(body?.tasks) ? body.tasks : []).map((t) => ({
-          id: String(t.id), label: String(t.label), group: String(t.group ?? ''),
-          description: String(t.description ?? ''), scope: String(t.scope ?? 'project'),
-          available: t.availability?.status === 'available', requiresRepo: t.requiresRepo === true,
-          args: Object.entries(t.runner?.args ?? {}).filter(([, spec]) => spec?.type === 'string').map(([name, spec]) => ({
-            name, type: 'string', maxLength: Number(spec?.maxLength) || 100000, maxItems: 50,
-          })),
-        }));
+        const tasks = (Array.isArray(body?.tasks) ? body.tasks : []).map((t) => {
+          const source = TASKS.find((x) => x.id === t.id || x.aliases?.includes(t.id));
+          return {
+            id: String(t.id), label: String(t.label), group: String(t.group ?? ''),
+            description: String(t.description ?? ''), scope: String(t.scope ?? 'project'),
+            available: t.availability?.status === 'available', requiresRepo: t.requiresRepo === true,
+            args: Object.entries(source?.runner?.args ?? {}).filter(([, spec]) => spec?.type === 'string').map(([name, spec]) => ({
+              name, type: 'string', maxLength: Number(spec?.maxLength) || 100000, maxItems: 50,
+            })),
+          };
+        });
         return respond(s, id, command, { tasks });
       }
       case 'tasks.run': {

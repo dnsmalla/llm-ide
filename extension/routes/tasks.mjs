@@ -91,7 +91,6 @@ function publicTask(task) {
       ...(runner.busKind ? { busKind: runner.busKind } : {}),
       ...(runner.action ? { action: runner.action } : {}),
       ...(runner.timeoutSeconds ? { timeoutSeconds: runner.timeoutSeconds } : {}),
-      ...(runner.args ? { args: runner.args } : {}),
     } : null,
     input: task.input,
     output: task.output,
