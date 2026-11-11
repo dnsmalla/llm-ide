@@ -152,9 +152,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       const facts = [...m.session, ...(m.project?.facts ?? [])].map(factText).filter(Boolean).slice(0, 40);
       const graph = host.graphSummary ? await host.graphSummary().catch(() => null) : null;
       if (facts.length === 0 && !graph) { setNotice("No project or session memory yet."); return; }
-      const block = `Use this local project context. Do not ask me to repeat it.\n\n${graph ? `${graph}\n\n` : ""}${facts.map((f) => `- ${f}`).join("\n")}`.slice(0, 4000);
+      const marker = "Use this local project context.";
+      const block = `${marker} Do not ask me to repeat it.\n\n${graph ? `${graph}\n\n` : ""}${facts.map((f) => `- ${f}`).join("\n")}`.slice(0, 4000);
       const current = controller.getView(chatId).draft;
-      controller.setView(chatId, { draft: current.trim() ? `${current.trim()}\n\n${block}` : block });
+      // Replacing an earlier pack keeps this idempotent: clicking twice must not append the same facts again.
+      const base = current.includes(marker) ? current.slice(0, current.indexOf(marker)).trimEnd() : current.trim();
+      controller.setView(chatId, { draft: base ? `${base}\n\n${block}` : block });
       setRefineNonce((n) => n + 1);
       setMemoryOpen(false);
     } catch { setNotice("Project memory could not be read."); }
