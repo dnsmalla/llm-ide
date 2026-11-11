@@ -461,7 +461,22 @@ public struct HostApiTasksListRequest: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiTasksListResultTasksItemArgsItem: Codable, Equatable, Sendable {
+    public var maxItems: Int?
+    public var maxLength: Int?
+    public var name: String
+    public var type: String
+
+    public init(maxItems: Int? = nil, maxLength: Int? = nil, name: String, type: String) {
+        self.maxItems = maxItems
+        self.maxLength = maxLength
+        self.name = name
+        self.type = type
+    }
+}
+
 public struct HostApiTasksListResultTasksItem: Codable, Equatable, Sendable {
+    public var args: [HostApiTasksListResultTasksItemArgsItem]?
     public var available: Bool
     public var description: String
     public var group: String
@@ -470,7 +485,8 @@ public struct HostApiTasksListResultTasksItem: Codable, Equatable, Sendable {
     public var requiresRepo: Bool?
     public var scope: String
 
-    public init(available: Bool, description: String, group: String, id: String, label: String, requiresRepo: Bool? = nil, scope: String) {
+    public init(args: [HostApiTasksListResultTasksItemArgsItem]? = nil, available: Bool, description: String, group: String, id: String, label: String, requiresRepo: Bool? = nil, scope: String) {
+        self.args = args
         self.available = available
         self.description = description
         self.group = group
@@ -490,10 +506,12 @@ public struct HostApiTasksListResult: Codable, Equatable, Sendable {
 }
 
 public struct HostApiTasksRunRequest: Codable, Equatable, Sendable {
+    public var args: [String: String]?
     public var projectId: String?
     public var taskId: String
 
-    public init(projectId: String? = nil, taskId: String) {
+    public init(args: [String: String]? = nil, projectId: String? = nil, taskId: String) {
+        self.args = args
         self.projectId = projectId
         self.taskId = taskId
     }

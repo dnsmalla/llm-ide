@@ -39,11 +39,11 @@ final class TasksStore: ObservableObject {
         loading = false
     }
 
-    func run(_ task: HostApiTasksListResultTasksItem, projectId: String?) async {
+    func run(_ task: HostApiTasksListResultTasksItem, projectId: String?, args: [String: String] = [:]) async {
         guard let host else { return }
         error = nil
         do {
-            let r = try await host.send(.tasksRun, HostApiTasksRunRequest(projectId: projectId, taskId: task.id), as: HostApiTasksRunResult.self)
+            let r = try await host.send(.tasksRun, HostApiTasksRunRequest(args: args.isEmpty ? nil : args, projectId: projectId, taskId: task.id), as: HostApiTasksRunResult.self)
             var run = Run(id: r.runId, taskLabel: task.label)
             run.status = "running"
             runs.insert(run, at: 0)

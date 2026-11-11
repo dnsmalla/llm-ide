@@ -6,6 +6,7 @@ struct TasksView: View {
     @EnvironmentObject var tasks: TasksStore
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var projects: ProjectsStore
+    @State private var running: HostApiTasksListResultTasksItem?
 
     private var grouped: [(String, [HostApiTasksListResultTasksItem])] {
         Dictionary(grouping: tasks.tasks, by: \.group)
@@ -32,7 +33,7 @@ struct TasksView: View {
                                 }
                                 Spacer()
                                 Button("Run") {
-                                    Task { await tasks.run(task, projectId: projects.selectedId) }
+                                    running = task
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(!task.available || !(projects.selectedId != nil || task.scope != "project"))
@@ -68,8 +69,57 @@ struct TasksView: View {
                 }
             }
         }
+        .sheet(item: $running) { task in
+            TaskRunSheet(task: task, projectId: projects.selectedId) { args in
+                Task { await tasks.run(task, projectId: projects.selectedId, args: args) }
+            }
+        }
         .navigationTitle("Auto Tasks")
         .task { await tasks.refresh() }
         .refreshable { await tasks.refresh() }
+    }
+}
+
+
+extension HostApiTasksListResultTasksItem: @retroactive Identifiable {}
+
+private struct TaskRunSheet: View {
+    let task: HostApiTasksListResultTasksItem
+    let projectId: String?
+    let onRun: ([String: String]) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var values: [String: String] = [:]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Task") {
+                    Text(task.label).font(.headline)
+                    Text(task.description).font(.caption).foregroundColor(.secondary)
+                }
+                if let args = task.args, !args.isEmpty {
+                    Section("Arguments") {
+                        ForEach(args, id: \.name) { arg in
+                            TextField(arg.name, text: Binding(
+                                get: { values[arg.name] ?? "" },
+                                set: { values[arg.name] = $0 }
+                            ))
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                        }
+                    }
+                }
+                Section {
+                    Button("Run on desktop") {
+                        onRun(values.filter { !$0.value.isEmpty })
+                        dismiss()
+                    }
+                    .disabled(projectId == nil && task.scope == "project")
+                }
+            }
+            .navigationTitle("Run task")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
     }
 }

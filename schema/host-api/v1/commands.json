@@ -1226,6 +1226,41 @@
                 },
                 "requiresRepo": {
                   "type": "boolean"
+                },
+                "args": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "name",
+                      "type"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9_]{0,40}$"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "string",
+                          "string[]"
+                        ]
+                      },
+                      "maxLength": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100000
+                      },
+                      "maxItems": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -1252,6 +1287,13 @@
           "projectId": {
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "args": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 100000
+            }
           }
         }
       },

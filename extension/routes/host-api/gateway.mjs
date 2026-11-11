@@ -630,6 +630,9 @@ export function createGateway(overrides) {
           id: String(t.id), label: String(t.label), group: String(t.group ?? ''),
           description: String(t.description ?? ''), scope: String(t.scope ?? 'project'),
           available: t.availability?.status === 'available', requiresRepo: t.requiresRepo === true,
+          args: Object.entries(t.runner?.args ?? {}).filter(([, spec]) => spec?.type === 'string').map(([name, spec]) => ({
+            name, type: 'string', maxLength: Number(spec?.maxLength) || 100000, maxItems: 50,
+          })),
         }));
         return respond(s, id, command, { tasks });
       }
@@ -644,7 +647,7 @@ export function createGateway(overrides) {
         taskJobs.set(key, { runId, status: 'running', startedAt: Date.now(), controller, summary: null, output: null, error: null });
         void internalTaskRequest(userId, `/kb/tasks/${encodeURIComponent(p.taskId)}/run`, {
           method: 'POST',
-          body: JSON.stringify({ ...(p.projectId ? { projectId: p.projectId } : {}) }),
+          body: JSON.stringify({ ...(p.projectId ? { projectId: p.projectId } : {}), ...(p.args && Object.keys(p.args).length ? { args: p.args } : {}) }),
         }, controller.signal).then((r) => {
           const job = taskJobs.get(key);
           if (!job) return;
