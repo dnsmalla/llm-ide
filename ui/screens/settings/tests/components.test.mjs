@@ -40,7 +40,6 @@ before(async () => {
       sdk: join(SETTINGS, "sections/AgentSdkSection.tsx"),
       optional: join(SETTINGS, "sections/OptionalComponentsSection.tsx"),
       server: join(SETTINGS, "sections/ServerSection.tsx"),
-      connections: join(SETTINGS, "sections/ConnectionsSection.tsx"),
       repos: join(SETTINGS, "sections/RepositoriesSection.tsx"),
       paths: join(SETTINGS, "sections/PathsSection.tsx"),
       memory: join(SETTINGS, "sections/MemorySection.tsx"),
@@ -68,11 +67,12 @@ before(async () => {
     alias: {
       "@llmide/ui-kit/styles.css": join(REPO, "ui/kit/src/styles/kit.css"),
       "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts"),
+      "@llmide/screens/shell": join(REPO, "ui/screens/shell/index.ts"),
     },
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "connections", "repos", "paths", "memory", "token", "general", "appModel", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret", "routing", "selfheal", "group"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "repos", "paths", "memory", "token", "general", "appModel", "builtin", "componentsModel", "sourcesModel", "projectModel", "registryDefault", "historyModel", "secret", "routing", "selfheal", "group"]) m[k] = await import(pathToFileURL(join(outdir, `${k}.js`)).href + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });
@@ -140,7 +140,7 @@ test("SettingsScreen: the real registry renders the live App groups in order; Te
   // Team is visible to every signed-in member: the project picker is per project (ADR 0022).
   const alwaysVisible = m.groups.APP_GROUPS.filter((g) => g.status !== "mac-only" && g.status !== "dev-only");
   assert.deepEqual(titles, alwaysVisible.map((g) => g.title));
-  assert.equal(titles.length, 15);
+  assert.equal(titles.length, 13);
   assert.ok(titles.includes("Phone and browser"), "phone and browser pairing is reachable");
   assert.ok(titles.includes("Team"), "Team is visible so a project admin can manage that project");
   assert.ok(!out.includes("st-band-project"));
@@ -212,17 +212,6 @@ test("Server & Backend: the log viewer is a labelled, read-only block when the h
   assert.match(out, /Kill &amp; Restart/);
   assert.doesNotMatch(out, /<input/, "the desktop backend is managed; no dead config fields");
   assert.doesNotMatch(out, /Old Mac app data|legacy import/i, "the retired Mac import is gone");
-});
-
-test("Connections: the catalog card explains selection vs credentials and has no credential inputs", () => {
-  const e = { client: { request: async () => ({ status: 200, body: { catalog: [] } }) }, host: { diagnostics: async () => ({}), copyText: async () => {} } };
-  const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.connections.default)));
-  assert.match(out, /only shows or hides/i);
-  assert.match(out, /Library → Connections/);
-  assert.match(out, /Loading the catalog/);
-  assert.match(out, /Refresh catalog/);
-  assert.ok(!/<input|<textarea|<select/.test(out), "no credential fields in this group");
-  assert.match(out, /Connector credentials and fetch actions live in Library/);
 });
 
 test("Repositories: the Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repos", () => {

@@ -11,9 +11,7 @@ const dflt = (file: () => Promise<{ default: unknown }>): Loader<SectionComponen
 
 const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   workspace: dflt(() => import("./sections/WorkspaceGroup.tsx")),
-  build: dflt(() => import("./sections/BuildSection.tsx")),
   server: dflt(() => import("./sections/ServerGroup.tsx")),
-  connections: dflt(() => import("./sections/ConnectionsSection.tsx")),
   updates: dflt(() => import("./sections/UpdatesSection.tsx")),
   mobile: dflt(() => import("./sections/MobileBridge.tsx")),
   team: dflt(() => import("./sections/TeamSection.tsx")),

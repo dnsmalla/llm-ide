@@ -27,9 +27,7 @@ export interface GroupDef {
 
 export const APP_GROUPS: readonly GroupDef[] = [
   { id: "workspace", title: "Workspace", sf: "slider.horizontal.3", icon: "sliders-horizontal", status: "partial", band: "app" },
-  { id: "build", title: "Build", sf: "hammer", icon: "hammer", status: "partial", band: "app" },
   { id: "server", title: "Server & Backend", sf: "server.rack", icon: "server", status: "partial", band: "app" },
-  { id: "connections", title: "Connections", sf: "tray.and.arrow.down", icon: "plug", status: "partial", band: "app" },
   { id: "updates", title: "Updates & About", sf: "arrow.down.circle", icon: "circle-arrow-down", status: "partial", band: "app" },
   { id: "mobile", title: "Phone and browser", sf: "iphone", icon: "smartphone", status: "works", band: "app" },
   // Team Hub (ADR 0021 H2 local part): members and invites over API 123. SettingsScreen hides this row
@@ -68,6 +66,7 @@ const LEGACY_ANCHORS: Readonly<Record<string, string>> = {
   routing: "model-routing",
   "agent-sdk": "server",
   "model-limits": "model-routing",
+  "build": "workspace",
   "extensions-trust": "trust",
   "folder-trust": "trust",
   "extension-sources": "trust",

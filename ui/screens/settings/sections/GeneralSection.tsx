@@ -4,6 +4,7 @@ import { LANGUAGES, PREFS_TEXT, UserPrefsModel, isLanguage, type PrefsState } fr
 import { useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import type { ThemeChoice } from "../host.ts";
 import { ErrorText, Field, NeedsHost, Switch } from "../ui.tsx";
+import { TerminalToggle } from "./SimpleSections.tsx";
 import AccountSection from "./AccountSection.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
 
@@ -88,6 +89,7 @@ export default function GeneralSection() {
         </div>
       ) : null}
       <PrefsBlock m={m} s={s} />
+      <TerminalToggle host={host} />
       {host.getDevTools && host.setDevTools ? (
         <div className="st-stack">
           <Switch
