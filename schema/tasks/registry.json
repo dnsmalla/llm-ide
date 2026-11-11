@@ -471,7 +471,7 @@
     },
     {
       "id": "issues.from_notes",
-      "label": "Sources → Issue",
+      "label": "Sources \u2192 Issue",
       "group": "Pipeline",
       "description": "File each action item from the Library meeting notes as an issue on a repository already on the Issues board. Each action is filed once.",
       "aliases": [
@@ -529,7 +529,7 @@
       "id": "issues.update",
       "label": "Update Issues",
       "group": "Automation",
-      "description": "Update Issues is Sources → Issue. This entry keeps the old id and its history resolving to that task.",
+      "description": "Update Issues is Sources \u2192 Issue. This entry keeps the old id and its history resolving to that task.",
       "aliases": [
         "updateIssues"
       ],
@@ -556,7 +556,7 @@
       "features": [],
       "availability": {
         "status": "alias",
-        "reason": "Update Issues is Sources → Issue; the old prompt is retired."
+        "reason": "Update Issues is Sources \u2192 Issue; the old prompt is retired."
       },
       "aliasOf": "issues.from_notes",
       "revision": 1
@@ -790,9 +790,10 @@
         "status": "available",
         "reason": null
       },
-      "revision": 2,
+      "revision": 3,
       "knownPromptHashes": [
-        "8150a528487348f9cf6e51ac1fc936d96e8ea2875ce11e41eab310db202e4183"
+        "8150a528487348f9cf6e51ac1fc936d96e8ea2875ce11e41eab310db202e4183",
+        "c5b7b0d2053da619905fcd988a5e82b3bbdce2896057b36a4f1278f269e84aa2"
       ]
     },
     {
@@ -868,9 +869,10 @@
         "status": "available",
         "reason": null
       },
-      "revision": 1,
+      "revision": 2,
       "knownPromptHashes": [
-        "f3c22277386b8a4c883319fe84e91d141f2e5cea676098fd0d09a918f9014caf"
+        "f3c22277386b8a4c883319fe84e91d141f2e5cea676098fd0d09a918f9014caf",
+        "0016e60f1b1c93868027acdfba0448c184461cdc378006c50b58182861522dc7"
       ]
     },
     {

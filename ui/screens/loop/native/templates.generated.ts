@@ -1030,7 +1030,7 @@ export const BUILT_IN_TEMPLATES = [
         },
         {
           "defaultKey": "refactor-test-write",
-          "defaultRevision": 2,
+          "defaultRevision": 5,
           "enabled": true,
           "id": "refactor/refactor-test-write",
           "isDefault": true,
@@ -1040,10 +1040,10 @@ export const BUILT_IN_TEMPLATES = [
           "outputPath": ".",
           "severity": "blocking",
           "skillId": "skills/test-gap-writer",
-          "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md",
-          "prompt": "Read the next refactor batch at the Input. First make sure the integration tests (tests/integration/ in a layered layout, else the test root) hold one before/after-equality test that runs the pipeline end to end on the smallest input that reaches the final output; create it if missing. Then, for EVERY file the batch lists as missing tests, create a new test file under the Output path, at the path the test-structure report gives, that pins the file's current observable outputs through public calls only — never pin private helpers or internal state. Never edit the source, existing tests or build config. End with one `Covered: <path> — <behaviours>` line per file.",
+          "targetPath": "llm-doc/loop/refactor/REFACTOR.md",
+          "prompt": "Read the refactor plan at the Input and take its first batch with status todo. First make sure the integration tests (tests/integration/ in a layered layout, else the test root) hold one before/after-equality test that runs the pipeline end to end on the smallest input that reaches the final output; create it if missing. Then, for EVERY file the batch lists as missing tests, create a new test file under the Output path, at the path the test-structure report gives, that pins the file's current observable outputs through public calls only — never pin private helpers or internal state. Never edit the source, existing tests or build config. End with one `Covered: <path> — <behaviours>` line per file.",
           "promptRef": "loop.refactor_test_gap_writer",
-          "promptHash": "8150a528487348f9cf6e51ac1fc936d96e8ea2875ce11e41eab310db202e4183"
+          "promptHash": "c5b7b0d2053da619905fcd988a5e82b3bbdce2896057b36a4f1278f269e84aa2"
         },
         {
           "allowsRepair": false,
@@ -1078,7 +1078,7 @@ export const BUILT_IN_TEMPLATES = [
         },
         {
           "defaultKey": "refactor-conform",
-          "defaultRevision": 1,
+          "defaultRevision": 2,
           "enabled": true,
           "id": "refactor/refactor-conform",
           "isDefault": true,
@@ -1088,10 +1088,10 @@ export const BUILT_IN_TEMPLATES = [
           "outputPath": ".",
           "severity": "blocking",
           "skillId": "skills/refactor-conform",
-          "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md",
-          "prompt": "Read the refactor rules (RULES.md) and the batch just applied, both beside the Input, then look at the code it touched under the Output path. For every file the batch lists, and any file it created, fix violations of those rules behaviour-preservingly — never widen the change to any other file, and never edit tests or build config. Write each fix as one line, `file:line — rule source — what`, to the rule-review file (RULE-REVIEW.md) beside the Input. End with `Conformed: R<n> — <k> fixes`.",
+          "targetPath": "llm-doc/loop/refactor/REFACTOR.md",
+          "prompt": "Read the refactor plan at the Input and the batch Refactor Apply most recently marked done, then look at the code it touched under the Output path. For every file the batch lists, and any file it created, fix violations of the rules beside the plan behaviour-preservingly — never widen the change to any other file, and never edit tests or build config. Write each fix as one line, `file:line — rule source — what`, to the rule-review file (RULE-REVIEW.md) beside the plan. End with `Conformed: R<n> — <k> fixes`.",
           "promptRef": "loop.refactor_conform",
-          "promptHash": "f3c22277386b8a4c883319fe84e91d141f2e5cea676098fd0d09a918f9014caf"
+          "promptHash": "0016e60f1b1c93868027acdfba0448c184461cdc378006c50b58182861522dc7"
         },
         {
           "command": "<detected-test-command>",

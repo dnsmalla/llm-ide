@@ -36,3 +36,14 @@ test("templates.ts keeps every built-in id and appends the Factory template", ()
   assert.deepEqual(ids, [...legacyRecipes.map((t) => t.id), "factory"]);
   assert.equal(templates.BUILT_IN_TEMPLATES.at(-1), FACTORY_TEMPLATE);
 });
+
+test("the refactor test and conform stages read the plan Refactor Plan actually writes", () => {
+  const refactor = BUILT_IN_TEMPLATES.find((t) => t.id === "refactoring");
+  assert.ok(refactor);
+  const plan = refactor.config.stages.find((s) => s.defaultKey === "refactor-plan");
+  assert.ok(plan?.outputPath);
+  for (const key of ["refactor-test-write", "refactor-conform"]) {
+    const stage = refactor.config.stages.find((s) => s.defaultKey === key);
+    assert.equal(stage?.targetPath, plan.outputPath, `${key} reads the plan, not a file nothing writes`);
+  }
+});

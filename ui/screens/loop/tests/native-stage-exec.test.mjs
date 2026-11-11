@@ -252,3 +252,30 @@ test("a repair outside a Factory loop sends no denyWrite", async () => {
   await createStageDeps(ctx, loop).repair(stage(), "1 failing", 1);
   assert.equal("denyWrite" in calls[0][1].body, false);
 });
+
+test("the Refactor Structure stage discovers tests and writes both structure reports", async () => {
+  const files = {
+    "package.json": JSON.stringify({ scripts: { test: "node --test" } }),
+    "tests/a.test.mjs": "import 'node:test';",
+  };
+  const writes = [];
+  const fs = {
+    async read(path) {
+      if (!(path in files)) throw Object.assign(new Error("not found"), { code: "not_found" });
+      return { status: "ok", text: files[path], hash: "h" };
+    },
+    async list(path) {
+      if (path === ".") return { entries: [{ name: "tests", kind: "dir", path: "tests" }, { name: "package.json", kind: "file", path: "package.json" }] };
+      if (path === "tests") return { entries: [{ name: "a.test.mjs", kind: "file", path: "tests/a.test.mjs" }] };
+      throw Object.assign(new Error("not found"), { code: "not_found" });
+    },
+    async create() {},
+    async write(path, text) { writes.push([path, text]); },
+  };
+  const { ctx } = ctxOf({ fs, projectRoot: "/p", runRoot: "/p" });
+  const s = stage({ id: "refactor/refactor-structure", name: "Refactor Structure", kind: "testMap", command: null, testOp: "structure" });
+  const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
+  assert.equal(r.ok, true);
+  assert.match(r.output, /1 test root/);
+  assert.deepEqual(writes.map(([p]) => p), ["llm-doc/loop/test/TEST-STRUCTURE.md", "system/loop/test/TEST-STRUCTURE.json"]);
+});

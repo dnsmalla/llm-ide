@@ -436,7 +436,7 @@
           },
           {
             "defaultKey": "refactor-test-write",
-            "defaultRevision": 2,
+            "defaultRevision": 5,
             "enabled": true,
             "id": "refactor/refactor-test-write",
             "isDefault": true,
@@ -447,7 +447,7 @@
             "promptTask": "loop.refactor_test_gap_writer",
             "severity": "blocking",
             "skillId": "skills/test-gap-writer",
-            "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md"
+            "targetPath": "llm-doc/loop/refactor/REFACTOR.md"
           },
           {
             "allowsRepair": false,
@@ -480,7 +480,7 @@
           },
           {
             "defaultKey": "refactor-conform",
-            "defaultRevision": 1,
+            "defaultRevision": 2,
             "enabled": true,
             "id": "refactor/refactor-conform",
             "isDefault": true,
@@ -491,7 +491,7 @@
             "promptTask": "loop.refactor_conform",
             "severity": "blocking",
             "skillId": "skills/refactor-conform",
-            "targetPath": "llm-doc/loop/refactor/NEXT-BATCH.md"
+            "targetPath": "llm-doc/loop/refactor/REFACTOR.md"
           },
           {
             "command": "<detected-test-command>",

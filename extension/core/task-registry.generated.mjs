@@ -589,9 +589,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1,
+    "revision": 2,
     "knownPromptHashes": [
-      "f3c22277386b8a4c883319fe84e91d141f2e5cea676098fd0d09a918f9014caf"
+      "f3c22277386b8a4c883319fe84e91d141f2e5cea676098fd0d09a918f9014caf",
+      "0016e60f1b1c93868027acdfba0448c184461cdc378006c50b58182861522dc7"
     ]
   },
   {
@@ -667,9 +668,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 2,
+    "revision": 3,
     "knownPromptHashes": [
-      "8150a528487348f9cf6e51ac1fc936d96e8ea2875ce11e41eab310db202e4183"
+      "8150a528487348f9cf6e51ac1fc936d96e8ea2875ce11e41eab310db202e4183",
+      "c5b7b0d2053da619905fcd988a5e82b3bbdce2896057b36a4f1278f269e84aa2"
     ]
   },
   {
