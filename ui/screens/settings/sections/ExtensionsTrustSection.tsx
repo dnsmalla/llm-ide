@@ -59,6 +59,10 @@ export function Allowlist() {
   useRefreshOnFocus(() => void m.load());
   const [confirm, setConfirm] = useState<string | null>(null);
   const a = s.allowlist;
+  // The effective list is the operator list plus the user's accepted additions; show it only when that is
+  // not exactly the two lists already above (an ignored entry or a ceiling can make it differ).
+  const expected = a ? new Set([...a.operator, ...a.user.filter((e) => !a.ignored.includes(e))]) : null;
+  const effectiveDiffers = Boolean(a && expected && (a.effective.length !== expected.size || a.effective.some((e) => !expected.has(e))));
   return (
     <div className="st-stack">
       <p className="st-hint">Where extensions may be installed from. Entries look like owner/repo or owner/*.</p>
@@ -96,7 +100,7 @@ export function Allowlist() {
               <Button tone="primary" disabled={!m.canAdd} onClick={() => void m.addDraft()}>Add</Button>
             </div>
           </Field>
-          <Group title="In effect" items={a.effective} empty="Nothing can be installed." />
+          {effectiveDiffers ? <Group title="In effect" items={a.effective} empty="Nothing can be installed." /> : null}
         </>
       ) : null}
     </div>

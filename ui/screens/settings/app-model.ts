@@ -24,7 +24,7 @@ import { Store } from "./store.ts";
 export const TOOL_PERMISSIONS_TEXT = {
   hint: 'Commands and tools you chose "Always allow" for, per project. Revoking one does not block it: the assistant just asks you again. File edits allowed "in this chat" last only for that chat and are not listed.',
   empty: "Nothing is always allowed. Anything that needs approval asks you each time.",
-  legacyTitle: "Older grants (no longer used)",
+  legacyTitle: "Legacy approvals (safe to remove)",
   revokeAllBody: "The assistant will ask for your approval again the next time. Nothing is blocked and no work is lost.",
 } as const;
 
