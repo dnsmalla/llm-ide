@@ -10,6 +10,8 @@
 		AA0000000000000000000501 /* ExplorerChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000502 /* ExplorerChatView.swift */; };
 		AA0000000000000000000101 /* TasksStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000102 /* TasksStore.swift */; };
 		AA0000000000000000000201 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000202 /* TasksView.swift */; };
+		AA0000000000000000000301 /* LoopStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000302 /* LoopStore.swift */; };
+		AA0000000000000000000401 /* LoopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000402 /* LoopView.swift */; };
 		060280FFDE8EBB4735C43370 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1050205A71E402C9809036C3 /* LoginView.swift */; };
 		86D51A8F64D3F1F7AF72109E /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6619B48C5ED4564AD23384A1 /* DesignSystem.swift */; };
 		A1B2C3D4E5F60718293A4B02 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B01 /* RootTabView.swift */; };
@@ -53,6 +55,8 @@
 		AA0000000000000000000502 /* ExplorerChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerChatView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000102 /* TasksStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksStore.swift; sourceTree = "<group>"; };
 		AA0000000000000000000202 /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000302 /* LoopStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopStore.swift; sourceTree = "<group>"; };
+		AA0000000000000000000402 /* LoopView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopView.swift; sourceTree = "<group>"; };
 		0F05147F87FAE3E4689CB880 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		1050205A71E402C9809036C3 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		237B2E48D363E5FB9B47CB07 /* MyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -181,6 +185,7 @@
 				B7CC02D68D4369B858A43C3C /* UsageView.swift */,
 				C2E0A1B2C3D4E5F600000001 /* ReadChatsView.swift */,
 				AA0000000000000000000202 /* TasksView.swift */,
+				AA0000000000000000000402 /* LoopView.swift */,
 				AA0000000000000000000502 /* ExplorerChatView.swift */,
 				C2E0A1B2C3D4E5F6000000A3 /* SyncEnrollSheet.swift */,
 				C2E0A1B2C3D4E5F6000000A5 /* SyncOfflineViews.swift */,
@@ -228,6 +233,7 @@
 				A7B80010CC00000000000004 /* LlmIdeChatStore.swift */,
 				A9C1E2F3B4D5061728394A02 /* ProjectsStore.swift */,
 				AA0000000000000000000102 /* TasksStore.swift */,
+				AA0000000000000000000302 /* LoopStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -325,6 +331,8 @@
 				C2E0A1B2C3D4E5F600000002 /* ReadChatsView.swift in Sources */,
 				AA0000000000000000000101 /* TasksStore.swift in Sources */,
 				AA0000000000000000000201 /* TasksView.swift in Sources */,
+				AA0000000000000000000301 /* LoopStore.swift in Sources */,
+				AA0000000000000000000401 /* LoopView.swift in Sources */,
 				AA0000000000000000000501 /* ExplorerChatView.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000A2 /* SyncStore.swift in Sources */,
 				C2E0A1B2C3D4E5F6000000AB /* BoxAuth.swift in Sources */,
