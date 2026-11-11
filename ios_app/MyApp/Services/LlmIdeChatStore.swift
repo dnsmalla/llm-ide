@@ -75,7 +75,7 @@ final class LlmIdeChatStore: ObservableObject {
     /// `files` carry text already extracted on-device (PDF/`.md`/`.txt`), never binary. Returns false only when
     /// the host's limits refuse the message before any turn starts; the caller then keeps the composer as is.
     @discardableResult
-    func sendLlmideChat(_ text: String, files: [ChatFileText] = []) async -> Bool {
+    func sendLlmideChat(_ text: String, files: [ChatFileText] = [], mode: String? = nil) async -> Bool {
         guard connection?.connectionStatus == .connected else {
             connection?.errorMessage = "Not connected to the desktop — wait for Live status, then try again."
             return true
@@ -88,11 +88,12 @@ final class LlmIdeChatStore: ObservableObject {
         }
         guard !isStreaming else { return false } // a second tap while the first waited for the list
         // Validated against the `chat.send` schema limits before any turn starts.
-        let request: HostApiChatSendRequest
+        var request: HostApiChatSendRequest
         switch HostApiChatSendPolicy.request(text: text, files: files, projectId: projectId) {
         case .send(let r): request = r
         case .refuse(let message): connection?.errorMessage = message; return false
         }
+        if let mode { request.mode = mode }
         // The host's own session store is the transcript: the phone sends only the new text (and files).
         let id = mintStreamingTurn(messages: &llmIdeMessages, commandIds: &llmIdeCommandIds, userText: text)
         isStreaming = true
