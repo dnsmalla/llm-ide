@@ -10,6 +10,7 @@ export type HostApiErrorBody = { code: HostApiErrorCode; details?: { hint?: stri
 export const HOST_API_COMMANDS = {
   "approvals.answer": { capability: "approvals", idempotent: false },
   "chat.cancel": { capability: "chat", idempotent: true },
+  "chat.delete": { capability: "chat", idempotent: true },
   "chat.history": { capability: "read", idempotent: true },
   "chat.history.clear": { capability: "chat", idempotent: true },
   "chat.new": { capability: "compose", idempotent: false },
@@ -38,6 +39,7 @@ export type HostApiCommandName = keyof typeof HOST_API_COMMANDS;
 export interface HostApiCommandMap {
   "approvals.answer": { request: { answers: Record<string, string>; commandId: string; projectId?: string; requestId: string }; result: { accepted: boolean } };
   "chat.cancel": { request: { projectId?: string }; result: { cancelled: boolean } };
+  "chat.delete": { request: { projectId?: string; sessionId: string }; result: { deleted: boolean } };
   "chat.history": { request: { beforeSeq?: number; limit?: number; projectId?: string; sessionId: string }; result: { messages: Array<{ content: string; role: "user" | "assistant"; seq: number }>; nextBeforeSeq?: number } };
   "chat.history.clear": { request: { projectId?: string }; result: { cleared: boolean } };
   "chat.new": { request: { projectId?: string }; result: { sessionId: string } };

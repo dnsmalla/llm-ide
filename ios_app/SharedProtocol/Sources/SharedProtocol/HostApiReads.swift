@@ -130,6 +130,20 @@ public final class HostApiReadController {
         }
     }
 
+    /// Delete one of this user's chats from the host and remove it from the list. The Chat tab's own
+    /// `chat.history.clear` is separate; this removes the session row itself.
+    public func delete(id: String) async {
+        guard let h = host(), HostApiReadGate.isOn(apiVersion: h.apiVersion, capabilities: h.capabilities) else { return }
+        do {
+            let r = try await h.send(.chatDelete, HostApiChatDeleteRequest(sessionId: id), as: HostApiChatDeleteResult.self)
+            guard r.deleted else { state.error = "That chat was not found."; return }
+            state.sessions.removeAll { $0.id == id }
+            if state.open?.id == id { state.open = nil }
+        } catch {
+            if let rejection = error as? HostApiRejection { state.error = rejection.message }
+        }
+    }
+
     /// Leaving the open chat: its late reply and late error are both dropped.
     public func close() {
         ticket += 1

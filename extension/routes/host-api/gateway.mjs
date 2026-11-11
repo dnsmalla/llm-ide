@@ -13,6 +13,7 @@ import { pushTargetOf } from './push-target.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES, MAX_LIFETIME_MS } from '../../kb/host-api-devices.mjs';
 import { getDb } from '../../kb/db.mjs';
+import { deleteChatSession } from '../../kb/chat-sessions.mjs';
 import { config } from '../../core/config.mjs';
 import { getMember, classRefusal } from '../../kb/members.mjs';
 import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
@@ -63,6 +64,7 @@ export const COMMAND_CLASS = Object.freeze({
   'push.config': 'self.read',
   'chat.cancel': 'self.write',
   'chat.history.clear': 'self.write',
+  'chat.delete': 'self.write',
   'chat.new': 'self.write',
   'push.register': 'self.write',
   'push.unregister': 'self.write',
@@ -725,6 +727,11 @@ export function createGateway(overrides) {
         const mine = [...owned.values()].filter((o) => o.session === s && !o.zombie);
         for (const o of mine) requestCancel(o);
         return respond(s, id, command, { cancelled: mine.length > 0 });
+      }
+      case 'chat.delete': {
+        const deleted = deleteChatSession(userId, p.sessionId);
+        audit('chat_delete', { peer: entry.peer, userId, deviceId: entry.state.deviceId });
+        return respond(s, id, command, { deleted });
       }
       case 'chat.history.clear': {
         if (!deps.chatClearEnabled()) return fail(s, id, 'denied', 'Clearing the phone chat is turned off on this computer.');

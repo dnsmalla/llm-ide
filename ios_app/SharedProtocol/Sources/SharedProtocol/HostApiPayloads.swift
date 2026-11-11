@@ -39,6 +39,24 @@ public struct HostApiChatCancelResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiChatDeleteRequest: Codable, Equatable, Sendable {
+    public var projectId: String?
+    public var sessionId: String
+
+    public init(projectId: String? = nil, sessionId: String) {
+        self.projectId = projectId
+        self.sessionId = sessionId
+    }
+}
+
+public struct HostApiChatDeleteResult: Codable, Equatable, Sendable {
+    public var deleted: Bool
+
+    public init(deleted: Bool) {
+        self.deleted = deleted
+    }
+}
+
 public struct HostApiChatHistoryRequest: Codable, Equatable, Sendable {
     public var beforeSeq: Int?
     public var limit: Int?

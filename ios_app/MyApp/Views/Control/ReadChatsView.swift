@@ -7,6 +7,7 @@ struct ReadChatsView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var usageStore: UsageStore
     @EnvironmentObject var syncStore: SyncStore
+    @State private var deleteTarget: HostApiChatSessionsResultSessionsItem?
 
     private var state: HostApiReadState { connection.readState }
     private var live: Bool { connection.servesV1Read && connection.connectionStatus == .connected }
@@ -35,6 +36,9 @@ struct ReadChatsView: View {
                     } else {
                         NavigationLink { ReadChatHistoryView(id: s.id, title: s.title) } label: { row(s, live: false) }
                             .accessibilityHint("Opens this chat read-only")
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) { deleteTarget = s } label: { Label("Delete", systemImage: "trash") }
+                            }
                     }
                 }
                 if state.nextOffset != nil {
@@ -48,6 +52,18 @@ struct ReadChatsView: View {
         .scrollContentBackground(.hidden)
         .background(DesignSystem.Colors.background.ignoresSafeArea())
         .navigationTitle("History")
+        .confirmationDialog("Delete this chat?", isPresented: Binding(
+            get: { deleteTarget != nil },
+            set: { if !$0 { deleteTarget = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let target = deleteTarget { Task { await connection.reads.delete(id: target.id) } }
+                deleteTarget = nil
+            }
+            Button("Cancel", role: .cancel) { deleteTarget = nil }
+        } message: {
+            Text("The chat and its messages are removed from the desktop. This cannot be undone.")
+        }
         .refreshable {
             if live { usageStore.refresh(); await connection.reads.refresh() } else { await syncStore.refresh() }
         }

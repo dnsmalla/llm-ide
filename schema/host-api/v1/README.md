@@ -35,7 +35,7 @@ as `minLenght` fails the gate instead of being silently ignored.
 
 ## Commands
 
-All 25 commands are listed below.
+All 26 commands are listed below.
 
 | Command | Capability | Idempotent | v2 tag |
 |---|---|---|---|
@@ -48,6 +48,7 @@ All 25 commands are listed below.
 | `chat.snapshot` | chat | yes | `llmide_chat_history_list` |
 | `chat.send` | chat | no | `llmide_chat` |
 | `chat.history.clear` | chat | yes | `llmide_chat_history_clear` |
+| `chat.delete` | chat | yes | — |
 | `chat.cancel` | chat | yes | `llmide_cancel` |
 | `chat.options` | compose | yes | — |
 | `chat.new` | compose | no | — |

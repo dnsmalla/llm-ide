@@ -16,6 +16,7 @@ public struct HostApiLimits: Sendable {
 public enum HostApiCommand: String, CaseIterable, Sendable {
     case approvalsAnswer = "approvals.answer"
     case chatCancel = "chat.cancel"
+    case chatDelete = "chat.delete"
     case chatHistory = "chat.history"
     case chatHistoryClear = "chat.history.clear"
     case chatNew = "chat.new"
@@ -44,6 +45,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         switch self {
         case .approvalsAnswer: return "approvals"
         case .chatCancel: return "chat"
+        case .chatDelete: return "chat"
         case .chatHistory: return "read"
         case .chatHistoryClear: return "chat"
         case .chatNew: return "compose"
@@ -74,6 +76,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         switch self {
         case .approvalsAnswer: return false
         case .chatCancel: return true
+        case .chatDelete: return true
         case .chatHistory: return true
         case .chatHistoryClear: return true
         case .chatNew: return false
@@ -107,6 +110,7 @@ public enum HostApi {
     public static let commands: [String: HostApiCommand] = [
         "approvals.answer": .approvalsAnswer,
         "chat.cancel": .chatCancel,
+        "chat.delete": .chatDelete,
         "chat.history": .chatHistory,
         "chat.history.clear": .chatHistoryClear,
         "chat.new": .chatNew,

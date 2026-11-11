@@ -19,8 +19,14 @@ struct TasksView: View {
             if let error = tasks.error {
                 Section { Text(error).foregroundColor(DesignSystem.Colors.danger) }
             }
-            if tasks.tasks.isEmpty && !tasks.loading {
-                Section { Text("No tasks are available on this desktop.").foregroundColor(DesignSystem.Colors.textSecondary) }
+            if tasks.loading && tasks.tasks.isEmpty {
+                Section { ProgressView("Loading tasks…") }
+            } else if tasks.tasks.isEmpty {
+                Section {
+                    Text("No tasks are available on this desktop.").foregroundColor(DesignSystem.Colors.textSecondary)
+                    Text("Update the desktop and check that Read + Compose are enabled in Phone and browser.").font(.caption).foregroundColor(DesignSystem.Colors.textTertiary)
+                    Button("Refresh") { Task { await tasks.refresh() } }
+                }
             }
             ForEach(grouped, id: \.0) { group, items in
                 Section(group) {
