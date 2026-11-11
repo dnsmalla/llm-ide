@@ -6,7 +6,7 @@ import { contextAdvises, contextPercentLabel, contextRows, contextShare, context
 const R = 5;
 const RING = 2 * Math.PI * R;
 
-export function ContextMeter({ usage, onNewChat }: { usage: ContextUsage | null; onNewChat?: () => void }) {
+export function ContextMeter({ usage, onNewChat, onContinueWithRecap }: { usage: ContextUsage | null; onNewChat?: () => void; onContinueWithRecap?: () => void }) {
   const [open, setOpen] = useState(false);
   if (!usage) return null;
   const rows = contextRows(usage);
@@ -33,6 +33,7 @@ export function ContextMeter({ usage, onNewChat }: { usage: ContextUsage | null;
             <div className="chat-context-advice">
               <p>This chat is getting expensive: every new turn re-sends the whole context.</p>
               {onNewChat ? <button type="button" className="chat-btn" onClick={() => { setOpen(false); onNewChat(); }}>Start a fresh chat</button> : null}
+              {onContinueWithRecap ? <button type="button" className="chat-btn" onClick={() => { setOpen(false); onContinueWithRecap(); }}>Continue with a local recap</button> : null}
             </div>
           ) : null}
         </div>

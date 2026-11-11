@@ -317,6 +317,23 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     } catch (e) { reportStoreError(e); }
   }, [store, reportStoreError, bumpSessions]);
 
+  /** Start a new chat with a short local recap of this one: no model call and much less context than re-sending it. */
+  const continueWithRecap = useCallback(async () => {
+    const lines: string[] = [];
+    for (const m of state.messages.slice(-6)) {
+      const text = m.role === "user" ? m.text : m.parts.map((p) => (p.kind === "text" ? p.sealed.join("") + p.open : "")).join("");
+      if (text.trim()) lines.push(`${m.role === "user" ? "User" : "Assistant"}: ${text.trim().slice(0, 900)}`);
+    }
+    const recap = `Context from the previous chat (local recap; do not repeat it):\n\n${lines.join("\n\n")}`.slice(0, 4000);
+    try {
+      const s = await store.createSession({ projectId: remoteProjectId() ?? undefined });
+      claimSession(surface, s.id);
+      setSessions((cur) => [s, ...cur]);
+      setActiveId(s.id);
+      controller.setView(s.id, { draft: recap });
+      bumpSessions();
+    } catch (e) { reportStoreError(e); }
+  }, [state.messages, store, controller, bumpSessions, reportStoreError]);
   const busy = state.phase === "streaming" || state.phase === "aborting";
   const persistFailure = controller.getPersistFailure();
   // The chat whose plan card started the current plan run (the Mac's PlanExecutionTracker); a new ordinary message ends it.
@@ -478,7 +495,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               compose={host.compose} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
-              meter={<><BudgetMeter budget={state.budget} /><ContextMeter usage={state.context} onNewChat={() => void newChat()} /></>}
+              meter={<><BudgetMeter budget={state.budget} /><ContextMeter usage={state.context} onNewChat={() => void newChat()} onContinueWithRecap={state.messages.length > 0 ? () => void continueWithRecap() : undefined} /></>}
               controls={<>
                 <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} modes={modeOptions} />
                 <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route} onConnectProvider={() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" })}
