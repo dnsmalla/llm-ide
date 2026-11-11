@@ -44,10 +44,14 @@ const SPAWN_PORTS: [u16; 4] = [3456, 3457, 3458, 3459];
 /// Fixed env of the core THIS app spawns (never read from the host env). `LLMIDE_LIVE_ACK=1`: a finalized extension
 /// capture is held until the desktop archivist (capture_archivist.rs) acks the verified note; without it the extension
 /// keeps every draft in `no-ack` and an ack releases nothing. An adopted server keeps its own env.
-const SPAWNED_CORE_FLAGS: [(&str, &str); 3] = [
+/// `LLMIDE_HOST_API_READ` / `_COMPOSE`: a paired phone gets History, Execute and Auto Tasks (each command is still
+/// checked against the member's role and project grant); they matter only while the pinned listener runs.
+const SPAWNED_CORE_FLAGS: [(&str, &str); 5] = [
     ("LLMIDE_ENGINE_PREWARM", "0"),
     ("LLMIDE_BACKUP_INTERVAL_HOURS", "0"),
     ("LLMIDE_LIVE_ACK", "1"),
+    ("LLMIDE_HOST_API_READ", "1"),
+    ("LLMIDE_HOST_API_COMPOSE", "1"),
 ];
 /// On a supervised restart, how long the port our just-exited core held may stay busy before it is skipped.
 const RESTART_PORT_WAIT: Duration = Duration::from_secs(3);
@@ -2332,6 +2336,11 @@ process.on('SIGTERM', () => process.exit(0));
         assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_LIVE_ACK", "1")));
         let host = vec![("LLMIDE_LIVE_ACK".to_string(), "0".to_string())];
         assert!(crate::core_env::scrub(&host, crate::fsutil::Os::Mac).is_empty(), "never taken from the host env");
+    }
+    #[test]
+    fn the_spawned_core_serves_phone_read_and_compose() {
+        assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_READ", "1")));
+        assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_COMPOSE", "1")));
     }
     #[cfg(unix)]
     #[test]
