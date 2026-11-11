@@ -205,3 +205,5 @@
 .chat-context-advice { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--tok-color-border); }
 .chat-context-advice p { margin: 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); line-height: 1.4; }
 .chat-context-advice .chat-btn { align-self: flex-start; }
+.chat-budget { font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); font-variant-numeric: tabular-nums; padding: 0 var(--tok-space-xs); white-space: nowrap; }
+.chat-budget[data-warn] { color: var(--tok-color-accent4); }

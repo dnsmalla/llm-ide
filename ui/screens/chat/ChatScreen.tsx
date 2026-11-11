@@ -12,6 +12,7 @@ import { HeaderBadges } from "./badges/HeaderBadges";
 import { ENDED_REASON, isEndedChat } from "./badges/Badges";
 import { MessageList } from "./MessageList";
 import { ContextMeter } from "./ContextMeter";
+import { BudgetMeter } from "./BudgetMeter";
 import { EmptyChat } from "./EmptyChat";
 import { PlanSwitchNotice } from "./plan/PlanSwitchNotice";
 import { EffortPicker, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
@@ -459,7 +460,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               compose={host.compose} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
-              meter={<ContextMeter usage={state.context} onNewChat={() => void newChat()} />}
+              meter={<><BudgetMeter budget={state.budget} /><ContextMeter usage={state.context} onNewChat={() => void newChat()} /></>}
               controls={<>
                 <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} modes={modeOptions} />
                 <ModelPicker groups={groups} provider={current.provider} model={current.model} plainChat={plain} route={route}

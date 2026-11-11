@@ -37,5 +37,5 @@ test("the meter renders nothing before a turn reports usage, and a ring with the
 
 test("the chat screen hands the meter to the composer bar", () => {
   const screen = readFileSync(join(CHAT, "ChatScreen.tsx"), "utf8");
-  assert.match(screen, /meter=\{<ContextMeter usage=\{state\.context\} onNewChat=/);
+  assert.match(screen, /meter=\{<>\s*<BudgetMeter budget=\{state\.budget\} \/>\s*<ContextMeter usage=\{state\.context\} onNewChat=/);
 });
