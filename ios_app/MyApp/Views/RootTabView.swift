@@ -29,13 +29,13 @@ struct RootTabView: View {
                     LiveChatPairingView { showLiveScanner = true }
                 }
             }
-            .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
+            .tabItem { Label("Ask", systemImage: "bubble.left.and.bubble.right.fill") }
             .badge(llmIdeStore.pendingApproval == nil ? 0 : 1)
             .tag(Tab.chat)
 
             if connection.hostCapabilities?.contains("compose") == true {
                 NavigationStack { ExplorerChatView() }
-                    .tabItem { Label("Explorer", systemImage: "hammer") }
+                    .tabItem { Label("Execute", systemImage: "hammer") }
                     .tag(Tab.explorer)
             }
 

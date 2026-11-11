@@ -93,7 +93,7 @@ final class LlmIdeChatStore: ObservableObject {
         case .send(let r): request = r
         case .refuse(let message): connection?.errorMessage = message; return false
         }
-        if let mode { request.mode = mode }
+        request.mode = mode ?? "ask"
         // The host's own session store is the transcript: the phone sends only the new text (and files).
         let id = mintStreamingTurn(messages: &llmIdeMessages, commandIds: &llmIdeCommandIds, userText: text)
         isStreaming = true

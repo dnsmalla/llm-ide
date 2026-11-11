@@ -35,7 +35,7 @@ struct ExplorerChatView: View {
                     .padding(DesignSystem.Spacing.sm)
             }
             HStack(spacing: DesignSystem.Spacing.sm) {
-                TextField("Ask the desktop to change code…", text: $text, axis: .vertical)
+                TextField("Describe the code change…", text: $text, axis: .vertical)
                     .lineLimit(1...6)
                     .textFieldStyle(.roundedBorder)
                 Button {
@@ -51,7 +51,7 @@ struct ExplorerChatView: View {
             }
             .padding(DesignSystem.Spacing.md)
         }
-        .navigationTitle("Explorer")
+        .navigationTitle("Execute")
         .background(DesignSystem.Colors.background.ignoresSafeArea())
     }
 }
