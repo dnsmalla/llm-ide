@@ -82,6 +82,7 @@ struct TasksView: View {
         }
         .navigationTitle("Auto Tasks")
         .task { await tasks.refresh() }
+        .onChange(of: projects.selectedId) { _ in Task { await tasks.refresh() } }
         .refreshable { await tasks.refresh() }
     }
 }

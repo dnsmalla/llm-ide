@@ -46,6 +46,11 @@ struct ExplorerView: View {
             FileTextView(name: entry.name, path: entry.path, projectId: projectId)
         }
         .task { if let projectId, files.entries.isEmpty { await files.list(projectId: projectId) } }
+        .onChange(of: projects.selectedId) { _ in
+            path = ""
+            files.clear()
+            if let projectId { Task { await files.list(projectId: projectId) } }
+        }
         .refreshable { if let projectId { await files.list(projectId: projectId, path: path) } }
     }
 
