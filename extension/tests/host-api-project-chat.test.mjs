@@ -224,3 +224,13 @@ test('unassigned project member is a viewer: Ask only, and the list is still sco
   await flush();
   assert.equal(g.turns.length, 1, 'a viewer may Ask');
 });
+
+test('the execute surface has its own current chat per project, valid only for that project', () => {
+  const u = user();
+  const a = chats.createChatSession(u, { title: 'Phone chat', surface: 'any', mode: 'agent', projectId: null }).id;
+  const x = chats.createChatSession(u, { title: 'Execute chat', surface: 'any', mode: 'agent', projectId: null }).id;
+  setQuickChatId(u, a, null); setQuickChatId(u, x, null, 'execute');
+  assert.equal(getQuickChatId(u, null), a);
+  assert.equal(getQuickChatId(u, null, 'execute'), x);
+  assert.equal(getQuickChatId(u, 'p1', 'execute'), null);
+});

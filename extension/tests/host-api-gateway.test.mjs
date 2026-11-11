@@ -34,8 +34,8 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     pins: { consumePin: (pin) => (pin === '123456' ? pinUser() : null) },
     devices: t.devices,
     quickChat: {
-      get: (_u, pid) => quick.get(pid || '') ?? null,
-      set: (_u, id, pid) => { quick.set(pid || '', id); },
+      get: (_u, pid, surface = 'ask') => quick.get(`${surface}:${pid || ''}`) ?? null,
+      set: (_u, id, pid, surface = 'ask') => { quick.set(`${surface}:${pid || ''}`, id); },
       create: () => `chat-${++made}`,
     },
     models: async () => { t.modelCalls += 1; if (models instanceof Error) throw models; return models ?? [{ id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5' }]; },
@@ -642,6 +642,15 @@ test('chat.new: starts a fresh phone chat; the next send goes there; audited', a
   await t.g.receive(s, req('c-0', 'chat.send', { text: 'first' })); await flush(); assert.equal(t.turns[0].chatSessionId, 'chat-1');
   await t.g.receive(s, req('c-1', 'chat.new', {})); assert.deepEqual(t.last().result, { sessionId: 'chat-2' }); assert.equal(t.audits.at(-1)[0], 'chat_new');
   await t.g.receive(s, req('c-2', 'chat.send', { text: 'second' })); await flush(); assert.equal(t.turns[1].chatSessionId, 'chat-2');
+});
+test('surfaces keep separate chats: an execute chat never shares the ask chat; chat.new on one leaves the other', async () => {
+  const t = harness({ compose: true, read: true }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-0', 'chat.send', { text: 'ask' })); await flush();
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'run', surface: 'execute' })); await flush();
+  assert.equal(t.turns[0].chatSessionId, 'chat-1'); assert.equal(t.turns[1].chatSessionId, 'chat-2');
+  await t.g.receive(s, req('c-2', 'chat.new', { surface: 'execute' })); assert.deepEqual(t.last().result, { sessionId: 'chat-3' });
+  await t.g.receive(s, req('c-3', 'chat.send', { text: 'again' })); await flush(); assert.equal(t.turns[2].chatSessionId, 'chat-1');
+  await t.g.receive(s, req('c-4', 'chat.send', { text: 'again', surface: 'execute' })); await flush(); assert.equal(t.turns[3].chatSessionId, 'chat-3');
 });
 test('chat.new: refused busy while a turn of this user runs', async () => {
   const t = harness({ compose: true, hold: true }); const s = {}; await t.paired(s);

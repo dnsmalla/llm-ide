@@ -72,22 +72,27 @@ export function listDevices(userId) {
 // The pointer is valid only while its session still exists AND belongs to the same project. A stale or
 // cross-project row reads as absent, so a turn creates a chat in the frame's project instead of writing
 // history into another project's session (API 128 PROJECT_MISMATCH).
-export function getQuickChatId(userId, projectId = null) {
+// The Execute surface keeps its own chat: its pointer is stored under a prefixed key (no migration), while the
+// session itself still belongs to the real project, which is what the JOIN checks.
+const surfaceKey = (pid, surface) => (surface === 'execute' ? `~execute:${pid}` : pid);
+
+export function getQuickChatId(userId, projectId = null, surface = 'ask') {
   requireUser(userId);
   const pid = projectId || '';
+  const key = surfaceKey(pid, surface);
   return getDb().prepare(`
     SELECT q.chat_session_id
       FROM host_api_project_chat q
       JOIN chat_sessions s ON s.id = q.chat_session_id AND s.user_id = q.user_id
      WHERE q.user_id = ? AND q.project_id = ?
        AND ((? = '' AND s.project_id IS NULL) OR s.project_id = ?)
-  `).get(userId, pid, pid, pid)?.chat_session_id ?? null;
+  `).get(userId, key, pid, pid)?.chat_session_id ?? null;
 }
 
-export function setQuickChatId(userId, chatSessionId, projectId = null) {
+export function setQuickChatId(userId, chatSessionId, projectId = null, surface = 'ask') {
   requireUser(userId);
   getDb().prepare(`
     INSERT INTO host_api_project_chat (user_id, project_id, chat_session_id) VALUES (?, ?, ?)
     ON CONFLICT(user_id, project_id) DO UPDATE SET chat_session_id = excluded.chat_session_id
-  `).run(userId, projectId || '', String(chatSessionId));
+  `).run(userId, surfaceKey(projectId || '', surface), String(chatSessionId));
 }

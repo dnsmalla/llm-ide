@@ -95,9 +95,11 @@ public struct HostApiChatHistoryResult: Codable, Equatable, Sendable {
 
 public struct HostApiChatHistoryClearRequest: Codable, Equatable, Sendable {
     public var projectId: String?
+    public var surface: String?
 
-    public init(projectId: String? = nil) {
+    public init(projectId: String? = nil, surface: String? = nil) {
         self.projectId = projectId
+        self.surface = surface
     }
 }
 
@@ -111,9 +113,11 @@ public struct HostApiChatHistoryClearResult: Codable, Equatable, Sendable {
 
 public struct HostApiChatNewRequest: Codable, Equatable, Sendable {
     public var projectId: String?
+    public var surface: String?
 
-    public init(projectId: String? = nil) {
+    public init(projectId: String? = nil, surface: String? = nil) {
         self.projectId = projectId
+        self.surface = surface
     }
 }
 
@@ -168,13 +172,15 @@ public struct HostApiChatSendRequest: Codable, Equatable, Sendable {
     public var mode: String?
     public var model: String?
     public var projectId: String?
+    public var surface: String?
     public var text: String
 
-    public init(attachments: [HostApiChatSendRequestAttachmentsItem]? = nil, mode: String? = nil, model: String? = nil, projectId: String? = nil, text: String) {
+    public init(attachments: [HostApiChatSendRequestAttachmentsItem]? = nil, mode: String? = nil, model: String? = nil, projectId: String? = nil, surface: String? = nil, text: String) {
         self.attachments = attachments
         self.mode = mode
         self.model = model
         self.projectId = projectId
+        self.surface = surface
         self.text = text
     }
 }
@@ -228,10 +234,12 @@ public struct HostApiChatSessionsResult: Codable, Equatable, Sendable {
 public struct HostApiChatSnapshotRequest: Codable, Equatable, Sendable {
     public var limit: Int?
     public var projectId: String?
+    public var surface: String?
 
-    public init(limit: Int? = nil, projectId: String? = nil) {
+    public init(limit: Int? = nil, projectId: String? = nil, surface: String? = nil) {
         self.limit = limit
         self.projectId = projectId
+        self.surface = surface
     }
 }
 

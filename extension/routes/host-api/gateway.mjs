@@ -109,8 +109,8 @@ function defaultDeps() {
     clear: async (userId, chatSessionId) => (await agentV2()).clearChatSessionState(userId, chatSessionId),
     decide: async (args) => (await import('../../llm_agent/sdk/decisions.mjs')).answerDecision(args),
     // The current Host API chat of ONE project (null = the legacy/global chat).
-    history: async (userId, projectId, limit) => {
-      const id = getQuickChatId(userId, projectId);
+    history: async (userId, projectId, limit, surface = 'ask') => {
+      const id = getQuickChatId(userId, projectId, surface);
       if (!id) return [];
       return (await chatSessions()).getChatSession(userId, id, { messageLimit: limit })?.messages ?? [];
     },
@@ -136,7 +136,7 @@ function defaultDeps() {
     quickChat: {
       get: getQuickChatId,
       set: setQuickChatId,
-      create: async (userId, projectId) => (await chatSessions()).createChatSession(userId, { title: 'Phone chat', surface: 'any', mode: 'agent', projectId }).id,
+      create: async (userId, projectId, surface = 'ask') => (await chatSessions()).createChatSession(userId, { title: surface === 'execute' ? 'Execute chat' : 'Phone chat', surface: 'any', mode: 'agent', projectId }).id,
     },
     devices: { issueDeviceToken, authenticateDeviceToken, revokeDevice },
     pins: { consumePin },
@@ -406,16 +406,16 @@ export function createGateway(overrides) {
     }
   }
 
-  function quickChatFor(userId, projectId) {
-    const existing = deps.quickChat.get(userId, projectId);
+  function quickChatFor(userId, projectId, surface = 'ask') {
+    const existing = deps.quickChat.get(userId, projectId, surface);
     if (existing) return existing;
     // Two sessions of one user sending to the same project must not create two phone chats. The key is
     // per (user, project), so a turn in project A never waits on project B's creation.
-    const key = `${userId}:${projectId || ''}`;
+    const key = `${userId}:${surface}:${projectId || ''}`;
     let p = creatingQuickChat.get(key);
     if (!p) {
-      p = Promise.resolve(deps.quickChat.create(userId, projectId))
-        .then((id) => { deps.quickChat.set(userId, id, projectId); return id; })
+      p = Promise.resolve(deps.quickChat.create(userId, projectId, surface))
+        .then((id) => { deps.quickChat.set(userId, id, projectId, surface); return id; })
         .finally(() => creatingQuickChat.delete(key));
       creatingQuickChat.set(key, p);
     }
@@ -438,8 +438,8 @@ export function createGateway(overrides) {
     return true;
   }
 
-  async function lines(userId, limit, projectId = null) {
-    return messagesOf(await deps.history(userId, projectId, limit), limit);
+  async function lines(userId, limit, projectId = null, surface = 'ask') {
+    return messagesOf(await deps.history(userId, projectId, limit, surface), limit);
   }
 
   // The SDK may be logged out or slow to answer: compose then offers the desktop default only, never an error.
@@ -754,7 +754,7 @@ export function createGateway(overrides) {
       }
       case 'chat.snapshot': {
         const limit = p.limit ?? HOST_API_LIMITS.defaultListItems;
-        return respond(s, id, command, { messages: await lines(userId, limit, p.projectId ?? null) });
+        return respond(s, id, command, { messages: await lines(userId, limit, p.projectId ?? null, p.surface) });
       }
       case 'chat.send': {
         // Text only (fixtures/security/compose.json imagesAllowed:false): the engine would read `[binary:` framing as an image.
@@ -774,7 +774,7 @@ export function createGateway(overrides) {
           audit('compose_send', { peer: entry.peer, userId, deviceId, detail: `mode=${p.mode ?? 'auto'} model=${p.model ?? 'default'} files=${p.attachments?.length ?? 0}`,
             dedupeKey: `${deviceId}:${p.mode ?? 'auto'}:${p.model ?? ''}` });
         }
-        const chatSessionId = await quickChatFor(userId, p.projectId ?? null);
+        const chatSessionId = await quickChatFor(userId, p.projectId ?? null, p.surface);
         if (sessions.get(s) !== entry) return;
         return startTurn(s, entry, id, p, chatSessionId);
       }
@@ -797,7 +797,7 @@ export function createGateway(overrides) {
         if (!deps.chatClearEnabled()) return fail(s, id, 'denied', 'Clearing the phone chat is turned off on this computer.');
         // A turn accepted here may not hold the engine's lock yet (mode classification runs first).
         if ([...owned.values()].some((o) => o.userId === userId)) return fail(s, id, 'busy', 'A chat turn is running — try again when it ends.', { retryable: true });
-        const chatSessionId = deps.quickChat.get(userId, p.projectId ?? null);
+        const chatSessionId = deps.quickChat.get(userId, p.projectId ?? null, p.surface);
         if (!chatSessionId) return respond(s, id, command, { cleared: true });
         const out = await deps.clear(userId, chatSessionId);
         if (!out?.cleared) return fail(s, id, 'busy', 'A chat turn is running — try again when it ends.', { retryable: true });
@@ -842,9 +842,9 @@ export function createGateway(overrides) {
         if (wait != null) return rateRefused(s, entry, id, wait);
         if ([...owned.values()].some((o) => o.userId === userId)) return fail(s, id, 'busy', 'A chat turn is running — try again when it ends.', { retryable: true });
         const projectId = p.projectId ?? null;
-        await creatingQuickChat.get(`${userId}:${projectId || ''}`); // a first chat being created right now is replaced, not raced
-        const sessionId = await deps.quickChat.create(userId, projectId);
-        deps.quickChat.set(userId, sessionId, projectId);
+        await creatingQuickChat.get(`${userId}:${p.surface ?? 'ask'}:${projectId || ''}`); // a first chat being created right now is replaced, not raced
+        const sessionId = await deps.quickChat.create(userId, projectId, p.surface);
+        deps.quickChat.set(userId, sessionId, projectId, p.surface);
         audit('chat_new', { peer: entry.peer, userId, deviceId: entry.state.deviceId });
         return respond(s, id, command, { sessionId });
       }
