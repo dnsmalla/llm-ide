@@ -90,6 +90,28 @@ struct ChatStoreTests {
         #expect(!a.isStreaming)
     }
 
+    @Test("a reload that matches what streamed in keeps the local rows; a different one swaps them")
+    func reloadReconciles() async {
+        ctx.scripted.reply = { _, _ in enc(HostApiChatSendResult(accepted: true)) }
+        let a = ask()
+        _ = await a.sendLlmideChat("hi")
+        await settle()
+        let id = ctx.scripted.calls[0].id!
+        a.handle(.event(.chatDelta, payload: delta("Hello"), replyTo: id))
+        let before = a.llmIdeMessages.map(\.id)
+        func snapshot(_ reply: String) -> (HostApiCommand, Data) async throws -> Data {
+            { cmd, _ in cmd == .chatSnapshot ? enc(HostApiChatSnapshotResult(messages: [.init(content: "hi", role: "user"), .init(content: reply, role: "assistant")])) : Data("{}".utf8) }
+        }
+        ctx.scripted.reply = snapshot("Hello\n")           // same text, trailing newline
+        a.handle(.event(.chatDone, payload: done(id), replyTo: nil))
+        await settle()
+        #expect(a.llmIdeMessages.map(\.id) == before, "unchanged transcript is not rebuilt")
+        ctx.scripted.reply = snapshot("Hello there")        // the desktop stored something else
+        a.loadSharedHistory()
+        await settle()
+        #expect(a.llmIdeMessages.last?.text == "Hello there")
+    }
+
     @Test("clearing a chat the desktop refuses leaves the transcript on screen and says why")
     func clearRefused() async {
         let a = ask()

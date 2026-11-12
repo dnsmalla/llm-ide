@@ -56,6 +56,7 @@ struct ReadChatsView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(DesignSystem.Colors.background.ignoresSafeArea())
+        .hostScreenChrome()
         .navigationTitle("History")
         .confirmationDialog("Delete this chat?", isPresented: Binding(
             get: { deleteTarget != nil },

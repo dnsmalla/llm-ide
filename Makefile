@@ -53,7 +53,7 @@ test-desktop: test-desktop-node
 
 # --- swift (iOS SharedProtocol) and gates ---------------------------------------
 
-.PHONY: regression test-shared-protocol
+.PHONY: regression test-shared-protocol test-ios-app
 
 # Pin the Xcode toolchain for the Swift builds below (SharedProtocol, the
 # graph-kit labs). git invokes the pre-push hook with an environment that can
@@ -79,6 +79,11 @@ ifeq ($(HAS_XCTEST),1)
 else
 	@echo "⚠ Skipping SharedProtocol swift test — full Xcode required (XCTest not in $$(xcode-select -p))"
 endif
+
+# The iPhone app's own tests (composition root and event routing; needs an iOS Simulator runtime). The store and
+# wire logic is covered by test-shared-protocol.
+test-ios-app:
+	bash scripts/test-ios-app.sh
 
 # Pre-push / pre-release regression gate: the graph-kit pin, the contracts,
 # the desktop/ui/web node suites, the agent/v2 wire and the graph-kit labs.

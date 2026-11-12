@@ -133,7 +133,7 @@ then pair again (a device paired before keeps its old grant).
 store once) and the tab shell; `Core/` the connection; `Features/<Name>/` one folder per tab or flow; `Shared/` the
 components every feature uses, including `.hostScreenChrome()` (connection banner, error banner, project picker).
 Store logic lives in `SharedProtocol/Stores/` behind `HostContext` / `ChatHostContext`, so `swift test` covers it; a store
-registers itself as a `HostEventSink` and the connection routes events to every sink. To add a tab: a store in
+registers itself as a `HostEventSink` and the connection routes events to every sink. App-level wiring (the composition root, event routing) is tested by `make test-ios-app` (`ios_app/MyAppTests/`, needs an iOS Simulator). To add a tab: a store in
 `SharedProtocol/Stores/`, its wiring in `AppModel`, a folder under `Features/`, and `.hostScreenChrome()` on its screen.
 
 ## Related

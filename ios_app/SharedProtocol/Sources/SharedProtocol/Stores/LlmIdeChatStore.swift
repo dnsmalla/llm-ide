@@ -151,9 +151,18 @@ public class LlmIdeChatStore: ObservableObject {
         let restored = reply.messages.enumerated().map { index, message in
             ChatMessage(historyIndex: index, role: message.role == "assistant" ? .assistant : .user, text: message.content)
         }
+        // The reply just streamed in is usually exactly what the desktop stored: keep the local rows then, so the
+        // transcript is not rebuilt (no flicker, scroll position and thumbnails stay). Only a real difference
+        // (another device wrote, a line was redacted or trimmed) swaps in the desktop's version.
+        if Self.sameTranscript(llmIdeMessages, restored) { return }
         // Carry local-only `imageData` across the swap: the server transcript has no images, so a just-sent
         // thumbnail used to vanish from its bubble the moment the reply completed.
         llmIdeMessages = Self.preservingAttachments(from: llmIdeMessages, into: restored)
+    }
+
+    /// Same turns in the same order, comparing role and text with surrounding whitespace ignored.
+    static func sameTranscript(_ a: [ChatMessage], _ b: [ChatMessage]) -> Bool {
+        a.count == b.count && zip(a, b).allSatisfy { $0.role == $1.role && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == $1.text.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
     /// The transcript is cleared only once the desktop confirms; a refusal leaves it on screen with the reason,
