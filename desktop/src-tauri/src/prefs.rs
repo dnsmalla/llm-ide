@@ -209,13 +209,18 @@ pub struct Prefs {
     /// them, so read / compose / push / tool approvals could never be on.
     /// Read, compose and tool approvals default ON (a paired phone gets History, Execute and Auto Tasks with no setup;
     /// each command is still checked against the member's role and project grant) and reach the core as an explicit
-    /// `1` or `0`. NOTE: a file saved before they defaulted on keeps its stored `false` (no migration): every save
-    /// writes every field, so an untouched default cannot be told from a deliberate off, and off is the safe side.
+    /// `1` or `0`. A file saved before they defaulted on stores `false` for all three (every save wrote every field),
+    /// which cannot be told from a deliberate off; the previous build forced them on, so `host_api_caps_migrated`
+    /// marks a one-time migration (see `parse`) that turns them on once, after which the user's switches are honoured.
     pub host_api_tls: bool,
     pub host_api_read: bool,
     pub host_api_compose: bool,
     pub host_api_push: bool,
     pub host_api_tool_approvals: bool,
+    /// Set once the three default-on capabilities above were restored for a file that predates this field. A missing
+    /// key reads as false (the file is old); `Default` is true (a fresh install needs no migration).
+    #[serde(default)]
+    pub host_api_caps_migrated: bool,
     /// App-wide defaults for loops added to a newly detected project.
     pub loop_defaults: LoopDefaults,
     /// Minutes between automatic Code Graph refreshes; 0 = off. Values 1-4 are raised to 5.
@@ -232,7 +237,7 @@ impl Default for Prefs {
             lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, continue_summary: false, terminal: true, theme: Theme::Dark,
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
             remote_server: RemoteServerPrefs::default(),
-            host_api_tls: false, host_api_read: true, host_api_compose: true, host_api_push: false, host_api_tool_approvals: true,
+            host_api_tls: false, host_api_read: true, host_api_compose: true, host_api_push: false, host_api_tool_approvals: true, host_api_caps_migrated: true,
             loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0, update_checks: true, notifications: NotifyPrefs::default(),
         }
     }
@@ -347,10 +352,31 @@ impl Prefs {
 
 /// Parses file text; any problem (too big, not JSON, unknown key, wrong type) yields the defaults.
 pub fn parse(text: &str) -> Prefs {
+    parse_migrating(text).0
+}
+
+/// Like `parse`, plus whether the one-time Host API capability migration ran (the caller persists it). A valid file
+/// without `hostApiCapsMigrated` gets read / compose / tool approvals switched on, as the previous build forced them.
+fn parse_migrating(text: &str) -> (Prefs, bool) {
     if text.len() > MAX_BYTES {
-        return Prefs::default();
+        return (Prefs::default(), false);
     }
-    serde_json::from_str::<Prefs>(text).map(|p| {
+    let Ok(p) = serde_json::from_str::<Prefs>(text) else {
+        return (Prefs::default(), false);
+    };
+    let migrate = !p.host_api_caps_migrated;
+    let mut out = from_stored(&p);
+    if migrate {
+        out.host_api_read = true;
+        out.host_api_compose = true;
+        out.host_api_tool_approvals = true;
+    }
+    out.host_api_caps_migrated = true;
+    (out, migrate)
+}
+
+fn from_stored(p: &Prefs) -> Prefs {
+    Some(p).map(|p| {
         let mut out = Prefs::default().patched(&PrefsPatch {
             lta_mode: Some(p.lta_mode), router: Some(p.router), cap: Some(p.cap), compress: Some(p.compress),
             learn: Some(p.learn), continue_summary: Some(p.continue_summary), terminal: Some(p.terminal), theme: Some(p.theme),
@@ -376,7 +402,17 @@ pub fn parse(text: &str) -> Prefs {
 pub fn load_from(dir: &Path) -> Prefs {
     let path = dir.join(FILE_NAME);
     match std::fs::metadata(&path) {
-        Ok(m) if m.is_file() && m.len() <= MAX_BYTES as u64 => std::fs::read_to_string(&path).map(|t| parse(&t)).unwrap_or_default(),
+        Ok(m) if m.is_file() && m.len() <= MAX_BYTES as u64 => match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let (prefs, migrated) = parse_migrating(&text);
+                // Best effort: if the write fails the migration simply runs again on the next load.
+                if migrated {
+                    let _ = save_to(dir, &prefs);
+                }
+                prefs
+            }
+            Err(_) => Prefs::default(),
+        },
         _ => Prefs::default(),
     }
 }
@@ -668,9 +704,9 @@ mod tests {
         let back = load_from(&dir);
         assert!(!back.host_api_read && !back.host_api_compose && !back.host_api_tool_approvals);
         let _ = std::fs::remove_dir_all(&dir);
-        // A file without the keys reads them as on; a stored false is kept (no migration: it may be deliberate).
+        // A file without the keys reads them as on; a stored false is kept once the file carries the migration marker.
         assert!(parse(r#"{"terminal":true}"#).host_api_read);
-        let stored = parse(r#"{"hostApiRead":false,"hostApiCompose":true,"hostApiToolApprovals":false}"#);
+        let stored = parse(r#"{"hostApiRead":false,"hostApiCompose":true,"hostApiToolApprovals":false,"hostApiCapsMigrated":true}"#);
         assert!(!stored.host_api_read && stored.host_api_compose && !stored.host_api_tool_approvals);
     }
 
@@ -856,6 +892,35 @@ mod tests {
         let block = &src[start..start + src[start..].find(']').unwrap()];
         let found: Vec<&str> = block.split('\'').skip(1).step_by(2).collect();
         assert_eq!(found, FEATURE_KEYS, "update prefs.rs FEATURE_KEYS to match config.mjs");
+    }
+
+    #[test]
+    fn an_old_file_without_the_marker_gets_the_three_capabilities_once() {
+        let d = tmp("caps-old");
+        let old = r#"{"hostApiRead":false,"hostApiCompose":false,"hostApiToolApprovals":false,"hostApiPush":false}"#;
+        std::fs::write(d.join(FILE_NAME), old).unwrap();
+        let p = load_from(&d);
+        assert!(p.host_api_read && p.host_api_compose && p.host_api_tool_approvals && p.host_api_caps_migrated);
+        assert!(!p.host_api_push, "push is not part of the migration");
+        assert!(std::fs::read_to_string(d.join(FILE_NAME)).unwrap().contains("hostApiCapsMigrated\": true"), "persisted");
+        // After the marker a later explicit off is honoured and survives a reload.
+        let off = Prefs { host_api_read: false, ..p };
+        save_to(&d, &off).unwrap();
+        assert!(!load_from(&d).host_api_read);
+    }
+
+    #[test]
+    fn a_marked_file_is_untouched_and_a_fresh_install_has_the_marker() {
+        let marked = parse(r#"{"hostApiRead":false,"hostApiCompose":false,"hostApiToolApprovals":false,"hostApiCapsMigrated":true}"#);
+        assert!(!marked.host_api_read && !marked.host_api_compose && !marked.host_api_tool_approvals);
+        let d = tmp("caps-fresh");
+        let fresh = load_from(&d);
+        assert!(fresh.host_api_read && fresh.host_api_caps_migrated);
+        assert!(!d.join(FILE_NAME).exists(), "a missing file is not written by load");
+        let bad = tmp("caps-bad");
+        std::fs::write(bad.join(FILE_NAME), r#"{"hostApiRead":false,"nope":1}"#).unwrap();
+        assert_eq!(load_from(&bad), Prefs::default());
+        assert!(std::fs::read_to_string(bad.join(FILE_NAME)).unwrap().contains("nope"), "an invalid file is left as it was");
     }
 
     #[test]
