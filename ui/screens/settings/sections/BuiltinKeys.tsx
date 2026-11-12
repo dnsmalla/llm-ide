@@ -163,7 +163,7 @@ export function BuiltinKeys() {
 
   return (
     <div className="st-note" role="group" aria-label="Built-in API keys">
-      <div className="st-row"><strong>API keys</strong></div>
+      <span className="st-label">API keys</span>
       <p className="st-hint">Keys are write-only. Once saved, this page shows only Saved or Not set, and a new key replaces the stored one.</p>
       {loadError ? <ErrorText text={loadError} /> : null}
       {visibleBuiltinKeys(apiVersion).map((row) => (

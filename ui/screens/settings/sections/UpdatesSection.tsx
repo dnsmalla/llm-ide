@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import AboutSection from "./AboutSection.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
 import { useEnv } from "../context.tsx";
-import { Switch, ErrorText } from "../ui.tsx";
+import { Button, Switch, ErrorText } from "../ui.tsx";
 import { updateErrorText, updateSummary, type UpdateStatusView } from "../updates-model.ts";
 
 /** The Mac's "Updates & About" group: the signed-update switch, Check now and Install, then version and diagnostics. */
@@ -34,9 +34,9 @@ export default function UpdatesSection() {
           ) : null}
           {usable ? (
             <div className="st-row">
-              <button type="button" disabled={busy} onClick={() => void run(async () => setStatus(await host.checkForUpdate!()))}>Check Now</button>
+              <Button disabled={busy} onClick={() => void run(async () => setStatus(await host.checkForUpdate!()))}>Check Now</Button>
               {status?.available ? (
-                <button type="button" disabled={busy} onClick={() => void run(async () => { await host.installUpdate!(); })}>Install {status.available.version} and Restart</button>
+                <Button tone="primary" disabled={busy} onClick={() => void run(async () => { await host.installUpdate!(); })}>Install {status.available.version} and Restart</Button>
               ) : null}
             </div>
           ) : null}

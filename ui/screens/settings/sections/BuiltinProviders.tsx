@@ -55,7 +55,7 @@ export function BuiltinProviders() {
 
   return (
     <div className="st-note" role="group" aria-label="Built-in providers">
-      <div className="st-row"><strong>Built-in providers</strong></div>
+      <span className="st-label">Built-in providers</span>
       <p className="st-hint">
         Always available, no connection needed. The Claude engine runs on this computer&apos;s <code>claude login</code>{" "}
         subscription when no API key is set, and its model list comes from the account. The Codex and Gemini rows check
