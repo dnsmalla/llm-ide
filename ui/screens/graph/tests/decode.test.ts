@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { decodeGraph, GraphDecodeError, cleanText, relativePath } from "../decode.ts";
 import { DEFAULT_CAPS } from "../model.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const fixture = (n: string) => readFileSync(new URL(`./fixtures/${n}.json`, import.meta.url), "utf8");
 
@@ -125,5 +126,5 @@ test("a 20k-node hostile file decodes within a generous time budget", () => {
   const t = performance.now();
   const m = decodeGraph(JSON.stringify({ files, calls: [{ from: 1 }, { from: "p/1.ts", to: "p/2.ts" }] }));
   assert.equal(m.n, 20_000);
-  assert.ok(performance.now() - t < 5000);
+  assert.ok(performance.now() - t < budget(5000));
 });

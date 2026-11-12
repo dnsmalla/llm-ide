@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { budget } from './helpers/perf.mjs';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
@@ -31,7 +32,7 @@ const db = kb.getDb();
 let n = 0;
 const mkUser = () => users.registerUser(db, { email: `bs-${Date.now()}-${++n}@example.com`, password: 'CorrectHorseBattery', displayName: 'b' }).id;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (fn, ms = 4000) => { const t = Date.now(); while (!(await fn())) { if (Date.now() - t > ms) throw new Error('timeout waiting'); await sleep(15); } };
+const until = async (fn, ms = budget(4000)) => { const t = Date.now(); while (!(await fn())) { if (Date.now() - t > ms) throw new Error('timeout waiting'); await sleep(15); } };
 const ACCT = 'aaaaaaaaaaaa';
 const ARGS = { sourceIds: [`gcal:${ACCT}`] };
 

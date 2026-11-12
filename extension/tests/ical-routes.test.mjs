@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { budget } from './helpers/perf.mjs';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
@@ -263,7 +264,7 @@ test('hostile feeds: huge RRULE, nested, 10 MB, binary; bidi and HTML in notes',
   feedHost(fx('hostile-rrule.ics'));
   const t0 = Date.now();
   let r = await sync(); assert.equal(r.status, 200);
-  assert.ok(Date.now() - t0 < 5000);
+  assert.ok(Date.now() - t0 < budget(5000));
   assert.ok(r.json.warnings.includes('rrule_subdaily'));
   feedHost(fx('nested.ics')); age(u, sid); r = await sync(); assert.equal(r.status, 200);
   assert.deepEqual(rows(u, sid).map((x) => x.title), ['Outer event']);

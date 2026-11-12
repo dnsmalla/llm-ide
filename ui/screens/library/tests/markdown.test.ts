@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { classifyHref, inlineText, outline, parseInline, parseMarkdown, resolveNoteLink, type Block, type Inline } from "../markdown.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const first = (src: string): Block => parseMarkdown(src)[0]!;
 const inl = (src: string, baseRel: string | null = "a/b.md"): Inline[] => parseInline(src, { baseRel }, 0);
@@ -159,7 +160,7 @@ test("bounds: deep nesting, huge input and pathological inline text stay fast an
   parseMarkdown("_x ".repeat(30_000) + "**".repeat(5_000));
   parseMarkdown("x".repeat(6 * 1024 * 1024));
   parseMarkdown(Array.from({ length: 20_000 }, (_, i) => `| ${i} | x |`).join("\n"));
-  assert.ok(performance.now() - t0 < 4000, `took ${performance.now() - t0} ms`);
+  assert.ok(performance.now() - t0 < budget(4000), `took ${performance.now() - t0} ms`);
 });
 
 test("a realistic long note parses fast (1 MB)", () => {
@@ -169,5 +170,5 @@ test("a realistic long note parses fast (1 MB)", () => {
   const blocks = parseMarkdown(doc);
   const ms = performance.now() - t0;
   assert.ok(blocks.length > 1000);
-  assert.ok(ms < 1500, `1 MB took ${ms} ms`);
+  assert.ok(ms < budget(1500), `1 MB took ${ms} ms`);
 });

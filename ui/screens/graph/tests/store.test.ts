@@ -6,6 +6,7 @@ import type { JobOutcome } from "../engine.ts";
 import type { CacheEntry } from "../cache.ts";
 import { runJob } from "../layout-job.ts";
 import { loadWasmBytes } from "./wasm-helper.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const GOOD = JSON.stringify({ files: [{ path: "a.ts", imports: ["b.ts"] }, { path: "b.ts" }] });
 
@@ -296,7 +297,7 @@ test("revealNode unhides a searched kind and clears a community/preset filter", 
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 // A deadline, not a poll count: under a loaded gate the wasm layout alone can take seconds.
-async function waitFor(cond: () => boolean, timeoutMs = 10_000): Promise<boolean> {
+async function waitFor(cond: () => boolean, timeoutMs = budget(10_000)): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (cond()) return true;

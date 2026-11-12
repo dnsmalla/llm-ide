@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { startCore } from '../../ui/screens/shell/tests/e2e/core-server.mjs';
 import { busHostProof, BUS_PROOF_HEADER } from '../core/host-approval.mjs';
+import { budget } from './helpers/perf.mjs';
 
 const KEY = randomBytes(32).toString('hex');
 const PROOF = busHostProof({ LLMIDE_HOST_APPROVAL_KEY: KEY });
@@ -45,7 +46,7 @@ function client(url) {
     frames.push(f);
     for (const w of [...waiters]) if (w.match(f)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(f); }
   };
-  const wait = (match, ms = 15_000) => {
+  const wait = (match, ms = budget(15_000)) => {
     const hit = frames.find(match);
     if (hit) return Promise.resolve(hit);
     return new Promise((resolve, reject) => {
@@ -91,7 +92,7 @@ test('hello (desktop), pair, chat.send gives delta then done, snapshot, revoke',
 
   const sent = await c.call('chat.send', { text: 'hi' });
   assert.deepEqual(sent.result, { accepted: true, requestId: sent.replyTo });
-  const done = await c.wait((f) => f.type === 'event' && f.command === 'chat.done' && f.replyTo === sent.replyTo, 30_000);
+  const done = await c.wait((f) => f.type === 'event' && f.command === 'chat.done' && f.replyTo === sent.replyTo, budget(30_000));
   const deltas = c.frames.filter((f) => f.type === 'event' && f.command === 'chat.delta' && f.replyTo === sent.replyTo);
   assert.ok(deltas.length >= 1, 'at least one chat.delta before chat.done');
   assert.ok(c.frames.indexOf(deltas.at(-1)) < c.frames.indexOf(done));
@@ -115,7 +116,7 @@ test('chat.snapshot carries the user and assistant lines of a finished turn', { 
   const { result: { token } } = await c.call('host.auth.pair', { pin });
   try {
     const sent = await c.call('chat.send', { text: 'snapshot me' });
-    await c.wait((f) => f.type === 'event' && f.command === 'chat.done' && f.replyTo === sent.replyTo, 30_000);
+    await c.wait((f) => f.type === 'event' && f.command === 'chat.done' && f.replyTo === sent.replyTo, budget(30_000));
     const snap = await c.call('chat.snapshot');
     assert.deepEqual(snap.result.messages.slice(-2).map((m) => m.role), ['user', 'assistant']);
     assert.equal(snap.result.messages.at(-2).content, 'snapshot me');

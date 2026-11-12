@@ -1,6 +1,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { loadChat, h, renderToStaticMarkup } from "./helpers.mjs";
+import { budget } from "../../test-support/perf.ts";
 
 let c;
 before(async () => { c = await loadChat("markdown"); });
@@ -63,7 +64,7 @@ test("pathological input stays bounded", () => {
   const t = Date.now();
   c.parseBlocks(("[" .repeat(20000)) + "\n" + "*".repeat(20000) + "\n" + "`".repeat(5000));
   c.parseBlocks("a".repeat(500000));
-  assert.ok(Date.now() - t < 2000);
+  assert.ok(Date.now() - t < budget(2000));
 });
 
 // --- hostile input: parse cost is bounded ------------------------------------------------------------------
@@ -91,7 +92,7 @@ test("hostile text parses within a time budget: bracket floods, unclosed links, 
   };
   for (const [name, text] of Object.entries(cases)) {
     const [ms] = timed(() => c.parseBlocks(text));
-    assert.ok(ms < BUDGET_MS, `${name}: ${Math.round(ms)} ms`);
+    assert.ok(ms < budget(BUDGET_MS), `${name}: ${Math.round(ms)} ms`);
   }
 });
 

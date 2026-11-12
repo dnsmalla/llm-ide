@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveBashCwd, handleRunBash, buildChildEnv } from '../llm_agent/tools/handlers/run-bash.mjs';
+import { budget } from './helpers/perf.mjs';
 
 // A model-supplied `cwd` relocates the command. Before containment existed,
 // `{ cwd: "/Users/me/.aws", command: "cat credentials" }` ran a gate-approved
@@ -226,7 +227,7 @@ test('aborting the turn kills an in-flight command instead of waiting out its ti
   // 30 s command, 120 s timeout: without the signal this promise could not
   // settle for 30 s, so a fast settle IS the abort taking effect.
   const p = handleRunBash(
-    { command: 'sleep 30', timeout: 120_000 },
+    { command: 'sleep 120', timeout: 300_000 },
     { workspaceRoot: workspace, signal: ac.signal },
   );
   await settle(150);
@@ -234,7 +235,7 @@ test('aborting the turn kills an in-flight command instead of waiting out its ti
   const r = await p;
   assert.equal(r.error, 'Command aborted.');
   assert.equal(r.exitCode, null);
-  assert.ok(Date.now() - started < 5_000, `abort must settle promptly, took ${Date.now() - started}ms`);
+  assert.ok(Date.now() - started < budget(5_000), `abort must settle promptly, took ${Date.now() - started}ms`);
 });
 
 test('abort kills the whole process group, not just the shell — grandchildren die too', async () => {
@@ -446,14 +447,14 @@ test('registry.mjs hands the loop\'s signal to run-bash (legacy engine ctx shape
     email: `run-bash-signal-${Date.now()}@example.com`,
     password: 'CorrectHorseBattery', displayName: 't',
   });
-  // `sleep 30` is prompt-tier; a project rule for `sleep` is how a legacy
+  // `sleep 120` is prompt-tier; a project rule for `sleep` is how a legacy
   // turn reaches the handler without a live approval channel in a unit test.
   addRule(user.id, workspace, 'run-bash', 'sleep');
 
   const ac = new AbortController();
   const started = Date.now();
   const p = get('run-bash').execute(
-    { command: 'sleep 30', timeout: 120_000 },
+    { command: 'sleep 120', timeout: 300_000 },
     {
       userId: user.id,
       agentContext: { sessionId: 'sig-legacy-1', workspaceRoot: workspace },
@@ -464,7 +465,7 @@ test('registry.mjs hands the loop\'s signal to run-bash (legacy engine ctx shape
   await settle(150);
   ac.abort();
   assert.equal((await p).error, 'Command aborted.');
-  assert.ok(Date.now() - started < 5_000);
+  assert.ok(Date.now() - started < budget(5_000));
 });
 
 test('registry.mjs hands a v2-shaped ctx.signal to run-bash too', async () => {
@@ -472,7 +473,7 @@ test('registry.mjs hands a v2-shaped ctx.signal to run-bash too', async () => {
   const ac = new AbortController();
   // No loopCtx => the v2 branch, which skips the legacy gate entirely.
   const p = get('run-bash').execute(
-    { command: 'sleep 30', timeout: 120_000 },
+    { command: 'sleep 120', timeout: 300_000 },
     { agentContext: { workspaceRoot: workspace }, signal: ac.signal },
   );
   await settle(150);

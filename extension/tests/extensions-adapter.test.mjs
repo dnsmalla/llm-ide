@@ -9,6 +9,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createWorld } from './helpers/extensions-world.mjs';
+import { budget, loadFactor } from './helpers/perf.mjs';
 
 const world = createWorld({ tag: 'ext-adapter' });
 const { freshDb, fakeFetch, jsonResponse } = await import('./provider-test-env.mjs');
@@ -80,7 +81,7 @@ async function turn(s, steps, { mode = 'execute', model = MODEL, answer, over = 
 const calls = () => (fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').trim().split('\n').filter(Boolean) : []);
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 async function waitGone(pid) {
-  for (let i = 0; i < 60 && alive(pid); i += 1) await new Promise((r) => setTimeout(r, 50));
+  for (let i = 0; i < Math.ceil(60 * loadFactor()) && alive(pid); i += 1) await new Promise((r) => setTimeout(r, 50));
   return !alive(pid);
 }
 
@@ -335,7 +336,8 @@ test('a server that never completes the handshake is abandoned at the connect ti
   const conn = await client.connectMcpServers({ hang: { command: process.execPath, args: ['-e', script] } },
     { deps: { limits: { connectMs: 400 } } });
   assert.deepEqual(conn.statuses, [{ name: 'hang', status: 'failed', toolCount: 0, reason: 'timeout' }]);
-  assert.ok(Date.now() - t0 < 5000);
+  assert.ok(Date.now() - t0 >= 400, 'not abandoned before the connect timeout');
+  assert.ok(Date.now() - t0 < budget(5000));
   assert.ok(await waitGone(Number(fs.readFileSync(pidFile, 'utf8'))), 'the hung process was killed');
   await conn.close();
 });
@@ -395,8 +397,8 @@ test('a hung server does not delay the others beyond the connect cap, and the mo
   const hang = { command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
   const t0 = Date.now();
   const mount = await mountMcpTools({ userId: s.a, mode: 'execute', emit: (e) => evs.push(e), sessionKey: 'k',
-    deps: { servers: { fakesrv: { command: process.execPath, args: [FIXTURE] }, hang }, clientDeps: { limits: { connectMs: 600 } } } });
-  assert.ok(Date.now() - t0 < 4000, 'bounded by the connect cap, not by the sum');
+    deps: { servers: { fakesrv: { command: process.execPath, args: [FIXTURE] }, hang }, clientDeps: { limits: { connectMs: Math.round(budget(600)) } } } });
+  assert.ok(Date.now() - t0 < budget(4000), 'bounded by the connect cap, not by the sum');
   assert.deepEqual(mount.statuses.map((x) => [x.name, x.status]), [['fakesrv', 'connected'], ['hang', 'failed']]);
   const info = evs.find((e) => e.kind === 'extensions_mcp' && e.level === 'info');
   assert.match(info.text, /fakesrv \(\d+ tools?\)/);

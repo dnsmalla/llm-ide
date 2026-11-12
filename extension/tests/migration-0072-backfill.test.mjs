@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { applyMigrations } from '../kb/migrations.mjs';
+import { budget } from './helpers/perf.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ALL = path.join(HERE, '../kb/migrations');
@@ -56,7 +57,7 @@ test('the backfill is linear: 10,000 source rows migrate well under 20 s', () =>
   const t0 = Date.now();
   big.exec(SQL);
   const ms = Date.now() - t0;
-  assert.ok(ms < 20_000, `backfill took ${ms} ms`);
+  assert.ok(ms < budget(20_000), `backfill took ${ms} ms`);
   assert.equal(big.prepare("SELECT COUNT(*) AS n FROM search WHERE kind = 'code' AND user_id = 'u1'").get().n, 10_000);
   big.close();
 });

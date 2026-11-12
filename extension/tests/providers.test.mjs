@@ -19,6 +19,7 @@ const { resolveProvider, providerApiKey, completeViaApi, callOpenAI, verifyProvi
 const { setSecret } = await import('../server/vault.mjs');
 const { syncCustomProviders } = await import('../server/custom-providers.mjs');
 import Database from 'better-sqlite3';
+import { budget } from './helpers/perf.mjs';
 
 // In-memory secrets store for resolver tests (same schema as the vault).
 function secretsDb() {
@@ -789,7 +790,8 @@ test('runViaCli: a CLI that cannot run is tagged PROVIDER_UNAVAILABLE (the code 
 });
 
 test('runViaCli: an aborted request kills the CLI and removes its temp dir', async () => {
-  const slow = scriptCli('pwd > "$0.cwd"; sleep 5; echo late');
+  // Sleeps far past the largest scaled bound (budget caps at 8×), so a run that ignores the abort can never pass.
+  const slow = scriptCli('pwd > "$0.cwd"; sleep 120; echo late');
   process.env.LLMIDE_GOOGLE_CLI = slow.bin;
   const ctl = new AbortController();
   const started = Date.now();
@@ -799,7 +801,7 @@ test('runViaCli: an aborted request kills the CLI and removes its temp dir', asy
     const poll = setInterval(() => { if (fs.existsSync(`${slow.bin}.cwd`)) { clearInterval(poll); ctl.abort(); } }, 20);
     await assert.rejects(() => runViaCli('google', 'hi', { signal: ctl.signal }), (err) => err.name === 'AbortError');
     clearInterval(poll);
-    assert.ok(Date.now() - started < 4500, 'did not wait for the CLI to finish');
+    assert.ok(Date.now() - started < budget(4500), 'did not wait for the CLI to finish');
     const ran = fs.readFileSync(`${slow.bin}.cwd`, 'utf8').trim();
     assert.equal(fs.existsSync(ran), false, 'temp dir removed on abort');
   } finally {

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { budget } from './helpers/perf.mjs';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
@@ -239,5 +240,5 @@ test('timing — a few hundred rows are answered in under 50 ms', async () => {
   const ms = performance.now() - t0;
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.tokens.totals.calls, 400);
-  assert.ok(ms < 50, `GET /kb/os/state took ${ms.toFixed(1)} ms`);
+  assert.ok(ms < budget(50), `GET /kb/os/state took ${ms.toFixed(1)} ms`);
 });

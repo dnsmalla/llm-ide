@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { budget } from './helpers/perf.mjs';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
@@ -301,7 +302,7 @@ test('latency: a list call through the route (200 templates) answers in under 20
     const ms = performance.now() - started;
     t.diagnostic(`GET /kb/docs/templates (200) took ${ms.toFixed(1)} ms`);
     assert.equal(res.json().count, 200);
-    assert.ok(ms < 200, `${ms.toFixed(1)} ms`);
+    assert.ok(ms < budget(200), `${ms.toFixed(1)} ms`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

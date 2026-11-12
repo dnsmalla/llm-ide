@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
+import { budget } from './helpers/perf.mjs';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
@@ -321,7 +322,7 @@ test('rollup of 50k rows with open runs stays correct and fast', () => {
   })();
   const t0 = Date.now();
   const res = store.rollupOlderThan('u1', 30, { db, now: NOW });
-  assert.ok(Date.now() - t0 < 5000);
+  assert.ok(Date.now() - t0 < budget(5000));
   assert.equal(res.toolEventsFolded, 45000);
   assert.equal(count('agent_tool_events', 'u1'), 5000);
   assert.equal(db.prepare('SELECT SUM(calls) AS n FROM agent_daily_tools WHERE user_id = ?').get('u1').n, 45000);

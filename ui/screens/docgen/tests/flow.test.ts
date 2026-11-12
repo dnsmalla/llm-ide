@@ -7,6 +7,7 @@ import { HISTORY_MAX, loadHistory } from "../history.ts";
 import { saveNewDocument, saveNewExternal, saveRevision, saveRevisionExternal } from "../save.ts";
 import { MAX_BODY_CHARS, MAX_SELECTED_SOURCES, MAX_SOURCE_CONTENT, type DocTemplate } from "../model.ts";
 import { controllableApi, FsErr, MemFs, okResult, readersFrom, tick } from "./fakes.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const tpl: DocTemplate = { id: "t", name: "Decision Log", sections: ["Context", "Decision"], rawContent: "", isBuiltin: false, folderName: "decision-log", isProjectTemplate: true, surface: "doc" };
 const sel = { template: tpl, command: "", prompt: "" };
@@ -270,7 +271,7 @@ test("loadHistory: 5,000 documents load in pages, newest first, quickly; missing
   const t0 = performance.now();
   const r = await loadHistory(fs, new AbortController().signal, (items) => pages.push(items.length));
   assert.equal(r.items.length, 5000);
-  assert.ok(performance.now() - t0 < 1500);
+  assert.ok(performance.now() - t0 < budget(1500));
   assert.equal(r.items[0]!.name, "doc-4999.md");
   assert.ok(pages.length >= 5);
   assert.equal(fs.listCalls, 6);

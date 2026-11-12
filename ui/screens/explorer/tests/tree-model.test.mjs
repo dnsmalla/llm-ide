@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./helpers.mjs";
+import { budget } from "../../test-support/perf.ts";
 
 const T = await load("tree-model.ts");
 
@@ -180,8 +181,8 @@ test("100k-entry folder: layout, window and page lookups stay cheap", () => {
   const p95 = samples[Math.floor(samples.length * 0.95)];
   const worst = samples[samples.length - 1];
   console.log(`BENCH tree 100k: layout ${(t1 - t0).toFixed(1)} ms, window median ${median.toFixed(3)} / p95 ${p95.toFixed(3)} / worst ${worst.toFixed(2)} ms, indexOfPath ${(lookup1 - lookup0).toFixed(1)} ms`);
-  assert.ok(median < 4, `window slice median ${median} ms`);
-  assert.ok(p95 < 8, `window slice p95 ${p95} ms`);
-  assert.ok(worst < 60, `window slice worst ${worst} ms`);
-  assert.ok(t1 - t0 < 150, `layout ${t1 - t0} ms`);
+  assert.ok(median < budget(4), `window slice median ${median} ms`);
+  assert.ok(p95 < budget(8), `window slice p95 ${p95} ms`);
+  assert.ok(worst < budget(60), `window slice worst ${worst} ms`);
+  assert.ok(t1 - t0 < budget(150), `layout ${t1 - t0} ms`);
 });

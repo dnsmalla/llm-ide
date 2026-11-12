@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { budget } from './helpers/perf.mjs';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
@@ -55,7 +56,7 @@ const pidReady = (file) => waitFor(() => fs.existsSync(file) && fs.readFileSync(
 // An acquired child that is never run is owned by the caller, so the test must reap it.
 const discard = (entry) => { entry.child.stdin.destroy(); entry.child.kill('SIGTERM'); };
 const tick = () => new Promise((r) => setTimeout(r, 50));
-const waitFor = async (fn, ms = 2000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await tick(); } return false; };
+const waitFor = async (fn, ms = budget(2000)) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await tick(); } return false; };
 
 process.env.LLMIDE_WARM_CLI = '1';   // opt the tests in (the module reads it per call)
 // os.freemem() on macOS excludes reclaimable cache and can read < 1 GiB on a healthy
@@ -151,14 +152,15 @@ test('timeout kills the child and reports killed:true; not retryable', async () 
   pool.prewarm(spec({ FAKE_WARM_MODE: 'hang', FAKE_WARM_PID_FILE: pidFile }));
   await waitFor(() => pool._warmPoolStateForTests().idle === 1);
   const child = pool.acquireWarm(spec({ FAKE_WARM_MODE: 'hang', FAKE_WARM_PID_FILE: pidFile }));
+  // The fixture writes its pid at startup; on a loaded machine that can come after a 200 ms timeout already killed it.
+  assert.ok(await pidReady(pidFile), 'fixture wrote its pid');
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
   await assert.rejects(pool.runWarm(child, 'x', { timeoutMs: 200, wantJson: true }), (err) => {
     assert.equal(err.killed, true);
     assert.equal(err.signal, 'SIGTERM');
     assert.equal(pool.isWarmRetryable(err), false);
     return true;
   });
-  assert.ok(await pidReady(pidFile), 'fixture wrote its pid');
-  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
   assert.ok(await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }), 'child is gone');
 });
 
@@ -497,12 +499,12 @@ test('an idle child does not keep a one-shot script alive', async () => {
     const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
       env: { ...process.env, LLMIDE_WARM_CLI: '1', LLMIDE_WARM_CLI_MIN_FREE_BYTES: '0' }, stdio: 'ignore',
     });
-    const guard = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('script hung with an idle warm child')); }, 6000);
+    const guard = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('script hung with an idle warm child')); }, budget(6000));
     child.on('error', reject);
     child.on('close', (c) => { clearTimeout(guard); resolve(c); });
   });
   assert.equal(code, 0);
-  assert.ok(Date.now() - started < 6000);
+  assert.ok(Date.now() - started < budget(6000));
 });
 
 test('cleanup: leave no idle child behind', () => {

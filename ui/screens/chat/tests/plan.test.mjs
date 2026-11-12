@@ -1,6 +1,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { loadChat, h, renderToStaticMarkup as html, fixtures } from "./helpers.mjs";
+import { budget } from "../../test-support/perf.ts";
 
 let c;
 before(async () => { c = await loadChat("plan"); });
@@ -260,7 +261,7 @@ test("diff: a huge replacement degrades to a replaced block instead of freezing"
   const b = Array.from({ length: 5000 }, (_, i) => `new ${i}`).join("\n");
   const t0 = performance.now();
   const s = c.diffStats(a, b);
-  assert.ok(performance.now() - t0 < 500, "bounded work");
+  assert.ok(performance.now() - t0 < budget(500), "bounded work");
   assert.equal(s.approximate, true);
   assert.deepEqual([s.added, s.removed], [5000, 5000]);
   const rows = c.diffRows(a, b).rows;

@@ -33,6 +33,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { budget } from './helpers/perf.mjs';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
@@ -172,7 +173,7 @@ test('legacy dispatch with no emit channel denies immediately instead of parking
   const started = Date.now();
   // loopCtx present (legacy), but no `emit` — exactly the buffered path.
   const result = await handlers['run-bash']({ command: 'echo should-not-run' }, { userId: user.id });
-  assert.ok(Date.now() - started < 5_000, 'must fail fast, not wait on the 300 s registry timeout');
+  assert.ok(Date.now() - started < budget(5_000), 'must fail fast, not wait on the 300 s registry timeout');
   assert.match(result.error, /interactive approval/i);
   assert.equal(result.stdout, undefined, 'the command must not have run');
 });

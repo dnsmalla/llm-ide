@@ -9,6 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
 import { barGeometry, buildRows, dayNumber, dayString, dependencyLines, GANTT_WINDOW_BUFFER, macBounds, timelineRange, visibleRowWindow } from "../gantt-model.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GANTT = resolve(HERE, "..");
@@ -58,7 +59,7 @@ test("the whole body (all 2,000 rows drawn) stays under 40,000 nodes at 365 days
   const ms = performance.now() - t0;
   const nodes = tags(html);
   assert.ok(nodes < 40_000, `whole body nodes: ${nodes}`);
-  assert.ok(ms < 1500, `render took ${ms.toFixed(0)} ms`);
+  assert.ok(ms < budget(1500), `render took ${ms.toFixed(0)} ms`);
   assert.equal(html.includes('class="gnt-grid"'), false, "no per-row day cells: the day grid is one background layer");
 });
 

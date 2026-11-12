@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { load } from "../../tests/helpers.mjs";
 import { entry } from "./fakes.mjs";
+import { budget } from "../../../test-support/perf.ts";
 
 const m = await load("scm/model.ts");
 
@@ -56,7 +57,7 @@ test("windowing handles 10k+ entries fast (grouping + flatten + window)", () => 
   const ms = performance.now() - t;
   assert.equal(rows.length, 20_001);
   assert.ok(w.end <= 60);
-  assert.ok(ms < 1500, `${ms}ms`);
+  assert.ok(ms < budget(1500), `${ms}ms`);
 });
 
 test("selection: plain, toggle, shift range across files only, prune after refresh", () => {

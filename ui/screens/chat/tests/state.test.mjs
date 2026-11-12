@@ -1,6 +1,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { loadChat, fixtures } from "./helpers.mjs";
+import { budget } from "../../test-support/perf.ts";
 
 let c;
 before(async () => { c = await loadChat("state"); });
@@ -145,7 +146,7 @@ test("10k-token reply reduces fast and keeps a small open tail", () => {
   let s = start();
   const t0 = Date.now();
   for (let i = 0; i < 10_000; i++) s = c.reduce(s, { type: "events", events: [ev("delta", { text: i % 40 === 39 ? "word.\n\n" : "word " })] });
-  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < budget(3000), `took ${Date.now() - t0} ms`);
   const part = last(s).parts[0];
   assert.ok(part.sealed.length >= c.SEAL_MERGE_AFTER, "past the merge threshold blocks are folded together");
   assert.ok(c.textOf(part).startsWith("word word") && c.textOf(part).includes("word.\n\nword"));
@@ -175,14 +176,14 @@ test("appendText: 200k paragraphs stay linear (sealed blocks are merged), text i
   p = c.appendText(p, "```js\na\n\nb\n```\n\n");
   for (let i = 0; i < 200; i++) p = c.appendText(p, para.repeat(n / 200));
   const ms = performance.now() - t0;
-  assert.ok(ms < 3000, `${Math.round(ms)} ms`);
+  assert.ok(ms < budget(3000), `${Math.round(ms)} ms`);
   assert.equal(c.textOf(p), "```js\na\n\nb\n```\n\n" + para.repeat(n));
   assert.ok(p.sealed.length < c.SEAL_MERGE_AFTER + (n * para.length) / c.SEAL_MERGE_MAX + 5, `sealed blocks: ${p.sealed.length}`);
   assert.match(p.sealed[0], /^```js\na\n\nb\n```\n\n$/, "the early blocks (the fence) are never merged");
   // a whitespace-padded line is not a fence and costs nothing
   const t1 = performance.now();
   c.appendText(c.emptyText(), "```" + " ".repeat(500_000) + "x\n");
-  assert.ok(performance.now() - t1 < 500);
+  assert.ok(performance.now() - t1 < budget(500));
 });
 
 test("chat_continued is info but shown (the user must see the chat was continued from a summary)", () => {

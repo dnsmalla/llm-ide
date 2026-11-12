@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as c from "../native/cron.ts";
 import * as m from "../native/model.ts";
 import * as u from "../native/usage.ts";
+import { budget } from "../../test-support/perf.ts";
 
 test("a resolve error does not block the run (Mac resolveModelForRun parity) and is logged", async () => {
   const d = await u.decideRun(async () => { throw new Error("404"); });
@@ -45,7 +46,7 @@ test("nextFireAfter is fast for yearly and never-firing expressions and still ex
   const t0 = performance.now();
   const next = c.nextFireAfter("30 9 1 1 *", new Date(2026, 0, 2));
   assert.equal(c.nextFireAfter("0 0 31 2 *", new Date(2026, 0, 2)), null);
-  assert.ok(performance.now() - t0 < 100, "should skip whole days and hours");
+  assert.ok(performance.now() - t0 < budget(100), "should skip whole days and hours");
   assert.deepEqual([next.getFullYear(), next.getMonth(), next.getDate(), next.getHours(), next.getMinutes()], [2027, 0, 1, 9, 30]);
   // Minute precision inside a matching hour, and strictly after `from`.
   const n2 = c.nextFireAfter("*/15 10 * * *", new Date(2026, 10, 2, 10, 15, 20));

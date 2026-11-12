@@ -5,6 +5,7 @@ import {
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const item = (key, over = {}) => ({ key, source: "issue", id: key.slice(6), title: `Title ${key}`, body: "", repo: null, addedAt: "2026-11-09T00:00:00.000Z", runIds: [], ...over });
 const live = (itemKey, projectRoot = "/p", state = "running") => ({ runId: `run-${itemKey.slice(6)}`, itemKey, projectRoot, mode: "full", state, startedAt: null, log: [] });
@@ -228,5 +229,5 @@ test("D6: 500 cards assemble and build well under 50 ms", () => {
   for (const it of items) assembleFacts(it, ctx);
   buildBoard(items, facts, Date.now());
   const ms = performance.now() - t;
-  assert.ok(ms < 50, `500 cards took ${ms.toFixed(1)} ms`);
+  assert.ok(ms < budget(50), `500 cards took ${ms.toFixed(1)} ms`);
 });

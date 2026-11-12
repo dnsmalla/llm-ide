@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { budget } from './helpers/perf.mjs';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
@@ -313,5 +314,5 @@ test('packSources stays fast on a request at the body limit (single pass, not O(
   const packed = packSources(sources);
   const elapsed = Date.now() - started;
   assert.ok(packed.text.length <= MAX_TOTAL_SOURCE_CHARS);
-  assert.ok(elapsed < 2_000, `packSources took ${elapsed} ms — the quadratic drop loop is back`);
+  assert.ok(elapsed < budget(2_000), `packSources took ${elapsed} ms — the quadratic drop loop is back`);
 });

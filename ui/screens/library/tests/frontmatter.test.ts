@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fmDateMs, fmInt, fmList, fmString, parseHead, parseNote, splitFrontmatter } from "../frontmatter.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../../../..");
@@ -79,7 +80,7 @@ test("bounds: huge headers, huge lists and many keys cannot blow up", () => {
   const t0 = performance.now();
   parseNote("---\n" + "a: ".repeat(1) + "[".repeat(50_000) + "\n---\n");
   parseNote("---\nk: '" + "'".repeat(50_000) + "\n---\n");
-  assert.ok(performance.now() - t0 < 500, "pathological quoting stays fast");
+  assert.ok(performance.now() - t0 < budget(500), "pathological quoting stays fast");
 });
 
 test("splitFrontmatter keeps the Mac quirks", () => {

@@ -43,6 +43,7 @@ function write(root, rel, text) {
 // ---------------------------------------------------------------------------
 
 import { GOLDEN_VISUAL_TEMPLATE, GOLDEN_DOC_TEMPLATE, GOLDEN_DOC_COMMAND, GOLDEN_VISUAL_COMMAND, GOLDEN_KIT_VISUAL_SEED } from './fixtures/docgen/golden.mjs';
+import { budget } from './helpers/perf.mjs';
 
 test('golden: visual template bytes match HEAD renderedMarkdown()', () => {
   const out = T.renderTemplateMarkdown({
@@ -686,7 +687,7 @@ test('latency: scanTemplates over 200 template folders', (t) => {
     const ms = performance.now() - started;
     t.diagnostic(`scanTemplates(200) took ${ms.toFixed(1)} ms`);
     assert.equal(templates.length, 200);
-    assert.ok(ms < 200, `scan took ${ms.toFixed(1)} ms`);
+    assert.ok(ms < budget(200), `scan took ${ms.toFixed(1)} ms`);
   } finally {
     cleanup(root);
   }

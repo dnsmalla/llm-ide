@@ -10,6 +10,7 @@ import { ApiError } from "../core-api.ts";
 import { decodeCatalog, decodeConnectResult, decodeCustomEndpoints, decodeModelList, decodeTestResult, type Catalog, type CatalogProvider } from "../decoders.ts";
 import { fakeClient, fixture, reply, deferred } from "./helpers.ts";
 import { filterBy, windowRange } from "../virtual.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const catalogBody = (): unknown => ({
   providers: (fixture("provider-catalog/get-kb-providers-catalog-200.json").response as { providers: unknown[] }).providers,
@@ -220,7 +221,7 @@ test("1,000+ connections: rows build and filter quickly", () => {
   const hit = filterBy(rows, "gateway 4999", (r) => r.name);
   assert.equal(rows.length, 5000);
   assert.equal(hit.length, 1);
-  assert.ok(performance.now() - t0 < 500);
+  assert.ok(performance.now() - t0 < budget(500));
 });
 
 // ---- Claude-compatible endpoints (core API 99) ------------------------------------------------

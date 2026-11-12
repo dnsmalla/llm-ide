@@ -6,6 +6,7 @@ import { decodeGraph, GraphDecodeError } from "../decode.ts";
 import { synthKitGraph } from "../bench/synth.ts";
 import { transferables } from "../protocol.ts";
 import { loadWasmBytes } from "./wasm-helper.ts";
+import { budget } from "../../test-support/perf.ts";
 
 test("runJob: decode, kernel layout, ranks, one pass", async () => {
   const stages: string[] = [];
@@ -54,7 +55,7 @@ test("fallback layout handles 50k nodes inside a generous budget", () => {
   const t = performance.now();
   const out = fallbackLayout(model);
   assert.equal(out.n, 50_000);
-  assert.ok(performance.now() - t < 20_000, "fallback must never take minutes");
+  assert.ok(performance.now() - t < Math.min(budget(20_000), 60_000), "fallback must never take minutes");
 });
 
 test("big graphs send a fast preview before the kernel result; small ones do not", async () => {

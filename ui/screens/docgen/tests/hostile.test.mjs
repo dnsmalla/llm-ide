@@ -3,6 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { loadEntry, react, server } from "./helpers.mjs";
+import { budget } from "../../test-support/perf.ts";
 
 let E, h, html;
 before(async () => {
@@ -120,5 +121,5 @@ test("a 2 MB generated document opens quickly and mounts only the first sections
   const paragraphs = (out.match(/<p>/g) ?? []).length;
   assert.ok(paragraphs <= 2 * 120 + 5, `mounted ${paragraphs} paragraphs`);
   assert.match(out, /Show more \(\d+ sections left\)/);
-  assert.ok(ms < 3000, `parse+render took ${ms.toFixed(0)} ms`);
+  assert.ok(ms < budget(3000), `parse+render took ${ms.toFixed(0)} ms`);
 });

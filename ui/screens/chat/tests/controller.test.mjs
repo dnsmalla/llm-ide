@@ -1,6 +1,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { loadChat, fakeCore, hangingStream, sse, until, tick, fixtures } from "./helpers.mjs";
+import { budget } from "../../test-support/perf.ts";
 
 let c;
 before(async () => { c = await loadChat("controller"); });
@@ -64,7 +65,7 @@ test("Stop: client abort + server cancel, idle well inside 2 s, message marked a
   ctl.abort("a");
   assert.equal(ctl.getState("a").phase, "aborting");
   await until(() => ctl.getState("a").phase === "idle");
-  assert.ok(Date.now() - t0 < 500, `idle after ${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < budget(500), `idle after ${Date.now() - t0} ms`);
   assert.equal(ctl.getState("a").messages.at(-1).status, "aborted");
   assert.ok(core.calls.some((x) => x.path === "/agent/v2/cancel" && x.body.chatSessionId === "a"));
   await tick(5);
@@ -231,7 +232,7 @@ test("a 10k-delta reply is micro-batched: far fewer state commits than events, t
   ctl.send("a", "long", { mode: "ask" });
   await until(() => ctl.getState("a").messages.at(-1)?.status === "done", 10_000);
   assert.ok(commits < 1500, `${commits} commits for 10002 events`);
-  assert.ok(Date.now() - t0 < 5000);
+  assert.ok(Date.now() - t0 < budget(5000));
   const text = c.assistantText(ctl.getState("a").messages.at(-1));
   assert.equal((text.match(/w/g) ?? []).length, 10_000);
 });

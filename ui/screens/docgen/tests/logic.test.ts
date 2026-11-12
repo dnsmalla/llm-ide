@@ -4,6 +4,7 @@ import { buildGenerateBody, estimateFit, fitNotice, formatBytes, MAX_BODY_CHARS,
 import { candidateName, documentStem, slugify } from "../naming.ts";
 import { describeFailure, isCancel } from "../errors.ts";
 import { folderForName, projectIdFor, PROJECT_ID_RE } from "../docs-api.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const tpl = (over: Partial<DocTemplate> = {}): DocTemplate => ({ id: "t", name: "Notes", sections: ["Summary", "Decisions"], rawContent: "", isBuiltin: false, folderName: "notes", isProjectTemplate: true, surface: "doc", ...over });
 const src = [{ name: "a.md", content: "hello" }];
@@ -52,7 +53,7 @@ test("estimateFit: whole sources, per-source cap, shared budget, omitted tail; m
   // tens of thousands of tiny sources: prefix rule drops the tail, never throws, stays fast
   const t0 = performance.now();
   const many = estimateFit(Array.from({ length: 50_000 }, (_, i) => ({ name: `n${i}`, chars: 5000 })));
-  assert.ok(performance.now() - t0 < 500);
+  assert.ok(performance.now() - t0 < budget(500));
   assert.ok(many.omitted > 0 && many.omitted < 50_000);
   assert.ok(many.packedChars <= MAX_TOTAL_SOURCE_CHARS);
   assert.deepEqual(estimateFit([]), { whole: 0, shortened: 0, omitted: 0, packedChars: 0, tokens: 0 });

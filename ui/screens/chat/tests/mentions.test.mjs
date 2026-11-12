@@ -1,6 +1,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { loadChat, h, renderToStaticMarkup as html } from "./helpers.mjs";
+import { budget } from "../../test-support/perf.ts";
 
 let c;
 before(async () => { c = await loadChat("mentions"); });
@@ -108,7 +109,7 @@ test("100k-file project: walk is capped, typing stays fast, deeper files stay re
   let n = 0;
   for (const q of ["file", "file-1", "f-9-4", "zzzz", "d19", "ts"]) { n += idx.search(q).length; }
   const per = (performance.now() - t0) / 6;
-  assert.ok(per < 30, `search took ${per.toFixed(1)} ms per query over 30k entries`);
+  assert.ok(per < budget(30), `search took ${per.toFixed(1)} ms per query over 30k entries`);
   assert.ok(n > 0);
   assert.ok(idx.search("file").length <= c.RESULT_LIMIT, "results are windowed");
   // A file beyond the index is still reachable: type its folder.

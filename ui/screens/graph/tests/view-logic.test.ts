@@ -9,6 +9,7 @@ import { fixedWindow, searchNodes } from "../search.ts";
 import { communityColor } from "../colors.ts";
 import { synthKitGraph } from "../bench/synth.ts";
 import { loadWasmBytes } from "./wasm-helper.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const flat = () => new Uint32Array(WEIGHT_BUCKETS);
 
@@ -129,7 +130,7 @@ test("search over 50k nodes is quick and windowing renders a constant number of 
   const model = decodeGraph(JSON.stringify({ files }));
   const t = performance.now();
   const hits = searchNodes(model, "file4");
-  assert.ok(performance.now() - t < 1500);
+  assert.ok(performance.now() - t < budget(1500));
   assert.ok(hits.length > 1000);
   for (const top of [0, 12_345, hits.length * 30 - 400]) {
     const w = fixedWindow(hits.length, 30, top, 420);

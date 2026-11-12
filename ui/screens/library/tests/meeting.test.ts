@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseNote } from "../frontmatter.ts";
 import { parseMeetingBody, parseTranscript, speakerCounts } from "../meeting.ts";
+import { budget } from "../../test-support/perf.ts";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -59,5 +60,5 @@ test("a 100k-line transcript parses quickly", () => {
   const t0 = performance.now();
   const t = parseTranscript(lines);
   assert.equal(t.length, 100_000);
-  assert.ok(performance.now() - t0 < 1500);
+  assert.ok(performance.now() - t0 < budget(1500));
 });

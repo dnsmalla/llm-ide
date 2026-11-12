@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadChat, h, renderToStaticMarkup as html, fakeCore, CHAT } from "./helpers.mjs";
+import { budget } from "../../test-support/perf.ts";
 
 let c;
 before(async () => {
@@ -64,7 +65,7 @@ test("rank: 5,000 entries rank in a frame", () => {
   const t0 = performance.now();
   for (const q of ["s", "sk", "alpha", "beta-3", "descr", "zq"]) c.rank(pool, q);
   const per = (performance.now() - t0) / 6;
-  assert.ok(per < 25, `rank took ${per.toFixed(1)} ms per query`);
+  assert.ok(per < budget(25), `rank took ${per.toFixed(1)} ms per query`);
 });
 
 test("trigger detection: leading slash without whitespace, last token with @", () => {
