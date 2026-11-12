@@ -231,8 +231,8 @@ export interface SettingsHost {
   setRoutePrefs?(prefs: { router: boolean; cap: boolean }): Promise<void>;
   /** Further host prefs read when the app/backend next starts: prompt compression, learned limits, the Terminal
    *  feature, ended-chat continuation, and the five Host API v1 capabilities. */
-  getExtraPrefs?(): Promise<{ compress: boolean; learn: boolean; terminal: boolean; continueSummary: boolean; hostApiTls: boolean; hostApiRead: boolean; hostApiCompose: boolean; hostApiPush: boolean; hostApiToolApprovals: boolean }>;
-  setExtraPrefs?(prefs: Partial<{ compress: boolean; learn: boolean; terminal: boolean; continueSummary: boolean; hostApiTls: boolean; hostApiRead: boolean; hostApiCompose: boolean; hostApiPush: boolean; hostApiToolApprovals: boolean }>): Promise<void>;
+  getExtraPrefs?(): Promise<{ compress: boolean; learn: boolean; terminal: boolean; continueSummary: boolean; hostApiTls: boolean; hostApiRead: boolean; hostApiCompose: boolean; hostApiPush: boolean; hostApiToolApprovals: boolean; hostApiWebOrigins: string[] }>;
+  setExtraPrefs?(prefs: Partial<{ compress: boolean; learn: boolean; terminal: boolean; continueSummary: boolean; hostApiTls: boolean; hostApiRead: boolean; hostApiCompose: boolean; hostApiPush: boolean; hostApiToolApprovals: boolean; hostApiWebOrigins: string[] }>): Promise<void>;
   /** App-wide defaults for loops added to a newly detected project. */
   getLoopDefaults?(): Promise<LoopDefaults>;
   setLoopDefaults?(defaults: LoopDefaults): Promise<LoopDefaults>;

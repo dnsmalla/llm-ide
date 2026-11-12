@@ -44,7 +44,7 @@ function Chat({ session, conn, onForget, onOpenOffline }: { session: Session; co
       <ReadPanel capabilities={capabilities} state={readState} onOpen={(id, t) => void read.open(id, t)}
         onOlder={() => void read.older()} onClose={read.close} onMore={() => void read.moreSessions()} />
       {!readState.open && (
-        <WebChat hostName={c.hello?.hostName ?? "Host"} connection={conn} capabilities={capabilities} state={state}
+        <WebChat hostName={c.hello?.hostName ?? "Host"} hostUrl={session.url} connection={conn} capabilities={capabilities} state={state}
           projects={projectState} onSelectProject={(id) => { projects.select(id); }}
           onSend={send} onStop={() => void controller.cancel()} onClear={() => void controller.clearHistory()}
           onForget={onForget} onOpenOffline={onOpenOffline} onAnswer={(r, a) => void controller.answerQuestion(r, a)} onDecline={(r) => void controller.declineQuestion(r)}

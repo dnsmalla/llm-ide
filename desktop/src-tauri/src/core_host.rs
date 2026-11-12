@@ -1338,11 +1338,18 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
         cmd.env("LLMIDE_SELF_HEAL", "1");
     }
     for key in ["LLMIDE_HOST_API_TLS", "LLMIDE_HOST_API_WEB_ORIGINS"] {
+        // Origins saved in Settings win; the host env is only the fallback (dev setups started from a shell).
+        if key == "LLMIDE_HOST_API_WEB_ORIGINS" && host_env_origins_shadowed(&p) { continue; }
         if let Some(v) = host_api_env(key, std::env::var(key).ok().as_deref()) {
             cmd.env(key, v);
         }
     }
     Ok(Launch { cmd, secrets: vec![secrets.jwt_secret.clone(), secrets.vault_key.clone(), approval_key], stdin_secrets: Some(stdin_secrets) })
+}
+
+/// Origins saved in Settings win over the host env's `LLMIDE_HOST_API_WEB_ORIGINS` (which stays the dev fallback).
+fn host_env_origins_shadowed(p: &crate::prefs::Prefs) -> bool {
+    !p.host_api_web_origins.is_empty()
 }
 
 /// True when the spawned core gets `LLMIDE_HOST_API_DEV=1`: a debug build whose own env has exactly `1`.
@@ -1535,6 +1542,10 @@ mod tests {
         assert_eq!(host_api_env("LLMIDE_HOST_API_WEB_ORIGINS", Some(o)), Some(o.to_string()));
         assert_eq!(host_api_env("LLMIDE_HOST_API_WEB_ORIGINS", Some(&"x".repeat(2049))), None, "bounded");
         assert_eq!(host_api_env("LLMIDE_HOST_API_WEB_ORIGINS", None), None);
+        let mut p = crate::prefs::Prefs::default();
+        assert!(!host_env_origins_shadowed(&p), "no saved origins: the host env passthrough stays");
+        p.host_api_web_origins = vec!["https://llm-ide.com".into()];
+        assert!(host_env_origins_shadowed(&p), "saved origins win over the host env");
         assert_eq!(host_api_env("LLMIDE_HOST_API_DEV", Some("1")), None, "the dev flag has its own debug-only gate");
         assert_eq!(host_api_env("LLMIDE_VAULT_KEY", Some("1")), None);
     }

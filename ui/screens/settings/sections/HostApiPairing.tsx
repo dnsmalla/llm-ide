@@ -11,6 +11,7 @@ import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { shellBus } from "../../shell/bus";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText, Switch } from "../ui.tsx";
+import { HOSTED_WEB_ORIGIN, addWebOrigin, webOriginError } from "../web-origins.ts";
 import AlsoRevoke, { type AlsoState } from "./AlsoRevoke.tsx";
 import { OFFLINE_UNAVAILABLE_NOTE, SEPARATE_LISTS_HINT, offlineCandidates, runRevokes, summarizeRevokes } from "../device-link-model.ts";
 import { describeSyncError, loadSyncStatus, revokeSyncDevice } from "../sync-model.ts";
@@ -18,6 +19,7 @@ import { describeSyncError, loadSyncStatus, revokeSyncDevice } from "../sync-mod
 /** `fingerprint`: the TLS listener's certificate pin (`sha256:` + 43 base64url characters); null for the dev listener.
  *  `addresses`: this computer's IPv4s for the pairing QR, best first; [] for the dev listener (or an older core). */
 export interface HostPin { pin: string; expiresAt: number; port: number; fingerprint: string | null; addresses: string[] }
+export { normaliseWebOrigin, webOriginError, addWebOrigin } from "../web-origins.ts";
 export interface HostDevice { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -123,6 +125,21 @@ function RevokeConfirm({ device, busy, also, alsoChecked, onToggleAlso, onCancel
   );
 }
 
+/** Browsers cannot pin the self-signed certificate (the iPhone does, from the QR): the user accepts it once, after
+ *  checking the fingerprint. The address is the first one the QR offers. */
+export function BrowserCertGuide({ pin }: { pin: HostPin }): ReactNode {
+  const address = pin.addresses[0] ?? "<this computer's address>";
+  return (
+    <div className="st-stack" role="note" aria-label="Browser certificate">
+      <p className="st-hint">
+        For a browser: open <code>https://{address}:{pin.port}/</code> once in the browser you will use and accept the certificate;
+        check that its SHA-256 fingerprint is <code>{pin.fingerprint}</code>.
+      </p>
+      <p className="st-hint">iPhones that scan the QR do not need this: the app pins the certificate itself.</p>
+    </div>
+  );
+}
+
 export function HostApiPairingView({ devices, pin, now, busy, error, notice, confirming, also, alsoChecked, onToggleAlso, onShowPin, onAskRevoke, onCancelRevoke, onRevoke }: {
   devices: HostDevice[];
   pin: HostPin | null;
@@ -155,6 +172,7 @@ export function HostApiPairingView({ devices, pin, now, busy, error, notice, con
               <p className="st-pre" aria-label="Pairing link" style={{ userSelect: "text", wordBreak: "break-all" }}>{qr}</p>
             </>
           ) : null}
+          {live.fingerprint ? <BrowserCertGuide pin={live} /> : null}
           {live.fingerprint
             ? <p className="st-pre" aria-label="Certificate fingerprint" style={{ userSelect: "text" }}>Fingerprint: {live.fingerprint}</p>
             : <p className="st-hint">Development only: the listener is plaintext on 127.0.0.1 and serves this computer alone.</p>}
@@ -188,6 +206,49 @@ export function HostApiPairingView({ devices, pin, now, busy, error, notice, con
 /** The five Host API v1 capabilities the desktop passes to the core it spawns (desktop prefs, exact `1`). */
 export interface HostApiPrefs {
   hostApiTls: boolean; hostApiRead: boolean; hostApiCompose: boolean; hostApiPush: boolean; hostApiToolApprovals: boolean;
+  /** Browser origins allowed to connect directly (normalised by the host on save). */
+  hostApiWebOrigins: string[];
+}
+
+/** The "Allowed browser origins" list: add / remove, with the same rule as the core checked inline. */
+export function AllowedOriginsEditor({ origins, onChange }: { origins: readonly string[]; onChange: (next: string[]) => void }): ReactNode {
+  const [draft, setDraft] = useState("");
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const add = (entry: string) => {
+    const r = addWebOrigin(origins, entry);
+    setDraftError(r.error);
+    if (r.error === null) { onChange(r.list); setDraft(""); }
+  };
+  return (
+    <div className="st-stack" role="group" aria-label="Allowed browser origins">
+      <span className="st-label">Allowed browser origins</span>
+      <p className="st-hint">A web app may open the pairing listener directly only from an origin listed here. A phone app is not affected.</p>
+      {origins.length === 0 ? <p className="st-hint">No browser origins are allowed.</p> : (
+        <ul className="st-stack" aria-label="Origins">
+          {origins.map((o) => {
+            const err = webOriginError(o);
+            return (
+              <li key={o} className="st-stack">
+                <div className="st-row">
+                  <code className="st-grow">{o}</code>
+                  <Button label={`Remove ${o}`} onClick={() => onChange(origins.filter((x) => x !== o))}>Remove</Button>
+                </div>
+                {err ? <p className="st-error" role="alert">{err}</p> : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <div className="st-row">
+        <input className="st-input st-grow" type="text" aria-label="New origin" placeholder="https://app.example.com" value={draft}
+          onChange={(ev) => { setDraft(ev.target.value); setDraftError(null); }}
+          onKeyDown={(ev) => { if (ev.key === "Enter") add(draft); }} />
+        <Button onClick={() => add(draft)}>Add</Button>
+      </div>
+      {!origins.includes(HOSTED_WEB_ORIGIN) ? <div className="st-row"><Button onClick={() => add(HOSTED_WEB_ORIGIN)}>{`Add ${HOSTED_WEB_ORIGIN}`}</Button></div> : null}
+      {draftError ? <p className="st-error" role="alert">{draftError}</p> : null}
+    </div>
+  );
 }
 
 /** The capability switches. All five apply at the NEXT core start; the pairing listener is the first one. */
@@ -201,6 +262,7 @@ export function HostApiSettingsView({ prefs, onSave }: { prefs: HostApiPrefs; on
       <Switch label="Let paired devices compose chats (modes, models, new chat)" checked={prefs.hostApiCompose} onChange={(v) => onSave({ hostApiCompose: v })} />
       <Switch label="Send push notifications to paired devices" checked={prefs.hostApiPush} onChange={(v) => onSave({ hostApiPush: v })} />
       <Switch label="Let paired devices answer tool approvals" checked={prefs.hostApiToolApprovals} onChange={(v) => onSave({ hostApiToolApprovals: v })} />
+      <AllowedOriginsEditor origins={prefs.hostApiWebOrigins ?? []} onChange={(next) => onSave({ hostApiWebOrigins: next })} />
       <p className="st-hint">Applies on the next core start.</p>
     </div>
   );
@@ -229,7 +291,7 @@ export default function HostApiPairing(): ReactNode {
   useEffect(() => {
     let live = true;
     void host.getExtraPrefs?.().then((p) => {
-      if (live) setPrefs({ hostApiTls: p.hostApiTls, hostApiRead: p.hostApiRead, hostApiCompose: p.hostApiCompose, hostApiPush: p.hostApiPush, hostApiToolApprovals: p.hostApiToolApprovals });
+      if (live) setPrefs({ hostApiTls: p.hostApiTls, hostApiRead: p.hostApiRead, hostApiCompose: p.hostApiCompose, hostApiPush: p.hostApiPush, hostApiToolApprovals: p.hostApiToolApprovals, hostApiWebOrigins: p.hostApiWebOrigins ?? [] });
     });
     return () => { live = false; };
   }, [host]);

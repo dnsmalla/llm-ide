@@ -69,7 +69,16 @@ export interface HostLink {
 
 export const ORIGIN_HINT =
   "Cannot reach the host. Check the address, that the desktop app runs with the Host API enabled, " +
-  "and that this page's origin is listed in LLMIDE_HOST_API_WEB_ORIGINS.";
+  "and that this page's origin is added in the desktop's Settings \u2192 Host API \u2192 Allowed browser origins.";
+/** The ORIGIN_HINT's missing piece: the exact origin to add (the browser's own, never the host's). */
+export const originText = (origin: string | undefined): string => (origin ? `This page's origin is ${origin}.` : "");
+/** wss://h:p/host-api/v1 -> https://h:p/ : where the user accepts the desktop's self-signed certificate. Null for ws:// or a bad URL. */
+export function trustUrl(hostUrl: string | undefined): string | null {
+  try {
+    const u = new URL(hostUrl ?? "");
+    return u.protocol === "wss:" ? `https://${u.host}/` : null;
+  } catch { return null; }
+}
 /** Shown after UNOPENED_LIMIT attempts in a row where the socket never opened (origin refused, certificate, port). */
 export const CERT_HINT =
   "If the address uses wss://, open its https:// address in this browser once and trust the certificate. " +

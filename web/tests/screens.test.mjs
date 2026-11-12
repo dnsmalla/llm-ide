@@ -149,9 +149,22 @@ test("chat banner: after UNOPENED_LIMIT never-opened attempts it shows the origi
   const early = re(UI.UNOPENED_LIMIT - 1);
   assert.doesNotMatch(early, /Forget and re-enter/);
   const late = re(UI.UNOPENED_LIMIT);
-  assert.match(late, /LLMIDE_HOST_API_WEB_ORIGINS/);
+  assert.doesNotMatch(late, /LLMIDE_HOST_API_WEB_ORIGINS/);
+  assert.match(late, /Settings \u2192 Host API \u2192 Allowed browser origins/);
   assert.match(late, /trust the certificate/);
   assert.match(late, /Forget and re-enter the address/);
+});
+
+test("chat banner: names this page's origin and links the host's https address to trust its certificate", () => {
+  const conn = { kind: "reconnecting", attempt: 3, inMs: 1000, unopened: UI.UNOPENED_LIMIT };
+  const out = html(h(UI.WebChat, chatProps(UI.initialChatState, { connection: conn, hostUrl: "wss://192.168.1.20:3016/host-api/v1", pageOrigin: "https://llm-ide.com" })));
+  assert.match(out, /This page&#x27;s origin is https:\/\/llm-ide\.com\./);
+  assert.match(out, /href="https:\/\/192\.168\.1\.20:3016\/"/);
+  assert.match(out, /Open the desktop&#x27;s address to trust its certificate/);
+  const plain = html(h(UI.WebChat, chatProps(UI.initialChatState, { connection: conn, hostUrl: "ws://127.0.0.1:3016/host-api/v1", pageOrigin: "http://localhost:5173" })));
+  assert.doesNotMatch(plain, /trust its certificate/);
+  assert.equal(UI.trustUrl("wss://h.example.com:3016/host-api/v1"), "https://h.example.com:3016/");
+  assert.equal(UI.trustUrl("nonsense"), null);
 });
 
 test("sync tier: the Pair a desktop / Connect desktop action follows hostPaired", () => {

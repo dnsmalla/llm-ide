@@ -13,4 +13,4 @@ export { ComposeBar } from "../src/screens/ComposeBar.tsx";
 export { initialComposeState } from "../src/chat/compose.ts";
 export { ProjectPicker } from "../src/screens/ProjectPicker.tsx";
 export { createProjectsController, initialProjectsState, projectRefusal } from "../src/projects/controller.ts";
-export { CERT_HINT, UNOPENED_LIMIT } from "../src/host-api/connection.ts";
+export { CERT_HINT, ORIGIN_HINT, UNOPENED_LIMIT, trustUrl, originText } from "../src/host-api/connection.ts";

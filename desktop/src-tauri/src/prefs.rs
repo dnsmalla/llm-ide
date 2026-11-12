@@ -221,6 +221,9 @@ pub struct Prefs {
     /// key reads as false (the file is old); `Default` is true (a fresh install needs no migration).
     #[serde(default)]
     pub host_api_caps_migrated: bool,
+    /// Browser origins allowed to open the pairing listener directly (`LLMIDE_HOST_API_WEB_ORIGINS`). Normalised on
+    /// save by `normalize_web_origins`; empty falls back to the desktop process's own env (dev setups).
+    pub host_api_web_origins: Vec<String>,
     /// App-wide defaults for loops added to a newly detected project.
     pub loop_defaults: LoopDefaults,
     /// Minutes between automatic Code Graph refreshes; 0 = off. Values 1-4 are raised to 5.
@@ -238,6 +241,7 @@ impl Default for Prefs {
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
             remote_server: RemoteServerPrefs::default(),
             host_api_tls: false, host_api_read: true, host_api_compose: true, host_api_push: false, host_api_tool_approvals: true, host_api_caps_migrated: true,
+            host_api_web_origins: Vec::new(),
             loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0, update_checks: true, notifications: NotifyPrefs::default(),
         }
     }
@@ -267,6 +271,7 @@ pub struct PrefsPatch {
     pub host_api_compose: Option<bool>,
     pub host_api_push: Option<bool>,
     pub host_api_tool_approvals: Option<bool>,
+    pub host_api_web_origins: Option<Vec<String>>,
     pub loop_defaults: Option<LoopDefaults>,
     pub graph_auto_update_minutes: Option<u32>,
     pub update_checks: Option<bool>,
@@ -282,6 +287,58 @@ fn normalize_features(list: &[String]) -> Vec<String> {
         .collect();
     if !out.iter().any(|k| k == "agent_chat") {
         out.insert(0, "agent_chat".to_string());
+    }
+    out
+}
+
+/// At most this many origins, and their comma-joined text at most `MAX_WEB_ORIGINS_CHARS` (core_host's env bound).
+const MAX_WEB_ORIGINS: usize = 10;
+const MAX_WEB_ORIGINS_CHARS: usize = 2048;
+
+fn port_ok(p: &str) -> bool {
+    (1..=5).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()) && matches!(p.parse::<u32>(), Ok(1..=65535))
+}
+
+fn dns_label_ok(l: &str) -> bool {
+    let b = l.as_bytes();
+    let edge = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
+    !b.is_empty() && b.len() <= 63 && edge(b[0]) && edge(b[b.len() - 1]) && b.iter().all(|c| edge(*c) || *c == b'-')
+}
+
+/// One Host API web origin, normalised by the same rule as `extension/core/host-api-origins.mjs` (pinned by
+/// `schema/host-api/v1/fixtures/security/origins.json`): an exact loopback http origin with a port, or an exact
+/// https DNS-name origin (default port dropped). `None` for anything else, including an IP-literal https origin.
+pub fn normalize_web_origin(entry: &str) -> Option<String> {
+    let e = entry.trim().to_lowercase();
+    if let Some(rest) = e.strip_prefix("http://") {
+        let (host, port) = rest.rsplit_once(':')?;
+        return (matches!(host, "localhost" | "127.0.0.1" | "[::1]") && port_ok(port)).then_some(e);
+    }
+    let rest = e.strip_prefix("https://")?;
+    let (host, port) = match rest.split_once(':') { Some((h, p)) => (h, Some(p)), None => (rest, None) };
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 || !labels.iter().all(|l| dns_label_ok(l)) || host.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        return None;
+    }
+    match port {
+        None => Some(e),
+        Some(p) if !port_ok(p) => None,
+        Some(p) if p.parse::<u32>() == Ok(443) => Some(format!("https://{host}")),
+        Some(_) => Some(e),
+    }
+}
+
+/// The saved list: invalid entries dropped, duplicates removed, bounded by count and total length.
+pub fn normalize_web_origins(list: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut chars = 0usize;
+    for entry in list {
+        let Some(n) = normalize_web_origin(entry) else { continue };
+        if out.contains(&n) { continue; }
+        let next = chars + n.len() + usize::from(!out.is_empty());
+        if out.len() >= MAX_WEB_ORIGINS || next > MAX_WEB_ORIGINS_CHARS { break; }
+        chars = next;
+        out.push(n);
     }
     out
 }
@@ -313,6 +370,7 @@ impl Prefs {
         if let Some(v) = p.host_api_compose { n.host_api_compose = v; }
         if let Some(v) = p.host_api_push { n.host_api_push = v; }
         if let Some(v) = p.host_api_tool_approvals { n.host_api_tool_approvals = v; }
+        if let Some(v) = &p.host_api_web_origins { n.host_api_web_origins = normalize_web_origins(v); }
         if let Some(v) = &p.loop_defaults {
             n.loop_defaults = v.clone().clamped();
         }
@@ -386,6 +444,7 @@ fn from_stored(p: &Prefs) -> Prefs {
             remote_server: Some(p.remote_server.clone()),
             host_api_tls: Some(p.host_api_tls), host_api_read: Some(p.host_api_read), host_api_compose: Some(p.host_api_compose),
             host_api_push: Some(p.host_api_push), host_api_tool_approvals: Some(p.host_api_tool_approvals),
+            host_api_web_origins: Some(p.host_api_web_origins.clone()),
             loop_defaults: Some(p.loop_defaults.clone()), graph_auto_update_minutes: Some(p.graph_auto_update_minutes),
             update_checks: Some(p.update_checks), notifications: Some(p.notifications),
         });
@@ -474,6 +533,7 @@ pub fn core_env_pairs(p: &Prefs, host_features: Option<&str>) -> Vec<(&'static s
     v.push(("LLMIDE_HOST_API_COMPOSE", flag(p.host_api_compose)));
     if p.host_api_push { v.push(("LLMIDE_HOST_API_PUSH", "1".to_string())); }
     v.push(("LLMIDE_HOST_API_TOOL_APPROVALS", flag(p.host_api_tool_approvals)));
+    if !p.host_api_web_origins.is_empty() { v.push(("LLMIDE_HOST_API_WEB_ORIGINS", p.host_api_web_origins.join(","))); }
     if !p.terminal || !p.features.is_empty() {
         if let Some(f) = effective_features_with(host_features, p.terminal, &p.features) { v.push(("LLMIDE_FEATURES", f)); }
     }
@@ -656,6 +716,40 @@ mod tests {
     /// The core env minus the three always-passed Host API capabilities, for tests about the other switches.
     fn without_host_api(v: Vec<(&'static str, String)>) -> Vec<(&'static str, String)> {
         v.into_iter().filter(|(k, _)| !DEFAULT_ON_HOST_API.contains(k)).collect()
+    }
+
+    #[test]
+    fn web_origins_follow_the_shared_fixture_rule() {
+        let text = include_str!("../../../schema/host-api/v1/fixtures/security/origins.json");
+        let fixture: serde_json::Value = serde_json::from_str(text).unwrap();
+        let raw: Vec<String> = fixture["allowlist"].as_str().unwrap().split(',').map(str::to_string).collect();
+        let want: Vec<String> = fixture["parsed"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        assert_eq!(normalize_web_origins(&raw), want);
+    }
+
+    #[test]
+    fn web_origins_validate_normalise_and_bound() {
+        assert_eq!(normalize_web_origin(" HTTPS://LLM-IDE.com "), Some("https://llm-ide.com".to_string()));
+        assert_eq!(normalize_web_origin("https://a.example.com:443"), Some("https://a.example.com".to_string()));
+        for bad in ["", "*", "https://localhost", "https://1.2.3.4", "http://example.com", "http://localhost", "http://localhost:0", "https://a.example.com:70000", "https://a.example.com/"] {
+            assert_eq!(normalize_web_origin(bad), None, "{bad}");
+        }
+        let many: Vec<String> = (0..20).map(|i| format!("https://h{i}.example.com")).collect();
+        assert_eq!(normalize_web_origins(&many).len(), 10);
+        let long: Vec<String> = (0..3).map(|i| format!("https://{}{i}.example.com", "a".repeat(60))).collect();
+        assert!(normalize_web_origins(&long).join(",").len() <= 2048);
+        let dup = vec!["https://a.example.com".to_string(), "HTTPS://a.example.com".to_string(), "bad".to_string()];
+        assert_eq!(normalize_web_origins(&dup), vec!["https://a.example.com".to_string()]);
+    }
+
+    #[test]
+    fn web_origins_reach_the_core_only_when_set() {
+        assert!(!core_env_pairs(&Prefs::default(), None).iter().any(|(k, _)| *k == "LLMIDE_HOST_API_WEB_ORIGINS"));
+        let p = Prefs::default().patched(&PrefsPatch {
+            host_api_web_origins: Some(vec!["https://llm-ide.com".into(), "http://localhost:5173".into(), "nope".into()]), ..Default::default()
+        });
+        assert!(core_env_pairs(&p, None).contains(&("LLMIDE_HOST_API_WEB_ORIGINS", "https://llm-ide.com,http://localhost:5173".to_string())));
+        assert_eq!(parse(&serde_json::to_string(&p).unwrap()).host_api_web_origins, p.host_api_web_origins);
     }
 
     #[test]

@@ -73,6 +73,8 @@ export interface HostPrefs {
   hostApiCompose: boolean;
   hostApiPush: boolean;
   hostApiToolApprovals: boolean;
+  /** Browser origins allowed to connect directly (`LLMIDE_HOST_API_WEB_ORIGINS`); the host normalises them on save. */
+  hostApiWebOrigins: string[];
   /** Host-owned marker of the one-time migration that turned read/compose/tool approvals on; never set from the UI. */
   hostApiCapsMigrated: boolean;
   /** Defaults applied to loops the Loop screen re-adds to a project. */
@@ -152,6 +154,7 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
   const remoteServer = decodeRemoteServer(raw.remoteServer);
   return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, continueSummary, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, remoteServer,
     hostApiTls: raw.hostApiTls === true, hostApiRead: raw.hostApiRead === true, hostApiCompose: raw.hostApiCompose === true, hostApiPush: raw.hostApiPush === true, hostApiToolApprovals: raw.hostApiToolApprovals === true,
+    hostApiWebOrigins: Array.isArray(raw.hostApiWebOrigins) ? raw.hostApiWebOrigins.filter((x): x is string => typeof x === "string" && x.length <= 300).slice(0, 10) : [],
     hostApiCapsMigrated: raw.hostApiCapsMigrated === true, loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
 }
 

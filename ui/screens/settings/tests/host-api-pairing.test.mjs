@@ -183,3 +183,36 @@ test("the revoke confirmation lists offline-sync devices (pre-checked one ticked
   assert.match(view({ devices, confirming: id, also: { unavailable: true, candidates: [] } }), /Offline sync could not be checked/);
   assert.match(view({ devices }), /separate lists/);
 });
+
+test("the allowed browser origins editor lists, offers the hosted app only when absent, and the TS rule matches the shared fixture", () => {
+  const base = { hostApiTls: true, hostApiRead: true, hostApiCompose: true, hostApiPush: false, hostApiToolApprovals: true };
+  const empty = renderToStaticMarkup(h(m.HostApiSettingsView, { prefs: { ...base, hostApiWebOrigins: [] }, onSave() {} }));
+  assert.match(empty, /Allowed browser origins/);
+  assert.match(empty, /Add https:\/\/llm-ide\.com/);
+  assert.match(empty, /Applies on the next core start\./);
+  const set = renderToStaticMarkup(h(m.HostApiSettingsView, { prefs: { ...base, hostApiWebOrigins: ["https://llm-ide.com", "http://localhost:5173"] }, onSave() {} }));
+  assert.match(set, /Remove https:\/\/llm-ide\.com/);
+  assert.doesNotMatch(set, /Add https:\/\/llm-ide\.com/);
+  const bad = renderToStaticMarkup(h(m.HostApiSettingsView, { prefs: { ...base, hostApiWebOrigins: ["https://10.0.0.1"] }, onSave() {} }));
+  assert.match(bad, /IP address cannot be an https origin/);
+  const fx = JSON.parse(readFileSync(join(REPO, "schema/host-api/v1/fixtures/security/origins.json"), "utf8"));
+  const parsed = [];
+  for (const e of fx.allowlist.split(",")) { const n = m.normaliseWebOrigin(e); if (n !== null && !parsed.includes(n)) parsed.push(n); }
+  assert.deepEqual(parsed, fx.parsed);
+  assert.equal(m.addWebOrigin(["https://a.example.com"], "HTTPS://A.example.com").error, "Already in the list.");
+  assert.deepEqual(m.addWebOrigin([], " https://x.example.com:443 "), { list: ["https://x.example.com"], error: null });
+  assert.match(m.addWebOrigin([], "https://x.example.com/").error, /no path/);
+  const full = Array.from({ length: 10 }, (_, i) => `https://h${i}.example.com`);
+  assert.match(m.addWebOrigin(full, "https://more.example.com").error, /At most 10/);
+});
+
+test("a TLS pairing PIN shows the browser certificate steps with the address, port and fingerprint", async () => {
+  const pin = await m.mintPin(fake({ "POST /host-api/pin": reply("post-host-api-pin-200") }));
+  const tls = { ...pin, port: 3016, fingerprint: "sha256:" + "A".repeat(43), addresses: ["192.168.1.20", "10.0.0.2"] };
+  const html = view({ pin: tls, now: tls.expiresAt - 1000 });
+  assert.match(html, /https:\/\/192\.168\.1\.20:3016\//);
+  assert.match(html, /accept the certificate/);
+  assert.match(html, /SHA-256 fingerprint is <code>sha256:A{43}/);
+  assert.match(html, /iPhones that scan the QR do not need this/);
+  assert.doesNotMatch(view({ pin: { ...tls, fingerprint: null, addresses: [] }, now: tls.expiresAt - 1000 }), /accept the certificate/);
+});

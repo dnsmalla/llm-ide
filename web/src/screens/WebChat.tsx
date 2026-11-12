@@ -5,7 +5,7 @@ import { Composer } from "@llmide/screens/chat/Composer.tsx";
 import { QuestionCard } from "@llmide/screens/chat/approvals/QuestionCard.tsx";
 import "@llmide/screens/chat/chat.css";
 import "@llmide/screens/chat/approvals/approvals.css";
-import { CERT_HINT, ORIGIN_HINT, UNOPENED_LIMIT, type ConnectionState } from "../host-api/connection.ts";
+import { CERT_HINT, ORIGIN_HINT, UNOPENED_LIMIT, originText, trustUrl, type ConnectionState } from "../host-api/connection.ts";
 import type { HostApiCapability } from "../host-api/types.generated.ts";
 import type { ChatState, WebMessage } from "../chat/store.ts";
 import { MAX_SEND_CHARS } from "../chat/controller.ts";
@@ -21,6 +21,10 @@ export interface WebChatProps {
   /** Offline sync is linked: the reconnecting banner offers a way back to the offline copy. */
   onOpenOffline?: () => void;
   hostName: string;
+  /** The host address (wss://h:p/host-api/v1): the banner links its https:// twin to trust the certificate. */
+  hostUrl?: string;
+  /** This page's origin, shown so the user can add it on the desktop; defaults to the browser's. */
+  pageOrigin?: string;
   connection: ConnectionState;
   capabilities: ReadonlySet<HostApiCapability>;
   state: ChatState;
@@ -109,7 +113,8 @@ export function WebChat(p: WebChatProps) {
       {p.connection.kind === "reconnecting" && (p.connection.unopened >= UNOPENED_LIMIT ? (
         // The socket never opened several times in a row: the address, origin or certificate is wrong, not a blip.
         <div className="web-unopened">
-          <StatusBanner severity="warning" message={`${ORIGIN_HINT} ${CERT_HINT}`} />
+          <StatusBanner severity="warning" message={`${ORIGIN_HINT} ${originText(p.pageOrigin ?? globalThis.location?.origin)} ${CERT_HINT}`.replace(/ {2,}/g, " ")} />
+          {trustUrl(p.hostUrl) && <a className="web-chat-action" href={trustUrl(p.hostUrl) as string} target="_blank" rel="noopener noreferrer">Open the desktop's address to trust its certificate</a>}
           <button type="button" className="web-chat-action" onClick={p.onForget}>Forget and re-enter the address</button>
         </div>
       ) : (
