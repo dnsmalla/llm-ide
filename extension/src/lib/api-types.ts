@@ -5880,6 +5880,93 @@ export type PostKbIssuesCloseResponse403 = CommonError;
 
 export type PostKbIssuesCloseResponse502 = CommonError;
 
+/** Request parts for `GET /kb/issues/detail` (schema/http/kb-sources.schema.json). */
+export type GetKbIssuesDetailRequest = {
+  query: {
+    /** github or gitlab */
+    provider: string;
+    /** As in POST /kb/issues/create */
+    repo: string;
+    /** The issue number (GitLab iid), a positive integer */
+    number: string;
+  };
+};
+
+export type GetKbIssuesDetailResponse200 = {
+  ok: true;
+  issue: {
+    state: string | null;
+    title: string;
+    body: string;
+    labels: string[];
+    /** title, dueOn, id */
+    milestone: Record<string, unknown> | null;
+    milestoneId: number | null;
+    assignees: string[];
+    assigneeIds: number[];
+    dueDate: string | null;
+    author: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+    webUrl: string | null;
+  };
+  /** What the repository offers, up to 100 each */
+  choices?: {
+    labels: string[];
+    milestones: Record<string, unknown>[];
+    assignees: Record<string, unknown>[];
+  };
+  /** Up to 100 non-system comments, newest last */
+  comments?: ({
+    id: number | null;
+    author: string;
+    body: string;
+    at: string | null;
+  })[];
+};
+
+export type GetKbIssuesDetailResponse400 = CommonError;
+
+export type GetKbIssuesDetailResponse403 = CommonError;
+
+export type GetKbIssuesDetailResponse502 = CommonError;
+
+/** Request parts for `POST /kb/issues/update` (schema/http/kb-sources.schema.json). */
+export type PostKbIssuesUpdateRequest = {
+  body: {
+    provider: "github" | "gitlab";
+    /** As in POST /kb/issues/create */
+    repo: string;
+    /** The issue number (GitLab iid), a positive integer */
+    number: number;
+    /** 1 to 255 characters after trimming */
+    title?: string;
+    /** At most 20 000 characters */
+    body?: string;
+    state?: "open" | "closed";
+    /** Up to 50 names of at most 100 characters */
+    labels?: string[];
+    /** A positive integer, or null to clear */
+    milestoneId?: number;
+    /** Up to 20 names */
+    assignees?: string[];
+    /** Up to 20 positive integers (GitLab) */
+    assigneeIds?: number[];
+    /** YYYY-MM-DD, or null to clear */
+    dueDate?: string;
+  };
+};
+
+export type PostKbIssuesUpdateResponse200 = IssueWriteOk;
+
+export type PostKbIssuesUpdateResponse400 = CommonError;
+
+export type PostKbIssuesUpdateResponse401 = CommonError;
+
+export type PostKbIssuesUpdateResponse403 = CommonError;
+
+export type PostKbIssuesUpdateResponse502 = CommonError;
+
 /** Request parts for `POST /kb/connect-git` (schema/http/kb-sources.schema.json). */
 export type PostKbConnectGitRequest = {
   body: {
@@ -10862,6 +10949,25 @@ export interface ApiEndpoints {
       401: PostKbIssuesCloseResponse401;
       403: PostKbIssuesCloseResponse403;
       502: PostKbIssuesCloseResponse502;
+    };
+  };
+  "GET /kb/issues/detail": {
+    request: GetKbIssuesDetailRequest;
+    responses: {
+      200: GetKbIssuesDetailResponse200;
+      400: GetKbIssuesDetailResponse400;
+      403: GetKbIssuesDetailResponse403;
+      502: GetKbIssuesDetailResponse502;
+    };
+  };
+  "POST /kb/issues/update": {
+    request: PostKbIssuesUpdateRequest;
+    responses: {
+      200: PostKbIssuesUpdateResponse200;
+      400: PostKbIssuesUpdateResponse400;
+      401: PostKbIssuesUpdateResponse401;
+      403: PostKbIssuesUpdateResponse403;
+      502: PostKbIssuesUpdateResponse502;
     };
   };
   "POST /kb/connect-git": {

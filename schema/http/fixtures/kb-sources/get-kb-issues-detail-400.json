@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /kb/issues/detail",
+  "status": 400,
+  "request": {
+    "query": {
+      "provider": "github",
+      "repo": "o/r",
+      "number": "0"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "number must be a positive integer"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "endpoint": "GET /kb/issues/detail",
+  "status": 200,
+  "request": {
+    "query": {
+      "provider": "github",
+      "repo": "o/r",
+      "number": "7"
+    }
+  },
+  "response": {
+    "ok": true,
+    "issue": {
+      "state": "open",
+      "title": "Fix login",
+      "body": "Steps",
+      "labels": [
+        "bug"
+      ],
+      "milestone": null,
+      "milestoneId": null,
+      "assignees": [
+        "dev"
+      ],
+      "assigneeIds": [],
+      "dueDate": null,
+      "author": "dev",
+      "createdAt": "2026-11-01T00:00:00Z",
+      "updatedAt": "2026-11-02T00:00:00Z",
+      "webUrl": "https://github.com/o/r/issues/7"
+    },
+    "choices": {
+      "labels": [
+        "bug"
+      ],
+      "milestones": [],
+      "assignees": []
+    },
+    "comments": [
+      {
+        "id": 1,
+        "author": "dev",
+        "body": "On it",
+        "at": "2026-11-02T00:00:00Z"
+      }
+    ]
+  }
+}

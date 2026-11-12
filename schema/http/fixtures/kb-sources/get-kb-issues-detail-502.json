@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /kb/issues/detail",
+  "status": 502,
+  "request": {
+    "query": {
+      "provider": "github",
+      "repo": "o/r",
+      "number": "7"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROVIDER_UNREACHABLE",
+      "message": "GitHub could not be reached. Check the connection and try again."
+    }
+  }
+}

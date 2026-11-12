@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/issues/update",
+  "status": 200,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "o/r",
+      "number": 7,
+      "title": "Fix login redirect"
+    }
+  },
+  "response": {
+    "ok": true,
+    "id": 7007,
+    "url": "https://github.com/o/r/issues/7",
+    "state": "open"
+  }
+}

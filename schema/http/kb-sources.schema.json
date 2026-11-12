@@ -1169,6 +1169,52 @@
       } } },
       "responses": { "200": { "$ref": "#/$defs/IssueWriteOk" }, "400": { "$ref": "_common#/$defs/Error" }, "401": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" } }
     },
+    "GET /kb/issues/detail": {
+      "description": "Desktop only: JWT + bus host proof (403 HOST_PROOF_REQUIRED). One hosted issue with its comments and the label, milestone and assignee choices of its repository, read with the vault token on the fixed provider host. The issue must be on the caller's board (an imported ticket row), else 403 REPO_NOT_ALLOWED; a missing token is 400 GITHUB_TOKEN_MISSING | GITLAB_TOKEN_MISSING; provider refusals map as in POST /kb/issues/create. The token never appears in the answer.",
+      "request": { "query": { "type": "object", "required": ["provider", "repo", "number"], "properties": {
+        "provider": { "type": "string", "description": "github or gitlab" },
+        "repo": { "type": "string", "description": "As in POST /kb/issues/create" },
+        "number": { "type": "string", "description": "The issue number (GitLab iid), a positive integer" }
+      } } },
+      "responses": {
+        "200": { "type": "object", "required": ["ok", "issue"], "properties": {
+          "ok": { "const": true },
+          "issue": { "type": "object", "required": ["state", "title", "body", "labels", "milestone", "milestoneId", "assignees", "assigneeIds", "dueDate", "author", "createdAt", "updatedAt", "webUrl"], "properties": {
+            "state": { "type": ["string", "null"] }, "title": { "type": "string" }, "body": { "type": "string" },
+            "labels": { "type": "array", "items": { "type": "string" } },
+            "milestone": { "type": ["object", "null"], "description": "title, dueOn, id" }, "milestoneId": { "type": ["integer", "null"] },
+            "assignees": { "type": "array", "items": { "type": "string" } }, "assigneeIds": { "type": "array", "items": { "type": "integer" } },
+            "dueDate": { "type": ["string", "null"] }, "author": { "type": ["string", "null"] }, "createdAt": { "type": ["string", "null"] }, "updatedAt": { "type": ["string", "null"] }, "webUrl": { "type": ["string", "null"] }
+          } },
+          "choices": { "type": "object", "required": ["labels", "milestones", "assignees"], "description": "What the repository offers, up to 100 each", "properties": {
+            "labels": { "type": "array", "items": { "type": "string" } },
+            "milestones": { "type": "array", "items": { "type": "object", "description": "id, title" } },
+            "assignees": { "type": "array", "items": { "type": "object", "description": "id, name" } }
+          } },
+          "comments": { "type": "array", "description": "Up to 100 non-system comments, newest last", "items": { "type": "object", "required": ["id", "author", "body", "at"], "properties": {
+            "id": { "type": ["integer", "null"] }, "author": { "type": "string" }, "body": { "type": "string" }, "at": { "type": ["string", "null"] }
+          } } }
+        } },
+        "400": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "POST /kb/issues/update": {
+      "description": "Desktop only, as POST /kb/issues/create. Edits an issue on the caller's board; at least one of title, body, state, labels, milestoneId, assignees, assigneeIds or dueDate is required (else 400 VALIDATION_FAILED 'nothing to update'). state closed or open also updates the board row. GitLab takes ids for milestone and assignees; GitHub takes names for assignees. A PR or MR is 400 NOT_AN_ISSUE. 'dispatch' bucket.",
+      "request": { "body": { "type": "object", "required": ["provider", "repo", "number"], "properties": {
+        "provider": { "type": "string", "enum": ["github", "gitlab"] },
+        "repo": { "type": "string", "description": "As in POST /kb/issues/create" },
+        "number": { "type": "integer", "description": "The issue number (GitLab iid), a positive integer" },
+        "title": { "type": "string", "x-optional": true, "description": "1 to 255 characters after trimming" },
+        "body": { "type": "string", "x-optional": true, "description": "At most 20 000 characters" },
+        "state": { "type": "string", "x-optional": true, "enum": ["open", "closed"] },
+        "labels": { "type": "array", "x-optional": true, "description": "Up to 50 names of at most 100 characters", "items": { "type": "string" } },
+        "milestoneId": { "type": "integer", "x-optional": true, "description": "A positive integer, or null to clear" },
+        "assignees": { "type": "array", "x-optional": true, "description": "Up to 20 names", "items": { "type": "string" } },
+        "assigneeIds": { "type": "array", "x-optional": true, "description": "Up to 20 positive integers (GitLab)", "items": { "type": "integer" } },
+        "dueDate": { "type": "string", "x-optional": true, "description": "YYYY-MM-DD, or null to clear" }
+      } } },
+      "responses": { "200": { "$ref": "#/$defs/IssueWriteOk" }, "400": { "$ref": "_common#/$defs/Error" }, "401": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" } }
+    },
     "POST /kb/connect-git": {
       "request": {
         "body": {

@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/issues/update",
+  "status": 400,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "o/r",
+      "number": 7
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "nothing to update"
+    }
+  }
+}

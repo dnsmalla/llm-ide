@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /kb/issues/detail",
+  "status": 403,
+  "request": {
+    "query": {
+      "provider": "github",
+      "repo": "o/r",
+      "number": "7"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REPO_NOT_ALLOWED",
+      "message": "This issue is not on your Issues board. Import its repository first."
+    }
+  }
+}

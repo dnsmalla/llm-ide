@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/issues/update",
+  "status": 403,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "o/r",
+      "number": 7,
+      "title": "Fix login redirect"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REPO_NOT_ALLOWED",
+      "message": "This issue is not on your Issues board. Import its repository first."
+    }
+  }
+}
