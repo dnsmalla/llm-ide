@@ -19,22 +19,28 @@ process.env.LLMIDE_DB_PATH = path.join(root, 'kb.db');
 const { getDb } = await import('../kb/db.mjs');
 const { registerProject } = await import('../kb/projects.mjs');
 const { grant } = await import('./helpers/grant.mjs');
-const chats = await import('../kb/chat-sessions.mjs');
 const { createBus } = await import('../routes/bus/executor.mjs');
 const { createGateway } = await import('../routes/host-api/gateway.mjs');
 
 after(() => {
-  try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
-const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
-const flush = () => new Promise((r) => setImmediate(r));
+const req = (id, command, payload = {}) =>
+  JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
 let seq = 0;
 function user(teamRole = 'member') {
   const id = `u-${++seq}`;
-  getDb().prepare("INSERT INTO users (id, email, display_name, password_hash, role, status) VALUES (?, ?, 'N', 'x', 'user', 'active')")
+  getDb()
+    .prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, role, status) VALUES (?, ?, 'N', 'x', 'user', 'active')",
+    )
     .run(id, `loop-${seq}@example.com`);
   grant(getDb(), id, { teamRole, maxMode: 'execute', usdCapMonth: 0 });
   return id;
@@ -43,35 +49,70 @@ const owner = user('owner');
 const projRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-loop-proj-'));
 registerProject(getDb(), owner, { id: 'p-alpha', name: 'Alpha', root: projRoot });
 registerProject(getDb(), owner, { id: 'p-beta', name: 'Beta', root: '/work/beta' });
-const bus = createBus({ logger: { info() {}, warn() {}, error() {} }, deps: { resolveProjectRoot: (_u, id) => { if (id !== 'p-alpha') throw new Error('unknown'); return projRoot; } } });
+const bus = createBus({
+  logger: { info() {}, warn() {}, error() {} },
+  deps: {
+    resolveProjectRoot: (_u, id) => {
+      if (id !== 'p-alpha') throw new Error('unknown');
+      return projRoot;
+    },
+  },
+});
 
-function gatewayFor(userId, { member = { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 }, withBus = true } = {}) {
+function gatewayFor(
+  userId,
+  { member = { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 }, withBus = true } = {},
+) {
   const sent = [];
   const g = createGateway({
-    send: (_s, text) => sent.push(JSON.parse(text)), close: () => {}, hostName: () => 'T',
+    send: (_s, text) => sent.push(JSON.parse(text)),
+    close: () => {},
+    hostName: () => 'T',
     capabilities: () => ['host', 'chat', 'approvals', 'read', 'compose'],
-    member: () => member, projectRequired: () => false, chatClearEnabled: () => true,
-    bus: () => (withBus ? bus : null), projectScope: () => ({ allowed: () => true }),
+    member: () => member,
+    projectRequired: () => false,
+    chatClearEnabled: () => true,
+    bus: () => (withBus ? bus : null),
+    projectScope: () => ({ allowed: () => true }),
     pins: { consumePin: (pin) => (pin === '123456' ? userId : null) },
-    devices: { issueDeviceToken: (_u, _n, _now, scopes) => ({ deviceId: `h-${userId}`, token: `tok-${userId}-0123456789`, scopes }), authenticateDeviceToken: () => null, revokeDevice: () => true },
-    turn: () => Promise.resolve(), log: () => {}, audit: () => {},
+    devices: {
+      issueDeviceToken: (_u, _n, _now, scopes) => ({
+        deviceId: `h-${userId}`,
+        token: `tok-${userId}-0123456789`,
+        scopes,
+      }),
+      authenticateDeviceToken: () => null,
+      revokeDevice: () => true,
+    },
+    turn: () => Promise.resolve(),
+    log: () => {},
+    audit: () => {},
   });
   const s = {};
   return {
-    sent, last: () => sent.at(-1),
-    async open() { g.opened(s, '127.0.0.1'); await g.receive(s, req('c-h', 'host.hello', HELLO)); await g.receive(s, req('c-p', 'host.auth.pair', { pin: '123456' })); },
+    sent,
+    last: () => sent.at(-1),
+    async open() {
+      g.opened(s, '127.0.0.1');
+      await g.receive(s, req('c-h', 'host.hello', HELLO));
+      await g.receive(s, req('c-p', 'host.auth.pair', { pin: '123456' }));
+    },
     ask: (id, command, payload) => g.receive(s, req(id, command, payload)),
   };
 }
 
 test('loop.start queues an approval-gated issues.implement; loop.list shows it; loop.cancel ends it', async () => {
-  const g = gatewayFor(owner); await g.open();
+  const g = gatewayFor(owner);
+  await g.open();
   await g.ask('l-1', 'loop.start', { projectId: 'p-alpha', issueIds: ['issue-0001', 'issue-0002'] });
   assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
   const { id, state } = g.last().result;
   assert.equal(state, 'awaiting_approval', 'a phone start waits for the desktop');
   await g.ask('l-2', 'loop.list', { projectId: 'p-alpha' });
-  assert.deepEqual(g.last().result.runs.map((r) => [r.id, r.state, r.issueCount]), [[id, 'awaiting_approval', 2]]);
+  assert.deepEqual(
+    g.last().result.runs.map((r) => [r.id, r.state, r.issueCount]),
+    [[id, 'awaiting_approval', 2]],
+  );
   await g.ask('l-3', 'loop.list', { projectId: 'p-beta' });
   assert.deepEqual(g.last().result.runs, [], 'another project never sees it');
   await g.ask('l-4', 'loop.cancel', { id });
@@ -83,61 +124,105 @@ test('loop.start queues an approval-gated issues.implement; loop.list shows it; 
 });
 
 test('loop.start is refused for a viewer, without a bus, and for an unknown project', async () => {
-  const viewer = gatewayFor(owner, { member: { teamRole: 'viewer', maxMode: 'read_only', usdCapMonth: 0 } }); await viewer.open();
+  const viewer = gatewayFor(owner, { member: { teamRole: 'viewer', maxMode: 'read_only', usdCapMonth: 0 } });
+  await viewer.open();
   await viewer.ask('v-1', 'loop.start', { projectId: 'p-alpha', issueIds: ['issue-0001'] });
   assert.equal(viewer.last().error?.code, 'denied');
-  const nobus = gatewayFor(owner, { withBus: false }); await nobus.open();
+  const nobus = gatewayFor(owner, { withBus: false });
+  await nobus.open();
   await nobus.ask('n-1', 'loop.start', { projectId: 'p-alpha', issueIds: ['issue-0001'] });
   assert.equal(nobus.last().error?.code, 'capability_unavailable');
-  const g = gatewayFor(owner); await g.open();
+  const g = gatewayFor(owner);
+  await g.open();
   await g.ask('u-1', 'loop.start', { projectId: 'p-missing', issueIds: ['issue-0001'] });
   assert.equal(g.last().error?.code, 'not_found');
 });
 
 test('loop.cancel refuses a command that is not a Loop run', async () => {
-  const g = gatewayFor(owner); await g.open();
+  const g = gatewayFor(owner);
+  await g.open();
   await g.ask('x-1', 'loop.cancel', { id: 'no-such-command' });
   assert.equal(g.last().error?.code, 'not_found');
 });
 
 test('loop.issues lists cached open issues (short numeric ids) and loop.start accepts them', async () => {
-  const g = gatewayFor(owner); await g.open();
+  const g = gatewayFor(owner);
+  await g.open();
   await g.ask('i-1', 'loop.issues', { projectId: 'p-alpha' });
   assert.deepEqual(g.last().result, { issues: [] });
   const { ingestSources } = await import('../kb/sources.mjs');
   ingestSources(owner, [
-    { kind: 'ticket', ref: 'https://github.com/o/r/issues/7', title: 'Fix login', body: 'b', meta: { provider: 'github', repo: 'o/r', number: 7, state: 'open', updatedAt: 1 } },
-    { kind: 'ticket', ref: 'https://github.com/o/r/issues/8', title: 'Closed one', body: 'b', meta: { provider: 'github', repo: 'o/r', number: 8, state: 'closed', updatedAt: 1 } },
+    {
+      kind: 'ticket',
+      ref: 'https://github.com/o/r/issues/7',
+      title: 'Fix login',
+      body: 'b',
+      meta: { provider: 'github', repo: 'o/r', number: 7, state: 'open', updatedAt: 1 },
+    },
+    {
+      kind: 'ticket',
+      ref: 'https://github.com/o/r/issues/8',
+      title: 'Closed one',
+      body: 'b',
+      meta: { provider: 'github', repo: 'o/r', number: 8, state: 'closed', updatedAt: 1 },
+    },
   ]);
   await g.ask('i-2', 'loop.issues', { projectId: 'p-alpha' });
   assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
   const issues = g.last().result.issues;
-  assert.deepEqual(issues.map((i) => [i.title, i.number, i.repo]), [['Fix login', 7, 'o/r']]);
+  assert.deepEqual(
+    issues.map((i) => [i.title, i.number, i.repo]),
+    [['Fix login', 7, 'o/r']],
+  );
   await g.ask('i-3', 'loop.start', { projectId: 'p-alpha', issueIds: [issues[0].id] });
   assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
 });
 
 test('chat.delete removes a chat from chat.sessions for good', async () => {
   const chats = await import('../kb/chat-sessions.mjs');
-  const keep = chats.createChatSession(owner, { title: 'keep', surface: 'any', mode: 'agent', projectId: 'p-alpha' }).id;
-  const gone = chats.createChatSession(owner, { title: 'gone', surface: 'any', mode: 'agent', projectId: 'p-alpha' }).id;
+  const keep = chats.createChatSession(owner, {
+    title: 'keep',
+    surface: 'any',
+    mode: 'agent',
+    projectId: 'p-alpha',
+  }).id;
+  const gone = chats.createChatSession(owner, {
+    title: 'gone',
+    surface: 'any',
+    mode: 'agent',
+    projectId: 'p-alpha',
+  }).id;
   chats.appendChatMessage(owner, gone, { role: 'user', content: 'hi' });
-  const g = gatewayFor(owner); await g.open();
+  const g = gatewayFor(owner);
+  await g.open();
   await g.ask('d-1', 'chat.sessions', { projectId: 'p-alpha' });
-  assert.deepEqual(g.last().result.sessions.map((s) => s.id).sort(), [keep, gone].sort());
+  assert.deepEqual(
+    g
+      .last()
+      .result.sessions.map((s) => s.id)
+      .sort(),
+    [keep, gone].sort(),
+  );
   await g.ask('d-2', 'chat.delete', { sessionId: gone });
   assert.deepEqual(g.last().result, { deleted: true });
   await new Promise((r) => setTimeout(r, 50));
   await g.ask('d-3', 'chat.sessions', { projectId: 'p-alpha' });
-  assert.deepEqual(g.last().result.sessions.map((s) => s.id), [keep]);
+  assert.deepEqual(
+    g.last().result.sessions.map((s) => s.id),
+    [keep],
+  );
 });
 
 test('tasks.list serves the registry through the real route', async () => {
-  const g = gatewayFor(owner); await g.open();
+  const g = gatewayFor(owner);
+  await g.open();
   await g.ask('t-1', 'tasks.list', {});
   assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
   assert.ok(g.last().result.tasks.length > 0, 'the phone sees tasks');
-  assert.ok(g.last().result.tasks.some((t) => t.available), 'some are runnable');
+  assert.ok(
+    g.last().result.tasks.some((t) => t.available),
+    'some are runnable',
+  );
 });
 
 test('loop.history reads the desktop Loop journal newest first and survives a missing one', async () => {
@@ -147,13 +232,33 @@ test('loop.history reads the desktop Loop journal newest first and survives a mi
   fs.writeFileSync(path.join(histRoot, 'system/project.json'), '{}');
   registerProjectRoot(owner, { id: 'p-hist', root: histRoot });
   registerProject(getDb(), owner, { id: 'p-hist', name: 'Hist', root: histRoot });
-  const g = gatewayFor(owner); await g.open();
+  const g = gatewayFor(owner);
+  await g.open();
   await g.ask('h-0', 'loop.history', { projectId: 'p-hist' });
   assert.deepEqual(g.last().result, { runs: [] });
   fs.mkdirSync(path.join(histRoot, 'system/loop-runs'), { recursive: true });
-  const line = (id, at, status) => JSON.stringify({ id, loopName: 'Regression', startedAt: at, durationSeconds: 12, statusCode: status, statusSummary: `s-${id}`, trigger: 'manual' });
-  fs.writeFileSync(path.join(histRoot, 'system/loop-runs/index-2026-11.jsonl'), [line('a', '2026-11-01T00:00:00Z', 'success'), 'not json', line('b', '2026-11-02T00:00:00Z', 'failed')].join('\n') + '\n');
+  const line = (id, at, status) =>
+    JSON.stringify({
+      id,
+      loopName: 'Regression',
+      startedAt: at,
+      durationSeconds: 12,
+      statusCode: status,
+      statusSummary: `s-${id}`,
+      trigger: 'manual',
+    });
+  fs.writeFileSync(
+    path.join(histRoot, 'system/loop-runs/index-2026-11.jsonl'),
+    [line('a', '2026-11-01T00:00:00Z', 'success'), 'not json', line('b', '2026-11-02T00:00:00Z', 'failed')].join('\n') +
+      '\n',
+  );
   await g.ask('h-1', 'loop.history', { projectId: 'p-hist' });
   assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
-  assert.deepEqual(g.last().result.runs.map((r) => [r.id, r.statusCode]), [['b', 'failed'], ['a', 'success']]);
+  assert.deepEqual(
+    g.last().result.runs.map((r) => [r.id, r.statusCode]),
+    [
+      ['b', 'failed'],
+      ['a', 'success'],
+    ],
+  );
 });
