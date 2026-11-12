@@ -26,8 +26,12 @@ export const throttled = (ms: number | null) =>
 // attempt starts about 15 s after the socket was lost; "failed" counts at once.
 export const SYNC_AFTER_ATTEMPTS = 5;
 // Before the session was ever live on this page (desktop off at load) there is no chat to keep: unreachable at once.
-export const hostUnreachable = (c: ConnectionState | null, wasLive: boolean): boolean =>
-  c?.kind === "failed" || (c?.kind === "reconnecting" && (!wasLive || c.attempt >= SYNC_AFTER_ATTEMPTS));
+// Each retry passes through "connecting"; `lastReconnect` (the preceding reconnecting state, null once ready) keeps the
+// verdict stable across that phase so the screen and sync pause/resume do not flip on every retry.
+export const hostUnreachable = (c: ConnectionState | null, wasLive: boolean, lastReconnect: ConnectionState | null = null): boolean => {
+  const eff = c?.kind === "connecting" && lastReconnect?.kind === "reconnecting" ? lastReconnect : c;
+  return eff?.kind === "failed" || (eff?.kind === "reconnecting" && (!wasLive || eff.attempt >= SYNC_AFTER_ATTEMPTS));
+};
 
 /** Which screen the App shows. `view` is the user's choice: "sync" (Open offline copy), "host" (Connect desktop). */
 export type AppView = "auto" | "host" | "sync";

@@ -18,6 +18,8 @@ export interface WebChatProps {
   compose?: ReactNode;
   /** Start a fresh phone chat (capability compose); absent = no button. */
   onNewChat?: () => void;
+  /** Offline sync is linked: the reconnecting banner offers a way back to the offline copy. */
+  onOpenOffline?: () => void;
   hostName: string;
   connection: ConnectionState;
   capabilities: ReadonlySet<HostApiCapability>;
@@ -109,7 +111,12 @@ export function WebChat(p: WebChatProps) {
           <StatusBanner severity="warning" message={`${ORIGIN_HINT} ${CERT_HINT}`} />
           <button type="button" className="web-chat-action" onClick={p.onForget}>Forget and re-enter the address</button>
         </div>
-      ) : <StatusBanner severity="info" message="The desktop isn't reachable yet — retrying." />)}
+      ) : (
+        <div className="web-unopened">
+          <StatusBanner severity="info" message="The desktop isn't reachable yet — retrying." />
+          {p.onOpenOffline && <button type="button" className="web-chat-action" onClick={p.onOpenOffline}>Open offline copy</button>}
+        </div>
+      ))}
       {p.connection.kind === "failed" && <StatusBanner severity="error" message={p.connection.message} />}
       {msgs.length > shown && <button type="button" onClick={() => setShown(shown + PAGE)}>Show older</button>}
       <p className="web-status" role="status" aria-live="polite">{state.turn ? "The assistant is replying…" : ""}</p>

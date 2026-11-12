@@ -160,3 +160,9 @@ test("sync tier: the Pair a desktop / Connect desktop action follows hostPaired"
   assert.match(html(h(UI.SyncTier, { state: st, sync, hostPaired: false, onHost: noop })), /Pair a desktop/);
   assert.match(html(h(UI.SyncTier, { state: st, sync, hostPaired: true, onHost: noop })), /Connect desktop/);
 });
+
+test("Chat reconnecting banner offers Open offline copy only when wired", () => {
+  const rc = { kind: "reconnecting", attempt: 1, inMs: 1000, unopened: 0 };
+  assert.ok(html(h(UI.WebChat, { ...chatProps(UI.initialChatState, { connection: rc }), onOpenOffline: () => {} })).includes("Open offline copy"));
+  assert.ok(!html(h(UI.WebChat, chatProps(UI.initialChatState, { connection: rc }))).includes("Open offline copy"));
+});

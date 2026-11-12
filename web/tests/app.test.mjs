@@ -203,6 +203,17 @@ test("host unreachable: a reconnect counts only from SYNC_AFTER_ATTEMPTS once th
   assert.equal(UI.hostUnreachable(null, false), false);
 });
 
+test("host unreachable: reconnecting -> connecting -> reconnecting past the threshold stays down", () => {
+  const rc = (attempt) => ({ kind: "reconnecting", attempt, inMs: 1000, unopened: 0 });
+  const connecting = { kind: "connecting" };
+  const last = rc(UI.SYNC_AFTER_ATTEMPTS);
+  assert.equal(UI.hostUnreachable(last, true, null), true);
+  assert.equal(UI.hostUnreachable(connecting, true, last), true, "retry in flight keeps down");
+  assert.equal(UI.hostUnreachable(rc(UI.SYNC_AFTER_ATTEMPTS + 1), true, last), true);
+  assert.equal(UI.hostUnreachable(connecting, true, rc(1)), false, "a short blip stays a blip");
+  assert.equal(UI.hostUnreachable(connecting, true, null), false);
+});
+
 test("sync traffic follows the same rule: paused during a blip and the first connect, running when down or shown", () => {
   const base = { hub: false, session: true, busy: false, down: false, view: "auto" };
   assert.equal(UI.syncShouldRun(base), false);
