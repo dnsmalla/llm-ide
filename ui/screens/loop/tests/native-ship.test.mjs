@@ -47,6 +47,17 @@ test("shipRequest picks gitlab for a gitlab saved repo", () => {
   assert.match(m.shipBlockedReason({ ...defaultRepoConfig(), gitlabBaseUrl: "https://git.example.com" }, "gitlab"), /gitlab\.com/);
 });
 
+test("manualApprovalBlock lets a person approve only a diff they can fully see that touches no CI or hook file", () => {
+  const diff = (over = {}) => ({ text: "x", truncated: false, patchId: "a".repeat(64), files: ["src/app.ts"], additions: 1, deletions: 0, ...over });
+  assert.equal(m.manualApprovalBlock(diff()), null);
+  assert.match(m.manualApprovalBlock(null), /Reading/);
+  assert.match(m.manualApprovalBlock(diff({ files: [] })), /no changes/i);
+  assert.match(m.manualApprovalBlock(diff({ patchId: "" })), /no changes/i);
+  assert.match(m.manualApprovalBlock(diff({ truncated: true })), /too large/);
+  assert.match(m.manualApprovalBlock(diff({ files: Array.from({ length: 1000 }, (_, i) => `f${i}.ts`) })), /too large/, "a file list at the host cap may hide paths");
+  assert.match(m.manualApprovalBlock(diff({ files: ["src/a.ts", ".github/workflows/ci.yml"] })), /\.github\/workflows\/ci\.yml/);
+});
+
 test("shipState maps secret_detected to a secret message that contains no diff text", () => {
   const secret = { ok: false, code: "secret_detected", message: "+ const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789'" };
   assert.equal(m.shipState(secret), "secret");

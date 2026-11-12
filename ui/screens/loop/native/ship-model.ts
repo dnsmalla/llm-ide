@@ -3,6 +3,7 @@
 import { DEFAULT_GITLAB_BASE, repoKeyOf, type RepoConfig, type RepoProvider } from "../../settings/repo-config.ts";
 import type { WorkItem } from "./factory.ts";
 import type { RunInfo } from "./worktree-run.ts";
+import { isCiHookPath } from "./protected.ts";
 
 /** The `POST /kb/loop/ship` body. `repo` is the provider slug (owner/name), never a path. */
 export interface ShipBody { worktree: string; branch: string; provider: "github" | "gitlab"; repo: string; base: string; title: string; body: string; patchId: string; allowSecret?: boolean }
@@ -12,6 +13,21 @@ export interface WorktreeDiff { text: string; truncated: boolean; patchId: strin
 export interface DiffFile { path: string; lines: string[] }
 
 const MAX_REVIEW_CHARS = 20_000;
+const HOST_MAX_DIFF_FILES = 1000;
+
+/**
+ * Why a person may not approve shipping an unfinished run's diff themselves, or null when they may. They must be able
+ * to see all of it, and CI/hook files stay behind the run's own guard (the server does not re-check them).
+ */
+export function manualApprovalBlock(diff: WorktreeDiff | null): string | null {
+  if (!diff) return "Reading the diff…";
+  if (!diff.patchId || diff.files.length === 0) return "There are no changes to approve.";
+  // The host cuts the file list at MAX_DIFF_FILES (loop_worktree.rs) without setting `truncated`; a full list may hide paths.
+  if (diff.truncated || diff.files.length >= HOST_MAX_DIFF_FILES) return "The diff is too large to show in full, so it cannot be approved by hand. Resume the run instead.";
+  const ci = diff.files.filter(isCiHookPath);
+  if (ci.length > 0) return `CI or hook files changed (${ci.slice(0, 3).join(", ")}${ci.length > 3 ? ", …" : ""}), so it cannot be approved by hand. Resume the run instead.`;
+  return null;
+}
 
 export function shipRequest(info: RunInfo, item: WorkItem, repo: { provider: "github" | "gitlab"; slug: string; base: string }, review: string, patchId: string): ShipBody {
   const title = item.title.replace(/\s+/g, " ").trim().slice(0, 200) || `Factory run ${info.runId}`;

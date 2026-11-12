@@ -64,6 +64,8 @@
 .loop-unapproved { font-size: 9px; color: var(--tok-color-accent-4, #b45309); }
 .loop-ship-files { list-style: none; margin: 6px 0; padding: 0; }
 .loop-ship-files summary { cursor: pointer; font-size: var(--tok-type-caption-size); }
+.loop-ship-approve { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; padding: 8px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm, 6px); }
+.loop-ship-approve label { font-size: var(--tok-type-caption-size); cursor: pointer; }
 .loop-diff { margin: 4px 0 8px; padding: 0 6px; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); white-space: pre; overflow: auto; max-height: 320px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); user-select: text; }
 .loop-confirm { margin: 6px 0; padding: 8px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); }
 .loop-diff-line { display: block; }

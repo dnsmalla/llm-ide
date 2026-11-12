@@ -6,15 +6,15 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { createHostFs } from "../explorer/fs";
 import { invokeHost } from "../shell/host";
 import { core } from "../shell/runtime";
-import { setRunRecordShip } from "../loop/native/history.ts";
+import { appendRunRecord, setRunRecordShip } from "../loop/native/history.ts";
 import { LOOP_PAGE_NOTE, cancelRun, concurrency, liveRuns, setConcurrency, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
 import { installRunManagerHost } from "../loop/native/run-manager-host.ts";
 import { ShipPanel } from "../loop/native/ShipPanel.tsx";
 import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
-import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { COLUMNS, COLUMN_LABELS, NOTE, columnFor, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, manualShipRecord, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
@@ -411,6 +411,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                 info={selInfo}
                 item={toWorkItem(selected)}
                 passed={selFacts?.lastRecord?.statusCode === "success"}
+                manualApproval={selFacts ? columnFor(selFacts).note === NOTE.interrupted : false}
                 reviewedPatchId={selFacts?.lastRecord?.reviewedPatchId ?? null}
                 requestProvider={selFacts?.lastRecord?.ship?.provider ?? null}
                 fs={fs}
@@ -418,7 +419,19 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                 onShipped={(r) => {
                   // Ship does not touch the run record; without this the card would stay in Ready to ship.
                   const entry = selFacts?.lastRecord?.entry ?? null;
-                  void (entry ? setRunRecordShip(fs, entry, r) : Promise.resolve(false))
+                  // An interrupted run has no finished record of its own: record the hand-approved ship and clear
+                  // the in-progress marker, which otherwise keeps the card in Needs you.
+                  const manual = selFacts?.interrupted === true || entry === null;
+                  const save = manual
+                    ? (async () => {
+                        const { entry: e, record } = manualShipRecord({ id: crypto.randomUUID(), now: new Date(), runId: selInfo.runId, mode: "full", item: { source: selected.source, id: selected.id, title: selected.title }, info: selInfo, ship: r });
+                        await appendRunRecord(fs, e, record);
+                        // A Resume started meanwhile owns the marker now (its crash detection); leave it.
+                        if (!liveRuns().some((l) => l.runId === selInfo.runId)) await fs.remove(`${repoPrefixFor(projectRoot, selInfo.worktree)}/.factory/RUN.json`).catch(() => undefined);
+                        return true;
+                      })()
+                    : setRunRecordShip(fs, entry, r);
+                  void save
                     .catch(() => false)
                     .then((ok) => { if (!ok) setError("Shipped, but the run record could not be updated, so the card may not move."); })
                     .then(() => loadFacts())
