@@ -142,7 +142,7 @@ export function decodeShipResults(body: unknown): Map<string, ShipStatus | "erro
     if (Array.isArray(row.comments)) {
       for (const c of row.comments) {
         if (!isRecord(c) || typeof c.author !== "string" || typeof c.body !== "string" || typeof c.at !== "string") continue;
-        comments.push({ author: c.author.slice(0, 200), body: c.body.slice(0, 4000), at: c.at.slice(0, 40) });
+        comments.push({ author: c.author.slice(0, 200), body: c.body.slice(0, 4000), at: c.at.slice(0, 40), ...((c as { bot?: unknown }).bot === true ? { bot: true } : {}) });
         if (comments.length >= SHIP_STATUS_BATCH) break;
       }
     }
@@ -223,6 +223,22 @@ export function toWorkItem(item: WorkItemRecord): WorkItem {
 }
 
 /** Send back needs a readable PR/MR status that asks for work (failing CI or new comments) and the run's worktree. */
+/** Automatic restarts per card before a person must act; a bot commenting on every MR must not loop the Factory. */
+export const AUTO_REWORK_LIMIT = 3;
+
+/**
+ * Why a shipped card's MR restarts its run from the first step by itself: the person closed it without merging, or
+ * commented on it. A CI failure keeps the Send back button, and nothing restarts past the limit or without a worktree.
+ */
+export function autoRework(facts: ItemFacts, reworksSoFar: number): "closed" | "comments" | null {
+  const s = facts.ship;
+  // An interrupted run (a rework stopped by closing the app) leaves the old MR record behind: never restart it unasked.
+  if (!s || facts.live || facts.interrupted || facts.shipStatusError || !facts.worktreeExists || !facts.lastRecord?.ship || reworksSoFar >= AUTO_REWORK_LIMIT) return null;
+  if (s.state === "closed") return "closed";
+  if (s.state === "open" && s.comments.some((c) => !c.bot)) return "comments";
+  return null;
+}
+
 export function sendBackAllowed(facts: ItemFacts): boolean {
   const s = facts.ship;
   return facts.worktreeExists && !facts.shipStatusError && s !== null && (s.ci === "failed" || s.comments.length > 0);

@@ -15,9 +15,9 @@ import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, autoRework, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { finishChecksAllowed, listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
-import { answerDecision, sendBack } from "./send-back.ts";
+import { answerDecision, rework, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
 
 const EMPTY_COPY: Record<Column, string> = { inbox: "No work items", needsDecision: "Nothing waiting for a decision", working: "No run in progress", needsYou: "Nothing needs you", readyToShip: "Nothing ready to ship", shipped: "No open PR/MR", done: "Nothing done yet" };
@@ -28,6 +28,20 @@ installRunManagerHost();
 
 /** The status route rides the core's `dispatch` rate-limit bucket (burst 4, one more per 10 s): never refresh more often. */
 const STATUS_MIN_GAP_MS = 10_000;
+const REWORKS_KEY = "llmide.factory.reworks";
+
+/** Automatic MR restarts per card, kept across app restarts so the limit holds. Unreadable storage reads as none. */
+function readReworkCounts(): Record<string, number> {
+  try {
+    const raw: unknown = JSON.parse(globalThis.localStorage?.getItem(REWORKS_KEY) ?? "{}");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return Object.fromEntries(Object.entries(raw).filter((e): e is [string, number] => typeof e[1] === "number" && Number.isFinite(e[1])));
+  } catch { return {}; }
+}
+
+function writeReworkCounts(counts: Record<string, number>): void {
+  try { globalThis.localStorage?.setItem(REWORKS_KEY, JSON.stringify(counts)); } catch { /* the in-memory once-per-record guard still holds */ }
+}
 
 export interface BoardProps {
   /** True only while the section is shown AND the Board tab is selected. */
@@ -185,6 +199,34 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
   }, [live, retryAt]);
+
+  // A rejected MR (closed, or commented on) restarts its run from the first step by itself, once per run record and
+  // at most AUTO_REWORK_LIMIT times per card; a merge resets the count. Runs while the Factory board is open.
+  const reworked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!projectRoot) return;
+    const counts = readReworkCounts();
+    let changed = false;
+    for (const item of items) {
+      const f = facts.get(item.key);
+      if (!f) continue;
+      // Keyed by project too: the same issue can be a card in two projects.
+      const countKey = `${projectRoot}\u0000${item.key}`;
+      if (f.ship?.state === "merged" && counts[countKey]) { delete counts[countKey]; changed = true; continue; }
+      const reason = autoRework(f, counts[countKey] ?? 0);
+      const once = `${item.key}:${f.lastRecord?.entry?.id ?? ""}`;
+      if (!reason || !f.ship || reworked.current.has(once)) continue;
+      reworked.current.add(once);
+      counts[countKey] = (counts[countKey] ?? 0) + 1;
+      changed = true;
+      const status = f.ship;
+      void act(async () => {
+        await rework({ fs, start: startRun, projectRoot }, item, status, reason);
+        setNotice(`${reason === "closed" ? "The MR was closed" : "The MR got comments"}: "${item.title}" starts again from the first step.`);
+      });
+    }
+    if (changed) writeReworkCounts(counts);
+  }, [facts, items, projectRoot]);
 
   const board = useMemo(() => buildBoard(items, facts, nowMs), [items, facts, nowMs]);
   const openCleanup = async () => {

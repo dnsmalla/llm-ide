@@ -266,6 +266,15 @@ test("configFor check runs only Verify and Review on the work already in the wor
   assert.deepEqual(c.stages.map((s) => s.prompt), base.stages.filter((s) => ["Verify", "Review", "Review gate"].includes(s.name)).map((s) => s.prompt), "no prompt is changed");
 });
 
+test("configFor rework runs every stage from the start and points Intake, Plan and Implement at FEEDBACK.md", () => {
+  const base = structuredClone(FACTORY_TEMPLATE.config);
+  base.stages.push({ ...base.stages[5], id: "user-lint", name: "Lint", kind: "codeGraph", command: null });
+  const c = configFor("rework", base);
+  assert.deepEqual(c.stages.map((s) => s.name), base.stages.map((s) => s.name), "every stage, a user-added one too");
+  for (const n of ["Intake", "Plan", "Implement"]) assert.match(c.stages.find((s) => s.name === n).prompt, /\.factory\/FEEDBACK\.md/, n);
+  assert.doesNotMatch(c.stages.find((s) => s.name === "Review").prompt ?? "", /FEEDBACK\.md/);
+});
+
 test("configFor full keeps every stage, including a user-added one", () => {
   const base = structuredClone(FACTORY_TEMPLATE.config);
   base.stages.push({ ...base.stages[5], id: "user-lint", name: "Lint", kind: "codeGraph", command: null });

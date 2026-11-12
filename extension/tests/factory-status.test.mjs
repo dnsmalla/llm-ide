@@ -80,6 +80,7 @@ test('github: merged PR with failing check returns merged and failed', async () 
     [`${base}/issues/8/comments`]: () => json(200, [
       { user: { login: 'alice' }, body: 'please rename', created_at: '2026-11-03T09:00:00Z' },
       { user: { login: 'bob' }, body: 'old', created_at: '2026-10-01T00:00:00Z' },
+      { user: { login: 'sonarcloud[bot]', type: 'Bot' }, body: 'Quality gate passed', created_at: '2026-11-03T10:00:00Z' },
     ]),
     [`${base}/pulls/8/comments`]: () => json(200, [
       { user: { login: 'carol' }, body: 'nit: typo', created_at: '2026-11-02T08:00:00Z', path: 'a.js' },
@@ -91,8 +92,9 @@ test('github: merged PR with failing check returns merged and failed', async () 
     assert.deepEqual(out, {
       url, state: 'merged', ci: 'failed', ciSummary: 'Failed checks: test',
       comments: [
-        { author: 'carol', body: 'nit: typo', at: '2026-11-02T08:00:00Z' },
-        { author: 'alice', body: 'please rename', at: '2026-11-03T09:00:00Z' },
+        { author: 'carol', body: 'nit: typo', at: '2026-11-02T08:00:00Z', bot: false },
+        { author: 'alice', body: 'please rename', at: '2026-11-03T09:00:00Z', bot: false },
+        { author: 'sonarcloud[bot]', body: 'Quality gate passed', at: '2026-11-03T10:00:00Z', bot: true },
       ],
     });
     assert.equal(seen.length, 5);
@@ -109,6 +111,7 @@ test('gitlab: open MR with failed pipeline and one new note since returns one co
     [`${base}/merge_requests/5/notes`]: () => json(200, [
       { body: 'added 1 commit', author: { username: 'bot' }, created_at: '2026-11-02T11:00:00Z', system: true },
       { body: 'new review note', author: { username: 'rev' }, created_at: '2026-11-02T10:00:00Z', system: false },
+      { body: 'coverage 81%', author: { username: 'project_123_bot', bot: true }, created_at: '2026-11-02T10:30:00Z', system: false },
       { body: 'old note', author: { username: 'rev' }, created_at: '2026-10-30T10:00:00Z', system: false },
     ]),
   });
@@ -117,7 +120,7 @@ test('gitlab: open MR with failed pipeline and one new note since returns one co
     const out = await pollRequest(url, { since: '2026-11-01T00:00:00Z', creds: { gitlab: { token: 'glpat_test_token_12345' } } });
     assert.deepEqual(out, {
       url, state: 'open', ci: 'failed', ciSummary: 'Failed jobs: unit',
-      comments: [{ author: 'rev', body: 'new review note', at: '2026-11-02T10:00:00Z' }],
+      comments: [{ author: 'rev', body: 'new review note', at: '2026-11-02T10:00:00Z', bot: false }, { author: 'project_123_bot', body: 'coverage 81%', at: '2026-11-02T10:30:00Z', bot: true }],
     });
     assert.ok(seen.every((s) => s.url.startsWith(`${base}/`)), 'gitlab.com with the encoded project path only');
     assert.ok(seen.every((s) => s.headers['PRIVATE-TOKEN'] === 'glpat_test_token_12345'));

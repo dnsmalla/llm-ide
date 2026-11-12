@@ -5,7 +5,7 @@ import { displayText } from "../explorer/scm/model.ts";
 
 export type Column = "inbox" | "needsDecision" | "working" | "needsYou" | "readyToShip" | "shipped" | "done";
 
-export interface ShipComment { author: string; body: string; at: string }
+export interface ShipComment { author: string; body: string; at: string; /** Posted by an integration, not a person. */ bot?: boolean }
 export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; ci: "none" | "pending" | "success" | "failed"; ciSummary: string | null; comments: ShipComment[] }
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
 export interface RunRecordFacts {
@@ -34,7 +34,7 @@ export const NOTE = {
 } as const;
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const RUN_MODES: readonly string[] = ["full", "intakeOnly", "continue", "sendBack", "check"];
+const RUN_MODES: readonly string[] = ["full", "intakeOnly", "continue", "sendBack", "check", "rework"];
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function httpsUrl(v: unknown): string | null {

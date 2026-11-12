@@ -266,7 +266,7 @@ function fail(run: ManagedRun, message: string): void {
 /** Starts a run (or queues it when the cap is reached) and returns its run id. Never awaits. */
 export function startRun(projectRoot: string, item: RunItem, mode: RunMode, opts: { runId?: string } = {}): string {
   const d = requireDeps();
-  if ((mode === "continue" || mode === "sendBack" || mode === "check") && !opts.runId) throw new Error(`${mode} needs the runId of an existing worktree`);
+  if ((mode === "continue" || mode === "sendBack" || mode === "check" || mode === "rework") && !opts.runId) throw new Error(`${mode} needs the runId of an existing worktree`);
   const runId = opts.runId ?? newRunId(d.now(), d.rand);
   if (runs.has(runId)) return runId;
   runs.set(runId, {

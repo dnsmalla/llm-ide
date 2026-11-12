@@ -294,7 +294,7 @@ export function factoryStartRefusal(state: { running: boolean; starting: boolean
   return null;
 }
 
-export type RunMode = "full" | "intakeOnly" | "continue" | "sendBack" | "check";
+export type RunMode = "full" | "intakeOnly" | "continue" | "sendBack" | "check" | "rework";
 export interface CiSummary { state: "none" | "pending" | "success" | "failed"; summary: string | null }
 export interface ReviewComment { author: string; body: string; at: string }
 
@@ -324,7 +324,7 @@ export function factoryRole(s: Pick<LoopStage, "kind" | "skillId" | "runOnce" | 
   return null;
 }
 
-const MODE_ROLES: Record<Exclude<RunMode, "full">, readonly FactoryRole[]> = {
+const MODE_ROLES: Record<Exclude<RunMode, "full" | "rework">, readonly FactoryRole[]> = {
   intakeOnly: ["setup", "intake", "intakeGate"],
   continue: ["plan", "implement", "verify", "review", "reviewGate"],
   sendBack: ["implement", "verify", "review", "reviewGate"],
@@ -344,6 +344,16 @@ export function configFor(mode: RunMode, base: LoopEngineConfig): LoopEngineConf
   // Factory runs hold while their project is closed; the Loop page also uses configFor, so its pause is unbounded too.
   copy.pauseTimeoutSeconds = 0;
   if (mode === "full") return copy;
+  // A rejected MR (closed, or commented on) starts over from the issue with the person's feedback in mind.
+  if (mode === "rework") {
+    for (const s of copy.stages) {
+      const role = factoryRole(s);
+      if (role !== "intake" && role !== "plan" && role !== "implement") continue;
+      const head = s.prompt?.trim() || `Run the ${s.name} skill for this loop.`;
+      s.prompt = `${head}\n\n${FEEDBACK_PROMPT_LINE}`;
+    }
+    return copy;
+  }
   const keep = new Set<FactoryRole>(MODE_ROLES[mode]);
   copy.stages = copy.stages.filter((s) => { const role = factoryRole(s); return role !== null && keep.has(role); });
   if (mode === "continue") {

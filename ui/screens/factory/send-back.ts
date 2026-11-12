@@ -1,5 +1,5 @@
 // Send back: CI failures and PR/MR review comments go to the same worktree as `.factory/FEEDBACK.md`, then a sendBack
-// run repairs, verifies and reviews. A button only; there is no automatic send-back.
+// run repairs, verifies and reviews. Send back is a button; a closed or commented MR reworks by itself (`rework`).
 import type { FsApi } from "../explorer/fs";
 import { feedbackMarkdown, neutralizeFences } from "../loop/native/factory.ts";
 import type { RunMode } from "../loop/native/run-manager.ts";
@@ -71,4 +71,15 @@ export async function answerDecision(deps: { fs: SendBackFs; start: StartRunFn; 
   if (!runId) throw new Error("This card has no run to continue.");
   await prepareAnswer(deps.fs, worktreePrefix(runId), answer);
   return deps.start(deps.projectRoot, item, "continue", { runId });
+}
+
+/** The MR was rejected (closed, or commented on): write its feedback, then rerun the card's worktree from the first step. */
+export async function rework(deps: { fs: SendBackFs; start: StartRunFn; projectRoot: string }, item: WorkItemRecord, status: ShipStatus, reason: "closed" | "comments"): Promise<string> {
+  const runId = item.runIds.at(-1);
+  if (!runId) throw new Error("This card has no run to rework.");
+  const note = reason === "closed"
+    ? "The MR was closed without merging. Start over from the issue, taking any comments below into account."
+    : "The MR got review comments. Start over from the issue and address them.";
+  await prepareSendBack(deps.fs, worktreePrefix(runId), status, note);
+  return deps.start(deps.projectRoot, item, "rework", { runId });
 }

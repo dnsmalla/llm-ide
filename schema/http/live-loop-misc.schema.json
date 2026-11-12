@@ -416,6 +416,11 @@
                         },
                         "at": {
                           "type": "string"
+                        },
+                        "bot": {
+                          "type": "boolean",
+                          "x-optional": true,
+                          "description": "Posted by an integration (GitHub user.type Bot or a [bot] login, GitLab author.bot), not a person; the Factory does not restart a run for it"
                         }
                       }
                     }

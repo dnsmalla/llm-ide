@@ -71,7 +71,7 @@ function newComments(rows, since) {
     .filter((c) => typeof c.body === 'string' && Date.parse(c.at) > after)
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
     .slice(-MAX_COMMENTS)
-    .map((c) => ({ author: c.author, body: c.body.slice(0, MAX_COMMENT_CHARS), at: c.at }));
+    .map((c) => ({ author: c.author, body: c.body.slice(0, MAX_COMMENT_CHARS), at: c.at, bot: c.bot === true }));
 }
 
 const summary = (prefix, names) => `${prefix}: ${names.slice(0, MAX_SUMMARY_NAMES).join(', ') || 'unnamed'}`.slice(0, MAX_SUMMARY_CHARS);
@@ -114,6 +114,8 @@ async function pollGithubPr(pr, since, token) {
     author: typeof c?.user?.login === 'string' ? c.user.login : '',
     body: c?.body,
     at: c?.created_at,
+    // Integrations (coverage, Sonar, Renovate) comment on every PR; the Factory must not treat them as a person's review.
+    bot: c?.user?.type === 'Bot' || (typeof c?.user?.login === 'string' && c.user.login.endsWith('[bot]')),
   }));
   return { state, ...githubCi(checks, status), comments: newComments(rows, since) };
 }
@@ -144,7 +146,7 @@ async function pollGitlabMr(mr, since, token) {
   }
   const rows = asArray(notes)
     .filter((n) => n?.system === false)
-    .map((n) => ({ author: typeof n?.author?.username === 'string' ? n.author.username : '', body: n?.body, at: n?.created_at }));
+    .map((n) => ({ author: typeof n?.author?.username === 'string' ? n.author.username : '', body: n?.body, at: n?.created_at, bot: n?.author?.bot === true }));
   return { state, ci, ciSummary, comments: newComments(rows, since) };
 }
 

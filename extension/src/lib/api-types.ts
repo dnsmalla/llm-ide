@@ -6655,6 +6655,8 @@ export type PostKbLoopShipStatusResponse200 = {
       author: string;
       body: string;
       at: string;
+      /** Posted by an integration (GitHub user.type Bot or a [bot] login, GitLab author.bot), not a person; the Factory does not restart a run for it */
+      bot?: boolean;
     }[];
   })[];
 };

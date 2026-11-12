@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { memFs } from "./mem-fs.mjs";
 import { feedbackMarkdown } from "../../loop/native/factory.ts";
 import { columnFor } from "../columns.ts";
-import { actionsFor, sendBackAllowed } from "../board-model.ts";
-import { answerDecision, feedbackInput, prepareAnswer, prepareSendBack, sendBack, worktreePrefix } from "../send-back.ts";
+import { AUTO_REWORK_LIMIT, actionsFor, autoRework, sendBackAllowed } from "../board-model.ts";
+import { answerDecision, feedbackInput, prepareAnswer, prepareSendBack, rework, sendBack, worktreePrefix } from "../send-back.ts";
 
 const URL7 = "https://github.com/acme/web/pull/7";
 const status = {
@@ -89,4 +89,29 @@ test("answerDecision appends a fenced, dated DECISIONS.md and starts continue in
   assert.equal(await answerDecision({ fs, projectRoot: "/p", start }, item, "Use Postgres."), "run-new");
   assert.deepEqual(calls, [["/p", "issue:x1", "continue", { runId: "r1" }]]);
   await assert.rejects(answerDecision({ fs, projectRoot: "/p", start }, { ...item, runIds: [] }, "x"), /no run/);
+});
+
+test("autoRework: a closed MR or new MR comments restart the run, at most AUTO_REWORK_LIMIT times; CI or merge do not", () => {
+  const facts = (ship, over = {}) => ({ live: null, lastRecord: { runId: "r1", ship: { provider: "github", url: URL7 }, entry: { id: "e9", startedAt: "x" } }, worktreeExists: true, ship, shipStatusError: false, lastKnownColumn: null, ...over });
+  assert.equal(autoRework(facts({ ...status, ci: "none", comments: [], state: "closed" }), 0), "closed");
+  assert.equal(autoRework(facts({ ...status, ci: "none" }), 0), "comments");
+  assert.equal(autoRework(facts({ ...status, comments: [] }), 0), null, "a CI failure keeps the Send back button");
+  assert.equal(autoRework(facts({ ...status, state: "merged" }), 0), null);
+  assert.equal(autoRework(facts({ ...status, state: "closed" }), AUTO_REWORK_LIMIT), null, "the cap stops a comment bot from looping the Factory");
+  assert.equal(autoRework(facts({ ...status, state: "closed" }, { live: { runId: "r1" } }), 0), null, "already running");
+  assert.equal(autoRework(facts({ ...status, state: "closed" }, { worktreeExists: false }), 0), null, "no worktree to rework");
+  assert.equal(autoRework(facts({ ...status, state: "closed" }, { shipStatusError: true }), 0), null);
+  assert.equal(autoRework(facts(null), 0), null);
+  assert.equal(autoRework(facts({ ...status, ci: "none", state: "closed" }, { interrupted: true }), 0), null, "an interrupted rework waits for a person");
+  assert.equal(autoRework(facts({ ...status, ci: "none", comments: [{ author: "sonarcloud[bot]", body: "Quality gate passed", at: "2026-11-12T00:00:00Z", bot: true }] }), 0), null, "integration comments are not a review");
+});
+
+test("rework writes the MR feedback and restarts the card's own worktree from the first step", async () => {
+  const fs = memFs();
+  const started = [];
+  const start = (root, it, mode, opts) => { started.push({ root, key: it.key, mode, opts }); return opts.runId; };
+  await rework({ fs, projectRoot: "/p", start }, item, { ...status, state: "closed" }, "closed");
+  assert.deepEqual(started, [{ root: "/p", key: item.key, mode: "rework", opts: { runId: "r1" } }]);
+  assert.match(fs.files.get(FEEDBACK), /closed without merging/);
+  assert.match(fs.files.get(FEEDBACK), /Please handle the empty password/);
 });
