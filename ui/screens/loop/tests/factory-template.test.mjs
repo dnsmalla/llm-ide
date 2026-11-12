@@ -271,5 +271,7 @@ test("processStepNames: enabled steps in order are the board lanes; gates, an em
     { role: "implement", enabled: false }, { role: "custom", name: "Doc review", kind: "skill", skill: "doc-writer" }, { role: "review" }, { role: "reviewGate" },
   ] };
   assert.deepEqual(processStepNames(t), ["Design", "Doc review", "Review"]);
+  // An auto step the loop's detection turned on keeps its place in the order.
+  assert.deepEqual(processStepNames(t, new Set(["Structure verify"])), ["Design", "Structure verify", "Doc review", "Review"]);
   assert.deepEqual(processStepNames(defaultFactoryTemplate()).includes("Review gate"), false);
 });

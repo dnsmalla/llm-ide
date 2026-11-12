@@ -608,14 +608,14 @@ export function templateProblemMessage(errors: readonly TemplateError[]): string
 /**
  * The enabled steps of a template, in order, as the board's lanes: the step names a run reports. Gates are not lanes
  * (a failed gate sits in the step it checks), a setup step needs a command, and an `auto` command step is left out
- * because detection decides whether it runs (a card that stops there still gets a lane).
+ * unless `detected` (the enabled step names of the project's Factory loop) says detection turned it on.
  */
-export function processStepNames(t: FactoryTemplate): string[] {
+export function processStepNames(t: FactoryTemplate, detected: ReadonlySet<string> = new Set()): string[] {
   const out: string[] = [];
   for (const ts of t.stages) {
     if (ts.role === "intakeGate" || ts.role === "reviewGate" || ts.kind === "artifactCheck" || ts.enabled === false) continue;
     if (ts.role === "setup" && !(ts.command ?? "").trim()) continue;
-    if (ts.role === "custom" && ts.kind === "shellCommand" && ts.command === "auto") continue;
+    if (ts.role === "custom" && ts.kind === "shellCommand" && ts.command === "auto" && !detected.has(ts.name ?? "")) continue;
     const name = ts.name ?? (ts.role === "custom" ? "" : builtInStage(ts.role).name);
     if (name) out.push(name);
   }
@@ -626,11 +626,12 @@ export function processStepNames(t: FactoryTemplate): string[] {
 export async function processSteps(fs: Pick<FsApi, "read">, factoryLoop: () => Promise<LoopDefinition | null>): Promise<string[] | null> {
   try {
     const file = await readTemplateFile(fs);
-    if (file.kind === "ok") return file.parse.ok ? processStepNames(file.parse.template) : null;
     const loop = await factoryLoop();
+    const detected = new Set((loop?.config.stages ?? []).filter((st) => st.enabled && st.disabledByDetection !== true).map((st) => st.name));
+    if (file.kind === "ok") return file.parse.ok ? processStepNames(file.parse.template, detected) : null;
     if (!loop) return null;
     const migrated = templateFromLoop(loop).template;
-    return processStepNames(upgradeOldDefault(migrated) ?? migrated);
+    return processStepNames(upgradeOldDefault(migrated) ?? migrated, detected);
   } catch {
     return null;
   }
