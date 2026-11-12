@@ -57,12 +57,19 @@ export async function loadDevices(client: CoreClient, { retryMs = PROOF_RETRY_MS
   }
 }
 
+/** At most this many `ip` parameters in the QR: keeps the code small enough to scan (level M). */
+export const QR_MAX_ADDRESSES = 4;
+
 /** The phone's pairing QR (same items as the Mac's `MobileConnectionInfo.qrPayload`), or null unless the PIN came from
- *  a TLS listener with an address. No `port`: this host has no v2 link, and a QR-pinned phone dials only v1. Every
- *  value is validated by decodePin (digits, dotted IPv4, base64url + `sha256:`), so none needs escaping. */
+ *  a TLS listener with an address. `ip` repeats once per address, in the core's preference order (Tailscale, LAN,
+ *  bridges), at most QR_MAX_ADDRESSES, best first: `llmide://pair?ip=A&ip=B&pin=…`. An older phone reads only the first
+ *  `ip`, so it still dials the best address. No `port`: this host has no v2 link, and a QR-pinned phone dials only v1.
+ *  Every value, each address included, is validated by decodePin (digits, dotted IPv4, base64url + `sha256:`), so none
+ *  needs escaping. */
 export function pairingPayload(p: HostPin): string | null {
   if (!p.fingerprint || p.addresses.length === 0) return null;
-  return `llmide://pair?ip=${p.addresses[0]}&pin=${p.pin}&h1port=${p.port}&h1fp=${p.fingerprint}&api=1`;
+  const ips = p.addresses.slice(0, QR_MAX_ADDRESSES).map((a) => `ip=${a}`).join("&");
+  return `llmide://pair?${ips}&pin=${p.pin}&h1port=${p.port}&h1fp=${p.fingerprint}&api=1`;
 }
 
 /** The payload as an inline SVG: dark modules on a fixed white field (with the 4-module quiet zone), so a dark theme

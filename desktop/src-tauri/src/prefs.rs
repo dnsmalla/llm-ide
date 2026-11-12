@@ -207,6 +207,10 @@ pub struct Prefs {
     /// Serve the pairing listener (pinned TLS, all interfaces) from the spawned core: `LLMIDE_HOST_API_TLS=1`.
     /// All five apply at the NEXT core start, like every other backend pref; a packaged app used to pass none of
     /// them, so read / compose / push / tool approvals could never be on.
+    /// Read, compose and tool approvals default ON (a paired phone gets History, Execute and Auto Tasks with no setup;
+    /// each command is still checked against the member's role and project grant) and reach the core as an explicit
+    /// `1` or `0`. NOTE: a file saved before they defaulted on keeps its stored `false` (no migration): every save
+    /// writes every field, so an untouched default cannot be told from a deliberate off, and off is the safe side.
     pub host_api_tls: bool,
     pub host_api_read: bool,
     pub host_api_compose: bool,
@@ -228,7 +232,7 @@ impl Default for Prefs {
             lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, continue_summary: false, terminal: true, theme: Theme::Dark,
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
             remote_server: RemoteServerPrefs::default(),
-            host_api_tls: false, host_api_read: false, host_api_compose: false, host_api_push: false, host_api_tool_approvals: false,
+            host_api_tls: false, host_api_read: true, host_api_compose: true, host_api_push: false, host_api_tool_approvals: true,
             loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0, update_checks: true, notifications: NotifyPrefs::default(),
         }
     }
@@ -414,7 +418,8 @@ pub fn effective_features_with(host_env: Option<&str>, terminal: bool, features:
     Some(if list.is_empty() { "agent_chat".to_string() } else { list.join(",") })
 }
 
-/// The `LLMIDE_*` variables the spawned core gets from the prefs: only ever the exact value `on`.
+/// The `LLMIDE_*` variables the spawned core gets from the prefs: the exact value `on` or `1` (and `0` for the three
+/// default-on Host API capabilities, which are always passed).
 pub fn core_env_pairs(p: &Prefs, host_features: Option<&str>) -> Vec<(&'static str, String)> {
     let mut v = Vec::new();
     if p.router {
@@ -425,12 +430,14 @@ pub fn core_env_pairs(p: &Prefs, host_features: Option<&str>) -> Vec<(&'static s
     if p.learn { v.push(("LLMIDE_ROUTER_LEARN", "on".to_string())); }
     if p.continue_summary { v.push(("LLMIDE_V2_CONTINUE_SUMMARY", "on".to_string())); }
     // Host API v1 capabilities: exact `1`, the value the core reads. A packaged app enables them in Settings; the
-    // core only sees them at its next start.
+    // core only sees them at its next start. The default-on three are always passed as `1` or `0` (the core treats
+    // anything but `1` as off), so a switch turned off also wins over a value inherited from the host env.
+    let flag = |on: bool| (if on { "1" } else { "0" }).to_string();
     if p.host_api_tls { v.push(("LLMIDE_HOST_API_TLS", "1".to_string())); }
-    if p.host_api_read { v.push(("LLMIDE_HOST_API_READ", "1".to_string())); }
-    if p.host_api_compose { v.push(("LLMIDE_HOST_API_COMPOSE", "1".to_string())); }
+    v.push(("LLMIDE_HOST_API_READ", flag(p.host_api_read)));
+    v.push(("LLMIDE_HOST_API_COMPOSE", flag(p.host_api_compose)));
     if p.host_api_push { v.push(("LLMIDE_HOST_API_PUSH", "1".to_string())); }
-    if p.host_api_tool_approvals { v.push(("LLMIDE_HOST_API_TOOL_APPROVALS", "1".to_string())); }
+    v.push(("LLMIDE_HOST_API_TOOL_APPROVALS", flag(p.host_api_tool_approvals)));
     if !p.terminal || !p.features.is_empty() {
         if let Some(f) = effective_features_with(host_features, p.terminal, &p.features) { v.push(("LLMIDE_FEATURES", f)); }
     }
@@ -608,14 +615,21 @@ mod tests {
         d
     }
 
+    const DEFAULT_ON_HOST_API: [&str; 3] = ["LLMIDE_HOST_API_READ", "LLMIDE_HOST_API_COMPOSE", "LLMIDE_HOST_API_TOOL_APPROVALS"];
+
+    /// The core env minus the three always-passed Host API capabilities, for tests about the other switches.
+    fn without_host_api(v: Vec<(&'static str, String)>) -> Vec<(&'static str, String)> {
+        v.into_iter().filter(|(k, _)| !DEFAULT_ON_HOST_API.contains(k)).collect()
+    }
+
     #[test]
     fn defaults_are_off_for_every_token_affecting_switch() {
         let d = Prefs::default();
         assert!(!d.router && !d.cap && !d.compress && !d.learn && !d.continue_summary);
-        assert!(!d.host_api_tls && !d.host_api_read && !d.host_api_compose && !d.host_api_push && !d.host_api_tool_approvals);
+        assert!(!d.host_api_tls && !d.host_api_push, "the listener and push stay opt-in");
         assert_eq!(d.lta_mode, LtaMode::Off);
         assert!(d.terminal);
-        assert!(core_env_pairs(&d, None).is_empty(), "defaults pass nothing to the core");
+        assert!(without_host_api(core_env_pairs(&d, None)).is_empty(), "defaults pass nothing else to the core");
     }
 
     #[test]
@@ -630,12 +644,34 @@ mod tests {
         ]);
         // A patch turns them back off; each one alone passes only its own key.
         let off = p.patched(&PrefsPatch { host_api_read: Some(false), ..Default::default() });
-        assert!(!core_env_pairs(&off, None).iter().any(|(k, _)| *k == "LLMIDE_HOST_API_READ"));
+        assert!(core_env_pairs(&off, None).contains(&("LLMIDE_HOST_API_READ", "0".to_string())));
         let only_push = Prefs { host_api_push: true, ..Prefs::default() };
-        assert_eq!(core_env_pairs(&only_push, None), vec![("LLMIDE_HOST_API_PUSH", "1".to_string())]);
-        // An older prefs file reads all five as off.
+        assert_eq!(without_host_api(core_env_pairs(&only_push, None)), vec![("LLMIDE_HOST_API_PUSH", "1".to_string())]);
+        // A file without the keys (written before they existed) gets the defaults: listener and push off.
         let old: Prefs = serde_json::from_str(r#"{"ltaMode":"off","router":false,"cap":false,"compress":false,"learn":false,"terminal":true,"theme":"dark"}"#).unwrap();
-        assert!(!old.host_api_tls && !old.host_api_read && !old.host_api_compose && !old.host_api_push && !old.host_api_tool_approvals);
+        assert!(!old.host_api_tls && !old.host_api_push);
+    }
+
+    #[test]
+    fn read_compose_and_tool_approvals_default_on_and_an_off_switch_is_honoured() {
+        let d = Prefs::default();
+        assert!(d.host_api_read && d.host_api_compose && d.host_api_tool_approvals);
+        let on: Vec<_> = DEFAULT_ON_HOST_API.iter().map(|k| (*k, "1".to_string())).collect();
+        assert_eq!(core_env_pairs(&d, None), on, "a paired phone works with no setup");
+        // Each switch turned off reaches the core as an explicit 0 (the core enables only the exact value 1).
+        let off = d.patched(&PrefsPatch { host_api_read: Some(false), host_api_compose: Some(false), host_api_tool_approvals: Some(false), ..Default::default() });
+        let zero: Vec<_> = DEFAULT_ON_HOST_API.iter().map(|k| (*k, "0".to_string())).collect();
+        assert_eq!(core_env_pairs(&off, None), zero);
+        // The off switch survives a save and a reload.
+        let dir = tmp("host-api-off");
+        save_to(&dir, &off).unwrap();
+        let back = load_from(&dir);
+        assert!(!back.host_api_read && !back.host_api_compose && !back.host_api_tool_approvals);
+        let _ = std::fs::remove_dir_all(&dir);
+        // A file without the keys reads them as on; a stored false is kept (no migration: it may be deliberate).
+        assert!(parse(r#"{"terminal":true}"#).host_api_read);
+        let stored = parse(r#"{"hostApiRead":false,"hostApiCompose":true,"hostApiToolApprovals":false}"#);
+        assert!(!stored.host_api_read && stored.host_api_compose && !stored.host_api_tool_approvals);
     }
 
     #[test]
@@ -718,9 +754,9 @@ mod tests {
     #[test]
     fn continue_summary_reaches_the_core_as_exactly_on() {
         let p = Prefs { continue_summary: true, ..Prefs::default() };
-        assert_eq!(core_env_pairs(&p, None), vec![("LLMIDE_V2_CONTINUE_SUMMARY", "on".to_string())]);
+        assert_eq!(without_host_api(core_env_pairs(&p, None)), vec![("LLMIDE_V2_CONTINUE_SUMMARY", "on".to_string())]);
         let off = p.patched(&PrefsPatch { continue_summary: Some(false), ..Default::default() });
-        assert!(core_env_pairs(&off, None).is_empty());
+        assert!(without_host_api(core_env_pairs(&off, None)).is_empty());
         let old: Prefs = serde_json::from_str(r#"{"ltaMode":"off","router":false,"cap":false,"compress":false,"learn":false,"terminal":true,"theme":"dark"}"#).unwrap();
         assert!(!old.continue_summary, "an older prefs file reads as off");
     }
@@ -728,12 +764,12 @@ mod tests {
     #[test]
     fn core_env_is_exactly_on_and_cap_compress_need_the_router() {
         let mut p = Prefs { router: true, cap: true, compress: true, learn: true, ..Prefs::default() };
-        let v = core_env_pairs(&p, None);
+        let v = without_host_api(core_env_pairs(&p, None));
         let names: Vec<&str> = v.iter().map(|(k, _)| *k).collect();
         assert_eq!(names, ["LLMIDE_ROUTER", "LLMIDE_ROUTER_CAP", "LLMIDE_ROUTER_COMPRESS", "LLMIDE_ROUTER_LEARN"]);
         assert!(v.iter().all(|(_, val)| val == "on"));
         p.router = false;
-        let v = core_env_pairs(&p, None);
+        let v = without_host_api(core_env_pairs(&p, None));
         assert_eq!(v.iter().map(|(k, _)| *k).collect::<Vec<_>>(), ["LLMIDE_ROUTER_LEARN"]);
     }
 
@@ -781,11 +817,11 @@ mod tests {
             features: Some(vec!["agent_chat".into(), "file_explorer".into(), "terminal".into()]),
             ..Default::default()
         });
-        let v = core_env_pairs(&p, Some("agent_chat,doc_gen"));
+        let v = without_host_api(core_env_pairs(&p, Some("agent_chat,doc_gen")));
         assert_eq!(v, vec![("LLMIDE_FEATURES", "agent_chat,file_explorer,terminal".to_string())]);
         // Terminal off removes it from the explicit profile too.
         let off = p.patched(&PrefsPatch { terminal: Some(false), ..Default::default() });
-        assert_eq!(core_env_pairs(&off, None), vec![("LLMIDE_FEATURES", "agent_chat,file_explorer".to_string())]);
+        assert_eq!(without_host_api(core_env_pairs(&off, None)), vec![("LLMIDE_FEATURES", "agent_chat,file_explorer".to_string())]);
         // The profile wins over the host's own value.
         let two = effective_features_with(None, true, &["agent_chat".into(), "auto_tasks".into()]).unwrap();
         assert_eq!(two, "agent_chat,auto_tasks");
@@ -809,7 +845,7 @@ mod tests {
         assert_eq!(effective_features(Some("agent_chat, terminal,file_explorer"), false).unwrap(), "agent_chat,file_explorer");
         assert_eq!(effective_features(Some("terminal"), false).unwrap(), "agent_chat");
         assert_eq!(effective_features(Some("agent_chat,terminal"), true).unwrap(), "agent_chat,terminal");
-        let v = core_env_pairs(&Prefs { terminal: false, ..Prefs::default() }, Some("agent_chat,terminal"));
+        let v = without_host_api(core_env_pairs(&Prefs { terminal: false, ..Prefs::default() }, Some("agent_chat,terminal")));
         assert_eq!(v, vec![("LLMIDE_FEATURES", "agent_chat".to_string())]);
     }
 

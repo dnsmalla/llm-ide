@@ -44,20 +44,15 @@ const SPAWN_PORTS: [u16; 4] = [3456, 3457, 3458, 3459];
 /// Fixed env of the core THIS app spawns (never read from the host env). `LLMIDE_LIVE_ACK=1`: a finalized extension
 /// capture is held until the desktop archivist (capture_archivist.rs) acks the verified note; without it the extension
 /// keeps every draft in `no-ack` and an ack releases nothing. An adopted server keeps its own env.
-/// `LLMIDE_HOST_API_TOOL_APPROVALS`: an Execute turn started from the phone asks before each edit or command; without this
-/// the phone cannot answer, and the turn waits on a prompt nobody can see.
 /// `LLMIDE_HOST_API_CHAT_CLEAR`: the phone's own "clear / delete this chat" (behind a confirmation there) works; without it the
-/// core refuses and the phone's cleared chat reappears on the next reload.
-/// `LLMIDE_HOST_API_READ` / `_COMPOSE`: a paired phone gets History, Execute and Auto Tasks (each command is still
-/// checked against the member's role and project grant); they matter only while the pinned listener runs.
-const SPAWNED_CORE_FLAGS: [(&str, &str); 7] = [
+/// core refuses and the phone's cleared chat reappears on the next reload. It has no Settings switch.
+/// NOTE: `LLMIDE_HOST_API_READ` / `_COMPOSE` / `_TOOL_APPROVALS` are NOT here: they are Settings switches, on by default,
+/// and `prefs::core_env_pairs` passes each one as an explicit `1` or `0` so turning one off is honoured.
+const SPAWNED_CORE_FLAGS: [(&str, &str); 4] = [
     ("LLMIDE_ENGINE_PREWARM", "0"),
     ("LLMIDE_BACKUP_INTERVAL_HOURS", "0"),
     ("LLMIDE_LIVE_ACK", "1"),
-    ("LLMIDE_HOST_API_READ", "1"),
-    ("LLMIDE_HOST_API_COMPOSE", "1"),
     ("LLMIDE_HOST_API_CHAT_CLEAR", "1"),
-    ("LLMIDE_HOST_API_TOOL_APPROVALS", "1"),
 ];
 /// On a supervised restart, how long the port our just-exited core held may stay busy before it is skipped.
 const RESTART_PORT_WAIT: Duration = Duration::from_secs(3);
@@ -2344,11 +2339,16 @@ process.on('SIGTERM', () => process.exit(0));
         assert!(crate::core_env::scrub(&host, crate::fsutil::Os::Mac).is_empty(), "never taken from the host env");
     }
     #[test]
-    fn the_spawned_core_serves_phone_read_and_compose() {
-        assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_READ", "1")));
-        assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_COMPOSE", "1")));
+    fn the_spawned_core_forces_only_chat_clear_and_leaves_switchable_capabilities_to_prefs() {
         assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_CHAT_CLEAR", "1")));
-        assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_TOOL_APPROVALS", "1")));
+        // Forcing these would override the Settings switch; prefs::core_env_pairs owns them (default on).
+        for key in ["LLMIDE_HOST_API_READ", "LLMIDE_HOST_API_COMPOSE", "LLMIDE_HOST_API_TOOL_APPROVALS"] {
+            assert!(!SPAWNED_CORE_FLAGS.iter().any(|(k, _)| *k == key), "{key} must follow the pref");
+        }
+        let env = crate::prefs::core_env_pairs(&crate::prefs::Prefs::default(), None);
+        for key in ["LLMIDE_HOST_API_READ", "LLMIDE_HOST_API_COMPOSE", "LLMIDE_HOST_API_TOOL_APPROVALS"] {
+            assert!(env.contains(&(key, "1".to_string())), "{key} is on by default");
+        }
     }
     #[cfg(unix)]
     #[test]

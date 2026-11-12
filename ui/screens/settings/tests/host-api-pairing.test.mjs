@@ -96,8 +96,11 @@ test("a TLS PIN shows the certificate fingerprint; a dev PIN shows none", async 
 test("a TLS PIN with an address shows the llmide://pair QR, its payload and alt text; a dev PIN or no address shows none", async () => {
   const tls = await m.mintPin(fake({ "POST /host-api/pin": reply("post-host-api-pin-200-tls") }));
   assert.deepEqual(tls.addresses, ["100.101.102.103", "192.168.1.20"]);
-  const payload = `llmide://pair?ip=100.101.102.103&pin=${tls.pin}&h1port=3016&h1fp=${tls.fingerprint}&api=1`;
-  assert.equal(m.pairingPayload(tls), payload, "Tailscale first, no v2 port (the phone then dials only v1)");
+  const payload = `llmide://pair?ip=100.101.102.103&ip=192.168.1.20&pin=${tls.pin}&h1port=3016&h1fp=${tls.fingerprint}&api=1`;
+  assert.equal(m.pairingPayload(tls), payload, "every address in the core's order, Tailscale first; no v2 port (the phone then dials only v1)");
+  // An older phone reads only the first ip: still the core's best address.
+  assert.equal(new URL(payload).searchParams.get("ip"), "100.101.102.103");
+  assert.deepEqual(new URL(payload).searchParams.getAll("ip"), tls.addresses);
   const html = view({ pin: tls, now: tls.expiresAt - 1000 });
   assert.match(html, /<svg[^>]*role="img"[^>]*aria-label="Pairing QR code for this computer"/);
   assert.match(html, /<path d="M\d/, "dark modules drawn");
@@ -110,6 +113,24 @@ test("a TLS PIN with an address shows the llmide://pair QR, its payload and alt 
   assert.doesNotMatch(view({ pin: noAddr, now: tls.expiresAt - 1000 }), /<svg/);
   assert.deepEqual(m.decodePin({ pin: "123456", expiresAt: 1, port: 3016, fingerprint: null }).addresses, [], "an older core without addresses");
   assert.throws(() => m.decodePin({ pin: "123456", expiresAt: 1, port: 3016, fingerprint: null, addresses: ["evil.example/x"] }), /BAD_RESPONSE/);
+});
+
+test("the QR carries at most four addresses, first one first, and every address is validated", () => {
+  const fp = `sha256:${"A".repeat(43)}`;
+  const six = ["100.64.0.1", "192.168.1.20", "10.0.0.5", "172.17.0.1", "172.18.0.1", "192.168.64.1"];
+  const pin = m.decodePin({ pin: "123456", expiresAt: 1, port: 3016, fingerprint: fp, addresses: six });
+  const payload = m.pairingPayload(pin);
+  assert.equal(m.QR_MAX_ADDRESSES, 4);
+  assert.deepEqual(new URL(payload).searchParams.getAll("ip"), six.slice(0, 4), "core order kept, the rest dropped");
+  assert.ok(payload.startsWith("llmide://pair?ip=100.64.0.1&ip=192.168.1.20&ip=10.0.0.5&ip=172.17.0.1&pin=123456&"));
+  // A bad address anywhere in the list (not only the first) rejects the whole answer, so nothing unescaped reaches the QR.
+  for (const bad of ["1.2.3.4&pin=000000", "256.1.1.1", "::1", ""]) {
+    assert.throws(() => m.decodePin({ pin: "123456", expiresAt: 1, port: 3016, fingerprint: fp, addresses: ["100.64.0.1", bad] }), /BAD_RESPONSE/);
+  }
+  // Four of the longest IPv4s still render as a QR at level M.
+  const longest = m.decodePin({ pin: "123456", expiresAt: 1, port: 65535, fingerprint: fp, addresses: Array(4).fill("255.255.255.255") });
+  const html = renderToStaticMarkup(h(m.PairingQr, { payload: m.pairingPayload(longest) }));
+  assert.match(html, /<path d="M\d/);
 });
 
 test("Revoke asks first (Cancel focused first), then deletes the device", async () => {
