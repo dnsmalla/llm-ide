@@ -17,6 +17,8 @@ export interface GraphCanvasProps {
   active: boolean;
   camera: { current: ViewCamera | null };
   showLabels?: boolean;
+  /** Quiet status shown over the canvas corner (counts, legend). */
+  hud?: React.ReactNode;
   onSelect: (node: number) => void;
   /** Double-click on a node (its index) or on the empty stage (-1). */
   onFocus?: (node: number) => void;
@@ -141,10 +143,11 @@ export function GraphCanvas(p: GraphCanvasProps) {
     >
       <div ref={box} className="gr-canvas" data-testid="graph-canvas" />
       {building && <div className="gr-building" role="status">Drawing {p.model.n.toLocaleString("en-US")} nodes...</div>}
+      {p.hud ? <div className="gr-hud">{p.hud}</div> : null}
       <div className="gr-zoom" role="group" aria-label="Zoom">
-        <button type="button" className="gr-btn" aria-label="Zoom in" onClick={() => view.current?.zoomIn()}>+</button>
-        <button type="button" className="gr-btn" aria-label="Zoom out" onClick={() => view.current?.zoomOut()}>-</button>
-        <button type="button" className="gr-btn" aria-label="Fit the whole graph" onClick={() => view.current?.reset()}>Fit</button>
+        <button type="button" className="gr-zoom-btn" aria-label="Zoom in" title="Zoom in" onClick={() => view.current?.zoomIn()}>+</button>
+        <button type="button" className="gr-zoom-btn" aria-label="Zoom out" title="Zoom out" onClick={() => view.current?.zoomOut()}>−</button>
+        <button type="button" className="gr-zoom-btn gr-zoom-fit" aria-label="Fit the whole graph" title="Fit the whole graph" onClick={() => view.current?.reset()}>Fit</button>
       </div>
     </div>
   );

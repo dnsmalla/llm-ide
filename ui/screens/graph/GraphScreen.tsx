@@ -223,32 +223,36 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
     );
   }
 
+  // The numbers and kind legend sit quietly over the canvas, not in the toolbar.
+  const hud = (
+    <>
+      <span aria-label="Nodes shown">{num(shown)} / {num(model.n)} shown</span>
+      {docGraph ? <span className="gr-legend-inline" aria-label="Node kinds">{legend.map((l) => <span key={l.kind}><i style={{ background: kindColor(l.kind) }} aria-hidden="true" />{l.label}</span>)}</span> : null}
+    </>
+  );
+
   return (
     <div className="gr-root" data-active={active}>
       <header className="gr-top">
-        <h2 className="gr-title">Code Graph</h2>
-        <p className="gr-summary" role="status">{num(model.n)} nodes, {num(model.m)} edges, {num(layout.communityCount)} communities{split && split.doc > 0 ? ` · ${num(split.code)} code · ${num(split.doc)} doc` : ""}{model.n > NODE_BUDGET ? " · overview: click a node to reveal its neighbours" : ""}</p>
-        <div className="gr-canvas-tools" role="group" aria-label="Graph display">
-          {hasSymbols ? (
-            <button type="button" className="gr-btn" aria-pressed={symbolsOn} onClick={() => store.setFilters({ hiddenKinds: setSymbolsShown(model, s.filters, !symbolsOn) })}>Symbols</button>
-          ) : null}
-          <span className="gr-muted" aria-label="Nodes shown">{num(shown)} / {num(model.n)} shown</span>
-          <div className="gr-seg" role="radiogroup" aria-label="Dimensions">
-            <button type="button" role="radio" aria-checked="true" className="gr-seg-btn" data-on="true">2D</button>
-            <button type="button" role="radio" aria-checked="false" className="gr-seg-btn" disabled title="3D is not available in the desktop renderer">3D</button>
-          </div>
-          <button type="button" className="gr-btn" aria-pressed={showLabels} onClick={() => setShowLabels((v) => !v)}>Labels</button>
-          {docGraph ? <span className="gr-legend-inline" aria-label="Node kinds">{legend.map((l) => <span key={l.kind}><i style={{ background: kindColor(l.kind) }} aria-hidden="true" />{l.label}</span>)}</span> : null}
-          {focusedName !== null ? (
-            <button type="button" className="gr-btn" title="Clear focus (or double-click empty space)" onClick={() => store.setFocus(-1)}>Focus: {focusedName} ✕</button>
-          ) : null}
-          <button ref={expandBtn} type="button" className="gr-btn" aria-label="Expand graph to full page" title="Expand graph to full page" onClick={() => setFullPage(true)}>⛶</button>
+        <div className="gr-heading">
+          <h2 className="gr-title">Code Graph</h2>
+          <p className="gr-summary" role="status">{num(model.n)} nodes, {num(model.m)} edges, {num(layout.communityCount)} communities{split && split.doc > 0 ? ` · ${num(split.code)} code · ${num(split.doc)} doc` : ""}{model.n > NODE_BUDGET ? " · overview: click a node to reveal its neighbours" : ""}</p>
         </div>
         <div role="tablist" aria-label="Graph views" className="gr-seg">
           <button type="button" role="tab" id="gr-tab-graph" aria-selected={s.tab === "graph"} aria-controls="gr-panel-graph" className="gr-seg-btn" data-on={s.tab === "graph"} onClick={() => store.setTab("graph")}>Graph</button>
           <button type="button" role="tab" id="gr-tab-list" aria-selected={s.tab === "list"} aria-controls="gr-panel-list" className="gr-seg-btn" data-on={s.tab === "list"} onClick={() => store.setTab("list")}>Nodes</button>
         </div>
-        <button type="button" className="gr-btn" onClick={() => void reloadCurrent()}>Reload</button>
+        <div className="gr-canvas-tools" role="group" aria-label="Graph display">
+          {hasSymbols ? (
+            <button type="button" className="gr-btn" aria-pressed={symbolsOn} onClick={() => store.setFilters({ hiddenKinds: setSymbolsShown(model, s.filters, !symbolsOn) })}>Symbols</button>
+          ) : null}
+          <button type="button" className="gr-btn" aria-pressed={showLabels} onClick={() => setShowLabels((v) => !v)}>Labels</button>
+          {focusedName !== null ? (
+            <button type="button" className="gr-btn gr-chip" title="Clear focus (or double-click empty space)" onClick={() => store.setFocus(-1)}>Focus: {focusedName} ✕</button>
+          ) : null}
+          <button ref={expandBtn} type="button" className="gr-btn gr-icon-btn" aria-label="Expand graph to full page" title="Expand graph to full page" onClick={() => setFullPage(true)}>⛶</button>
+          <button type="button" className="gr-btn" title="Read the graph file again" onClick={() => void reloadCurrent()}>Reload</button>
+        </div>
       </header>
       {notices.length > 0 && (
         <div className="gr-notices">{notices.slice(0, 4).map((n) => <StatusBanner key={n} severity="info" message={n} />)}</div>
@@ -258,25 +262,35 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
       {fatal && <StatusBanner severity="error" message={`${fatal} The Nodes tab still works.`} />}
       <div className="gr-body">
         <div className="gr-side">
-          {quickPick}
+          <div className="gr-find">
+            <label className="gr-field gr-search">
+              <span className="gr-sr">Search nodes</span>
+              <input type="search" value={s.query} spellCheck={false} placeholder="Search nodes by name or path" onChange={(e) => store.setQuery(e.target.value)} />
+            </label>
+            {s.query.trim() !== "" && (
+              <div className="gr-results">
+                <p className="gr-muted" role="status">{num(results.length)} match{results.length === 1 ? "" : "es"}</p>
+                <NodeList id="gr-search" label="Search results" model={model} layout={layout} count={results.length} nodeAt={(k) => results[k]} selected={sel} onSelect={(i) => store.revealNode(i)} initialViewport={240} emptyText="No node matches." />
+              </div>
+            )}
+          </div>
+          {repos.length > 1 ? quickPick : null}
           <GraphFileTree
             paths={model.paths}
             selected={s.query}
             onSelect={(path) => store.setQuery(path)}
             onClear={() => store.setQuery("")}
           />
-          <label className="gr-field">
-            <span>Search nodes</span>
-            <input type="search" value={s.query} spellCheck={false} placeholder="Name or path" onChange={(e) => store.setQuery(e.target.value)} />
-          </label>
-          {s.query.trim() !== "" && (
-            <div className="gr-results">
-              <p className="gr-muted" role="status">{num(results.length)} match{results.length === 1 ? "" : "es"}</p>
-              <NodeList id="gr-search" label="Search results" model={model} layout={layout} count={results.length} nodeAt={(k) => results[k]} selected={sel} onSelect={(i) => store.revealNode(i)} initialViewport={240} emptyText="No node matches." />
+          {/* Everything that is not needed to look around: filters, communities and generating the graph. */}
+          <details className="gr-advanced">
+            <summary>Advanced</summary>
+            <div className="gr-advanced-body">
+              <h3 className="gr-subhead">Filters and communities</h3>
+              <Controls model={model} communities={communities} filters={s.filters} onChange={(patch) => store.setFilters(patch)} />
+              <h3 className="gr-subhead">Generate graph</h3>
+              {runFooter}
             </div>
-          )}
-          <details className="gr-advanced"><summary>Filters and communities</summary><Controls model={model} communities={communities} filters={s.filters} onChange={(patch) => store.setFilters(patch)} /></details>
-          {runFooter}
+          </details>
         </div>
         <main className="gr-main">
           <div id="gr-panel-graph" role="tabpanel" aria-labelledby="gr-tab-graph" hidden={s.tab !== "graph"} className="gr-panel">
@@ -290,6 +304,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
               active={active && s.tab === "graph"}
               camera={camera}
               showLabels={showLabels}
+              hud={hud}
               onSelect={(i) => store.select(i)}
               onFocus={(i) => store.setFocus(i < 0 || i === store.getSnapshot().focus ? -1 : i)}
               onFatal={setFatal}
