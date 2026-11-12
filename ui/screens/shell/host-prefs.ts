@@ -73,6 +73,8 @@ export interface HostPrefs {
   hostApiCompose: boolean;
   hostApiPush: boolean;
   hostApiToolApprovals: boolean;
+  /** Host-owned marker of the one-time migration that turned read/compose/tool approvals on; never set from the UI. */
+  hostApiCapsMigrated: boolean;
   /** Defaults applied to loops the Loop screen re-adds to a project. */
   loopDefaults: LoopDefaults;
   /** Minutes between automatic Code Graph refreshes; 0 = off. Host raises 1-4 to 5. */
@@ -150,7 +152,7 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
   const remoteServer = decodeRemoteServer(raw.remoteServer);
   return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, continueSummary, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, remoteServer,
     hostApiTls: raw.hostApiTls === true, hostApiRead: raw.hostApiRead === true, hostApiCompose: raw.hostApiCompose === true, hostApiPush: raw.hostApiPush === true, hostApiToolApprovals: raw.hostApiToolApprovals === true,
-    loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
+    hostApiCapsMigrated: raw.hostApiCapsMigrated === true, loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {
