@@ -11269,6 +11269,164 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/issues/detail:
+    get:
+      summary: "One hosted issue with its comments and the label, milestone and assignee choices (desktop only: needs the bus host proof)"
+      tags:
+        - "kb-sources"
+      parameters:
+        - name: "provider"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            enum:
+              - "github"
+              - "gitlab"
+        - name: "repo"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            description: "As in POST /kb/issues/create"
+        - name: "number"
+          in: "query"
+          required: true
+          schema:
+            type: "integer"
+            description: "The issue number (GitLab iid), a positive integer"
+      responses:
+        "200":
+          description: "OK: `{ ok: true, issue, choices, comments }`; the token never appears"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "ok"
+                  - "issue"
+                properties:
+                  ok:
+                    const: true
+                  issue:
+                    type: "object"
+                    description: "state, title, body, labels, milestone, assignees, dueDate, author, createdAt, updatedAt, webUrl"
+                  choices:
+                    type: "object"
+                    description: "labels, milestones and assignees the repository offers (up to 100 each)"
+                  comments:
+                    type: "array"
+                    description: "Up to 100 non-system comments, newest last"
+                    items:
+                      type: "object"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden (host proof missing, or the issue is not on the board)"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "502":
+          description: "Bad Gateway"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/issues/update:
+    post:
+      summary: "Edit a hosted issue's title, body, state, labels, milestone, assignees or due date (desktop only; at least one field)"
+      tags:
+        - "kb-sources"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "provider"
+                - "repo"
+                - "number"
+              properties:
+                provider:
+                  type: "string"
+                  enum:
+                    - "github"
+                    - "gitlab"
+                repo:
+                  type: "string"
+                  description: "As in POST /kb/issues/create"
+                number:
+                  type: "integer"
+                  description: "The issue number (GitLab iid), a positive integer"
+                title:
+                  type: "string"
+                  description: "1 to the title limit"
+                body:
+                  type: "string"
+                state:
+                  type: "string"
+                  enum:
+                    - "open"
+                    - "closed"
+                labels:
+                  type: "array"
+                  maxItems: 50
+                  items:
+                    type: "string"
+                milestoneId:
+                  type: "integer"
+                  nullable: true
+                assignees:
+                  type: "array"
+                  maxItems: 20
+                  items:
+                    type: "string"
+                assigneeIds:
+                  type: "array"
+                  maxItems: 20
+                  items:
+                    type: "integer"
+                dueDate:
+                  type: "string"
+                  nullable: true
+                  description: "YYYY-MM-DD"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/IssueWriteOk"
+        "400":
+          description: "Bad Request (invalid field, or nothing to update)"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "502":
+          description: "Bad Gateway"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/issues/comment:
     post:
       tags:
