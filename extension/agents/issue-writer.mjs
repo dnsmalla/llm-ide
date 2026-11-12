@@ -126,7 +126,29 @@ export async function callProvider(w, token) {
 export async function createIssue({ userId, provider, repo, title, body: text, idem, token }) {
   const w = parseIssueWrite("create", { provider, repo, title, body: text, idem });
   if (w.error) return { status: 400, body: w };
-  return onceForIdem(userId, w, () => callProvider(w, token));
+  const out = await onceForIdem(userId, w, () => callProvider(w, token));
+  recordCreatedIssue(userId, w, out);
+  return out;
+}
+
+/**
+ * After a hosted create: the new issue's ticket row, in the importer's shape, so the Issues board, the Factory's
+ * open-issue picker and the per-step comments find it before the repository is imported again. Never fails the create.
+ */
+export function recordCreatedIssue(userId, w, out, now = new Date()) {
+  if (w?.op !== 'create' || out?.status !== 200 || !Number.isSafeInteger(out.number) || out.number <= 0) return false;
+  const url = out.body?.url;
+  if (typeof url !== 'string' || !url.startsWith(`${WEB_ORIGIN[w.provider]}/`)) return false;
+  const at = now.toISOString();
+  try {
+    kb.ingestSources(userId, [{
+      kind: 'ticket', ref: url, chunkIdx: 0, title: String(w.title).slice(0, 500), body: String(w.body ?? '').slice(0, 50_000),
+      meta: { provider: w.provider, repo: w.repo, number: out.number, state: 'open', isPR: false, labels: [], createdAt: at, updatedAt: at },
+    }]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** True when the repository is already on this user's Issues board (the only repositories a write may reach). */

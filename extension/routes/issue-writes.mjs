@@ -10,7 +10,7 @@ import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { safeAudit, clientIp } from '../server/route-http.mjs';
-import { NAME, WEB_ORIGIN, parseIssueWrite, parseIssueUpdate, updateIssue, callProvider, onceForIdem } from '../agents/issue-writer.mjs';
+import { NAME, WEB_ORIGIN, parseIssueWrite, parseIssueUpdate, updateIssue, callProvider, onceForIdem, recordCreatedIssue } from '../agents/issue-writer.mjs';
 
 // The writer lives in agents/ (the Sources -> Issue task calls it too); these names keep their old import path.
 export { ISSUE_LIMITS, IDEM_TTL_MS, parseIssueWrite, parseIssueUpdate, providerCall, mapProviderFailure, onceForIdem, _resetIssueWriteIdemForTests } from '../agents/issue-writer.mjs';
@@ -56,6 +56,7 @@ export async function handleIssueWriteRoutes(req, res, { userId, url }) {
   const token = getSecret(kb.getDb(), userId, `${w.provider}.token`);
   if (!token) return fail(res, 400, `${w.provider.toUpperCase()}_TOKEN_MISSING`, `Add a ${NAME[w.provider]} token in Settings → Built-in keys first.`);
   const out = op === 'update' ? await updateIssue(w, token) : op === 'create' ? await onceForIdem(userId, w, () => callProvider(w, token)) : await callProvider(w, token);
+  if (op === 'create') recordCreatedIssue(userId, w, out);
   if ((op === 'close' || (op === 'update' && w.state === 'closed')) && out.status === 200) kb.setTicketState(userId, { provider: w.provider, repo: w.repo, number: w.number, state: 'closed' });
   if (op === 'update' && w.state === 'open' && out.status === 200) kb.setTicketState(userId, { provider: w.provider, repo: w.repo, number: w.number, state: 'open' });
   audit(out.status === 200 ? 'success' : 'failure', resource, {

@@ -263,3 +263,37 @@ test("issue edit: every field is checked; an empty edit and a bad date are refus
   assert.equal(parseIssueUpdate({ ...base, dueDate: "tomorrow" }).error.details.field, "dueDate");
   assert.equal(parseIssueUpdate({ ...base, labels: [""] }).error.details.field, "labels");
 });
+
+test("a created issue is recorded at once, so it can be commented on (and run by the Factory) before the next import", async () => {
+  reset();
+  const u = user("created");
+  seed(u);
+  _setPinnedFetchForTests(async (url, init) => {
+    if (url === "https://gitlab.com/api/v4/projects/g%2Fsub%2Fp/issues" && init.method === "POST") return new Response(JSON.stringify({ id: 901, iid: 12, web_url: "https://gitlab.com/g/sub/p/-/issues/12", state: "opened" }), { status: 201 });
+    if (url === "https://gitlab.com/api/v4/projects/g%2Fsub%2Fp/issues/12/notes") return new Response(JSON.stringify({ id: 1 }), { status: 201 });
+    return new Response("{}", { status: 404 });
+  });
+  try {
+    const created = await call(u, "/kb/issues/create", { provider: "gitlab", repo: "g/sub/p", title: "From the docs", body: "Step 0", idem: "C".repeat(20) });
+    assert.equal(created.status, 200);
+    assert.deepEqual(db.findTicket(u, { provider: "gitlab", repo: "g/sub/p", number: 12, origin: "https://gitlab.com" }), { isPR: false });
+    const comment = await call(u, "/kb/issues/comment", { provider: "gitlab", repo: "g/sub/p", number: 12, body: "**Factory · `Plan`** — passed" });
+    assert.equal(comment.status, 200, "the Factory's step comment on the new issue is accepted");
+    const listed = db.listTicketSources(u, { provider: "gitlab", repo: "g/sub/p", state: "open", limit: 50 });
+    assert.ok(JSON.stringify(listed).includes("From the docs"), "the new issue is listed as open");
+  } finally { _setPinnedFetchForTests(null); }
+});
+
+test("recordCreatedIssue records only a successful create on the provider's own web host", async () => {
+  const { recordCreatedIssue } = await import("../agents/issue-writer.mjs");
+  reset();
+  const u = user("guard");
+  const w = { op: "create", provider: "gitlab", repo: "g/p", title: "T", body: "" };
+  assert.equal(recordCreatedIssue(u, w, { status: 502, number: 4, body: { url: "https://gitlab.com/g/p/-/issues/4" } }), false);
+  assert.equal(recordCreatedIssue(u, w, { status: 200, number: null, body: { url: "https://gitlab.com/g/p/-/issues/4" } }), false);
+  assert.equal(recordCreatedIssue(u, w, { status: 200, number: 4, body: { url: "https://gitlab.com.evil.example/g/p/-/issues/4" } }), false);
+  assert.equal(recordCreatedIssue(u, { ...w, op: "comment" }, { status: 200, number: 4, body: { url: "https://gitlab.com/g/p/-/issues/4" } }), false);
+  assert.equal(db.findTicket(u, { provider: "gitlab", repo: "g/p", number: 4, origin: "https://gitlab.com" }), null);
+  assert.equal(recordCreatedIssue(u, w, { status: 200, number: 4, body: { url: "https://gitlab.com/g/p/-/issues/4" } }), true);
+  assert.deepEqual(db.findTicket(u, { provider: "gitlab", repo: "g/p", number: 4, origin: "https://gitlab.com" }), { isPR: false });
+});
