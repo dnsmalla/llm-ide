@@ -13,6 +13,8 @@ process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 process.env.LLMIDE_LOG_FILE = 'none';
 const pinDir = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "_hub-pin-"));
+// Registered at once: a run that fails before the `after` hook below (e.g. listen refused) must not leave the dir.
+process.on('exit', () => fs.rmSync(pinDir, { recursive: true, force: true }));
 process.env.LLMIDE_HOST_API_FINGERPRINT_FILE = path.join(pinDir, "pin");
 fs.writeFileSync(process.env.LLMIDE_HOST_API_FINGERPRINT_FILE, "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n");
 process.env.LLMIDE_HUB_PUBLIC_URL = "wss://hub.example.com/host-api/v1";
