@@ -3,11 +3,15 @@ import Foundation
 @testable import SharedProtocol
 
 private func enc<T: Encodable>(_ v: T) -> Data { try! JSONEncoder().encode(v) }
-private func settle() async { for _ in 0..<50 { await Task.yield() } }
+private func settle() async {
+    for _ in 0..<50 { await Task.yield() }
+    // resume finalization schedules the history snapshot on a detached Task; give it a real hop.
+    try? await Task.sleep(nanoseconds: 50_000_000)
+}
 
 /// Streaming replies and resume-after-reconnect (`chat.delta` increments, `chat.resume`).
 @MainActor
-@Suite("Chat resume")
+@Suite("Chat resume", .serialized)
 struct ChatResumeTests {
     let ctx = FakeContext()
 

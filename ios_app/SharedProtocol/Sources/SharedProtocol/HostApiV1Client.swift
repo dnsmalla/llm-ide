@@ -265,14 +265,16 @@ public final class HostApiV1Client: HostConnection {
                 if wasConnected { teardown(); onEvent?(.disconnected(reason: rejection)) }
             }
         case let .event(name, payload, replyTo, rev):
+            // Nothing pushed mid-handshake belongs to a session yet. Check this BEFORE touching the rev tracker:
+            // an early event must not emit resync either.
+            guard state == .connected else { return }
             if revs.observe(event: rev) == .gap { onEvent?(.resync) }
             if name == .hostCapabilities,
                let e = try? JSONDecoder().decode(HostApiHostCapabilitiesEvent.self, from: payload) {
                 capabilities = Set(e.capabilities)
                 onEvent?(.capabilities(capabilities))
             }
-            // Nothing pushed mid-handshake belongs to a session yet: forward events only once connect has finished.
-            if state == .connected { onEvent?(.event(name, payload: payload, replyTo: replyTo)) }
+            onEvent?(.event(name, payload: payload, replyTo: replyTo))
         }
     }
 }
