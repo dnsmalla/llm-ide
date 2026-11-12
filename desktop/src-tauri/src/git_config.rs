@@ -33,6 +33,9 @@ const ALLOWED: &[(&str, bool, &[&str])] = &[
     ("fetch", false, &["prune"]),
     ("init", false, &["defaultbranch"]),
     ("commit", false, &["gpgsign"]),
+    // Plain data git-lfs writes; git never reads `lfs.*`, and the program-running half (`filter.lfs.*`) stays refused.
+    ("lfs", false, &["repositoryformatversion"]),
+    ("lfs", true, &["access", "locksverify"]),
 ];
 
 fn key_ok(k: &str) -> bool {
@@ -81,7 +84,9 @@ fn check_key_line(section: &(String, bool), line: &str, allow_worktree: bool) ->
         return Err(format!("unsupported line {line:.40}"));
     }
     let lk = key.to_ascii_lowercase();
-    let Some((_, sub_ok, keys)) = ALLOWED.iter().find(|(n, _, _)| *n == section.0) else {
+    // A section may carry one rule per form (with and without a subsection); prefer the one matching this header.
+    let rule = ALLOWED.iter().find(|(n, s, _)| *n == section.0 && *s == section.1).or_else(|| ALLOWED.iter().find(|(n, _, _)| *n == section.0));
+    let Some((_, sub_ok, keys)) = rule else {
         return Err(format!("section [{}] is not allowed", section.0));
     };
     if section.1 && !sub_ok {
@@ -172,6 +177,23 @@ mod tests {
         check_config(ok.as_bytes()).unwrap();
         check_config(b"").unwrap();
         check_config(b"[core]\r\n\tbare = false\r\n").unwrap();
+    }
+
+    #[test]
+    fn accepts_the_data_keys_git_lfs_writes_and_nothing_else_under_lfs() {
+        let lfs = "[core]\n\tbare = false\n[lfs]\n\trepositoryformatversion = 0\n[lfs \"https://gitlab.com/g/p.git/info/lfs\"]\n\taccess = basic\n\tlocksverify = false\n";
+        check_config(lfs.as_bytes()).unwrap();
+        for bad in [
+            "[lfs]\n\taccess = basic\n",
+            "[lfs]\n\turl = https://evil\n",
+            "[lfs]\n\tstandalonetransferagent = x\n",
+            "[lfs \"u\"]\n\trepositoryformatversion = 0\n",
+            "[lfs \"customtransfer.x\"]\n\tpath = /bin/sh\n",
+            "[lfs.customtransfer.x]\n\tpath = /bin/sh\n",
+            "[filter \"lfs\"]\n\tprocess = git-lfs filter-process\n",
+        ] {
+            assert!(check_config(bad.as_bytes()).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
