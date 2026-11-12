@@ -259,6 +259,12 @@ export function subscribe(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
+/** A one-line notice for the Factory board (e.g. a background MR restart), shown once like a start refusal. */
+export function postRunNotice(message: string): void {
+  lastNotice = message;
+  emit();
+}
+
 /** The reason the most recent run did not start, once. */
 export function takeRunNotice(): string | null {
   const n = lastNotice;

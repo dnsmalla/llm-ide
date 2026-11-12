@@ -14,7 +14,10 @@ import { autoShipKind, decodeWorktreeDiff } from "./ship-model.ts";
 import { setRunRecordAutoShip, setRunRecordShip } from "./history.ts";
 import { postIssueText, postStageComment } from "../../factory/issue-comment-poster.ts";
 import { autoShipRun } from "../../factory/auto-ship.ts";
-import { cancelRun, configureRunManager, concurrency, liveRuns, projectGuardedFs, startRun } from "./run-manager.ts";
+import { readReworkCounts, watchMrsOnce, writeReworkCounts } from "../../factory/mr-watch.ts";
+import { chunkShipRequests, decodeShipResults, decodeWorktreeList } from "../../factory/board-model.ts";
+import type { ShipStatus } from "../../factory/columns.ts";
+import { cancelRun, configureRunManager, concurrency, liveRuns, postRunNotice, projectGuardedFs, startRun } from "./run-manager.ts";
 
 let installed = false;
 const commentChains = new Map<string, Promise<void>>();
@@ -83,6 +86,45 @@ export function installRunManagerHost(): void {
     onRunFinished: (info) => noteRunFinished(info.runId, info.statusCode, info.statusSummary),
   });
   installBusRunner();
+  installMrWatch(hostFs, activeProject);
+}
+
+let mrWatchInstalled = false;
+const MR_WATCH_MS = 5 * 60 * 1000;
+
+/** The background MR watch (factory/mr-watch.ts): every 5 minutes, and once shortly after the app starts. */
+function installMrWatch(hostFs: ReturnType<typeof createHostFs>, activeProject: () => string | null): void {
+  if (mrWatchInstalled) return;
+  mrWatchInstalled = true;
+  let busy = false;
+  const tick = () => {
+    if (busy) return;
+    busy = true;
+    void watchMrsOnce({
+      projectRoot: activeProject,
+      fs: (root) => projectGuardedFs(hostFs, root, activeProject),
+      worktrees: () => invokeHost<unknown>("loop_worktree_list").then(decodeWorktreeList, () => new Map()),
+      live: () => liveRuns(),
+      shipStatus: async (requests) => {
+        const out = new Map<string, ShipStatus | "error">();
+        for (const chunk of chunkShipRequests(requests)) {
+          const r = await core.requestRaw("/kb/loop/ship-status", { method: "POST", body: { requests: chunk }, timeoutMs: 30_000 });
+          // Rate limited or failed: nothing is decided from a status that was not read.
+          if (r.status !== 200) return new Map();
+          for (const [url, st] of decodeShipResults(r.body)) out.set(url, st);
+        }
+        return out;
+      },
+      readCounts: readReworkCounts,
+      writeCounts: writeReworkCounts,
+      start: startRun,
+      notice: postRunNotice,
+    }).finally(() => { busy = false; });
+  };
+  const first = setTimeout(tick, 30_000);
+  const timer = setInterval(tick, MR_WATCH_MS);
+  (first as unknown as { unref?: () => void }).unref?.();
+  (timer as unknown as { unref?: () => void }).unref?.();
 }
 
 /** The Factory's own path for issues: store each as a card and start one `full` run per issue (bus and Auto Task). */
