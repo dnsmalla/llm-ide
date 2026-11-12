@@ -42,3 +42,34 @@ test('POST /kb/tasks/:id/run refuses a caller without the host proof before read
   assert.equal(res.out.body.error.code, 'HOST_PROOF_REQUIRED');
   assert.equal(bodyRead, false);
 });
+
+// A string[] arg arrives from the Host API as newline-separated text (its args are strings only).
+async function runSourcesWithArgs(args) {
+  const { busHostProof, BUS_PROOF_HEADER } = await import('../core/host-approval.mjs');
+  const payload = Buffer.from(JSON.stringify({ args }));
+  const { Readable } = await import('node:stream');
+  const req = Object.assign(Readable.from([payload]), {
+    method: 'POST',
+    url: '/kb/tasks/sources.update/run',
+    headers: { [BUS_PROOF_HEADER]: busHostProof() },
+  });
+  const res = fakeRes();
+  await handleTaskRoutes(req, res, { userId: 'u1', url: req.url });
+  return res.out;
+}
+
+test('run: a string[] arg accepts newline text (split, trimmed, blanks dropped) and still accepts an array', async () => {
+  for (const sourceIds of ['a\r\n  b \n\n c', ['a', 'b', 'c']]) {
+    const out = await runSourcesWithArgs({ sourceIds });
+    assert.notEqual(out.body?.error?.code, 'VALIDATION_FAILED');
+  }
+});
+
+test('run: a string[] arg given as text still enforces maxItems and maxLength', async () => {
+  const tooMany = Array.from({ length: 51 }, (_, i) => `s${i}`).join('\n');
+  for (const sourceIds of [tooMany, 'x'.repeat(129), 5]) {
+    const out = await runSourcesWithArgs({ sourceIds });
+    assert.equal(out.status, 400);
+    assert.equal(out.body.error.code, 'VALIDATION_FAILED');
+  }
+});

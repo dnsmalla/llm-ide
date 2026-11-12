@@ -155,13 +155,19 @@ export async function handleTaskRoutes(req, res, ctx) {
   }
   if (task.availability.status !== 'available') return failure(res, 404, 'TASK_NOT_AVAILABLE', task.availability.reason ?? 'This task is not available.');
   const argSpecs = task.runner?.args ?? {};
-  for (const [key, value] of Object.entries(raw.args ?? {})) {
+  const runArgs = {};
+  for (const [key, rawValue] of Object.entries(raw.args ?? {})) {
     const spec = argSpecs[key];
     if (!spec) return failure(res, 400, 'VALIDATION_FAILED', `unknown args field ${key.slice(0, 40)}`);
+    // Host API args are strings only, so a string[] arrives as newline-separated text.
+    const value = spec.type !== 'string' && typeof rawValue === 'string'
+      ? rawValue.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
+      : rawValue;
     const ok = spec.type === 'string'
       ? typeof value === 'string' && value.length <= spec.maxLength
       : Array.isArray(value) && value.length <= (spec.maxItems ?? 50) && value.every((v) => typeof v === 'string' && v.length <= spec.maxLength);
     if (!ok) return failure(res, 400, 'VALIDATION_FAILED', `args.${key.slice(0, 40)} is not valid`);
+    runArgs[key] = value;
   }
   if (task.scope === 'project' && !raw.projectId) return failure(res, 400, 'PROJECT_REQUIRED', 'This task runs on a registered project.');
   // A hub accepts a project-scoped task only for a known project (the same rule the Issues board's writes follow).
@@ -205,7 +211,7 @@ export async function handleTaskRoutes(req, res, ctx) {
       userId,
       projectRoot,
       projectId: raw.projectId ?? null,
-      args: raw.args ?? {},
+      args: runArgs,
       signal: ac.signal,
       deps,
     });
