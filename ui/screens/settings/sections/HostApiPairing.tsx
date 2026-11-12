@@ -12,7 +12,7 @@ import { shellBus } from "../../shell/bus";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText, Switch } from "../ui.tsx";
 import { HOSTED_WEB_ORIGIN, addWebOrigin, webOriginError } from "../web-origins.ts";
-import AlsoRevoke, { type AlsoState } from "./AlsoRevoke.tsx";
+import AlsoRevoke, { ALSO_LOADING_NOTE, isAlsoLoading, type AlsoState } from "./AlsoRevoke.tsx";
 import { OFFLINE_UNAVAILABLE_NOTE, SEPARATE_LISTS_HINT, offlineCandidates, runRevokes, summarizeRevokes } from "../device-link-model.ts";
 import { describeSyncError, loadSyncStatus, revokeSyncDevice } from "../sync-model.ts";
 
@@ -119,7 +119,8 @@ function RevokeConfirm({ device, busy, also, alsoChecked, onToggleAlso, onCancel
       <AlsoRevoke heading="Also remove from offline sync" note={OFFLINE_UNAVAILABLE_NOTE} state={also ?? null} checked={alsoChecked ?? []} busy={busy} onToggle={(id) => onToggleAlso?.(id)} />
       <div className="st-row">
         <button ref={cancel} type="button" className="st-btn" onClick={onCancel} disabled={busy}>Cancel</button>
-        <Button tone="danger" disabled={busy} onClick={onRevoke}>Revoke</Button>
+        <Button tone="danger" disabled={busy || isAlsoLoading(also)} onClick={onRevoke}>Revoke</Button>
+        {isAlsoLoading(also) ? <span className="st-hint">{ALSO_LOADING_NOTE}</span> : null}
       </div>
     </div>
   );

@@ -7,7 +7,7 @@ import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import { invokeHost, isHostAvailable } from "../../shell/host.ts";
 import { PairingQr, loadDevices, revokeDevice } from "./HostApiPairing.tsx";
-import AlsoRevoke, { type AlsoState } from "./AlsoRevoke.tsx";
+import AlsoRevoke, { ALSO_LOADING_NOTE, isAlsoLoading, type AlsoState } from "./AlsoRevoke.tsx";
 import { LIVE_UNAVAILABLE_NOTE, SEPARATE_LISTS_HINT, liveCandidates, runRevokes, summarizeRevokes } from "../device-link-model.ts";
 import { startEnroll, pollEnrollSerially, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, markSyncPasswordChanged, enrollFailureText, enrollScreen, describeSyncError,
   type EnrollStart, type EnrollPoll, type SyncStatus } from "../sync-model.ts";
@@ -154,7 +154,8 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
                   <AlsoRevoke heading="Also unpair from Live Chat" note={LIVE_UNAVAILABLE_NOTE} state={also} checked={alsoChecked} busy={busy} onToggle={toggleAlso} />
                   <div className="st-row">
                     <button type="button" className="st-btn" onClick={closeConfirm} disabled={busy}>Cancel</button>
-                    <Button tone="danger" disabled={busy} onClick={() => void run(() => revokeSelected(d))}>Revoke</Button>
+                    <Button tone="danger" disabled={busy || isAlsoLoading(also)} onClick={() => void run(() => revokeSelected(d))}>Revoke</Button>
+                    {isAlsoLoading(also) ? <span className="st-hint">{ALSO_LOADING_NOTE}</span> : null}
                   </div>
                 </div>
               ) : null}

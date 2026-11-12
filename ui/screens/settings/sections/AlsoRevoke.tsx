@@ -5,6 +5,11 @@ import type { AlsoCandidate } from "../device-link-model.ts";
 
 export interface AlsoState { candidates: AlsoCandidate[]; unavailable: boolean }
 
+export const ALSO_LOADING_NOTE = "Checking the other list…";
+/** The other list is still being read (null); a failed read is `unavailable`, which is not loading. Revoke waits for it so
+ *  the likely match is never silently skipped. */
+export const isAlsoLoading = (state: AlsoState | null | undefined): boolean => state === null;
+
 export default function AlsoRevoke({ heading, note, state, checked, busy, onToggle }: {
   heading: string; note: string; state: AlsoState | null; checked: readonly string[]; busy: boolean; onToggle: (deviceId: string) => void;
 }): ReactNode {

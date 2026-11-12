@@ -216,3 +216,17 @@ test("a TLS pairing PIN shows the browser certificate steps with the address, po
   assert.match(html, /iPhones that scan the QR do not need this/);
   assert.doesNotMatch(view({ pin: { ...tls, fingerprint: null, addresses: [] }, now: tls.expiresAt - 1000 }), /accept the certificate/);
 });
+
+test("Revoke waits while the other list is loading, then enables once loaded or failed", () => {
+  const devices = m.decodeDevices(reply("get-host-api-devices-200").body);
+  const id = devices[0].deviceId;
+  const revokeBtn = (html) => html.match(/<button[^>]*>Revoke<\/button>/)?.[0] ?? "";
+  const loading = view({ devices, confirming: id, also: null });
+  assert.match(revokeBtn(loading), /disabled/);
+  assert.match(loading, /Checking the other list/);
+  for (const also of [{ unavailable: true, candidates: [] }, { unavailable: false, candidates: [] }, undefined]) {
+    const html = view({ devices, confirming: id, also });
+    assert.doesNotMatch(revokeBtn(html), /disabled/);
+    assert.doesNotMatch(html, /Checking the other list/);
+  }
+});
