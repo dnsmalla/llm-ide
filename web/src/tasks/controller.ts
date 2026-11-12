@@ -52,9 +52,16 @@ export interface TasksControllerOptions {
   storage: KeyValue | null;
   /** Identifies the paired desktop (its URL or certificate id), so runs do not mix across desktops. */
   desktopKey: string;
+  /** Older keys (the URL) whose runs move to desktopKey on first load. */
+  legacyKeys?: readonly string[];
   now?: () => number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (h: unknown) => void;
+}
+
+/** Forget: drop this desktop's stored runs (output can be large), under the identity key and every URL key. Best effort. */
+export function forgetTaskRuns(storage: KeyValue | null, keys: readonly string[]): void {
+  for (const k of keys) { try { storage?.removeItem(STORAGE_PREFIX + k); } catch { /* nothing to do */ } }
 }
 
 export function createTasksController(link: HostLink, opts: TasksControllerOptions) {
@@ -64,7 +71,17 @@ export function createTasksController(link: HostLink, opts: TasksControllerOptio
   const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
   const key = STORAGE_PREFIX + desktopKey;
   let initialRuns: TaskRun[] = [];
-  try { initialRuns = parseStoredRuns(storage?.getItem(key) ?? null); } catch { /* memory only */ }
+  try {
+    let raw = storage?.getItem(key) ?? null;
+    for (const old of opts.legacyKeys ?? []) {
+      if (old === desktopKey) continue;
+      const legacy = storage?.getItem(STORAGE_PREFIX + old) ?? null;
+      if (legacy === null) continue;
+      if (raw === null) { raw = legacy; storage?.setItem(key, legacy); }
+      storage?.removeItem(STORAGE_PREFIX + old);
+    }
+    initialRuns = parseStoredRuns(raw);
+  } catch { /* memory only */ }
   let state: TasksState = { ...initialTasksState, runs: initialRuns };
   const subs = new Set<() => void>();
   let loadSeq = 0;

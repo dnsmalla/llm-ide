@@ -108,7 +108,7 @@ const MAX_CACHED_PROJECTS = 200;
 
 /** The desktop's identity for per-desktop browser state: its certificate fingerprint when a device record has one, else
  *  the URL (so it survives Change address). `legacy` are the URL keys older builds wrote. */
-function desktopKeys(storage: KeyValue | null, url: string, from: string | null): { id: string; legacy: string[] } {
+export function desktopKeys(storage: KeyValue | null, url: string, from: string | null): { id: string; legacy: string[] } {
   const urls = from && from !== url ? [url, from] : [url];
   try {
     const raw = storage?.getItem(DEVICES);

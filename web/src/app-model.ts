@@ -3,11 +3,12 @@
 import { HostApiError, HostConnection, MISMATCH_NOTICE, type ConnectionState, type HostConnectionOptions, type TokenStore } from "./host-api/connection.ts";
 import { browserPushEnv } from "./push/controller.ts";
 import { checkHostUrl } from "./host-api/url.ts";
-import { lastHostUrl, projectListStoreFor, projectStoreFor, tokenStoreFor } from "./host-api/storage.ts";
+import { browserStorage, desktopKeys, lastHostUrl, projectListStoreFor, projectStoreFor, tokenStoreFor } from "./host-api/storage.ts";
 import { createChatController, type ChatController } from "./chat/controller.ts";
 import { createComposeController, type ComposeController } from "./chat/compose.ts";
 import { createProjectsController, type ProjectsController } from "./projects/controller.ts";
 
+import { forgetTaskRuns } from "./tasks/controller.ts";
 import { createReadController, type ReadController } from "./read/controller.ts";
 
 export interface Session {
@@ -176,6 +177,7 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
       // Best effort and never awaited: a forgotten host must not keep pushing to this browser.
       if (s.connection.capabilities.has("push")) void s.connection.send("push.unregister", {}).done.catch(() => {});
       void d.dropPush().catch(() => {});
+      try { const st = browserStorage(); const id = desktopKeys(st, s.url, null); forgetTaskRuns(st, [id.id, s.url, ...id.legacy]); } catch { /* best effort */ }
       void s.connection.forget().then((revoked) => { if (!disposed) adopt(null, revoked ? null : REVOKE_IN_DESKTOP); });
     },
     dispose() { disposed = true; offState?.(); offState = null; if (live) shut(live); live = null; subs.clear(); },

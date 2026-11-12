@@ -51,3 +51,8 @@ test("scan sheet: unsupported state offers paste and no photo or camera", () => 
   assert.match(cam, /<video/);
   assert.match(cam, /capture="environment"/);
 });
+
+test("IPv4 octets with a leading zero are refused (the URL parser reads them as octal)", () => {
+  const o = UI.parsePairingLink(link(`ip=010.1.2.3&ip=0127.0.0.1&ip=192.168.01.5&ip=192.168.1.5&ip=10.0.0.0&${base}`));
+  assert.deepEqual(o.addresses, ["192.168.1.5", "10.0.0.0"]);
+});

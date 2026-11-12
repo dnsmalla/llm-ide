@@ -55,7 +55,7 @@ function SessionApp({ session, conn, hub, onForget, onChangeAddress, onOpenOffli
         },
         stop: () => void execute.cancel(), newChat: () => void execute.newChat(), deleteChat: () => void execute.clearHistory(),
         answerQuestion: (r, a) => void execute.answerQuestion(r, a), declineQuestion: (r) => void execute.declineQuestion(r), answerTool: (r, d) => void execute.answerTool(r, d),
-        setModel: executeCompose.setModel, removeAttachment: executeCompose.remove, addFiles: (f) => { if (f) void executeCompose.addFiles(Array.from(f)); },
+        reload: () => void executeCompose.load(), setModel: executeCompose.setModel, removeAttachment: executeCompose.remove, addFiles: (f) => { if (f) void executeCompose.addFiles(Array.from(f)); },
       },
     },
     actions: {

@@ -40,6 +40,7 @@ export interface ShellContext {
 export interface ExecuteContext {
   chat: ChatState; compose: ComposeState;
   actions: {
+    reload?(): void; // re-ask the desktop for chat options (the Retry of the unavailable page)
     send(text: string): void; stop(): void; newChat(): void; deleteChat(): void;
     answerQuestion(requestId: string, answers: Record<string, string>): void; declineQuestion(requestId: string): void; answerTool(requestId: string, decision: "allow_once" | "deny"): void;
     setModel(id: string): void; removeAttachment(index: number): void; addFiles(files: FileList | null): void;

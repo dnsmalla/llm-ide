@@ -4,7 +4,7 @@ import { ReadPanel } from "../screens/ReadPanel.tsx";
 import { SettingsScreen } from "../screens/SettingsScreen.tsx";
 import { ComposeBar } from "../screens/ComposeBar.tsx";
 import { WebChat } from "../screens/WebChat.tsx";
-import { ExecuteSection } from "../screens/ExecuteScreen.tsx";
+import { ExecuteSection, OtherTurnHint } from "../screens/ExecuteScreen.tsx";
 import { TasksSection } from "../screens/TasksSection.tsx";
 import { LoopSection } from "../screens/LoopSection.tsx";
 import { registerSection, type SectionProps, type ShellContext } from "./registry.ts";
@@ -12,13 +12,17 @@ import { registerSection, type SectionProps, type ShellContext } from "./registr
 function AskSection({ ctx }: SectionProps) {
   const { actions: a, capabilities: caps, conn, chat, compose } = ctx;
   const canCompose = caps.has("compose");
+  const execBusy = ctx.execute?.chat.turn != null && chat.turn === null;
   return (
     <WebChat hostName={ctx.hostName} hostUrl={ctx.hostUrl} pageOrigin={ctx.pageOrigin} connection={conn} capabilities={caps} state={chat}
       onSend={a.send} onStop={a.stop} onClear={a.clearHistory} onForget={a.forget} onChangeAddress={a.changeAddress} onOpenOffline={a.openOffline}
       onAnswer={a.answerQuestion} onDecline={a.declineQuestion} onTool={a.answerTool} onNewChat={canCompose ? a.newChat : undefined}
       compose={caps.has("chat") ? (
-        <ComposeBar state={compose} canChoose={canCompose} disabled={conn.kind !== "ready" || chat.turn !== null}
-          onMode={a.setMode} onModel={a.setModel} onRemove={a.removeAttachment} onFiles={a.addFiles} />
+        <>
+          {execBusy ? <OtherTurnHint text="Execute is running — wait for it or stop it." label="Go to Execute" onOpen={() => ctx.navigate("execute")} /> : null}
+          <ComposeBar state={compose} canChoose={canCompose} disabled={conn.kind !== "ready" || chat.turn !== null || ctx.execute?.chat.turn != null}
+            onMode={a.setMode} onModel={a.setModel} onRemove={a.removeAttachment} onFiles={a.addFiles} />
+        </>
       ) : null} />
   );
 }

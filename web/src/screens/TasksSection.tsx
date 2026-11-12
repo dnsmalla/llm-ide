@@ -1,7 +1,7 @@
 // Auto Tasks: the desktop's task registry, a Run sheet with the declared arguments, and this browser's recent runs.
 // `TasksView` is pure (state in, callbacks out) so the gallery and tests render it without a connection.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { browserStorage } from "../host-api/storage.ts";
+import { browserStorage, desktopKeys } from "../host-api/storage.ts";
 import { createTasksController, type TaskDef, type TaskRun, type TasksState, type TaskStatus } from "../tasks/controller.ts";
 import { friendlyDate, fullDate } from "../format.ts";
 import type { SectionProps } from "../shell/registry.ts";
@@ -129,7 +129,11 @@ export function TasksView({ state, projectName, canRun, onRefresh, onRun, onCanc
 export function TasksSection({ ctx }: SectionProps) {
   const link = ctx.session.connection;
   const url = ctx.session.url;
-  const controller = useMemo(() => createTasksController(link, { storage: browserStorage(), desktopKey: url }), [link, url]);
+  const controller = useMemo(() => {
+    const storage = browserStorage();
+    const id = desktopKeys(storage, url, null);
+    return createTasksController(link, { storage, desktopKey: id.id, legacyKeys: [url, ...id.legacy] });
+  }, [link, url]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   useEffect(() => {
     void controller.load();

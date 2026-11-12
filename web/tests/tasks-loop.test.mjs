@@ -1,6 +1,6 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { createTasksController, parseStoredRuns, MAX_RECENT_RUNS, MAX_STORED_OUTPUT, POLL_MS } from "../src/tasks/controller.ts";
+import { forgetTaskRuns, createTasksController, parseStoredRuns, MAX_RECENT_RUNS, MAX_STORED_OUTPUT, POLL_MS } from "../src/tasks/controller.ts";
 import { createLoopController, MAX_LOOP_ISSUES } from "../src/loop/controller.ts";
 import { mapFeatureError } from "../src/tasks/errors.ts";
 import { loadUi, h, html } from "./helpers.mjs";
@@ -227,4 +227,17 @@ test("loop render: runs, ready to ship, approval, history, empty, issues sheet",
   const noIssues = html(h(UI.LoopView, props({ ...UI.LOOP_EMPTY_FIXTURE }, { initialSheet: true })));
   assert.ok(noIssues.includes(UI.LOOP_NO_ISSUES));
   assert.ok(html(h(UI.LoopView, props({ ...UI.LOOP_EMPTY_FIXTURE, projectId: null }))).includes("Pick a project"));
+});
+
+test("task runs move from the URL key to the desktop identity key; forget removes them", () => {
+  const st = memory();
+  const runs = JSON.stringify([{ runId: "r1", taskId: "t", label: "T", startedAt: 1, status: "completed", output: "x" }]);
+  st.setItem("llmide.web.taskRuns.v1:wss://h:1/host-api/v1", runs);
+  const c = createTasksController(fakeLink(), { storage: st, desktopKey: "fp:sha256:AAA", legacyKeys: ["wss://h:1/host-api/v1"] });
+  assert.equal(c.getState().runs.length, 1);
+  assert.equal(st.getItem("llmide.web.taskRuns.v1:wss://h:1/host-api/v1"), null);
+  assert.equal(st.getItem("llmide.web.taskRuns.v1:fp:sha256:AAA"), runs);
+  forgetTaskRuns(st, ["fp:sha256:AAA", "wss://h:1/host-api/v1"]);
+  assert.equal(st.m.size, 0);
+  forgetTaskRuns({ removeItem() { throw new Error("blocked"); } }, ["x"]); // never throws
 });

@@ -44,6 +44,8 @@ function canonicalPrivateHost(host: string): string | null {
   if (host.includes("%")) return null;
   const octets = host.split(".");
   if (octets.length === 4 && octets.every((o) => /^[0-9]+$/.test(o))) {
+    // A leading zero is octal to the URL parser (010 -> 8): refuse it instead of vetting a different address.
+    if (!octets.every((o) => /^(0|[1-9][0-9]{0,2})$/.test(o))) return null;
     const v = octets.map(Number);
     return v.every((n) => n >= 0 && n <= 255) && isPrivateIPv4(v) ? host : null;
   }

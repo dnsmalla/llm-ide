@@ -28,7 +28,7 @@ function fakeLink(results = {}, caps = ["host", "chat", "approvals", "compose", 
   };
 }
 
-test("two surfaces are independent: each names its own surface and only takes events for its own turn", async () => {
+test("two surfaces keep separate threads (one turn at a time per connection): each names its own surface and only takes events for its own turn", async () => {
   const link = fakeLink({ "chat.send": { accepted: true }, "chat.snapshot": { messages: [] }, "chat.new": { sessionId: "s" }, "chat.history.clear": { cleared: true } });
   const ask = createChatController(link);
   const exec = createChatController(link, { surface: "execute" });
@@ -96,11 +96,32 @@ test("compose: Ask never offers execute; the Execute compose keeps it and sends 
 test("execute availability: needs compose + tool_approvals and a host that offers it", () => {
   const caps = (...c) => new Set(["host", ...c]);
   const cs = (modes) => ({ ...UI.initialComposeState, modes });
-  assert.deepEqual(UI.executeAvailability(caps("chat", "compose", "tool_approvals"), cs(["auto", "execute"])), { ok: true });
+  assert.deepEqual(UI.executeAvailability(caps("chat", "compose", "tool_approvals"), cs(["auto", "execute"])), { ok: true, loading: false });
   assert.deepEqual(UI.executeAvailability(caps("chat", "compose"), cs([])), { ok: false, reason: "no_grant" });
   assert.deepEqual(UI.executeAvailability(caps("chat", "tool_approvals"), cs([])), { ok: false, reason: "no_grant" });
   assert.deepEqual(UI.executeAvailability(caps("chat", "compose", "tool_approvals"), cs(["auto", "ask"])), { ok: false, reason: "not_offered" });
-  assert.deepEqual(UI.executeAvailability(new Set(), cs([])), { ok: true }, "capabilities unknown: no flash");
+  assert.deepEqual(UI.executeAvailability(new Set(), cs([])), { ok: true, loading: true }, "capabilities unknown: no flash");
+  assert.deepEqual(UI.executeAvailability(caps("chat", "compose", "tool_approvals"), cs([])), { ok: true, loading: true }, "still loading");
+  assert.deepEqual(UI.executeAvailability(caps("chat", "compose", "tool_approvals"), { ...cs([]), error: "boom" }), { ok: false, reason: "load_failed" });
+});
+
+test("execute section: a failed chat.options shows an explanation with Retry, not the composer", () => {
+  const sl = slice(); sl.compose = { ...sl.compose, modes: [], error: "boom" }; sl.actions.reload = noop;
+  const out = html(h(UI.Shell, { ctx: ctx({ execute: sl }), forceSection: "execute" }));
+  assert.match(out, /Could not check whether Execute is available/); assert.match(out, />Retry</); assert.doesNotMatch(out, /<textarea/);
+});
+
+test("one turn per connection: each composer is disabled while the other surface has a turn, with a hint", () => {
+  const running = [{ type: "sent", commandId: "c-1", text: "go" }].reduce(UI.reduce, UI.initialChatState);
+  assert.notEqual(running.turn, null);
+  const askOut = html(h(UI.Shell, { ctx: ctx({ execute: slice(running) }), forceSection: "ask" }));
+  assert.match(askOut, /Execute is running/); assert.match(askOut, /Go to Execute/);
+  assert.match(askOut, /aria-label="Mode: [^"]*"[^>]*disabled/);
+  const execOut = html(h(UI.Shell, { ctx: ctx({ chat: running, execute: slice() }), forceSection: "execute" }));
+  assert.match(execOut, /Ask is replying/); assert.match(execOut, /Go to Ask/);
+  assert.match(execOut, /aria-label="Model: [^"]*"[^>]*disabled/);
+  assert.doesNotMatch(html(h(UI.Shell, { ctx: ctx({ execute: slice() }), forceSection: "ask" })), /Execute is running/);
+  assert.doesNotMatch(html(h(UI.Shell, { ctx: ctx({ execute: slice() }), forceSection: "execute" })), /Ask is replying/);
 });
 
 const ctx = (o = {}) => ({
