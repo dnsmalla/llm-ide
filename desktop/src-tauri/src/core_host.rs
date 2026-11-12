@@ -44,17 +44,20 @@ const SPAWN_PORTS: [u16; 4] = [3456, 3457, 3458, 3459];
 /// Fixed env of the core THIS app spawns (never read from the host env). `LLMIDE_LIVE_ACK=1`: a finalized extension
 /// capture is held until the desktop archivist (capture_archivist.rs) acks the verified note; without it the extension
 /// keeps every draft in `no-ack` and an ack releases nothing. An adopted server keeps its own env.
+/// `LLMIDE_HOST_API_TOOL_APPROVALS`: an Execute turn started from the phone asks before each edit or command; without this
+/// the phone cannot answer, and the turn waits on a prompt nobody can see.
 /// `LLMIDE_HOST_API_CHAT_CLEAR`: the phone's own "clear / delete this chat" (behind a confirmation there) works; without it the
 /// core refuses and the phone's cleared chat reappears on the next reload.
 /// `LLMIDE_HOST_API_READ` / `_COMPOSE`: a paired phone gets History, Execute and Auto Tasks (each command is still
 /// checked against the member's role and project grant); they matter only while the pinned listener runs.
-const SPAWNED_CORE_FLAGS: [(&str, &str); 6] = [
+const SPAWNED_CORE_FLAGS: [(&str, &str); 7] = [
     ("LLMIDE_ENGINE_PREWARM", "0"),
     ("LLMIDE_BACKUP_INTERVAL_HOURS", "0"),
     ("LLMIDE_LIVE_ACK", "1"),
     ("LLMIDE_HOST_API_READ", "1"),
     ("LLMIDE_HOST_API_COMPOSE", "1"),
     ("LLMIDE_HOST_API_CHAT_CLEAR", "1"),
+    ("LLMIDE_HOST_API_TOOL_APPROVALS", "1"),
 ];
 /// On a supervised restart, how long the port our just-exited core held may stay busy before it is skipped.
 const RESTART_PORT_WAIT: Duration = Duration::from_secs(3);
@@ -2345,6 +2348,7 @@ process.on('SIGTERM', () => process.exit(0));
         assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_READ", "1")));
         assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_COMPOSE", "1")));
         assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_CHAT_CLEAR", "1")));
+        assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_TOOL_APPROVALS", "1")));
     }
     #[cfg(unix)]
     #[test]

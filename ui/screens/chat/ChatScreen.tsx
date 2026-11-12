@@ -339,13 +339,14 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       bumpSessions();
     } catch (e) { reportStoreError(e); }
   }, [state.messages, store, controller, bumpSessions, reportStoreError]);
-  // A side dock starts its own chat instead of opening the latest one the main Chat tab has open.
+  // The side popup starts its own chat instead of opening the latest one the main Chat tab has open; the Explorer
+  // and other docks keep restoring their own latest chat.
   const dockNewRef = useRef(false);
   useEffect(() => {
-    if (!dock || activeId || dockNewRef.current) return;
+    if (!dock || surface !== "side" || activeId || dockNewRef.current) return;
     dockNewRef.current = true;
     void newChat();
-  }, [dock, activeId, newChat]);
+  }, [dock, surface, activeId, newChat]);
 
   const busy = state.phase === "streaming" || state.phase === "aborting";
   const persistFailure = controller.getPersistFailure();
