@@ -512,19 +512,94 @@ pub fn stage(root: &Path, paths: &[String], stage: bool) -> R<()> {
 
 // ---- Tauri commands ------------------------------------------------------------------------
 
+/// The repository Source Control works in, and its project-relative folder (`""` = the project itself).
+pub(crate) struct ScmRoot {
+    pub repo: PathBuf,
+    pub prefix: String,
+}
+
+impl ScmRoot {
+    /// A project-relative path from the webview as a path inside the repository; anything outside it is refused.
+    pub(crate) fn to_repo(&self, rel: &str) -> R<String> {
+        if self.prefix.is_empty() {
+            return Ok(rel.to_string());
+        }
+        match rel.strip_prefix(self.prefix.as_str()).and_then(|r| r.strip_prefix('/')) {
+            Some(r) if !r.is_empty() => Ok(r.to_string()),
+            _ => gerr("invalid_path", "the path is outside the repository"),
+        }
+    }
+
+    pub(crate) fn to_repo_all(&self, rels: &[String]) -> R<Vec<String>> {
+        rels.iter().map(|r| self.to_repo(r)).collect()
+    }
+
+    /// A repository-relative path git printed, as the project-relative path the Explorer opens.
+    pub(crate) fn to_project(&self, rel: &str) -> String {
+        if self.prefix.is_empty() { rel.to_string() } else { format!("{}/{rel}", self.prefix) }
+    }
+}
+
+/// The project folder when it is a repository, else the first clone under `code/` (the Loop's work-root rule).
+/// Symlinked folders are skipped so git never runs outside the project.
+pub(crate) fn scm_root(root: &Path) -> ScmRoot {
+    let here = || ScmRoot { repo: root.to_path_buf(), prefix: String::new() };
+    if std::fs::symlink_metadata(root.join(".git")).is_ok() {
+        return here();
+    }
+    let code = root.join("code");
+    if !std::fs::symlink_metadata(&code).is_ok_and(|m| m.is_dir()) {
+        return here();
+    }
+    let mut clones: Vec<String> = std::fs::read_dir(&code)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| !n.starts_with('.') && std::fs::symlink_metadata(code.join(n).join(".git")).is_ok())
+        .collect();
+    clones.sort();
+    let Some(name) = clones.into_iter().next() else { return here() };
+    let repo = code.join(&name);
+    // The resolved clone must still lie inside the project, whatever was swapped in after the checks above.
+    let inside = match (std::fs::canonicalize(root), std::fs::canonicalize(&repo)) {
+        (Ok(r), Ok(c)) => c.starts_with(r.join("code")),
+        _ => false,
+    };
+    if inside { ScmRoot { repo, prefix: format!("code/{name}") } } else { here() }
+}
+
+pub(crate) async fn blocking_scm<T, F>(f: F) -> R<T>
+where
+    T: Send + 'static,
+    F: FnOnce(ScmRoot) -> R<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || f(scm_root(&crate::fs_ops::active_root()?)))
+        .await
+        .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?
+}
+
+/// For commands that carry no file path: they run in the repository root.
 pub(crate) async fn blocking<T, F>(f: F) -> R<T>
 where
     T: Send + 'static,
     F: FnOnce(PathBuf) -> R<T> + Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(move || f(crate::fs_ops::active_root()?))
-        .await
-        .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?
+    blocking_scm(move |s| f(s.repo)).await
 }
 
 #[tauri::command]
 pub async fn git_status() -> R<GitStatus> {
-    blocking(|root| status(&root)).await
+    blocking_scm(|s| {
+        let mut st = status(&s.repo)?;
+        for e in &mut st.entries {
+            e.path = s.to_project(&e.path);
+            e.orig_path = e.orig_path.as_deref().map(|p| s.to_project(p));
+        }
+        Ok(st)
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -536,7 +611,7 @@ pub struct DiffReq {
 
 #[tauri::command]
 pub async fn git_diff(req: DiffReq) -> R<DiffResult> {
-    blocking(move |root| diff(&root, &req.path, req.staged)).await
+    blocking_scm(move |s| diff(&s.repo, &s.to_repo(&req.path)?, req.staged)).await
 }
 
 #[derive(Deserialize)]
@@ -547,7 +622,7 @@ pub struct ShowReq {
 
 #[tauri::command]
 pub async fn git_show(req: ShowReq) -> R<ShowResult> {
-    blocking(move |root| show(&root, &req.path, &req.rev)).await
+    blocking_scm(move |s| show(&s.repo, &s.to_repo(&req.path)?, &req.rev)).await
 }
 
 #[derive(Deserialize)]
@@ -558,7 +633,7 @@ pub struct StageReq {
 
 #[tauri::command]
 pub async fn git_stage(req: StageReq) -> R<()> {
-    blocking(move |root| stage(&root, &req.paths, req.stage)).await
+    blocking_scm(move |s| stage(&s.repo, &s.to_repo_all(&req.paths)?, req.stage)).await
 }
 
 #[cfg(test)]
@@ -586,6 +661,72 @@ mod tests {
             .output()
             .unwrap();
         assert!(o.status.success(), "{args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+
+    #[test]
+    fn scm_root_uses_the_first_clone_under_code_when_the_project_is_not_a_repository() {
+        let root = scratch("scm-root");
+        assert_eq!(scm_root(&root).repo, root);
+        assert_eq!(scm_root(&root).prefix, "");
+        fs::create_dir_all(root.join("code/a-plain-folder")).unwrap();
+        fs::create_dir_all(root.join("code/.hidden/.git")).unwrap();
+        fs::create_dir_all(root.join("code/smart-input/.git")).unwrap();
+        let s = scm_root(&root);
+        assert_eq!(s.repo, root.join("code/smart-input"));
+        assert_eq!(s.prefix, "code/smart-input");
+        assert_eq!(s.to_project("src/app.ts"), "code/smart-input/src/app.ts");
+        assert_eq!(s.to_repo("code/smart-input/src/app.ts").unwrap(), "src/app.ts");
+        assert_eq!(s.to_repo_all(&["code/smart-input/a".into(), "code/smart-input/b/".into()]).unwrap(), vec!["a", "b/"]);
+        for outside in ["README.md", "code/smart-input", "code/smart-input/", "code/smart-input-2/x", "code/a-plain-folder/x"] {
+            assert_eq!(s.to_repo(outside).unwrap_err().code, "invalid_path", "{outside}");
+        }
+        fs::create_dir_all(root.join(".git")).unwrap();
+        assert_eq!(scm_root(&root).repo, root, "a project that is itself a repository wins");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scm_root_never_follows_a_symlinked_clone_out_of_the_project() {
+        let root = scratch("scm-root-link");
+        let outside = scratch("scm-root-outside");
+        fs::create_dir_all(outside.join(".git")).unwrap();
+        fs::create_dir_all(root.join("code")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("code/escape")).unwrap();
+        assert_eq!(scm_root(&root).repo, root);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scm_root_never_follows_a_symlinked_code_folder_out_of_the_project() {
+        let root = scratch("scm-code-link");
+        let outside = scratch("scm-code-outside");
+        fs::create_dir_all(outside.join("victim/.git")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("code")).unwrap();
+        assert_eq!(scm_root(&root).repo, root);
+        assert_eq!(scm_root(&root).prefix, "");
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn status_of_a_clone_under_code_reports_project_relative_paths() {
+        if !have_git() {
+            return;
+        }
+        let root = scratch("scm-clone-status");
+        let repo = root.join("code/app");
+        fs::create_dir_all(&repo).unwrap();
+        g(&repo, &["init", "-q"]);
+        fs::write(repo.join("new.txt"), "x").unwrap();
+        let s = scm_root(&root);
+        let st = status(&s.repo).unwrap();
+        assert_eq!(st.branch.as_deref(), Some("main"));
+        let paths: Vec<String> = st.entries.iter().map(|e| s.to_project(&e.path)).collect();
+        assert_eq!(paths, vec!["code/app/new.txt"]);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

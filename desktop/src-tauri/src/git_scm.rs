@@ -1598,7 +1598,7 @@ pub fn discard_all(root: &Path, include_untracked: bool, confirm: &dyn Fn(&str) 
 
 // ---- Tauri commands --------------------------------------------------------------------
 
-use crate::git::blocking;
+use crate::git::{blocking, blocking_scm};
 
 #[derive(Deserialize)]
 pub struct HunksReq {
@@ -1609,7 +1609,7 @@ pub struct HunksReq {
 
 #[tauri::command]
 pub async fn git_diff_hunks(req: HunksReq) -> R<HunkDiff> {
-    blocking(move |root| diff_hunks(&root, &req.path, req.staged)).await
+    blocking_scm(move |s| diff_hunks(&s.repo, &s.to_repo(&req.path)?, req.staged)).await
 }
 
 #[derive(Deserialize)]
@@ -1622,7 +1622,7 @@ pub struct StageHunksReq {
 
 #[tauri::command]
 pub async fn git_stage_hunks(req: StageHunksReq) -> R<()> {
-    blocking(move |root| stage_hunks(&root, &req.path, req.staged, &req.diff_id, &req.hunks)).await
+    blocking_scm(move |s| stage_hunks(&s.repo, &s.to_repo(&req.path)?, req.staged, &req.diff_id, &req.hunks)).await
 }
 
 #[tauri::command]
@@ -1640,7 +1640,11 @@ static DESTRUCTIVE_DIALOGS: crate::confirm::DialogGuard = crate::confirm::Dialog
 
 #[tauri::command]
 pub async fn git_discard(paths: Vec<String>) -> R<DiscardResult> {
-    blocking(move |root| DESTRUCTIVE_DIALOGS.run(|| discard(&root, &paths, &native_ask("Discard changes?", "Discard")))).await
+    blocking_scm(move |s| {
+        let paths = s.to_repo_all(&paths)?;
+        DESTRUCTIVE_DIALOGS.run(|| discard(&s.repo, &paths, &native_ask("Discard changes?", "Discard")))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1692,7 +1696,14 @@ pub async fn git_log(req: LogReq) -> R<LogPage> {
 
 #[tauri::command]
 pub async fn git_commit_files(hash: String) -> R<CommitDetail> {
-    blocking(move |root| commit_files(&root, &hash)).await
+    blocking_scm(move |s| {
+        let mut detail = commit_files(&s.repo, &hash)?;
+        for f in &mut detail.files {
+            f.path = s.to_project(&f.path);
+        }
+        Ok(detail)
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -1703,7 +1714,7 @@ pub struct CommitDiffReq {
 
 #[tauri::command]
 pub async fn git_commit_diff(req: CommitDiffReq) -> R<CommitDiff> {
-    blocking(move |root| commit_diff(&root, &req.hash, &req.path)).await
+    blocking_scm(move |s| commit_diff(&s.repo, &req.hash, &s.to_repo(&req.path)?)).await
 }
 
 #[tauri::command]
@@ -1762,9 +1773,15 @@ pub struct MergeReq {
 
 #[tauri::command]
 pub async fn git_merge(req: MergeReq) -> R<MergeOutcome> {
-    blocking(move |root| {
+    blocking_scm(move |s| {
         let mode = merge_mode(req.mode.as_deref())?;
-        DESTRUCTIVE_DIALOGS.run(|| merge(&root, &req.name, mode, &None, &native_ask("Merge branch?", "Merge")))
+        let mut outcome = DESTRUCTIVE_DIALOGS.run(|| merge(&s.repo, &req.name, mode, &None, &native_ask("Merge branch?", "Merge")))?;
+        if let MergeOutcome::Conflicts { paths, .. } = &mut outcome {
+            for p in paths.iter_mut() {
+                *p = s.to_project(p);
+            }
+        }
+        Ok(outcome)
     })
     .await
 }
