@@ -19,7 +19,7 @@ export interface DeviceStore {
   get(): string | null;
   set(token: string | null): void;
   /** The paired desktop's known identity (null when nothing is paired here). */
-  identity(): { fingerprint: string | null } | null;
+  identity(): { fingerprint: string | null; borrowed?: boolean } | null;
   /** The hello's identity, remembered so set()/confirm() can record it. */
   observe(info: HostIdentity): void;
   /** A stored token was accepted: fill in the fingerprint if unknown, refresh the name and move the record to this URL. */
@@ -67,7 +67,7 @@ export function tokenStoreFor(url: string, storage: KeyValue | null = browserSto
     Object.fromEntries(Object.entries(list).filter(([, r]) => !drop(r)));
   return {
     get: () => active(read())?.token ?? null,
-    identity() { const a = active(read()); return a ? { fingerprint: a.fingerprint } : null; },
+    identity() { const a = active(read()); return a ? { fingerprint: a.fingerprint, borrowed: a.url !== url } : null; },
     observe(info) { seen = info; },
     set(token) {
       const list = read();

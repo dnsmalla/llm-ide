@@ -46,7 +46,7 @@ export interface TokenStore {
   get(): string | null;
   set(token: string | null): void;
   /** Optional identity of the paired desktop: lets the handshake withhold the token from a different host. */
-  identity?(): { fingerprint: string | null } | null;
+  identity?(): { fingerprint: string | null; borrowed?: boolean } | null;
   observe?(info: { fingerprint: string | null; hostName: string }): void;
   confirm?(): void;
 }
@@ -276,9 +276,11 @@ export class HostConnection implements HostLink {
       if (!hello.requiresAuth) return this.#ready();
       let token = this.#o.tokens.get();
       // Never hand the stored token to a host that is not the one it was issued by (a reused LAN IP, a new port).
-      const known = this.#o.tokens.identity?.()?.fingerprint ?? null;
+      const identity = this.#o.tokens.identity?.() ?? null;
+      const known = identity?.fingerprint ?? null;
       let mismatch = false;
-      if (token && known && known !== fingerprint) { token = null; mismatch = true; }
+      // A record borrowed from another address (Change address) with no fingerprint was never issued for this host.
+      if (token && ((known && known !== fingerprint) || (!known && identity?.borrowed))) { token = null; mismatch = true; }
       this.#mismatch = mismatch;
       if (token) {
         try {

@@ -137,3 +137,23 @@ test("Change address validates the URL and reports an unreachable host without d
   assert.equal(m.getState().session.url, U1);
   m.dispose();
 });
+
+test("Change address with an unknown fingerprint does not send the token and goes to the PIN path", async () => {
+  const st = memory(); st.setItem(`llmide.hostApi.v1.token:${U1}`, TOKEN);
+  const n = net({ [U2]: "ZZ" });
+  const c = conn(U2, st, n, U1);
+  assert.equal(await c.connect(), "needsPin");
+  assert.equal(n.sentToken(), false, "no token sent to the new address");
+  assert.deepEqual(c.state, { kind: "needsPin", mismatch: true });
+  assert.equal(Object.values(devices(st))[0].url, U1, "old record kept");
+  assert.equal(Object.values(devices(st))[0].fingerprint, null);
+});
+
+test("a same-URL token with unknown fingerprint is sent and the fingerprint is learned", async () => {
+  const st = memory(); st.setItem(`llmide.hostApi.v1.token:${U1}`, TOKEN);
+  const n = net({ [U1]: "AA" });
+  const c = conn(U1, st, n);
+  assert.equal(await c.connect(), "ready");
+  assert.equal(n.sentToken(), true);
+  assert.equal(Object.values(devices(st))[0].fingerprint, "AA");
+});
