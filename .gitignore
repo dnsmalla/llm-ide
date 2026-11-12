@@ -16,6 +16,11 @@ kb/*.db-journal
 kb/backups/
 kb/MOVED-TO-APP-SUPPORT.txt
 kb/*.pre-move
+# The whole root kb/ is runtime state (databases, logs, agent-sdk cache, team.yaml); extension/kb/ is code.
+/kb/
+
+# Leftover builds and bundles of the removed Swift Mac app (it lives in git history).
+/mac/
 kb/.migrating*
 
 # Test-created SQLite files (per-test temp DBs).
