@@ -345,6 +345,41 @@ test("runs that start together in a project without a Factory loop all get the o
   }
 });
 
+test("the Factory's steps come from system/factory-template.json: written once from the loop, applied, refused when invalid", async () => {
+  const { memFs } = await import("../../factory/tests/mem-fs.mjs");
+  const tpl = await import("../native/factory-template.ts");
+  const fs = memFs();
+  const loop = await rm.loadOrCreateFactoryLoop(fs);
+  const written = fs.files.get(tpl.TEMPLATE_FILE);
+  assert.equal(written, tpl.formatFactoryTemplate(tpl.templateFromLoop(loop).template), "a project without a template gets one written from its loop");
+
+  const edited = tpl.parseFactoryTemplate(written).template;
+  edited.stages = edited.stages.map((s) => (s.role === "implement" ? { ...s, prompt: "Keep the change small." } : s));
+  fs.put(tpl.TEMPLATE_FILE, tpl.formatFactoryTemplate(edited));
+  const applied = await rm.loadOrCreateFactoryLoop(fs);
+  assert.equal(applied.config.stages.find((s) => s.name === "Implement").prompt, "Keep the change small.");
+  const saved = JSON.parse(fs.files.get("system/loop.json")).loops.find((l) => l.defaultKey === "factory");
+  assert.equal(saved.config.stages.find((s) => s.name === "Implement").prompt, "Keep the change small.", "saved before the run, so the host approves what runs");
+
+  fs.put(tpl.TEMPLATE_FILE, '{\n  "version": 1,\n  "stages": [\n    { "role": "implemnt" }\n  ]\n}\n');
+  await assert.rejects(rm.loadOrCreateFactoryLoop(fs), /Fix system\/factory-template\.json.*line 4: stages\[0\]\.role: unknown role "implemnt".*did not start/);
+});
+
+test("a migration that cannot keep a step writes the template but stops the run once, naming each step and why", async () => {
+  const { memFs } = await import("../../factory/tests/mem-fs.mjs");
+  const tpl = await import("../native/factory-template.ts");
+  const first = memFs();
+  await rm.loadOrCreateFactoryLoop(first);
+  const store = JSON.parse(first.files.get("system/loop.json"));
+  const factory = store.loops.find((l) => l.defaultKey === "factory");
+  factory.config.stages.push({ ...factory.config.stages[0], id: "g", name: "Graph snapshot", kind: "codeGraph", command: null, order: 99 });
+  const fs = memFs({ "system/loop.json": JSON.stringify(store) });
+  await assert.rejects(rm.loadOrCreateFactoryLoop(fs), /Graph snapshot: a "codeGraph" step cannot be written in the template.*review system\/factory-template\.json \(Factory → Process\)/s);
+  assert.ok(fs.files.has(tpl.TEMPLATE_FILE), "the template is written anyway");
+  const next = await rm.loadOrCreateFactoryLoop(fs);
+  assert.equal(next.config.stages.some((s) => s.name === "Graph snapshot"), false, "the second run goes ahead with the template");
+});
+
 test("a Factory run writes .factory/RUN.json and removes it after the record", async () => {
   const marks = [];
   setup({ fsFor: () => ({ write: async (path) => { marks.push(["write", path]); }, remove: async (path) => { marks.push(["remove", path]); } }) });

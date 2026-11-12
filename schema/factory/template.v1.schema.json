@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-ide.local/schema/factory/template.v1.schema.json",
+  "title": "Factory process template v1",
+  "description": "The project's editable Factory process, <project>/system/factory-template.json. Documentation only: ui/screens/loop/native/factory-template.ts (parseFactoryTemplate) is authoritative and also enforces what a JSON Schema cannot say well: exactly one implement, verify, review and reviewGate step; at most one setup, intake, intakeGate and plan step; intakeGate after intake; implement before verify before review before reviewGate; reviewGate last; step names unique (case-insensitive); an enabled setup step needs a command; implement, verify, review and reviewGate cannot be turned off or made advisory; object keys __proto__, constructor and prototype are refused.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "stages"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxIterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "maxCostUsd": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "0 = no limit"
+        },
+        "wallClockMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 30,
+      "items": {
+        "$ref": "#/$defs/stage"
+      }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
+    },
+    "command": {
+      "type": "string",
+      "maxLength": 500,
+      "pattern": "^[^\\r\\n]*$"
+    },
+    "prompt": {
+      "type": "string",
+      "maxLength": 20000
+    },
+    "timeoutMinutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 240
+    },
+    "stage": {
+      "type": "object",
+      "required": [
+        "role"
+      ],
+      "oneOf": [
+        {
+          "description": "Built-in steps with no command or prompt of their own: the gates read the verdict file their step wrote.",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "enum": [
+                "intakeGate",
+                "reviewGate"
+              ]
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "timeoutMinutes": {
+              "$ref": "#/$defs/timeoutMinutes"
+            },
+            "severity": {
+              "$ref": "#/$defs/severity",
+              "description": "advisory only for intakeGate; reviewGate must stay blocking"
+            }
+          }
+        },
+        {
+          "description": "Built-in skill steps: their skill is fixed, the prompt can be changed.",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "enum": [
+                "intake",
+                "plan",
+                "implement",
+                "review"
+              ]
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "$ref": "#/$defs/prompt"
+            },
+            "timeoutMinutes": {
+              "$ref": "#/$defs/timeoutMinutes"
+            },
+            "severity": {
+              "$ref": "#/$defs/severity",
+              "description": "advisory only for intake and plan; implement and review must stay blocking"
+            }
+          }
+        },
+        {
+          "description": "Built-in shell steps. verify's command may be \"auto\": the test command detected for the project.",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "enum": [
+                "setup",
+                "verify"
+              ]
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "command": {
+              "$ref": "#/$defs/command"
+            },
+            "timeoutMinutes": {
+              "$ref": "#/$defs/timeoutMinutes"
+            },
+            "severity": {
+              "$ref": "#/$defs/severity",
+              "description": "advisory only for setup; verify must stay blocking"
+            }
+          }
+        },
+        {
+          "description": "A custom shell step.",
+          "additionalProperties": false,
+          "required": [
+            "role",
+            "name",
+            "kind",
+            "command"
+          ],
+          "properties": {
+            "role": {
+              "const": "custom"
+            },
+            "kind": {
+              "const": "shellCommand"
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "severity": {
+              "$ref": "#/$defs/severity"
+            },
+            "command": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/command"
+                },
+                {
+                  "minLength": 1
+                }
+              ]
+            },
+            "timeoutMinutes": {
+              "$ref": "#/$defs/timeoutMinutes"
+            }
+          }
+        },
+        {
+          "description": "A custom skill step. A bare skill id means skills/<id>.",
+          "additionalProperties": false,
+          "required": [
+            "role",
+            "name",
+            "kind",
+            "skill"
+          ],
+          "properties": {
+            "role": {
+              "const": "custom"
+            },
+            "kind": {
+              "const": "skill"
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            },
+            "skill": {
+              "type": "string",
+              "pattern": "^(skills/)?[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "a skills/<name> skill; a bare name means skills/<name>"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "severity": {
+              "$ref": "#/$defs/severity"
+            },
+            "prompt": {
+              "$ref": "#/$defs/prompt"
+            },
+            "timeoutMinutes": {
+              "$ref": "#/$defs/timeoutMinutes"
+            }
+          }
+        },
+        {
+          "description": "A custom verdict check: passes when the file under .factory/ contains the verdict line (written by an earlier step).",
+          "additionalProperties": false,
+          "required": [
+            "role",
+            "name",
+            "kind",
+            "verdictPath",
+            "verdictLine"
+          ],
+          "properties": {
+            "role": {
+              "const": "custom"
+            },
+            "kind": {
+              "const": "artifactCheck"
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            },
+            "verdictPath": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^\\.factory/(?!.*(^|/)\\.\\.(/|$))[^\\\\\\r\\n]+$",
+              "not": {
+                "enum": [
+                  ".factory/READINESS.md",
+                  ".factory/REVIEW.md"
+                ]
+              },
+              "description": "relative path under .factory/, no '..'; READINESS.md and REVIEW.md belong to the Factory's own gates"
+            },
+            "verdictLine": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[^\\r\\n]*$"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "severity": {
+              "$ref": "#/$defs/severity"
+            },
+            "timeoutMinutes": {
+              "$ref": "#/$defs/timeoutMinutes"
+            }
+          }
+        }
+      ]
+    },
+    "severity": {
+      "enum": [
+        "blocking",
+        "advisory"
+      ]
+    }
+  }
+}

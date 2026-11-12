@@ -933,6 +933,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <option value="">＋ Add stage…</option>
             {Object.entries(stageKindLabel).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
           </select></div>
+        {isFactoryLoop(loop) ? <p className="loop-native-hint" role="note">The Factory's steps come from system/factory-template.json (Factory → Process). Edits here are replaced at the next Factory run.</p> : null}
         <div className="loop-actions">
           <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
           <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>

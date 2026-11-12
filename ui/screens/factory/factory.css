@@ -46,3 +46,19 @@
 .fx-stage span { opacity: 0.7; }
 .fx-stage-passed span { color: var(--tok-color-accent3); }
 .fx-stage-failed span { color: var(--tok-color-danger); }
+
+/* Process tab: the editable system/factory-template.json */
+.fx-process { overflow-y: auto; }
+.fx-process-field { flex: 1; min-height: 240px; }
+.fx-process-text { flex: 1; min-height: 320px; resize: vertical; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); line-height: 1.5; tab-size: 2; white-space: pre; }
+.fx-process-text[aria-invalid="true"] { border-color: var(--tok-color-danger); }
+.fx-process-problems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.fx-process-problem { width: 100%; text-align: left; border: 1px solid var(--tok-color-danger); border-radius: var(--tok-radius-sm); background: var(--tok-color-surface); color: var(--tok-color-text); font: inherit; padding: var(--tok-space-xs) var(--tok-space-sm); cursor: pointer; overflow-wrap: anywhere; }
+.fx-process-problem:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
+.fx-process-line { font-weight: 600; color: var(--tok-color-danger); }
+.fx-process-reset { flex-direction: column; align-items: stretch; }
+.fx-process-diff { max-height: 280px; }
+.fx-process-diff-line[data-kind="add"] { color: var(--tok-color-success); }
+.fx-process-diff-line[data-kind="del"] { color: var(--tok-color-danger); }
+.fx-process-diff-line[data-kind="same"] { color: var(--tok-color-text-muted); }
+.fx-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

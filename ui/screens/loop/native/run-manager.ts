@@ -6,6 +6,7 @@ import type { FsApi } from "../../explorer/fs";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
 import { configFor, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type RunMode } from "./factory.ts";
+import { TEMPLATE_FILE, applyTemplate, droppedMessage, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, writeTemplateIfMissing } from "./factory-template.ts";
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
@@ -101,17 +102,31 @@ async function ensureFactoryLoop(fs: FsApi): Promise<LoopDefinition | null> {
     r = ensured.load;
   }
   if (r.kind !== "ok") return null;
-  const loop = r.store.loops.find(isFactoryLoop) ?? null;
-  if (!loop) return null;
+  const found = r.store.loops.find(isFactoryLoop) ?? null;
+  if (!found) return null;
+  // The project's template decides the steps. A project without one gets it written from its current loop.
+  const file = await readTemplateFile(fs);
+  if (file.kind === "ok" && !file.parse.ok) throw new Error(templateProblemMessage(file.parse.errors));
+  const templated = file.kind === "ok" && file.parse.ok ? applyTemplate(found, file.parse.template, command) : found;
+  const fromTemplate = !sameLoop(templated, found);
   // An existing Factory loop saved before detection existed can have an empty Verify command. Fill it once,
   // persist it, and let the run continue instead of sending the user to the Loop page.
-  const repaired = withDetectedVerify(loop, command);
-  if (!repaired.changed) return repaired.loop;
+  const repaired = withDetectedVerify(templated, command);
+  if (file.kind === "missing") {
+    const migrated = templateFromLoop(repaired.loop);
+    await writeTemplateIfMissing(fs, migrated.template);
+    // Nothing is dropped silently: this run stops once so the person sees what changed; the next run uses the file.
+    if (migrated.dropped.length > 0) throw new Error(droppedMessage(migrated.dropped));
+  }
+  if (!fromTemplate && !repaired.changed) return repaired.loop;
   const store = { ...r.store, loops: r.store.loops.map((l) => (l.id === repaired.loop.id ? repaired.loop : l)) };
   try {
     await saveLoops(fs, store, r.hash);
-    return repaired.loop;
-  } catch { return repaired.loop; }
+  } catch (e) {
+    // The host approves and runs loop.json, so template steps that could not be saved must not run as the old ones.
+    if (fromTemplate) throw new Error(`system/loop.json could not be updated from ${TEMPLATE_FILE} (${e instanceof Error ? e.message : String(e)}); the run did not start.`);
+  }
+  return repaired.loop;
 }
 
 let ensuring: Promise<unknown> = Promise.resolve();
