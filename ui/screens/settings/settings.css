@@ -79,7 +79,7 @@
 .st-group-btn:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 2px; border-radius: var(--st-r-sm); }
 .st-group[data-open="true"] > .st-group-h .st-group-btn, .st-group:focus-within > .st-group-h .st-group-btn { background: color-mix(in srgb, var(--tok-color-accent) 5%, transparent); }
 .st-group > .ui-card { border: 0; border-top: 1px solid var(--tok-color-border); border-radius: 0; padding: var(--st-card-pad); background: transparent; }
-.st-group[data-open="true"] > .ui-card { max-height: calc(100vh - 220px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+/* No inner scroll box: a long section scrolls with the page, not a second clipped container inside it. */
 .st-group .ui-settings-section { border: 0; background: transparent; box-shadow: none; }
 .ui-settings-title { font-size: var(--st-fs-ui); letter-spacing: .055em; color: var(--tok-color-text); }
 .ui-settings-icon { width: 24px; height: 24px; border-radius: var(--st-r-sm); justify-content: center; color: var(--tok-color-accent2); background: color-mix(in srgb, var(--tok-color-accent2) 12%, transparent); }
