@@ -827,7 +827,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   return (
     <div className="loop-native" data-active={active}>
       <aside className="loop-pane loop-loops" aria-label="Loops">
-        <div className="loop-pane-head"><span>Loops</span><select className="loop-add-stage" aria-label="New loop or template" value="" onChange={(e) => { { const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === e.target.value); if (t) addLoopFromTemplate(t); } }}>
+        <div className="loop-pane-head"><span>Loops</span><select className="loop-add-stage" aria-label="New loop or template" value="" onChange={(e) => { const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === e.target.value); if (t) addLoopFromTemplate(t); }}>
           <option value="">＋ New loop…</option>
           <optgroup label="Built-in">{BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
           {customTemplates.length > 0 ? <optgroup label="My templates">{customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup> : null}
