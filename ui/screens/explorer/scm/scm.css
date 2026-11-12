@@ -2,8 +2,10 @@
 .scm-root { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; background: var(--tok-color-surface); color: var(--tok-color-text); font-size: var(--tok-type-body-size); }
 .scm-head { display: flex; align-items: center; gap: var(--tok-space-xs); padding: 6px var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); min-height: 35px; box-sizing: border-box; }
 .scm-title { margin: 0; font-size: var(--tok-type-tree-header-size); font-weight: var(--tok-type-tree-header-weight); text-transform: uppercase; letter-spacing: 0.5px; color: var(--tok-color-text-muted); }
-.scm-tabs { display: flex; border-bottom: 1px solid var(--tok-color-border); }
-.scm-tab { flex: 1; font: inherit; font-size: var(--tok-type-caption-size); background: none; border: 0; border-bottom: 2px solid transparent; color: var(--tok-color-text-muted); padding: 6px 4px; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; justify-content: center; }
+/* A narrow side panel scrolls the tab strip sideways instead of pushing tabs out of view. */
+.scm-tabs { display: flex; border-bottom: 1px solid var(--tok-color-border); overflow-x: auto; scrollbar-width: none; }
+.scm-tabs::-webkit-scrollbar { display: none; }
+.scm-tab { flex: 1 0 auto; white-space: nowrap; font: inherit; font-size: var(--tok-type-caption-size); background: none; border: 0; border-bottom: 2px solid transparent; color: var(--tok-color-text-muted); padding: 6px 4px; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; justify-content: center; }
 .scm-tab[aria-selected="true"] { color: var(--tok-color-text); border-bottom-color: var(--tok-color-accent); }
 .scm-tab:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: -2px; }
 .scm-tabpanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -15,7 +17,12 @@
 
 /* changes list */
 .scm-changes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.scm-bulk { display: flex; align-items: center; gap: var(--tok-space-xs); padding: 4px var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
+/* Wraps onto a second row when the panel is narrow; each control keeps its label on one line. */
+.scm-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-xs); padding: 4px var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
+.scm-bulk > :is(button, label, .scm-count) { white-space: nowrap; flex: none; }
+.scm-bulk > label { display: inline-flex; align-items: center; gap: 4px; }
+.scm-bulk > span.scm-help { flex: 1 1 100%; }
+.scm-bulk > .ex-spacer { flex: 1 1 0; min-width: 0; }
 .scm-count { color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .scm-list { flex: 1; min-height: 80px; overflow: auto; outline: none; position: relative; }
 .scm-list:focus-visible { box-shadow: inset 0 0 0 2px var(--tok-color-accent); }
