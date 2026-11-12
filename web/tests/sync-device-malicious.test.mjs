@@ -7,7 +7,10 @@ import * as E from '../../extension/core/sync-enroll.mjs';
 import { createTamperStore } from './helpers/tamper-store.mjs';
 import { createFakeDesktop } from './helpers/fake-desktop.mjs';
 import { enrollKeys, parsePair } from '../src/sync/enroll.ts';
-import { startPairing, readAck, readFirstWrap, readSnapshot, sendRequest, readReply } from '../src/sync/device.ts';
+import { prepareClaim, putClaim, readAck, readFirstWrap, readSnapshot, sendRequest, readReply } from '../src/sync/device.ts';
+
+// Contract 4a-4c as the controller runs it: prepare the claim, then write it once.
+const startPairing = async (store, pair, o) => { const e = await prepareClaim(store, pair, o); await putClaim(store, e); return e; };
 
 const T = 1_762_400_000_000;
 const kinds = (tag = 'a') => ({ chats: { items: [{ id: 'c1', title: `Chat ${tag}`, updatedAt: T, messages: [] }] }, plans: { items: [] } });

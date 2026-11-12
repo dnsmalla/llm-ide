@@ -34,13 +34,6 @@ function verifyKeyOf(d: LinkedDevice): Promise<CryptoKey> {
   return k;
 }
 
-/** Contract 4a-4c: pin the desktop key by sfp, make this browser's keys, write the claim once. */
-export async function startPairing(store: DeviceStore, pair: Pair, o: { name: string; now: number }): Promise<Enrolling> {
-  const e = await prepareClaim(store, pair, o);
-  await putClaim(store, e);
-  return e;
-}
-
 /** Contract 4c: write the claim; a retry writes the same name and bytes again, never a second claim. */
 export const putClaim = (store: DeviceStore, e: Enrolling) => store.put(e.claimPath, e.claimBytes, 1);
 

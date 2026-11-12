@@ -4,7 +4,10 @@ import assert from 'node:assert/strict';
 import { createMemoryStore } from '../../extension/connectors/sync-store/index.mjs';
 import { createFakeDesktop } from './helpers/fake-desktop.mjs';
 import { parsePair, ID22 } from '../src/sync/enroll.ts';
-import { startPairing, readAck, readFirstWrap, readSnapshot, sendRequest, readReply, MAX_TEXT, PREV_REPLY_MS } from '../src/sync/device.ts';
+import { prepareClaim, putClaim, readAck, readFirstWrap, readSnapshot, sendRequest, readReply, MAX_TEXT, PREV_REPLY_MS } from '../src/sync/device.ts';
+
+// Contract 4a-4c as the controller runs it: prepare the claim, then write it once.
+const startPairing = async (store, pair, o) => { const e = await prepareClaim(store, pair, o); await putClaim(store, e); return e; };
 
 const T = 1_762_400_000_000;
 const MARK = 'SECRET-MARKER-7f3a';

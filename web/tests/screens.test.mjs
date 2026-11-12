@@ -143,3 +143,20 @@ test("tool approval card says where saved rules live, still offers no saved rule
   const out = html(h(UI.WebChat, chatProps(s, { capabilities: caps("chat", "approvals", "tool_approvals") })));
   assert.match(out, /made and revoked on the desktop/); assert.doesNotMatch(out, /[Aa]lways/);
 });
+
+test("chat banner: after UNOPENED_LIMIT never-opened attempts it shows the origin and certificate hints with a forget action", () => {
+  const re = (unopened) => html(h(UI.WebChat, chatProps(UI.initialChatState, { connection: { kind: "reconnecting", attempt: 3, inMs: 1000, unopened } })));
+  const early = re(UI.UNOPENED_LIMIT - 1);
+  assert.doesNotMatch(early, /Forget and re-enter/);
+  const late = re(UI.UNOPENED_LIMIT);
+  assert.match(late, /LLMIDE_HOST_API_WEB_ORIGINS/);
+  assert.match(late, /trust the certificate/);
+  assert.match(late, /Forget and re-enter the address/);
+});
+
+test("sync tier: the Pair a desktop / Connect desktop action follows hostPaired", () => {
+  const st = { phase: "locked", pairStep: null, sas: null, busy: false, error: null, notice: null, online: true, email: "", snapshot: null, stale: false, checkedAt: null, pending: [], answered: [] };
+  const sync = new Proxy({}, { get: () => noop });
+  assert.match(html(h(UI.SyncTier, { state: st, sync, hostPaired: false, onHost: noop })), /Pair a desktop/);
+  assert.match(html(h(UI.SyncTier, { state: st, sync, hostPaired: true, onHost: noop })), /Connect desktop/);
+});

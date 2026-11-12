@@ -12,7 +12,7 @@ export type ConnectionState =
   | { kind: "connecting" }
   | { kind: "needsPin" }
   | { kind: "ready" }
-  | { kind: "reconnecting"; attempt: number; inMs: number }
+  | { kind: "reconnecting"; attempt: number; inMs: number; unopened: number } // unopened: consecutive attempts whose socket never opened
   | { kind: "failed"; code: HostApiErrorCode; message: string };
 
 export class HostApiError extends Error {
@@ -54,6 +54,9 @@ export interface HostConnectionOptions {
   backoffMs?: (attempt: number) => number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
+  pingMs?: number;
+  /** Calls fn when the page becomes visible again or the network comes back; returns an unsubscribe. */
+  onWake?: (fn: () => void) => () => void;
 }
 
 export interface HostLink {
@@ -67,6 +70,13 @@ export interface HostLink {
 export const ORIGIN_HINT =
   "Cannot reach the host. Check the address, that the desktop app runs with the Host API enabled, " +
   "and that this page's origin is listed in LLMIDE_HOST_API_WEB_ORIGINS.";
+/** Shown after UNOPENED_LIMIT attempts in a row where the socket never opened (origin refused, certificate, port). */
+export const CERT_HINT =
+  "If the address uses wss://, open its https:// address in this browser once and trust the certificate. " +
+  "If the desktop's port or address changed, forget this host and enter the new address.";
+export const UNOPENED_LIMIT = 3;
+// A ping while idle finds a half-open socket (sleep, network change) before the user's next request does.
+export const PING_MS = 25_000;
 export const defaultBackoff = (attempt: number) => Math.min(30_000, 500 * 2 ** attempt);
 
 const EVENTS = new Set<string>(HOST_API_EVENT_NAMES);
@@ -79,6 +89,16 @@ const refused = (e: HostApiError): { id: string; done: Promise<never> } => {
   done.catch(() => {});
   return { id: "", done };
 };
+function browserWake(fn: () => void): () => void {
+  const g = globalThis as unknown as {
+    addEventListener?: (t: string, f: () => void) => void; removeEventListener?: (t: string, f: () => void) => void;
+    document?: { visibilityState?: string; addEventListener?: (t: string, f: () => void) => void; removeEventListener?: (t: string, f: () => void) => void };
+  };
+  const visible = () => { if (g.document?.visibilityState === "visible") fn(); };
+  g.addEventListener?.("online", fn);
+  g.document?.addEventListener?.("visibilitychange", visible);
+  return () => { g.removeEventListener?.("online", fn); g.document?.removeEventListener?.("visibilitychange", visible); };
+}
 const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
 
 interface Pending { frame: string; idempotent: boolean; retried: boolean; timer: unknown; resolve: (r: never) => void; reject: (e: HostApiError) => void }
@@ -96,6 +116,9 @@ export class HostConnection implements HostLink {
   #rev = -1;
   #attempt = 0;
   #retryTimer: unknown = null;
+  #pingTimer: unknown = null;
+  #unopened = 0;
+  #offWake: (() => void) | null = null;
   #wanted = false;
   #pin: string | null = null;
   #settle: Settle | null = null;
@@ -108,6 +131,8 @@ export class HostConnection implements HostLink {
       setTimer: (fn, ms) => setTimeout(fn, ms),
       clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
       createSocket: (url) => new WebSocket(url) as unknown as SocketLike,
+      pingMs: PING_MS,
+      onWake: browserWake,
       ...o,
     } as Required<HostConnectionOptions>;
   }
@@ -130,6 +155,7 @@ export class HostConnection implements HostLink {
     old?.close(1000);
     this.#wanted = true;
     this.#pin = pin ?? null;
+    this.#offWake ??= this.#o.onWake(() => this.#wake());
     const p = new Promise<"ready" | "needsPin">((resolve, reject) => { this.#settle = { resolve, reject }; });
     p.catch(() => {});
     this.#open();
@@ -157,6 +183,8 @@ export class HostConnection implements HostLink {
     this.#wanted = false;
     this.#pin = null;
     this.#clearRetry();
+    this.#clearPing();
+    this.#offWake?.(); this.#offWake = null;
     const s = this.#socket;
     this.#socket = null;
     this.#rejectAll("The connection was closed.");
@@ -175,8 +203,29 @@ export class HostConnection implements HostLink {
     return revoked;
   }
 
+  /** Back on screen or online: retry now instead of waiting out the backoff; when ready, check the socket at once. */
+  #wake() {
+    if (!this.#wanted) return;
+    if (this.#state.kind === "reconnecting") return this.#open();
+    if (this.#state.kind === "ready") this.#ping();
+  }
+
+  #schedulePing() {
+    this.#clearPing();
+    if (this.#o.pingMs > 0) this.#pingTimer = this.#o.setTimer(() => { this.#pingTimer = null; this.#ping(); }, this.#o.pingMs);
+  }
+
+  #ping() {
+    this.#clearPing();
+    const s = this.#socket;
+    if (this.#state.kind !== "ready" || !s) return;
+    // #arm already drops the socket when the ping (resent once) gets no answer; any reply means the link is alive.
+    this.#request("host.ping", {}).done.then(() => {}, () => {}).finally(() => { if (this.#socket === s && this.#state.kind === "ready") this.#schedulePing(); });
+  }
+
   #open() {
     this.#clearRetry();
+    this.#clearPing();
     this.#rev = -1;
     this.#setState({ kind: "connecting" });
     let s: SocketLike;
@@ -228,6 +277,8 @@ export class HostConnection implements HostLink {
 
   #ready() {
     this.#attempt = 0;
+    this.#unopened = 0;
+    this.#schedulePing();
     this.#pin = null;
     this.#setState({ kind: "ready" });
     this.#resolve("ready");
@@ -236,6 +287,7 @@ export class HostConnection implements HostLink {
 
   #fail(err: HostApiError) {
     this.#wanted = false;
+    this.#clearPing();
     const s = this.#socket;
     this.#socket = null;
     this.#rejectAll(err.message);
@@ -247,6 +299,8 @@ export class HostConnection implements HostLink {
   #lost(opened: boolean) {
     const askedPin = this.#state.kind === "needsPin";
     this.#socket = null;
+    this.#clearPing();
+    this.#unopened = opened ? 0 : this.#unopened + 1;
     this.#rejectAll("The connection to the host closed.");
     this.#reject(unreachable(opened ? "The connection to the host closed." : ORIGIN_HINT));
     if (!this.#wanted) return this.#setState({ kind: "idle" });
@@ -256,7 +310,7 @@ export class HostConnection implements HostLink {
     }
     this.#attempt += 1;
     const inMs = this.#o.backoffMs(this.#attempt);
-    this.#setState({ kind: "reconnecting", attempt: this.#attempt, inMs });
+    this.#setState({ kind: "reconnecting", attempt: this.#attempt, inMs, unopened: this.#unopened });
     this.#retryTimer = this.#o.setTimer(() => { this.#retryTimer = null; this.#open(); }, inMs);
   }
 
@@ -285,8 +339,10 @@ export class HostConnection implements HostLink {
       }
       this.#pending.delete(id);
       p.reject(unreachable("The host did not answer in time."));
-      // a silent host while "ready" is likely a half-open socket (e.g. after sleep): close it so #lost reconnects
-      if (this.#state.kind === "ready" && this.#socket?.readyState === 1) this.#socket.close();
+      // A silent host while "ready" is likely a half-open socket (e.g. after sleep). Treat it as lost now: the browser
+      // may take minutes to report a dead TCP socket closed, so do not wait for its onclose.
+      const s = this.#socket;
+      if (this.#state.kind === "ready" && s?.readyState === 1) { this.#socket = null; s.close(); this.#lost(true); }
     }, this.#o.timeoutMs);
   }
 
@@ -335,6 +391,7 @@ export class HostConnection implements HostLink {
 
   #resolve(r: "ready" | "needsPin") { const s = this.#settle; this.#settle = null; s?.resolve(r); }
   #reject(e: HostApiError) { const s = this.#settle; this.#settle = null; s?.reject(e); }
+  #clearPing() { if (this.#pingTimer !== null) { this.#o.clearTimer(this.#pingTimer); this.#pingTimer = null; } }
   #clearRetry() { if (this.#retryTimer !== null) { this.#o.clearTimer(this.#retryTimer); this.#retryTimer = null; } }
   #setState(s: ConnectionState) { this.#state = s; for (const fn of this.#onState) fn(s); }
 }

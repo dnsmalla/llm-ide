@@ -1,6 +1,7 @@
 // The App's session lifecycle without React: auto-connect, pairing, adopting a session, and tearing it down when the
 // host revokes this browser. App.tsx renders it; tests drive it with a fake socket.
-import { HostApiError, HostConnection, type HostConnectionOptions, type TokenStore } from "./host-api/connection.ts";
+import { HostApiError, HostConnection, type ConnectionState, type HostConnectionOptions, type TokenStore } from "./host-api/connection.ts";
+import { browserPushEnv } from "./push/controller.ts";
 import { lastHostUrl, projectStoreFor, tokenStoreFor } from "./host-api/storage.ts";
 import { createChatController, type ChatController } from "./chat/controller.ts";
 import { createComposeController, type ComposeController } from "./chat/compose.ts";
@@ -21,11 +22,42 @@ export const REVOKE_IN_DESKTOP = "Revoke this browser in the desktop app's Setti
 export const throttled = (ms: number | null) =>
   ms ? `Too many attempts — wait ${Math.ceil(ms / 1000)} s and try again.` : "Too many attempts — wait a moment and try again.";
 
+// A short blip must not unmount Chat (its draft) or start sync storage traffic. With the default backoff the 5th
+// attempt starts about 15 s after the socket was lost; "failed" counts at once.
+export const SYNC_AFTER_ATTEMPTS = 5;
+// Before the session was ever live on this page (desktop off at load) there is no chat to keep: unreachable at once.
+export const hostUnreachable = (c: ConnectionState | null, wasLive: boolean): boolean =>
+  c?.kind === "failed" || (c?.kind === "reconnecting" && (!wasLive || c.attempt >= SYNC_AFTER_ATTEMPTS));
+
+/** Which screen the App shows. `view` is the user's choice: "sync" (Open offline copy), "host" (Connect desktop). */
+export type AppView = "auto" | "host" | "sync";
+export function chooseScreen(o: { hub: boolean; syncPhase: string; session: boolean; down: boolean; view: AppView }): "sync" | "chat" | "pairing" {
+  if (!o.hub && o.syncPhase === "pairing") return "sync";
+  const linked = !o.hub && o.syncPhase !== "none";
+  // Offline copy on its own only for a paired desktop that is unreachable; with no desktop paired, Pairing stays reachable.
+  if (linked && (o.view === "sync" || (o.view === "auto" && o.session && o.down))) return "sync";
+  return o.session ? "chat" : "pairing";
+}
+
+/** Sync storage traffic runs only when it is shown or the desktop is really unreachable, never during a blip. */
+export const syncShouldRun = (o: { hub: boolean; session: boolean; busy: boolean; down: boolean; view: AppView }): boolean =>
+  !o.hub && (o.view === "sync" || (!o.session && !o.busy) || (o.session && o.down));
+
+/** Applied on every change; disposing is left to unmount, since a disposed controller never starts again. start() runs
+ *  once (it loads the linked device, so the App knows sync is linked) and is a no-op after; a hub never needs it. */
+export function driveSync(sync: { start(): Promise<void>; pause(): void; resume(): void }, o: { hub: boolean; run: boolean }): void {
+  if (o.run) sync.resume(); else sync.pause();
+  if (!o.hub) void sync.start();
+}
+
+const dropBrowserPush = async () => { await (await browserPushEnv().subscription())?.unsubscribe(); };
+
 export interface AppDeps {
   tokensFor: (url: string) => TokenStore;
   remember: (url: string) => void;
   confirm: (message: string) => boolean;
   connection: Partial<HostConnectionOptions>; // test seam: createSocket, timers
+  dropPush: () => Promise<void>; // this browser's push subscription, unsubscribed on forget
 }
 
 const errorText = (e: unknown) =>
@@ -34,7 +66,8 @@ const errorText = (e: unknown) =>
 
 export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) {
   const d: AppDeps = {
-    tokensFor: tokenStoreFor, remember: (url) => lastHostUrl().set(url), confirm: (m) => globalThis.confirm?.(m) ?? true, connection: {}, ...deps,
+    tokensFor: tokenStoreFor, remember: (url) => lastHostUrl().set(url), confirm: (m) => globalThis.confirm?.(m) ?? true, connection: {},
+    dropPush: dropBrowserPush, ...deps,
   };
   let state: AppState = { session: null, busy: false, error: null, notice: null };
   let live: Session | null = null;
@@ -103,6 +136,9 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
       const s = live;
       if (!s || !d.confirm(FORGET_CONFIRM)) return;
       offState?.(); offState = null; // forget() closes the connection itself; not a revocation
+      // Best effort and never awaited: a forgotten host must not keep pushing to this browser.
+      if (s.connection.capabilities.has("push")) void s.connection.send("push.unregister", {}).done.catch(() => {});
+      void d.dropPush().catch(() => {});
       void s.connection.forget().then((revoked) => { if (!disposed) adopt(null, revoked ? null : REVOKE_IN_DESKTOP); });
     },
     dispose() { disposed = true; offState?.(); offState = null; if (live) shut(live); live = null; subs.clear(); },

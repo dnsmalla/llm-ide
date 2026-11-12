@@ -5,7 +5,7 @@ import { Composer } from "@llmide/screens/chat/Composer.tsx";
 import { QuestionCard } from "@llmide/screens/chat/approvals/QuestionCard.tsx";
 import "@llmide/screens/chat/chat.css";
 import "@llmide/screens/chat/approvals/approvals.css";
-import type { ConnectionState } from "../host-api/connection.ts";
+import { CERT_HINT, ORIGIN_HINT, UNOPENED_LIMIT, type ConnectionState } from "../host-api/connection.ts";
 import type { HostApiCapability } from "../host-api/types.generated.ts";
 import type { ChatState, WebMessage } from "../chat/store.ts";
 import { MAX_SEND_CHARS } from "../chat/controller.ts";
@@ -103,7 +103,13 @@ export function WebChat(p: WebChatProps) {
         </div>
       </header>
       {state.notice && <StatusBanner severity="info" message={state.notice} />}
-      {p.connection.kind === "reconnecting" && <StatusBanner severity="info" message="The desktop isn't reachable yet — retrying." />}
+      {p.connection.kind === "reconnecting" && (p.connection.unopened >= UNOPENED_LIMIT ? (
+        // The socket never opened several times in a row: the address, origin or certificate is wrong, not a blip.
+        <div className="web-unopened">
+          <StatusBanner severity="warning" message={`${ORIGIN_HINT} ${CERT_HINT}`} />
+          <button type="button" className="web-chat-action" onClick={p.onForget}>Forget and re-enter the address</button>
+        </div>
+      ) : <StatusBanner severity="info" message="The desktop isn't reachable yet — retrying." />)}
       {p.connection.kind === "failed" && <StatusBanner severity="error" message={p.connection.message} />}
       {msgs.length > shown && <button type="button" onClick={() => setShown(shown + PAGE)}>Show older</button>}
       <p className="web-status" role="status" aria-live="polite">{state.turn ? "The assistant is replying…" : ""}</p>

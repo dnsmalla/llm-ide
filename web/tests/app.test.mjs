@@ -33,8 +33,9 @@ function desk({ token = null, up = true, script = {} } = {}) {
     return s;
   };
   d.runTimers = () => { for (const t of d.timers.splice(0)) if (t.live) t.fn(); };
-  d.model = (confirm = () => true) => UI.createAppModel(URL_, {
-    tokensFor: () => tokens, remember: () => {}, confirm: (m) => { d.confirms.push(m); return confirm(m); },
+  d.pushDrops = 0;
+  d.model = (confirm = () => true, dropPush = async () => { d.pushDrops++; }) => UI.createAppModel(URL_, {
+    tokensFor: () => tokens, remember: () => {}, confirm: (m) => { d.confirms.push(m); return confirm(m); }, dropPush,
     connection: { createSocket, backoffMs: () => 1000, setTimer: (fn, ms) => { const t = { fn, ms, live: true }; d.timers.push(t); return t; }, clearTimer: (t) => { if (t) t.live = false; } },
   });
   return d;
@@ -101,7 +102,22 @@ test("forget asks first; a declined confirm keeps the session and the token", as
   assert.equal(d.stored, null);
   assert.ok(d.sent.includes("host.auth.revoke"));
   assert.equal(m.getState().notice, null, "revoked on the host, and not mistaken for a revocation notice");
+  assert.equal(d.pushDrops, 1, "the browser push subscription is dropped with the host");
   m.dispose();
+});
+
+test("forget unregisters push on a host that serves it, and a failing unsubscribe never blocks the forget", async () => {
+  const d = desk({ token: "k".repeat(40) });
+  const caps = [...CAPS, "push"];
+  d.script["host.hello"] = () => ({ result: { ...RESULTS["host.hello"], capabilities: caps } });
+  d.script["host.auth.token"] = () => ({ result: { capabilities: caps } });
+  d.script["push.unregister"] = () => ({ result: {} });
+  const m2 = d.model(() => true, () => Promise.reject(new Error("no service worker")));
+  m2.start(); await tick(); await tick();
+  m2.forget(); await tick(); await tick();
+  assert.ok(d.sent.indexOf("push.unregister") >= 0 && d.sent.indexOf("push.unregister") < d.sent.indexOf("host.auth.revoke"), JSON.stringify(d.sent));
+  assert.equal(m2.getState().session, null);
+  m2.dispose();
 });
 
 const fakeSync = (phase) => {
@@ -138,11 +154,72 @@ test("sync: while the first connection attempt is running, the sync tier does no
   assert.doesNotMatch(html(h(UI.App, { model: m, sync: fakeSync("locked") })), /offline sync/);
 });
 
-test("sources: Pairing and the sync tier both offer documents and code", () => {
+test("sources: Pairing and the sync tier both offer documents and code", async () => {
   const m = desk().model();
   assert.match(html(h(UI.App, { model: m, sync: fakeSync("none") })), /Open documents and code/);
-  const down = desk({ up: false }).model();
+  const down = desk({ token: "k".repeat(40), up: false }).model();
+  down.start(); await tick(); await tick();
   assert.match(html(h(UI.App, { model: down, sync: fakeSync("locked") })), />Documents and code<\/button>/);
+  down.dispose();
+});
+
+test("sync linked but no desktop paired: Pairing stays reachable and offers the offline copy, with the revoked notice", async () => {
+  const m = desk().model();
+  const out = html(h(UI.App, { model: m, sync: fakeSync("locked") }));
+  assert.match(out, /Pair browser/);
+  assert.match(out, /Open offline copy/);
+  assert.doesNotMatch(out, /Pairing link/, "already linked: no paste-a-link form");
+  const d = desk({ token: "k".repeat(40) });
+  const r = d.model();
+  r.start(); await tick(); await tick();
+  d.script["host.auth.token"] = () => ({ error: { code: "auth_failed", message: "Unknown token.", retryable: false } });
+  d.sockets.at(-1).close();
+  await tick(); d.runTimers(); await tick(); await tick(); await tick();
+  const revoked = html(h(UI.App, { model: r, sync: fakeSync("locked") }));
+  assert.ok(revoked.includes("removed or expired this browser"), "the REVOKED notice is shown even with sync linked");
+  r.dispose();
+});
+
+test("screen choice: a blip keeps Chat; SyncTier only for a paired, unreachable desktop or on request", () => {
+  const base = { hub: false, syncPhase: "locked", session: true, down: false, view: "auto" };
+  assert.equal(UI.chooseScreen(base), "chat");
+  assert.equal(UI.chooseScreen({ ...base, down: true }), "sync");
+  assert.equal(UI.chooseScreen({ ...base, down: true, view: "host" }), "chat", "Connect desktop from SyncTier");
+  assert.equal(UI.chooseScreen({ ...base, session: false, down: true }), "pairing", "no session: Pairing, never SyncTier on its own");
+  assert.equal(UI.chooseScreen({ ...base, session: false, view: "sync" }), "sync", "Open offline copy");
+  assert.equal(UI.chooseScreen({ ...base, syncPhase: "none", down: true }), "chat");
+  assert.equal(UI.chooseScreen({ ...base, hub: true, down: true }), "chat");
+  assert.equal(UI.chooseScreen({ ...base, session: false, syncPhase: "pairing" }), "sync");
+});
+
+test("host unreachable: a reconnect counts only from SYNC_AFTER_ATTEMPTS once the session was live; failed at once", () => {
+  const rc = (attempt) => ({ kind: "reconnecting", attempt, inMs: 1000, unopened: 0 });
+  assert.equal(UI.hostUnreachable(rc(1), true), false, "a 1-2 s blip");
+  assert.equal(UI.hostUnreachable(rc(UI.SYNC_AFTER_ATTEMPTS - 1), true), false);
+  assert.equal(UI.hostUnreachable(rc(UI.SYNC_AFTER_ATTEMPTS), true), true);
+  assert.equal(UI.hostUnreachable(rc(1), false), true, "desktop off at load: no chat to keep");
+  assert.equal(UI.hostUnreachable({ kind: "failed", code: "internal", message: "x" }, true), true);
+  assert.equal(UI.hostUnreachable({ kind: "ready" }, true), false);
+  assert.equal(UI.hostUnreachable(null, false), false);
+});
+
+test("sync traffic follows the same rule: paused during a blip and the first connect, running when down or shown", () => {
+  const base = { hub: false, session: true, busy: false, down: false, view: "auto" };
+  assert.equal(UI.syncShouldRun(base), false);
+  assert.equal(UI.syncShouldRun({ ...base, down: true }), true);
+  assert.equal(UI.syncShouldRun({ ...base, session: false, busy: true }), false);
+  assert.equal(UI.syncShouldRun({ ...base, session: false }), true);
+  assert.equal(UI.syncShouldRun({ ...base, view: "sync" }), true);
+  assert.equal(UI.syncShouldRun({ ...base, hub: true, down: true }), false);
+});
+
+test("hub flips pause and resume sync and never dispose it", () => {
+  const calls = [];
+  const sync = { start: async () => { calls.push("start"); }, pause: () => calls.push("pause"), resume: () => calls.push("resume"), dispose: () => calls.push("dispose") };
+  UI.driveSync(sync, { hub: false, run: true });
+  UI.driveSync(sync, { hub: true, run: false });
+  UI.driveSync(sync, { hub: false, run: true });
+  assert.deepEqual(calls, ["resume", "start", "pause", "resume", "start"]);
 });
 
 test("projects: on load it asks projects.list, shows the first project and scopes the chat snapshot", async () => {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HostConnection, HostApiError, ORIGIN_HINT } from "../src/host-api/connection.ts";
+import { HostConnection, HostApiError, ORIGIN_HINT, PING_MS } from "../src/host-api/connection.ts";
 
 const CAPS = ["host", "chat", "approvals"];
 const RESULTS = {
@@ -10,11 +10,13 @@ const RESULTS = {
   "host.auth.revoke": { revoked: true },
   "chat.snapshot": { messages: [] },
   "chat.send": { accepted: true },
+  "host.ping": {},
 };
 
 function harness({ token = null, script = {} } = {}) {
   let stored = token, rev = 0;
   const sockets = [], timers = [], sent = [];
+  const wake = { fns: new Set() };
   const tokens = { get: () => stored, set: (t) => { stored = t; } };
   const reply = (s, obj) => queueMicrotask(() => s.onmessage?.({ data: typeof obj === "string" ? obj : JSON.stringify(obj) }));
   const host = (s, f) => {
@@ -37,11 +39,13 @@ function harness({ token = null, script = {} } = {}) {
     setTimer: (fn, ms) => { const t = { fn, ms, live: true }; timers.push(t); return t; },
     clearTimer: (t) => { if (t) t.live = false; },
     backoffMs: (n) => n * 1000,
+    onWake: (fn) => { wake.fns.add(fn); return () => { wake.fns.delete(fn); }; },
   });
   const runTimers = () => { for (const t of timers.splice(0)) if (t.live) t.fn(); };
   const event = (s, command, payload, r, replyTo) => reply(s, { apiVersion: 1, id: `h-e${r}`, type: "event", command, payload, ts: 1, rev: r, ...(replyTo ? { replyTo } : {}) });
   const tick = () => new Promise((r) => setTimeout(r, 0));
-  return { conn, sockets, sent, timers, runTimers, event, reply, tick, token: () => stored };
+  const fireWake = () => { for (const fn of wake.fns) fn(); };
+  return { conn, sockets, sent, timers, runTimers, event, reply, tick, token: () => stored, wake, fireWake };
 }
 
 test("hello then token auth reaches ready, fires one resync, and sends a well-formed hello", async () => {
@@ -146,7 +150,7 @@ test("an unexpected close rejects pending work, backs off, re-auths with the tok
   const pending = h.conn.send("chat.snapshot", {});
   h.sockets[0].close();
   await assert.rejects(pending.done, (e) => e.code === "host_unreachable");
-  assert.deepEqual(h.conn.state, { kind: "reconnecting", attempt: 1, inMs: 1000 });
+  assert.deepEqual(h.conn.state, { kind: "reconnecting", attempt: 1, inMs: 1000, unopened: 0 });
   h.runTimers(); // the backoff timer reopens
   await h.tick(); await h.tick();
   assert.equal(h.conn.state.kind, "ready");
@@ -229,4 +233,80 @@ test("refused sends and timeouts never surface as unhandled rejections", async (
     assert.equal(seen.length, 0);
     void p;
   } finally { process.off("unhandledRejection", on); }
+});
+
+const pingTimers = (h) => h.timers.filter((t) => t.live && t.ms === PING_MS);
+const firePing = (h) => { const t = pingTimers(h)[0]; t.live = false; t.fn(); };
+
+test("while ready the client pings every PING_MS and keeps pinging after each answer", async () => {
+  const h = harness({ token: "k".repeat(40) });
+  await h.conn.connect();
+  assert.equal(pingTimers(h).length, 1);
+  firePing(h);
+  assert.equal(h.sent.at(-1).command, "host.ping");
+  assert.deepEqual(h.sent.at(-1).payload, {});
+  await h.tick();
+  assert.equal(pingTimers(h).length, 1, "the next ping is scheduled after the answer");
+  assert.equal(h.conn.state.kind, "ready");
+});
+
+test("close clears the ping timer", async () => {
+  const h = harness({ token: "k".repeat(40) });
+  await h.conn.connect();
+  assert.equal(pingTimers(h).length, 1);
+  h.conn.close();
+  assert.equal(pingTimers(h).length, 0);
+});
+
+test("an unanswered ping drops the half-open socket at once and reconnects", async () => {
+  const h = harness({ token: "k".repeat(40), script: { "host.ping": () => null } });
+  await h.conn.connect();
+  firePing(h);
+  h.sockets[0].close = () => {}; // a dead TCP socket: the browser never reports the close
+  h.runTimers(); // ping resent once
+  h.runTimers(); // gives up
+  await h.tick();
+  assert.equal(h.conn.state.kind, "reconnecting");
+  assert.equal(pingTimers(h).length, 0);
+});
+
+test("a wake (page visible, network back) reconnects now instead of waiting out the backoff", async () => {
+  const h = harness({ token: "k".repeat(40) });
+  await h.conn.connect();
+  h.sockets[0].close();
+  await h.tick();
+  assert.equal(h.conn.state.kind, "reconnecting");
+  const backoff = h.timers.find((t) => t.live && t.ms === 1000);
+  h.fireWake();
+  assert.equal(backoff.live, false, "the backoff timer is cleared");
+  await h.tick(); await h.tick();
+  assert.equal(h.conn.state.kind, "ready");
+  assert.equal(h.sockets.length, 2);
+  h.fireWake(); // ready: check the socket with a ping
+  assert.equal(h.sent.at(-1).command, "host.ping");
+  h.conn.close();
+  assert.equal(h.wake.fns.size, 0, "close() stops listening");
+  assert.equal(h.timers.filter((t) => t.live).length, 0, "close() clears every timer");
+});
+
+test("consecutive attempts whose socket never opened are counted and reset by an open", async () => {
+  const h = harness({ token: "k".repeat(40) });
+  await h.conn.connect();
+  h.sockets[0].close(); // opened once: not counted
+  await h.tick();
+  assert.equal(h.conn.state.unopened, 0);
+  for (let i = 1; i <= 3; i++) {
+    h.runTimers();
+    const s = h.sockets.at(-1);
+    s.onopen = null; // refused before open (origin, certificate, port)
+    s.close();
+    await h.tick();
+    assert.equal(h.conn.state.unopened, i);
+  }
+  h.runTimers();
+  await h.tick(); await h.tick();
+  assert.equal(h.conn.state.kind, "ready");
+  h.sockets.at(-1).close();
+  await h.tick();
+  assert.equal(h.conn.state.unopened, 0);
 });

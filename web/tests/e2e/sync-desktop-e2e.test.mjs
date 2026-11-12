@@ -30,7 +30,8 @@ test('pair, read, queue and reply against the real desktop sync code', { skip },
     const store = createMemoryStore();
     const { qr } = await startEnrollment(u, { store, tier: 'web', now: T, env: {} });
     assert.ok(qr.startsWith('https://llm-ide.com/app/#pair='));
-    const e = await D.startPairing(store, parsePair(qr), { name: 'E2E browser', now: T });
+    const e = await D.prepareClaim(store, parsePair(qr), { name: 'E2E browser', now: T });
+    await D.putClaim(store, e);
     const p = await pollEnrollment(u, { now: T + 1000 });
     assert.equal(p.phase, 'confirm');
     assert.equal(p.name, 'E2E browser');

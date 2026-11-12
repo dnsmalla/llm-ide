@@ -20,11 +20,18 @@ export function checkHostUrl(raw: string, pageProtocol: string | undefined = glo
   return { ok: true, url: `${ws}//${u.host}${path}` };
 }
 
-export function initialHostUrl(env: string | undefined, last: string | null): string {
+// An https page cannot use the plaintext loopback default (checkHostUrl refuses it): start empty there.
+export function initialHostUrl(env: string | undefined, last: string | null, pageProtocol: string | undefined = globalThis.location?.protocol): string {
   for (const c of [last, env]) {
     if (!c) continue;
-    const r = checkHostUrl(c);
+    const r = checkHostUrl(c, pageProtocol);
     if (r.ok) return r.url;
   }
-  return DEFAULT_HOST_URL;
+  return pageProtocol === "https:" ? "" : DEFAULT_HOST_URL;
+}
+
+export function hostUrlHint(pageProtocol: string | undefined = globalThis.location?.protocol): string {
+  return pageProtocol === "https:"
+    ? "For a hub, enter https://hub.example.com. For a desktop, wss://<host>:<port>/host-api/v1."
+    : `For a hub, enter https://hub.example.com. For this computer, ${DEFAULT_HOST_URL}.`;
 }

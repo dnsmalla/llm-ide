@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
-import { checkHostUrl } from "../host-api/url.ts";
+import { checkHostUrl, hostUrlHint } from "../host-api/url.ts";
 
 export interface PairingProps {
   initialUrl: string;
@@ -66,7 +66,7 @@ export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit
             {shown && <StatusBanner severity="error" message={shown} />}
             <label htmlFor={ids[0]}>Hub or desktop address</label>
             <input id={ids[0]} type="url" value={url} onChange={(e) => setUrl(e.target.value)} required autoComplete="off" spellCheck={false} />
-            <p className="web-hint">For a hub, enter https://hub.example.com. For this computer, ws://127.0.0.1:3016/host-api/v1.</p>
+            <p className="web-hint">{hostUrlHint()}</p>
             <label htmlFor={ids[1]}>Pairing PIN</label>
             <input id={ids[1]} className="web-pin" inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} required autoFocus placeholder="••••••" aria-describedby={ids[2]} />

@@ -10,7 +10,7 @@ import { KINDS } from "../sync/kinds.ts";
 import type { SyncController, SyncState } from "../sync/controller.ts";
 
 type Actions = Pick<SyncController, "pair" | "cancelPairing" | "unlock" | "send" | "refresh" | "lock" | "forget">;
-export interface SyncTierProps { state: SyncState; sync: Actions; hostPaired: boolean; onSources?: () => void }
+export interface SyncTierProps { state: SyncState; sync: Actions; hostPaired: boolean; onSources?: () => void; onHost?: () => void }
 
 const READ = new Set(["read"] as const);
 const when = (ms: number) => new Date(ms).toLocaleString();
@@ -25,7 +25,7 @@ export const REPLY_TEXT: Record<string, string> = {
   stale_epoch: "The desktop changed its keys. Send it again.",
 };
 
-function Frame({ children, hostPaired, onSources }: { children: ReactNode; hostPaired: boolean; onSources?: () => void }) {
+function Frame({ children, hostPaired, onSources, onHost }: { children: ReactNode; hostPaired: boolean; onSources?: () => void; onHost?: () => void }) {
   return (
     <main className="web-app sync-app">
       <header className="sync-topbar">
@@ -36,6 +36,7 @@ function Frame({ children, hostPaired, onSources }: { children: ReactNode; hostP
         <div className="sync-top-actions">
           {hostPaired && <span className="sync-chip" data-tone="muted">Desktop not reachable</span>}
           {onSources && <button type="button" className="sync-ghost" onClick={onSources}>Documents and code</button>}
+          {onHost && <button type="button" className="sync-ghost" onClick={onHost}>{hostPaired ? "Connect desktop" : "Pair a desktop"}</button>}
         </div>
       </header>
       {children}
@@ -204,9 +205,9 @@ function ReadyView({ state, sync }: { state: SyncState; sync: Actions }) {
   );
 }
 
-export function SyncTier({ state, sync, hostPaired, onSources }: SyncTierProps) {
+export function SyncTier({ state, sync, hostPaired, onSources, onHost }: SyncTierProps) {
   return (
-    <Frame hostPaired={hostPaired} onSources={onSources}>
+    <Frame hostPaired={hostPaired} onSources={onSources} onHost={onHost}>
       {state.phase === "pairing" ? <PairView state={state} sync={sync} />
         : state.phase === "locked" ? <UnlockView state={state} sync={sync} />
         : state.phase === "removed" ? (
@@ -218,6 +219,17 @@ export function SyncTier({ state, sync, hostPaired, onSources }: SyncTierProps) 
         )
         : <ReadyView state={state} sync={sync} />}
     </Frame>
+  );
+}
+
+/** On the Pairing screen once this browser is linked to sync: the way to the offline copy without a paired desktop. */
+export function OfflineCopyEntry({ onOpen }: { onOpen: () => void }) {
+  return (
+    <section className="web-form">
+      <h2>Offline sync</h2>
+      <p>This browser is linked to the desktop's sync storage. Read its last snapshot and queue prompts while it is off.</p>
+      <button type="button" onClick={onOpen}>Open offline copy</button>
+    </section>
   );
 }
 

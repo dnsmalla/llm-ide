@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkHostUrl, initialHostUrl, DEFAULT_HOST_URL } from "../src/host-api/url.ts";
+import { checkHostUrl, initialHostUrl, hostUrlHint, DEFAULT_HOST_URL } from "../src/host-api/url.ts";
 import { tokenStoreFor, lastHostUrl } from "../src/host-api/storage.ts";
 
 test("loopback ws and any wss are accepted and normalised", () => {
@@ -43,6 +43,14 @@ test("the initial URL prefers the last one, then the build variable, then the de
   assert.equal(initialHostUrl("wss://h.example:3016/host-api/v1", null), "wss://h.example:3016/host-api/v1");
   assert.equal(initialHostUrl("wss://h.example:3016/host-api/v1", "ws://127.0.0.1:3017/host-api/v1"), "ws://127.0.0.1:3017/host-api/v1");
   assert.equal(initialHostUrl("garbage", "also garbage"), DEFAULT_HOST_URL);
+});
+
+test("on an https page the default is empty and the hint names wss://", () => {
+  assert.equal(initialHostUrl(undefined, null, "https:"), "");
+  assert.equal(initialHostUrl(undefined, "ws://127.0.0.1:3017/host-api/v1", "https:"), "");
+  assert.equal(initialHostUrl("wss://h.example:3016/host-api/v1", null, "https:"), "wss://h.example:3016/host-api/v1");
+  assert.match(hostUrlHint("https:"), /wss:\/\//);
+  assert.doesNotMatch(hostUrlHint("https:"), /127\.0\.0\.1/);
 });
 
 const memory = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: (k) => m.delete(k), m }; };
