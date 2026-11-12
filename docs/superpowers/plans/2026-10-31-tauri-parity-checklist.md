@@ -1,6 +1,6 @@
 # Tauri parity checklist against the Mac app
 
-Status (counted 2026-11-05 from the Tauri column): `x` 0, `~` 105 (built, not verified), `-` 45 (not started), `defer` 20, `n/a` 0. No row is verified yet. Created 2026-10-31, at `main`. The Phase 0 spike (Monaco, xterm, chat replay) is not counted until a row is verified. Parents: [Phase 3 plan](2026-10-31-tauri-phase3-plan.md), [MASTER-PLAN](../MASTER-PLAN.md) S2, [ADR 0018](../../decisions/0018-tauri-desktop-node-core-relay.md).
+Status (counted 2026-11-12 from the Tauri column): `x` 0, `~` 130 (built, not verified), `-` 19 (not started), `defer` 21, `later` 1, `n/a` 0. Sections 8, 10 and 11 were re-checked against the code on 2026-11-12 (their `-` rows became `~` where the code exists); the 19 remaining `-` rows in the other sections were not re-checked. No row is verified yet. Created 2026-10-31, at `main`. The Phase 0 spike (Monaco, xterm, chat replay) is not counted until a row is verified. Parents: [Phase 3 plan](2026-10-31-tauri-phase3-plan.md), [MASTER-PLAN](../MASTER-PLAN.md) S2, [ADR 0018](../../decisions/0018-tauri-desktop-node-core-relay.md).
 
 How to use: one row per behaviour. **Mac** is the reference (Swift source named in the row). **Tauri** is one of `-` (not started), `~` (built, not verified), `x` (verified on macOS), `x+w` (verified on macOS and Windows), `n/a` (decided not to port, with a reason in Evidence), `defer` (planned later). **Evidence** is a test name, a screenshot under `desktop/parity/`, or a commit hash. A row is `x` only with evidence, and visual rows also need the user's side-by-side check. Each slice owner edits only their own section, in the same commit that lands the work. Rows were derived from the Mac source tree, not from memory; an unknown behaviour found later is added as a new row, not skipped.
 
@@ -170,15 +170,15 @@ Phase 5 rows close at `x` (macOS) for the macOS exit gate; `x+w` waits for the W
 
 | Row | Mac (source) | Tauri | Evidence |
 |---|---|---|---|
-| Connect GitHub, GitLab (write-only token into the core vault, never listed) | yes (Keychain, `RepoBackendFactory`) | - |  |
+| Connect GitHub, GitLab (write-only token into the core vault, never listed) | yes (Keychain, `RepoBackendFactory`) | ~ | built, not GUI-verified: Settings > Repositories, a write-only token per provider into the core vault (`github.token`, `gitlab.token`), never rendered back (`ui/screens/settings/repo-config.ts`) |
 | Connect Backlog and Linear | yes (dispatch targets in the core) | - |  |
-| Issue list: paged fetch, filters, saved views, "showing N of M", 10k windowed | yes (`RepoIssuesView`) | - |  |
-| Kanban with label-derived columns (`::` GitLab, `:` GitHub), windowed per column | yes (`RepoKanbanPanel`) | - |  |
-| Issue detail: safe markdown, comments, labels, assignee, no auto-loaded images | yes (`RepoIssueDetailSheet`) | - |  |
-| Schedule editor and overlay (`/kb/issue-schedule`) | yes (`IssueScheduleEditorSheet`) | - |  |
-| Gantt with row and time-window virtualisation, drag reschedule with rollback, 2,000 rows at 60 fps | yes (`GanttView`, `GanttViewModel`) | - |  |
-| Rate limit handling (Retry-After, reset time shown) | yes (`GitHubClient`) | - |  |
-| Repo allowlist enforced in the core | yes (`AllowlistedRepoBackend`) | - |  |
+| Issue list: paged fetch, filters, saved views, "showing N of M", 10k windowed | yes (`RepoIssuesView`) | ~ | built, not GUI-verified: partial: paged fetch and import summary (`ui/screens/issues/issue-paging.ts`, `issues-model.ts`, tests `issue-paging`, `issues-model`); saved views and the 10k windowing are not measured |
+| Kanban with label-derived columns (`::` GitLab, `:` GitHub), windowed per column | yes (`RepoKanbanPanel`) | ~ | built, not GUI-verified: partial: board mode of the Issues screen (`IssuesScreen.tsx`); column derivation and per-column windowing not re-checked against the Mac rule |
+| Issue detail: safe markdown, comments, labels, assignee, no auto-loaded images | yes (`RepoIssueDetailSheet`) | ~ | built, not GUI-verified: `IssueDetail.tsx` (comments, labels, assignee); the no-auto-loaded-images rule is not re-checked |
+| Schedule editor and overlay (`/kb/issue-schedule`) | yes (`IssueScheduleEditorSheet`) | ~ | built, not GUI-verified: `gantt/ScheduleEditor.tsx`, `gantt-model.ts` (`/kb/issue-schedule`; the nested-key hint for an older core), tests `gantt-model`, `gantt-screen-wiring` |
+| Gantt with row and time-window virtualisation, drag reschedule with rollback, 2,000 rows at 60 fps | yes (`GanttView`, `GanttViewModel`) | ~ | built, not GUI-verified: `gantt/GanttChart.tsx`, `GanttScreen.tsx`, test `gantt-body`; the 2,000 rows at 60 fps figure is not measured |
+| Rate limit handling (Retry-After, reset time shown) | yes (`GitHubClient`) | ~ | built, not GUI-verified: partial: the import summary shows GitHub's wait time (`issues-model.ts` `importSummary`, `retryAfter`; test `issues-model`) |
+| Repo allowlist enforced in the core | yes (`AllowlistedRepoBackend`) | ~ | built, not GUI-verified: UI side only: `issues/repo-scope.ts` (tests `repo-scope`); the enforcement itself stays in the core and is not re-verified here |
 | Existing-issue picker and recent issues grounding for Chat | yes (`IssueSeamRegistry`) | - |  |
 | GitLab dispatch target | no (Mac Issues UI only) | defer | work-kit W6: leave |
 
@@ -218,17 +218,17 @@ Built as one screen with two surfaces (`ui/screens/docgen/`: `DocGenScreen`, `Se
 
 | Row | Mac (source) | Tauri | Evidence |
 |---|---|---|---|
-| Job runner routes: enqueue, list, get, cancel, stream; reconcile interrupted as aborted on boot | yes (`LoopRunQueue`, `LoopRunJournal.reconcileInterrupted`) | - |  |
-| Cron and scheduler with the Swift fixtures (timezone, DST), missed-run policy | yes (`CronExpression`, 60 s timer) | - |  |
-| Loop contract `system/loop.json` and journal `system/loop-runs/` readable both ways | yes (`LoopEngineConfigStore`, `LoopRunJournal`) | - |  |
-| Auto Task config exported one way, history and logs | yes (`AutoTaskConfigStore`, `TaskLogStore`) | - |  |
-| Stage detector and test map identical on fixtures | yes (`LoopStageDetector`) | - |  |
-| Repair scope guard, protected paths, verify approvals fail closed, adversarial corpus | yes (`RepairScopeGuard`, `VerifyApprovalStore`) | - | independent review required |
-| Runner: stages, repair via `/kb/loop/agent-run`, worktree, ship, cancel kills process group | yes (`LoopEngineRunner`) | - |  |
-| The 13 Auto Tasks and custom tasks on the SDK engine, metered | yes (`AutoCodeUpdateService`) | - |  |
-| Default loops (Regression, Test, System Check, Plan, Refactoring, Doc Optimization) | yes (`LoopTemplate`) | - |  |
-| Loop screen: runs windowed, live run, stage detail, journal paged, editor, New Loop wizard, run one stage | yes (`LoopEngineView`) | - |  |
-| Auto Tasks screen: config, schedule, model limits, task logs | yes (`AutoCodeView`, `ModelLimitsPanel`) | - |  |
+| Job runner routes: enqueue, list, get, cancel, stream; reconcile interrupted as aborted on boot | yes (`LoopRunQueue`, `LoopRunJournal.reconcileInterrupted`) | ~ | built, not GUI-verified: partial: an in-process run manager and a persisted queue (`loop/native/run-manager.ts`, `queue.ts`; tests `native-run-manager`, `native-queue`); it deliberately has no cross-window background queue and does not use the Mac's core job routes |
+| Cron and scheduler with the Swift fixtures (timezone, DST), missed-run policy | yes (`CronExpression`, 60 s timer) | ~ | built, not GUI-verified: `tasks/schedule.ts` (30 s tick, one run at a time under the Auto Task lock), `autotasks/native/cron.ts`, `due.ts` (tests `cron`, `due`, `schedule`); the Swift timezone and DST fixtures are not re-checked |
+| Loop contract `system/loop.json` and journal `system/loop-runs/` readable both ways | yes (`LoopEngineConfigStore`, `LoopRunJournal`) | ~ | built, not GUI-verified: `loop/native/model.ts` (tolerant reader of the committed `loop.json`), `history.ts` (journal); tests `native-model`, `native-history`; reading by both apps is not shown |
+| Auto Task config exported one way, history and logs | yes (`AutoTaskConfigStore`, `TaskLogStore`) | ~ | built, not GUI-verified: partial: `autotasks/native/model.ts`, `usage.ts`, `tasks/run-history.ts`, `store.ts` (tests `native-model`, `usage`, `run-history`) |
+| Stage detector and test map identical on fixtures | yes (`LoopStageDetector`) | ~ | built, not GUI-verified: `loop/native/testmap.ts`, `default-stage.ts` (tests `native-testmap`, `native-parity`) |
+| Repair scope guard, protected paths, verify approvals fail closed, adversarial corpus | yes (`RepairScopeGuard`, `VerifyApprovalStore`) | ~ | built, not GUI-verified: `loop/native/protected.ts`, `approvals.ts`, host `loop_approval.rs` (tests `native-protected`, `native-approvals`, `native-write-guard`); still needs the independent review and the adversarial corpus |
+| Runner: stages, repair via `/kb/loop/agent-run`, worktree, ship, cancel kills process group | yes (`LoopEngineRunner`) | ~ | built, not GUI-verified: `loop/native/runner.ts`, `stage-exec.ts`, `worktree-run.ts`, host `loop_runner.rs` (own process group, `loop_worktree.rs`); tests `native-runner`, `native-stage-exec`, `native-worktree-run` |
+| The 13 Auto Tasks and custom tasks on the SDK engine, metered | yes (`AutoCodeUpdateService`) | ~ | built, not GUI-verified: registry and custom tasks (`tasks/registry.generated.ts`, `runner.ts`, `autotasks/native/custom.ts`, `run-custom.ts`; tests `registry`, `run-custom`); the count of 13 and metering are not re-checked |
+| Default loops (Regression, Test, System Check, Plan, Refactoring, Doc Optimization) | yes (`LoopTemplate`) | ~ | built, not GUI-verified: `loop/native/defaults.ts`, `templates.ts` (tests `native-templates`, `generated-templates`); the six names are not re-checked |
+| Loop screen: runs windowed, live run, stage detail, journal paged, editor, New Loop wizard, run one stage | yes (`LoopEngineView`) | ~ | built, not GUI-verified: `loop/native/NativeLoopScreen.tsx` (live run, stage detail, editor, wizard) and the Factory board (`ui/screens/factory/`) |
+| Auto Tasks screen: config, schedule, model limits, task logs | yes (`AutoCodeView`, `ModelLimitsPanel`) | ~ | built, not GUI-verified: `autotasks/native/NativeAutoTasksScreen.tsx`, `ModelLimitsPanel.tsx` |
 | Engine preference swift or core, default flips only after user-run real runs | no (new) | - |  |
 | Phone bridges for Loop and Auto Tasks | yes (`MobileLoopBridge`, `MobileAutoTaskBridge`) | defer | the Swift app keeps the phone until the relay |
 
