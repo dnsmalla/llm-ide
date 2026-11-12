@@ -65,3 +65,12 @@ test("the helper accepts the model key and preserves it across a redeploy", { sk
   assert.match(helper, /ANTHROPIC_API_KEY/);
   assert.match(helper, /grep '\^ANTHROPIC_API_KEY=' "\$CONF"/);
 });
+
+test("the hub env serves Host API read but never compose or tool approvals", () => {
+  const installer = read("install-hub.sh");
+  assert.match(installer, /LLMIDE_HOST_API_READ=1/);
+  assert.doesNotMatch(installer, /LLMIDE_HOST_API_(COMPOSE|TOOL_APPROVALS)/);
+  const deploy = read("llmide-deploy");
+  assert.match(deploy, /\|LLMIDE_HOST_API_READ\|/, "the env allowlist accepts READ");
+  assert.doesNotMatch(deploy, /LLMIDE_HOST_API_(COMPOSE|TOOL_APPROVALS)/);
+});

@@ -334,7 +334,7 @@ pub fn generate_secrets() -> Result<DeploySecrets, FsError> {
 
 pub fn env_bytes(s: &DeploySecrets, domain: &str, version: &str) -> Vec<u8> {
     format!(
-        "NODE_ENV=production\nPATH=/usr/local/bin:/usr/bin:/bin\nLLMIDE_HOST=127.0.0.1\nLLMIDE_PORT=3457\nLLMIDE_HUB=1\nLLMIDE_TLS_TERMINATED=1\nLLMIDE_HUB_DOMAIN={domain}\nLLMIDE_HUB_VERSION={version}\nLLMIDE_DATA_DIR=/var/lib/llmide\nLLMIDE_DB_PATH=/var/lib/llmide/data.db\nLLMIDE_PROJECTS_ROOT=/srv/llmide/projects\nLLMIDE_BACKUP_DIR=/var/lib/llmide/backups\nLLMIDE_BACKUP_KEEP=7\nLLMIDE_DISABLE_REGISTRATION=1\nLLMIDE_TRUST_PROXY=1\nLLMIDE_LOG_JSON=1\nLLMIDE_LOG_LEVEL=info\nLLMIDE_LOG_ROTATE=external\nLLMIDE_MAX_TURNS=8\nLLMIDE_HOST_API_HUB=1\nLLMIDE_HOST_API_WEB_ORIGINS=https://{domain}\nLLMIDE_HOST_API_FINGERPRINT_FILE=/etc/llmide/host-api-fingerprint\nLLMIDE_HUB_PUBLIC_URL=wss://{domain}/host-api/v1\nLLMIDE_JWT_SECRET={}\nLLMIDE_VAULT_KEY={}\n",
+        "NODE_ENV=production\nPATH=/usr/local/bin:/usr/bin:/bin\nLLMIDE_HOST=127.0.0.1\nLLMIDE_PORT=3457\nLLMIDE_HUB=1\nLLMIDE_TLS_TERMINATED=1\nLLMIDE_HUB_DOMAIN={domain}\nLLMIDE_HUB_VERSION={version}\nLLMIDE_DATA_DIR=/var/lib/llmide\nLLMIDE_DB_PATH=/var/lib/llmide/data.db\nLLMIDE_PROJECTS_ROOT=/srv/llmide/projects\nLLMIDE_BACKUP_DIR=/var/lib/llmide/backups\nLLMIDE_BACKUP_KEEP=7\nLLMIDE_DISABLE_REGISTRATION=1\nLLMIDE_TRUST_PROXY=1\nLLMIDE_LOG_JSON=1\nLLMIDE_LOG_LEVEL=info\nLLMIDE_LOG_ROTATE=external\nLLMIDE_MAX_TURNS=8\nLLMIDE_HOST_API_HUB=1\nLLMIDE_HOST_API_READ=1\nLLMIDE_HOST_API_WEB_ORIGINS=https://{domain}\nLLMIDE_HOST_API_FINGERPRINT_FILE=/etc/llmide/host-api-fingerprint\nLLMIDE_HUB_PUBLIC_URL=wss://{domain}/host-api/v1\nLLMIDE_JWT_SECRET={}\nLLMIDE_VAULT_KEY={}\n",
         s.jwt, s.vault
     ).into_bytes()
 }
@@ -343,7 +343,7 @@ const ENV_KEYS: &[&str] = &[
     "NODE_ENV", "PATH", "LLMIDE_HOST", "LLMIDE_PORT", "LLMIDE_HUB", "LLMIDE_TLS_TERMINATED",
     "LLMIDE_HUB_DOMAIN", "LLMIDE_HUB_VERSION", "LLMIDE_DATA_DIR", "LLMIDE_DB_PATH", "LLMIDE_PROJECTS_ROOT",
     "LLMIDE_BACKUP_DIR", "LLMIDE_BACKUP_KEEP", "LLMIDE_DISABLE_REGISTRATION", "LLMIDE_TRUST_PROXY",
-    "LLMIDE_LOG_JSON", "LLMIDE_LOG_LEVEL", "LLMIDE_LOG_ROTATE", "LLMIDE_BACKUP_REMOTE", "LLMIDE_MAX_TURNS", "LLMIDE_HOST_API_HUB",
+    "LLMIDE_LOG_JSON", "LLMIDE_LOG_LEVEL", "LLMIDE_LOG_ROTATE", "LLMIDE_BACKUP_REMOTE", "LLMIDE_MAX_TURNS", "LLMIDE_HOST_API_HUB", "LLMIDE_HOST_API_READ",
     "LLMIDE_HOST_API_WEB_ORIGINS", "LLMIDE_HOST_API_FINGERPRINT_FILE", "LLMIDE_HUB_PUBLIC_URL",
     "LLMIDE_JWT_SECRET", "LLMIDE_VAULT_KEY", "ANTHROPIC_API_KEY",
 ];
@@ -909,6 +909,9 @@ mod tests {
         assert!(env.contains("LLMIDE_HUB_PUBLIC_URL=wss://hub.example.com/host-api/v1"));
         validate_env_text(&env).unwrap();
         assert!(env.contains("LLMIDE_BACKUP_KEEP=7"));
+        assert!(env.contains("LLMIDE_HOST_API_READ=1"));
+        // ADR 0021 D4: execute stays desktop-only on a hub, so compose / tool approvals are never switched on.
+        assert!(!env.contains("LLMIDE_HOST_API_COMPOSE") && !env.contains("LLMIDE_HOST_API_TOOL_APPROVALS"));
         for stage in STAGES { let cmd = stage_command(stage).unwrap(); assert!(!cmd.contains(&s.jwt)); }
     }
 

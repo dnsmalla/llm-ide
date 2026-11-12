@@ -221,6 +221,7 @@ ENV_FILE="$TMP/core.env"
   printf 'LLMIDE_LOG_ROTATE=external\n'
   printf 'LLMIDE_MAX_TURNS=8\n'
   printf 'LLMIDE_HOST_API_HUB=1\n'
+  printf 'LLMIDE_HOST_API_READ=1\n'
   printf 'LLMIDE_HOST_API_WEB_ORIGINS=https://%s\n' "$DOMAIN"
   printf 'LLMIDE_HOST_API_FINGERPRINT_FILE=/etc/llmide/host-api-fingerprint\n'
   printf 'LLMIDE_HUB_PUBLIC_URL=wss://%s/host-api/v1\n' "$DOMAIN"

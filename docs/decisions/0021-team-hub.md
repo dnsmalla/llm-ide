@@ -142,3 +142,14 @@ commands under a separate OS user first.
 - `max_mode: none` still refuses turns; `read_only` still keeps tools off.
 - Test: `extension/tests/hub-member-clamp.test.mjs` (engineer read-only, owner/admin execute, project owner
   read-only); `project-roles.test.mjs` pins local execute unchanged.
+
+## Amendment: hub serves Host API `read` (2026-11-12)
+
+A hub now sets `LLMIDE_HOST_API_READ=1` (installer env, `remote_deploy.rs` env template, and the `llmide-deploy env`
+allowlist), so its paired phones and browsers can read their own chat history, sessions and usage
+(`chat.sessions`, `chat.history`, `usage.get`). Consistent with D4: every read is the session user's own, re-redacted;
+nothing executes. `LLMIDE_HOST_API_COMPOSE` and `LLMIDE_HOST_API_TOOL_APPROVALS` stay off (execute is desktop-only).
+`minimalFor` keeps `read` for every member tier, viewers included.
+
+Existing hubs: redeploy from the desktop rewrites the env (JWT/vault keys preserved). Devices paired before that must
+re-pair to receive `read`, since a device is granted only what was served at pairing.
