@@ -75,6 +75,9 @@ final class ConnectionService: ObservableObject {
     /// its outcome when it changed, so a cancelled attempt cannot kill a newer one.
     private var connectionGeneration = 0
     private var reconnectTask: Task<Void, Never>?
+    /// Earliest time a host-imposed retry delay (throttle `retryAfterMs`) allows another dial. `reconnectNow()`
+    /// (path updates, foregrounding) must not bypass it; the scheduled retry still fires on its own.
+    private var retryNotBefore: Date?
 
     /// True after `closeConnection()` until the next `connect(...)` call.
     /// Distinguishes an intentional close (don't auto-reconnect) from an
@@ -173,6 +176,7 @@ final class ConnectionService: ObservableObject {
                 self.errorMessage = nil
                 self.requiresRepair = false
                 self.reconnectAttempt = 0
+                self.retryNotBefore = nil
                 // The address that answered leads next time.
                 self.directIP = result.address
                 self.lastConnectedIP = result.address
@@ -286,6 +290,7 @@ final class ConnectionService: ObservableObject {
     private func disconnect(clearDirect: Bool) {
         reconnectTask?.cancel()
         reconnectTask = nil
+        retryNotBefore = nil
         if clearDirect { directIP = nil; directPIN = nil }
         liveSinks.forEach { $0.handleChatError(commandId: nil) }
         invalidateSocket()
@@ -339,6 +344,7 @@ final class ConnectionService: ObservableObject {
     /// reset the attempt counter and dial now. Connected → one `host.ping`; reconnect if it is not answered.
     func reconnectNow() {
         guard !userClosed else { return }
+        if connectionStatus != .connected, let notBefore = retryNotBefore, Date() < notBefore { return }
         switch connectionStatus {
         case .connected:
             probeConnection()
@@ -392,6 +398,11 @@ final class ConnectionService: ObservableObject {
         guard let ip = directIP else { return }
         let pin = directPIN ?? ""
         guard reconnectTask == nil else { return }
+        if let ms = retryAfterMs, ms > 0 {
+            retryNotBefore = Date().addingTimeInterval(Double(ms) / 1000)
+        } else {
+            retryNotBefore = nil
+        }
         // Show "connecting" rather than a false "disconnected" while auto-retrying.
         connectionStatus = .connecting
         // First retry is immediate, then back off.
