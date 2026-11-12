@@ -8,6 +8,7 @@ struct ExplorerChatView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var store: ExecuteChatStore
     @EnvironmentObject var projects: ProjectsStore
+    @EnvironmentObject var askStore: LlmIdeChatStore
     @State private var text = ""
     @State private var showClearConfirm = false
 
@@ -53,6 +54,8 @@ struct ExplorerChatView: View {
             if let err = connection.errorMessage {
                 StatusBanner(.error(message: err) { connection.errorMessage = nil })
             }
+            // The project this run works in; it is the same choice the Ask, Auto Tasks and Loop tabs use.
+            ProjectPickerBar(isBusy: store.isStreaming) { id in _ = projects.select(id) }
             transcript
             if let tool = store.pendingToolApproval {
                 ToolApprovalCard(request: tool, enabled: connection.connectionStatus == .connected) { store.submitToolApproval(allow: $0) }
@@ -70,7 +73,7 @@ struct ExplorerChatView: View {
                 } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.title2)
                 }
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isStreaming || connection.connectionStatus != .connected)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isStreaming || askStore.isStreaming || connection.connectionStatus != .connected)
                 .accessibilityLabel("Run on desktop")
             }
             .padding(DesignSystem.Spacing.md)

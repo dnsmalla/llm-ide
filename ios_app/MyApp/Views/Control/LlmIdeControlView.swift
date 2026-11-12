@@ -10,6 +10,7 @@ import SharedProtocol
 struct LlmIdeControlView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
+    @EnvironmentObject var executeStore: ExecuteChatStore
     @EnvironmentObject var projectsStore: ProjectsStore
     @Environment(\.dismiss) private var dismiss
     /// True when hosted by the tab shell (no own stack, no "Done").
@@ -305,6 +306,7 @@ struct LlmIdeControlView: View {
             && isConnected
             && connection.supports(HostApiCommand.chatSend.capability)
             && !llmIdeStore.isStreaming   // one question at a time
+            && !executeStore.isStreaming  // the desktop runs one chat turn per connection
     }
 
     // MARK: — Actions

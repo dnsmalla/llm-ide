@@ -35,7 +35,7 @@ struct LoopView: View {
                 Section {
                     Text(projects.state.loaded && projects.state.projects.isEmpty
                          ? "No project is registered on the desktop yet. Open a project in the desktop app first."
-                         : "Choose a project on the Chat tab first.")
+                         : "Choose a project above first.")
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
             } else if loop.runs.isEmpty {
@@ -78,6 +78,7 @@ struct LoopView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) { ProjectPickerBar(isBusy: false) { id in _ = projects.select(id) } }
         .navigationTitle("Loop")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
