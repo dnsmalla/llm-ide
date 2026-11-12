@@ -212,3 +212,53 @@
 .chat-budget-warning .chat-btn { flex: none; }
 .chat-model-empty { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .chat-model-empty .chat-muted { font-size: var(--tok-type-caption-size); }
+
+/* Premium composer: one rounded input card, the message on top and its toolbar inside the card. Pickers are pills,
+   tools are round icon buttons, Send is the one accent. Theme-aware shadow via --ui-shadow. */
+.chat-composer { gap: 8px; padding: 8px 20px 16px; border-top: 0; background: linear-gradient(to bottom, transparent, var(--tok-color-surface) 36px); }
+.chat-composer > * { width: 100%; max-width: 960px; margin-inline: auto; box-sizing: border-box; }
+.chat-input-card { display: flex; flex-direction: column; border: 1px solid var(--tok-color-border); border-radius: 16px; background: var(--tok-color-surface); box-shadow: 0 8px 28px color-mix(in srgb, var(--ui-shadow, black) calc(18% * var(--ui-shadow-k, 1)), transparent); transition: border-color .15s, box-shadow .15s; }
+.chat-input-card:focus-within { border-color: color-mix(in srgb, var(--tok-color-accent) 60%, var(--tok-color-border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tok-color-accent) 14%, transparent), 0 8px 28px color-mix(in srgb, var(--ui-shadow, black) calc(18% * var(--ui-shadow-k, 1)), transparent); }
+.chat-input-card[data-listening] { border-color: var(--tok-color-danger); }
+.chat-input-card .chat-textarea { width: 100%; box-sizing: border-box; min-height: 60px; max-height: 40vh; padding: 14px 16px 6px; border: 0; border-radius: 16px 16px 0 0; background: transparent; resize: none; font-size: 14px; line-height: 1.55; }
+.chat-input-card .chat-textarea:focus, .chat-input-card .chat-textarea:focus-visible { outline: none; border: 0; }
+.chat-input-card .chat-ghost { padding: 0 16px 2px; }
+.chat-input-card .chat-composer-bar { padding: 6px 8px 8px 10px; gap: 6px; align-items: center; }
+
+/* Settings pills: mode, model, effort and permission */
+.chat-composer-bar .chat-pick select, .chat-composer-bar .chat-chip-btn { height: 28px; padding: 0 24px 0 10px; border: 1px solid transparent; border-radius: 999px; background-color: var(--tok-color-surface2); color: var(--tok-color-text); font-size: 12px; font-weight: 600; cursor: pointer; appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--tok-color-text-muted) 50%), linear-gradient(135deg, var(--tok-color-text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 52%, calc(100% - 10px) 52%; background-size: 4px 4px; background-repeat: no-repeat; }
+.chat-composer-bar .chat-chip-btn { padding-right: 10px; background-image: none; }
+.chat-composer-bar .chat-pick select:hover, .chat-composer-bar .chat-chip-btn:hover { border-color: var(--tok-color-border); }
+.chat-composer-bar .chat-pick select:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
+.chat-composer-bar .chat-pick select:disabled { opacity: .55; cursor: default; }
+
+/* Round tools: options, attach, memory, mic */
+.chat-composer-bar .chat-icon-btn { width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; color: var(--tok-color-text-muted); cursor: pointer; transition: background .12s, color .12s; }
+.chat-composer-bar .chat-icon-btn:hover:not(:disabled) { color: var(--tok-color-text); background: var(--tok-color-surface2); }
+.chat-composer-bar .chat-icon-btn:disabled { opacity: .4; cursor: default; }
+.chat-composer-bar .chat-icon-btn[aria-expanded="true"] { color: var(--tok-color-accent); background: color-mix(in srgb, var(--tok-color-accent) 12%, transparent); }
+.chat-mic[aria-pressed="true"] { color: var(--tok-color-body) !important; background: var(--tok-color-danger) !important; animation: chat-mic-pulse 1.4s ease-in-out infinite; }
+@keyframes chat-mic-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--tok-color-danger) 25%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .chat-mic[aria-pressed="true"] { animation: none; } }
+
+/* Send / Queue / Stop */
+.chat-send, .chat-stop { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+.chat-send { flex-direction: row; }
+.chat-send:hover:not(:disabled) { filter: brightness(1.08); }
+.chat-send:disabled { opacity: 1; background: var(--tok-color-surface2); border-color: transparent; color: var(--tok-color-text-muted); }
+.chat-stop { background: color-mix(in srgb, var(--tok-color-danger) 12%, transparent); }
+.chat-composer-bar .chat-budget, .chat-composer-bar .chat-context-chip { font-size: 11px; }
+.chat-composer-bar [role="img"] { color: var(--tok-color-text-muted); font-size: 12px; padding: 0 2px; }
+
+/* Queue and errors above the card */
+.chat-queue { gap: 4px; }
+.chat-queue li { align-items: center; padding: 6px 10px; border: 1px dashed var(--tok-color-border); border-radius: 10px; background: var(--tok-color-surface); }
+.chat-dict-error { margin: 0; font-size: 12px; }
+.chat-dock-mode .chat-composer { padding: 8px 10px 10px; }
+.chat-dock-mode .chat-input-card .chat-composer-bar .chat-pick select { width: 100%; }
+/* Pill widths by picker, not by position (the model picker is a div, so :first-of-type caught it). */
+.chat-composer-bar .chat-pick:first-of-type select { max-width: none; }
+.chat-composer-bar .chat-pick select { max-width: 150px; }
+.chat-composer-bar .chat-pick select[aria-label="Model"] { max-width: 240px; }

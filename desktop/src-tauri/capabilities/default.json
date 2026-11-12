@@ -54,6 +54,7 @@
     "allow-secrets-status",
     "allow-capture-status",
     "allow-capture-request-permission",
+    "allow-start-system-dictation",
     "allow-capture-open-settings",
     "allow-capture-start",
     "allow-capture-stop",

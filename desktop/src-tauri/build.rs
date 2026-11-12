@@ -43,6 +43,7 @@ const COMMANDS: &[&str] = &[
     "secrets_status",
     "capture_status",
     "capture_request_permission",
+    "start_system_dictation",
     "capture_open_settings",
     "capture_start",
     "capture_stop",

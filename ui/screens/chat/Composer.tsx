@@ -6,6 +6,7 @@ import { ImeGuard } from "./ime";
 import type { ComposerExtras, SendExtra } from "./slash/extras";
 import type { ReactNode } from "react";
 import { MAX_QUEUE } from "./state";
+import { invokeHost, isHostAvailable } from "../shell/host";
 
 export interface ComposerProps {
   draft: string;
@@ -42,6 +43,12 @@ export const MAX_MESSAGE_CHARS = 120_000;
 
 /** The Mac's send-key glyph (ChatComposer.keyHint): the tooltip says what Return and Shift+Return do. */
 export const KEY_HINT = "\u21B5 sends \u00B7 \u21E7\u21B5 for a new line";
+const svg = (d: ReactNode) => <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
+const MIC_ICON = svg(<><rect x="5.5" y="1.75" width="5" height="8" rx="2.5" /><path d="M3.25 7.5a4.75 4.75 0 0 0 9.5 0M8 12.25v2" /></>);
+export const ATTACH_ICON = svg(<path d="M13 7.5 8 12.5a3.2 3.2 0 0 1-4.5-4.5L9 2.5a2.1 2.1 0 0 1 3 3L6.6 10.9a1 1 0 0 1-1.5-1.5L10 4.5" />);
+const SEND_ICON = svg(<path d="M8 13V3.5M3.75 7.75 8 3.5l4.25 4.25" />);
+const STOP_ICON = <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1.5" fill="currentColor" /></svg>;
+
 export function KeyHint() {
   return <span className="chat-muted" role="img" aria-label={KEY_HINT} title={KEY_HINT}>{"\u21B5"}</span>;
 }
@@ -111,6 +118,11 @@ export function isDictationShortcut(e: { key: string; metaKey: boolean; ctrlKey:
 export const dictationShortcutLabel = (mac = isMacPlatform()): string => (mac ? "Cmd+M" : "Ctrl+M");
 
 /** The window-level shortcut is enabled only while this surface is on screen. */
+/** Which voice input the mic uses: the web view's speech engine, else the Mac host's system Dictation, else none. Pure. */
+export function dictationMode(webSpeech: boolean, host: boolean, mac: boolean): "web" | "system" | null {
+  return webSpeech ? "web" : host && mac ? "system" : null;
+}
+
 export const dictationEnabled = (active: boolean, voice: unknown): boolean => active && voice !== null && voice !== undefined;
 
 /** Window-level shortcut: skip events the focused composer already handled (it calls preventDefault). */
@@ -145,8 +157,20 @@ export function Composer(p: ComposerProps) {
   // handler runs first and preventDefaults, so this listener does not toggle twice.
   const toggleRef = useRef(toggleVoice);
   toggleRef.current = toggleVoice;
+  // No web speech engine (the macOS web view has none for apps): the desktop host starts the system's own Dictation
+  // in the focused message box instead, so the mic always works on the Mac app.
+  const form = useRef<HTMLFormElement | null>(null);
+  const [dictError, setDictError] = useState<string | null>(null);
+  const systemDictation = dictationMode(voice !== null, isHostAvailable(), isMacPlatform()) === "system";
+  const startSystemDictation = () => {
+    form.current?.querySelector("textarea")?.focus();
+    setDictError(null);
+    invokeHost<void>("start_system_dictation").catch(() => setDictError("Dictation could not start. Turn it on in System Settings → Keyboard → Dictation."));
+  };
+  const dictate = voice ? toggleVoice : systemDictation ? startSystemDictation : null;
+  toggleRef.current = dictate ?? toggleVoice;
   useEffect(() => {
-    if (!dictationEnabled(p.active === true, voice)) return undefined;
+    if (!dictationEnabled(p.active === true, dictate)) return undefined;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (!isGlobalDictationShortcut(e)) return;
       e.preventDefault();
@@ -154,7 +178,7 @@ export function Composer(p: ComposerProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [voice, p.active]);
+  }, [dictate !== null, p.active]);
 
   const stopRef = useRef(p.onStop);
   stopRef.current = p.onStop;
@@ -185,7 +209,7 @@ export function Composer(p: ComposerProps) {
     p.onDraft("");
   };
   return (
-    <form className="chat-composer" aria-label="Message composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
+    <form ref={form} className="chat-composer" aria-label="Message composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
       {p.queue.length > 0 && (
         <ul className="chat-queue" aria-label="Queued messages">
           {p.queue.map((q, i) => (
@@ -196,6 +220,7 @@ export function Composer(p: ComposerProps) {
       )}
       {p.extras?.chips}
       {p.extras?.menu}
+      <div className="chat-input-card" data-busy={p.busy || undefined} data-listening={listening || undefined}>
       <textarea
         {...p.extras?.textareaProps}
         className="chat-textarea" aria-label="Message" rows={3} value={p.draft} placeholder={p.busy ? "Type to queue the next message" : COMPOSER_PLACEHOLDER}
@@ -204,7 +229,7 @@ export function Composer(p: ComposerProps) {
         onKeyDown={(e) => {
           // Keys that belong to the input method (commit/cancel a conversion) do nothing here: no send, no menu pick, no Stop.
           if (guard.isIme(e)) return;
-          if (voice && isDictationShortcut(e)) { e.preventDefault(); toggleVoice(); return; }
+          if (dictate && isDictationShortcut(e)) { e.preventDefault(); dictate(); return; }
           if (p.extras?.onKeyDown(e)) return;
           if (e.key === "Tab" && !e.shiftKey && ghost) { e.preventDefault(); p.onDraft(ghost); return; }
           if (e.key === "Escape" && ghost && !p.busy) { e.preventDefault(); setGhostOffFor(p.draft); return; }
@@ -223,7 +248,7 @@ export function Composer(p: ComposerProps) {
           <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h5M10 12h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><circle cx="10.5" cy="4" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.2"/><circle cx="5.5" cy="8" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.2"/><circle cx="8.5" cy="12" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.2"/></svg>
         </button>
         {(!p.collapsible || optionsOpen) && p.extras?.toolbar}
-        {(!p.collapsible || optionsOpen) && !p.extras?.toolbar && p.onAttach && <button type="button" className="chat-btn" onClick={p.onAttach} aria-label="Attach files">Attach</button>}
+        {(!p.collapsible || optionsOpen) && !p.extras?.toolbar && p.onAttach && <button type="button" className="chat-icon-btn" onClick={p.onAttach} aria-label="Attach files" title="Attach files">{ATTACH_ICON}</button>}
         {(!p.collapsible || optionsOpen) && p.controls}
         {(!p.collapsible || optionsOpen) && p.memory}
         {tooLong && <span role="alert" className="chat-error">Message is too long ({p.draft.length.toLocaleString("en-US")} of {MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters).</span>}
@@ -233,11 +258,14 @@ export function Composer(p: ComposerProps) {
         <span className="chat-spacer" />
         {p.meter}
         <KeyHint />
-        {(!p.collapsible || optionsOpen) && (voice ? <button type="button" className="chat-btn" aria-pressed={listening} onClick={toggleVoice} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`Dictate with the system speech recogniser (${dictationShortcutLabel()})`}>{listening ? "Listening…" : "Dictate"}</button>
-          : <button type="button" className="chat-btn" disabled aria-label="Dictate a message" title="Speech recognition is not available in this build">Dictate</button>)}
-        {p.busy && <button type="button" className="chat-btn chat-danger" onClick={p.onStop} disabled={p.aborting} aria-label="Stop the running turn">{p.aborting ? "Stopping…" : "Stop"}</button>}
-        <button type="submit" className="chat-btn chat-primary" disabled={!canSend}>{p.busy ? "Queue" : "Send"}</button>
+        {dictate
+          ? <button type="button" className="chat-icon-btn chat-mic" aria-pressed={listening} onClick={dictate} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`${listening ? "Stop dictation" : voice ? "Dictate" : "Dictate with macOS Dictation"} (${isMacPlatform() ? "⌘M" : "Ctrl+M"})`}>{MIC_ICON}</button>
+          : <button type="button" className="chat-icon-btn chat-mic" disabled aria-label="Dictate a message" title="Speech recognition is not available here">{MIC_ICON}</button>}
+        {p.busy && <button type="button" className="chat-btn chat-danger chat-stop" onClick={p.onStop} disabled={p.aborting} aria-label="Stop the running turn" title="Stop the running reply (Esc)">{STOP_ICON}{p.aborting ? "Stopping…" : "Stop"}</button>}
+        <button type="submit" className="chat-btn chat-primary chat-send" disabled={!canSend} title={p.busy ? "Queue this message: it sends when the current reply ends (↵)" : "Send (↵ · ⇧↵ for a new line)"}>{p.busy ? "Queue" : "Send"}{SEND_ICON}</button>
       </div>
+      </div>
+      {dictError ? <p className="chat-muted chat-dict-error" role="status">{dictError}</p> : null}
     </form>
   );
 }

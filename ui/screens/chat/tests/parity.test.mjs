@@ -159,3 +159,11 @@ test("the header total never calls a partial sum \"This chat\" (reloaded replies
   const costed = c.chatTotalLabel([{ ...reply("a", u), costUsd: 0.01 }, { ...reply("b", u), costUsd: 0.02 }], false);
   assert.equal(costed.text, "1.0K tokens · $0.03", "the header sums reported reply costs");
 });
+
+test("dictation: the web speech engine first, else macOS system Dictation through the desktop host, else none", () => {
+  assert.equal(c.dictationMode(true, false, false), "web");
+  assert.equal(c.dictationMode(true, true, true), "web");
+  assert.equal(c.dictationMode(false, true, true), "system", "the Mac app always has a working mic");
+  assert.equal(c.dictationMode(false, true, false), null, "system Dictation is a macOS host feature");
+  assert.equal(c.dictationMode(false, false, true), null, "a browser without speech has no mic");
+});

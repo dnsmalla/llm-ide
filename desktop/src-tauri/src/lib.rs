@@ -9,6 +9,7 @@ mod capture_store;
 mod capture_ax_macos;
 mod capture_session;
 mod capture_host;
+mod dictation;
 mod capture_archivist;
 mod chat_archive;
 mod chat_cmds;
@@ -301,6 +302,7 @@ macro_rules! product_handlers {
         tauri::generate_handler![
                 capture_host::capture_status,
                 capture_host::capture_request_permission,
+                dictation::start_system_dictation,
                 capture_host::capture_open_settings,
                 capture_host::capture_start,
                 capture_host::capture_stop,

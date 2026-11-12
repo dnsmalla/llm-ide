@@ -11,6 +11,7 @@ import type { CatalogLoader } from "./loader";
 import type { MentionSearch } from "../mentions";
 import { MODES } from "../route";
 import type { ModelGroupLike } from "./items";
+import { ATTACH_ICON } from "../Composer";
 
 /** What the host app supplies; every field is optional so a plain browser still gets a working composer. */
 export interface ComposeServices {
@@ -144,7 +145,7 @@ export function useComposerExtras(o: ExtrasOptions): ComposerExtras {
     ),
     toolbar: (
       <>
-        {services.attachHost ? <button type="button" className="chat-btn" aria-label="Attach files" onClick={() => void attachments.pickFiles()}>Attach</button> : null}
+        {services.attachHost ? <button type="button" className="chat-icon-btn" aria-label="Attach files" title="Attach files" onClick={() => void attachments.pickFiles()}>{ATTACH_ICON}</button> : null}
       </>
     ),
     blockedReason: items.some((i) => i.status === "reading") ? "Reading attachments…"
