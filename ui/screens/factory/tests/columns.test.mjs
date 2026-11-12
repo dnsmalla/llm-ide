@@ -84,7 +84,7 @@ test("a passed intake-only run goes back to Inbox, ready to start", () => {
 test("decodeRunRecordFacts reads the factory fields and rejects other records", () => {
   const raw = { id: "e1", statusCode: "success", endedAt: "2026-11-09T10:00:00.000Z", factoryMode: "intakeOnly", worktree: { runId: "r1", branch: "factory/r1", baseCommit: "abc", repo: "code/web" }, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3", commit: "def", reused: false }, needsDecision: null };
   const entry = { id: "e1", startedAt: "2026-11-09T09:00:00.000Z" };
-  assert.deepEqual(decodeRunRecordFacts(raw, entry), { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3" }, reviewedPatchId: null, costUsd: null, durationSeconds: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, endedAt: "2026-11-09T10:00:00.000Z", entry });
+  assert.deepEqual(decodeRunRecordFacts(raw, entry), { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3" }, reviewedPatchId: null, costUsd: null, durationSeconds: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, autoShipBlocked: null, endedAt: "2026-11-09T10:00:00.000Z", entry });
   const reviewed = "d".repeat(64);
   assert.equal(decodeRunRecordFacts({ ...raw, diffSummary: { files: ["src/a.ts"], truncated: false, patchId: reviewed } }).reviewedPatchId, reviewed);
   assert.equal(decodeRunRecordFacts({ ...raw, diffSummary: { files: [], truncated: false, patchId: "short" } }).reviewedPatchId, null, "a malformed id never becomes a comparison");
@@ -138,4 +138,14 @@ test("R-049: the last Verify wins, and a pass or needs-decision has no failing s
   assert.equal(f.failingStage, null);
   assert.equal(decodeRunRecordFacts({ ...raw, statusCode: "failed" }).failingStage.name, "Verify");
   assert.equal(decodeRunRecordFacts({ ...raw, statusCode: "failed", needsDecision: "Which database?" }).failingStage, null);
+});
+
+test("a run that could not open its MR says why: a passed one keeps Ship, any other waits in Needs you", () => {
+  const raw = (statusCode) => ({ statusCode, worktree: { runId: "r1" }, autoShip: { blocked: "CI or hook files changed (.gitlab-ci.yml)" } });
+  const passed = decodeRunRecordFacts(raw("success"));
+  assert.equal(passed.autoShipBlocked, "CI or hook files changed (.gitlab-ci.yml)");
+  assert.deepEqual(columnFor({ live: null, lastRecord: passed, worktreeExists: true, ship: null, shipStatusError: false, lastKnownColumn: null }), { column: "readyToShip", note: "Not shipped" });
+  const failed = decodeRunRecordFacts(raw("failed"));
+  assert.deepEqual(columnFor({ live: null, lastRecord: failed, worktreeExists: true, ship: null, shipStatusError: false, lastKnownColumn: null }), { column: "needsYou", note: "Not shipped" });
+  assert.equal(decodeRunRecordFacts({ statusCode: "success", worktree: { runId: "r1" }, autoShip: { blocked: 7 } }).autoShipBlocked, null);
 });

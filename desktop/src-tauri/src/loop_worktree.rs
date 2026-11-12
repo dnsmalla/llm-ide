@@ -507,6 +507,20 @@ pub async fn loop_worktree_status(run_id: String) -> Result<WorktreeStatus, Stri
     blocking(move || status_in(&resolve(&run_id)?)).await
 }
 
+/// The branch the run's repo has checked out (what its worktree was cut from), or None for a detached HEAD. The draft
+/// MR a Factory run opens targets it. Read-only.
+pub fn repo_branch_in(info: &RunInfo) -> Option<String> {
+    let out = git(Path::new(&info.repo), &["symbolic-ref", "--quiet", "--short", "HEAD"]).ok()?;
+    let name = text(out);
+    let ok = !name.is_empty() && name.len() <= 200 && !name.starts_with('-') && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'));
+    ok.then_some(name)
+}
+
+#[tauri::command]
+pub async fn loop_repo_branch(run_id: String) -> Result<Option<String>, String> {
+    blocking(move || Ok(repo_branch_in(&resolve(&run_id)?))).await
+}
+
 /// Removes the run's worktree (dirty or not) and its branch, and forgets the run. Harmless when already gone.
 /// Only ever removes `<project>/system/loop-worktrees/<run_id>`.
 pub fn remove_in(info: &RunInfo) -> Result<(), String> {
@@ -801,6 +815,20 @@ mod tests {
         assert_eq!(listed[0].run_id, "restart1");
         assert_eq!(listed[0].worktree, info.worktree);
         remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repo_branch_names_the_branch_the_run_was_cut_from() {
+        let p = project_repo("repo-branch");
+        sh_git(&p, &["checkout", "-q", "-b", "dev"]);
+        let info = prepare_in(&p, &p, "rb1", None, "task").unwrap();
+        assert_eq!(repo_branch_in(&info).as_deref(), Some("dev"));
+        let head = sh_git(&p, &["rev-parse", "HEAD"]).trim().to_string();
+        sh_git(&p, &["checkout", "-q", "--detach", &head]);
+        assert_eq!(repo_branch_in(&info), None, "a detached HEAD names no branch");
+        let _ = remove_in(&info);
         let _ = std::fs::remove_dir_all(&p);
     }
 

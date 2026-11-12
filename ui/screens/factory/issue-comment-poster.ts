@@ -21,6 +21,14 @@ const PLACEHOLDER = /^<[^>]+>$/;
 
 const quiet = async <T>(p: () => Promise<T>): Promise<T | null> => { try { return await p(); } catch { return null; } };
 
+/** Posts `text` on the item's issue when it is one and commenting is allowed. True when posted; never throws. */
+export async function postIssueText(d: Pick<PosterDeps, "request" | "allowed">, item: CommentItem, text: string): Promise<boolean> {
+  const target = issueTarget(item);
+  if (!target || !d.allowed(target.provider)) return false;
+  const res = await quiet(() => d.request("/kb/issues/comment", { ...target, body: text }));
+  return res !== null && res.status >= 200 && res.status < 300;
+}
+
 /** True when the comment was posted. */
 export async function postStageComment(d: PosterDeps, e: StageEvent): Promise<boolean> {
   const target = issueTarget(e.item);

@@ -17,6 +17,8 @@ export interface RunRecordFacts {
   test: { command: string | null; ok: boolean | null } | null;
   failingStage: { name: string; error: string } | null;
   readiness: string | null;
+  /** Why the run did not open its draft MR by itself (auto-ship refused or failed), or null. */
+  autoShipBlocked?: string | null;
   reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null;
 }
 
@@ -28,7 +30,7 @@ export const NOTE = {
   queued: "Queued", paused: "Paused", interrupted: "Interrupted", intakeReady: "Intake ready",
   statusUnavailable: "status unavailable", ciFailed: "CI failed", newComments: "New review comments",
   ciFailedAndComments: "CI failed, new review comments", closedUnmerged: "Closed without merge", ciRunning: "CI running",
-  failed: "Failed", stopped: "Stopped", error: "Error", blocked: "Blocked",
+  failed: "Failed", stopped: "Stopped", error: "Error", blocked: "Blocked", notShipped: "Not shipped",
 } as const;
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -81,6 +83,7 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     test: verify ? { command: typeof verifyConfig?.command === "string" ? verifyConfig.command.slice(0, 300) : null, ok: isRecord(verify.run) ? verify.run.exitCode === 0 : null } : null,
     failingStage: failed && typeof failed.stageName === "string" ? { name: failed.stageName.slice(0, 120), error: displayText(typeof (failed.run as Record<string, unknown>)?.stdout === "string" ? ((failed.run as Record<string, unknown>).stdout as string) : "").split("\n").slice(0, 3).join("\n").slice(0, 600) } : null,
     readiness,
+    autoShipBlocked: isRecord(raw.autoShip) && typeof raw.autoShip.blocked === "string" && raw.autoShip.blocked.trim() !== "" ? displayText(raw.autoShip.blocked).slice(0, 300) : null,
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,
     entry,
   };
@@ -118,6 +121,8 @@ export function columnFor(f: ItemFacts): { column: Column; note: string | null }
     return { column: "shipped", note: s.ci === "pending" ? NOTE.ciRunning : null };
   }
   if (rec.needsDecision !== null) return { column: "needsDecision", note: null };
+  // The run should have opened its MR but could not: a passed run keeps its Ship button, any other waits for a person.
+  if (rec.autoShipBlocked) return rec.statusCode === "success" ? { column: "readyToShip", note: NOTE.notShipped } : { column: "needsYou", note: NOTE.notShipped };
   if (rec.statusCode === "success") return rec.mode === "intakeOnly" ? { column: "inbox", note: NOTE.intakeReady } : { column: "readyToShip", note: null };
   return { column: "needsYou", note: finishedNote(rec.statusCode) };
 }

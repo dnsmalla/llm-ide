@@ -20,7 +20,7 @@ test("buildBoard groups items by derived column and keeps insertion order", () =
   assert.deepEqual(Object.keys(board), ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"]);
   assert.deepEqual(board.inbox.map((c) => c.key), ["issue:a", "issue:c"]);
   assert.deepEqual(board.working.map((c) => c.key), ["issue:b"]);
-  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, shipOverride: null }]);
+  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, notShipped: null, shipOverride: null }]);
   assert.deepEqual(board.done, []);
   assert.equal(lastKnownFrom(board).get("issue:d"), "readyToShip");
 });
@@ -33,6 +33,7 @@ test("actionsFor needsYou with Interrupted is resume, discard", () => {
   assert.deepEqual(actionsFor("needsYou", "Interrupted"), ["finishChecks", "rerun", "discard"]);
   assert.equal(ACTION_LABELS.finishChecks, "Finish checks");
   assert.equal(ACTION_LABELS.rerun, "Run again from start");
+  assert.deepEqual(actionsFor("needsYou", "Not shipped"), ["rerun", "openDiff", "discard"]);
 });
 
 test("actionsFor covers every column and every action has a label", () => {

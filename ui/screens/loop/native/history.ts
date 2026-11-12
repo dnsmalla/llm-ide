@@ -170,8 +170,8 @@ export function decodeFactoryFields(record: Record<string, unknown> | null): Fac
   return { workItem, worktree, ship, needsDecision: typeof r.needsDecision === "string" ? r.needsDecision : null, diffSummary };
 }
 
-/** Records a Ship result on an existing run record. False when the record is missing or unreadable (nothing is created). */
-export async function setRunRecordShip(fs: Pick<FsApi, "read" | "write">, entry: Pick<LoopRunIndexEntry, "id" | "startedAt">, ship: NonNullable<FactoryRunFields["ship"]>): Promise<boolean> {
+/** Merges `fields` into an existing run record. False when the record is missing or unreadable (nothing is created). */
+async function setRunRecordFields(fs: Pick<FsApi, "read" | "write">, entry: Pick<LoopRunIndexEntry, "id" | "startedAt">, fields: Record<string, unknown>): Promise<boolean> {
   const path = runRecordPath(entry.id, entry.startedAt);
   let text: string;
   let hash: string;
@@ -185,6 +185,16 @@ export async function setRunRecordShip(fs: Pick<FsApi, "read" | "write">, entry:
   try { record = JSON.parse(text); } catch { return false; }
   if (!isRecord(record)) return false;
   // Compare-and-set on the hash just read: a concurrent edit makes the write fail instead of being overwritten.
-  await fs.write(path, JSON.stringify({ ...record, ship }, null, 2) + "\n", { expected_hash: hash });
+  await fs.write(path, JSON.stringify({ ...record, ...fields }, null, 2) + "\n", { expected_hash: hash });
   return true;
+}
+
+/** Records a Ship result on an existing run record. False when the record is missing or unreadable (nothing is created). */
+export function setRunRecordShip(fs: Pick<FsApi, "read" | "write">, entry: Pick<LoopRunIndexEntry, "id" | "startedAt">, ship: NonNullable<FactoryRunFields["ship"]>): Promise<boolean> {
+  return setRunRecordFields(fs, entry, { ship });
+}
+
+/** Records why a finished Factory run did not open its draft MR by itself, so its card can say so. */
+export function setRunRecordAutoShip(fs: Pick<FsApi, "read" | "write">, entry: Pick<LoopRunIndexEntry, "id" | "startedAt">, blocked: string, at: Date): Promise<boolean> {
+  return setRunRecordFields(fs, entry, { autoShip: { blocked: blocked.slice(0, 300), at: at.toISOString() } });
 }

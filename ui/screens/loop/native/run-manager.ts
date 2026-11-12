@@ -70,6 +70,8 @@ export interface RunManagerDeps {
   onStage?(runId: string): void;
   /** A stage finished (passed or failed): the Factory posts its step comment on the run's issue. */
   onStageResult?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; stage: LoopStage; ok: boolean; iteration: number; runPrefix: string }): void;
+  /** The run's record was just written: the Factory opens its draft MR (or records why not). Returns a log line. */
+  autoShip?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; info: WorktreeInfo; entry: { id: string; startedAt: string }; statusCode: string; needsDecision: boolean; failedStage: LoopStage | null; runPrefix: string }): Promise<string>;
   /** A finished run's record was written (or held): the Factory bus runner reports it to the phone. */
   onRunFinished?(info: { runId: string; itemKey: string; projectRoot: string; mode: RunMode; statusCode: string; statusSummary: string }): void;
 }
@@ -336,8 +338,18 @@ async function execute(run: ManagedRun): Promise<void> {
     fail(run, e instanceof Error ? e.message : String(e));
   }
   if (finished) {
-    try { await saveRecord(d, run, fs, finished, started); }
+    let entry: { id: string; startedAt: string } | null = null;
+    try { entry = await saveRecord(d, run, fs, finished, started); }
     catch (e) { appendLog(run, `run record not written: ${e instanceof Error ? e.message : String(e)}`); }
+    // Only a record written now can carry the MR. A held record (project closed) is not auto-shipped: its card keeps
+    // the manual Ship. The run stays live meanwhile, so the board hides Ship and cannot ship it twice.
+    if (entry && d.autoShip) {
+      run.live.note = "Opening the MR";
+      emit();
+      const f = finished;
+      const line = await d.autoShip({ runId: run.live.runId, projectRoot: run.live.projectRoot, mode: run.live.mode, item: run.item, info: f.info, entry, statusCode: runStatusCode(f.outcome), needsDecision: needsDecisionSummary(f.outcome) !== null, failedStage: f.outcome.failedStage, runPrefix: repoPrefixFor(run.live.projectRoot, f.info.worktree) }).catch((e: unknown) => `MR not opened: ${e instanceof Error ? e.message : String(e)}`);
+      if (line) appendLog(run, line);
+    }
     try {
       d.onRunFinished?.({ runId: run.live.runId, itemKey: run.item.key, projectRoot: run.live.projectRoot, mode: run.live.mode, statusCode: runStatusCode(finished.outcome), statusSummary: finished.outcome.statusSummary });
     } catch { /* a listener must never change the run's own outcome */ }
@@ -440,7 +452,7 @@ export function repoRelFor(repo: string | null, projectRoot: string, workRoot: s
   return workRoot ? repoPrefixFor(projectRoot, workRoot) : "";
 }
 
-async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Finished, started: Date): Promise<void> {
+async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Finished, started: Date): Promise<{ id: string; startedAt: string } | null> {
   const { live, item } = run;
   const ended = d.now();
   const changedPaths = await d.host<string[]>("loop_changed_paths", { runId: live.runId }).catch(() => [] as string[]);
@@ -472,9 +484,10 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
     // Same write closure as the record, so flushPending also clears the marker when the project is reopened.
     await clearMarker(fs, marker);
   };
-  if (d.activeProject() === live.projectRoot) { await write(); return; }
+  if (d.activeProject() === live.projectRoot) { await write(); return { id: entry.id, startedAt: entry.startedAt }; }
   appendLog(run, "The run's project is not open; its record is saved when you open it again.");
   pending.set(live.projectRoot, [...(pending.get(live.projectRoot) ?? []), write]);
+  return null;
 }
 
 /**

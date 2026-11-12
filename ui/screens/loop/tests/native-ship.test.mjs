@@ -58,6 +58,25 @@ test("autoShipBlock opens an MR only for a diff a person can fully review that t
   assert.match(m.autoShipBlock(diff({ files: ["src/a.ts", ".github/workflows/ci.yml"] })), /\.github\/workflows\/ci\.yml/);
 });
 
+test("autoShipKind: every finished run reaches its MR, labelled by how it ended; stops and refusals do not", () => {
+  const r = (over = {}) => ({ mode: "full", statusCode: "success", needsDecision: false, failedRole: null, ...over });
+  assert.equal(m.autoShipKind(r()), "passed");
+  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: "verify" })), "testsFailing");
+  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: "review" })), "reviewRejected");
+  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: "reviewGate" })), "reviewRejected");
+  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: "implement" })), "incomplete");
+  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: null })), "incomplete", "budget reached");
+  for (const stop of ["aborted", "error", "blocked.repair_out_of_scope"]) assert.equal(m.autoShipKind(r({ statusCode: stop })), null, stop);
+  assert.equal(m.autoShipKind(r({ mode: "intakeOnly" })), null);
+  assert.equal(m.autoShipKind(r({ statusCode: "failed", needsDecision: true })), null, "the intake gate asks a person first");
+  assert.equal(m.autoShipTitle("Fix login", "passed"), "Fix login");
+  assert.equal(m.autoShipTitle("Fix login", "testsFailing"), "[Tests failing] Fix login");
+  assert.equal(m.autoShipTitle("Fix login", "reviewRejected"), "[Review: changes requested] Fix login");
+  assert.equal(m.autoShipTitle("x".repeat(250), "incomplete").length, 200);
+  assert.match(m.autoShipNote("testsFailing", "Verify"), /tests failed/i);
+  assert.equal(m.autoShipNote("passed", null), "");
+});
+
 test("shipState maps secret_detected to a secret message that contains no diff text", () => {
   const secret = { ok: false, code: "secret_detected", message: "+ const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789'" };
   assert.equal(m.shipState(secret), "secret");

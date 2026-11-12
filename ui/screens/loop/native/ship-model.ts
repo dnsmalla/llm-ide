@@ -1,7 +1,7 @@
 // Pure model behind the Factory's Review / Ship / Discard panel (spec A4). Node tests import it, so it imports only
 // types from the shell (shell/core and shell/host do not load under node --test's strip-only mode).
 import { DEFAULT_GITLAB_BASE, repoKeyOf, type RepoConfig, type RepoProvider } from "../../settings/repo-config.ts";
-import type { WorkItem } from "./factory.ts";
+import type { FactoryRole, WorkItem } from "./factory.ts";
 import type { RunInfo } from "./worktree-run.ts";
 import { isCiHookPath } from "./protected.ts";
 
@@ -28,6 +28,37 @@ export function autoShipBlock(diff: WorktreeDiff | null): string | null {
   const ci = diff.files.filter(isCiHookPath);
   if (ci.length > 0) return `CI or hook files changed (${ci.slice(0, 3).join(", ")}${ci.length > 3 ? ", …" : ""}), so it is not shipped automatically.`;
   return null;
+}
+
+export type AutoShipKind = "passed" | "testsFailing" | "reviewRejected" | "incomplete";
+
+/**
+ * How a finished Factory run reaches its draft MR, or null when it must not open one by itself. The MR is the one place
+ * a person reviews, so a failed run ships too, labelled; a cancel, an error, a guard block, an intake-only run and a
+ * run waiting on an intake decision do not.
+ */
+export function autoShipKind(r: { mode: string; statusCode: string; needsDecision: boolean; failedRole: FactoryRole | null }): AutoShipKind | null {
+  if (r.mode === "intakeOnly" || r.needsDecision) return null;
+  if (r.statusCode === "success") return "passed";
+  if (r.statusCode !== "failed") return null;
+  if (r.failedRole === "verify") return "testsFailing";
+  if (r.failedRole === "review" || r.failedRole === "reviewGate") return "reviewRejected";
+  return "incomplete";
+}
+
+const KIND_PREFIX: Record<AutoShipKind, string> = { passed: "", testsFailing: "[Tests failing] ", reviewRejected: "[Review: changes requested] ", incomplete: "[Incomplete] " };
+
+export function autoShipTitle(title: string, kind: AutoShipKind): string {
+  return (KIND_PREFIX[kind] + title).slice(0, 200);
+}
+
+/** The line that opens the MR description of a run that did not pass, so the reviewer sees it first. */
+export function autoShipNote(kind: AutoShipKind, failedStage: string | null): string {
+  const at = failedStage ? ` (${failedStage.replace(/[\r\n`]/g, " ").slice(0, 80)})` : "";
+  if (kind === "testsFailing") return `> **The Factory's tests failed${at}.** Opened for your review; check the failures before merging.`;
+  if (kind === "reviewRejected") return `> **The review agent requested changes${at}.** Its report is below; close the MR or comment to rerun the Factory.`;
+  if (kind === "incomplete") return `> **The run did not finish${at}.** This is its work so far; close the MR or comment to rerun the Factory.`;
+  return "";
 }
 
 export function shipRequest(info: RunInfo, item: WorkItem, repo: { provider: "github" | "gitlab"; slug: string; base: string }, review: string, patchId: string): ShipBody {

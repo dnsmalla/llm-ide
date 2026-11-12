@@ -56,6 +56,22 @@ async function finish(runId, outcome = PASSED) { world.gates.get(runId).resolve(
 async function switchProject(root) { world.active = root; for (const l of [...world.listeners]) l(); await settle(); }
 const states = () => rm.liveRuns().map((r) => [r.runId, r.state]);
 
+test("the run opens its MR right after its record is written, and never from a record held for a closed project", async () => {
+  const calls = [];
+  setup({ autoShip: async (e) => { calls.push(e); return "Draft MR: https://gitlab.com/g/p/-/merge_requests/1"; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].entry.id, world.records[0].entry.id, "the MR is recorded on the record just written");
+  assert.deepEqual({ runId: calls[0].runId, statusCode: calls[0].statusCode, needsDecision: calls[0].needsDecision, branch: calls[0].info.branch }, { runId: a, statusCode: "success", needsDecision: false, branch: `factory/${a}` });
+  const b = rm.startRun("/p", item(2), "full");
+  await settle();
+  await switchProject("/other");
+  await finish(b);
+  assert.equal(calls.length, 1, "a held record has no MR yet");
+});
+
 test("cap 2: third start is queued and starts when one finishes", async () => {
   setup();
   const a = rm.startRun("/p", item(1), "full");
