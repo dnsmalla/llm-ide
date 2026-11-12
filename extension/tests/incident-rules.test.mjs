@@ -71,3 +71,11 @@ test('cleanIncident validates, redacts, caps, signs and classifies', () => {
   assert.match(c.id, /^[0-9a-f]{16}$/);
   assert.deepEqual([...INCIDENT_STATUSES], ['new', 'fixing', 'proposed', 'ignored', 'needsHuman', 'fixed']);
 });
+
+test('a report the user made from Chat is never filtered as an environment problem', () => {
+  const words = 'The save fails with permission denied and the request timed out';
+  assert.notEqual(cleanIncident({ source: 'log', category: 'chat report', message: words }).environmental, null, 'only a UI report is attested');
+  const mine = cleanIncident({ source: 'ui', category: 'chat report', message: words });
+  assert.equal(mine.environmental, null);
+  assert.notEqual(cleanIncident({ source: 'ui', category: 'chat', message: words }).environmental, null, 'other UI reports are still classified');
+});

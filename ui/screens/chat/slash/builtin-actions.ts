@@ -21,11 +21,14 @@ export interface BuiltinHandlers {
   openSection(section: string): void;
   setModel(provider: string, model: string): void;
   say(message: string): void;
+  /** `/self-heal <description>`: record the problem with Self-Heal. */
+  selfHeal(description: string): void;
 }
 
 export function runBuiltin(call: BuiltinCall, groups: readonly ModelGroupLike[], h: BuiltinHandlers): void {
   if (call.kind === "clearChat") return h.clearChat();
   if (call.kind === "openSection") return h.openSection(call.section);
+  if (call.kind === "selfHeal") return h.selfHeal(call.argument);
   const m = resolveModelArg(call.argument, groups);
   if (m) return h.setModel(m.provider, m.model);
   h.say(call.argument ? `No single model matches "${call.argument.slice(0, 60)}". Pick one from the model list.` : "Pick a model from the model list below.");

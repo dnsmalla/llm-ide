@@ -7,7 +7,8 @@
 export type BuiltinAction =
   | { kind: "clearChat" }
   | { kind: "openSection"; section: string }
-  | { kind: "switchModel" };
+  | { kind: "switchModel" }
+  | { kind: "selfHeal" };
 
 export interface Builtin {
   label: string;
@@ -25,6 +26,7 @@ export const BUILTINS: readonly Builtin[] = [
   b("/clear", "Clear this conversation", { kind: "clearChat" }, { aliases: ["/reset", "/new"] }),
   b("/model", "Switch the model for the current provider", { kind: "switchModel" }, { insert: "/model " }),
   b("/config", "Open Settings", { kind: "openSection", section: "settings" }, { aliases: ["/settings"] }),
+  b("/self-heal", "Report this problem to Self-Heal so the app can try to fix it (debug builds)", { kind: "selfHeal" }, { aliases: ["/heal"], insert: "/self-heal " }),
   b("/loop", "Open the Loop Engine", { kind: "openSection", section: "loopEngine" }),
   b("/mcp", "Open Library → MCP Plugins", { kind: "openSection", section: "library" }),
   b("/plugin", "Open Library → Plugins", { kind: "openSection", section: "library" }, { aliases: ["/plugins"] }),
@@ -46,7 +48,8 @@ const BY_NAME = new Map<string, Builtin>(BUILTINS.flatMap((x) => [x.label, ...x.
 export type BuiltinCall =
   | { kind: "clearChat" }
   | { kind: "openSection"; section: string }
-  | { kind: "switchModel"; argument: string };
+  | { kind: "switchModel"; argument: string }
+  | { kind: "selfHeal"; argument: string };
 
 /** Recognises a built-in in text as typed (whole-message, case/whitespace tolerant, like the Mac). */
 export function parseBuiltin(text: string): BuiltinCall | null {
@@ -54,6 +57,8 @@ export function parseBuiltin(text: string): BuiltinCall | null {
   if (!t.startsWith("/")) return null;
   const lower = t.toLowerCase();
   if (lower === "/model" || lower.startsWith("/model ")) return { kind: "switchModel", argument: t.slice("/model".length).trim() };
+  const heal = /^\/(?:self-heal|heal)(?:\s+([\s\S]*))?$/i.exec(t);
+  if (heal) return { kind: "selfHeal", argument: (heal[1] ?? "").trim() };
   const hit = BY_NAME.get(lower);
   if (!hit) return null;
   if (hit.action.kind === "clearChat") return { kind: "clearChat" };

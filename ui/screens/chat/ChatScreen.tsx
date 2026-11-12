@@ -25,6 +25,8 @@ import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./
 import type { ChatController } from "./controller";
 import { useChatState, useControllerVersion } from "./hooks";
 import { chatApprovalStore } from "../shell/chat-approvals";
+import { pendingCount, reportChatProblem } from "../shell/self-heal";
+import { reportFromChat } from "./self-heal-report";
 import { chatOutputStore } from "../shell/chat-output";
 import {
   AUTO_MODE, MODES, READ_ONLY_MODES, PROVIDER_BLOCKED_NOTE, defaultModelForMode, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
@@ -544,8 +546,14 @@ function DraftComposer({ controller, id, compose, models, mode, setMode, setMode
   const [draft, setDraft] = useState(() => controller.getView(id).draft);
   const onDraft = (t: string) => { setDraft(t); controller.setView(id, { draft: t }); };
   const notice = <PlanSwitchNotice draft={draft} mode={mode} onSwitch={() => setMode("plan")} />;
-  if (!compose) return <>{notice}<Composer {...rest} active={active} draft={draft} onDraft={onDraft} /></>;
-  return <>{notice}<ComposerWithExtras {...rest} active={active} draft={draft} onDraft={onDraft} compose={compose} models={models} setMode={setMode} setModel={setModel} clearChat={clearChat} chatId={id} /></>;
+  // `/self-heal …` reports this chat's last exchange; the screen owns the messages, the composer only the command.
+  // Memoised: the composer rebuilds its model whenever the services object changes identity.
+  const withReport = useMemo<ComposeServices | undefined>(
+    () => (compose ? { ...compose, reportProblem: (d) => reportFromChat({ report: reportChatProblem, pending: pendingCount }, d, controller.getState(id).messages) } : undefined),
+    [compose, controller, id],
+  );
+  if (!withReport) return <>{notice}<Composer {...rest} active={active} draft={draft} onDraft={onDraft} /></>;
+  return <>{notice}<ComposerWithExtras {...rest} active={active} draft={draft} onDraft={onDraft} compose={withReport} models={models} setMode={setMode} setModel={setModel} clearChat={clearChat} chatId={id} /></>;
 }
 
 /** The plan run's progress bar and counts, above the task list (the Mac's PlanExecutionCard header). */

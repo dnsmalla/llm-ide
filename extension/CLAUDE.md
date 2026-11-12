@@ -144,6 +144,7 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
   - The host turns the spawned core's stderr and panic records into reports.
   - The webview's pump (`ui/screens/shell/self-heal.ts`, `self_heal_take` every 15 s) adds Chat and Loop failures and posts them to `POST /kb/self-heal/incidents`.
   - `kb/incidents.mjs` stores them in `self_heal_incidents` (migration 0067) after `core/incident.mjs` redacted and signed them.
+  - **From Chat:** `/self-heal <what is wrong>` (alias `/heal`) records the user's description plus the chat's last exchange (as data) as a `ui` incident of category `chat report` and posts it at once (`reportChatProblem`, `ui/screens/chat/self-heal-report.ts`). The core never classes that category as an environment problem. It only records: the fix is still the manual Try to fix. A release build answers that Self-Heal is debug-only.
 - **Fix loop (plan B, manual only)**: Settings → Self-Heal → Try to fix (`ui/screens/settings/self-heal-run.ts`).
   1. `POST /kb/self-heal/runs` (one run per user, 4 h in-memory lease) triages up to 5 `new` incidents and returns `.self-heal/BATCH.md` (`core/self-heal-batch.mjs`).
   2. The host adds a worktree of the source checkout under `<data dir>/self-heal/loop-worktrees/<run id>` (`self_heal_fix.rs`).

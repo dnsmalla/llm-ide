@@ -26,6 +26,8 @@ export interface ComposeServices {
   initialPath?: string | null;
   /** Built-in section navigation ("settings", "library", "loopEngine"). */
   openSection?: (section: string) => boolean;
+  /** `/self-heal <description>`: records the problem (with this chat's last exchange) and answers what to do next. */
+  reportProblem?: (description: string) => Promise<string>;
 }
 
 export interface SendExtra { skills?: string[]; attachments?: WireAttachment[] }
@@ -108,6 +110,11 @@ export function useComposerExtras(o: ExtrasOptions): ComposerExtras {
         openSection: (s) => { if (!services.openSection?.(s)) setFlash("That section is not available in this build."); },
         setModel: (p, m) => live.current.setModel(p, m),
         say: setFlash,
+        selfHeal: (description) => {
+          const report = services.reportProblem;
+          if (!report) return setFlash("Self-Heal is not available in this build.");
+          void report(description).then(setFlash, () => setFlash("Could not record the problem. Try again."));
+        },
       });
       return null;
     }

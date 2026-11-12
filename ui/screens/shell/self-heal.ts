@@ -78,6 +78,18 @@ export function reportUiIncident(category: "chat" | "loop", message: unknown): v
   keep([{ source: "ui", category, message: m, stack: null }]);
 }
 
+/**
+ * A problem the user reported from Chat (`/self-heal …`): kept like any other incident but posted now, not on the next
+ * 15 s tick, so Settings → Self-Heal shows it at once. False when Self-Heal is off (a release build).
+ */
+export async function reportChatProblem(message: unknown): Promise<boolean> {
+  const m = text(message);
+  if (!enabled || m === null) return false;
+  keep([{ source: "ui", category: "chat report", message: m, stack: null }]);
+  if (lastDeps) await pumpOnce(lastDeps);
+  return true;
+}
+
 /** One tick: take from the host, then post everything pending in batches; a failed post keeps the rest for later. */
 export async function pumpOnce(deps: PumpDeps): Promise<void> {
   let take: ReturnType<typeof decodeTake>;

@@ -7,6 +7,8 @@ import { redactSecretsForStorage } from './redact-secrets.mjs';
 
 export const INCIDENT_SOURCES = Object.freeze(['ui', 'log', 'crash', 'server']);
 export const INCIDENT_STATUSES = Object.freeze(['new', 'fixing', 'proposed', 'ignored', 'needsHuman', 'fixed']);
+/** The category of a report the user made from Chat (`/self-heal`): they attest it is an app problem. */
+export const USER_REPORT_CATEGORY = 'chat report';
 export const MAX_MESSAGE = 2000;
 export const MAX_STACK = 8000;
 export const MAX_CATEGORY = 200;
@@ -89,5 +91,6 @@ export function cleanIncident(input, home = homedir()) {
   if (!cat || !msg.trim()) return null;
   const stk = stack ? redactIncidentText(stack, MAX_STACK, home) : null;
   const clean = { source, category: cat, message: msg, stack: stk || null };
-  return { id: incidentSignature(clean), ...clean, environmental: environmentalReason(msg) };
+  // A user's own report is never filtered as an environment problem: their words may mention a timeout or a permission.
+  return { id: incidentSignature(clean), ...clean, environmental: cat === USER_REPORT_CATEGORY && source === 'ui' ? null : environmentalReason(msg) };
 }

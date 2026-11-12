@@ -58,3 +58,4 @@ export * from "../DockHeader";
 export * from "../usage";
 
 export * from "../tauri-store";
+export * from "../self-heal-report";

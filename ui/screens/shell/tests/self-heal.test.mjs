@@ -75,3 +75,16 @@ test("flushSelfHealNow drains the host once more through the running pump, and d
   await sh.flushSelfHealNow(0);
   assert.equal(takes, before, "a stopped pump is not flushed");
 });
+
+test("reportChatProblem records at once through the running pump, and does nothing in a release build", async () => {
+  assert.equal(await sh.reportChatProblem("it crashes"), false, "off before the host says debug");
+  const posted = [];
+  let stop = () => {};
+  stop = sh.startSelfHealPump({ take: take(true), post: async (b) => { posted.push(b); } }, 3_600_000);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(await sh.reportChatProblem("   "), false, "empty text is not a report");
+  assert.equal(await sh.reportChatProblem("the plan card never saves"), true);
+  assert.deepEqual(posted.flat().at(-1), { source: "ui", category: "chat report", message: "the plan card never saves", stack: null });
+  assert.equal(sh.pendingCount(), 0, "posted now, not on the next tick");
+  stop();
+});

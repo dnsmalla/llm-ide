@@ -293,3 +293,12 @@ test("CompletionMenu: hostile text renders as text", () => {
   assert.ok(!out.includes("<img") && !out.includes("<script"));
   assert.match(out, /&lt;img/);
 });
+
+test("/self-heal and /heal carry what the user typed as the problem description", () => {
+  assert.deepEqual(c.parseBuiltin("/self-heal the plan card never saves"), { kind: "selfHeal", argument: "the plan card never saves" });
+  assert.deepEqual(c.parseBuiltin("  /HEAL   it crashes\nwhen I open Explorer "), { kind: "selfHeal", argument: "it crashes\nwhen I open Explorer" });
+  assert.deepEqual(c.parseBuiltin("/self-heal"), { kind: "selfHeal", argument: "" });
+  assert.equal(c.parseBuiltin("/healthy"), null);
+  assert.equal(c.parseBuiltin("please /self-heal this"), null);
+  assert.ok(c.RESERVED_NAMES.has("/self-heal") && c.RESERVED_NAMES.has("/heal"));
+});
