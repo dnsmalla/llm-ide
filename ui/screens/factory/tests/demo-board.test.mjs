@@ -45,14 +45,14 @@ test("demo data: one item per column keeps its card, actions, note and ship stat
   assert.equal(board.shipped[0].note, "CI running");
   assert.equal(board.working[0].lastLine, "reading context");
 
-  // The board shows the process: Backlog, each step, MR open, Done; the status is a badge on the card.
+  // The board shows the process: Backlog, each step, Done (finished, not merged); merged work leaves the board.
   const steps = ["Plan", "Implement", "Verify", "Test gaps", "Doc review", "Review"];
   const withSteps = buildBoard(items, facts, at.getTime(), { steps });
   const lanes = buildLanes(withSteps, steps);
   const where = Object.fromEntries(lanes.flatMap((l) => l.cards.map((c) => [c.title, `${l.label} · ${c.status}`])));
   assert.deepEqual(where, {
     "Demo 101": "Backlog · Inbox", "Demo 102": "Plan · Needs decision", "Free text idea": "Plan · Working", "Demo 104": "Verify · Needs you",
-    "Demo 105": "MR open · Ready to ship", "Demo 106": "MR open · Shipped", "Demo 107": "Done · Done",
+    "Demo 105": "Done · Ready to ship", "Demo 106": "Done · Shipped",
   });
 
   const live = assembleFacts(items[2], { projectRoot: "/demo", live: [facts.get(items[2].key).live], records, worktrees: new Map([["r3", {}]]), ship: new Map(), lastKnown: new Map() });

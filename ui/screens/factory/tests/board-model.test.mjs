@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -21,7 +21,7 @@ test("buildBoard groups items by derived column and keeps insertion order", () =
   assert.deepEqual(Object.keys(board), ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"]);
   assert.deepEqual(board.inbox.map((c) => c.key), ["issue:a", "issue:c"]);
   assert.deepEqual(board.working.map((c) => c.key), ["issue:b"]);
-  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, lane: "mr", status: "Ready to ship", actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, notShipped: null, shipOverride: null }]);
+  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, lane: "done", status: "Ready to ship", actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, notShipped: null, shipOverride: null }]);
   assert.deepEqual(board.done, []);
   assert.equal(lastKnownFrom(board).get("issue:d"), "readyToShip");
 });
@@ -223,21 +223,36 @@ test("process lanes: backlog, each step, MR open, done; a card sits in the step 
     ["issue:e", { ...EMPTY_FACTS, lastRecord: { ...rec("re"), statusCode: "failed", failingStage: { name: "Doc review", error: "x" } } }],
   ]);
   const lanes = buildLanes(buildBoard(items, facts, Date.now(), { steps }), steps);
-  assert.deepEqual(lanes.map((l) => l.label), ["Backlog", "Plan", "Implement", "Verify", "Review", "Doc review", "MR open", "Done"]);
+  assert.deepEqual(lanes.map((l) => l.label), ["Backlog", "Plan", "Implement", "Verify", "Review", "Doc review", "Done"]);
   const at = (label) => lanes.find((l) => l.label === label).cards.map((c) => c.key);
   assert.deepEqual(at("Backlog"), ["issue:a"]);
   assert.deepEqual(at("Implement"), ["issue:b"]);
   assert.deepEqual(at("Review"), ["issue:c"], "a failed gate sits in the step it checks");
   assert.deepEqual(at("Doc review"), ["issue:e"], "a step the process no longer lists still gets a lane");
-  assert.deepEqual(at("MR open"), ["issue:d"]);
+  assert.deepEqual(at("Done"), ["issue:d"], "finished, not merged yet");
   assert.equal(lanes.find((l) => l.label === "Review").cards[0].status, "Needs you");
-  // A send-back re-run of a shipped item shows its running step, not MR open; a queued run waits in Backlog.
+  // A send-back re-run of a shipped item shows its running step, not Done; a queued run waits in Backlog.
   const shipped = { ...rec("rs"), ship: { provider: "github", url: "https://github.com/a/b/pull/1" } };
   const rerun = { ...EMPTY_FACTS, lastRecord: shipped, live: { ...live("issue:s"), progress: { stageName: "Verify", stageIndex: 2, stageCount: 4, iteration: 1, repairs: 0, stages: [], startedAt: null } } };
   const queued = { ...EMPTY_FACTS, live: live("issue:q", "/p", "queued") };
   const two = buildLanes(buildBoard([item("issue:s", { runIds: ["rs"] }), item("issue:q")], new Map([["issue:s", rerun], ["issue:q", queued]]), Date.now(), { steps }), steps);
   assert.deepEqual(two.find((l) => l.label === "Verify").cards.map((c) => c.key), ["issue:s"]);
   assert.deepEqual(two.find((l) => l.label === "Backlog").cards.map((c) => c.key), ["issue:q"]);
+});
+
+test("Backlog lists every open issue not on the board; Done holds finished work and drops merged work", () => {
+  const steps = ["Implement"];
+  const merged = { ...EMPTY_FACTS, lastRecord: { ...rec("rm"), ship: { provider: "github", url: "https://github.com/a/b/pull/2" } }, ship: { url: "https://github.com/a/b/pull/2", state: "merged", ci: "success", ciSummary: null, comments: [] } };
+  const open = { ...EMPTY_FACTS, lastRecord: { ...rec("ro"), ship: { provider: "github", url: "https://github.com/a/b/pull/3" } }, ship: { url: "https://github.com/a/b/pull/3", state: "open", ci: "failed", ciSummary: null, comments: [] } };
+  const items = [item("issue:a"), item("issue:m", { runIds: ["rm"] }), item("issue:o", { runIds: ["ro"] })];
+  const board = buildBoard(items, new Map([["issue:m", merged], ["issue:o", open]]), Date.now(), { steps });
+  const lanes = buildLanes(board, steps, [openIssueCard({ key: "issue:a", title: "dup" }), openIssueCard({ key: "issue:new", title: "#9 New" })]);
+  const at = (label) => lanes.find((l) => l.label === label).cards.map((c) => c.key);
+  assert.deepEqual(at("Backlog"), ["issue:a", "issue:new"], "an open issue already on the board is not listed twice");
+  assert.deepEqual(at("Done"), ["issue:o"], "an open MR (even with failed CI) is done-not-merged; a merged one leaves the board");
+  assert.equal(lanes.find((l) => l.label === "Done").cards[0].status, "Needs you");
+  const fresh = lanes[0].cards[1];
+  assert.deepEqual([fresh.status, fresh.actions], ["Open issue", ["start"]]);
 });
 
 test("Start and Run intake start their own run plan; only Finish checks reviews existing work", async () => {

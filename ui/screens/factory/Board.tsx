@@ -16,7 +16,7 @@ import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, LANE_BACKLOG, LANE_DONE, LANE_MR, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, openIssueCard, LANE_BACKLOG, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { finishChecksAllowed, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
 import { isFactoryLoop, pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
 import { processHasIntake, processSteps } from "../loop/native/factory-template.ts";
@@ -25,7 +25,7 @@ import { readRepoConfig } from "../settings/repo-config.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
 
-const emptyCopy = (lane: string): string => (lane === LANE_BACKLOG ? "No work items" : lane === LANE_MR ? "No open PR/MR" : lane === LANE_DONE ? "Nothing done yet" : "Nothing at this step");
+const emptyCopy = (lane: string): string => (lane === LANE_BACKLOG ? "No work items" : lane === LANE_DONE ? "Nothing waiting to merge" : "Nothing at this step");
 
 // Wire the run manager to the real host once, when this chunk loads: startRun throws without it, and runs must
 // outlive this component (the Issues entry installs it the same way before it starts an intake run).
@@ -198,13 +198,15 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     panelRef.current?.querySelector<HTMLElement>("button")?.focus();
   }, [selectedKey]);
 
+  // Open issues fill the Backlog (and the Add picker): loaded when the board is shown and on Refresh.
+  const [issuesTick, setIssuesTick] = useState(0);
   useEffect(() => {
-    if (!addOpen || addKind !== "issue" || !projectRoot) return;
+    if (!active || !projectRoot) return;
     let live = true;
     setOpenIssues(null);
     void loadOpenIssues(projectRoot).then((list) => { if (live) setOpenIssues(list); });
     return () => { live = false; };
-  }, [addOpen, addKind, projectRoot]);
+  }, [active, projectRoot, issuesTick]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -223,7 +225,9 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   }, [live, retryAt]);
 
   const board = useMemo(() => buildBoard(items, facts, nowMs, { intake: hasIntake ?? undefined, steps }), [items, facts, nowMs, hasIntake, steps]);
-  const lanes = useMemo(() => buildLanes(board, steps ?? []), [board, steps]);
+  // Open issues not on the board yet, keyed like a stored issue item so a started one becomes the same card.
+  const openIssueItems = useMemo(() => new Map((openIssues ?? []).map((i) => { const it = workItemFromIssue(i); return [it.key, it] as const; })), [openIssues]);
+  const lanes = useMemo(() => buildLanes(board, steps ?? [], [...openIssueItems.values()].map(openIssueCard)), [board, steps, openIssueItems]);
   const openCleanup = async () => {
     const merged = new Set(items.filter((i) => facts.get(i.key)?.ship?.state === "merged").flatMap((i) => i.runIds));
     const statuses = new Map();
@@ -358,7 +362,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         <span className="fx-spacer" />
         <button type="button" className="fx-btn fx-primary" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>Add</button>
         <button type="button" className="fx-btn" onClick={() => void (cleanup ? setCleanup(null) : openCleanup())} aria-expanded={cleanup !== null} disabled={worktrees.size === 0}>Clean up…</button>
-        <button type="button" className="fx-btn" onClick={() => void loadFacts().then(() => refreshStatus(true))}>Refresh</button>
+        <button type="button" className="fx-btn" onClick={() => { setIssuesTick((n) => n + 1); void loadFacts().then(() => refreshStatus(true)); }}>Refresh</button>
       </header>
       {cleanup ? (
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm worktree clean-up">
@@ -424,6 +428,18 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
               <h3 className="fx-col-title">{lane.label} <span>{lane.cards.length}</span></h3>
               <ul className="fx-cards" role="list" aria-label={`${lane.label} cards`}>
                 {lane.cards.map((view) => {
+                  const open = byKey.has(view.key) ? null : openIssueItems.get(view.key) ?? null;
+                  if (open) {
+                    return (
+                      <Card key={view.key} view={view} selected={false} onOpen={() => undefined}
+                        onAction={() => void act(async () => {
+                          if (!projectRoot) return;
+                          await sendToFactory(fs, [open], { runIntake: false, projectRoot, start: startRun });
+                          onAction(open, "start");
+                          setSelectedKey(open.key);
+                        })} />
+                    );
+                  }
                   const it = byKey.get(view.key) ?? null;
                   return (
                     <Card

@@ -51,8 +51,9 @@ export function actionsFor(column: Column, note: string | null, process: { intak
 }
 
 export const LANE_BACKLOG = "backlog";
-export const LANE_MR = "mr";
 export const LANE_DONE = "done";
+/** Merged work leaves the board: Done holds finished work that is not merged yet. */
+export const LANE_MERGED = "merged";
 export const stepLane = (name: string): string => `step:${name}`;
 const norm = (n: string) => n.trim().toLowerCase().replace(/\s+gate$/, "");
 
@@ -68,22 +69,26 @@ export function laneFor(column: Column, f: ItemFacts, steps: readonly string[]):
   const rec = f.lastRecord;
   // A live run shows its step first, also a send-back re-run of an item whose MR is already open.
   if (column === "working") return f.live?.state === "queued" ? LANE_BACKLOG : stageLane(f.live?.progress?.stageName, steps) ?? (steps[0] ? stepLane(steps[0]) : LANE_BACKLOG);
-  if (column === "done") return LANE_DONE;
-  if (rec?.ship || column === "readyToShip") return LANE_MR;
+  if (column === "done") return LANE_MERGED;
+  // Finished, not merged: ready to ship, or an MR open (also when CI failed or a reviewer commented).
+  if (rec?.ship || column === "readyToShip") return LANE_DONE;
   if (column === "inbox") return LANE_BACKLOG;
   // Stopped: the failing step, else the last one reached; an interrupted run with no record has none.
   return stageLane(rec?.failingStage?.name ?? rec?.lastStage, steps) ?? (rec && steps[0] ? stepLane(steps[0]) : LANE_BACKLOG);
 }
 
 export interface Lane { id: string; label: string; cards: CardView[] }
-/** The lanes in order: Backlog, each process step, any step a card stopped at that the process no longer lists, MR open, Done. */
-export function buildLanes(board: Record<Column, CardView[]>, steps: readonly string[]): Lane[] {
+/**
+ * The lanes in order: Backlog (stored items, then `openIssues`: open issues not on the board yet), each process step,
+ * any step a card stopped at that the process no longer lists, and Done (finished, not merged). Merged cards are left out.
+ */
+export function buildLanes(board: Record<Column, CardView[]>, steps: readonly string[], openIssues: readonly CardView[] = []): Lane[] {
   const cards = COLUMNS.flatMap((c) => board[c]);
   const lanes: Lane[] = [{ id: LANE_BACKLOG, label: "Backlog", cards: [] }, ...steps.map((s) => ({ id: stepLane(s), label: s, cards: [] as CardView[] }))];
-  const mr: Lane = { id: LANE_MR, label: "MR open", cards: [] };
   const done: Lane = { id: LANE_DONE, label: "Done", cards: [] };
-  const by = new Map<string, Lane>([...lanes, mr, done].map((l) => [l.id, l]));
+  const by = new Map<string, Lane>([...lanes, done].map((l) => [l.id, l]));
   for (const c of cards) {
+    if (c.lane === LANE_MERGED) continue;
     let lane = by.get(c.lane);
     if (!lane) {
       lane = { id: c.lane, label: c.lane.startsWith("step:") ? c.lane.slice(5) : c.lane, cards: [] };
@@ -92,7 +97,14 @@ export function buildLanes(board: Record<Column, CardView[]>, steps: readonly st
     }
     lane.cards.push(c);
   }
-  return [...lanes, mr, done];
+  const onBoard = new Set(cards.map((c) => c.key));
+  lanes[0].cards.push(...openIssues.filter((c) => !onBoard.has(c.key)));
+  return [...lanes, done];
+}
+
+/** An open issue not on the board yet, as a Backlog card whose only action is Start (it is stored when started). */
+export function openIssueCard(item: Pick<WorkItemRecord, "key" | "title">): CardView {
+  return { key: item.key, title: item.title, source: "issue", note: null, lane: LANE_BACKLOG, status: "Open issue", actions: ["start"] };
 }
 
 /** One card per item, grouped by the column its facts derive. Insertion order is kept inside a column. */
