@@ -66,6 +66,7 @@ export const COMMAND_CLASS = Object.freeze({
   'host.ping': null,
   'host.snapshot': 'self.read',
   'chat.snapshot': 'self.read',
+  'chat.resume': 'self.read',
   'chat.sessions': 'self.read',
   'chat.history': 'self.read',
   'usage.get': 'self.read',
@@ -105,6 +106,9 @@ export function hostApiCapabilities(env = process.env) {
 
 const agentV2 = () => import('../agent-v2.mjs');
 const chatSessions = () => import('../../kb/chat-sessions.mjs');
+export const OUTCOME_TTL_MS = 10 * 60_000; // a detached turn's finished outcome stays resumable this long
+export const OUTCOME_MAX_PER_USER = 20;
+const RESUME_TEXT_MAX = 100_000;
 const pushModule = () => import('./push.mjs'); // Task 6; lazy, off the boot path
 
 function defaultDeps() {
@@ -250,9 +254,12 @@ export function createGateway(overrides) {
   const deps = { ...defaultDeps(), ...overrides };
   const sessions = new Map(); // handle -> { state, peer, num, queue, timer, rev, grants, lastSent }
   // internal id -> { session, external, cancelRequested, started, zombie, userId, chatSessionId, translator, sdkSessionId, open }.
-  // A closed session's in-flight commands stay as zombies (nothing sent) until their turn settles, so a cancel
-  // requested before the turn held the engine lock can be re-issued when its init arrives.
+  // A closed session's in-flight turn is DETACHED (o.session = null): nothing is sent, the translator keeps the reply
+  // and pending approvals, and `chat.resume` from the same device rebinds it. `zombie` = cancel requested for good
+  // (device revoked / shutdown): nothing sent, so a cancel requested before the turn held the engine lock can still
+  // be re-issued when its init arrives.
   const owned = new Map();
+  const outcomes = new Map(); // userId -> Map(external id -> { deviceId, state, text, stopReason?, message?, at })
   const creatingQuickChat = new Map(); // `${userId}:${projectId}` -> Promise<chatSessionId>
   // Separate buckets: a wrong PIN must not delay a token reconnect from the same peer, nor the reverse.
   const pairThrottle = new PairingThrottle();
@@ -322,11 +329,59 @@ export function createGateway(overrides) {
     const entry = sessions.get(session);
     if (entry) { clearTimeout(entry.timer); rate.drop(entry.num); }
     sessions.delete(session);
+    // A dropped connection (a locked phone) must not cancel the reply: the turn detaches and can be resumed.
     for (const o of owned.values()) {
       if (o.session !== session || o.zombie) continue;
+      o.session = null;
+      o.translator.discardPending();
+    }
+  }
+
+  function cancelDeviceTurns(userId, deviceId) {
+    for (const o of owned.values()) {
+      if (o.userId !== userId || (deviceId != null && o.deviceId !== deviceId) || o.zombie) continue;
       o.zombie = true;
       requestCancel(o);
     }
+    if (deviceId == null) return;
+    const mine = outcomes.get(userId);
+    if (mine) for (const [k, v] of mine) if (v.deviceId === deviceId) mine.delete(k);
+  }
+
+  function keepOutcome(o, events) {
+    const last = events.at(-1);
+    if (!last || (last.command !== 'chat.done' && last.command !== 'chat.error')) return;
+    const now = deps.now();
+    const mine = outcomes.get(o.userId) ?? new Map();
+    outcomes.set(o.userId, mine);
+    for (const [k, v] of mine) if (now - v.at > OUTCOME_TTL_MS) mine.delete(k);
+    mine.delete(o.external);
+    mine.set(o.external, last.command === 'chat.done'
+      ? { deviceId: o.deviceId, state: 'done', text: o.translator.text(), ...(last.payload.stopReason ? { stopReason: last.payload.stopReason } : {}), at: now }
+      : { deviceId: o.deviceId, state: 'error', text: o.translator.text(), message: last.payload.message, at: now });
+    while (mine.size > OUTCOME_MAX_PER_USER) mine.delete(mine.keys().next().value);
+  }
+
+  const tail = (text) => {
+    if (text.length <= RESUME_TEXT_MAX) return { text };
+    let t = text.slice(-RESUME_TEXT_MAX);
+    if (/^[\udc00-\udfff]/.test(t)) t = t.slice(1);
+    return { text: t, truncated: true };
+  };
+
+  function resume(s, entry, id, p) {
+    const { userId, deviceId } = entry.state;
+    const o = [...owned.values()].find((x) => x.userId === userId && x.deviceId === deviceId && x.external === p.requestId && !x.zombie);
+    if (o) {
+      o.session = s;
+      o.translator.discardPending(); // the response carries the full text
+      respond(s, id, 'chat.resume', { state: 'running', ...tail(o.translator.text()) });
+      for (const e of o.pending.values()) sendEvent(s, e.command, e.payload, o.external);
+      return;
+    }
+    const k = outcomes.get(userId)?.get(p.requestId);
+    if (!k || k.deviceId !== deviceId || deps.now() - k.at > OUTCOME_TTL_MS) return respond(s, id, 'chat.resume', { state: 'unknown' });
+    return respond(s, id, 'chat.resume', { state: k.state, ...tail(k.text), ...(k.stopReason ? { stopReason: k.stopReason } : {}), ...(k.message ? { message: k.message } : {}) });
   }
 
   // Per-member cap (ADR 0021 hub): count only this member's authenticated connections.
@@ -359,6 +414,7 @@ export function createGateway(overrides) {
       deps.close(s);
       closed(s);
     }
+    cancelDeviceTurns(userId, deviceId); // a revoked device's detached turns end too
   }
 
   function closeAll() {
@@ -366,6 +422,7 @@ export function createGateway(overrides) {
       deps.close(s);
       closed(s);
     }
+    for (const o of owned.values()) { if (!o.zombie) { o.zombie = true; requestCancel(o); } }
   }
 
   function capabilitiesChanged() {
@@ -487,8 +544,13 @@ export function createGateway(overrides) {
 
   function startTurn(s, entry, id, p, chatSessionId) {
     const iid = internalId(entry.num, id);
-    const o = { session: s, external: id, cancelRequested: false, started: false, zombie: false, userId: entry.state.userId, chatSessionId,
-      translator: createTranslator({ external: id }), sdkSessionId: null, open: new Set(), reply: '', saved: Promise.resolve() };
+    const o = { session: s, external: id, cancelRequested: false, started: false, zombie: false, userId: entry.state.userId, deviceId: entry.state.deviceId, chatSessionId,
+      translator: null, sdkSessionId: null, open: new Set(), pending: new Map(), reply: '', saved: Promise.resolve() };
+    // The coalescing timer fires between engine events; a detached turn sends nothing.
+    o.translator = createTranslator({ external: id, onFlush: (events) => {
+      if (owned.get(iid) !== o || o.zombie || !o.session) return;
+      for (const e of events) sendEvent(o.session, e.command, e.payload, id);
+    } });
     owned.set(iid, o);
     // The phone chat's lines go to chat_messages (what the snapshots read), in order, even for a closed session.
     const save = (role, content) => {
@@ -500,7 +562,12 @@ export function createGateway(overrides) {
       if (owned.get(iid) !== o || o.zombie) return;
       const t = o.translator.push(ev, { cancelledByClient: o.cancelRequested });
       if (t.terminal) owned.delete(iid);
-      for (const e of t.events) sendEvent(s, e.command, e.payload, id);
+      for (const e of t.events) {
+        if (e.command === 'approval.request' || e.command === 'toolApproval.request') o.pending.set(e.payload.requestId, e);
+        else if (e.command === 'approval.cleared') o.pending.delete(e.payload.requestId);
+      }
+      if (!o.session) { if (t.terminal) keepOutcome(o, t.events); return; }
+      for (const e of t.events) sendEvent(o.session, e.command, e.payload, id);
     };
     // Runs inside the engine's event callback: a throw here must never fail the turn.
     const onEvent = (ev) => {
@@ -535,11 +602,11 @@ export function createGateway(overrides) {
         push({ type: 'error', message, retryable: RETRYABLE.has(code) });
       })
       .catch((e) => deps.log(`Host API v1 turn end failed (${e?.code ?? 'error'})`))
-      .finally(() => { if (owned.get(iid) === o) owned.delete(iid); });
+      .finally(() => { o.translator.dispose(); if (owned.get(iid) === o) owned.delete(iid); });
   }
 
   async function answer(s, entry, id, p, action, extra) {
-    const o = owned.get(internalId(entry.num, p.commandId));
+    const o = [...owned.values()].find((x) => x.session === s && x.external === p.commandId);
     if (!o || !o.open.has(p.requestId)) return fail(s, id, 'not_found', 'That chat request is not open on this connection.');
     const out = await deps.decide({ requestId: p.requestId, sdkSessionId: o.sdkSessionId, userId: o.userId, action, ...extra });
     if (!out?.ok) {
@@ -548,6 +615,7 @@ export function createGateway(overrides) {
         : fail(s, id, 'not_found', 'That approval is no longer waiting for an answer.');
     }
     o.open.delete(p.requestId);
+    o.pending.delete(p.requestId);
     respond(s, id, p.command, { accepted: true });
   }
 
@@ -889,6 +957,8 @@ export function createGateway(overrides) {
         const limit = p.limit ?? HOST_API_LIMITS.defaultListItems;
         return respond(s, id, command, { messages: await lines(userId, limit, p.projectId ?? null, p.surface) });
       }
+      case 'chat.resume':
+        return resume(s, entry, id, p);
       case 'chat.send': {
         // Text only (fixtures/security/compose.json imagesAllowed:false): the engine would read `[binary:` framing as an image.
         if ((p.attachments ?? []).some(isBinaryAttachment)) return fail(s, id, 'invalid_payload', 'Attachments must be plain text; images are not accepted.');

@@ -1,8 +1,11 @@
 // Stateful engine-event -> Host API v1 event translator (the Node twin of HostApiV2Translator.swift).
-// Deltas are accumulated and sent as chunked chat.delta at the result, matching the Mac's wire behaviour.
+// Deltas stream coalesced: flushed at >= FLUSH_BYTES pending or FLUSH_MS after the first pending byte, and always
+// before chat.done / chat.error / approval events so the order is preserved. The full reply is kept for resume.
 import { clamp } from './frame.mjs';
 
 const DELTA_CHUNK = 100_000;
+export const FLUSH_BYTES = 4096;
+export const FLUSH_MS = 250;
 const none = { events: [], terminal: false };
 const ev = (command, payload) => ({ command, payload });
 const validId = (s) => typeof s === 'string' && s.length >= 1 && s.length <= 64;
@@ -38,17 +41,34 @@ function questionsOf(raw) {
   return out;
 }
 
-export function createTranslator({ external }) {
+export function createTranslator({ external, onFlush = null, flushBytes = FLUSH_BYTES, flushMs = FLUSH_MS }) {
   let reply = '';
+  let pending = '';
+  let timer = null;
   let ended = false;
+  const stopTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  const takePending = () => {
+    stopTimer();
+    const out = chunks(pending).map((text) => ev('chat.delta', { text }));
+    pending = '';
+    return out;
+  };
+  const withFlush = (r) => (r === none || (!r.terminal && !r.events.length) ? r : { ...r, events: [...takePending(), ...r.events] });
   const step = (e, cancelledByClient) => {
       switch (e?.type) {
         case 'delta':
-          reply += str(e.text);
-          return none;
+          { const text = str(e.text);
+            reply += text;
+            pending += text;
+            if (pending.length >= flushBytes) return { events: takePending(), terminal: false };
+            if (pending && !timer && onFlush) {
+              timer = setTimeout(() => { timer = null; const events = takePending(); if (events.length && !ended) onFlush(events); }, flushMs);
+              timer.unref?.();
+            }
+            return none; }
         case 'result': {
           const done = { requestId: external, ...(typeof e.stopReason === 'string' && e.stopReason ? { stopReason: clamp(e.stopReason, 200) } : {}) };
-          return { events: [...chunks(reply).map((text) => ev('chat.delta', { text })), ev('chat.done', done)], terminal: true };
+          return { events: [ev('chat.done', done)], terminal: true };
         }
         case 'error':
           if (cancelledByClient) return { events: [ev('chat.done', { requestId: external, stopReason: 'cancelled' })], terminal: true };
@@ -78,11 +98,17 @@ export function createTranslator({ external }) {
   return {
     push(e, { cancelledByClient } = {}) {
       if (ended) return { events: [], terminal: true };
-      const r = step(e, cancelledByClient);
-      ended = r.terminal;
+      const r = withFlush(step(e, cancelledByClient));
+      if (r.terminal) { ended = true; stopTimer(); pending = ''; }
       return r;
     },
+    /** The whole reply so far (never cleared by a flush). */
+    text: () => reply,
+    /** Drop unsent deltas (a resume response already carries the full text). */
+    discardPending() { pending = ''; stopTimer(); },
+    dispose() { ended = true; stopTimer(); },
   };
 }
 
+// One-shot helper: with no timer, deltas below the byte threshold are only flushed by the next flushing event.
 export const translate = (e, { external, cancelledByClient } = {}) => createTranslator({ external }).push(e, { cancelledByClient });

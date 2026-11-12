@@ -35,7 +35,7 @@ as `minLenght` fails the gate instead of being silently ignored.
 
 ## Commands
 
-All 33 commands are listed below.
+All 34 commands are listed below.
 
 | Command | Capability | Idempotent | v2 tag |
 |---|---|---|---|
@@ -50,6 +50,7 @@ All 33 commands are listed below.
 | `chat.history.clear` | chat | yes | `llmide_chat_history_clear` |
 | `chat.delete` | chat | yes | — |
 | `chat.cancel` | chat | yes | `llmide_cancel` |
+| `chat.resume` | chat | yes | — |
 | `chat.options` | compose | yes | — |
 | `chat.new` | compose | no | — |
 | `approvals.answer` | approvals | no | `approval_answer` |
@@ -74,6 +75,8 @@ All 33 commands are listed below.
 | `projects.list` | host | yes | — |
 
 `read` (tier R in the command bus spec) is the read-only slice: the user's chat list, one chat's history, and the usage and limits summary. It is served only when the host enables it (desktop: `LLMIDE_HOST_API_READ=1`, default off) and only to a device paired while it was served. The Tauri app passes `LLMIDE_HOST_API_TLS`, `LLMIDE_HOST_API_WEB_ORIGINS` and (fixed) `LLMIDE_HOST_API_READ=1` / `LLMIDE_HOST_API_COMPOSE=1` to a core it starts; an adopted core keeps its own env. The remaining spec domains (Explorer, Auto Tasks, Loop, projects, files, SCM, issues, Self-Heal, generation, Library, activity) are added by later plans using the same envelope and registry machinery.
+
+`chat.resume` (`{ requestId, projectId? }`) re-attaches to a turn this device started on an earlier connection. A dropped connection no longer cancels a running turn: the host keeps it detached (events are not sent; an approval stays pending) and the engine still writes the reply to chat history. Only the same user and device may resume; anything else, an expired or unknown id answers `{ state: "unknown" }`. `running`: `text` is the reply so far (the last 100000 characters, `truncated: true`, if longer); the turn is rebound to this connection, later `chat.delta` / `chat.done` / `chat.error` flow here, `chat.cancel` works, and still-pending `approval.request` / `toolApproval.request` events follow the response. `done` / `error`: the kept outcome (`text`, `stopReason` or `message`) for 10 minutes. `chat.delta` streams while the turn runs, in chunks of at least 4 KB or 250 ms; a client must append deltas in order and treat `chat.done` as the end. `chat.cancel` and revoking the device still cancel a detached turn.
 
 `projects.list` returns the paired device's projects and its effective role on each (`id`, `name`, `role`, `maxMode`, `usdCapMonth`, `permissions`). A project-scoped command (`chat.send`, `chat.new`, `chat.snapshot`, `chat.sessions`, `chat.history`, `chat.history.clear`, `chat.cancel`, `chat.options`, `approvals.answer`, `toolApprovals.answer`) may carry `projectId`; the host checks the fresh project grant on every frame, and an unassigned device is a viewer on that project (Ask only). A frame with no `projectId` keeps the legacy/global chat, so existing pairings keep working. One current chat is kept per (user, project): `chat.sessions` without a project is only the project_id NULL set, and `chat.history` refuses another project's session. On a hub every project-scoped frame needs a project (`PROJECT_REQUIRED`).
 

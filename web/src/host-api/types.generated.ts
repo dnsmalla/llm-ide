@@ -15,6 +15,7 @@ export const HOST_API_COMMANDS = {
   "chat.history.clear": { capability: "chat", idempotent: true },
   "chat.new": { capability: "compose", idempotent: false },
   "chat.options": { capability: "compose", idempotent: true },
+  "chat.resume": { capability: "chat", idempotent: true },
   "chat.send": { capability: "chat", idempotent: false },
   "chat.sessions": { capability: "read", idempotent: true },
   "chat.snapshot": { capability: "chat", idempotent: true },
@@ -51,6 +52,7 @@ export interface HostApiCommandMap {
   "chat.history.clear": { request: { projectId?: string; surface?: "ask" | "execute" }; result: { cleared: boolean } };
   "chat.new": { request: { projectId?: string; surface?: "ask" | "execute" }; result: { sessionId: string } };
   "chat.options": { request: { projectId?: string }; result: { models: Array<{ label?: string; model: string }>; modes: Array<"auto" | "ask" | "plan" | "assist_plan" | "review" | "document" | "execute"> } };
+  "chat.resume": { request: { projectId?: string; requestId: string }; result: { message?: string; state: "running" | "done" | "error" | "unknown"; stopReason?: string; text?: string; truncated?: boolean } };
   "chat.send": { request: { attachments?: Array<{ name: string; text: string }>; mode?: "auto" | "ask" | "plan" | "assist_plan" | "review" | "document" | "execute"; model?: string; projectId?: string; surface?: "ask" | "execute"; text: string }; result: { accepted: boolean; requestId?: string } };
   "chat.sessions": { request: { limit?: number; offset?: number; projectId?: string }; result: { nextOffset?: number; sessions: Array<{ id: string; phoneChat?: boolean; title: string; updatedAt: number }> } };
   "chat.snapshot": { request: { limit?: number; projectId?: string; surface?: "ask" | "execute" }; result: { messages: Array<{ content: string; role: "user" | "assistant" }> } };

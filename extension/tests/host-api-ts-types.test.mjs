@@ -17,7 +17,7 @@ test('the TS output exists and loads under strip-types with the full surface', (
   const r = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', code], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').pop()), {
-    v: 1, c: 33, e: 7, caps: ['host', 'chat', 'approvals', 'tool_approvals', 'read', 'compose', 'push'], codes: 11, send: { capability: 'chat', idempotent: false },
+    v: 1, c: 34, e: 7, caps: ['host', 'chat', 'approvals', 'tool_approvals', 'read', 'compose', 'push'], codes: 11, send: { capability: 'chat', idempotent: false },
   });
 });
 

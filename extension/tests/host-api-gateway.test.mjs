@@ -9,7 +9,7 @@ const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersion
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
 function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null, pinUser = () => 'u1', member = () => ({ teamRole: 'owner', maxMode: 'execute' }), projectRequired = false } = {}) {
-  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, readCalls: [], pending: [], audits: [], modelCalls: 0, member };
+  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, readCalls: [], pending: [], audits: [], modelCalls: 0, member, skew: 0 };
   const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
   const quick = new Map(); // projectId || '' -> current phone chat
@@ -29,6 +29,7 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     // ADR 0021 authority; the default is the install owner, so the full served list is paired.
     member: (userId) => t.member(userId),
     projectRequired: () => projectRequired,
+    now: () => Date.now() + t.skew,
     log: () => {},
     chatClearEnabled: () => chatClear,
     pins: { consumePin: (pin) => (pin === '123456' ? pinUser() : null) },
@@ -308,7 +309,7 @@ test('closeAll cancels every in-flight turn and closes every session', async () 
   await t.g.receive(s2, req('c-2', 'chat.send', { text: 'b' }));
   const before = t.sent.length;
   t.g.closeAll();
-  assert.equal(t.cancelled.length, 2);
+  assert.equal(t.cancelled.length, 2, 'shutdown cancels even detached turns');
   assert.deepEqual(new Set(t.closed), new Set([s1, s2]));
   // Late engine events after close are dropped.
   t.turns[0].onEvent({ type: 'delta', text: 'late' });
@@ -402,16 +403,15 @@ test('a rejected turn is a chat.error; SESSION_TOKEN_LIMIT is not retryable; an 
   assert.equal(thrown, null);
 });
 
-test('a session closed before init re-issues the cancel when init arrives', async () => {
+test('a session closed before init detaches; the turn is not cancelled and keeps running', async () => {
   const t = harness({ hold: true, skipInit: () => true });
   const s = {};
   await t.paired(s);
   await t.g.receive(s, req('c-9', 'chat.send', { text: 'hello' }));
   t.g.closed(s);
-  assert.deepEqual(t.cancelled, [], 'nothing holds the engine lock yet');
-  const before = t.sent.length;
   t.turns[0].onEvent({ type: 'init', sessionId: 'sdk-1' });
-  assert.deepEqual(t.cancelled, [['u1', 'chat-1']]);
+  assert.deepEqual(t.cancelled, [], 'a dropped connection never cancels');
+  const before = t.sent.length;
   t.turns[0].onEvent({ type: 'delta', text: 'late' });
   t.pending[0]();
   await flush();
@@ -871,4 +871,177 @@ test('chat.delete: denied when clear/delete is turned off on this computer', asy
   const t = harness({ read: true }); const s = {}; await t.paired(s);
   await t.g.receive(s, req('c-1', 'chat.delete', { sessionId: 'chat-2' }));
   assert.equal(t.lastError(), 'denied');
+});
+
+// ---- detach + chat.resume ----
+const events = (t, name) => t.sent.map(([, f]) => f).filter((f) => f.type === 'event' && f.command === name);
+const reconnect = async (t, s, token) => {
+  t.g.opened(s, '127.0.0.1');
+  await t.g.receive(s, req('c-h', 'host.hello', HELLO));
+  await t.g.receive(s, req('c-t', 'host.auth.token', { token }));
+};
+const tokenOf = (t) => [...t.tokens.keys()][0];
+
+test('deltas stream before the result, in coalesced chunks (4 KB flushes at once)', async () => {
+  const t = harness({ hold: true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'go' }));
+  t.turns[0].onEvent({ type: 'delta', text: 'a'.repeat(5000) });
+  assert.equal(events(t, 'chat.delta').length, 1, 'streamed before any result');
+  t.turns[0].onEvent({ type: 'delta', text: 'tail' });
+  assert.equal(events(t, 'chat.delta').length, 1, 'small text waits for the timer');
+  t.turns[0].onEvent({ type: 'result', stopReason: 'end_turn' });
+  const names = t.sent.map(([, f]) => f.command).filter((c) => c?.startsWith('chat.d'));
+  assert.deepEqual(names, ['chat.delta', 'chat.delta', 'chat.done'], 'the tail is flushed before done');
+  t.pending[0]();
+});
+
+test('order with approvals: pending text flushes before the approval event', async () => {
+  const t = harness({ hold: true, toolApprovals: true });
+  const s = {};
+  await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'go' }));
+  t.turns[0].onEvent({ type: 'delta', text: 'before' });
+  t.turns[0].onEvent({ type: 'approval_request', kind: 'ToolApproval', requestId: 'r-1', toolName: 'Edit' });
+  const cmds = t.sent.map(([, f]) => f.command).filter((c) => c === 'chat.delta' || c === 'toolApproval.request');
+  assert.deepEqual(cmds, ['chat.delta', 'toolApproval.request']);
+  t.pending[0]();
+});
+
+test('a disconnect does not cancel; resume returns the text so far, later deltas and pending approvals go to the new session', async () => {
+  const t = harness({ hold: true, toolApprovals: true });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'go' }));
+  t.turns[0].onEvent({ type: 'delta', text: 'Hello ' });
+  t.turns[0].onEvent({ type: 'approval_request', kind: 'ToolApproval', requestId: 'r-1', toolName: 'Edit', argsSummary: 'x' });
+  t.g.closed(s1);
+  assert.deepEqual(t.cancelled, []);
+  t.turns[0].onEvent({ type: 'delta', text: 'world' });
+  const s2 = { n: 2 };
+  await reconnect(t, s2, tokenOf(t));
+  const mark = t.sent.length;
+  await t.g.receive(s2, req('r-1', 'chat.resume', { requestId: 'c-1' }));
+  const after = t.sent.slice(mark).filter(([s]) => s === s2).map(([, f]) => f);
+  assert.deepEqual(after[0].result, { state: 'running', text: 'Hello world' });
+  assert.equal(after[1].command, 'toolApproval.request', 'pending approval re-emitted after the response');
+  assert.equal(after[1].payload.requestId, 'r-1');
+  // answering works from the new session, later events flow there
+  await t.g.receive(s2, req('a-1', 'toolApprovals.answer', { commandId: 'c-1', requestId: 'r-1', decision: 'allow_once' }));
+  assert.deepEqual(t.last().result, { accepted: true });
+  t.turns[0].onEvent({ type: 'result', stopReason: 'end_turn' });
+  assert.equal(t.sent.at(-1)[0], s2);
+  assert.equal(t.last().command, 'chat.done');
+  t.pending[0]();
+});
+
+test('chat.cancel from the resumed session cancels the turn', async () => {
+  const t = harness({ hold: true });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'go' }));
+  t.g.closed(s1);
+  const s2 = { n: 2 };
+  await reconnect(t, s2, tokenOf(t));
+  await t.g.receive(s2, req('r-1', 'chat.resume', { requestId: 'c-1' }));
+  await t.g.receive(s2, req('x-1', 'chat.cancel'));
+  assert.deepEqual(t.last().result, { cancelled: true });
+  assert.deepEqual(t.cancelled, [['u1', 'chat-1']]);
+  t.pending[0]();
+});
+
+test('resume after the turn finished while detached returns the kept outcome (done and error)', async () => {
+  const t = harness({ hold: true });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'go' }));
+  t.turns[0].onEvent({ type: 'delta', text: 'answer' });
+  t.g.closed(s1);
+  t.turns[0].onEvent({ type: 'result', stopReason: 'end_turn' });
+  t.pending[0]();
+  await flush();
+  const s2 = { n: 2 };
+  await reconnect(t, s2, tokenOf(t));
+  await t.g.receive(s2, req('r-1', 'chat.resume', { requestId: 'c-1' }));
+  assert.deepEqual(t.last().result, { state: 'done', text: 'answer', stopReason: 'end_turn' });
+  await t.g.receive(s2, req('c-2', 'chat.send', { text: 'again' }));
+  t.turns[1].onEvent({ type: 'delta', text: 'half' });
+  t.g.closed(s2);
+  t.turns[1].onEvent({ type: 'error', message: 'boom', code: 'X' });
+  t.pending[1]();
+  await flush();
+  const s3 = { n: 3 };
+  await reconnect(t, s3, tokenOf(t));
+  await t.g.receive(s3, req('r-2', 'chat.resume', { requestId: 'c-2' }));
+  assert.deepEqual(t.last().result, { state: 'error', text: 'half', message: 'The turn failed on this computer.' });
+  await t.g.receive(s3, req('r-3', 'chat.resume', { requestId: 'nope' }));
+  assert.deepEqual(t.last().result, { state: 'unknown' });
+});
+
+test('another device or user resumes nothing: unknown, and the turn stays with its owner', async () => {
+  let who = 'u1';
+  const t = harness({ hold: true, pinUser: () => who });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'go' }));
+  t.g.closed(s1);
+  const other = { n: 2 };
+  await t.paired(other); // a second device of the same user
+  await t.g.receive(other, req('r-1', 'chat.resume', { requestId: 'c-1' }));
+  assert.deepEqual(t.last().result, { state: 'unknown' }, 'same user, other device');
+  who = 'u2';
+  const stranger = { n: 3 };
+  await t.paired(stranger);
+  await t.g.receive(stranger, req('r-2', 'chat.resume', { requestId: 'c-1' }));
+  assert.deepEqual(t.last().result, { state: 'unknown' }, 'other user');
+  assert.deepEqual(t.cancelled, []);
+  t.pending[0]();
+});
+
+test('kept outcomes expire after 10 minutes and are bounded to 20 per user', async () => {
+  const t = harness({ hold: true });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  for (let i = 0; i < 22; i += 1) {
+    t.skew += 11_000; // refill the turn bucket
+    await t.g.receive(s1, req(`c-${i}`, 'chat.send', { text: 'go' }));
+    t.g.closed(s1);
+    t.turns[i].onEvent({ type: 'result' });
+    t.pending[i]();
+    await flush();
+    await reconnect(t, s1, tokenOf(t));
+  }
+  await t.g.receive(s1, req('r-old', 'chat.resume', { requestId: 'c-0' }));
+  assert.deepEqual(t.last().result, { state: 'unknown' }, 'the oldest outcome was evicted');
+  await t.g.receive(s1, req('r-new', 'chat.resume', { requestId: 'c-21' }));
+  assert.equal(t.last().result.state, 'done');
+});
+
+test('a kept outcome expires with the clock', async () => {
+  const t = harness({ hold: true });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'go' }));
+  t.g.closed(s1);
+  t.turns[0].onEvent({ type: 'result' });
+  t.pending[0]();
+  await flush();
+  await reconnect(t, s1, tokenOf(t));
+  t.skew = 10 * 60_000 + 1;
+  await t.g.receive(s1, req('r-1', 'chat.resume', { requestId: 'c-1' }));
+  assert.deepEqual(t.last().result, { state: 'unknown' });
+});
+
+test('revoking the device cancels its detached turn and drops its outcomes', async () => {
+  const t = harness({ hold: true });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'go' }));
+  const s2 = { n: 2 };
+  await reconnect(t, s2, tokenOf(t));
+  t.g.closed(s1);
+  t.g.disconnectDevice('u1', 'h1-dev1');
+  assert.deepEqual(t.cancelled, [['u1', 'chat-1']]);
+  t.pending[0]();
 });

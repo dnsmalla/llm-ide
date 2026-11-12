@@ -157,6 +157,32 @@ public struct HostApiChatOptionsResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiChatResumeRequest: Codable, Equatable, Sendable {
+    public var projectId: String?
+    public var requestId: String
+
+    public init(projectId: String? = nil, requestId: String) {
+        self.projectId = projectId
+        self.requestId = requestId
+    }
+}
+
+public struct HostApiChatResumeResult: Codable, Equatable, Sendable {
+    public var message: String?
+    public var state: String
+    public var stopReason: String?
+    public var text: String?
+    public var truncated: Bool?
+
+    public init(message: String? = nil, state: String, stopReason: String? = nil, text: String? = nil, truncated: Bool? = nil) {
+        self.message = message
+        self.state = state
+        self.stopReason = stopReason
+        self.text = text
+        self.truncated = truncated
+    }
+}
+
 public struct HostApiChatSendRequestAttachmentsItem: Codable, Equatable, Sendable {
     public var name: String
     public var text: String

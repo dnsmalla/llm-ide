@@ -21,6 +21,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
     case chatHistoryClear = "chat.history.clear"
     case chatNew = "chat.new"
     case chatOptions = "chat.options"
+    case chatResume = "chat.resume"
     case chatSend = "chat.send"
     case chatSessions = "chat.sessions"
     case chatSnapshot = "chat.snapshot"
@@ -57,6 +58,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .chatHistoryClear: return "chat"
         case .chatNew: return "compose"
         case .chatOptions: return "compose"
+        case .chatResume: return "chat"
         case .chatSend: return "chat"
         case .chatSessions: return "read"
         case .chatSnapshot: return "chat"
@@ -95,6 +97,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .chatHistoryClear: return true
         case .chatNew: return false
         case .chatOptions: return true
+        case .chatResume: return true
         case .chatSend: return false
         case .chatSessions: return true
         case .chatSnapshot: return true
@@ -136,6 +139,7 @@ public enum HostApi {
         "chat.history.clear": .chatHistoryClear,
         "chat.new": .chatNew,
         "chat.options": .chatOptions,
+        "chat.resume": .chatResume,
         "chat.send": .chatSend,
         "chat.sessions": .chatSessions,
         "chat.snapshot": .chatSnapshot,
