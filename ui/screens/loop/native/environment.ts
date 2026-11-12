@@ -4,6 +4,8 @@ import type { FsApi } from "../../explorer/fs";
 
 export type DetectFs = Pick<FsApi, "read"> & Partial<Pick<FsApi, "list">>;
 export const DETECTED_TEST = "<detected-test-command>";
+/** The Factory's Structure verify command until detection fills it; never the test command's placeholder. */
+export const DETECTED_STRUCTURE = "<detected-structure-command>";
 
 function codeOf(e: unknown): string {
   return typeof e === "object" && e !== null && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "";
@@ -44,6 +46,39 @@ export async function detectTestCommand(fs: DetectFs, prefix = ""): Promise<{ co
 
 export function applyDetected(command: string | null, configured: string | null): string | null {
   return configured === DETECTED_TEST ? command : configured;
+}
+
+/** A command that checks the code's structure without running it: lint script, TypeScript, or Ruff. */
+export async function detectStructureCommand(fs: DetectFs, prefix = ""): Promise<{ command: string | null; reason: string }> {
+  const path = (name: string) => (prefix ? `${prefix}/${name}` : name);
+  try {
+    const pkg = await fs.read(path("package.json"), 500_000);
+    if (pkg.status === "ok" && pkg.text) {
+      const parsed = JSON.parse(pkg.text) as { scripts?: Record<string, unknown> };
+      if (typeof parsed.scripts?.lint === "string" && parsed.scripts.lint.trim() !== "") return { command: "npm run lint", reason: "package.json declares a lint script." };
+    }
+  } catch { /* no package.json */ }
+  if (await exists(fs, path("tsconfig.json"))) return { command: "npx tsc --noEmit", reason: "tsconfig.json found." };
+  if (await exists(fs, path("ruff.toml")) || await exists(fs, path(".ruff.toml"))) return { command: "ruff check .", reason: "Ruff configuration found." };
+  try {
+    const py = await fs.read(path("pyproject.toml"), 500_000);
+    if (py.status === "ok" && py.text && /^\[tool\.ruff/m.test(py.text)) return { command: "ruff check .", reason: "pyproject.toml configures Ruff." };
+  } catch { /* no pyproject.toml */ }
+  return { command: null, reason: "No lint script, tsconfig.json or Ruff configuration found." };
+}
+
+/** Detect the structure check at the project root, else in the first linked clone under code/. */
+export async function detectProjectStructureCommand(fs: DetectFs): Promise<{ command: string | null; prefix: string }> {
+  const root = await detectStructureCommand(fs);
+  if (root.command || !fs.list) return { command: root.command, prefix: "" };
+  try {
+    for (const e of (await fs.list("code")).entries) {
+      if (e.kind !== "dir") continue;
+      const found = await detectStructureCommand(fs, `code/${e.name}`);
+      if (found.command) return { command: found.command, prefix: `code/${e.name}` };
+    }
+  } catch { /* no code folder */ }
+  return { command: null, prefix: "" };
 }
 
 /** Detect the test command at the project root, else in the first linked clone under code/. */

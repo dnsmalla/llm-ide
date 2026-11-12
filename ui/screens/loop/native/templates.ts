@@ -23,7 +23,8 @@ export const BUILT_IN_TEMPLATES: LoopTemplate[] = [...GENERATED_RECIPES, FACTORY
 export function applyTemplate(t: LoopTemplate, detected: string | null, keepUndetected = false): LoopEngineConfig {
   const c = structuredClone(t.config);
   c.stages = c.stages.flatMap((s) => {
-    const copy = { ...s, id: crypto.randomUUID(), isDefault: false, defaultKey: null };
+    // A "custom/" id is what makes a step custom (factoryRole), so it must survive the copy.
+    const copy = { ...s, id: s.id.startsWith("custom/") ? s.id : crypto.randomUUID(), isDefault: false, defaultKey: null };
     if (copy.command === DETECTED_TEST) {
       if (!detected && !keepUndetected) return [];
       copy.command = detected ?? "";

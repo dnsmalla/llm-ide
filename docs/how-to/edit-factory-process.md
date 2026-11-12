@@ -18,6 +18,34 @@ first time the Factory runs or the Process tab opens.
 The template is the source of truth. At the start of every Factory run its steps replace the Factory loop's steps in
 `system/loop.json`, so edits made to the Factory loop on the Loop page are replaced at the next run.
 
+## The default process
+
+A new project, or one whose Factory loop was never edited, starts with:
+
+Set up → Plan → Implement → Structure verify → Verify → Test gaps → Doc review → Review → Review gate
+
+- **Structure verify** checks the code without running it: `npm run lint` when `package.json` has a lint script, else
+  `npx tsc --noEmit` when there is a `tsconfig.json`, else `ruff check .` when Ruff is configured. It blocks the run.
+  When nothing is detected it stays off; give it a `command` (or keep `"auto"` and add a lint script) to turn it on.
+- **Test gaps** adds tests for behaviour the run changed and has none; **Doc review** updates the documentation of that
+  behaviour. Both are advisory: a failure is reported and the MR still opens.
+- Implement and Test gaps (`skills/test-gap-writer`) may write test files; every other step that writes a test or
+  build-config file is reverted and stops the run. CI and hook files are protected for every step. Custom skill steps
+  never write under `.factory/`.
+- There is no Intake step: the issue is expected to be prepared already, and the person reviews at the MR. **Run
+  intake** on a card says so instead of running.
+
+### Add Intake back
+
+Put these two steps first (before `plan`):
+
+```json
+{ "role": "intake" },
+{ "role": "intakeGate" },
+```
+
+Intake then writes `.factory/READINESS.md`, and the Intake gate stops a run that is not ready for a decision.
+
 ## Format
 
 ```json
@@ -26,12 +54,11 @@ The template is the source of truth. At the start of every Factory run its steps
   "budget": { "maxIterations": 10, "maxCostUsd": 10, "wallClockMinutes": 120 },
   "stages": [
     { "role": "setup", "command": "npm ci" },
-    { "role": "intake" },
-    { "role": "intakeGate" },
     { "role": "plan" },
     { "role": "implement", "prompt": "Keep the change small and add a test." },
+    { "role": "custom", "name": "Structure verify", "kind": "shellCommand", "command": "auto" },
     { "role": "verify", "command": "auto" },
-    { "role": "custom", "name": "Lint", "kind": "shellCommand", "command": "npm run lint", "severity": "advisory" },
+    { "role": "custom", "name": "Test gaps", "kind": "skill", "skill": "test-gap-writer", "severity": "advisory" },
     { "role": "review" },
     { "role": "reviewGate" }
   ]
@@ -49,7 +76,8 @@ The template is the source of truth. At the start of every Factory run its steps
 
 A `custom` step has a `kind`:
 
-- `shellCommand` runs `command`.
+- `shellCommand` runs `command`; `"auto"` means the detected structure check (lint, TypeScript or Ruff), and the step
+  stays off while none is detected.
 - `skill` runs `skill` (`doc-writer` or `skills/doc-writer`) with an optional `prompt`.
 - `artifactCheck` passes when the file `verdictPath` (under `.factory/`, for example `.factory/LINT.md`) contains the
   line `verdictLine`, for example `Verdict: clean`. An earlier step writes that file. `.factory/READINESS.md` and
@@ -68,6 +96,8 @@ step keeps your text and no longer gets those updates; delete the `prompt` key t
   off or made `advisory`. `reviewGate` is the last step.
 - `setup`, `intake`, `intakeGate` and `plan` appear at most once; `intakeGate` needs `intake` before it.
 - Step names are unique. A step without `name` uses the built-in name.
+- A custom `skill` step cannot sit between `review` and `reviewGate`: the gate reads Review's report, and an agent step
+  in between could change it. A shell or verdict check there is fine.
 - Unknown keys are errors. Budgets: `maxIterations` 1–50, `maxCostUsd` 0–1000 (0 = no limit), `wallClockMinutes`
   1–1440; `timeoutMinutes` 1–240.
 
@@ -79,6 +109,12 @@ The first Factory run in a project without the file writes it from the project's
 of that loop cannot be written in the template, for example a step of another kind or an advisory Review, the file is
 written anyway and that run stops, listing each step and why. Review the file under **Factory → Process**, then run
 again; the next run uses the file.
+
+## Which steps a re-run uses
+
+A full run, and a restart after a rejected MR, run every step. **Send back** runs Implement, Verify, Review and the
+Review gate; **Finish checks** runs Verify, Review and the Review gate. Both also keep your blocking custom checks
+(shell and verdict steps such as Structure verify) and skip custom skill steps such as Test gaps and Doc review.
 
 ## Errors
 

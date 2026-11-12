@@ -4,8 +4,8 @@
 // below is authoritative (schema/factory/template.v1.schema.json documents the same format) and points every problem
 // at its exact line. Pure apart from the two fs helpers at the end.
 import type { FsApi } from "../../explorer/fs";
-import { DETECTED_TEST } from "./environment.ts";
-import { FACTORY_TEMPLATE, factoryRole, type FactoryRole } from "./factory.ts";
+import { DETECTED_STRUCTURE, DETECTED_TEST } from "./environment.ts";
+import { FACTORY_BUILT_IN_STAGES, FACTORY_TEMPLATE, factoryRole, isCustomStage, type FactoryRole } from "./factory.ts";
 import type { LoopDefinition, LoopStage } from "./model.ts";
 
 export const TEMPLATE_FILE = "system/factory-template.json";
@@ -40,6 +40,7 @@ const SKILL = /^(skills\/)?[a-z0-9][a-z0-9-]{0,63}$/;
 // The Factory's own gates read these; a custom check on them would be taken for that gate.
 const RESERVED_VERDICTS = new Set([".factory/READINESS.md", ".factory/REVIEW.md"]);
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const BETWEEN_REVIEW_AND_GATE = 'a custom skill step cannot come between "review" and "reviewGate" (it could change Review\'s report)';
 
 /** Why a custom verdict file is refused, or null: a relative path under .factory/ with no "..". */
 function verdictPathProblem(p: string): string | null {
@@ -50,7 +51,7 @@ function verdictPathProblem(p: string): string | null {
 const MAX_STAGES = 30;
 const MAX_TEXT = 200_000;
 
-const builtInStage = (role: FactoryRole): LoopStage => FACTORY_TEMPLATE.config.stages.find((s) => factoryRole(s) === role)!;
+const builtInStage = (role: FactoryRole): LoopStage => FACTORY_BUILT_IN_STAGES.find((s) => factoryRole(s) === role)!;
 const defaultName = (role: FactoryRole): string => builtInStage(role).name;
 
 // ---- a JSON reader that remembers the line of every value ----------------------------------------------------------
@@ -291,6 +292,11 @@ function checkProcess(stages: TemplateStage[], err: (path: string, message: stri
   }
   const last = first.get("reviewGate");
   if (last !== undefined && last !== stages.length - 1) err(at(last), '"reviewGate" must be the last step');
+  const review = first.get("review");
+  // The gate reads Review's report; an agent step in between could rewrite it, and .factory/ is never guarded.
+  if (review !== undefined && last !== undefined) {
+    stages.forEach((s, i) => { if (i > review && i < last && s.role === "custom" && s.kind === "skill") err(at(i), BETWEEN_REVIEW_AND_GATE); });
+  }
   const names = new Map<string, number>();
   stages.forEach((s, i) => {
     const name = (s.name ?? (s.role === "custom" ? "" : defaultName(s.role))).trim();
@@ -331,7 +337,9 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
   }
   const timeout = (s: LoopStage): number | undefined => (s.timeoutSeconds ? clamp(Math.round(s.timeoutSeconds / 60), 1, 240) : undefined);
   const stages: TemplateStage[] = [];
-  for (const s of sorted) {
+  const reviewAt = sorted.indexOf(primary.get("review")!);
+  const gateAt = sorted.indexOf(primary.get("reviewGate")!);
+  for (const [index, s] of sorted.entries()) {
     const role = factoryRole(s);
     const required = role !== null && (REQUIRED as readonly string[]).includes(role);
     if (role && primary.get(role) === s) {
@@ -357,6 +365,7 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
     }
     if (role === "intakeGate" || role === "reviewGate") { drop(s, `a second "${role}" step is not allowed`); continue; }
     if (s.kind !== "shellCommand" && s.kind !== "skill" && s.kind !== "artifactCheck") { drop(s, `a "${s.kind}" step cannot be written in the template`); continue; }
+    if (s.kind === "skill" && reviewAt >= 0 && gateAt > reviewAt && index > reviewAt && index < gateAt) { drop(s, BETWEEN_REVIEW_AND_GATE); continue; }
     if (s.testOp) drop(s, `its testOp "${s.testOp}": a custom step has none, so it is not kept`);
     const out: TemplateStage = { role: "custom", name: s.name, kind: s.kind };
     if (s.kind === "artifactCheck") {
@@ -370,9 +379,11 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
       out.verdictPath = path;
       out.verdictLine = lineText;
     } else if (s.check) drop(s, "its check: a shell or skill step has none, so it is not kept");
+    // An undetected Structure verify is written as "auto" and stays off until detection finds a command.
+    const autoShell = s.kind === "shellCommand" && s.command === DETECTED_STRUCTURE;
     if (s.kind === "shellCommand") {
       if (!s.command?.trim()) { drop(s, "it has no command"); continue; }
-      out.command = s.command;
+      out.command = autoShell ? "auto" : s.command;
     }
     if (s.kind === "skill") {
       const skill = s.skillId?.startsWith("skills/") ? s.skillId.slice(7) : s.skillId;
@@ -380,7 +391,7 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
       out.skill = skill;
       if (s.prompt) out.prompt = s.prompt;
     }
-    if (!s.enabled) out.enabled = false;
+    if (!s.enabled && !(autoShell && s.disabledByDetection)) out.enabled = false;
     if (s.severity === "advisory") out.severity = "advisory";
     const t = timeout(s);
     if (t) out.timeoutMinutes = t;
@@ -405,10 +416,25 @@ export function defaultFactoryTemplate(): FactoryTemplate {
   return templateFromLoop({ id: "factory", name: "Factory", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: "factory", runsOnSchedule: false, config: structuredClone(FACTORY_TEMPLATE.config) }).template;
 }
 
+const OLD_DEFAULT_ROLES = ["setup", "intake", "intakeGate", "plan", "implement", "verify", "review", "reviewGate"];
+
+/**
+ * A project's Factory loop that is still the previous built-in default (Intake first, nothing else edited) moves to the
+ * current default, keeping its Set up and Verify commands and its budget. Anything edited keeps its own steps.
+ */
+export function upgradeOldDefault(t: FactoryTemplate): FactoryTemplate | null {
+  if (t.stages.length !== OLD_DEFAULT_ROLES.length || t.stages.some((s, i) => s.role !== OLD_DEFAULT_ROLES[i])) return null;
+  const edited = t.stages.some((s) => Object.keys(s).some((k) => !(k === "role" || (s.role === "setup" && (k === "command" || k === "enabled")) || (s.role === "verify" && k === "command"))));
+  if (edited) return null;
+  const next = defaultFactoryTemplate();
+  const keep = (role: TemplateRole) => t.stages.find((s) => s.role === role)!;
+  return { ...next, ...(t.budget ? { budget: t.budget } : {}), stages: next.stages.map((s) => (s.role === "setup" || s.role === "verify" ? { ...keep(s.role) } : s)) };
+}
+
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "step";
 
 /** The Factory loop with the template's steps and budget. Deterministic: an unchanged template yields an unchanged loop. */
-export function applyTemplate(loop: LoopDefinition, t: FactoryTemplate, detectedTest: string | null): LoopDefinition {
+export function applyTemplate(loop: LoopDefinition, t: FactoryTemplate, detectedTest: string | null, detectedStructure: string | null = null): LoopDefinition {
   const existing = [...loop.config.stages].sort((a, b) => a.order - b.order);
   const used = new Set<LoopStage>();
   const own = (role: FactoryRole) => {
@@ -436,6 +462,9 @@ export function applyTemplate(loop: LoopDefinition, t: FactoryTemplate, detected
     const kind = ts.kind!;
     const prev = existing.find((s) => !used.has(s) && s.kind === kind && s.name.toLowerCase() === (ts.name ?? "").toLowerCase()) ?? null;
     if (prev) used.add(prev);
+    const auto = kind === "shellCommand" && ts.command === "auto";
+    const command = kind !== "shellCommand" ? null : auto ? detectedStructure ?? DETECTED_STRUCTURE : ts.command ?? null;
+    const undetected = auto && command === DETECTED_STRUCTURE;
     const skillId = kind === "skill" ? (ts.skill!.startsWith("skills/") ? ts.skill! : `skills/${ts.skill}`) : null;
     const check = kind === "artifactCheck" ? { verdict: { path: ts.verdictPath!, line: ts.verdictLine! } } : null;
     const base: LoopStage = {
@@ -445,9 +474,12 @@ export function applyTemplate(loop: LoopDefinition, t: FactoryTemplate, detected
     };
     return {
       ...base, ...(prev ?? {}),
-      kind, name: ts.name ?? "", command: kind === "shellCommand" ? ts.command ?? null : null, skillId, prompt: kind === "skill" ? ts.prompt ?? null : null,
-      enabled: ts.enabled ?? true, severity: ts.severity ?? "blocking", timeoutSeconds, order, runOnce: false,
+      // Only a "custom/" id keeps a step out of the Factory's roles, so an older loop's random id is replaced.
+      id: prev && isCustomStage(prev) ? prev.id : base.id,
+      kind, name: ts.name ?? "", command, skillId, prompt: kind === "skill" ? ts.prompt ?? null : null,
+      enabled: ts.enabled ?? !undetected, severity: ts.severity ?? "blocking", timeoutSeconds, order, runOnce: false,
       allowsRepair: prev?.allowsRepair ?? base.allowsRepair, check, testOp: null, graphOp: null, raw: null,
+      disabledByDetection: undetected ? true : kind === "shellCommand" && auto ? false : prev?.disabledByDetection ?? null,
     };
   });
   const b = t.budget ?? {};
@@ -546,6 +578,24 @@ export async function writeTemplateIfMissing(fs: Pick<FsApi, "write">, t: Factor
 export function droppedMessage(dropped: readonly DroppedStep[]): string {
   const list = dropped.map((d) => `${d.name}: ${d.reason}`).join("; ");
   return `The Factory now takes its steps from ${TEMPLATE_FILE}, and some of this project's Factory settings could not be kept: ${list}. Please review ${TEMPLATE_FILE} (Factory → Process), then run again. The run did not start.`;
+}
+
+/**
+ * Whether the project's Factory process has an Intake step: from the template file, else from what the first run
+ * would write for its loop (the previous default moves to one without Intake). Null when it cannot be told.
+ */
+export async function processHasIntake(fs: Pick<FsApi, "read">, factoryLoop: () => Promise<LoopDefinition | null>): Promise<boolean | null> {
+  try {
+    const file = await readTemplateFile(fs);
+    const has = (t: FactoryTemplate) => t.stages.some((st) => st.role === "intake" && st.enabled !== false);
+    if (file.kind === "ok") return file.parse.ok ? has(file.parse.template) : null;
+    const loop = await factoryLoop();
+    if (!loop) return null;
+    const migrated = templateFromLoop(loop).template;
+    return has(upgradeOldDefault(migrated) ?? migrated);
+  } catch {
+    return null;
+  }
 }
 
 /** The run-start message for a template with problems: up to five, each with its line. */

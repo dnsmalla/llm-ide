@@ -231,3 +231,11 @@ test("D6: 500 cards assemble and build well under 50 ms", () => {
   const ms = performance.now() - t;
   assert.ok(ms < budget(50), `500 cards took ${ms.toFixed(1)} ms`);
 });
+
+test("a process without an Intake step offers no Run intake on Inbox cards", () => {
+  assert.deepEqual(actionsFor("inbox", null, { intake: false }), ["start", "discard"]);
+  assert.deepEqual(actionsFor("needsDecision", null, { intake: false }), ["discard"]);
+  assert.deepEqual(actionsFor("inbox", null), ["start", "intake", "discard"], "unknown process: unchanged");
+  const board = buildBoard([item("issue:a")], new Map(), 0, { intake: false });
+  assert.deepEqual(board.inbox[0].actions, ["start", "discard"]);
+});

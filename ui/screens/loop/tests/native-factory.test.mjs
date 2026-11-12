@@ -8,6 +8,9 @@ import { DETECTED_TEST } from "../native/environment.ts";
 import { decodeRepoConfig } from "../../settings/repo-config.ts";
 import { DEFAULT_LOOP_SPECS } from "../native/defaults.ts";
 
+// Every built-in step, including Intake and its gate, which the default process leaves out.
+const FULL = { ...FACTORY_TEMPLATE, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: structuredClone(f.FACTORY_BUILT_IN_STAGES) } };
+
 test("the Factory is a default loop of every project, with or without a detected test command", () => {
   // Not a Mac starter spec: it is built from FACTORY_TEMPLATE.
   assert.doesNotMatch(JSON.stringify(DEFAULT_LOOP_SPECS), /factory/i);
@@ -18,7 +21,7 @@ test("the Factory is a default loop of every project, with or without a detected
     const verify = loops[0].config.stages.find((s) => f.factoryRole(s) === "verify");
     assert.equal(verify.command, command ?? "", "Verify is kept, never dropped");
     assert.equal(verify.enabled, true);
-    assert.equal(loops[0].config.stages.length, 8);
+    assert.equal(loops[0].config.stages.length, 9);
   }
 });
 
@@ -40,8 +43,26 @@ test("a Factory whose Verify has no command names the stage instead of running w
   assert.equal(f.factoryVerifyProblem({ stages: none.stages.map((s) => (f.factoryRole(s) === "verify" ? { ...s, enabled: false } : s)) }), null);
 });
 
-test("factory template has the 8 stages in order with runOnce and gates as specified", () => {
+test("the default process: no Intake; Structure verify, Test gaps and Doc review are custom steps with no Factory role", () => {
   const s = f.FACTORY_TEMPLATE.config.stages;
+  assert.deepEqual(s.map((x) => x.name), ["Set up", "Plan", "Implement", "Structure verify", "Verify", "Test gaps", "Doc review", "Review", "Review gate"]);
+  assert.deepEqual(s.map((x) => factoryRole(x)), ["setup", "plan", "implement", null, "verify", null, null, "review", "reviewGate"]);
+  assert.deepEqual(s.map((x) => x.order), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(s.map((x) => x.severity), ["blocking", "blocking", "blocking", "blocking", "blocking", "advisory", "advisory", "blocking", "blocking"]);
+  const [structure, gaps, docs] = [s[3], s[5], s[6]];
+  assert.deepEqual({ id: structure.id, kind: structure.kind, command: structure.command, enabled: structure.enabled, disabledByDetection: structure.disabledByDetection }, { id: "custom/structure-verify-1", kind: "shellCommand", command: f.DETECTED_STRUCTURE ?? "<detected-structure-command>", enabled: false, disabledByDetection: true });
+  assert.deepEqual([gaps.skillId, docs.skillId], ["skills/test-gap-writer", "skills/doc-writer"]);
+  for (const x of [gaps, docs]) {
+    assert.match(x.prompt, /\.factory\/PLAN\.md/);
+    assert.match(x.prompt, /files this run changed/);
+    assert.match(x.prompt, /write nothing under \.factory\//);
+    assert.match(x.prompt, /behaviour/);
+  }
+  assert.ok(s.every((x) => x.id.startsWith("factory/") || x.id.startsWith("custom/")));
+});
+
+test("the built-in steps in order with runOnce and gates as specified", () => {
+  const s = f.FACTORY_BUILT_IN_STAGES;
   assert.deepEqual(s.map((x) => x.name), ["Set up", "Intake", "Intake gate", "Plan", "Implement", "Verify", "Review", "Review gate"]);
   assert.deepEqual(s.map((x) => x.kind), ["shellCommand", "skill", "artifactCheck", "skill", "skill", "shellCommand", "skill", "artifactCheck"]);
   assert.deepEqual(s.map((x) => x.order), [0, 1, 2, 3, 4, 5, 6, 7]);
@@ -71,11 +92,13 @@ test("factory template has the 8 stages in order with runOnce and gates as speci
   assert.ok(BUILT_IN_TEMPLATES.some((t) => t.id === "factory" && t === f.FACTORY_TEMPLATE));
 });
 
-test("applying the factory template keeps runOnce, resolves Verify and sets up npm projects", () => {
+test("applying the factory template keeps runOnce, resolves Verify, keeps custom ids and sets up npm projects", () => {
   const npm = f.withSetupCommand(applyTemplate(f.FACTORY_TEMPLATE, "npm test"), "npm test");
-  assert.equal(npm.stages.length, 8);
-  assert.deepEqual(npm.stages.map((x) => x.runOnce), [true, true, true, true, true, false, false, false]);
-  assert.equal(npm.stages[5].command, "npm test");
+  assert.equal(npm.stages.length, 9);
+  assert.deepEqual(npm.stages.map((x) => x.runOnce), [true, true, true, false, false, false, false, false, false]);
+  assert.equal(npm.stages[4].command, "npm test");
+  assert.equal(npm.stages[3].command, "<detected-structure-command>", "Verify detection never fills Structure verify");
+  assert.deepEqual(npm.stages.filter((x) => x.id.startsWith("custom/")).map((x) => x.name), ["Structure verify", "Test gaps", "Doc review"], "a custom step keeps its custom/ id");
   assert.equal(npm.stages[0].command, "npm ci");
   assert.equal(npm.stages[0].enabled, true);
   const py = f.withSetupCommand(applyTemplate(f.FACTORY_TEMPLATE, "pytest"), "pytest");
@@ -108,8 +131,8 @@ test("taskMarkdown fences body and neutralises an embedded fence marker", () => 
 });
 
 test("intake gate failure maps to needs-decision summary", () => {
-  const raw = f.FACTORY_TEMPLATE.config.stages;
-  const applied = applyTemplate(f.FACTORY_TEMPLATE, "npm test").stages;
+  const raw = FULL.config.stages;
+  const applied = applyTemplate(FULL, "npm test").stages;
   assert.equal(f.needsDecisionSummary({ passed: false, failedStage: applied[2] }), "needs decision: see .factory/READINESS.md");
   assert.equal(f.NEEDS_DECISION_SUMMARY, "needs decision: see .factory/READINESS.md");
   assert.equal(f.needsDecisionSummary({ passed: false, failedStage: raw[7] }), null);
@@ -119,7 +142,7 @@ test("intake gate failure maps to needs-decision summary", () => {
 });
 
 test("factory loops are recognised by defaultKey and guard paths exclude .factory", () => {
-  const s = f.FACTORY_TEMPLATE.config.stages;
+  const s = FULL.config.stages;
   const factory = { defaultKey: "factory" };
   const other = { defaultKey: null };
   assert.equal(f.isFactoryLoop(factory), true);
@@ -225,17 +248,19 @@ test("agentRunBody: only Intake sees the project llm-doc folder, and only when t
 
 const roleOf = (stages) => stages.map((s) => factoryRole(s));
 
-test("factory template stages map to eight distinct roles, also after applyTemplate resets ids and keys", () => {
-  const roles = roleOf(FACTORY_TEMPLATE.config.stages);
+test("the built-in steps map to eight distinct roles, also after applyTemplate resets ids and keys", () => {
+  const roles = roleOf(FULL.config.stages);
   assert.deepEqual(roles, ["setup", "intake", "intakeGate", "plan", "implement", "verify", "review", "reviewGate"]);
-  const reset = FACTORY_TEMPLATE.config.stages.map((s) => ({ ...s, id: `uuid-${s.name}`, defaultKey: null, name: `${s.name} (renamed)` }));
+  const reset = FULL.config.stages.map((s) => ({ ...s, id: `uuid-${s.name}`, defaultKey: null, name: `${s.name} (renamed)` }));
   assert.deepEqual(roleOf(reset), roles, "roles do not depend on id, key or name");
   assert.equal(factoryRole({ kind: "shellCommand", skillId: null, runOnce: false, check: null }), "verify");
   assert.equal(factoryRole({ kind: "codeGraph", skillId: null, runOnce: false, check: null }), null);
+  assert.equal(factoryRole({ id: "custom/lint-1", kind: "shellCommand", skillId: null, runOnce: false, check: null }), null, "a custom shell step is never Verify");
+  assert.equal(factoryRole({ id: "custom/x-2", kind: "skill", skillId: "skills/factory-review", runOnce: false, check: null }), null);
 });
 
 test("configFor intakeOnly keeps only setup, intake and its gate, also with ids and keys reset", () => {
-  const base = structuredClone(FACTORY_TEMPLATE.config);
+  const base = structuredClone(FULL.config);
   base.stages = base.stages.map((s) => ({ ...s, id: `uuid-${s.name}`, defaultKey: null }));
   const c = configFor("intakeOnly", base);
   assert.deepEqual(roleOf(c.stages), ["setup", "intake", "intakeGate"]);
@@ -253,7 +278,7 @@ test("configFor continue keeps everything after the Intake gate", () => {
 test("configFor sendBack starts at Implement and its prompt names FEEDBACK.md", () => {
   const base = structuredClone(FACTORY_TEMPLATE.config);
   const c = configFor("sendBack", base);
-  assert.deepEqual(c.stages.map((s) => s.name), ["Implement", "Verify", "Review", "Review gate"]);
+  assert.deepEqual(c.stages.map((s) => s.name), ["Implement", "Structure verify", "Verify", "Review", "Review gate"]);
   assert.match(c.stages[0].prompt, /\.factory\/FEEDBACK\.md/);
   assert.equal(base.stages[4].prompt, FACTORY_TEMPLATE.config.stages[4].prompt, "the base prompt is not changed");
   assert.equal(c.stages.filter((s) => /FEEDBACK\.md/.test(s.prompt ?? "")).length, 1, "only Implement gets the line");
@@ -262,12 +287,12 @@ test("configFor sendBack starts at Implement and its prompt names FEEDBACK.md", 
 test("configFor check runs only Verify and Review on the work already in the worktree", () => {
   const base = structuredClone(FACTORY_TEMPLATE.config);
   const c = configFor("check", base);
-  assert.deepEqual(c.stages.map((s) => s.name), ["Verify", "Review", "Review gate"]);
-  assert.deepEqual(c.stages.map((s) => s.prompt), base.stages.filter((s) => ["Verify", "Review", "Review gate"].includes(s.name)).map((s) => s.prompt), "no prompt is changed");
+  assert.deepEqual(c.stages.map((s) => s.name), ["Structure verify", "Verify", "Review", "Review gate"]);
+  assert.deepEqual(c.stages.map((s) => s.prompt), base.stages.filter((s) => ["Structure verify", "Verify", "Review", "Review gate"].includes(s.name)).map((s) => s.prompt), "no prompt is changed");
 });
 
 test("configFor rework runs every stage from the start and points Intake, Plan and Implement at FEEDBACK.md", () => {
-  const base = structuredClone(FACTORY_TEMPLATE.config);
+  const base = structuredClone(FULL.config);
   base.stages.push({ ...base.stages[5], id: "user-lint", name: "Lint", kind: "codeGraph", command: null });
   const c = configFor("rework", base);
   assert.deepEqual(c.stages.map((s) => s.name), base.stages.map((s) => s.name), "every stage, a user-added one too");
@@ -316,4 +341,50 @@ test("an existing Factory loop gets its missing Verify command from detection", 
   custom.config.stages = custom.config.stages.map((s) => (s.id === "factory/verify" ? { ...s, command: "npm run check" } : s));
   assert.equal(f.withDetectedVerify(custom, "make test").changed, false, "a user-set command is never overwritten");
   assert.equal(f.withDetectedVerify(loop, null).changed, false);
+});
+
+test("the modes that pick steps by role never take the default's custom steps for Verify", () => {
+  const base = structuredClone(FACTORY_TEMPLATE.config);
+  assert.deepEqual(configFor("check", base).stages.map((s) => s.name), ["Structure verify", "Verify", "Review", "Review gate"], "the blocking custom check stays");
+  assert.deepEqual(configFor("sendBack", base).stages.map((s) => s.name), ["Implement", "Structure verify", "Verify", "Review", "Review gate"]);
+  assert.deepEqual(configFor("continue", base).stages.map((s) => s.name), ["Plan", "Implement", "Verify", "Review", "Review gate"]);
+  assert.deepEqual(configFor("full", base).stages.map((s) => s.name), base.stages.map((s) => s.name));
+  const lint = { ...base.stages[3], command: "", enabled: true };
+  assert.equal(f.factoryVerifyProblem({ stages: [lint, base.stages[4]].map((s) => (s.name === "Verify" ? { ...s, command: "npm test" } : s)) }), null, "an empty custom shell step is not a Verify problem");
+});
+
+test("Structure verify is filled from detection like Verify, never over a command a person set", () => {
+  const loop = factoryLoop("npm test");
+  const filled = f.withDetectedStructure(loop, "npm run lint");
+  const structure = filled.loop.config.stages.find((s) => s.name === "Structure verify");
+  assert.equal(filled.changed, true);
+  assert.deepEqual({ command: structure.command, enabled: structure.enabled }, { command: "npm run lint", enabled: true });
+  assert.equal(filled.loop.config.stages.find((s) => factoryRole(s) === "verify").command, "npm test", "Verify is untouched");
+  assert.equal(f.withDetectedStructure(filled.loop, "ruff check .").changed, false, "a filled command stays");
+  assert.equal(f.withDetectedStructure(loop, null).changed, false);
+  const verifyOnly = f.withDetectedVerify(loop, "pytest");
+  assert.equal(verifyOnly.loop.config.stages.find((s) => s.name === "Structure verify").command, "<detected-structure-command>", "test detection never touches it");
+});
+
+test("Test gaps may write tests like Implement (CI and hook files still guarded); Doc review may not", () => {
+  const factory = { defaultKey: "factory" };
+  const [gaps, docs] = ["Test gaps", "Doc review"].map((n) => f.FACTORY_TEMPLATE.config.stages.find((s) => s.name === n));
+  const paths = ["tests/button.test.ts", "src/__tests__/a.test.ts", "test_api.py", ".github/workflows/ci.yml", "docs/a.md"];
+  assert.deepEqual(f.guardedPaths(factory, gaps, paths), [".github/workflows/ci.yml"]);
+  assert.deepEqual(f.guardedPaths(factory, docs, paths), paths);
+});
+
+test("a custom skill step never writes under .factory/ (the reports the gates judge)", () => {
+  const body = (stage) => f.agentRunBody({ message: "m", stage, repoRoot: "/r", timeoutMs: 1, projectRoot: "/p", llmDocExists: false });
+  for (const n of ["Test gaps", "Doc review"]) assert.equal(body(f.FACTORY_TEMPLATE.config.stages.find((s) => s.name === n)).denyWrite, ".factory", n);
+  assert.equal(body(f.FACTORY_BUILT_IN_STAGES.find((s) => s.name === "Review")).denyWrite, undefined, "Review writes its report");
+});
+
+test("sendBack and check keep the blocking custom checks (Structure verify) and skip custom agent steps", () => {
+  const base = structuredClone(FACTORY_TEMPLATE.config);
+  base.stages = base.stages.map((s) => (s.name === "Structure verify" ? { ...s, command: "npm run lint", enabled: true } : s));
+  assert.deepEqual(configFor("sendBack", base).stages.map((s) => s.name), ["Implement", "Structure verify", "Verify", "Review", "Review gate"]);
+  assert.deepEqual(configFor("check", base).stages.map((s) => s.name), ["Structure verify", "Verify", "Review", "Review gate"]);
+  const advisory = { ...base, stages: base.stages.map((s) => (s.name === "Structure verify" ? { ...s, severity: "advisory" } : s)) };
+  assert.deepEqual(configFor("check", advisory).stages.map((s) => s.name), ["Verify", "Review", "Review gate"], "an advisory custom check is skipped");
 });

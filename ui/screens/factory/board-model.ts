@@ -26,7 +26,9 @@ export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> =
 export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeExists: false, ship: null, shipStatusError: false, lastKnownColumn: null };
 
 /** The actions a card in this column offers (the spec's table; `note` refines the needs-you cases). */
-export function actionsFor(column: Column, note: string | null): CardAction[] {
+export function actionsFor(column: Column, note: string | null, process: { intake?: boolean } = {}): CardAction[] {
+  // A process without an Intake step cannot run intake: the action is not offered (the run manager refuses it too).
+  if (process.intake === false) return actionsFor(column, note).filter((a) => a !== "intake");
   switch (column) {
     case "inbox": return note === NOTE.intakeReady ? ["start", "discard"] : ["start", "intake", "discard"];
     case "needsDecision": return ["intake", "discard"];
@@ -45,12 +47,12 @@ export function actionsFor(column: Column, note: string | null): CardAction[] {
 }
 
 /** One card per item, grouped by the column its facts derive. Insertion order is kept inside a column. */
-export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<string, ItemFacts>, nowMs = Date.now()): Record<Column, CardView[]> {
+export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<string, ItemFacts>, nowMs = Date.now(), process: { intake?: boolean } = {}): Record<Column, CardView[]> {
   const board = Object.fromEntries(COLUMNS.map((c) => [c, [] as CardView[]])) as Record<Column, CardView[]>;
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null });
   }
   return board;
 }

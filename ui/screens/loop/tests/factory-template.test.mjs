@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FACTORY_TEMPLATE, factoryRole } from "../native/factory.ts";
+import { FACTORY_BUILT_IN_STAGES, FACTORY_TEMPLATE, factoryRole } from "../native/factory.ts";
 import { DETECTED_TEST } from "../native/environment.ts";
 import {
-  TEMPLATE_FILE, applyTemplate, defaultFactoryTemplate, formatFactoryTemplate, lineDiff, lineStart, parseFactoryTemplate, problemCountLabel, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, writeTemplateIfMissing,
+  TEMPLATE_FILE, applyTemplate, defaultFactoryTemplate, processHasIntake, upgradeOldDefault, formatFactoryTemplate, lineDiff, lineStart, parseFactoryTemplate, problemCountLabel, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, writeTemplateIfMissing,
 } from "../native/factory-template.ts";
 
 const loopOf = (stages = structuredClone(FACTORY_TEMPLATE.config.stages)) => ({ id: "F", name: "Factory", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: "factory", runsOnSchedule: false, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages } });
@@ -22,7 +22,9 @@ test("the default template parses, round-trips and lists every built-in step", (
   const r = parseFactoryTemplate(s);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
   assert.deepEqual(r.template, t);
-  assert.deepEqual(t.stages.map((x) => x.role), ["setup", "intake", "intakeGate", "plan", "implement", "verify", "review", "reviewGate"]);
+  assert.deepEqual(t.stages.map((x) => x.role), ["setup", "plan", "implement", "custom", "verify", "custom", "custom", "review", "reviewGate"]);
+  assert.deepEqual(t.stages[3], { role: "custom", name: "Structure verify", kind: "shellCommand", command: "auto" }, "undetected: auto, off until a command is found");
+  assert.deepEqual(t.stages.filter((x) => x.kind === "skill").map((x) => [x.name, x.skill, x.severity]), [["Test gaps", "test-gap-writer", "advisory"], ["Doc review", "doc-writer", "advisory"]]);
   assert.equal(formatFactoryTemplate(r.template), s, "format is stable");
 });
 
@@ -70,6 +72,8 @@ test("the Factory's required steps, their order and their uniqueness are enforce
   assert.match(msgs(Array.from({ length: 31 }, () => ({ role: "implement" }))), /at most 30 steps/);
   assert.match(msgs([{ role: "implement" }, { role: "verify", command: "x" }, { role: "review" }, { role: "reviewGate", enabled: false }]), /stages\[3\]\.enabled: the "reviewGate" step cannot be turned off/);
   assert.match(msgs([{ role: "implement" }, { role: "verify", command: "x", severity: "advisory" }, { role: "review" }, { role: "reviewGate" }]), /stages\[1\]\.severity: the "verify" step must stay blocking/);
+  assert.match(msgs([{ role: "implement" }, { role: "verify", command: "x" }, { role: "review" }, { role: "custom", name: "Docs", kind: "skill", skill: "doc-writer" }, { role: "reviewGate" }]), /stages\[3\]\.role: a custom skill step cannot come between "review" and "reviewGate"/);
+  assert.equal(parseFactoryTemplate(text({ version: 1, stages: [{ role: "implement" }, { role: "verify", command: "x" }, { role: "review" }, { role: "custom", name: "Lint", kind: "shellCommand", command: "npm run lint" }, { role: "reviewGate" }] })).ok, true, "a shell check there is fine");
 });
 
 test("fields are allowed only where they mean something, and custom steps need what they run", () => {
@@ -111,7 +115,7 @@ test("the built-in loop migrates to a template that applies back to the same ste
 });
 
 test("apply is deterministic, keeps existing stage ids, and an unchanged template changes nothing", () => {
-  const loop = loopOf(structuredClone(FACTORY_TEMPLATE.config.stages).map((s, i) => ({ ...s, id: `random-${i}` })));
+  const loop = loopOf(structuredClone(FACTORY_TEMPLATE.config.stages).map((s, i) => ({ ...s, id: s.id.startsWith("custom/") ? s.id : `random-${i}` })));
   const t = templateFromLoop(loop).template;
   const a = applyTemplate(loop, t, null);
   assert.deepEqual(a, applyTemplate(loop, t, null));
@@ -123,7 +127,7 @@ test("apply is deterministic, keeps existing stage ids, and an unchanged templat
 });
 
 test("custom steps, budgets and user edits survive the migration and are built from scratch on apply", () => {
-  const stages = structuredClone(FACTORY_TEMPLATE.config.stages);
+  const stages = structuredClone(FACTORY_BUILT_IN_STAGES);
   stages.splice(6, 0, { ...stages[5], id: "u1", name: "Lint", command: "npm run lint", severity: "advisory", order: 6 });
   stages.push({ ...stages[0], id: "u2", name: "Graph", kind: "codeGraph", command: null, order: 99 });
   const loop = loopOf(stages.map((s, i) => ({ ...s, order: i })));
@@ -137,7 +141,7 @@ test("custom steps, budgets and user edits survive the migration and are built f
   assert.equal(t.stages.some((s) => s.name === "Graph"), false, "a stage the template cannot express is left out, and reported");
   const applied = applyTemplate(loop, t, null);
   const lint = applied.config.stages.find((s) => s.name === "Lint");
-  assert.deepEqual({ kind: lint.kind, command: lint.command, severity: lint.severity, id: lint.id }, { kind: "shellCommand", command: "npm run lint", severity: "advisory", id: "u1" });
+  assert.deepEqual({ kind: lint.kind, command: lint.command, severity: lint.severity, id: lint.id }, { kind: "shellCommand", command: "npm run lint", severity: "advisory", id: "custom/lint-1" }, "an older loop's random id becomes a custom/ id, so it is never taken for Verify");
   assert.equal(applied.config.maxCostUsd, null);
   assert.equal(applied.config.wallClockBudgetSeconds, 1800);
   const fresh = applyTemplate(loopOf(), { version: 1, stages: [...base().stages.slice(0, 3), { role: "custom", name: "Docs check", kind: "skill", skill: "doc-writer", prompt: "Check docs." }, { role: "reviewGate" }] }, null);
@@ -171,7 +175,7 @@ test("the file helpers read, create once and explain problems with their lines",
 });
 
 test("severity and verdict-check steps migrate and apply instead of being dropped; what cannot is reported with a reason", () => {
-  const stages = structuredClone(FACTORY_TEMPLATE.config.stages);
+  const stages = structuredClone(FACTORY_BUILT_IN_STAGES);
   stages.find((s) => s.name === "Plan").severity = "advisory";
   stages.find((s) => s.name === "Review").severity = "advisory";
   stages.find((s) => s.name === "Verify").prompt = "unused prompt";
@@ -193,7 +197,7 @@ test("severity and verdict-check steps migrate and apply instead of being droppe
   assert.equal(parseFactoryTemplate(formatFactoryTemplate(template)).ok, true);
   const applied = applyTemplate(loop, template, null);
   const gate = applied.config.stages.find((s) => s.name === "Lint gate");
-  assert.deepEqual({ kind: gate.kind, check: gate.check, severity: gate.severity, id: gate.id, role: factoryRole(gate) }, { kind: "artifactCheck", check: { verdict: { path: ".factory/LINT.md", line: "Verdict: clean" } }, severity: "advisory", id: "c1", role: null });
+  assert.deepEqual({ kind: gate.kind, check: gate.check, severity: gate.severity, id: gate.id, role: factoryRole(gate) }, { kind: "artifactCheck", check: { verdict: { path: ".factory/LINT.md", line: "Verdict: clean" } }, severity: "advisory", id: "custom/lint-gate-1", role: null });
   assert.equal(applied.config.stages.find((s) => s.name === "Plan").severity, "advisory");
   assert.equal(applied.config.stages.find((s) => s.name === "Review").severity, "blocking");
 });
@@ -208,4 +212,54 @@ test("an unreadable template says why: too large or not UTF-8 text", async () =>
 
 test("the spoken problem count is short", () => {
   assert.deepEqual([0, 1, 3].map(problemCountLabel), ["No problems", "1 problem", "3 problems"]);
+});
+
+test("an unedited loop of the previous default moves to the new default, keeping its commands and budget; an edited one keeps its steps", () => {
+  const old = loopOf(structuredClone(FACTORY_BUILT_IN_STAGES).map((s) => (s.name === "Set up" ? { ...s, command: "npm ci", enabled: true } : s.name === "Verify" ? { ...s, command: "npm test" } : s)));
+  old.config.maxIterations = 6;
+  const migrated = templateFromLoop(old).template;
+  const up = upgradeOldDefault(migrated);
+  assert.deepEqual(up.stages.map((s) => s.role), defaultFactoryTemplate().stages.map((s) => s.role));
+  assert.deepEqual(up.stages.find((s) => s.role === "setup"), { role: "setup", command: "npm ci" });
+  assert.deepEqual(up.stages.find((s) => s.role === "verify"), { role: "verify", command: "npm test" });
+  assert.equal(up.budget.maxIterations, 6);
+  const edited = { ...migrated, stages: migrated.stages.map((s) => (s.role === "intake" ? { ...s, prompt: "Mine." } : s)) };
+  assert.equal(upgradeOldDefault(edited), null);
+  assert.equal(upgradeOldDefault(defaultFactoryTemplate()), null, "the current default is left alone");
+});
+
+test("a template that brings Intake back applies with the built-in Intake step", () => {
+  const t = { version: 1, stages: [{ role: "intake" }, { role: "intakeGate" }, ...defaultFactoryTemplate().stages] };
+  assert.equal(parseFactoryTemplate(formatFactoryTemplate(t)).ok, true);
+  const applied = applyTemplate(loopOf(), t, null);
+  assert.deepEqual(applied.config.stages.slice(0, 2).map((s) => [s.name, factoryRole(s)]), [["Intake", "intake"], ["Intake gate", "intakeGate"]]);
+});
+
+test("a custom shell step with command auto takes the detected structure command and is on only when one was found", () => {
+  const t = defaultFactoryTemplate();
+  const off = applyTemplate(loopOf(), t, null, null).config.stages.find((s) => s.name === "Structure verify");
+  assert.deepEqual({ command: off.command, enabled: off.enabled, role: factoryRole(off) }, { command: "<detected-structure-command>", enabled: false, role: null });
+  const on = applyTemplate(loopOf(), t, null, "npx tsc --noEmit").config.stages.find((s) => s.name === "Structure verify");
+  assert.deepEqual({ command: on.command, enabled: on.enabled, id: on.id }, { command: "npx tsc --noEmit", enabled: true, id: "custom/structure-verify-1" });
+});
+
+test("migration reports a custom agent step between Review and its gate instead of keeping it", () => {
+  const stages = structuredClone(FACTORY_BUILT_IN_STAGES);
+  stages.splice(7, 0, { ...stages[6], id: "custom/x-1", name: "Polish", skillId: "skills/doc-writer" });
+  const { template, dropped } = templateFromLoop(loopOf(stages.map((s, i) => ({ ...s, order: i }))));
+  assert.deepEqual(dropped, [{ name: "Polish", reason: 'a custom skill step cannot come between "review" and "reviewGate" (it could change Review\'s report)' }]);
+  assert.equal(template.stages.some((s) => s.name === "Polish"), false);
+});
+
+test("processHasIntake reads the template, else what the first run would write, else does not know", async () => {
+  const { memFs } = await import("../../factory/tests/mem-fs.mjs");
+  const none = async () => null;
+  const withFile = (t) => memFs({ [TEMPLATE_FILE]: formatFactoryTemplate(t) });
+  assert.equal(await processHasIntake(withFile(defaultFactoryTemplate()), none), false);
+  assert.equal(await processHasIntake(withFile({ version: 1, stages: [{ role: "intake" }, { role: "intakeGate" }, ...defaultFactoryTemplate().stages] }), none), true);
+  assert.equal(await processHasIntake(memFs({ [TEMPLATE_FILE]: "{" }), none), null, "a broken file: unknown");
+  assert.equal(await processHasIntake(memFs(), none), null);
+  assert.equal(await processHasIntake(memFs(), async () => loopOf(structuredClone(FACTORY_BUILT_IN_STAGES))), false, "the previous default moves to the new one");
+  const edited = structuredClone(FACTORY_BUILT_IN_STAGES).map((s) => (s.name === "Intake" ? { ...s, prompt: "Mine." } : s));
+  assert.equal(await processHasIntake(memFs(), async () => loopOf(edited)), true, "an edited loop keeps its Intake");
 });

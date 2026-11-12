@@ -107,7 +107,7 @@ export default function ProcessEditor({ active, projectRoot }: { active: boolean
       {notice ? <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} /> : null}
       <div className="fx-head">
         <span className="fx-hint">
-          <code>{TEMPLATE_FILE}</code> · each step has a <code>role</code>: setup, intake, intakeGate, plan, implement, verify, review, reviewGate (fixed skills; change name, prompt, command, timeout) or custom (your own <code>shellCommand</code>, <code>skill</code> or <code>artifactCheck</code> verdict check). implement, verify, review and reviewGate are required, stay blocking, come in that order, and reviewGate comes last.
+          <code>{TEMPLATE_FILE}</code> · each step has a <code>role</code>: setup, intake, intakeGate, plan, implement, verify, review, reviewGate (fixed skills; change name, prompt, command, timeout) or custom (your own <code>shellCommand</code> — <code>"auto"</code> = the detected lint/TypeScript/Ruff check —, <code>skill</code> or <code>artifactCheck</code> verdict check). Add <code>{'{"role": "intake"}'}</code> and <code>{'{"role": "intakeGate"}'}</code> first to bring Intake back. implement, verify, review and reviewGate are required, stay blocking, come in that order, and reviewGate comes last.
         </span>
         <span className="fx-spacer" />
         <button type="button" ref={resetOpener} className="fx-btn" disabled={busy} onClick={() => setConfirmReset(true)}>Reset to default…</button>

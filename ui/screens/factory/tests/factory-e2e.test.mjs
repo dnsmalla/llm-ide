@@ -22,7 +22,8 @@ async function settle() { for (let i = 0; i < 60; i++) await tick(); }
 const ROOT = "/p";
 const REPO = "grid-devs/personal/dinesh/smart-input";
 const MR = `https://gitlab.com/${REPO}/-/merge_requests/9`;
-const FACTORY_LOOP = { id: "F", name: "Factory", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: "factory", runsOnSchedule: false, config: structuredClone(FACTORY_TEMPLATE.config) };
+// The default process, with Structure verify's command already detected (a project with a lint script).
+const FACTORY_LOOP = { id: "F", name: "Factory", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: "factory", runsOnSchedule: false, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: structuredClone(FACTORY_TEMPLATE.config.stages).map((s) => (s.name === "Structure verify" ? { ...s, command: "npm run lint", enabled: true, disabledByDetection: false } : s)) } };
 const config = decodeRepoConfig({ saved: { gitlab: [{ id: "g", url: `https://gitlab.com/${REPO}`, clonePath: `${ROOT}/code/smart-input`, active: true }] } });
 
 function world(outcome) {
@@ -102,7 +103,9 @@ test("an open issue runs every step, comments after each one, and opens its draf
   const w = world({});
   const { record, column } = await runIssue(w);
   const steps = w.comments.map((c) => /Factory · `([^`]+)`\*\* — (\w[\w ]*)/.exec(c.body)?.slice(1).join(":"));
-  assert.deepEqual(steps, ["Intake:passed", "Plan:passed", "Implement:passed", "Verify:passed", "Review:passed", "Ship:draft MR opened"], "one comment per step, in order, then the Ship comment");
+  assert.deepEqual(steps, ["Plan:passed", "Implement:passed", "Structure verify:passed", "Verify:passed", "Test gaps:passed", "Doc review:passed", "Review:passed", "Ship:draft MR opened"], "one comment per step, in order, then the Ship comment");
+  const structure = w.comments.find((c) => /`Structure verify`/.test(c.body)).body;
+  assert.doesNotMatch(structure, /Test command/, "a custom shell step is not reported as the Verify step");
   assert.ok(w.comments.every((c) => c.provider === "gitlab" && c.repo === REPO && c.number === 2), "every comment lands on issue #2");
   assert.match(w.comments.find((c) => /Implement/.test(c.body)).body, /`src\/button\.css`/);
   assert.match(w.comments.find((c) => /`Review`/.test(c.body)).body, /Review verdict: `approve`/);

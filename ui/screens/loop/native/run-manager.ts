@@ -4,9 +4,9 @@
 // host, core and project store are wired in by run-manager-host.ts, so node tests can load this module.
 import type { FsApi } from "../../explorer/fs";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
-import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
-import { configFor, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type RunMode } from "./factory.ts";
-import { TEMPLATE_FILE, applyTemplate, droppedMessage, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, writeTemplateIfMissing } from "./factory-template.ts";
+import { detectProjectStructureCommand, detectProjectTestCommand, detectStructureCommand, detectTestCommand } from "./environment.ts";
+import { configFor, factoryRole, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedStructure, withDetectedVerify, type RunMode } from "./factory.ts";
+import { TEMPLATE_FILE, applyTemplate, droppedMessage, formatFactoryTemplate, parseFactoryTemplate, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, upgradeOldDefault, writeTemplateIfMissing, type FactoryTemplate } from "./factory-template.ts";
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
@@ -104,21 +104,30 @@ async function ensureFactoryLoop(fs: FsApi): Promise<LoopDefinition | null> {
   if (r.kind !== "ok") return null;
   const found = r.store.loops.find(isFactoryLoop) ?? null;
   if (!found) return null;
-  // The project's template decides the steps. A project without one gets it written from its current loop.
+  // The project's template decides the steps. A project without one gets it written from its current loop (an
+  // unedited loop of the previous default moves to the current default).
+  const structure = (await detectProjectStructureCommand(fs).catch(() => null))?.command ?? null;
   const file = await readTemplateFile(fs);
-  if (file.kind === "ok" && !file.parse.ok) throw new Error(templateProblemMessage(file.parse.errors));
-  const templated = file.kind === "ok" && file.parse.ok ? applyTemplate(found, file.parse.template, command) : found;
+  let template: FactoryTemplate;
+  if (file.kind === "ok") {
+    if (!file.parse.ok) throw new Error(templateProblemMessage(file.parse.errors));
+    template = file.parse.template;
+  } else {
+    const migrated = templateFromLoop(withDetectedVerify(found, command).loop);
+    template = upgradeOldDefault(migrated.template) ?? migrated.template;
+    await writeTemplateIfMissing(fs, template);
+    // Nothing is dropped silently: this run stops once so the person sees what changed; the next run uses the file.
+    if (migrated.dropped.length > 0) throw new Error(droppedMessage(migrated.dropped));
+    const check = parseFactoryTemplate(formatFactoryTemplate(template));
+    if (!check.ok) throw new Error(templateProblemMessage(check.errors));
+  }
+  const templated = applyTemplate(found, template, command, structure);
   const fromTemplate = !sameLoop(templated, found);
   // An existing Factory loop saved before detection existed can have an empty Verify command. Fill it once,
   // persist it, and let the run continue instead of sending the user to the Loop page.
-  const repaired = withDetectedVerify(templated, command);
-  if (file.kind === "missing") {
-    const migrated = templateFromLoop(repaired.loop);
-    await writeTemplateIfMissing(fs, migrated.template);
-    // Nothing is dropped silently: this run stops once so the person sees what changed; the next run uses the file.
-    if (migrated.dropped.length > 0) throw new Error(droppedMessage(migrated.dropped));
-  }
-  if (!fromTemplate && !repaired.changed) return repaired.loop;
+  const verified = withDetectedVerify(templated, command);
+  const repaired = withDetectedStructure(verified.loop, structure);
+  if (!fromTemplate && !verified.changed && !repaired.changed) return repaired.loop;
   const store = { ...r.store, loops: r.store.loops.map((l) => (l.id === repaired.loop.id ? repaired.loop : l)) };
   try {
     await saveLoops(fs, store, r.hash);
@@ -387,6 +396,11 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   };
   const loop = await d.loadFactoryLoop(fs);
   if (!loop) { fail(run, "This project has no Factory loop (system/loop.json could not be read); the run did not start."); return null; }
+  // Without an Intake step an intake-only run would do nothing and still pass as "Intake ready".
+  if (run.live.mode === "intakeOnly" && !loop.config.stages.some((s) => s.enabled && factoryRole(s) === "intake")) {
+    fail(run, "This Factory process has no Intake step; add one in Factory → Process. The run did not start.");
+    return null;
+  }
   let config = configFor(run.live.mode, loop.config);
   const token = await d.approve(loop.id);
   if (token === null) { fail(run, "The Factory loop's commands were not approved; the run did not start."); return null; }
@@ -394,9 +408,12 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   const info = run.reuse ? await findWorktree(d, run.live.runId) : await prepareWorktree(d, run);
   if (!info) { fail(run, `The worktree of run ${run.live.runId} no longer exists; the run did not start.`); return null; }
   // The project root often holds the clone under code/<name>, so detect the test command in the run worktree, not only at the project root.
-  const detected = await detectTestCommand(fs, repoPrefixFor(run.live.projectRoot, info.worktree)).catch(() => null);
-  const filled = withDetectedVerify(loop, detected?.command ?? null);
-  if (filled.changed) config = configFor(run.live.mode, filled.loop.config);
+  const runPrefix = repoPrefixFor(run.live.projectRoot, info.worktree);
+  const detected = await detectTestCommand(fs, runPrefix).catch(() => null);
+  const structure = await detectStructureCommand(fs, runPrefix).catch(() => null);
+  const verifyFilled = withDetectedVerify(loop, detected?.command ?? null);
+  const filled = withDetectedStructure(verifyFilled.loop, structure?.command ?? null);
+  if (verifyFilled.changed || filled.changed) config = configFor(run.live.mode, filled.loop.config);
   const verifyProblem = factoryVerifyProblem(config);
   if (verifyProblem) { fail(run, `${verifyProblem} The run did not start.`); return null; }
   const marker = `${repoPrefixFor(run.live.projectRoot, info.worktree)}/.factory/RUN.json`;

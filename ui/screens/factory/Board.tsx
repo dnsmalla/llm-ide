@@ -17,7 +17,9 @@ import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.t
 import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
 import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { finishChecksAllowed, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
-import { pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
+import { isFactoryLoop, pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
+import { processHasIntake } from "../loop/native/factory-template.ts";
+import { loadLoops } from "../loop/native/store.ts";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
@@ -73,6 +75,15 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [textTitle, setTextTitle] = useState("");
   const [textBody, setTextBody] = useState("");
   const [addIntake, setAddIntake] = useState(false);
+  // Whether the project's process has an Intake step; null = not known yet (Run intake stays offered, the run manager refuses it).
+  const [hasIntake, setHasIntake] = useState<boolean | null>(null);
+  useEffect(() => {
+    setHasIntake(null);
+    if (!projectRoot || !active) return;
+    let live = true;
+    void processHasIntake(fs, async () => (await loadLoops(fs).then((r) => (r.kind === "ok" ? r.store.loops.find(isFactoryLoop) ?? null : null), () => null))).then((v) => { if (live) setHasIntake(v); });
+    return () => { live = false; };
+  }, [fs, projectRoot, active]);
   const [notice, setNotice] = useState<string | null>(null);
   const [cleanup, setCleanup] = useState<CleanupPlan | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -205,7 +216,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     return () => clearInterval(t);
   }, [live, retryAt]);
 
-  const board = useMemo(() => buildBoard(items, facts, nowMs), [items, facts, nowMs]);
+  const board = useMemo(() => buildBoard(items, facts, nowMs, { intake: hasIntake ?? undefined }), [items, facts, nowMs, hasIntake]);
   const openCleanup = async () => {
     const merged = new Set(items.filter((i) => facts.get(i.key)?.ship?.state === "merged").flatMap((i) => i.runIds));
     const statuses = new Map();
@@ -241,7 +252,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     } else {
       item = workItemFromText(textTitle, textBody);
     }
-    const res = await sendToFactory(fs, [item], { runIntake: addIntake, projectRoot, start: startRun });
+    const res = await sendToFactory(fs, [item], { runIntake: addIntake && hasIntake !== false, projectRoot, start: startRun });
     setNotice(sendSummary(res.added, res.existing.length));
     setSelectedKey(item.key);
     setAddOpen(false);
@@ -375,7 +386,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
               <label className="fx-field fx-grow"><span>Description</span><textarea rows={3} value={textBody} onChange={(e) => setTextBody(e.target.value)} /></label>
             </>
           )}
-          <label className="fx-check"><input type="checkbox" checked={addIntake} onChange={(e) => setAddIntake(e.target.checked)} /> Run intake now</label>
+          {hasIntake !== false ? <label className="fx-check"><input type="checkbox" checked={addIntake} onChange={(e) => setAddIntake(e.target.checked)} /> Run intake now</label> : null}
           <button type="submit" className="fx-btn fx-primary" disabled={addKind === "issue" ? issuePick === "" : textTitle.trim() === ""}>Add to Factory</button>
           <button type="button" className="fx-btn" onClick={() => setAddOpen(false)}>Cancel</button>
         </form>

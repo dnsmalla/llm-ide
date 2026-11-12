@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as rm from "../native/run-manager.ts";
-import { FACTORY_TEMPLATE, configFor } from "../native/factory.ts";
+import { FACTORY_BUILT_IN_STAGES, FACTORY_TEMPLATE, configFor } from "../native/factory.ts";
 import { runNativeLoop } from "../native/runner.ts";
 
 function deferred() { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; }
@@ -14,6 +14,8 @@ function memoryStorage(init = {}) {
 
 const PASSED = { passed: true, iterationsUsed: 1, stages: [], iterations: [], failedStage: null, statusSummary: "passed after 1 iteration" };
 const FACTORY_LOOP = { id: "F", name: "Factory", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: "factory", runsOnSchedule: false, config: structuredClone(FACTORY_TEMPLATE.config) };
+// A process that still has Intake (the default leaves it out; a person can add it back).
+const WITH_INTAKE = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: structuredClone(FACTORY_BUILT_IN_STAGES) } };
 const item = (n) => ({ key: `issue:${n}`, source: "issue", id: String(n), title: `Issue ${n}`, body: "Do it", repo: "", provider: null });
 
 let world;
@@ -233,12 +235,21 @@ test("a finished run is removed from liveRuns and its record is appended once", 
   off();
 });
 
-test("an intake gate failure records the needs-decision reason", async () => {
+test("an intake-only run is refused when the process has no Intake step, instead of passing as \"Intake ready\"", async () => {
   setup();
+  rm.startRun("/p", item(1), "intakeOnly");
+  await settle();
+  assert.equal(world.configs.length, 0, "nothing runs");
+  assert.deepEqual(world.records, [], "no run record, so no card turns Intake ready");
+  assert.match(rm.takeRunNotice(), /no Intake step; add one in Factory → Process\. The run did not start\./);
+});
+
+test("an intake gate failure records the needs-decision reason", async () => {
+  setup({ loadFactoryLoop: async () => WITH_INTAKE });
   const a = rm.startRun("/p", item(1), "intakeOnly");
   await settle();
-  assert.deepEqual(world.configs[0], configFor("intakeOnly", FACTORY_LOOP.config));
-  await finish(a, { passed: false, iterationsUsed: 1, stages: [], iterations: [], failedStage: FACTORY_TEMPLATE.config.stages[2], statusSummary: "Intake gate failed; repair is disabled for this stage" });
+  assert.deepEqual(world.configs[0], configFor("intakeOnly", WITH_INTAKE.config));
+  await finish(a, { passed: false, iterationsUsed: 1, stages: [], iterations: [], failedStage: FACTORY_BUILT_IN_STAGES[2], statusSummary: "Intake gate failed; repair is disabled for this stage" });
   assert.equal(world.records[0].record.needsDecision, "needs decision: see .factory/READINESS.md");
   assert.equal(world.records[0].entry.statusCode, "failed");
 });
@@ -278,7 +289,7 @@ test("repoRelFor keeps a project-relative repo and otherwise derives it from the
 test("a running run holds at a stage boundary while another project is open and resumes after switching back", async () => {
   const first = deferred();
   const names = [];
-  const twoStages = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: FACTORY_TEMPLATE.config.stages.slice(3, 5).map((s) => ({ ...s, enabled: true })) } };
+  const twoStages = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: FACTORY_BUILT_IN_STAGES.slice(3, 5).map((s) => ({ ...structuredClone(s), enabled: true })) } };
   setup({
     loadFactoryLoop: async () => twoStages,
     runLoop: runNativeLoop,
@@ -378,6 +389,64 @@ test("a migration that cannot keep a step writes the template but stops the run 
   assert.ok(fs.files.has(tpl.TEMPLATE_FILE), "the template is written anyway");
   const next = await rm.loadOrCreateFactoryLoop(fs);
   assert.equal(next.config.stages.some((s) => s.name === "Graph snapshot"), false, "the second run goes ahead with the template");
+});
+
+test("a new project gets the default process, with Structure verify on when a lint script is detected", async () => {
+  const { memFs } = await import("../../factory/tests/mem-fs.mjs");
+  const tpl = await import("../native/factory-template.ts");
+  const fs = memFs({ "package.json": JSON.stringify({ scripts: { test: "vitest", lint: "eslint ." } }) });
+  const loop = await rm.loadOrCreateFactoryLoop(fs);
+  assert.deepEqual(loop.config.stages.map((s) => s.name), ["Set up", "Plan", "Implement", "Structure verify", "Verify", "Test gaps", "Doc review", "Review", "Review gate"]);
+  const structure = loop.config.stages.find((s) => s.name === "Structure verify");
+  assert.deepEqual({ command: structure.command, enabled: structure.enabled, id: structure.id }, { command: "npm run lint", enabled: true, id: "custom/structure-verify-1" });
+  assert.equal(loop.config.stages.find((s) => s.name === "Verify").command, "npm test");
+  const written = tpl.parseFactoryTemplate(fs.files.get(tpl.TEMPLATE_FILE)).template;
+  assert.equal(written.stages.some((s) => s.role === "intake"), false);
+});
+
+test("a project whose loop is the unedited previous default moves to the new process; an existing template is never touched", async () => {
+  const { memFs } = await import("../../factory/tests/mem-fs.mjs");
+  const tpl = await import("../native/factory-template.ts");
+  const first = memFs();
+  await rm.loadOrCreateFactoryLoop(first);
+  const store = JSON.parse(first.files.get("system/loop.json"));
+  const factory = store.loops.find((l) => l.defaultKey === "factory");
+  factory.config.stages = structuredClone(FACTORY_BUILT_IN_STAGES).map((s) => (s.name === "Verify" ? { ...s, command: "pytest" } : s));
+  const fs = memFs({ "system/loop.json": JSON.stringify(store) });
+  const loop = await rm.loadOrCreateFactoryLoop(fs);
+  assert.equal(loop.config.stages.some((s) => s.name === "Intake"), false);
+  assert.equal(loop.config.stages.find((s) => s.name === "Verify").command, "pytest", "its own Verify command is kept");
+  const own = tpl.formatFactoryTemplate({ version: 1, stages: [{ role: "intake" }, { role: "intakeGate" }, { role: "implement" }, { role: "verify", command: "pytest" }, { role: "review" }, { role: "reviewGate" }] });
+  const kept = memFs({ "system/loop.json": JSON.stringify(store), [tpl.TEMPLATE_FILE]: own });
+  const keptLoop = await rm.loadOrCreateFactoryLoop(kept);
+  assert.equal(kept.files.get(tpl.TEMPLATE_FILE), own);
+  assert.deepEqual(keptLoop.config.stages.map((s) => s.name), ["Intake", "Intake gate", "Implement", "Verify", "Review", "Review gate"]);
+});
+
+test("a run whose Test gaps step writes a test file still passes and reaches its MR (the test is not reverted)", async () => {
+  const { createStageDeps } = await import("../native/stage-exec.ts");
+  const gaps = structuredClone(FACTORY_TEMPLATE.config.stages.find((s) => s.name === "Test gaps"));
+  const loop = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: [{ ...gaps, order: 0 }] } };
+  const shipped = [];
+  let agentRan = false;
+  setup({
+    loadFactoryLoop: async () => loop,
+    runLoop: runNativeLoop,
+    createStageDeps,
+    host: async (command, args) => {
+      world.hostCalls.push([command, args, world.active]);
+      if (command === "loop_worktree_prepare") return { runId: args.runId, project: "/p", repo: "/p", worktree: `/p/system/loop-worktrees/${args.runId}`, branch: `factory/${args.runId}`, baseCommit: "abc1234def" };
+      if (command === "loop_changed_paths") return agentRan ? ["tests/button.test.ts"] : [];
+      return null;
+    },
+    core: { async request(path) { if (path === "/kb/loop/agent-run") { agentRan = true; return { reply: "added a test", resultSubtype: "success", changedPaths: ["tests/button.test.ts"], createdPaths: ["tests/button.test.ts"] }; } return {}; } },
+    autoShip: async (e) => { shipped.push(e.statusCode); return "Draft MR: https://example/mr/1"; },
+  });
+  rm.startRun("/p", item(1), "full");
+  await settle();
+  assert.equal(agentRan, true);
+  assert.equal(world.hostCalls.some(([c]) => c === "loop_revert_paths"), false, "the new test is kept");
+  assert.deepEqual(shipped, ["success"], "the run passed and opened its MR");
 });
 
 test("a Factory run writes .factory/RUN.json and removes it after the record", async () => {

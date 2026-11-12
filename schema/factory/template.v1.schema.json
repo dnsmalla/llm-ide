@@ -155,7 +155,7 @@
           }
         },
         {
-          "description": "A custom shell step.",
+          "description": "A custom shell step. \"auto\" as its command means the detected structure check (npm run lint, npx tsc --noEmit or ruff check .); the step stays off while none is detected.",
           "additionalProperties": false,
           "required": [
             "role",

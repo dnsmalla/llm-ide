@@ -119,3 +119,19 @@ test("detectProjectTestCommand falls back to the first linked clone under code/"
   };
   assert.deepEqual(await e.detectProjectTestCommand(fs), { command: "make test", reason: "Makefile has a test target.", prefix: "code/llm-ide" });
 });
+
+test("Structure verify detection: lint script, then TypeScript, then Ruff; nothing found leaves it off", async () => {
+  const files = (map) => ({
+    async read(path) { if (path in map) return { status: "ok", text: map[path] }; throw Object.assign(new Error("missing"), { code: "not_found" }); },
+    async list(path) { if (path === "code") return { entries: Object.keys(map).filter((k) => k.startsWith("code/")).map((k) => ({ name: k.split("/")[1], kind: "dir" })) }; throw Object.assign(new Error("missing"), { code: "not_found" }); },
+  });
+  assert.equal((await e.detectStructureCommand(files({ "package.json": '{"scripts":{"lint":"eslint ."}}', "tsconfig.json": "{}" }))).command, "npm run lint");
+  assert.equal((await e.detectStructureCommand(files({ "package.json": '{"scripts":{"test":"vitest"}}', "tsconfig.json": "{}" }))).command, "npx tsc --noEmit");
+  assert.equal((await e.detectStructureCommand(files({ "ruff.toml": "" }))).command, "ruff check .");
+  assert.equal((await e.detectStructureCommand(files({ "pyproject.toml": "[tool.ruff]\nline-length = 100\n" }))).command, "ruff check .");
+  assert.equal((await e.detectStructureCommand(files({ "pyproject.toml": "[project]\nname = 'x'\n" }))).command, null, "a pyproject without Ruff is not enough");
+  assert.equal((await e.detectStructureCommand(files({}))).command, null);
+  assert.equal((await e.detectStructureCommand(files({ "w/tsconfig.json": "{}" }), "w")).command, "npx tsc --noEmit", "reads a run worktree when given a prefix");
+  assert.deepEqual(await e.detectProjectStructureCommand(files({ "code/app/package.json": '{"scripts":{"lint":"x"}}' })), { command: "npm run lint", prefix: "code/app" });
+  assert.notEqual(e.DETECTED_STRUCTURE, e.DETECTED_TEST);
+});

@@ -3,7 +3,7 @@
 // imports only types from the shell and explorer modules.
 import type { FsApi } from "../../explorer/fs";
 import { repoKeyOf, type RepoConfig } from "../../settings/repo-config.ts";
-import { DETECTED_TEST } from "./environment.ts";
+import { DETECTED_STRUCTURE, DETECTED_TEST } from "./environment.ts";
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { isCiHookPath } from "./protected.ts";
 import type { LoopRunOutcome } from "./runner.ts";
@@ -37,20 +37,42 @@ function stage(order: number, s: Partial<LoopStage> & Pick<LoopStage, "id" | "na
   };
 }
 
+/** Every step the Factory knows by role, with its fixed skill, verdict file and repair rules (also those the default leaves out). */
+export const FACTORY_BUILT_IN_STAGES: readonly LoopStage[] = [
+  stage(0, { id: "factory/setup", name: "Set up", kind: "shellCommand", command: "", runOnce: true, enabled: false, disabledByDetection: true, allowsRepair: false }),
+  stage(1, { id: "factory/intake", name: "Intake", kind: "skill", skillId: FACTORY_INTAKE_SKILL, runOnce: true, allowsRepair: false, targetPath: ".factory/TASK.md", outputPath: READINESS_PATH, prompt: PROMPTS["factory.intake"] }),
+  stage(2, { id: "factory/intake-gate", name: "Intake gate", kind: "artifactCheck", check: { verdict: { path: READINESS_PATH, line: "Verdict: ready" } }, runOnce: true, allowsRepair: false }),
+  stage(3, { id: "factory/plan", name: "Plan", kind: "skill", skillId: FACTORY_PLAN_SKILL, runOnce: true, allowsRepair: false, targetPath: ".factory/TASK.md", outputPath: ".factory/PLAN.md", prompt: PROMPTS["factory.plan"] }),
+  stage(4, { id: "factory/implement", name: "Implement", kind: "skill", skillId: FACTORY_IMPLEMENT_SKILL, runOnce: true, allowsRepair: true, targetPath: ".factory/PLAN.md", prompt: PROMPTS["factory.implement"] }),
+  stage(5, { id: "factory/verify", name: "Verify", kind: "shellCommand", command: DETECTED_TEST, allowsRepair: true }),
+  stage(6, { id: "factory/review", name: "Review", kind: "skill", skillId: FACTORY_REVIEW_SKILL, allowsRepair: false, outputPath: REVIEW_PATH, prompt: PROMPTS["factory.review"] }),
+  stage(7, { id: "factory/review-gate", name: "Review gate", kind: "artifactCheck", check: { verdict: { path: REVIEW_PATH, line: "Verdict: approve" } }, allowsRepair: true }),
+];
+
+/** Skills whose job is writing tests: in a Factory loop they get Implement's test-glob exemption (CI/hook files stay guarded). */
+export const TEST_WRITING_SKILLS: ReadonlySet<string> = new Set([FACTORY_IMPLEMENT_SKILL, "skills/test-gap-writer"]);
+
+export const TEST_GAPS_PROMPT = "Read .factory/PLAN.md and the files this run changed. Add or extend tests only where that changed behaviour has none, following the repository's own test layout. Do not change application code or behaviour, and write nothing under .factory/.";
+export const DOC_REVIEW_PROMPT = "Read .factory/PLAN.md and the files this run changed. Bring the documentation and docstrings that describe that changed behaviour up to date. Change documentation only, never code or behaviour, and write nothing under .factory/.";
+
+const builtIn = (id: string, order: number): LoopStage => ({ ...structuredClone(FACTORY_BUILT_IN_STAGES.find((s) => s.id === id)!), order });
+
 export const FACTORY_TEMPLATE: LoopTemplate = {
   id: "factory",
   name: "Factory",
-  summary: "One work item in its own worktree: intake, plan, implement test-first, verify, review. A pass offers Ship as a draft PR/MR.",
+  summary: "One prepared issue in its own worktree: plan, implement test-first, structure and test checks, test gaps and docs, review. Every finished run opens a draft PR/MR for you to review.",
   config: {
     stages: [
-      stage(0, { id: "factory/setup", name: "Set up", kind: "shellCommand", command: "", runOnce: true, enabled: false, disabledByDetection: true, allowsRepair: false }),
-      stage(1, { id: "factory/intake", name: "Intake", kind: "skill", skillId: FACTORY_INTAKE_SKILL, runOnce: true, allowsRepair: false, targetPath: ".factory/TASK.md", outputPath: READINESS_PATH, prompt: PROMPTS["factory.intake"] }),
-      stage(2, { id: "factory/intake-gate", name: "Intake gate", kind: "artifactCheck", check: { verdict: { path: READINESS_PATH, line: "Verdict: ready" } }, runOnce: true, allowsRepair: false }),
-      stage(3, { id: "factory/plan", name: "Plan", kind: "skill", skillId: FACTORY_PLAN_SKILL, runOnce: true, allowsRepair: false, targetPath: ".factory/TASK.md", outputPath: ".factory/PLAN.md", prompt: PROMPTS["factory.plan"] }),
-      stage(4, { id: "factory/implement", name: "Implement", kind: "skill", skillId: FACTORY_IMPLEMENT_SKILL, runOnce: true, allowsRepair: true, targetPath: ".factory/PLAN.md", prompt: PROMPTS["factory.implement"] }),
-      stage(5, { id: "factory/verify", name: "Verify", kind: "shellCommand", command: DETECTED_TEST, allowsRepair: true }),
-      stage(6, { id: "factory/review", name: "Review", kind: "skill", skillId: FACTORY_REVIEW_SKILL, allowsRepair: false, outputPath: REVIEW_PATH, prompt: PROMPTS["factory.review"] }),
-      stage(7, { id: "factory/review-gate", name: "Review gate", kind: "artifactCheck", check: { verdict: { path: REVIEW_PATH, line: "Verdict: approve" } }, allowsRepair: true }),
+      builtIn("factory/setup", 0),
+      builtIn("factory/plan", 1),
+      builtIn("factory/implement", 2),
+      // Custom steps carry a "custom/" id: factoryRole gives them no role, so they are never taken for Verify.
+      stage(3, { id: "custom/structure-verify-1", name: "Structure verify", kind: "shellCommand", command: DETECTED_STRUCTURE, enabled: false, disabledByDetection: true, allowsRepair: true }),
+      builtIn("factory/verify", 4),
+      stage(5, { id: "custom/test-gaps-2", name: "Test gaps", kind: "skill", skillId: "skills/test-gap-writer", severity: "advisory", allowsRepair: false, prompt: TEST_GAPS_PROMPT }),
+      stage(6, { id: "custom/doc-review-3", name: "Doc review", kind: "skill", skillId: "skills/doc-writer", severity: "advisory", allowsRepair: false, prompt: DOC_REVIEW_PROMPT }),
+      builtIn("factory/review", 7),
+      builtIn("factory/review-gate", 8),
     ],
     maxIterations: 10, consecutiveFailureStop: 2, wallClockBudgetSeconds: 7200, pauseTimeoutSeconds: 1800,
     maxRepairsPerStage: 3, repairModel: null, protectedPathPolicy: "revert", writeSummaryNote: false,
@@ -59,6 +81,20 @@ export const FACTORY_TEMPLATE: LoopTemplate = {
   },
 };
 
+/** A step added to the Factory process by a person or the default (id "custom/…"): it has no Factory role. */
+export const isCustomStage = (s: { id?: string | null }): boolean => typeof s.id === "string" && s.id.startsWith("custom/");
+
+/** Fill a custom Structure verify step's command from detection, and enable it; a person's own command is never replaced. */
+export function withDetectedStructure(loop: LoopDefinition, detected: string | null): { loop: LoopDefinition; changed: boolean } {
+  if (!detected) return { loop, changed: false };
+  let changed = false;
+  const stages = loop.config.stages.map((s) => {
+    if (!isCustomStage(s) || s.kind !== "shellCommand" || s.command !== DETECTED_STRUCTURE) return s;
+    changed = true;
+    return { ...s, command: detected, enabled: s.disabledByDetection ? true : s.enabled, disabledByDetection: false };
+  });
+  return changed ? { loop: { ...loop, config: { ...loop.config, stages } }, changed: true } : { loop, changed: false };
+}
 
 /** Why these Factory stages cannot run: an enabled Verify stage has no command (none was detected for the project). */
 export function factoryVerifyProblem(config: Pick<LoopEngineConfig, "stages">): string | null {
@@ -106,14 +142,15 @@ export interface AgentRunBody {
  */
 export function agentRunBody(a: {
   message: string;
-  stage: Pick<LoopStage, "kind" | "skillId">;
+  stage: Pick<LoopStage, "kind" | "skillId"> & { id?: string | null };
   repoRoot: string;
   timeoutMs: number;
   projectRoot: string;
   llmDocExists: boolean;
 }): AgentRunBody {
   const scope = writeScopeFor(a.stage);
-  const implement = a.stage.kind === "skill" && a.stage.skillId === FACTORY_IMPLEMENT_SKILL;
+  // Implement and every custom skill step change code, tests or docs, never the reports under .factory/ that the gates judge.
+  const implement = a.stage.kind === "skill" && (a.stage.skillId === FACTORY_IMPLEMENT_SKILL || isCustomStage(a.stage));
   const project = a.projectRoot.replace(/\/+$/, "");
   const wantsDocs = a.stage.skillId === FACTORY_INTAKE_SKILL && a.llmDocExists && project !== "" && a.repoRoot.replace(/\/+$/, "") !== project;
   return {
@@ -135,7 +172,7 @@ export function agentRunBody(a: {
  */
 export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind" | "skillId"> | null, paths: readonly string[]): string[] {
   if (!isFactoryLoop(loop)) return [...paths];
-  if (stage && stage.kind === "skill" && stage.skillId === FACTORY_IMPLEMENT_SKILL) {
+  if (stage && stage.kind === "skill" && stage.skillId !== null && TEST_WRITING_SKILLS.has(stage.skillId)) {
     return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/") && isCiHookPath(p));
   }
   return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/"));
@@ -315,9 +352,11 @@ export type FactoryRole = "setup" | "intake" | "intakeGate" | "plan" | "implemen
 
 /**
  * The role of a Factory stage. `applyTemplate` resets a stage's id and defaultKey and the user may rename or reorder
- * stages, so the role comes from what the stage runs: its skill, its verdict file, or its shell kind.
+ * stages, so the role comes from what the stage runs: its skill, its verdict file, or its shell kind. A "custom/" id
+ * is a person's own step, never a Factory role (its shell command is not Verify).
  */
-export function factoryRole(s: Pick<LoopStage, "kind" | "skillId" | "runOnce" | "check">): FactoryRole | null {
+export function factoryRole(s: Pick<LoopStage, "kind" | "skillId" | "runOnce" | "check"> & { id?: string | null }): FactoryRole | null {
+  if (isCustomStage(s)) return null;
   if (s.kind === "skill") {
     if (s.skillId === FACTORY_INTAKE_SKILL) return "intake";
     if (s.skillId === FACTORY_PLAN_SKILL) return "plan";
@@ -366,7 +405,14 @@ export function configFor(mode: RunMode, base: LoopEngineConfig): LoopEngineConf
     return copy;
   }
   const keep = new Set<FactoryRole>(MODE_ROLES[mode]);
-  copy.stages = copy.stages.filter((s) => { const role = factoryRole(s); return role !== null && keep.has(role); });
+  // A blocking custom check (Structure verify, a verdict check) is cheap and deterministic, so the modes that re-check
+  // work keep it; custom agent steps (Test gaps, Doc review) belong to a full run only.
+  const keepChecks = mode === "sendBack" || mode === "check";
+  copy.stages = copy.stages.filter((s) => {
+    const role = factoryRole(s);
+    if (role !== null) return keep.has(role);
+    return keepChecks && isCustomStage(s) && s.kind !== "skill" && s.severity === "blocking";
+  });
   if (mode === "continue") {
     for (const s of copy.stages) {
       const role = factoryRole(s);
