@@ -19,6 +19,15 @@ public protocol HostEventSink: AnyObject {
     func clearPendingPrompts()
     /// A different desktop was paired: forget the previous one's state.
     func resetForNewDevice()
+    /// The connection dropped but may come back: keep a detached turn waiting. Default ends turns as before.
+    func connectionDropped()
+    /// The connection is ready (again): resume what was waiting. Default does nothing.
+    func connectionReady()
+}
+
+public extension HostEventSink {
+    func connectionDropped() { handleChatError(commandId: nil) }
+    func connectionReady() {}
 }
 
 /// `HostContext` plus what the chat needs: the shared error banner, the selected project and its refusals.

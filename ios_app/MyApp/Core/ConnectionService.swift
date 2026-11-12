@@ -190,6 +190,7 @@ final class ConnectionService: ObservableObject {
                 }
                 self.connectionStatus = .connected
                 PushRegistrar.shared.hostReady()
+                self.liveSinks.forEach { $0.connectionReady() }
             case .unreachable:
                 var message = "Couldn't reach the desktop. Check it's awake and on the same network (or Tailscale). Retrying…"
                 // Repeated silence on a LAN address is the classic signature of a denied Local Network permission.
@@ -245,8 +246,8 @@ final class ConnectionService: ObservableObject {
         case .disconnected(let reason):
             if !reason.retryable { return handleRefusal(reason) }
             if errorMessage == nil { errorMessage = "Disconnected from the desktop. Retrying…" }
-            // v1 has no replay: no event for a turn on the old session can arrive, so end them all now.
-            liveSinks.forEach { $0.handleChatError(commandId: nil) }
+            // The core detaches a dropped turn instead of cancelling it: sinks keep it waiting and resume on ready.
+            liveSinks.forEach { $0.connectionDropped() }
             invalidateSocket()
             connectionStatus = .disconnected
             scheduleReconnect(retryAfterMs: reason.retryAfterMs)
@@ -385,7 +386,7 @@ final class ConnectionService: ObservableObject {
     /// The socket looks dead (a network switch leaves it half-open): tear it down and dial again now.
     private func connectionLost(_ generation: Int) {
         guard generation == connectionGeneration, connectionStatus == .connected, let ip = directIP else { return }
-        liveSinks.forEach { $0.handleChatError(commandId: nil) }
+        liveSinks.forEach { $0.connectionDropped() }
         reconnectAttempt = 0
         invalidateSocket()
         connectionStatus = .disconnected

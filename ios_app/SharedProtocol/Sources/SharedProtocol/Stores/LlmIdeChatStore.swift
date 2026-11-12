@@ -20,6 +20,12 @@ public class LlmIdeChatStore: ObservableObject {
     /// Why the last question went away without this phone answering it
     /// ("Answered on the desktop", "no longer open"). Shown once, then cleared.
     @Published public var approvalNotice: String?
+    /// True while the connection is down but the desktop may still be running this phone's turn (the core
+    /// detaches it instead of cancelling). The turn is shown as waiting, not failed; `connectionReady` resumes it.
+    @Published public var isWaitingForDesktop: Bool = false
+    /// Shown in `approvalNotice` while `isWaitingForDesktop`.
+    public static let waitingNotice = "Waiting for the desktop to reconnect…"
+    public static let truncatedNotice = "The reply is long; showing the latest part."
 
     /// Command ids whose streamed reply belongs to this transcript.
     private var llmIdeCommandIds: Set<String> = []
@@ -112,6 +118,12 @@ public class LlmIdeChatStore: ObservableObject {
     /// refusal is shown by the picker instead of the connection banner.
     private func chatSendFailed(_ id: String, _ error: Error) {
         let r = error as? HostApiRejection
+        // The socket dropped under the send: the host may or may not have the turn. Keep it and let the resume
+        // on reconnect decide (`unknown` falls back to the transcript) instead of failing a turn that may run on.
+        if r?.code == "host_unreachable", ownsCommand(id), currentCommandId == id {
+            markWaiting()
+            return
+        }
         let local = HostApiChatNotices.disconnectsAfterSendFailure(error)
         if noteProjectRefusal(error) {
             handleChatError(commandId: id)
@@ -330,6 +342,8 @@ public class LlmIdeChatStore: ObservableObject {
             // Only this phone's own turn.
             guard let e = try? d.decode(HostApiApprovalRequestEvent.self, from: payload) else { return }
             let request = ApprovalRequest(event: e)
+            // A re-sent prompt (after chat.resume) for the card already up must not rebuild or duplicate it.
+            if pendingApproval?.requestId == request.requestId { return }
             if !request.questions.isEmpty, ownsCommand(request.commandId) {
                 approvalNotice = nil
                 pendingApproval = request
@@ -338,6 +352,7 @@ public class LlmIdeChatStore: ObservableObject {
             // Same ownership rule as questions.
             guard let e = try? d.decode(HostApiToolApprovalRequestEvent.self, from: payload) else { return }
             let request = ToolApprovalRequest(event: e)
+            if pendingToolApproval?.requestId == request.requestId { return }
             if ownsCommand(request.commandId) {
                 approvalNotice = nil
                 pendingApproval = nil
@@ -394,6 +409,7 @@ public class LlmIdeChatStore: ObservableObject {
     private func finishTurn(_ id: String) {
         streamTimeoutTask?.cancel()
         isStreaming = false
+        clearWaiting()
         // The turn is over, so its question (if any) can no longer be
         // answered — the requestId is dead server-side. The host sends an
         // explicit clear too; this covers the event arriving first. Scoped
@@ -408,6 +424,7 @@ public class LlmIdeChatStore: ObservableObject {
     public func handleChatError(commandId: String? = nil) {
         streamTimeoutTask?.cancel()
         isStreaming = false
+        clearWaiting()
         if let commandId {
             llmIdeCommandIds.remove(commandId)
             if currentCommandId == commandId { currentCommandId = nil }
@@ -432,12 +449,90 @@ public class LlmIdeChatStore: ObservableObject {
         streamTimeoutTask?.cancel()
         streamTimeoutTask = nil
         isStreaming = false
+        clearWaiting()
         llmIdeCommandIds.removeAll()
         cancelledCommandIds.removeAll()
         currentCommandId = nil
         pendingApproval = nil
         pendingToolApproval = nil
         llmIdeMessages.removeAll()
+    }
+
+    // MARK: — Detach and resume
+
+    private func markWaiting() {
+        streamTimeoutTask?.cancel() // a long outage must not trip the idle breaker and cancel a turn that still runs
+        isWaitingForDesktop = true
+        approvalNotice = Self.waitingNotice
+    }
+
+    private func clearWaiting() {
+        guard isWaitingForDesktop else { return }
+        isWaitingForDesktop = false
+        if approvalNotice == Self.waitingNotice { approvalNotice = nil }
+    }
+
+    /// The connection dropped with a turn in flight: the core detaches it, so keep it as waiting rather than
+    /// failing it. Without a live turn this is the old behaviour (nothing to keep).
+    public func connectionDropped() {
+        guard isStreaming, let id = currentCommandId, ownsCommand(id), !cancelledCommandIds.contains(id) else {
+            handleChatError(commandId: nil)
+            return
+        }
+        clearPendingPrompts() // re-sent by the core after a successful resume
+        markWaiting()
+    }
+
+    /// The connection is ready again: ask the core what became of the waiting turn (`chat.resume`).
+    public func connectionReady() {
+        guard isWaitingForDesktop, let id = currentCommandId, ownsCommand(id), let host = context?.host else { return }
+        let projectId = selectedProjectId
+        Task { [weak self] in
+            do {
+                let result = try await host.send(.chatResume, HostApiChatResumeRequest(projectId: projectId, requestId: id),
+                                                 as: HostApiChatResumeResult.self)
+                self?.applyResume(result, id: id)
+            } catch {
+                self?.resumeFailed(error, id: id)
+            }
+        }
+    }
+
+    /// An old host (`unknown_command`) or any refusal means the turn cannot be resumed: finalize from history.
+    /// A dropped socket again just keeps waiting; the next ready retries.
+    private func resumeFailed(_ error: Error, id: String) {
+        guard currentCommandId == id, isWaitingForDesktop else { return }
+        if (error as? HostApiRejection)?.code == "host_unreachable" { return }
+        finishTurn(id)
+    }
+
+    private func applyResume(_ result: HostApiChatResumeResult, id: String) {
+        // The user may have stopped, reset or the turn finished by a live event while the reply was in flight.
+        guard currentCommandId == id, ownsCommand(id), isWaitingForDesktop else { return }
+        switch result.state {
+        case "running":
+            // `text` is the FULL reply so far: replace, never append. Later deltas append to it.
+            if let text = result.text { replaceLastAssistant(text) }
+            clearWaiting()
+            if result.truncated == true { approvalNotice = Self.truncatedNotice }
+            startStreamTimeout(for: id)
+        case "done":
+            if let text = result.text { replaceLastAssistant(text) }
+            finishTurn(id)
+        case "error":
+            handleChatError(commandId: id)
+            if let message = result.message, message != "Cancelled" { context?.errorMessage = message }
+        default: // "unknown" and anything newer: the snapshot is the truth
+            finishTurn(id)
+        }
+    }
+
+    private func replaceLastAssistant(_ text: String) {
+        if let idx = llmIdeMessages.lastIndex(where: { $0.role == .assistant }) {
+            llmIdeMessages[idx].text = text
+        } else {
+            llmIdeMessages.append(ChatMessage(role: .assistant, text: text))
+        }
     }
 
     /// Idle window: long, because the host sends no progress events to restart it while a tool runs or a
