@@ -156,6 +156,19 @@ export async function indexGithubIssues(userId, { repo, token, state = 'all', bu
   const slug = repoSlug(repo);
   const allowedState = ['open', 'closed', 'all'].includes(state) ? state : 'all';
 
+  return runImport(userId, {
+    slug, budgetMs, prefix: `https://github.com/${slug}/`,
+    fetchBatch: (page) => fetchPage(slug, allowedState, page, token),
+    toItem: (issue) => toTicketItem(issue, slug),
+  });
+}
+
+/**
+ * Pages until a short or empty page (exhausted), or stops early at MAX_PAGES pages, MAX_ROWS rows, the time budget or
+ * a secondary limit (truncated: true; retryAfter in seconds when a limit stopped it). An exhausted run replaces the
+ * repo's rows (`prefix`), a stopped one only upserts and deletes nothing, in one transaction. Shared by both providers.
+ */
+async function runImport(userId, { slug, budgetMs, prefix, fetchBatch, toItem }) {
   const items = [];
   const deadline = Date.now() + budgetMs;
   let exhausted = false;
@@ -165,7 +178,7 @@ export async function indexGithubIssues(userId, { repo, token, state = 'all', bu
     if (page > 1 && Date.now() > deadline) break;
     let batch;
     try {
-      batch = await fetchPage(slug, allowedState, page, token);
+      batch = await fetchBatch(page);
     } catch (err) {
       if (err.retryAfter == null) throw err;
       retryAfter = err.retryAfter;
@@ -173,21 +186,97 @@ export async function indexGithubIssues(userId, { repo, token, state = 'all', bu
     }
     pages = page;
     if (!Array.isArray(batch) || batch.length === 0) { exhausted = true; break; }
-    for (const issue of batch) items.push(toTicketItem(issue, slug));
+    for (const issue of batch) items.push(toItem(issue));
     if (batch.length < PER_PAGE) { exhausted = true; break; }  // last page
     if (items.length >= MAX_ROWS) break;
   }
 
-  // A run that finished replaces the repo's rows, so an issue that vanished
-  // upstream goes. A truncated or stopped run saw only part of the repo: it
-  // upserts what it fetched and deletes nothing, or it would drop older rows
-  // it never saw.
+  // A run that finished replaces the repo's rows, so an issue that vanished upstream goes. A truncated or stopped run
+  // saw only part of the repo: it upserts what it fetched and deletes nothing, or it would drop older rows it never saw.
   // One transaction: a failed upsert must not leave the repo's rows deleted.
   const written = getDb().transaction(() => {
-    if (exhausted) deleteSourcesByPrefix(userId, 'ticket', `https://github.com/${slug}/`);
+    if (exhausted) deleteSourcesByPrefix(userId, 'ticket', prefix);
     return ingestSources(userId, items);
   })();
   return { repo: slug, count: items.length, chunks: written, pages, truncated: !exhausted, retryAfter };
+}
+
+// --- GitLab (gitlab.com): projects live in nested groups (group/sub/project), addressed by their URL-encoded path ---
+
+const GITLAB_API = 'https://gitlab.com/api/v4';
+const GITLAB_SEGMENT = /^[A-Za-z0-9._-]{1,100}$/;
+
+/** "group/sub/project" or "https://gitlab.com/group/sub/project(.git)" -> "group/sub/project" (2 to 20 segments). */
+export function gitlabSlug(repo) {
+  const t = String(repo || '').trim().replace(/^https:\/\/gitlab\.com\//i, '').replace(/[?#].*$/, '').replace(/\/+$/, '').replace(/\.git$/, '');
+  const segs = t.split('/');
+  if (segs.length < 2 || segs.length > 20 || !segs.every((x) => GITLAB_SEGMENT.test(x) && x !== '.' && x !== '..')) {
+    throw new Error('Repo must be "group/project" (nested groups allowed)');
+  }
+  return segs.join('/');
+}
+
+async function fetchGitlabPage(slug, state, page, token) {
+  const gl = state === 'open' ? 'opened' : state;  // GitLab calls open issues "opened"
+  const url = `${GITLAB_API}/projects/${encodeURIComponent(slug)}/issues?state=${encodeURIComponent(gl)}&per_page=${PER_PAGE}&page=${page}&order_by=updated_at&sort=desc`;
+  const headers = { 'User-Agent': 'llm-ide-extension' };
+  if (token) headers['PRIVATE-TOKEN'] = token;
+  const r = await makeTrackerFetch({ secret: token, followSameHost: true })(url, { headers, signal: AbortSignal.timeout(15_000) });
+  if (r.status === 429) {
+    const err = new Error('GitLab rate limit reached; the run stopped early.');
+    err.retryAfter = retryAfterSeconds(r.headers.get('retry-after'));
+    throw err;
+  }
+  if (r.status === 401 || r.status === 403) throw new Error(`GitLab auth failed (${r.status}) — check the token (needs read_api for private projects).`);
+  if (r.status === 404) throw new Error(`Project not found or no access: ${slug}`);
+  if (!r.ok) throw new Error(`GitLab API request failed with status ${r.status}`);
+  return r.json();
+}
+
+function toGitlabItem(issue, slug) {
+  const labels = Array.isArray(issue.labels) ? issue.labels.map((l) => cleanText(typeof l === 'string' ? l : l?.name, 100)).filter(Boolean).slice(0, 100) : [];
+  const ms = issue.milestone && typeof issue.milestone === 'object' ? issue.milestone : null;
+  const milestone = ms && (ms.title || ms.due_date)
+    ? { title: cleanText(ms.title, 200), dueOn: typeof ms.due_date === 'string' && !Number.isNaN(Date.parse(ms.due_date)) ? cleanText(ms.due_date, 64) : null }
+    : null;
+  const assignees = Array.isArray(issue.assignees) ? issue.assignees.map((a) => cleanText(a?.username, 100)).filter(Boolean).slice(0, 50) : [];
+  // GitLab's issue carries its own due date (YYYY-MM-DD); the Gantt and the board show it without a local overlay.
+  const dueDate = typeof issue.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(issue.due_date) ? issue.due_date : null;
+  return {
+    kind: 'ticket',
+    ref: issue.web_url,
+    chunkIdx: 0,
+    title: String(issue.title || '').slice(0, 500),
+    body: String(issue.description || '').slice(0, 50_000),
+    meta: {
+      provider: 'gitlab',
+      repo: slug,
+      number: issue.iid,
+      state: issue.state === 'opened' ? 'open' : issue.state,
+      isPR: false,
+      labels,
+      author: issue.author?.username,
+      createdAt: issue.created_at,
+      updatedAt: issue.updated_at,
+      closedAt: issue.closed_at,
+      milestone,
+      assignees,
+      dueDate,
+    },
+  };
+}
+
+/** Import one GitLab project's issues into the KB index; same rules as `indexGithubIssues` (gitlab.com only). */
+export async function indexGitlabIssues(userId, { repo, token, state = 'all', budgetMs = IMPORT_BUDGET_MS }) {
+  if (typeof repo === 'string' && repo.length > MAX_REPO_LEN) throw new Error(`repo parameter exceeds maximum allowed length (${MAX_REPO_LEN} chars)`);
+  if (typeof token === 'string' && token.length > MAX_TOKEN_LEN) throw new Error(`token parameter exceeds maximum allowed length (${MAX_TOKEN_LEN} chars)`);
+  const slug = gitlabSlug(repo);
+  const allowedState = ['open', 'closed', 'all'].includes(state) ? state : 'all';
+  return runImport(userId, {
+    slug, budgetMs, prefix: `https://gitlab.com/${slug}/`,
+    fetchBatch: (page) => fetchGitlabPage(slug, allowedState, page, token),
+    toItem: (issue) => toGitlabItem(issue, slug),
+  });
 }
 
 // Generic importer — accepts an array of { id, title, body, url?, meta? }

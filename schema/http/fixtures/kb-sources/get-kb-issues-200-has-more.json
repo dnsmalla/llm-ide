@@ -35,7 +35,8 @@
         },
         "assignees": [
           "example-user"
-        ]
+        ],
+        "dueDate": null
       }
     ],
     "total": 2,

@@ -291,7 +291,7 @@
             "object",
             "null"
           ],
-          "description": "GitHub milestone of the issue (title and dueOn), or null when it has none. dueOn is the milestone due date (ISO 8601) and may be null.",
+          "description": "Milestone of the issue (title and dueOn), or null when it has none. dueOn is the milestone due date (ISO 8601) and may be null.",
           "properties": {
             "title": {
               "type": "string"
@@ -306,10 +306,17 @@
         },
         "assignees": {
           "type": "array",
-          "description": "GitHub logins of the assignees (at most 50); empty when unassigned.",
+          "description": "Logins of the assignees (at most 50); empty when unassigned.",
           "items": {
             "type": "string"
           }
+        },
+        "dueDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "GitLab's own due date (YYYY-MM-DD) for the issue; null when it has none, and always null for GitHub (its only date is the milestone's)."
         }
       }
     },
@@ -1300,13 +1307,22 @@
             "state": {
               "type": "string",
               "x-optional": true
+            },
+            "provider": {
+              "type": "string",
+              "x-optional": true,
+              "enum": [
+                "github",
+                "gitlab"
+              ],
+              "description": "github (default) or gitlab (gitlab.com, nested groups; vault gitlab.token). Added in API 145."
             }
           }
         }
       },
       "responses": {
         "200": {
-          "x-unspecified": "fetches the repo's issues from api.github.com; the success needs the network, so it is not captured. It answers ok, the repo, count, chunks, pages, truncated and retryAfter (seconds to wait after a GitHub secondary limit that stopped the run early, else null). A truncated or stopped run deletes no stored rows (API 106)."
+          "x-unspecified": "fetches the repo's issues from api.github.com (or gitlab.com for provider gitlab); the success needs the network, so it is not captured. It answers ok, the repo, count, chunks, pages, truncated and retryAfter (seconds to wait after a GitHub secondary limit that stopped the run early, else null). A truncated or stopped run deletes no stored rows (API 106)."
         },
         "400": {
           "$ref": "_common#/$defs/Error"

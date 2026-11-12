@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 144
+  x-api-version: 145
 servers:
   - url: "https://{host}"
     variables:
@@ -8822,6 +8822,12 @@ paths:
                   description: "GitHub PAT (optional — vault github.token used otherwise)"
                 state:
                   type: "string"
+                provider:
+                  type: "string"
+                  enum:
+                    - "github"
+                    - "gitlab"
+                  description: "github (default) or gitlab (gitlab.com, nested groups; vault gitlab.token). Added in API 145."
       responses:
         "200":
           description: "Indexing summary"
@@ -20804,7 +20810,7 @@ components:
           type:
             - "object"
             - "null"
-          description: "GitHub milestone of the issue (title and dueOn), or null when it has none. dueOn is the milestone due date (ISO 8601) and may be null."
+          description: "Milestone of the issue (title and dueOn), or null when it has none. dueOn is the milestone due date (ISO 8601) and may be null."
           properties:
             title:
               type: "string"
@@ -20814,9 +20820,14 @@ components:
                 - "null"
         assignees:
           type: "array"
-          description: "GitHub logins of the assignees (at most 50); empty when unassigned."
+          description: "Logins of the assignees (at most 50); empty when unassigned."
           items:
             type: "string"
+        dueDate:
+          type:
+            - "string"
+            - "null"
+          description: "GitLab's own due date (YYYY-MM-DD) for the issue; null when it has none, and always null for GitHub (its only date is the milestone's)."
     IssueWriteOk:
       type: "object"
       description: "A hosted issue write the provider accepted (extension/routes/issue-writes.mjs). Never carries the token."

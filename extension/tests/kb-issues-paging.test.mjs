@@ -229,7 +229,7 @@ test('an old client that sends no offset still gets the same fields it read befo
   const issue = body.issues[0];
   // Every key a pre-105 client could read is still present, and nothing new is required of it.
   const pre105 = ['id', 'title', 'body', 'url', 'provider', 'repo', 'number', 'state', 'labels', 'author', 'createdAt', 'updatedAt', 'isPR'];
-  const added = ['milestone', 'assignees'];
+  const added = ['milestone', 'assignees', 'dueDate'];
   for (const key of Object.keys(issue)) assert.ok([...pre105, ...added].includes(key), `unexpected key ${key}`);
   for (const key of ['id', 'title', 'body', 'url', 'provider', 'repo', 'number', 'state', 'labels']) {
     assert.ok(key in issue, `missing ${key}`);
@@ -275,4 +275,13 @@ test('caller-supplied meta from the JSON importer is reduced to the documented s
   assert.equal(byNumber[1].milestone, null);
   assert.deepEqual(byNumber[1].assignees, ['ann']);
   assert.deepEqual(byNumber[2].milestone, { title: 'v2', dueOn: null });
+});
+
+test('GitLab\'s own due date is returned as dueDate; an issue without one (or GitHub) answers null', async () => {
+  const u = register('gl-due');
+  const gl = (n, extra = {}) => ({ ...ticket({ n }), meta: { ...ticket({ n }).meta, provider: 'gitlab', repo: 'group/sub/project', ...extra } });
+  db.ingestSources(u, [gl(1, { dueDate: '2026-12-24' }), gl(2), gl(3, { dueDate: 'not a date' })]);
+  const body = await getIssues(u, 'repo=group%2Fsub%2Fproject&state=open&limit=10&provider=gitlab');
+  const by = Object.fromEntries(body.issues.map((i) => [i.number, i.dueDate]));
+  assert.deepEqual(by, { 1: '2026-12-24', 2: null, 3: null });
 });

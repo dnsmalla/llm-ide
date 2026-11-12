@@ -35,7 +35,8 @@
         },
         "assignees": [
           "example-user"
-        ]
+        ],
+        "dueDate": null
       },
       {
         "id": "2",
@@ -52,7 +53,8 @@
         "updatedAt": "2026-10-20T00:00:00Z",
         "isPR": false,
         "milestone": null,
-        "assignees": []
+        "assignees": [],
+        "dueDate": null
       }
     ],
     "total": 2,

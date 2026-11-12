@@ -359,3 +359,57 @@ test('a finished run deletes only this user\'s rows for this repo: a sibling rep
   assert.equal(db.listTicketSources(userId, { provider: 'github', repo: 'example/iso-sibling', state: null, limit: 10 }).total, 2, 'a sibling repo sharing the prefix is kept');
   assert.equal(db.getDb().prepare("SELECT COUNT(*) AS n FROM sources WHERE user_id = ? AND kind = 'ticket'").get(other).n, 1, 'another user\'s row is kept');
 });
+
+// --- GitLab importer: same paging and replacement rules, nested groups, GitLab's own due date ---
+
+const { indexGitlabIssues, gitlabSlug } = await import('../connectors/issues.mjs');
+
+function glIssue(n, slug, overrides = {}) {
+  return {
+    iid: n, title: `Issue ${n}`, description: `body ${n}`, state: 'opened', web_url: `https://gitlab.com/${slug}/-/issues/${n}`,
+    labels: ['bug'], author: { username: 'ann' }, assignees: [{ username: 'bob' }], due_date: '2026-12-24',
+    milestone: { title: 'v1', due_date: '2026-12-31' }, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-02T00:00:00Z', closed_at: null,
+    ...overrides,
+  };
+}
+
+test('gitlabSlug accepts nested groups and URLs and rejects other shapes', () => {
+  assert.equal(gitlabSlug('group/sub/project'), 'group/sub/project');
+  assert.equal(gitlabSlug('https://gitlab.com/group/sub/project.git/'), 'group/sub/project');
+  for (const bad of ['', 'solo', 'a//b', 'a/../b', 'a b/c', `g/${Array(20).fill('s').join('/')}`]) assert.throws(() => gitlabSlug(bad), /Repo must be/, bad);
+});
+
+test('GitLab import: maps the issue, keeps its own due date, sends the token only to gitlab.com, and re-runs replace', async () => {
+  const slug = 'group/sub/project';
+  calls = [];
+  _setPinnedFetchForTests(async (url, init = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u, headers: init.headers || {} });
+    return new Response(JSON.stringify(Number(u.searchParams.get('page')) === 1 ? [glIssue(1, slug), glIssue(2, slug, { state: 'closed', due_date: null })] : []), { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+  const r = await indexGitlabIssues(userId, { repo: slug, token: 'glpat-test', state: 'open' });
+  assert.equal(r.count, 2); assert.equal(r.truncated, false);
+  assert.equal(calls[0].url.hostname, 'gitlab.com');
+  assert.equal(calls[0].url.pathname, `/api/v4/projects/${encodeURIComponent(slug)}/issues`.replace(/%2F/g, '%2F'));
+  assert.equal(calls[0].url.searchParams.get('state'), 'opened', 'open is spelled "opened" for GitLab');
+  assert.equal(calls[0].headers['PRIVATE-TOKEN'], 'glpat-test');
+  const page = db.listTicketSources(userId, { provider: 'gitlab', repo: slug, state: null, limit: 10, offset: 0 });
+  const one = page.rows.find((x) => x.meta.number === 1);
+  assert.equal(one.meta.state, 'open'); assert.equal(one.meta.dueDate, '2026-12-24'); assert.deepEqual(one.meta.milestone, { title: 'v1', dueOn: '2026-12-31' });
+  assert.deepEqual(one.meta.assignees, ['bob']);
+  assert.equal(page.rows.find((x) => x.meta.number === 2).meta.dueDate, null);
+  // An exhausted re-run replaces the project's rows: an issue gone upstream goes.
+  _setPinnedFetchForTests(async (url) => new Response(JSON.stringify(Number(new URL(String(url)).searchParams.get('page')) === 1 ? [glIssue(1, slug)] : []), { status: 200 }));
+  await indexGitlabIssues(userId, { repo: slug, token: 'glpat-test' });
+  assert.equal(db.listTicketSources(userId, { provider: 'gitlab', repo: slug, state: null, limit: 10, offset: 0 }).total, 1);
+});
+
+test('GitLab import: auth, missing project and rate limit are reported plainly', async () => {
+  for (const [status, re] of [[401, /GitLab auth failed \(401\)/], [404, /Project not found/]]) {
+    _setPinnedFetchForTests(async () => new Response('{}', { status }));
+    await assert.rejects(indexGitlabIssues(userId, { repo: 'g/p', token: 'x' }), re);
+  }
+  _setPinnedFetchForTests(async () => new Response('{}', { status: 429, headers: { 'retry-after': '30' } }));
+  const r = await indexGitlabIssues(userId, { repo: 'g/limited', token: 'x' });
+  assert.equal(r.truncated, true); assert.equal(r.retryAfter, 30);
+});

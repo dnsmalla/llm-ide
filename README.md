@@ -3,7 +3,7 @@
 > A local-first AI workspace. Capture meetings and sources, plan in a searchable library, automate code review and implementation, and send work to GitHub or GitLab when you approve it. Everything runs on your computer unless you allow an outbound action.
 
 [![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](./extension/package.json)
-[![API](https://img.shields.io/badge/wire%20API-v144-green.svg)](./extension/server.mjs)
+[![API](https://img.shields.io/badge/wire%20API-v145-green.svg)](./extension/server.mjs)
 [![Manifest](https://img.shields.io/badge/manifest-V3-orange.svg)](./extension/manifest.json)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)](#license)
 

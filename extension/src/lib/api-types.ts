@@ -1373,13 +1373,15 @@ export type Issue = {
   createdAt?: string;
   updatedAt?: string;
   isPR?: boolean;
-  /** GitHub milestone of the issue (title and dueOn), or null when it has none. dueOn is the milestone due date (ISO 8601) and may be null. */
+  /** Milestone of the issue (title and dueOn), or null when it has none. dueOn is the milestone due date (ISO 8601) and may be null. */
   milestone?: {
     title?: string;
     dueOn?: string | null;
   } | null;
-  /** GitHub logins of the assignees (at most 50); empty when unassigned. */
+  /** Logins of the assignees (at most 50); empty when unassigned. */
   assignees?: string[];
+  /** GitLab's own due date (YYYY-MM-DD) for the issue; null when it has none, and always null for GitHub (its only date is the milestone's). */
+  dueDate?: string | null;
 };
 
 export type ProjectExport = {
@@ -6013,6 +6015,8 @@ export type PostKbConnectGithubIssuesRequest = {
     /** GitHub PAT (optional — vault github.token used otherwise) */
     token?: string;
     state?: string;
+    /** github (default) or gitlab (gitlab.com, nested groups; vault gitlab.token). Added in API 145. */
+    provider?: "github" | "gitlab";
   };
 };
 

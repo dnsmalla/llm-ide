@@ -6,7 +6,7 @@
 import * as kb from '../kb/db.mjs';
 import { indexLocalRepo } from '../connectors/git.mjs';
 import { indexScip } from '../connectors/scip.mjs';
-import { indexGithubIssues, indexTicketsJson } from '../connectors/issues.mjs';
+import { indexGithubIssues, indexGitlabIssues, indexTicketsJson } from '../connectors/issues.mjs';
 import { indexJUnit } from '../connectors/qa.mjs';
 import { indexBoxFolder, boxTest } from '../connectors/box.mjs';
 import { projectIdForFolder, filteredRepoAllowlist } from '../kb/projects.mjs';
@@ -426,6 +426,8 @@ export async function handleKB(req, res) {
           ? { title: m.milestone.title, dueOn: typeof m.milestone.dueOn === 'string' ? m.milestone.dueOn : null }
           : null,
         assignees: Array.isArray(m.assignees) ? m.assignees.filter((a) => typeof a === 'string') : [],
+        // GitLab's own due date (YYYY-MM-DD); null for GitHub, whose only date is the milestone's.
+        dueDate: typeof m.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(m.dueDate) ? m.dueDate : null,
       }));
       const hasMore = offset + issues.length < page.total;
       sendJSON(res, 200, {
@@ -650,18 +652,26 @@ export async function handleKB(req, res) {
         sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing repo (owner/name)' } });
         return true;
       }
+      // `provider` (additive, API 145): github (default) or gitlab (gitlab.com, nested groups). The route keeps its
+      // name; the provider picks the importer, the vault token and the error code.
+      const provider = body.provider ?? 'github';
+      if (provider !== 'github' && provider !== 'gitlab') {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'provider must be github or gitlab' } });
+        return true;
+      }
       try {
         // The Mac passes its stored token; the desktop keeps the token in the vault only and sends no body
-        // token, so fall back to the vault's github.token rather than demanding a credential from the page.
-        const token = body.token || getSecret(kb.getDb(), userId, 'github.token') || undefined;
-        const result = await indexGithubIssues(userId, {
+        // token, so fall back to the vault's <provider>.token rather than demanding a credential from the page.
+        const token = body.token || getSecret(kb.getDb(), userId, `${provider}.token`) || undefined;
+        const index = provider === 'gitlab' ? indexGitlabIssues : indexGithubIssues;
+        const result = await index(userId, {
           repo: body.repo,
           token,
           state: body.state,
         });
         sendJSON(res, 200, { ok: true, ...result });
       } catch (err) {
-        sendJSON(res, 400, { error: { code: 'GITHUB_INDEX_FAILED', message: err.message } });
+        sendJSON(res, 400, { error: { code: `${provider.toUpperCase()}_INDEX_FAILED`, message: err.message } });
       }
       return true;
     }

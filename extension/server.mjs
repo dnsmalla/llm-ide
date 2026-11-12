@@ -435,6 +435,10 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          no longer in the doc_gen group, so with LLMIDE_FEATURES excluding doc_gen it answers 200 (or its usual
 //          4xx) instead of 404 feature_disabled, and /health ENDPOINTS lists it. The /kb/docs/* routes still answer
 //          feature_disabled with doc_gen off. Request and response shapes are unchanged.
+//   v145 — additive (no new route). POST /kb/connect-github-issues takes an optional `provider` (github, the default,
+//          or gitlab): gitlab imports a gitlab.com project's issues (nested groups, the vault gitlab.token) through
+//          the same paging, caps and replace-on-exhaust rules, and answers GITLAB_INDEX_FAILED on an error. GET
+//          /kb/issues gains `dueDate` (GitLab's own YYYY-MM-DD due date, else null) on every issue.
 //   v135 — Factory Ship verifies the reviewed diff, additive (contract schema/http/live-loop-misc.schema.json):
 //          POST /kb/loop/ship requires `patchId` (64 lowercase hex; the host's loop_worktree_diff.patchId).
 //          After staging without .factory/, commitAndPush recomputes the sha256 of the staged --binary patch
@@ -457,7 +461,7 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          is idempotent, a wrong token is 409 LEASE_LOST). All four need the desktop class AND the bus host proof
 //          (403 HOST_PROOF_REQUIRED). An expired lease becomes `interrupted` in the minute sweep. `ship` never
 //          ships: a passed run answers { readyToShip: true, shipped: false } and a desktop click is still the only Ship.
-const SERVER_API_VERSION = 144;
+const SERVER_API_VERSION = 145;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
