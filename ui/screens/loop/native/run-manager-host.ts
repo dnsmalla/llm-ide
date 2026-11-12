@@ -10,9 +10,12 @@ import { core } from "../../shell/runtime";
 import { readRepoConfig } from "../../settings/repo-config";
 import { approveLoop } from "./approvals.ts";
 import { repoForIssue } from "./factory.ts";
+import { decodeWorktreeDiff } from "./ship-model.ts";
+import { postStageComment } from "../../factory/issue-comment-poster.ts";
 import { cancelRun, configureRunManager, concurrency, liveRuns, projectGuardedFs, startRun } from "./run-manager.ts";
 
 let installed = false;
+const commentChains = new Map<string, Promise<void>>();
 let busRunnerInstalled = false;
 let busDeps: Parameters<typeof pollOnce>[0] | null = null;
 let polling = false;
@@ -34,6 +37,19 @@ export function installRunManagerHost(): void {
     // A stage boundary renews the phone command's lease instead of waiting for the 60 s tick.
     onStage: () => { if (busDeps) kickPoll(busDeps); },
     subscribeProject: (listener) => projectStore.subscribe(listener),
+    onStageResult: (e) => {
+      const fs = projectGuardedFs(hostFs, e.projectRoot, activeProject);
+      // One chain per run, so a slow lookup (the diff) never lets a later step's comment land first.
+      const prev = commentChains.get(e.runId) ?? Promise.resolve();
+      const next = prev.then(() => postStageComment({
+        request: (path, body) => core.requestRaw(path, { method: "POST", body, timeoutMs: 15_000 }),
+        diffFiles: (runId) => invokeHost<unknown>("loop_worktree_diff", { runId }).then((raw) => decodeWorktreeDiff(raw).files),
+        readText: (path) => fs.read(path, 200_000).then((r) => (r.status === "ok" ? r.text : null)),
+        allowed: (provider) => readRepoConfig().operations[provider].includes("commentIssue"),
+      }, e)).then(() => undefined, () => undefined);
+      commentChains.set(e.runId, next);
+      void next.then(() => { if (commentChains.get(e.runId) === next) commentChains.delete(e.runId); });
+    },
     // The bus runner reports a finished Factory run to the phone's claimed command (B5).
     onRunFinished: (info) => noteRunFinished(info.runId, info.statusCode, info.statusSummary),
   });

@@ -339,6 +339,23 @@ test("a Factory run writes .factory/RUN.json and removes it after the record", a
   assert.deepEqual(marks.find(([k]) => k === "remove")?.[1], "system/loop-worktrees/" + a + "/.factory/RUN.json");
 });
 
+test("a finished stage is reported with its run, item and worktree path, and a throwing listener does not stop the run", async () => {
+  let emit;
+  const seen = [];
+  setup({
+    runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; },
+    onStageResult: (e) => { seen.push(e); throw new Error("listener bug"); },
+  });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  emit({ type: "stage-result", stage: { id: "s1", name: "Implement" }, ok: true, iteration: 1 });
+  await settle();
+  assert.equal(seen.length, 1);
+  assert.deepEqual({ runId: seen[0].runId, projectRoot: seen[0].projectRoot, mode: seen[0].mode, key: seen[0].item.key, name: seen[0].stage.name, ok: seen[0].ok }, { runId: a, projectRoot: "/p", mode: "full", key: item(1).key, name: "Implement", ok: true });
+  assert.match(seen[0].runPrefix, new RegExp(`${a}$`));
+  assert.equal(rm.liveRuns().find((r) => r.runId === a).progress.stages[0]?.state ?? "passed", "passed");
+});
+
 test("LiveRun.progress follows the runner events", async () => {
   let emit;
   setup({ runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; } });

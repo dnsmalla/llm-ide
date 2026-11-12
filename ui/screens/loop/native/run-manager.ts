@@ -7,7 +7,7 @@ import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
 import { configFor, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type RunMode } from "./factory.ts";
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
-import type { LoopDefinition, LoopEngineConfig } from "./model.ts";
+import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
 import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent } from "./runner.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
@@ -68,6 +68,8 @@ export interface RunManagerDeps {
   onStage?(runId: string): void;
   /** A stage boundary: the Factory bus runner renews its lease from this, not only from the 60 s timer. */
   onStage?(runId: string): void;
+  /** A stage finished (passed or failed): the Factory posts its step comment on the run's issue. */
+  onStageResult?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; stage: LoopStage; ok: boolean; iteration: number; runPrefix: string }): void;
   /** A finished run's record was written (or held): the Factory bus runner reports it to the phone. */
   onRunFinished?(info: { runId: string; itemKey: string; projectRoot: string; mode: RunMode; statusCode: string; statusSummary: string }): void;
 }
@@ -385,6 +387,9 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     } else if (e.type === "stage-result") {
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = e.ok ? "passed" : "failed";
+      try {
+        d.onStageResult?.({ runId: run.live.runId, projectRoot: run.live.projectRoot, mode: run.live.mode, item: run.item, stage: e.stage, ok: e.ok, iteration: e.iteration, runPrefix: repoPrefixFor(run.live.projectRoot, info.worktree) });
+      } catch { /* a listener must not stop the run */ }
     } else if (e.type === "stage-skipped") {
       progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
       const row = progress.stages.find((r) => r.id === e.stage.id);
