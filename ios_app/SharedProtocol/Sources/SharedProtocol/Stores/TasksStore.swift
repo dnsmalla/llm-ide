@@ -1,34 +1,34 @@
 import Foundation
-import SharedProtocol
+import Combine
 
 /// Auto Tasks from the phone: the list comes from the desktop registry, `tasks.run` starts ONE registry task on
 /// the desktop, and `tasks.status` is polled until it ends. The phone never sends a command or prompt.
 @MainActor
-final class TasksStore: ObservableObject {
-    struct Run: Identifiable, Equatable {
-        let id: String
-        var status: String = "running"
-        var summary: String?
-        var output: String?
-        var error: String?
-        var taskLabel: String = ""
+public final class TasksStore: ObservableObject {
+    public struct Run: Identifiable, Equatable {
+        public let id: String
+        public var status: String = "running"
+        public var summary: String?
+        public var output: String?
+        public var error: String?
+        public var taskLabel: String = ""
     }
 
-    @Published private(set) var tasks: [HostApiTasksListResultTasksItem] = []
-    @Published private(set) var loading = false
-    @Published private(set) var error: String?
-    @Published private(set) var runs: [Run] = []
+    @Published public private(set) var tasks: [HostApiTasksListResultTasksItem] = []
+    @Published public private(set) var loading = false
+    @Published public private(set) var error: String?
+    @Published public private(set) var runs: [Run] = []
     private var polls: [String: Task<Void, Never>] = [:]
-    weak var connection: ConnectionService?
+    private weak var context: HostContext?
 
-    init(connection: ConnectionService) { self.connection = connection }
+    public init(context: HostContext) { self.context = context }
 
     private var host: HostConnection? {
-        guard connection?.connectionStatus == .connected else { return nil }
-        return connection?.host
+        guard context?.isConnected == true else { return nil }
+        return context?.host
     }
 
-    func refresh() async {
+    public func refresh() async {
         guard let host else { return }
         loading = true; error = nil
         do {
@@ -39,7 +39,7 @@ final class TasksStore: ObservableObject {
         loading = false
     }
 
-    func run(_ task: HostApiTasksListResultTasksItem, projectId: String?, args: [String: String] = [:]) async {
+    public func run(_ task: HostApiTasksListResultTasksItem, projectId: String?, args: [String: String] = [:]) async {
         guard let host else { return }
         error = nil
         do {
@@ -53,7 +53,7 @@ final class TasksStore: ObservableObject {
         }
     }
 
-    func cancel(_ run: Run) async {
+    public func cancel(_ run: Run) async {
         guard let host else { return }
         _ = try? await host.send(.tasksCancel, HostApiTasksCancelRequest(runId: run.id), as: HostApiTasksCancelResult.self)
         polls[run.id]?.cancel(); polls[run.id] = nil

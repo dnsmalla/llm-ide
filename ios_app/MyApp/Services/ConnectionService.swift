@@ -2,73 +2,6 @@ import Foundation
 import UIKit
 import SharedProtocol
 
-// MARK: — Shared chat value types
-
-/// One entry in the chat transcript. Owned by `LlmIdeChatStore`, rendered by `ChatBubble`.
-struct ChatMessage: Identifiable, Equatable {
-    /// STABLE across a history reload. The id used to be a fresh `UUID()` per
-    /// instance, and `loadSharedHistory()` replaces the whole array after every
-    /// completed reply — so identical content got a new identity each time and
-    /// SwiftUI tore down and rebuilt the entire transcript, losing the scroll
-    /// anchor. Server-derived turns key on (index, role, text); locally minted
-    /// ones keep a UUID, which is stable for their lifetime.
-    let id: String
-    let role: Role
-    var text: String
-    /// Optional image the user attached (shown as a thumbnail in the bubble).
-    var imageData: Data? = nil
-
-    enum Role { case user, assistant }
-
-    init(role: Role, text: String, imageData: Data? = nil) {
-        self.id = UUID().uuidString
-        self.role = role
-        self.text = text
-        self.imageData = imageData
-    }
-
-    /// A turn restored from the server transcript. `index` disambiguates two
-    /// identical messages in one conversation.
-    init(historyIndex index: Int, role: Role, text: String) {
-        self.id = "h\(index):\(role == .assistant ? "a" : "u"):\(text.hashValue)"
-        self.role = role
-        self.text = text
-        self.imageData = nil
-    }
-}
-
-// MARK: — Streaming-chat helpers
-
-/// Append the user turn + an empty assistant placeholder, and mint a commandId
-/// into the store's id set. Returns the commandId.
-@discardableResult
-func mintStreamingTurn(
-    messages: inout [ChatMessage],
-    commandIds: inout Set<String>,
-    userText: String,
-    imageData: Data? = nil
-) -> String {
-    messages.append(ChatMessage(role: .user, text: userText, imageData: imageData))
-    messages.append(ChatMessage(role: .assistant, text: ""))
-    let id = UUID().uuidString
-    commandIds.insert(id)
-    return id
-}
-
-func appendToLastAssistant(_ list: inout [ChatMessage], _ chunk: String) {
-    if let idx = list.lastIndex(where: { $0.role == .assistant }) {
-        list[idx].text += chunk
-    } else {
-        list.append(ChatMessage(role: .assistant, text: chunk))
-    }
-}
-
-func removeTrailingEmptyAssistant(_ list: inout [ChatMessage]) {
-    if let last = list.last, last.role == .assistant, last.text.isEmpty {
-        list.removeLast()
-    }
-}
-
 // MARK: — ConnectionService
 
 /// Owns the Host API v1 connection to the paired desktop (TLS-pinned `wss://`): connect, backoff,
@@ -81,7 +14,7 @@ final class ConnectionService: ObservableObject {
             // raised on the old connection can never be answered — a card left up would accept a tap
             // and look approved when nothing was.
             if connectionStatus != .connected, oldValue == .connected {
-                chatStores.forEach { $0.clearPendingPrompts() }
+                liveSinks.forEach { $0.clearPendingPrompts() }
             }
         }
     }
@@ -123,11 +56,14 @@ final class ConnectionService: ObservableObject {
         case disconnected, connecting, connected
     }
 
-    // Weak back-references to the stores (the app owns them via `@StateObject`).
-    weak var llmIdeStore: LlmIdeChatStore?
-    /// The Execute tab's own chat; it receives the same host events and keeps only the turns it started.
-    weak var executeStore: LlmIdeChatStore?
-    private var chatStores: [LlmIdeChatStore] { [llmIdeStore, executeStore].compactMap { $0 } }
+    /// Event consumers (the Ask and Execute chats register themselves). Weak: the app owns the stores.
+    private struct WeakSink { weak var value: HostEventSink? }
+    private var sinks: [WeakSink] = []
+    private var liveSinks: [HostEventSink] { sinks.compactMap(\.value) }
+    func registerSink(_ sink: HostEventSink) {
+        sinks.removeAll { $0.value == nil }
+        sinks.append(WeakSink(value: sink))
+    }
     weak var usageStore: UsageStore?
     weak var projectsStore: ProjectsStore?
     /// Set at app launch: the pairing (address, pin, token) and the host name.
@@ -259,29 +195,29 @@ final class ConnectionService: ObservableObject {
         case .capabilities(let caps):
             hostCapabilities = caps
             if !servesV1Read { reads.reset() }   // `read` revoked: clear what is on screen now
-            chatStores.forEach { $0.handle(event) }
+            liveSinks.forEach { $0.handle(event) }
             PushRegistrar.shared.hostReady()
         case .disconnected(let reason):
             if !reason.retryable { return handleRefusal(reason) }
             if errorMessage == nil { errorMessage = "Disconnected from the desktop. Retrying…" }
             // v1 has no replay: no event for a turn on the old session can arrive, so end them all now.
-            chatStores.forEach { $0.handleChatError() }
+            liveSinks.forEach { $0.handleChatError(commandId: nil) }
             invalidateSocket()
             connectionStatus = .disconnected
             scheduleReconnect(retryAfterMs: reason.retryAfterMs)
         case .resync:
-            chatStores.forEach { $0.handle(event) }
+            liveSinks.forEach { $0.handle(event) }
             projectsStore?.refresh()
             if servesV1Read { Task { await reads.refresh() } }
         case .event:
-            chatStores.forEach { $0.handle(event) }
+            liveSinks.forEach { $0.handle(event) }
         }
     }
 
     /// Wipe every mirrored surface so a newly paired host starts from a blank
     /// slate. Also the single place the "Forget" call sites use.
     func resetStoresForNewDevice() {
-        chatStores.forEach { $0.resetForNewDevice() }
+        liveSinks.forEach { $0.resetForNewDevice() }
         usageStore?.resetForNewDevice()
         projectsStore?.resetForNewDevice()
         reads.reset()
@@ -307,7 +243,7 @@ final class ConnectionService: ObservableObject {
         reconnectTask?.cancel()
         reconnectTask = nil
         if clearDirect { directIP = nil; directPIN = nil }
-        chatStores.forEach { $0.handleChatError() }
+        liveSinks.forEach { $0.handleChatError(commandId: nil) }
         invalidateSocket()
         connectionStatus = .disconnected
     }
@@ -342,4 +278,22 @@ final class ConnectionService: ObservableObject {
             self.connect(ip: ip, pin: pin)
         }
     }
+}
+
+// MARK: — Store context
+
+extension ConnectionService: ChatHostContext {
+    var isConnected: Bool { connectionStatus == .connected }
+    var selectedProjectId: String? { projectsStore?.selectedId }
+
+    /// The project a scoped frame should name, waiting for the first `projects.list` reply when the picker is
+    /// still loading. Without this the first snapshot/send went out with no project and ran under the team
+    /// grant even though a project was remembered. Offline keeps the seeded choice.
+    func scopedProjectId() async -> String? {
+        guard isConnected, let projects = projectsStore else { return selectedProjectId }
+        if !projects.state.loaded { projects.refresh() }
+        return await projects.projectIdForScopedFrame()
+    }
+
+    func noteProjectRefusal(_ error: Error) -> Bool { projectsStore?.noteRefusal(error) == true }
 }

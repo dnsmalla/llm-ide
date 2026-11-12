@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedProtocol
 
 @main
 struct MyAppApp: App {
@@ -24,14 +25,14 @@ struct MyAppApp: App {
         _connection = StateObject(wrappedValue: connection)
         PushRegistrar.shared.connection = connection
 
-        _llmIdeStore = StateObject(wrappedValue: LlmIdeChatStore(connection: connection))
-        _executeStore = StateObject(wrappedValue: ExecuteChatStore(connection: connection))
+        _llmIdeStore = StateObject(wrappedValue: LlmIdeChatStore(context: connection))
+        _executeStore = StateObject(wrappedValue: ExecuteChatStore(context: connection))
         _usageStore = StateObject(wrappedValue: UsageStore(connection: connection))
         _projectsStore = StateObject(wrappedValue: ProjectsStore(connection: connection, connectionStore: connectionStore))
         _syncStore = StateObject(wrappedValue: SyncStore())
         _sourceReadStore = StateObject(wrappedValue: SourceReadStore())
-        _tasksStore = StateObject(wrappedValue: TasksStore(connection: connection))
-        _loopStore = StateObject(wrappedValue: LoopStore(connection: connection))
+        _tasksStore = StateObject(wrappedValue: TasksStore(context: connection))
+        _loopStore = StateObject(wrappedValue: LoopStore(context: connection))
     }
 
     var body: some Scene {

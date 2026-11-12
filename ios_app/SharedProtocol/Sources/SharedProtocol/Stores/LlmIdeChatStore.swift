@@ -1,25 +1,25 @@
 import Foundation
-import SharedProtocol
+import Combine
 
-/// Transcript + send/handle logic for the Chat tab, spoken over `ConnectionService.host` (Host API v1).
-/// Holds a weak reference to the `ConnectionService`.
+/// Transcript + send/handle logic for the Chat tab, spoken over the connection's `host` (Host API v1).
+/// Holds a weak reference to its `ChatHostContext` (the app's `ConnectionService`).
 @MainActor
-class LlmIdeChatStore: ObservableObject {
+public class LlmIdeChatStore: ObservableObject {
     /// Transcript for the llm-ide chat sheet.
-    @Published var llmIdeMessages: [ChatMessage] = []
+    @Published public var llmIdeMessages: [ChatMessage] = []
     /// True while a streamed reply for THIS surface is in flight. Replaces the
     /// pre-refactor shared `llmStreaming` flag.
-    @Published var isStreaming: Bool = false
+    @Published public var isStreaming: Bool = false
     /// The question the agent is parked on, when it has asked one mid-turn.
     /// Rendered as tappable options under the transcript: answering is the
     /// fast path, and typing is for when none of them is what you mean.
     /// Nil whenever nothing is waiting on an answer.
-    @Published var pendingApproval: ApprovalRequest?
+    @Published public var pendingApproval: ApprovalRequest?
     /// A tool/edit permission prompt relayed from the host (only while it grants `tool_approvals`).
-    @Published var pendingToolApproval: ToolApprovalRequest?
+    @Published public var pendingToolApproval: ToolApprovalRequest?
     /// Why the last question went away without this phone answering it
     /// ("Answered on the desktop", "no longer open"). Shown once, then cleared.
-    @Published var approvalNotice: String?
+    @Published public var approvalNotice: String?
 
     /// Command ids whose streamed reply belongs to this transcript.
     private var llmIdeCommandIds: Set<String> = []
@@ -35,43 +35,35 @@ class LlmIdeChatStore: ObservableObject {
     /// Turns this store sent a cancel for, so the host's answering `error` is dropped rather than shown or
     /// applied to a newer turn. Removed when that error (or a done) arrives.
     private var cancelledCommandIds: Set<String> = []
+    /// How long Stop waits for the host's answering event before it frees the screen itself (tests shorten it).
+    public var cancelGraceNanos: UInt64 = 6_000_000_000
 
-    weak var connection: ConnectionService?
+    private weak var context: ChatHostContext?
 
     /// "ask" (the Chat tab) or "execute" (the Execute tab): each is its own chat on the desktop, with its own
     /// transcript, new-chat and delete. Only "execute" is named on the wire; the default keeps the legacy chat.
-    let surface: String
+    public let surface: String
     private var wireSurface: String? { surface == "execute" ? "execute" : nil }
 
-    init(connection: ConnectionService, surface: String = "ask") {
-        self.connection = connection
+    public init(context: ChatHostContext, surface: String = "ask") {
+        self.context = context
         self.surface = surface
-        // Register so ConnectionService can route this slice's `HostEvent`s here.
-        if surface == "execute" { connection.executeStore = self } else { connection.llmIdeStore = self }
+        // The connection routes its `HostEvent`s to every registered sink; this store keeps only its own turns.
+        context.registerSink(self)
     }
 
     /// The project every project-scoped frame names (ADR 0022); nil keeps the v1 team behavior.
-    private var selectedProjectId: String? { connection?.projectsStore?.selectedId }
+    private var selectedProjectId: String? { context?.selectedProjectId }
 
     /// Guards a snapshot reply so an older project's load cannot overwrite a newer selection's transcript.
     private var historyTicket = 0
 
-    /// The project a scoped frame should name, waiting for the first `projects.list` reply when the picker
-    /// is still loading. Without this the first snapshot/send went out with no project and ran under the
-    /// team grant even though a project was remembered. Offline keeps the seeded choice.
-    private func scopedProjectId() async -> String? {
-        guard connection?.connectionStatus == .connected, let projects = connection?.projectsStore else {
-            return selectedProjectId
-        }
-        if !projects.state.loaded { projects.refresh() }
-        return await projects.projectIdForScopedFrame()
-    }
+    /// The project a scoped frame should name (the context waits for the first `projects.list` reply).
+    private func scopedProjectId() async -> String? { await context?.scopedProjectId() }
 
     /// Send a refused frame's reason to the picker. A non-project error is left to the caller.
     @discardableResult
-    private func noteProjectRefusal(_ error: Error) -> Bool {
-        connection?.projectsStore?.noteRefusal(error) == true
-    }
+    private func noteProjectRefusal(_ error: Error) -> Bool { context?.noteProjectRefusal(error) == true }
 
     // MARK: — Send
 
@@ -81,15 +73,15 @@ class LlmIdeChatStore: ObservableObject {
     /// `files` carry text already extracted on-device (PDF/`.md`/`.txt`), never binary. Returns false only when
     /// the host's limits refuse the message before any turn starts; the caller then keeps the composer as is.
     @discardableResult
-    func sendLlmideChat(_ text: String, files: [ChatFileText] = [], mode: String? = nil) async -> Bool {
-        guard connection?.connectionStatus == .connected else {
-            connection?.errorMessage = "Not connected to the desktop — wait for Live status, then try again."
+    public func sendLlmideChat(_ text: String, files: [ChatFileText] = [], mode: String? = nil) async -> Bool {
+        guard context?.isConnected == true else {
+            context?.errorMessage = "Not connected to the desktop — wait for Live status, then try again."
             return true
         }
         // A send typed before projects.list replied still names the selected project (L4).
         let projectId = await scopedProjectId()
-        guard connection?.connectionStatus == .connected else {
-            connection?.errorMessage = "Not connected to the desktop — wait for Live status, then try again."
+        guard context?.isConnected == true else {
+            context?.errorMessage = "Not connected to the desktop — wait for Live status, then try again."
             return true
         }
         guard !isStreaming else { return false } // a second tap while the first waited for the list
@@ -97,7 +89,7 @@ class LlmIdeChatStore: ObservableObject {
         var request: HostApiChatSendRequest
         switch HostApiChatSendPolicy.request(text: text, files: files, projectId: projectId) {
         case .send(let r): request = r
-        case .refuse(let message): connection?.errorMessage = message; return false
+        case .refuse(let message): context?.errorMessage = message; return false
         }
         request.mode = mode ?? "ask"
         request.surface = wireSurface
@@ -108,7 +100,7 @@ class LlmIdeChatStore: ObservableObject {
         startStreamTimeout(for: id)
         Task { [weak self] in
             do {
-                _ = try await self?.connection?.host.send(.chatSend, request, id: id, as: HostApiChatSendResult.self)
+                _ = try await self?.context?.host.send(.chatSend, request, id: id, as: HostApiChatSendResult.self)
             } catch {
                 self?.chatSendFailed(id, error)
             }
@@ -123,26 +115,26 @@ class LlmIdeChatStore: ObservableObject {
         let local = HostApiChatNotices.disconnectsAfterSendFailure(error)
         if noteProjectRefusal(error) {
             handleChatError(commandId: id)
-            if local { connection?.disconnect() }
+            if local { context?.disconnect() }
             return
         }
-        connection?.errorMessage = r?.message ?? (local ? "Failed to encode chat message: \(error.localizedDescription)"
+        context?.errorMessage = r?.message ?? (local ? "Failed to encode chat message: \(error.localizedDescription)"
                                                          : "The desktop sent a reply this app could not read.")
         handleChatError(commandId: id)
-        if local { connection?.disconnect() }
+        if local { context?.disconnect() }
     }
 
     /// Load the host's shared chat transcript (`chat.snapshot`) for the selected project, after the first
     /// projects.list reply so the first frame names the project (L4).
-    func loadSharedHistory() {
-        guard connection?.connectionStatus == .connected else { return }
+    public func loadSharedHistory() {
+        guard context?.isConnected == true else { return }
         historyTicket += 1
         let ticket = historyTicket
         Task { [weak self] in
             guard let self else { return }
             let projectId = await self.scopedProjectId()
             do {
-                let result = try await self.connection?.host.send(
+                let result = try await self.context?.host.send(
                     .chatSnapshot, HostApiChatSnapshotRequest(limit: 50, projectId: projectId, surface: self.wireSurface),
                     as: HostApiChatSnapshotResult.self)
                 guard ticket == self.historyTicket else { return } // a newer project's load won
@@ -166,42 +158,42 @@ class LlmIdeChatStore: ObservableObject {
 
     /// The transcript is cleared only once the desktop confirms; a refusal leaves it on screen with the reason,
     /// instead of emptying it and having the next reload bring it back.
-    func clearLlmIdeChat() {
+    public func clearLlmIdeChat() {
         Task { [weak self] in
             guard let self else { return }
             do {
                 let request = HostApiChatHistoryClearRequest(projectId: self.selectedProjectId, surface: self.wireSurface)
-                if try await self.connection?.host.send(.chatHistoryClear, request,
+                if try await self.context?.host.send(.chatHistoryClear, request,
                                                         as: HostApiChatHistoryClearResult.self).cleared == true {
                     self.llmIdeMessages.removeAll()
                 } else {
-                    self.connection?.errorMessage = "The desktop did not clear that chat."
+                    self.context?.errorMessage = "The desktop did not clear that chat."
                 }
             } catch {
                 guard !self.noteProjectRefusal(error) else { return }
                 if let r = error as? HostApiRejection, r.code != "host_unreachable" {
-                    self.connection?.errorMessage = r.message
+                    self.context?.errorMessage = r.message
                 }
             }
         }
     }
 
     /// Start a fresh phone chat on the desktop and clear this transcript. The old chat stays in History.
-    func newChat() {
-        guard !isStreaming, let host = connection?.host else { return }
+    public func newChat() {
+        guard !isStreaming, let host = context?.host else { return }
         Task { [weak self] in
             do {
                 _ = try await host.send(.chatNew, HostApiChatNewRequest(surface: self?.wireSurface), as: HostApiChatNewResult.self)
                 self?.llmIdeMessages.removeAll()
                 self?.approvalNotice = nil
             } catch {
-                if let rejection = error as? HostApiRejection { self?.connection?.errorMessage = rejection.message }
+                if let rejection = error as? HostApiRejection { self?.context?.errorMessage = rejection.message }
             }
         }
     }
 
     /// Cancel the in-flight chat turn on the host.
-    func cancelStreaming() {
+    public func cancelStreaming() {
         // `Set.first` is nondeterministic — with two ids in flight Stop could
         // cancel the wrong turn. Track the live one explicitly.
         guard let id = currentCommandId else { return }
@@ -216,7 +208,7 @@ class LlmIdeChatStore: ObservableObject {
             var result: HostApiChatCancelResult?
             do {
                 let request = HostApiChatCancelRequest(projectId: self?.selectedProjectId)
-                result = try await self?.connection?.host.send(.chatCancel, request, as: HostApiChatCancelResult.self)
+                result = try await self?.context?.host.send(.chatCancel, request, as: HostApiChatCancelResult.self)
             } catch {
                 // Stop still ends the local turn even when the host refuses the project.
                 _ = self?.noteProjectRefusal(error)
@@ -230,7 +222,7 @@ class LlmIdeChatStore: ObservableObject {
             }
             // The host accepted the cancel but its answering event may never come (a turn parked on a prompt):
             // Stop must always free the screen, so end the turn here after a short grace.
-            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            try? await Task.sleep(nanoseconds: self.cancelGraceNanos)
             if self.currentCommandId == id { self.cancelledCommandIds.remove(id); self.handleChatError(commandId: id) }
         }
     }
@@ -245,7 +237,7 @@ class LlmIdeChatStore: ObservableObject {
     /// failure there is the host's to show — this surface cannot render a
     /// decision error usefully, and leaving a tappable question up after the
     /// answer was sent invites a second answer to a question that is gone.
-    func submitApproval(selection: [Int: Set<String>]) {
+    public func submitApproval(selection: [Int: Set<String>]) {
         guard let request = pendingApproval else { return }
         let answers = request.answers(from: selection)
         guard !answers.isEmpty else { return }
@@ -253,11 +245,11 @@ class LlmIdeChatStore: ObservableObject {
                                                    projectId: selectedProjectId, requestId: request.requestId)
         Task { [weak self] in
             guard let self else { return }
-            do { _ = try await self.connection?.host.send(.approvalsAnswer, answer, as: HostApiApprovalsAnswerResult.self) }
+            do { _ = try await self.context?.host.send(.approvalsAnswer, answer, as: HostApiApprovalsAnswerResult.self) }
             catch {
                 guard !self.noteProjectRefusal(error) else { return }
                 if let r = error as? HostApiRejection, r.code != "host_unreachable" {
-                    self.connection?.errorMessage = r.message
+                    self.context?.errorMessage = r.message
                 }
             }
         }
@@ -266,15 +258,15 @@ class LlmIdeChatStore: ObservableObject {
     }
 
     /// Drop any question / tool prompt: its turn is gone (connection lost or reset).
-    func clearPendingPrompts() {
+    public func clearPendingPrompts() {
         pendingApproval = nil
         pendingToolApproval = nil
     }
 
-    func submitToolApproval(allow: Bool) {
+    public func submitToolApproval(allow: Bool) {
         // A card left over from before the host withdrew `tool_approvals` never sends (see `.capabilities`).
         guard let request = pendingToolApproval else { return }
-        guard connection?.host.capabilities.contains(HostApiCommand.toolApprovalsAnswer.capability) == true else {
+        guard context?.host.capabilities.contains(HostApiCommand.toolApprovalsAnswer.capability) == true else {
             // Never leave a card whose buttons do nothing (Task 6 review M2).
             pendingToolApproval = nil
             approvalNotice = HostApiChatNotices.toolApprovalsOff
@@ -284,11 +276,11 @@ class LlmIdeChatStore: ObservableObject {
                                                        projectId: selectedProjectId, requestId: request.requestId)
         Task { [weak self] in
             guard let self else { return }
-            do { _ = try await self.connection?.host.send(.toolApprovalsAnswer, answer, as: HostApiToolApprovalsAnswerResult.self) }
+            do { _ = try await self.context?.host.send(.toolApprovalsAnswer, answer, as: HostApiToolApprovalsAnswerResult.self) }
             catch {
                 guard !self.noteProjectRefusal(error) else { return }
                 if let r = error as? HostApiRejection, r.code != "host_unreachable" {
-                    self.connection?.errorMessage = r.message
+                    self.context?.errorMessage = r.message
                 }
             }
         }
@@ -296,7 +288,7 @@ class LlmIdeChatStore: ObservableObject {
         approvalNotice = nil
     }
 
-    func handle(_ event: HostEvent) {
+    public func handle(_ event: HostEvent) {
         let d = JSONDecoder()
         switch event {
         case .event(.chatDelta, let payload, let replyTo?):
@@ -323,7 +315,7 @@ class LlmIdeChatStore: ObservableObject {
                 handleChatError()
             }
             if let e = try? d.decode(HostApiChatErrorEvent.self, from: payload), e.message != "Cancelled" {
-                connection?.errorMessage = e.message
+                context?.errorMessage = e.message
             }
         case .event(.approvalRequest, let payload, _):
             // Only this phone's own turn.
@@ -364,11 +356,11 @@ class LlmIdeChatStore: ObservableObject {
         }
     }
 
-    func ownsCommand(_ id: String) -> Bool { llmIdeCommandIds.contains(id) }
+    public func ownsCommand(_ id: String) -> Bool { llmIdeCommandIds.contains(id) }
 
     /// Re-attach image thumbnails the server transcript can't carry, matching
     /// on (role, text) from the most recent local turns.
-    static func preservingAttachments(from local: [ChatMessage],
+    public static func preservingAttachments(from local: [ChatMessage],
                                       into restored: [ChatMessage]) -> [ChatMessage] {
         guard local.contains(where: { $0.imageData != nil }) else { return restored }
         // Walk BOTH lists forward. Matching on (role, text) alone attached the
@@ -404,7 +396,7 @@ class LlmIdeChatStore: ObservableObject {
         loadSharedHistory()
     }
 
-    func handleChatError(commandId: String? = nil) {
+    public func handleChatError(commandId: String? = nil) {
         streamTimeoutTask?.cancel()
         isStreaming = false
         if let commandId {
@@ -427,7 +419,7 @@ class LlmIdeChatStore: ObservableObject {
 
     /// Blank slate for a newly paired host. Without this the previous machine's
     /// transcript stays on screen (and its in-flight ids stay routable).
-    func resetForNewDevice() {
+    public func resetForNewDevice() {
         streamTimeoutTask?.cancel()
         streamTimeoutTask = nil
         isStreaming = false
@@ -441,7 +433,7 @@ class LlmIdeChatStore: ObservableObject {
 
     /// Idle window: long, because the host sends no progress events to restart it while a tool runs or a
     /// question waits for an answer (Plan 4 decision 7).
-    static let idleSeconds: UInt64 = 960
+    public static let idleSeconds: UInt64 = 960
 
     private func startStreamTimeout(for commandId: String) {
         streamTimeoutTask?.cancel()
@@ -449,7 +441,7 @@ class LlmIdeChatStore: ObservableObject {
             try? await Task.sleep(nanoseconds: Self.idleSeconds * 1_000_000_000)
             guard !Task.isCancelled, let self else { return }
             guard self.llmIdeCommandIds.contains(commandId) else { return }
-            self.connection?.errorMessage =
+            self.context?.errorMessage =
                 "Timed out waiting for the desktop — check that LLM-IDE is running there."
             self.handleChatError(commandId: commandId)
             self.sendCancel(commandId)
@@ -459,6 +451,8 @@ class LlmIdeChatStore: ObservableObject {
 
 /// The Execute tab's chat: a distinct type so SwiftUI can hand the view its own store next to the Chat tab's.
 @MainActor
-final class ExecuteChatStore: LlmIdeChatStore {
-    init(connection: ConnectionService) { super.init(connection: connection, surface: "execute") }
+public final class ExecuteChatStore: LlmIdeChatStore {
+    public init(context: ChatHostContext) { super.init(context: context, surface: "execute") }
 }
+
+extension LlmIdeChatStore: HostEventSink {}

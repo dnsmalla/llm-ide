@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedProtocol
 import UIKit
 
 /// One chat bubble in a transcript. Renders the user/assistant turn, the
