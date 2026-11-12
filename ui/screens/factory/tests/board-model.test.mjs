@@ -3,11 +3,8 @@ import assert from "node:assert/strict";
 import {
   ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
-  manualShipRecord, shipRequestsFor, toWorkItem,
+  shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
-import { columnFor } from "../columns.ts";
-import { appendRunRecord } from "../../loop/native/history.ts";
-import { memFs } from "./mem-fs.mjs";
 
 const item = (key, over = {}) => ({ key, source: "issue", id: key.slice(6), title: `Title ${key}`, body: "", repo: null, addedAt: "2026-11-09T00:00:00.000Z", runIds: [], ...over });
 const live = (itemKey, projectRoot = "/p", state = "running") => ({ runId: `run-${itemKey.slice(6)}`, itemKey, projectRoot, mode: "full", state, startedAt: null, log: [] });
@@ -33,7 +30,9 @@ test("actionsFor readyToShip is openDiff, ship, discard", () => {
 });
 
 test("actionsFor needsYou with Interrupted is resume, discard", () => {
-  assert.deepEqual(actionsFor("needsYou", "Interrupted"), ["resume", "openDiff", "discard"]);
+  assert.deepEqual(actionsFor("needsYou", "Interrupted"), ["finishChecks", "rerun", "discard"]);
+  assert.equal(ACTION_LABELS.finishChecks, "Finish checks");
+  assert.equal(ACTION_LABELS.rerun, "Run again from start");
 });
 
 test("actionsFor covers every column and every action has a label", () => {
@@ -128,23 +127,6 @@ test("latestRecords reads the newest record per factory run id from the month in
   assert.equal(reads.includes("system/loop-runs/2026-10/e1.json"), false, "an older record of the same run is not loaded");
   assert.equal((await latestRecords(fs, new Set())).size, 0);
   assert.equal((await latestRecords({ async list() { throw new Error("gone"); }, async read() { throw new Error("gone"); } }, new Set(["r1"]))).size, 0);
-});
-
-test("a hand-approved ship of an unfinished run becomes the run's latest record and moves its card to Shipped", async () => {
-  const fs = memFs();
-  const ship = { provider: "gitlab", url: "https://gitlab.com/g/p/-/merge_requests/7", commit: "abc1234", reused: false };
-  const { entry, record } = manualShipRecord({
-    id: "ship-1", now: new Date("2026-11-12T09:00:00.000Z"), runId: "r1", mode: "full",
-    item: { source: "issue", id: "2", title: "Make buttons more colorful" },
-    info: { branch: "factory/r1", baseCommit: "0123456789abcdef", repo: "/p/code/app" }, ship,
-  });
-  await appendRunRecord(fs, entry, record);
-  const facts = (await latestRecords(fs, new Set(["r1"]))).get("r1");
-  assert.equal(facts.statusCode, "manual");
-  assert.equal(facts.ship.url, ship.url);
-  assert.equal(facts.reviewedPatchId, null, "no review is claimed for a hand-approved ship");
-  assert.equal(columnFor({ ...EMPTY_FACTS, lastRecord: facts, worktreeExists: true }).column, "shipped");
-  assert.match(record.statusSummary, /by hand/);
 });
 
 test("decodeWorktreeList keys run info by run id and drops bad rows", () => {

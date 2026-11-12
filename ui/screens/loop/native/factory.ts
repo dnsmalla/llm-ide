@@ -294,7 +294,7 @@ export function factoryStartRefusal(state: { running: boolean; starting: boolean
   return null;
 }
 
-export type RunMode = "full" | "intakeOnly" | "continue" | "sendBack";
+export type RunMode = "full" | "intakeOnly" | "continue" | "sendBack" | "check";
 export interface CiSummary { state: "none" | "pending" | "success" | "failed"; summary: string | null }
 export interface ReviewComment { author: string; body: string; at: string }
 
@@ -328,6 +328,8 @@ const MODE_ROLES: Record<Exclude<RunMode, "full">, readonly FactoryRole[]> = {
   intakeOnly: ["setup", "intake", "intakeGate"],
   continue: ["plan", "implement", "verify", "review", "reviewGate"],
   sendBack: ["implement", "verify", "review", "reviewGate"],
+  // An interrupted run's finished work: test and review it as it stands; only a failing check's repair edits code.
+  check: ["verify", "review", "reviewGate"],
 };
 
 /** The Factory loop's config narrowed to the stages one run mode runs. Never mutates `base`. */

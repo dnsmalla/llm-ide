@@ -16,16 +16,17 @@ const MAX_REVIEW_CHARS = 20_000;
 const HOST_MAX_DIFF_FILES = 1000;
 
 /**
- * Why a person may not approve shipping an unfinished run's diff themselves, or null when they may. They must be able
- * to see all of it, and CI/hook files stay behind the run's own guard (the server does not re-check them).
+ * Why a finished Factory run must stop for a person instead of opening its draft MR by itself, or null when it may ship.
+ * A person reviews every diff at the MR, so the MR must show all of it; CI/hook files stay behind the run's own guard
+ * (the server does not re-check them).
  */
-export function manualApprovalBlock(diff: WorktreeDiff | null): string | null {
-  if (!diff) return "Reading the diff…";
-  if (!diff.patchId || diff.files.length === 0) return "There are no changes to approve.";
+export function autoShipBlock(diff: WorktreeDiff | null): string | null {
+  if (!diff) return "The diff could not be read.";
+  if (!diff.patchId || diff.files.length === 0) return "The run changed nothing, so there is nothing to ship.";
   // The host cuts the file list at MAX_DIFF_FILES (loop_worktree.rs) without setting `truncated`; a full list may hide paths.
-  if (diff.truncated || diff.files.length >= HOST_MAX_DIFF_FILES) return "The diff is too large to show in full, so it cannot be approved by hand. Resume the run instead.";
+  if (diff.truncated || diff.files.length >= HOST_MAX_DIFF_FILES) return "The diff is too large to show in full, so it is not shipped automatically. Open diff to look at it.";
   const ci = diff.files.filter(isCiHookPath);
-  if (ci.length > 0) return `CI or hook files changed (${ci.slice(0, 3).join(", ")}${ci.length > 3 ? ", …" : ""}), so it cannot be approved by hand. Resume the run instead.`;
+  if (ci.length > 0) return `CI or hook files changed (${ci.slice(0, 3).join(", ")}${ci.length > 3 ? ", …" : ""}), so it is not shipped automatically.`;
   return null;
 }
 

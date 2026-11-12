@@ -58,7 +58,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       ) : view.actions.length > 0 ? (
         <div className="fx-actions">
           {view.actions.map((a) => (
-            <button key={a} type="button" className={a === "start" || a === "ship" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
+            <button key={a} type="button" className={a === "start" || a === "ship" || a === "finishChecks" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
               if (a === "discard") {
                 setConfirmDiscard(true);
                 setDiscardStatus(null);

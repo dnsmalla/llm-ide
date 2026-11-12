@@ -77,13 +77,22 @@ export async function putRunOnBoard(fs: ItemsFs, item: WorkItem, runId: string):
 }
 
 /** What Start, Run intake and Resume do with a card: a fresh run, a reuse of its worktree, or a continue after intake. */
-export function runPlanFor(action: "start" | "intake" | "resume", item: WorkItemRecord, facts: ItemFacts): { mode: RunMode; runId?: string } {
+export function runPlanFor(action: "start" | "intake" | "resume" | "finishChecks" | "rerun", item: WorkItemRecord, facts: ItemFacts): { mode: RunMode; runId?: string } {
   const last = item.runIds.at(-1) ?? null;
   const reusable = last !== null && facts.worktreeExists;
+  if (action === "finishChecks") return reusable ? { mode: "check", runId: last } : { mode: "full" };
   if (action === "intake") return reusable ? { mode: "intakeOnly", runId: last } : { mode: "intakeOnly" };
   const intakeReady = facts.lastRecord?.mode === "intakeOnly" && facts.lastRecord.statusCode === "success" && facts.lastRecord.runId === last;
-  if (action === "resume") return reusable ? { mode: intakeReady ? "continue" : "full", runId: last } : { mode: "full" };
+  if (action === "resume" || action === "rerun") return reusable ? { mode: intakeReady ? "continue" : "full", runId: last } : { mode: "full" };
   return reusable && intakeReady ? { mode: "continue", runId: last } : { mode: "full" };
+}
+
+/**
+ * Finish checks reviews work the interrupted run already did, so there must be some: changes in the worktree and the
+ * plan they implement. A run stopped before Plan or Implement would otherwise be reviewed as an empty diff.
+ */
+export function finishChecksAllowed(work: { changedFiles: number; hasPlan: boolean }): boolean {
+  return work.changedFiles > 0 && work.hasPlan;
 }
 
 /** The notice for a send, counting what was already there. */

@@ -259,6 +259,13 @@ test("configFor sendBack starts at Implement and its prompt names FEEDBACK.md", 
   assert.equal(c.stages.filter((s) => /FEEDBACK\.md/.test(s.prompt ?? "")).length, 1, "only Implement gets the line");
 });
 
+test("configFor check runs only Verify and Review on the work already in the worktree", () => {
+  const base = structuredClone(FACTORY_TEMPLATE.config);
+  const c = configFor("check", base);
+  assert.deepEqual(c.stages.map((s) => s.name), ["Verify", "Review", "Review gate"]);
+  assert.deepEqual(c.stages.map((s) => s.prompt), base.stages.filter((s) => ["Verify", "Review", "Review gate"].includes(s.name)).map((s) => s.prompt), "no prompt is changed");
+});
+
 test("configFor full keeps every stage, including a user-added one", () => {
   const base = structuredClone(FACTORY_TEMPLATE.config);
   base.stages.push({ ...base.stages[5], id: "user-lint", name: "Lint", kind: "codeGraph", command: null });

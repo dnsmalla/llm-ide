@@ -6,16 +6,17 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { createHostFs } from "../explorer/fs";
 import { invokeHost } from "../shell/host";
 import { core } from "../shell/runtime";
-import { appendRunRecord, setRunRecordShip } from "../loop/native/history.ts";
+import { setRunRecordShip } from "../loop/native/history.ts";
 import { LOOP_PAGE_NOTE, cancelRun, concurrency, liveRuns, setConcurrency, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
 import { installRunManagerHost } from "../loop/native/run-manager-host.ts";
 import { ShipPanel } from "../loop/native/ShipPanel.tsx";
+import { decodeWorktreeDiff } from "../loop/native/ship-model.ts";
 import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
-import { COLUMNS, COLUMN_LABELS, NOTE, columnFor, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, manualShipRecord, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
-import { listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
+import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { finishChecksAllowed, listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
 
@@ -236,7 +237,23 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     switch (action) {
       case "start":
       case "intake":
-      case "resume": {
+      case "finishChecks": {
+        const f = facts.get(item.key) ?? EMPTY_FACTS;
+        const runId = item.runIds.at(-1) ?? null;
+        const wt = runId ? worktrees.get(runId) : undefined;
+        void act(async () => {
+          const changed = runId && wt ? await invokeHost<unknown>("loop_worktree_diff", { runId }).then((raw) => decodeWorktreeDiff(raw).files.length, () => 0) : 0;
+          const hasPlan = wt ? await fs.read(`${repoPrefixFor(root, wt.worktree)}/.factory/PLAN.md`, 200_000).then((r) => r.status === "ok", () => false) : false;
+          const ok = finishChecksAllowed({ changedFiles: changed, hasPlan });
+          const plan = ok ? runPlanFor("finishChecks", item, f) : runPlanFor("resume", item, f);
+          if (!ok) setNotice("The run stopped before its work was written, so there is nothing to check yet. It resumes instead.");
+          const started = startRun(root, item, plan.mode, plan.runId ? { runId: plan.runId } : undefined);
+          if (!plan.runId) await attachRun(fs, item.key, started);
+        });
+        return;
+      }
+      case "resume":
+      case "rerun": {
         const plan = runPlanFor(action, item, facts.get(item.key) ?? EMPTY_FACTS);
         void act(async () => {
           const runId = startRun(root, item, plan.mode, plan.runId ? { runId: plan.runId } : undefined);
@@ -411,7 +428,6 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                 info={selInfo}
                 item={toWorkItem(selected)}
                 passed={selFacts?.lastRecord?.statusCode === "success"}
-                manualApproval={selFacts ? columnFor(selFacts).note === NOTE.interrupted : false}
                 reviewedPatchId={selFacts?.lastRecord?.reviewedPatchId ?? null}
                 requestProvider={selFacts?.lastRecord?.ship?.provider ?? null}
                 fs={fs}
@@ -419,19 +435,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                 onShipped={(r) => {
                   // Ship does not touch the run record; without this the card would stay in Ready to ship.
                   const entry = selFacts?.lastRecord?.entry ?? null;
-                  // An interrupted run has no finished record of its own: record the hand-approved ship and clear
-                  // the in-progress marker, which otherwise keeps the card in Needs you.
-                  const manual = selFacts?.interrupted === true || entry === null;
-                  const save = manual
-                    ? (async () => {
-                        const { entry: e, record } = manualShipRecord({ id: crypto.randomUUID(), now: new Date(), runId: selInfo.runId, mode: "full", item: { source: selected.source, id: selected.id, title: selected.title }, info: selInfo, ship: r });
-                        await appendRunRecord(fs, e, record);
-                        // A Resume started meanwhile owns the marker now (its crash detection); leave it.
-                        if (!liveRuns().some((l) => l.runId === selInfo.runId)) await fs.remove(`${repoPrefixFor(projectRoot, selInfo.worktree)}/.factory/RUN.json`).catch(() => undefined);
-                        return true;
-                      })()
-                    : setRunRecordShip(fs, entry, r);
-                  void save
+                  void (entry ? setRunRecordShip(fs, entry, r) : Promise.resolve(false))
                     .catch(() => false)
                     .then((ok) => { if (!ok) setError("Shipped, but the run record could not be updated, so the card may not move."); })
                     .then(() => loadFacts())

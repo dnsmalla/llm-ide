@@ -1,6 +1,6 @@
 // Pure Factory board logic: grouping, card actions, fact assembly and decoders for host and core answers. No React,
 // no host: the board's columns come from these facts every time it is read, and nothing here writes anything.
-import { loadRunRecord, type HistoryFs, type LoopRunIndexEntry } from "../loop/native/history.ts";
+import { loadRunRecord, type HistoryFs } from "../loop/native/history.ts";
 import type { WorkItem } from "../loop/native/factory.ts";
 import type { LiveRun } from "../loop/native/run-manager.ts";
 import { COLUMNS, NOTE, columnFor, decodeRunRecordFacts, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
@@ -10,7 +10,7 @@ export { factoryAnchor, focusKeyFromAnchor } from "./anchor.ts";
 
 export const STATUS_REFRESH_MS = 5 * 60 * 1000;
 export const SHIP_STATUS_BATCH = 20;
-export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "intake" | "answer";
+export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "finishChecks" | "rerun" | "intake" | "answer";
 export interface CardView {
   key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[];
   costUsd?: number | null; durationSeconds?: number | null; progressLabel?: string | null; lastLine?: string | null;
@@ -19,7 +19,7 @@ export interface CardView {
   readiness?: string | null;
   shipOverride?: { rule: string; file: string | null; line: number | null } | null;
 }
-export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", intake: "Run intake", answer: "Answer & continue" };
+export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Finish checks", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue" };
 export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> = { issue: "Issue", spec: "Spec", text: "Text" };
 export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeExists: false, ship: null, shipStatusError: false, lastKnownColumn: null };
 
@@ -30,8 +30,8 @@ export function actionsFor(column: Column, note: string | null): CardAction[] {
     case "needsDecision": return ["intake", "discard"];
     case "working": return [];
     case "needsYou":
-      // Open diff reaches the Ship panel, where a person may approve and ship the unfinished work themselves.
-      if (note === NOTE.interrupted) return ["resume", "openDiff", "discard"];
+      // Finish checks tests and reviews the work already done instead of rerunning the whole Loop.
+      if (note === NOTE.interrupted) return ["finishChecks", "rerun", "discard"];
       if (note === NOTE.ciFailed || note === NOTE.newComments || note === NOTE.ciFailedAndComments) return ["sendBack", "openRequest", "openDiff", "discard"];
       if (note === NOTE.closedUnmerged || note === NOTE.statusUnavailable) return ["openRequest", "discard"];
       return ["resume", "openDiff", "discard"];
@@ -206,30 +206,6 @@ export async function latestRecords(fs: HistoryFs, runIds: ReadonlySet<string>):
     if (facts && facts.runId === runId) out.set(runId, facts);
   }
   return out;
-}
-
-export interface ManualShipArgs {
-  id: string; now: Date; runId: string; mode: string;
-  item: { source: string; id: string | null; title: string };
-  info: { branch: string; baseCommit: string; repo: string };
-  ship: { provider: "github" | "gitlab"; url: string; commit: string; reused: boolean; secretOverride?: unknown };
-}
-
-/**
- * The run record for work a person approved and shipped although its run never finished (no review or test verdict).
- * Same index fields as a run-manager record, so it becomes the run's latest record and the card moves to Shipped;
- * `diffSummary` is absent on purpose, so no reviewed patch is ever claimed.
- */
-export function manualShipRecord(a: ManualShipArgs): { entry: LoopRunIndexEntry & { factoryRunId: string; factoryMode: string }; record: Record<string, unknown> } {
-  const at = a.now.toISOString();
-  const entry = { id: a.id, loopId: "factory", loopName: "Factory", startedAt: at, durationSeconds: 0, iterationsUsed: 0, statusCode: "manual", statusSummary: "Shipped by hand after the person checked the diff; the run did not finish review and tests.", trigger: "manual", factoryRunId: a.runId, factoryMode: a.mode };
-  const record = {
-    ...entry, endedAt: at, stages: [],
-    workItem: a.item,
-    worktree: { runId: a.runId, branch: a.info.branch, baseCommit: a.info.baseCommit, repo: a.info.repo },
-    ship: a.ship, needsDecision: null,
-  };
-  return { entry, record };
 }
 
 /** "2 runs live in other projects": the board shows only the open project's cards, never another project's. */

@@ -11,7 +11,7 @@ import { core } from "../../shell/runtime";
 import { readRepoConfig } from "../../settings/repo-config.ts";
 import type { WorkItem } from "./factory.ts";
 import { sensitiveChangedFiles } from "./protected.ts";
-import { decodeWorktreeDiff, decodeWorktreeStatus, diffLineKind, discardWarning, manualApprovalBlock, reviewedPatchIdWarning, shipBlockedReason, shipCopy, shipRequest, shipState, shipTarget, splitDiffByFile, type ShipResult, type WorktreeDiff, type WorktreeStatus } from "./ship-model.ts";
+import { decodeWorktreeDiff, decodeWorktreeStatus, diffLineKind, discardWarning, reviewedPatchIdWarning, shipBlockedReason, shipCopy, shipRequest, shipState, shipTarget, splitDiffByFile, type ShipResult, type WorktreeDiff, type WorktreeStatus } from "./ship-model.ts";
 import type { RunInfo } from "./worktree-run.ts";
 
 const PREVIEW_LINES = 400;
@@ -21,10 +21,8 @@ export interface ShipPanelProps {
   item: WorkItem;
   /** The diff the run end already read; when set the panel does not re-read on mount (the past-run path omits it). */
   initialDiff?: WorktreeDiff;
-  /** A passed run ships directly. Otherwise Ship is offered only when `manualApproval` is set and the person approves the shown diff. */
+  /** Ship is offered only after a passed run; Discard always. */
   passed: boolean;
-  /** An interrupted Factory run: the person may approve its finished work and ship it without rerunning the Loop. */
-  manualApproval?: boolean;
   /** The patch id the passing Review read (the run record's diffSummary.patchId), if that run recorded one. */
   reviewedPatchId?: string | null;
   /** The provider of the open PR/MR the run record knows about, if any: Discard leaves it and the remote branch alone. */
@@ -37,7 +35,7 @@ export interface ShipPanelProps {
   onClose(): void;
 }
 
-export function ShipPanel({ info, item, initialDiff, passed, manualApproval = false, reviewedPatchId = null, requestProvider = null, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
+export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = null, requestProvider = null, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
   const [diff, setDiff] = useState<WorktreeDiff | null>(initialDiff ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [review, setReview] = useState("");
@@ -62,11 +60,6 @@ export function ShipPanel({ info, item, initialDiff, passed, manualApproval = fa
   const blocked = target ? shipBlockedReason(config, target.provider) : "This repository is not in Settings → Repositories (with its clone folder), so it cannot be shipped from here.";
   const kind = target?.provider === "gitlab" ? "draft merge request" : "draft pull request";
   const staleReview = reviewedPatchIdWarning(reviewedPatchId, diff?.patchId ?? null);
-  // An unfinished run ships only on the person's own approval of THIS diff; a new diff needs approving again.
-  const [approved, setApproved] = useState(false);
-  useEffect(() => setApproved(false), [diff?.patchId]);
-  const approvalBlock = manualApprovalBlock(diff);
-  const canShip = passed || (manualApproval && approved && approvalBlock === null);
 
   useEffect(() => {
     if (!target || diff === null) return;
@@ -106,7 +99,7 @@ export function ShipPanel({ info, item, initialDiff, passed, manualApproval = fa
   }, [fs, info.runId, info.repo, info.project, runPrefix, initialDiff]);
 
   const ship = async (allowSecret = false) => {
-    if (!target || blocked || busy || !canShip) return;
+    if (!target || blocked || busy || !passed) return;
     const repo = { provider: target.provider, slug: target.slug, base: base.trim() };
     if (!repo.base) { setMessage({ severity: "warning", text: "Enter the target branch first." }); return; }
     setConfirming(null);
@@ -200,18 +193,8 @@ export function ShipPanel({ info, item, initialDiff, passed, manualApproval = fa
       </ul>
       {diff?.truncated ? <p className="loop-warn">The diff is too large to show in full. Ship commits every change, including the part not shown.</p> : null}
       {staleReview ? <p className="loop-warn" role="alert">{staleReview}</p> : null}
-      {!passed && !manualApproval ? <p className="loop-native-hint">Ship is offered only after a passed run. You can still discard this worktree.</p> : null}
-      {!passed && manualApproval ? (
-        <div className="loop-ship-approve" role="group" aria-label="Approve by hand">
-          <p className="loop-warn">This run did not finish review and tests. Ship only changes you have checked yourself.</p>
-          <label className="loop-inline">
-            <input type="checkbox" checked={approved} disabled={busy || approvalBlock !== null} aria-describedby={approvalBlock ? "loop-ship-approve-why" : undefined} onChange={(e) => setApproved(e.target.checked)} />
-            <span>I checked these changes and approve shipping them.</span>
-          </label>
-          {approvalBlock ? <p id="loop-ship-approve-why" className="loop-native-hint" role="status">{approvalBlock}</p> : null}
-        </div>
-      ) : null}
-      {canShip && blocked ? <p className="loop-warn">{blocked}</p> : null}
+      {!passed ? <p className="loop-native-hint">Ship is offered only after a passed run. You can still discard this worktree.</p> : null}
+      {passed && blocked ? <p className="loop-warn">{blocked}</p> : null}
       <label className="loop-field"><span>Target branch</span><input value={base} disabled={busy} onChange={(e) => setBase(e.target.value)} /></label>
       {requestProvider ? <p className="loop-native-hint">The existing draft keeps its text.</p> : (
         <>
@@ -227,7 +210,7 @@ export function ShipPanel({ info, item, initialDiff, passed, manualApproval = fa
       ) : null}
       {confirming === "ship" && target ? (
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm ship" ref={confirmRef}>
-          <p className="loop-warn">{`Ship ${info.branch} as a ${kind} to ${target.slug} (${target.provider}), into ${base.trim() || "(no target branch)"}? This commits the worktree changes (never .factory/), pushes ${info.branch} with your git credentials and opens a ${kind}. Nothing is merged.${passed ? "" : " No review or test passed for this diff: you are approving it yourself."}`}</p>
+          <p className="loop-warn">{`Ship ${info.branch} as a ${kind} to ${target.slug} (${target.provider}), into ${base.trim() || "(no target branch)"}? This commits the worktree changes (never .factory/), pushes ${info.branch} with your git credentials and opens a ${kind}. Nothing is merged.`}</p>
           <div className="loop-inline">
             <button type="button" className="loop-btn loop-btn-primary" disabled={busy} onClick={() => void ship()}>Confirm ship</button>
             <button type="button" className="loop-btn" disabled={busy} onClick={() => setConfirming(null)}>Cancel</button>
@@ -254,8 +237,8 @@ export function ShipPanel({ info, item, initialDiff, passed, manualApproval = fa
         </div>
       ) : null}
       <div className="loop-inline">
-        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !canShip || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} ref={opener} onClick={() => { lastOpener.current = opener.current; setConfirming("ship"); }}>{busy ? "Working…" : "Ship as draft…"}</button>
-        {secretHit && secretHit.hits.length > 0 ? <button type="button" className="loop-btn" disabled={busy || !canShip || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={(e) => { lastOpener.current = e.currentTarget; setConfirming("anyway"); }}>Ship anyway…</button> : null}
+        <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} ref={opener} onClick={() => { lastOpener.current = opener.current; setConfirming("ship"); }}>{busy ? "Working…" : "Ship as draft…"}</button>
+        {secretHit && secretHit.hits.length > 0 ? <button type="button" className="loop-btn" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={(e) => { lastOpener.current = e.currentTarget; setConfirming("anyway"); }}>Ship anyway…</button> : null}
         {shippedUrl ? <button type="button" className="loop-btn" onClick={() => { void invokeHost("open_external_url", { url: shippedUrl }).catch(() => undefined); }}>Open {kind}</button> : null}
         <button type="button" className="loop-btn" disabled={busy} onClick={(e) => { lastOpener.current = e.currentTarget; openDiscard(); }}>Discard…</button>
       </div>

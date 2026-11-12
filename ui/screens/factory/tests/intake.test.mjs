@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { memFs } from "./mem-fs.mjs";
 import { addItem, readItems } from "../items.ts";
-import { listSpecFiles, putRunOnBoard, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromSpec, workItemFromText } from "../intake.ts";
+import { finishChecksAllowed, listSpecFiles, putRunOnBoard, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromSpec, workItemFromText } from "../intake.ts";
 
 const NOW = new Date("2026-11-09T10:00:00.000Z");
 const issue = (n, over = {}) => ({ id: `gh-${n}`, provider: "github", repo: "acme/web", number: n, title: `Fix ${n}`, body: `Body ${n}`, url: `https://github.com/acme/web/issues/${n}`, ...over });
@@ -64,6 +64,21 @@ test("intake and resume reuse the card's worktree when it still exists", () => {
   // Resume of a card whose intake already passed continues after the Intake gate instead of re-running Intake and Plan.
   const ready = facts({ lastRecord: { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: null, endedAt: null, entry: null }, worktreeExists: true });
   assert.deepEqual(runPlanFor("resume", item, ready), { mode: "continue", runId: "r1" });
+});
+
+test("an interrupted run finishes its checks in its own worktree, or reruns from the start", () => {
+  const item = { ...workItemFromIssue(issue(5), NOW), runIds: ["r1"] };
+  assert.deepEqual(runPlanFor("finishChecks", item, facts({ worktreeExists: true })), { mode: "check", runId: "r1" });
+  assert.deepEqual(runPlanFor("finishChecks", item, facts()), { mode: "full" }, "no worktree left: nothing to check, start over");
+  assert.deepEqual(runPlanFor("rerun", item, facts({ worktreeExists: true })), { mode: "full", runId: "r1" });
+  const ready = facts({ lastRecord: { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: null, endedAt: null, entry: null }, worktreeExists: true });
+  assert.deepEqual(runPlanFor("rerun", item, ready), { mode: "continue", runId: "r1" }, "a passed intake is not redone");
+});
+
+test("Finish checks needs finished work to check; otherwise the run resumes", () => {
+  assert.equal(finishChecksAllowed({ changedFiles: 3, hasPlan: true }), true);
+  assert.equal(finishChecksAllowed({ changedFiles: 0, hasPlan: true }), false, "an empty diff would be reviewed as nothing");
+  assert.equal(finishChecksAllowed({ changedFiles: 3, hasPlan: false }), false, "stopped before Plan: no plan to review against");
 });
 
 test("specs come from llm-doc only, titled by their first heading", () => {

@@ -32,7 +32,7 @@ export const NOTE = {
 } as const;
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const RUN_MODES: readonly string[] = ["full", "intakeOnly", "continue", "sendBack"];
+const RUN_MODES: readonly string[] = ["full", "intakeOnly", "continue", "sendBack", "check"];
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function httpsUrl(v: unknown): string | null {
