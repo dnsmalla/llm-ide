@@ -7,6 +7,8 @@ struct ReadChatsView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var usageStore: UsageStore
     @EnvironmentObject var syncStore: SyncStore
+    @EnvironmentObject var llmIdeStore: LlmIdeChatStore
+    @EnvironmentObject var executeStore: ExecuteChatStore
     @State private var deleteTarget: HostApiChatSessionsResultSessionsItem?
 
     private var state: HostApiReadState { connection.readState }
@@ -33,6 +35,9 @@ struct ReadChatsView: View {
                 ForEach(state.sessions, id: \.id) { s in
                     if s.phoneChat == true {
                         row(s, live: true)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) { deleteTarget = s } label: { Label("Delete", systemImage: "trash") }
+                            }
                     } else {
                         NavigationLink { ReadChatHistoryView(id: s.id, title: s.title) } label: { row(s, live: false) }
                             .accessibilityHint("Opens this chat read-only")
@@ -57,7 +62,13 @@ struct ReadChatsView: View {
             set: { if !$0 { deleteTarget = nil } }
         ), titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                if let target = deleteTarget { Task { await connection.reads.delete(id: target.id) } }
+                if let target = deleteTarget {
+                    Task {
+                        await connection.reads.delete(id: target.id)
+                        // A deleted Ask/Execute chat must not linger on its tab.
+                        llmIdeStore.loadSharedHistory(); executeStore.loadSharedHistory()
+                    }
+                }
                 deleteTarget = nil
             }
             Button("Cancel", role: .cancel) { deleteTarget = nil }

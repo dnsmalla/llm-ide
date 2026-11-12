@@ -67,6 +67,8 @@ public final class HostApiReadController {
     private var ticket = 0      // the open chat's request generation: a reply for an older open() is dropped
     private var generation = 0  // bumped by reset(): every reply from before a disconnect is dropped
     private var moreBusy = false
+    /// Chats this phone deleted: a list reply that was already in flight must not bring one back. Cleared on reset.
+    private var deleted = Set<String>()
     /// The project every read names (API 128); nil keeps the legacy/global (no-project) list.
     private let projectId: () -> String?
 
@@ -79,7 +81,7 @@ public final class HostApiReadController {
         await run(.chatSessions,
                   HostApiChatSessionsRequest(limit: Self.sessionsPage, projectId: projectId()),
                   as: HostApiChatSessionsResult.self) { s, r in
-            s.sessions = r.sessions; s.nextOffset = r.nextOffset
+            s.sessions = r.sessions.filter { !deleted.contains($0.id) }; s.nextOffset = r.nextOffset
         }
     }
 
@@ -103,7 +105,7 @@ public final class HostApiReadController {
         await run(.chatSessions, HostApiChatSessionsRequest(limit: Self.sessionsPage, offset: offset, projectId: projectId()),
                   as: HostApiChatSessionsResult.self) { s, r in
             let seen = Set(s.sessions.map(\.id))
-            s.sessions = Array((s.sessions + r.sessions.filter { !seen.contains($0.id) }).prefix(Self.maxSessions))
+            s.sessions = Array((s.sessions + r.sessions.filter { !seen.contains($0.id) && !deleted.contains($0.id) }).prefix(Self.maxSessions))
             // At the memory cap there is nothing more to show, so "more" goes away.
             s.nextOffset = s.sessions.count >= Self.maxSessions ? nil : r.nextOffset
         }
@@ -137,6 +139,7 @@ public final class HostApiReadController {
         do {
             let r = try await h.send(.chatDelete, HostApiChatDeleteRequest(sessionId: id), as: HostApiChatDeleteResult.self)
             guard r.deleted else { state.error = "That chat was not found."; return }
+            deleted.insert(id)
             state.sessions.removeAll { $0.id == id }
             if state.open?.id == id { state.open = nil }
         } catch {
@@ -156,6 +159,7 @@ public final class HostApiReadController {
         generation += 1
         ticket += 1
         moreBusy = false
+        deleted.removeAll()
         state = HostApiReadState()
     }
 

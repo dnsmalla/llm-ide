@@ -164,8 +164,9 @@ class LlmIdeChatStore: ObservableObject {
         llmIdeMessages = Self.preservingAttachments(from: llmIdeMessages, into: restored)
     }
 
+    /// The transcript is cleared only once the desktop confirms; a refusal leaves it on screen with the reason,
+    /// instead of emptying it and having the next reload bring it back.
     func clearLlmIdeChat() {
-        llmIdeMessages.removeAll()
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -173,6 +174,8 @@ class LlmIdeChatStore: ObservableObject {
                 if try await self.connection?.host.send(.chatHistoryClear, request,
                                                         as: HostApiChatHistoryClearResult.self).cleared == true {
                     self.llmIdeMessages.removeAll()
+                } else {
+                    self.connection?.errorMessage = "The desktop did not clear that chat."
                 }
             } catch {
                 guard !self.noteProjectRefusal(error) else { return }
