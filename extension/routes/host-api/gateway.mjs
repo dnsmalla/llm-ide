@@ -108,6 +108,7 @@ const agentV2 = () => import('../agent-v2.mjs');
 const chatSessions = () => import('../../kb/chat-sessions.mjs');
 export const OUTCOME_TTL_MS = 10 * 60_000; // a detached turn's finished outcome stays resumable this long
 export const OUTCOME_MAX_PER_USER = 20;
+export const DETACH_GRACE_MS = 5 * 60_000; // a detached turn nobody resumes in this time is cancelled (old clients never resume)
 const RESUME_TEXT_MAX = 100_000;
 const pushModule = () => import('./push.mjs'); // Task 6; lazy, off the boot path
 
@@ -334,6 +335,12 @@ export function createGateway(overrides) {
       if (o.session !== session || o.zombie) continue;
       o.session = null;
       o.translator.discardPending();
+      clearTimeout(o.detachTimer);
+      o.detachTimer = setTimeout(() => {
+        if (o.session || o.zombie || owned.get(o.iid) !== o) return;
+        requestCancel(o); // not zombie: the cancelled outcome is still kept for a late resume
+      }, deps.detachGraceMs ?? DETACH_GRACE_MS);
+      o.detachTimer.unref?.();
     }
   }
 
@@ -357,8 +364,8 @@ export function createGateway(overrides) {
     for (const [k, v] of mine) if (now - v.at > OUTCOME_TTL_MS) mine.delete(k);
     mine.delete(o.external);
     mine.set(o.external, last.command === 'chat.done'
-      ? { deviceId: o.deviceId, state: 'done', text: o.translator.text(), ...(last.payload.stopReason ? { stopReason: last.payload.stopReason } : {}), at: now }
-      : { deviceId: o.deviceId, state: 'error', text: o.translator.text(), message: last.payload.message, at: now });
+      ? { deviceId: o.deviceId, state: 'done', ...tail(o.translator.text()), ...(last.payload.stopReason ? { stopReason: last.payload.stopReason } : {}), at: now }
+      : { deviceId: o.deviceId, state: 'error', ...tail(o.translator.text()), message: last.payload.message, at: now });
     while (mine.size > OUTCOME_MAX_PER_USER) mine.delete(mine.keys().next().value);
   }
 
@@ -374,6 +381,7 @@ export function createGateway(overrides) {
     const o = [...owned.values()].find((x) => x.userId === userId && x.deviceId === deviceId && x.external === p.requestId && !x.zombie);
     if (o) {
       o.session = s;
+      clearTimeout(o.detachTimer);
       o.translator.discardPending(); // the response carries the full text
       respond(s, id, 'chat.resume', { state: 'running', ...tail(o.translator.text()) });
       for (const e of o.pending.values()) sendEvent(s, e.command, e.payload, o.external);
@@ -381,7 +389,7 @@ export function createGateway(overrides) {
     }
     const k = outcomes.get(userId)?.get(p.requestId);
     if (!k || k.deviceId !== deviceId || deps.now() - k.at > OUTCOME_TTL_MS) return respond(s, id, 'chat.resume', { state: 'unknown' });
-    return respond(s, id, 'chat.resume', { state: k.state, ...tail(k.text), ...(k.stopReason ? { stopReason: k.stopReason } : {}), ...(k.message ? { message: k.message } : {}) });
+    return respond(s, id, 'chat.resume', { state: k.state, text: k.text, ...(k.truncated ? { truncated: true } : {}), ...(k.stopReason ? { stopReason: k.stopReason } : {}), ...(k.message ? { message: k.message } : {}) });
   }
 
   // Per-member cap (ADR 0021 hub): count only this member's authenticated connections.
@@ -544,7 +552,7 @@ export function createGateway(overrides) {
 
   function startTurn(s, entry, id, p, chatSessionId) {
     const iid = internalId(entry.num, id);
-    const o = { session: s, external: id, cancelRequested: false, started: false, zombie: false, userId: entry.state.userId, deviceId: entry.state.deviceId, chatSessionId,
+    const o = { session: s, iid, detachTimer: null, external: id, cancelRequested: false, started: false, zombie: false, userId: entry.state.userId, deviceId: entry.state.deviceId, chatSessionId,
       translator: null, sdkSessionId: null, open: new Set(), pending: new Map(), reply: '', saved: Promise.resolve() };
     // The coalescing timer fires between engine events; a detached turn sends nothing.
     o.translator = createTranslator({ external: id, onFlush: (events) => {
@@ -561,12 +569,12 @@ export function createGateway(overrides) {
     const push = (ev) => {
       if (owned.get(iid) !== o || o.zombie) return;
       const t = o.translator.push(ev, { cancelledByClient: o.cancelRequested });
-      if (t.terminal) owned.delete(iid);
+      if (t.terminal) { owned.delete(iid); clearTimeout(o.detachTimer); keepOutcome(o, t.events); }
       for (const e of t.events) {
         if (e.command === 'approval.request' || e.command === 'toolApproval.request') o.pending.set(e.payload.requestId, e);
         else if (e.command === 'approval.cleared') o.pending.delete(e.payload.requestId);
       }
-      if (!o.session) { if (t.terminal) keepOutcome(o, t.events); return; }
+      if (!o.session) return;
       for (const e of t.events) sendEvent(o.session, e.command, e.payload, id);
     };
     // Runs inside the engine's event callback: a throw here must never fail the turn.
@@ -602,7 +610,7 @@ export function createGateway(overrides) {
         push({ type: 'error', message, retryable: RETRYABLE.has(code) });
       })
       .catch((e) => deps.log(`Host API v1 turn end failed (${e?.code ?? 'error'})`))
-      .finally(() => { o.translator.dispose(); if (owned.get(iid) === o) owned.delete(iid); });
+      .finally(() => { o.translator.dispose(); clearTimeout(o.detachTimer); if (owned.get(iid) === o) owned.delete(iid); });
   }
 
   async function answer(s, entry, id, p, action, extra) {
@@ -988,7 +996,9 @@ export function createGateway(overrides) {
         return respond(s, id, command, optionsOf(await modelsFor(userId), executeAllowed(entry) && toolApprovalsUsable(entry)));
       }
       case 'chat.cancel': {
-        const mine = [...owned.values()].filter((o) => o.session === s && !o.zombie);
+        // Also this device's detached turns: an old client never resumes, so cancel is its only way to stop one.
+        const mine = [...owned.values()].filter((o) => !o.zombie && (o.session === s
+          || (o.session === null && o.userId === userId && o.deviceId === entry.state.deviceId)));
         for (const o of mine) requestCancel(o);
         return respond(s, id, command, { cancelled: mine.length > 0 });
       }

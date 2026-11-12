@@ -8,7 +8,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
-function harness({ toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null, pinUser = () => 'u1', member = () => ({ teamRole: 'owner', maxMode: 'execute' }), projectRequired = false } = {}) {
+function harness({ detachGraceMs, toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null, pinUser = () => 'u1', member = () => ({ teamRole: 'owner', maxMode: 'execute' }), projectRequired = false } = {}) {
   const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, readCalls: [], pending: [], audits: [], modelCalls: 0, member, skew: 0 };
   const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
@@ -30,6 +30,7 @@ function harness({ toolApprovals = false, chatClear = false, hold = false, skipI
     member: (userId) => t.member(userId),
     projectRequired: () => projectRequired,
     now: () => Date.now() + t.skew,
+    ...(detachGraceMs != null ? { detachGraceMs } : {}),
     log: () => {},
     chatClearEnabled: () => chatClear,
     pins: { consumePin: (pin) => (pin === '123456' ? pinUser() : null) },
@@ -1044,4 +1045,64 @@ test('revoking the device cancels its detached turn and drops its outcomes', asy
   t.g.disconnectDevice('u1', 'h1-dev1');
   assert.deepEqual(t.cancelled, [['u1', 'chat-1']]);
   t.pending[0]();
+});
+
+test('a detached turn nobody resumes within the grace is cancelled; resuming clears the timer', async () => {
+  const t = harness({ hold: true, detachGraceMs: 30 });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'go' }));
+  t.g.closed(s1);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.deepEqual(t.cancelled, [['u1', 'chat-1']], 'grace expired');
+  t.pending[0]();
+  await flush();
+  const t2 = harness({ hold: true, detachGraceMs: 30 });
+  const a = { n: 1 };
+  await t2.paired(a);
+  await t2.g.receive(a, req('c-1', 'chat.send', { text: 'go' }));
+  t2.g.closed(a);
+  const b = { n: 2 };
+  await reconnect(t2, b, tokenOf(t2));
+  await t2.g.receive(b, req('r-1', 'chat.resume', { requestId: 'c-1' }));
+  await new Promise((r) => setTimeout(r, 80));
+  assert.deepEqual(t2.cancelled, [], 'resumed: no cancel');
+  t2.pending[0]();
+});
+
+test('chat.cancel from a fresh connection cancels this device\'s detached turn, not another device\'s', async () => {
+  const t = harness({ hold: true });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'go' }));
+  t.g.closed(s1);
+  const other = { n: 2 };
+  await t.paired(other); // second device, same user
+  await t.g.receive(other, req('x-0', 'chat.cancel'));
+  assert.deepEqual(t.last().result, { cancelled: false });
+  const s2 = { n: 3 };
+  await reconnect(t, s2, [...t.tokens.keys()][0]);
+  await t.g.receive(s2, req('x-1', 'chat.cancel'));
+  assert.deepEqual(t.last().result, { cancelled: true });
+  assert.deepEqual(t.cancelled, [['u1', 'chat-1']]);
+  t.pending[0]();
+});
+
+test('a turn that ends while attached keeps its outcome (half-open socket), tail-capped with truncated', async () => {
+  const t = harness({ hold: true });
+  const s1 = { n: 1 };
+  await t.paired(s1);
+  await t.g.receive(s1, req('c-1', 'chat.send', { text: 'go' }));
+  t.turns[0].onEvent({ type: 'delta', text: 'x'.repeat(100_005) });
+  t.turns[0].onEvent({ type: 'result', stopReason: 'end_turn' });
+  t.g.closed(s1);
+  t.pending[0]();
+  await flush();
+  const s2 = { n: 2 };
+  await reconnect(t, s2, tokenOf(t));
+  await t.g.receive(s2, req('r-1', 'chat.resume', { requestId: 'c-1' }));
+  const r = t.last().result;
+  assert.equal(r.state, 'done');
+  assert.equal(r.text.length, 100_000);
+  assert.equal(r.truncated, true);
 });
