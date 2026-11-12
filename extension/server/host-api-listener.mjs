@@ -15,6 +15,11 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
  *  (the gateway's 4-session cap and 10 s auth timeout only start after the upgrade). */
 export const LISTENER_LIMITS = Object.freeze({ handshakeTimeoutMs: 10_000, maxConnections: 32, requestTimeoutMs: 10_000 });
 
+/** Liveness: every open connection is pinged this often, and closed once nothing (pong or frame) arrived for
+ *  LIVENESS_MISSED_INTERVALS intervals, so a peer gone without a FIN (phone off Wi-Fi) frees its gateway session. */
+export const LIVENESS_PING_MS = 30_000;
+export const LIVENESS_MISSED_INTERVALS = 2;
+
 export const sessionTransport = {
   send: (s, text) => { try { s.conn.send(text); } catch { /* closed */ } },
   close: (s) => { try { s.conn.close(1000); } catch { /* closed */ } },
@@ -61,7 +66,7 @@ function listenOn(server, port, host) {
 }
 
 export async function startHostApiListener({ gateway, tls = null, hub = false, basePort = 3016, candidates = 10, log = () => {},
-  onRefused = () => {}, originAllowlist = config.hostApiWebOrigins, limits = LISTENER_LIMITS }) {
+  onRefused = () => {}, originAllowlist = config.hostApiWebOrigins, limits = LISTENER_LIMITS, pingIntervalMs = LIVENESS_PING_MS }) {
   let nextId = 0;
   const live = new Set();
   const notFound = (req, res) => { res.writeHead(404, { 'Content-Length': 0 }).end(); };
@@ -86,6 +91,19 @@ export async function startHostApiListener({ gateway, tls = null, hub = false, b
     });
   }
 
+  const liveness = setInterval(() => {
+    const now = Date.now();
+    for (const c of live) {
+      if (now - c.lastHeard >= LIVENESS_MISSED_INTERVALS * pingIntervalMs) {
+        log('Host API v1 connection silent past its ping deadline — closing');
+        try { c.close(1001); } catch { /* closed */ }
+      } else {
+        try { c.ping(); } catch { /* closed */ }
+      }
+    }
+  }, pingIntervalMs);
+  liveness.unref();
+
   server.on('upgrade', (req, socket, head) => {
     socket.on('error', () => {});
     const why = upgradeRefusal(req, { tls: !!tls, hub, allowlist: originAllowlist });
@@ -106,7 +124,7 @@ export async function startHostApiListener({ gateway, tls = null, hub = false, b
   let port = null;
   for (let i = 0; i < candidates && port === null; i++) {
     try { port = await listenOn(server, basePort === 0 ? 0 : basePort + i, host); } catch (e) {
-      if (e.code !== 'EADDRINUSE' || i === candidates - 1) throw e;
+      if (e.code !== 'EADDRINUSE' || i === candidates - 1) { clearInterval(liveness); throw e; }
     }
   }
   log(`Host API v1 listener (${tls ? 'TLS' : 'development plaintext'}) on ${host}:${port}`);
@@ -114,6 +132,7 @@ export async function startHostApiListener({ gateway, tls = null, hub = false, b
     port,
     address: host,
     close: () => new Promise((resolve) => {
+      clearInterval(liveness);
       for (const c of live) { try { c.close(1001); } catch { /* closed */ } }
       server.close(() => resolve());
       server.closeAllConnections?.();

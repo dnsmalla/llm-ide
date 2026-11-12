@@ -61,7 +61,7 @@ const bus = createBus({
 
 function gatewayFor(
   userId,
-  { member = { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 }, withBus = true } = {},
+  { member = { teamRole: 'owner', maxMode: 'execute', usdCapMonth: 0 }, withBus = true, chatClear = true } = {},
 ) {
   const sent = [];
   const g = createGateway({
@@ -71,7 +71,7 @@ function gatewayFor(
     capabilities: () => ['host', 'chat', 'approvals', 'read', 'compose'],
     member: () => member,
     projectRequired: () => false,
-    chatClearEnabled: () => true,
+    chatClearEnabled: () => chatClear,
     bus: () => (withBus ? bus : null),
     projectScope: () => ({ allowed: () => true }),
     pins: { consumePin: (pin) => (pin === '123456' ? userId : null) },
@@ -203,7 +203,11 @@ test('chat.delete removes a chat from chat.sessions for good', async () => {
       .sort(),
     [keep, gone].sort(),
   );
-  await g.ask('d-2', 'chat.delete', { sessionId: gone });
+  // Scoped like chat.history: a chat is deletable only under the projectId chat.sessions listed it for.
+  await g.ask('d-x', 'chat.delete', { sessionId: gone });
+  assert.equal(g.last().error?.code, 'denied', JSON.stringify(g.last()));
+  assert.match(g.last().error.message, /PROJECT_MISMATCH/);
+  await g.ask('d-2', 'chat.delete', { sessionId: gone, projectId: 'p-alpha' });
   assert.deepEqual(g.last().result, { deleted: true });
   await new Promise((r) => setTimeout(r, 50));
   await g.ask('d-3', 'chat.sessions', { projectId: 'p-alpha' });
@@ -261,4 +265,18 @@ test('loop.history reads the desktop Loop journal newest first and survives a mi
       ['a', 'success'],
     ],
   );
+});
+
+test('chat.delete: refused while clear/delete is off; an unknown chat is deleted:false', async () => {
+  const chats = await import('../kb/chat-sessions.mjs');
+  const id = chats.createChatSession(owner, { title: 'stay', surface: 'any', mode: 'agent', projectId: 'p-alpha' }).id;
+  const off = gatewayFor(owner, { chatClear: false });
+  await off.open();
+  await off.ask('x-1', 'chat.delete', { sessionId: id, projectId: 'p-alpha' });
+  assert.equal(off.last().error?.code, 'denied', JSON.stringify(off.last()));
+  assert.ok(chats.getChatSession(owner, id), 'nothing deleted');
+  const on = gatewayFor(owner);
+  await on.open();
+  await on.ask('x-2', 'chat.delete', { sessionId: 'no-such-chat', projectId: 'p-alpha' });
+  assert.deepEqual(on.last().result, { deleted: false });
 });

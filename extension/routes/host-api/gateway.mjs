@@ -231,6 +231,12 @@ async function internalTaskRequest(userId, path, init, signal) {
   return out.body;
 }
 
+// Expired jobs are swept on every insert too, so a device that runs tasks and never asks for their status
+// cannot grow the map without bound.
+function sweepTaskJobs(now = Date.now()) {
+  for (const [key, job] of taskJobs) if (now - job.startedAt > TASK_JOB_TTL_MS) taskJobs.delete(key);
+}
+
 function taskJobFor(deviceId, runId) {
   const key = `${deviceId}:${runId}`;
   const job = taskJobs.get(key);
@@ -447,6 +453,18 @@ export function createGateway(overrides) {
     return Boolean(m) && m.teamRole !== 'viewer' && m.maxMode !== 'read_only' && m.maxMode !== 'none';
   }
 
+  // Execute parks on tool-approval prompts: without `tool_approvals` (served ∩ granted) the phone could never
+  // answer them, so the turn would hang. Same refusal shape as composeRefused.
+  const toolApprovalsUsable = (entry) => entry.grants?.has('tool_approvals') && deps.capabilities().includes('tool_approvals');
+  function executeRefused(s, entry, id) {
+    if (toolApprovalsUsable(entry)) return false;
+    if (!deps.capabilities().includes('tool_approvals')) { fail(s, id, 'capability_unavailable', 'This computer does not serve tool approvals right now, so Execute cannot run from here.'); return true; }
+    const { userId: u, deviceId: d } = entry.state;
+    audit('scope_denied', { peer: entry.peer, userId: u, deviceId: d, detail: 'tool_approvals', dedupeKey: `${d}:tool_approvals` });
+    fail(s, id, 'denied', 'This device was not granted tool approvals — pair again to grant it.');
+    return true;
+  }
+
   function composeRefused(s, entry, id) {
     if (entry.grants?.has('compose') && deps.capabilities().includes('compose')) return false;
     if (!deps.capabilities().includes('compose')) { fail(s, id, 'capability_unavailable', 'This computer does not serve compose right now.'); return true; }
@@ -633,7 +651,9 @@ export function createGateway(overrides) {
         const served2 = minimalFor(deps.member(pinUser), served);
         // The device is granted exactly what is served now; a capability turned on later needs a re-pair.
         const scopes = [...new Set(['host', ...served2])];
-        const { deviceId, token } = deps.devices.issueDeviceToken(pinUser, entry.state.phase.clientName, deps.now(), scopes);
+        const { deviceId, token, evicted } = deps.devices.issueDeviceToken(pinUser, entry.state.phase.clientName, deps.now(), scopes);
+        // A device pushed out by the per-user device cap is unpaired: its live sockets end like a revoke.
+        for (const old of evicted ?? []) disconnectDevice(pinUser, old);
         entry.state.authenticated(pinUser, deviceId);
         entry.state.pairedAt = deps.now();
         clearTimeout(entry.timer);
@@ -649,6 +669,18 @@ export function createGateway(overrides) {
           return fail(s, id, 'auth_failed', 'This device is no longer paired with this computer — pair again with a new PIN.');
         }
         tokenThrottle.success(entry.peer);
+        // A device reconnecting supersedes its own older sockets once the member is at the cap: a phone that lost
+        // Wi-Fi without a FIN must not hold slots until every reconnect is `busy`. Only at the cap, so two live tabs
+        // sharing one web token do not evict each other in a reconnect loop. Closed silently: an error frame such
+        // as auth_failed could make a client forget its token.
+        if (userSessionCount(auth.userId) >= MAX_SESSIONS_PER_USER) {
+          for (const [other, e] of [...sessions]) {
+            if (other === s || e.state.userId !== auth.userId || e.state.deviceId !== auth.deviceId) continue;
+            audit('session_replaced', { peer: e.peer, userId: auth.userId, deviceId: auth.deviceId, dedupeKey: `${auth.deviceId}:replaced` });
+            deps.close(other);
+            closed(other);
+          }
+        }
         if (userSessionCount(auth.userId) >= MAX_SESSIONS_PER_USER) return refuseUserCap(s, entry, id, auth.userId, 'token_failed');
         entry.state.authenticated(auth.userId, auth.deviceId);
         entry.state.pairedAt = auth.pairedAt;
@@ -723,6 +755,7 @@ export function createGateway(overrides) {
         const deviceId = entry.state.deviceId;
         const controller = new AbortController();
         const key = `${deviceId}:${runId}`;
+        sweepTaskJobs();
         taskJobs.set(key, { runId, status: 'running', startedAt: Date.now(), controller, summary: null, output: null, error: null });
         void internalTaskRequest(userId, `/kb/tasks/${encodeURIComponent(p.taskId)}/run`, {
           method: 'POST',
@@ -857,6 +890,7 @@ export function createGateway(overrides) {
         const picks = p.mode !== undefined || p.model !== undefined;
         if (picks && composeRefused(s, entry, id)) return;
         if (p.mode === 'execute' && !executeAllowed(entry)) return fail(s, id, 'denied', 'This account or project cannot run code changes from the phone.');
+        if (p.mode === 'execute' && executeRefused(s, entry, id)) return;
         const wait = rate.turn(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         if (owned.has(internalId(entry.num, id))) return fail(s, id, 'busy', 'That request id is still running.');
@@ -876,7 +910,7 @@ export function createGateway(overrides) {
       case 'chat.options': {
         if (readRefused(s, entry, id)) return;
         audit('chat_options', { peer: entry.peer, userId, deviceId: entry.state.deviceId, dedupeKey: entry.state.deviceId });
-        return respond(s, id, command, optionsOf(await modelsFor(userId), executeAllowed(entry)));
+        return respond(s, id, command, optionsOf(await modelsFor(userId), executeAllowed(entry) && toolApprovalsUsable(entry)));
       }
       case 'chat.cancel': {
         const mine = [...owned.values()].filter((o) => o.session === s && !o.zombie);
@@ -884,6 +918,15 @@ export function createGateway(overrides) {
         return respond(s, id, command, { cancelled: mine.length > 0 });
       }
       case 'chat.delete': {
+        // Gated like chat.history.clear, and scoped like chat.history: only a chat chat.sessions lists for this projectId.
+        if (!deps.chatClearEnabled()) return fail(s, id, 'denied', 'Deleting chats is turned off on this computer.');
+        if ([...owned.values()].some((o) => o.userId === userId)) return fail(s, id, 'busy', 'A chat turn is running — try again when it ends.', { retryable: true });
+        const session = await deps.read.history(userId, p.sessionId, { limit: 1 });
+        if (!session) return respond(s, id, command, { deleted: false });
+        if ((session.projectId ?? null) !== (p.projectId ?? null)) {
+          audit('project_denied', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: 'mismatch', dedupeKey: `${entry.state.deviceId}:delete:mismatch` });
+          return fail(s, id, 'denied', 'PROJECT_MISMATCH: That chat belongs to another project.');
+        }
         const deleted = deleteChatSession(userId, p.sessionId);
         audit('chat_delete', { peer: entry.peer, userId, deviceId: entry.state.deviceId });
         return respond(s, id, command, { deleted });

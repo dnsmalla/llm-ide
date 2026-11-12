@@ -51,9 +51,12 @@ test('revoke and idle expiry retire a token', () => {
 test('a user keeps at most 20 devices, the least recently seen evicted', () => {
   const u = user();
   const first = dev.issueDeviceToken(u, 'd0', 1);
-  for (let i = 1; i <= 20; i++) dev.issueDeviceToken(u, `d${i}`, 1 + i);
+  const issued = [];
+  for (let i = 1; i <= 20; i++) issued.push(dev.issueDeviceToken(u, `d${i}`, 1 + i));
   assert.equal(dev.listDevices(u).length, 20);
   assert.ok(!dev.listDevices(u).some((d) => d.deviceId === first.deviceId), 'oldest evicted');
+  assert.deepEqual(issued.slice(0, 19).map((d) => d.evicted), Array(19).fill([]), 'nothing evicted under the cap');
+  assert.deepEqual(issued[19].evicted, [first.deviceId], 'the evicted id is returned so the gateway can drop its sockets');
   const newest = dev.issueDeviceToken(u, 'd21', 100);
   assert.equal(dev.listDevices(u).length, 20);
   assert.ok(dev.authenticateDeviceToken(newest.token, 101));

@@ -27,14 +27,16 @@ export function issueDeviceToken(userId, name, now = Date.now(), scopes = null) 
   const deviceId = `h1-${randomUUID()}`;
   const token = randomBytes(32).toString('base64url');
   const db = getDb();
-  db.transaction(() => {
+  // Devices pushed out by the cap; the caller ends their live sessions.
+  const evicted = db.transaction(() => {
     db.prepare('INSERT INTO host_api_devices (user_id, device_id, name, token_hash, paired_at, last_seen_at, scopes) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(userId, deviceId, String(name || 'Device').slice(0, 120), hash(token), now, now, scopes == null ? null : JSON.stringify(scopes));
     const extra = db.prepare('SELECT device_id FROM host_api_devices WHERE user_id = ? AND device_id != ? ORDER BY last_seen_at DESC, paired_at DESC LIMIT -1 OFFSET ?')
       .all(userId, deviceId, MAX_DEVICES_PER_USER - 1);
     for (const r of extra) db.prepare('DELETE FROM host_api_devices WHERE user_id = ? AND device_id = ?').run(userId, r.device_id);
+    return extra.map((r) => r.device_id);
   })();
-  return { deviceId, token };
+  return { deviceId, token, evicted };
 }
 
 export function authenticateDeviceToken(token, now = Date.now()) {

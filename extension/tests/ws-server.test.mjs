@@ -254,3 +254,24 @@ test('a peer that stops reading is closed with 1013 once more than MAX_BUFFERED_
   conn.send(big);
   assert.equal(socket.writes, 5);
 });
+
+test('ping() writes an empty ping; inbound bytes refresh lastHeard', async () => {
+  let conn;
+  const server = http.createServer();
+  server.on('upgrade', (req, socket, head) => { conn = acceptUpgrade(req, socket, head); });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const h = { port: server.address().port, clients: [] };
+  try {
+    const c = await connect(h);
+    await until(() => conn, 'upgrade');
+    const before = conn.lastHeard;
+    conn.ping();
+    await until(() => c.rx().includes(Buffer.from([0x89, 0x00])), 'ping');
+    await new Promise((r) => setTimeout(r, 5));
+    c.socket.write(mask(10, [])); // the pong
+    await until(() => conn.lastHeard > before, 'lastHeard refreshed');
+  } finally {
+    for (const c of h.clients) c.destroy();
+    server.close();
+  }
+});

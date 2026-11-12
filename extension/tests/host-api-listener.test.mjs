@@ -77,3 +77,24 @@ test('a refused upgrade reports its event; a wrong path reports none', { skip },
   assert.equal(l.address, '127.0.0.1');
   await l.close();
 });
+
+test('liveness: a peer that never answers pings is closed; a pinging client stays open', { skip }, async () => {
+  const gw = fakeGateway();
+  const l = await startHostApiListener({ gateway: gw, basePort: 0, originAllowlist: [], pingIntervalMs: 40 });
+  // A raw upgraded socket that reads nothing back: the phone that dropped off Wi-Fi without a FIN.
+  const silent = await new Promise((resolve, reject) => {
+    const headers = { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': Buffer.alloc(16, 2).toString('base64') };
+    const r = http.request({ host: '127.0.0.1', port: l.port, path: '/host-api/v1', headers });
+    r.on('upgrade', (_res, sock) => { sock.on('error', () => {}); resolve(sock); });
+    r.on('error', reject);
+    r.end();
+  });
+  const live = new WebSocket(`ws://127.0.0.1:${l.port}/host-api/v1`); // answers pings with pongs
+  await new Promise((r) => live.addEventListener('open', r));
+  await until(() => gw.calls.some((c) => c[0] === 'closed' && c[1] === 1));
+  await new Promise((r) => setTimeout(r, 200)); // several more intervals
+  assert.ok(!gw.calls.some((c) => c[0] === 'closed' && c[1] === 2), 'a client that pongs is kept');
+  assert.equal(live.readyState, WebSocket.OPEN);
+  live.close(); silent.destroy();
+  await l.close();
+});

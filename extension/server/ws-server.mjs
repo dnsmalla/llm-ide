@@ -97,6 +97,7 @@ export class WsConnection extends EventEmitter {
     this.parts = [];    // fragments of the message being assembled
     this.partBytes = 0;
     this.closed = false;
+    this.lastHeard = Date.now(); // any inbound bytes (a pong included): the listener's liveness check reads it
     socket.on('data', (chunk) => this.#onData(chunk));
     socket.on('end', () => socket.destroy());
     socket.on('close', () => { clearTimeout(this.#closeTimer); this.#finish(1006); });
@@ -107,6 +108,13 @@ export class WsConnection extends EventEmitter {
     if (this.closed) return;
     if (this.socket.writableLength > MAX_BUFFERED_BYTES) { this.close(1013); return; }
     this.socket.write(encodeFrame(1, Buffer.from(String(text), 'utf8')));
+  }
+
+  /** Sends an empty ping; a live peer answers with a pong, which refreshes lastHeard. */
+  ping() {
+    if (this.closed) return;
+    if (this.socket.writableLength > MAX_BUFFERED_BYTES) { this.close(1013); return; }
+    this.socket.write(encodeFrame(9, Buffer.alloc(0)));
   }
 
   close(code = 1000) {
@@ -130,6 +138,7 @@ export class WsConnection extends EventEmitter {
 
   #onData(chunk) {
     if (this.closed) return;
+    this.lastHeard = Date.now();
     this.chunks.push(chunk);
     this.pending += chunk.length;
     if (this.pending < this.need) return;

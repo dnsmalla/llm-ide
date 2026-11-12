@@ -573,9 +573,14 @@ test('compose: not served by default — chat.options is capability_unavailable,
   await t.g.receive(s, req('c-1', 'chat.options', {}));
   assert.equal(t.lastError(), 'capability_unavailable'); assert.equal(t.modelCalls, 0);
 });
-test('compose: served and granted — chat.options lists the read-only modes and the SDK models, audited once a minute', async () => {
+test('compose: chat.options offers execute only when tool approvals are served and granted', async () => {
   const t = harness({ compose: true }); const s = {}; await t.paired(s);
-  assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals', 'compose']);
+  await t.g.receive(s, req('c-1', 'chat.options', {}));
+  assert.equal(t.last().result.modes.includes('execute'), false, 'the phone could not answer its approval prompts');
+});
+test('compose: served and granted — chat.options lists the read-only modes and the SDK models, audited once a minute', async () => {
+  const t = harness({ compose: true, toolApprovals: true }); const s = {}; await t.paired(s);
+  assert.deepEqual(t.last().result.capabilities, ['host', 'chat', 'approvals', 'tool_approvals', 'compose']);
   await t.g.receive(s, req('c-1', 'chat.options', {}));
   assert.deepEqual(t.last().result, { modes: ['auto', 'ask', 'plan', 'assist_plan', 'review', 'document', 'execute'], models: [{ model: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }] });
   await t.g.receive(s, req('c-2', 'chat.options', {}));
@@ -628,7 +633,7 @@ test('compose send: a model the desktop does not list is denied, no turn starts'
   assert.equal(t.lastError(), 'denied'); assert.equal(t.turns.length, 0);
 });
 test('compose send: execute reaches the turn for an owner with execute authority', async () => {
-  const t = harness({ compose: true }); const s = {}; await t.paired(s);
+  const t = harness({ compose: true, toolApprovals: true }); const s = {}; await t.paired(s);
   await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', mode: 'execute' })); await flush();
   assert.equal(t.lastError(), undefined); assert.equal(t.turns.length, 1); assert.equal(t.turns[0].mode, 'execute'); assert.equal(t.turns[0].allowExecute, true);
 });
@@ -767,4 +772,80 @@ test('R-023 #7: a session open across the 90-day boundary is refused on the next
   await t.g.receive(s2, req('c-p', 'host.ping'));
   assert.equal(t.lastError(), 'auth_failed');
   assert.ok(t.closed.includes(s2), 'the expired session is closed');
+});
+
+// --- execute needs tool approvals the phone can answer ----------------------
+test('compose send: execute is capability_unavailable when tool approvals are not served; no turn', async () => {
+  const t = harness({ compose: true }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.send', { text: 'hi', mode: 'execute' })); await flush();
+  assert.equal(t.lastError(), 'capability_unavailable'); assert.equal(t.turns.length, 0);
+  await t.g.receive(s, req('c-2', 'chat.send', { text: 'hi', mode: 'plan' })); await flush();
+  assert.equal(t.turns.length, 1, 'a read-only mode still runs');
+});
+test('compose send: execute on a device paired before tool approvals were served is denied with a re-pair hint', async () => {
+  const t = harness({ compose: true }); await t.paired({ n: 1 }); const token = t.last().result.token;
+  const t2 = harness({ compose: true, toolApprovals: true }); t2.tokens.set(token, t.tokens.get(token)); const s2 = { n: 2 };
+  t2.g.opened(s2, '127.0.0.1'); await t2.g.receive(s2, req('c-h', 'host.hello', HELLO));
+  await t2.g.receive(s2, req('c-t', 'host.auth.token', { token }));
+  await t2.g.receive(s2, req('c-1', 'chat.send', { text: 'hi', mode: 'execute' })); await flush();
+  assert.equal(t2.lastError(), 'denied'); assert.match(t2.last().error.message, /pair again/); assert.equal(t2.turns.length, 0);
+  assert.equal(t2.audits.at(-1)[0], 'scope_denied'); assert.equal(t2.audits.at(-1)[1].detail, 'tool_approvals');
+});
+
+// --- stale sessions and evicted devices --------------------------------------
+async function tokenSession(t, token, n) {
+  const s = { n };
+  t.g.opened(s, `10.0.0.${n}`); await t.g.receive(s, req('c-h', 'host.hello', HELLO));
+  await t.g.receive(s, req('c-t', 'host.auth.token', { token }));
+  return s;
+}
+test('a device reconnecting at the per-user cap replaces its own stale sessions instead of answering busy', async () => {
+  const { MAX_SESSIONS_PER_USER } = await import('../routes/host-api/gateway.mjs');
+  const t = harness(); const s1 = { n: 1 }; await t.paired(s1); const token = t.last().result.token;
+  const old = [s1];
+  for (let i = 2; i <= MAX_SESSIONS_PER_USER; i += 1) old.push(await tokenSession(t, token, i));
+  assert.equal(t.closed.length, 0);
+  const fresh = await tokenSession(t, token, 99);
+  assert.ok(t.last().result?.capabilities, JSON.stringify(t.last()));
+  assert.deepEqual(t.closed, old, 'every older socket of this device is closed');
+  assert.ok(!t.sent.some(([s, f]) => old.includes(s) && f.error?.code === 'auth_failed'), 'no auth_failed: the client keeps its token');
+  assert.equal(t.audits.filter(([e]) => e === 'session_replaced').length, MAX_SESSIONS_PER_USER);
+  await t.g.receive(fresh, req('c-1', 'host.ping', {})); assert.deepEqual(t.last().result, {});
+});
+test('below the cap a second socket of the same device is left open (two tabs of one web token)', async () => {
+  const t = harness(); const s1 = { n: 1 }; await t.paired(s1); const token = t.last().result.token;
+  await tokenSession(t, token, 2);
+  assert.deepEqual(t.closed, []);
+  await t.g.receive(s1, req('c-1', 'host.ping', {})); assert.deepEqual(t.last().result, {});
+});
+test('at the cap, sessions of OTHER devices are not replaced: still busy', async () => {
+  const { MAX_SESSIONS_PER_USER } = await import('../routes/host-api/gateway.mjs');
+  const t = harness();
+  for (let i = 1; i <= MAX_SESSIONS_PER_USER; i += 1) await t.paired({ n: i });
+  const other = t.last().result.token;
+  t.tokens.set('tok-another-device-0123456789', { ...t.tokens.get(other), deviceId: 'h1-other' });
+  await tokenSession(t, 'tok-another-device-0123456789', 99);
+  assert.equal(t.lastError(), 'busy');
+});
+test('pairing a device that evicts the oldest at the device cap disconnects the evicted device', async () => {
+  const t = harness(); const s1 = { n: 1 }; await t.paired(s1);
+  const issue = t.devices.issueDeviceToken;
+  t.devices.issueDeviceToken = (...a) => ({ ...issue(...a), evicted: ['h1-dev1'] });
+  const s2 = { n: 2 }; await t.paired(s2);
+  assert.ok(t.last().result?.token, 'the new pairing succeeds');
+  assert.deepEqual(t.closed, [s1]);
+  assert.ok(t.sent.some(([s, f]) => s === s1 && f.error?.code === 'auth_failed'), 'the evicted device is told it was removed');
+});
+
+// --- chat.delete: gated like chat.history.clear ------------------------------
+test('chat.delete: refused busy (retryable) while a turn of this user runs', async () => {
+  const t = harness({ chatClear: true, hold: true, read: true }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-0', 'chat.send', { text: 'long' })); await flush();
+  await t.g.receive(s, req('c-1', 'chat.delete', { sessionId: 'chat-2' }));
+  assert.equal(t.lastError(), 'busy'); assert.equal(t.last().error.retryable, true);
+});
+test('chat.delete: denied when clear/delete is turned off on this computer', async () => {
+  const t = harness({ read: true }); const s = {}; await t.paired(s);
+  await t.g.receive(s, req('c-1', 'chat.delete', { sessionId: 'chat-2' }));
+  assert.equal(t.lastError(), 'denied');
 });
