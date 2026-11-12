@@ -230,3 +230,17 @@ test("Revoke waits while the other list is loading, then enables once loaded or 
     assert.doesNotMatch(html, /Checking the other list/);
   }
 });
+
+test("the pairing link has a Copy link button; copyText uses the clipboard and reports failure", async () => {
+  const tls = await m.mintPin(fake({ "POST /host-api/pin": reply("post-host-api-pin-200-tls") }));
+  assert.match(view({ pin: tls, now: tls.expiresAt - 1000 }), /<button[^>]*>Copy link<\/button>/);
+  assert.doesNotMatch(view({ pin: null }), /Copy link/);
+  const written = [];
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { clipboard: { writeText: async (t) => { written.push(t); } } } });
+  assert.equal(await m.copyText("llmide://pair?x=1"), true);
+  assert.deepEqual(written, ["llmide://pair?x=1"]);
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { clipboard: { writeText: async () => { throw new Error("denied"); } } } });
+  assert.equal(await m.copyText("x"), false, "a denied clipboard falls through to selection (no element here)");
+  if (saved) Object.defineProperty(globalThis, "navigator", saved); else delete globalThis.navigator;
+});

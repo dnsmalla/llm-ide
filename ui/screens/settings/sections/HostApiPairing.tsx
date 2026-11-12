@@ -141,6 +141,39 @@ export function BrowserCertGuide({ pin }: { pin: HostPin }): ReactNode {
   );
 }
 
+/** Writes `text` to the clipboard; falls back to selecting the link element so the user can copy it by hand. */
+export async function copyText(text: string, fallbackEl?: Element | null): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    void e;
+    if (fallbackEl) {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(fallbackEl);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+    return false;
+  }
+}
+
+export function CopyLinkButton({ link }: { link: string }): ReactNode {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const copy = (): void => {
+    const el = document.querySelector('[aria-label="Pairing link"]');
+    void copyText(link, el).then((ok) => {
+      setCopied(ok);
+      if (timer.current) clearTimeout(timer.current);
+      if (ok) timer.current = setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return <Button onClick={copy} label={copied ? "Copied" : "Copy link"}>{copied ? "Copied" : "Copy link"}</Button>;
+}
+
 export function HostApiPairingView({ devices, pin, now, busy, error, notice, confirming, also, alsoChecked, onToggleAlso, onShowPin, onAskRevoke, onCancelRevoke, onRevoke }: {
   devices: HostDevice[];
   pin: HostPin | null;
@@ -171,6 +204,7 @@ export function HostApiPairingView({ devices, pin, now, busy, error, notice, con
               <PairingQr payload={qr} />
               <p className="st-hint">Scan with the LLM-IDE iPhone app. The phone pins the certificate fingerprint below.</p>
               <p className="st-pre" aria-label="Pairing link" style={{ userSelect: "text", wordBreak: "break-all" }}>{qr}</p>
+              <CopyLinkButton link={qr} />
             </>
           ) : null}
           {live.fingerprint ? <BrowserCertGuide pin={live} /> : null}
