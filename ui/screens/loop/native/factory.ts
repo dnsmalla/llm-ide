@@ -212,6 +212,17 @@ export function reviewDiffSection(diff: { text: string; truncated: boolean }): s
   ].join("\n");
 }
 
+/**
+ * The issue number a work item's id names: a bare number ("2") or the board's "provider:repo#2" form. Null otherwise,
+ * so a spec or free-text item never comments on or references an issue.
+ */
+export function issueNumberOf(id: string | null | undefined): number | null {
+  const m = /^(?:\d{1,9}|[^\s#]+#(\d{1,9}))$/.exec(id ?? "");
+  if (!m) return null;
+  const n = Number(m[1] ?? id);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
 export interface PickerIssue { id: string; number: number | null; title: string; body: string; repo: string; provider: string; url: string }
 
 /** `GET /kb/issues` rows for the picker: pull requests and untitled rows dropped, the body kept up to 100k chars. */

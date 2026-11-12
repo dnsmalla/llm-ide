@@ -27,6 +27,12 @@ test("shipRequest uses the item title and links the issue", () => {
   assert.doesNotMatch(text.body, /Refs/);
 });
 
+test("a board issue id (provider:repo#N) is referenced as #N in the MR", () => {
+  const body = m.shipRequest(info, { ...issue, id: "gitlab:grp/web#12", repo: "grp/web" }, { provider: "gitlab", slug: "grp/web", base: "dev" }, "", PATCH);
+  assert.match(body.body, /^Refs #12$/m);
+  assert.doesNotMatch(body.body, /tests and review passed/, "a labelled failing MR must not claim a pass");
+});
+
 test("shipRequest picks gitlab for a gitlab saved repo", () => {
   const config = decodeRepoConfig({ saved: {
     github: [{ id: "h", url: "https://github.com/acme/other", clonePath: "/p/code/other", active: true }],

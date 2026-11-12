@@ -11,6 +11,9 @@ test("only an imported issue with a provider, repo and number is commented on", 
   assert.equal(issueTarget({ ...issue, repo: null }), null);
   assert.equal(issueTarget({ ...issue, id: "abc" }), null);
   assert.equal(issueTarget({ ...issue, id: "0" }), null);
+  // The board stores an issue as "provider:repo#N" (intake.workItemFromIssue): that is the same issue.
+  assert.deepEqual(issueTarget({ ...issue, id: "gitlab:grid-devs/personal/dinesh/smart-input#2" }), { provider: "gitlab", repo: "grid-devs/personal/dinesh/smart-input", number: 2 });
+  assert.equal(issueTarget({ ...issue, id: "gitlab:g/p#x" }), null);
 });
 
 test("verdictLine keeps only the one Verdict line of a report", () => {

@@ -1,7 +1,7 @@
 // The comment the Factory posts on an issue after each step, so the issue shows what the run did. Facts only (step,
 // result, changed file names, test command, review verdict line): never tool output or code, which may hold secrets.
 import { displayLine } from "../explorer/scm/model.ts";
-import type { FactoryRole, RunMode } from "../loop/native/factory.ts";
+import { issueNumberOf, type FactoryRole, type RunMode } from "../loop/native/factory.ts";
 
 export interface CommentItem { source: string; id: string | null; repo: string | null; provider: "github" | "gitlab" | null }
 export interface IssueTarget { provider: "github" | "gitlab"; repo: string; number: number }
@@ -15,9 +15,9 @@ const MAX_FILES = 20;
 
 /** The hosted issue a work item came from, or null when it is not one (spec, free text, unknown repo or number). */
 export function issueTarget(item: CommentItem): IssueTarget | null {
-  if (item.source !== "issue" || !item.provider || !item.repo || !item.id || !/^\d{1,9}$/.test(item.id)) return null;
-  const number = Number(item.id);
-  return number > 0 ? { provider: item.provider, repo: item.repo, number } : null;
+  const number = item.source === "issue" ? issueNumberOf(item.id) : null;
+  if (!item.provider || !item.repo || number === null) return null;
+  return { provider: item.provider, repo: item.repo, number };
 }
 
 /** The value of the report's first `Verdict:` line, one plain line of at most 120 characters, or null. */

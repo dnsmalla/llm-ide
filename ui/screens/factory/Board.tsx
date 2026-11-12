@@ -16,7 +16,9 @@ import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
 import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
-import { finishChecksAllowed, listSpecFiles, runPlanFor, sendSummary, sendToFactory, workItemFromSpec, workItemFromText } from "./intake.ts";
+import { finishChecksAllowed, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
+import { pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
+import { readRepoConfig } from "../settings/repo-config.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
 
@@ -28,6 +30,18 @@ installRunManagerHost();
 
 /** The status route rides the core's `dispatch` rate-limit bucket (burst 4, one more per 10 s): never refresh more often. */
 const STATUS_MIN_GAP_MS = 10_000;
+
+/**
+ * Open issues the Factory can work on: imported issues (GET /kb/issues) of every provider with a saved repository,
+ * kept only when Settings → Repositories maps their repository to a clone inside this project (else a run cannot start).
+ */
+async function loadOpenIssues(projectRoot: string): Promise<PickerIssue[]> {
+  const saved = readRepoConfig().saved;
+  const providers = (["gitlab", "github"] as const).filter((p) => saved[p].some((r) => r.clonePath.trim() !== ""));
+  const pages = await Promise.all(providers.map((p) => core.requestRaw(`/kb/issues?provider=${p}&state=open&limit=100`, { method: "GET" }).catch(() => null)));
+  return pages.flatMap((r) => (r?.status === 200 ? pickerIssues(r.body) : []))
+    .filter((i) => repoForIssue({ provider: i.provider, repo: i.repo }, saved, projectRoot) !== null);
+}
 
 export interface BoardProps {
   /** True only while the section is shown AND the Board tab is selected. */
@@ -52,9 +66,10 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [cap, setCap] = useState(() => concurrency());
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [addKind, setAddKind] = useState<"spec" | "text">("spec");
-  const [specFiles, setSpecFiles] = useState<string[]>([]);
-  const [specPath, setSpecPath] = useState("");
+  // The Factory works from open issues (llm-doc specs become issues first, via Sources → Issue); free text stays for odd jobs.
+  const [addKind, setAddKind] = useState<"issue" | "text">("issue");
+  const [openIssues, setOpenIssues] = useState<PickerIssue[] | null>(null);
+  const [issuePick, setIssuePick] = useState("");
   const [textTitle, setTextTitle] = useState("");
   const [textBody, setTextBody] = useState("");
   const [addIntake, setAddIntake] = useState(false);
@@ -167,8 +182,12 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   }, [selectedKey]);
 
   useEffect(() => {
-    if (addOpen && addKind === "spec") void listSpecFiles(fs).then(setSpecFiles);
-  }, [addOpen, addKind, fs]);
+    if (!addOpen || addKind !== "issue" || !projectRoot) return;
+    let live = true;
+    setOpenIssues(null);
+    void loadOpenIssues(projectRoot).then((list) => { if (live) setOpenIssues(list); });
+    return () => { live = false; };
+  }, [addOpen, addKind, projectRoot]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -215,10 +234,10 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const submitAdd = () => void act(async () => {
     if (!projectRoot) return;
     let item: WorkItemRecord;
-    if (addKind === "spec") {
-      const r = await fs.read(specPath, 200_000);
-      if (r.status !== "ok" || r.text === null) throw new Error(`${specPath} is not readable text.`);
-      item = workItemFromSpec(specPath, r.text);
+    if (addKind === "issue") {
+      const picked = openIssues?.find((i) => i.id === issuePick);
+      if (!picked) throw new Error("Choose an open issue first.");
+      item = workItemFromIssue(picked);
     } else {
       item = workItemFromText(textTitle, textBody);
     }
@@ -226,7 +245,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     setNotice(sendSummary(res.added, res.existing.length));
     setSelectedKey(item.key);
     setAddOpen(false);
-    setSpecPath("");
+    setIssuePick("");
     setTextTitle("");
     setTextBody("");
   });
@@ -338,16 +357,16 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       {addOpen ? (
         <form className="fx-form" aria-label="Add a work item" onSubmit={(e) => { e.preventDefault(); submitAdd(); }}>
           <label className="fx-field"><span>From</span>
-            <select value={addKind} onChange={(e) => setAddKind(e.target.value as "spec" | "text")}>
-              <option value="spec">Spec from llm-doc/</option>
-              <option value="text">Free text</option>
+            <select value={addKind} onChange={(e) => setAddKind(e.target.value as "issue" | "text")}>
+              <option value="issue">Open issue</option>
+              <option value="text">Free text (no issue comments)</option>
             </select>
           </label>
-          {addKind === "spec" ? (
-            <label className="fx-field fx-grow"><span>Spec file</span>
-              <select value={specPath} onChange={(e) => setSpecPath(e.target.value)}>
-                <option value="">{specFiles.length ? "Choose a spec…" : "No .md files under llm-doc/"}</option>
-                {specFiles.map((p) => <option key={p} value={p}>{p}</option>)}
+          {addKind === "issue" ? (
+            <label className="fx-field fx-grow"><span>Issue</span>
+              <select value={issuePick} onChange={(e) => setIssuePick(e.target.value)} disabled={openIssues === null}>
+                <option value="">{openIssues === null ? "Loading open issues…" : openIssues.length ? "Choose an issue…" : "No open issues from a repository with a clone (Settings → Repositories); import them on the Issues screen"}</option>
+                {(openIssues ?? []).map((i) => <option key={i.id} value={i.id}>{`${i.repo}${i.number !== null ? ` #${i.number}` : ""} ${i.title}`.slice(0, 160)}</option>)}
               </select>
             </label>
           ) : (
@@ -357,7 +376,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
             </>
           )}
           <label className="fx-check"><input type="checkbox" checked={addIntake} onChange={(e) => setAddIntake(e.target.checked)} /> Run intake now</label>
-          <button type="submit" className="fx-btn fx-primary" disabled={addKind === "spec" ? specPath === "" : textTitle.trim() === ""}>Add to Factory</button>
+          <button type="submit" className="fx-btn fx-primary" disabled={addKind === "issue" ? issuePick === "" : textTitle.trim() === ""}>Add to Factory</button>
           <button type="button" className="fx-btn" onClick={() => setAddOpen(false)}>Cancel</button>
         </form>
       ) : null}

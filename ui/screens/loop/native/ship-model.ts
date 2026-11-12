@@ -1,7 +1,7 @@
 // Pure model behind the Factory's Review / Ship / Discard panel (spec A4). Node tests import it, so it imports only
 // types from the shell (shell/core and shell/host do not load under node --test's strip-only mode).
 import { DEFAULT_GITLAB_BASE, repoKeyOf, type RepoConfig, type RepoProvider } from "../../settings/repo-config.ts";
-import type { FactoryRole, WorkItem } from "./factory.ts";
+import { issueNumberOf, type FactoryRole, type WorkItem } from "./factory.ts";
 import type { RunInfo } from "./worktree-run.ts";
 import { isCiHookPath } from "./protected.ts";
 
@@ -64,16 +64,17 @@ export function autoShipNote(kind: AutoShipKind, failedStage: string | null): st
 export function shipRequest(info: RunInfo, item: WorkItem, repo: { provider: "github" | "gitlab"; slug: string; base: string }, review: string, patchId: string): ShipBody {
   const title = item.title.replace(/\s+/g, " ").trim().slice(0, 200) || `Factory run ${info.runId}`;
   const lines: string[] = [];
-  if (item.source === "issue" && item.id && /^\d+$/.test(item.id)) {
+  const issue = item.source === "issue" ? issueNumberOf(item.id) : null;
+  if (issue !== null) {
     const sameRepo = !item.repo || item.repo.toLowerCase() === repo.slug.toLowerCase();
-    lines.push(`Refs ${sameRepo ? "" : item.repo}#${item.id}`);
+    lines.push(`Refs ${sameRepo ? "" : item.repo}#${issue}`);
   } else if (item.source === "spec" && item.id) {
     lines.push(`Spec: \`${item.id}\``);
   }
   lines.push(
     "",
     `Factory run \`${info.runId}\` on \`${info.branch}\`, started from \`${info.baseCommit.slice(0, 12)}\`.`,
-    "Opened as a draft by the LLM-IDE Factory after its tests and review passed. Review it before merging.",
+    "Opened as a draft by the LLM-IDE Factory. Review it before merging.",
     "",
     "## Review",
     "",
