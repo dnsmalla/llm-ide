@@ -273,7 +273,14 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     const root = projectRoot;
     switch (action) {
       case "start":
-      case "intake":
+      case "intake": {
+        const plan = runPlanFor(action, item, facts.get(item.key) ?? EMPTY_FACTS);
+        void act(async () => {
+          const runId = startRun(root, item, plan.mode, plan.runId ? { runId: plan.runId } : undefined);
+          if (!plan.runId) await attachRun(fs, item.key, runId);
+        });
+        return;
+      }
       case "finishChecks": {
         const f = facts.get(item.key) ?? EMPTY_FACTS;
         const runId = item.runIds.at(-1) ?? null;

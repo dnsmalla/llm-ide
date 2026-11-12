@@ -240,6 +240,12 @@ test("process lanes: backlog, each step, MR open, done; a card sits in the step 
   assert.deepEqual(two.find((l) => l.label === "Backlog").cards.map((c) => c.key), ["issue:q"]);
 });
 
+test("Start and Run intake start their own run plan; only Finish checks reviews existing work", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../Board.tsx", import.meta.url), "utf8");
+  assert.match(src, /case "start":\s*case "intake": \{\s*const plan = runPlanFor\(action,/);
+});
+
 test("D4: the board markup uses a region, labelled lists and a log", async () => {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("../Board.tsx", import.meta.url), "utf8");
