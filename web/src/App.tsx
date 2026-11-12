@@ -7,13 +7,13 @@ import { createSyncController, type SyncController } from "./sync/controller.ts"
 import { createSourcesController, type SourcesController } from "./sources/controller.ts";
 import { SourcesEntry, SourcesScreen } from "./screens/SourcesScreen.tsx";
 import { PairingScreen } from "./screens/PairingScreen.tsx";
-import { WebChat } from "./screens/WebChat.tsx";
-import { ComposeBar } from "./screens/ComposeBar.tsx";
-import { ReadPanel } from "./screens/ReadPanel.tsx";
 import { OfflineCopyEntry, SyncLinkEntry, SyncTier } from "./screens/SyncTier.tsx";
 import { hubCopy, isHubHello, syncEntryVisible } from "./hub-copy.ts";
 import { createPushController } from "./push/controller.ts";
-import { PushToggle } from "./screens/PushToggle.tsx";
+import { Shell } from "./shell/Shell.tsx";
+import { navigate, useRoute } from "./shell/hash.ts";
+import type { ShellContext } from "./shell/registry.ts";
+import { toast, ToastHost } from "./ui/index.ts";
 
 /** The session's connection state, re-rendered on every change. */
 function useConnection(session: Session | null): ConnectionState | null {
@@ -22,41 +22,57 @@ function useConnection(session: Session | null): ConnectionState | null {
   return session?.connection.state ?? null;
 }
 
-function Chat({ session, conn, onForget, onChangeAddress, onOpenOffline }: { session: Session; conn: ConnectionState; onForget: () => void; onChangeAddress: (url: string) => Promise<string | null>; onOpenOffline?: () => void }) {
-  const { connection: c, controller, read, compose, projects } = session;
+function SessionApp({ session, conn, hub, onForget, onChangeAddress, onOpenOffline, onOpenSources }: { session: Session; conn: ConnectionState; hub: boolean; onForget: () => void; onChangeAddress: (url: string) => Promise<string | null>; onOpenOffline?: () => void; onOpenSources: () => void }) {
+  const { connection: c, controller, read, compose, projects, execute, executeCompose } = session;
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const readState = useSyncExternalStore(read.subscribe, read.getState, read.getState);
   const cs = useSyncExternalStore(compose.subscribe, compose.getState, compose.getState);
+  const execState = useSyncExternalStore(execute.subscribe, execute.getState, execute.getState);
+  const execCompose = useSyncExternalStore(executeCompose.subscribe, executeCompose.getState, executeCompose.getState);
   const projectState = useSyncExternalStore(projects.subscribe, projects.getState, projects.getState);
   const [push] = useState(() => createPushController(c));
   const ps = useSyncExternalStore(push.subscribe, push.getState, push.getState);
   useEffect(() => { void push.refresh(); return c.onResync(() => void push.refresh()); }, [push, c]);
+  // A reconnect after a drop is worth a word; the very first connect is not.
+  const was = useRef(conn.kind);
+  useEffect(() => {
+    if (conn.kind === "ready" && (was.current === "reconnecting" || was.current === "failed")) toast.show("Reconnected to your desktop.", "success");
+    was.current = conn.kind;
+  }, [conn.kind]);
   const capabilities = state.capabilities ?? c.capabilities;
   const canCompose = capabilities.has("compose");
-  const send = (t: string) => {
-    const sent = compose.getState().attachments;
-    void controller.send(t, compose.extras()).then((ok) => { if (ok) compose.removeSent(sent); });
-  };
   const newChat = () => void controller.newChat().then((ok) => { if (ok) void read.refresh(); });
-  return (
-    <div className="web-shell">
-      <PushToggle state={ps} onEnable={() => void push.enable()} onDisable={() => void push.disable()} />
-      <ReadPanel capabilities={capabilities} state={readState} onOpen={(id, t) => void read.open(id, t)}
-        onOlder={() => void read.older()} onClose={read.close} onMore={() => void read.moreSessions()} />
-      {!readState.open && (
-        <WebChat hostName={c.hello?.hostName ?? "Host"} hostUrl={session.url} connection={conn} capabilities={capabilities} state={state}
-          projects={projectState} onSelectProject={(id) => { projects.select(id); }}
-          onSend={send} onStop={() => void controller.cancel()} onClear={() => void controller.clearHistory()}
-          onForget={onForget} onChangeAddress={onChangeAddress} onOpenOffline={onOpenOffline} onAnswer={(r, a) => void controller.answerQuestion(r, a)} onDecline={(r) => void controller.declineQuestion(r)}
-          onTool={(r, d) => void controller.answerTool(r, d)} onNewChat={canCompose ? newChat : undefined}
-          compose={capabilities.has("chat") ? (
-            <ComposeBar state={cs} canChoose={canCompose} disabled={conn.kind !== "ready" || state.turn !== null}
-              onMode={compose.setMode} onModel={compose.setModel} onRemove={compose.remove}
-              onFiles={(f) => { if (f) void compose.addFiles(Array.from(f)); }} />
-          ) : null} />
-      )}
-    </div>
-  );
+  const ctx: ShellContext = {
+    session, conn, capabilities, hub, hostName: c.hello?.hostName ?? "Host", hostUrl: session.url,
+    chat: state, read: readState, compose: cs, projects: projectState, push: ps, offlineLinked: onOpenOffline !== undefined,
+    navigate: (section, sub) => navigate(section, sub),
+    execute: {
+      chat: execState, compose: execCompose,
+      actions: {
+        send: (t) => {
+          const sent = executeCompose.getState().attachments;
+          void execute.send(t, executeCompose.extras()).then((ok) => { if (ok) executeCompose.removeSent(sent); });
+        },
+        stop: () => void execute.cancel(), newChat: () => void execute.newChat(), deleteChat: () => void execute.clearHistory(),
+        answerQuestion: (r, a) => void execute.answerQuestion(r, a), declineQuestion: (r) => void execute.declineQuestion(r), answerTool: (r, d) => void execute.answerTool(r, d),
+        setModel: executeCompose.setModel, removeAttachment: executeCompose.remove, addFiles: (f) => { if (f) void executeCompose.addFiles(Array.from(f)); },
+      },
+    },
+    actions: {
+      send: (t) => {
+        const sent = compose.getState().attachments;
+        void controller.send(t, compose.extras()).then((ok) => { if (ok) compose.removeSent(sent); });
+      },
+      stop: () => void controller.cancel(), clearHistory: () => void controller.clearHistory(), newChat: canCompose ? newChat : undefined,
+      answerQuestion: (r, a) => void controller.answerQuestion(r, a), declineQuestion: (r) => void controller.declineQuestion(r), answerTool: (r, d) => void controller.answerTool(r, d),
+      selectProject: (id) => { projects.select(id); },
+      setMode: compose.setMode, setModel: compose.setModel, removeAttachment: compose.remove, addFiles: (f) => { if (f) void compose.addFiles(Array.from(f)); },
+      readOpen: (id, t) => void read.open(id, t), readOlder: () => void read.older(), readClose: read.close, readMore: () => void read.moreSessions(),
+      enablePush: () => void push.enable(), disablePush: () => void push.disable(),
+      forget: onForget, changeAddress: onChangeAddress, openOffline: onOpenOffline, openSources: onOpenSources,
+    },
+  };
+  return <Shell ctx={ctx} />;
 }
 
 export function App(props: { model?: AppModel; sync?: SyncController; sources?: SourcesController }) {
@@ -69,7 +85,9 @@ function AppMain({ model: given, sync: givenSync, sources: givenSources }: { mod
   const [model] = useState(() => given ?? createAppModel(initialHostUrl(import.meta.env.VITE_HOST_API_URL, lastHostUrl().get())));
   const [sync] = useState(() => givenSync ?? createSyncController());
   const [sources] = useState(() => givenSources ?? createSourcesController());
-  const [showSources, setShowSources] = useState(false);
+  // Sources is a Settings sub-page in the URL (#/settings/sources), so a reload or a shared link lands on it.
+  const route = useRoute();
+  const showSources = route.section === "settings" && route.sub === "sources";
   const [view, setView] = useState<AppView>("auto");
   const [liveSession, setLiveSession] = useState<Session | null>(null);
   const s = useSyncExternalStore(model.subscribe, model.getState, model.getState);
@@ -89,12 +107,12 @@ function AppMain({ model: given, sync: givenSync, sources: givenSources }: { mod
   const down = hostUnreachable(conn, s.session !== null && liveSession === s.session, lastReconnect.current);
   const run = syncShouldRun({ hub, session: s.session !== null, busy: s.busy, down, view });
   useEffect(() => { driveSync(sync, { hub, run }); }, [sync, hub, run]);
-  const openSources = () => setShowSources(true);
-  if (showSources) return <SourcesScreen state={so} sources={sources} onBack={() => setShowSources(false)} />;
+  const openSources = () => navigate("settings", "sources");
+  if (showSources) return <><SourcesScreen state={so} sources={sources} onBack={() => navigate("settings")} /><ToastHost /></>;
   const screen = chooseScreen({ hub, syncPhase: sy.phase, session: s.session !== null, down, view });
   if (screen === "sync") return <SyncTier state={sy} sync={sync} hostPaired={s.session !== null} onSources={openSources} onHost={() => setView("host")} />;
   const linked = !hub && sy.phase !== "none";
-  if (s.session && conn) return <Chat session={s.session} conn={conn} onForget={model.forget} onChangeAddress={model.changeAddress} onOpenOffline={linked ? () => setView("sync") : undefined} />;
+  if (s.session && conn) return <SessionApp session={s.session} conn={conn} hub={hub} onForget={model.forget} onChangeAddress={model.changeAddress} onOpenOffline={linked ? () => setView("sync") : undefined} onOpenSources={openSources} />;
   return <PairingScreen initialUrl={model.initialUrl} busy={s.busy} error={s.error} revokedNotice={s.notice} onSubmit={(u, p) => void model.attempt(u, p)}
     footer={<>{!syncEntryVisible(s.session?.connection.hello) ? <p className="hub-note">{hubCopy(s.session?.connection.hello)}</p>
       : linked ? <OfflineCopyEntry onOpen={() => setView("sync")} />

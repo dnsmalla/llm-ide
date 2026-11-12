@@ -1,0 +1,50 @@
+/* App shell layout. Phone: header / pane / tab bar. From 900px: sidebar + header / pane. Safe-area insets keep the PWA clear of
+ * the notch and the home indicator. 100dvh so the mobile browser chrome does not add a scroll. */
+.shell { --shell-tab-h: 58px; --shell-bottom: calc(var(--shell-tab-h)); height: 100vh; height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "header" "main" "tabs"; background: var(--ui-bg); color: var(--ui-text); }
+.shell-skip { position: absolute; left: var(--ui-s-3); top: -60px; z-index: 100; padding: var(--ui-s-2) var(--ui-s-4); background: var(--ui-accent); color: var(--ui-on-accent); border-radius: var(--ui-r-md); font-weight: var(--ui-fw-bold); text-decoration: none; }
+.shell-skip:focus { top: calc(var(--ui-safe-top) + var(--ui-s-2)); }
+
+.shell-header { grid-area: header; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--ui-s-2) var(--ui-s-3);
+  padding: calc(var(--ui-safe-top) + var(--ui-s-3)) calc(var(--ui-safe-right) + var(--ui-s-4)) var(--ui-s-3) calc(var(--ui-safe-left) + var(--ui-s-4));
+  background: color-mix(in srgb, var(--ui-card) 92%, transparent); border-bottom: 1px solid var(--ui-line); -webkit-backdrop-filter: saturate(1.4) blur(14px); backdrop-filter: saturate(1.4) blur(14px); min-width: 0; }
+.shell-heading { display: flex; align-items: center; gap: var(--ui-s-3); min-width: 0; }
+.shell-heading .web-mark { width: 32px; height: 32px; }
+.shell-host { margin: 0; font-size: var(--ui-fs-xs); color: var(--ui-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46vw; }
+.shell-heading h1 { margin: 0; font-size: var(--ui-fs-xl); line-height: var(--ui-lh-tight); letter-spacing: -.02em; }
+.shell-tools { display: flex; align-items: center; gap: var(--ui-s-2); flex-wrap: wrap; min-width: 0; margin-left: auto; }
+.shell-status { display: inline-flex; }
+
+.shell-main { grid-area: main; min-height: 0; min-width: 0; overflow: hidden; outline: none; position: relative; }
+.shell-pane { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.shell-pane[hidden] { display: none; }
+.shell-pane[data-layout="fill"] { overflow: hidden; }
+
+.shell-side { display: none; }
+.shell-tabs { grid-area: tabs; background: color-mix(in srgb, var(--ui-card) 94%, transparent); border-top: 1px solid var(--ui-line); padding: 0 var(--ui-safe-right) var(--ui-safe-bottom) var(--ui-safe-left); -webkit-backdrop-filter: saturate(1.4) blur(14px); backdrop-filter: saturate(1.4) blur(14px); }
+.shell-nav-list { list-style: none; margin: 0; padding: 0; }
+.shell-nav-tab { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); height: var(--shell-tab-h); }
+.shell-nav-tab .shell-nav-item { flex-direction: column; justify-content: center; gap: 2px; height: 100%; font-size: 11px; font-weight: var(--ui-fw-medium); padding: 0 2px; border-radius: 0; }
+.shell-nav-tab .shell-nav-item span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-nav-item { display: flex; align-items: center; gap: var(--ui-s-3); min-height: var(--ui-touch); color: var(--ui-muted); text-decoration: none; -webkit-tap-highlight-color: transparent; transition: color var(--ui-dur-fast) var(--ui-ease), background var(--ui-dur-fast) var(--ui-ease); }
+.shell-nav-item:hover { color: var(--ui-text); }
+.shell-nav-item[aria-current="page"] { color: var(--ui-accent); }
+.shell-nav-tab .shell-nav-item[aria-current="page"] svg { transform: translateY(-1px); }
+
+@media (min-width: 900px) {
+  .shell { --shell-bottom: 0px; grid-template-columns: 248px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "side header" "side main"; }
+  .shell-tabs { display: none; }
+  .shell-side { grid-area: side; display: flex; flex-direction: column; gap: var(--ui-s-5); padding: calc(var(--ui-safe-top) + var(--ui-s-5)) var(--ui-s-3) var(--ui-s-4) calc(var(--ui-safe-left) + var(--ui-s-3)); background: var(--ui-card); border-right: 1px solid var(--ui-line); min-height: 0; overflow-y: auto; }
+  .shell-side .web-brand { padding: 0 var(--ui-s-3); }
+  .shell-nav-side { display: grid; gap: 2px; }
+  .shell-nav-side .shell-nav-item { padding: 0 var(--ui-s-3); border-radius: var(--ui-r-md); font-size: var(--ui-fs-md); font-weight: var(--ui-fw-medium); }
+  .shell-nav-side .shell-nav-item:hover { background: var(--ui-hover); }
+  .shell-nav-side .shell-nav-item[aria-current="page"] { background: var(--ui-accent-soft); font-weight: var(--ui-fw-bold); }
+  .shell-side-foot { margin: auto 0 0; padding: 0 var(--ui-s-3); color: var(--ui-muted); font-size: var(--ui-fs-xs); }
+  .shell-header { padding-top: calc(var(--ui-safe-top) + var(--ui-s-3)); padding-left: var(--ui-s-6); padding-right: calc(var(--ui-safe-right) + var(--ui-s-6)); }
+  .shell-host { max-width: 28vw; }
+}
+@media (max-width: 420px) {
+  .shell-heading .web-mark { display: none; }
+  .shell-tools { width: 100%; justify-content: space-between; margin-left: 0; }
+  .shell-host { max-width: 60vw; }
+}

@@ -13,6 +13,8 @@ import { createReadController, type ReadController } from "./read/controller.ts"
 export interface Session {
   url: string; tokens: TokenStore; connection: HostConnection; projects: ProjectsController;
   controller: ChatController; read: ReadController; compose: ComposeController;
+  /** The Execute chat: its own controller and compose options, alive as long as the session (a tab switch never drops a run). */
+  execute: ChatController; executeCompose: ComposeController;
 }
 export interface AppState { session: Session | null; busy: boolean; error: string | null; notice: string | null }
 
@@ -86,13 +88,15 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
     const connection = new HostConnection({ url, clientName: "LLM-IDE Web", clientVersion: __APP_VERSION__, tokens, ...d.connection });
     let controller: ChatController | null = null;
     let compose: ComposeController | null = null;
+    let execute: ChatController | null = null;
+    let executeCompose: ComposeController | null = null;
     let read: ReadController | null = null;
     const projects = createProjectsController(connection, {
       storage: projectStoreFor(url, undefined, from),
       listStorage: projectListStoreFor(url, undefined, from),
       // A project switch rewires every scoped view: the chat, the compose options and the read-only
       // history (which clears the previous project's list before loading the new one).
-      onSelectionChange: () => { void controller?.resync(); void compose?.load(); void read?.projectChanged(); },
+      onSelectionChange: () => { void controller?.resync(); void execute?.resync(); void compose?.load(); void executeCompose?.load(); void read?.projectChanged(); },
     });
     const onProjectRefused = (e: unknown) => { projects.noteRefusal(e); };
     controller = createChatController(connection, {
@@ -101,10 +105,13 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
       onProjectRefused,
     });
     compose = createComposeController(connection, { projectId: () => projects.getSelectedId(), onProjectRefused });
+    // Execute's refusals (no grant, not offered) are about the chat, not the project: they must not mark the project as refused.
+    execute = createChatController(connection, { projectId: () => projects.getSelectedId(), scopeReady: () => projects.whenLoaded(), surface: "execute" });
+    executeCompose = createComposeController(connection, { projectId: () => projects.getSelectedId(), surface: "execute" });
     read = createReadController(connection, { projectId: () => projects.getSelectedId() });
-    return { url, tokens, connection, projects, controller, read, compose };
+    return { url, tokens, connection, projects, controller, read, compose, execute, executeCompose };
   };
-  const shut = (s: Session) => { s.projects.dispose(); s.controller.dispose(); s.read.dispose(); s.compose.dispose(); s.connection.close(); };
+  const shut = (s: Session) => { s.projects.dispose(); s.controller.dispose(); s.execute.dispose(); s.read.dispose(); s.compose.dispose(); s.executeCompose.dispose(); s.connection.close(); };
   const adopt = (s: Session | null, notice: string | null = null) => {
     offState?.(); offState = null;
     if (live && live !== s) shut(live);

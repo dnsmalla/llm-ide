@@ -1,4 +1,5 @@
 import type { ProjectsState, ProjectRefusalCode } from "../projects/controller.ts";
+import { Skeleton } from "../ui/index.ts";
 
 const REFUSAL: Record<ProjectRefusalCode, string> = {
   PROJECT_REQUIRED: "A project is required.",
@@ -17,7 +18,7 @@ export interface ProjectPickerProps {
 export function ProjectPicker({ state, disabled = false, onSelect }: ProjectPickerProps) {
   const selected = state.projects.find((p) => p.id === state.selectedId) ?? null;
   if (!state.loaded) {
-    return <div className="web-project-picker" role="status"><span className="web-project-loading">Loading projects…</span></div>;
+    return <div className="web-project-picker" role="status"><Skeleton width={140} height={36} /><span className="ui-sr-only web-project-loading">Loading projects…</span></div>;
   }
   if (state.projects.length === 0) {
     if (state.error) {
@@ -31,8 +32,8 @@ export function ProjectPicker({ state, disabled = false, onSelect }: ProjectPick
   }
   return (
     <div className="web-project-picker">
-      <label htmlFor="web-project-select">Project</label>
-      <select id="web-project-select" value={selected?.id ?? ""} disabled={disabled || state.loading}
+      <label htmlFor="web-project-select" className="ui-sr-only">Project</label>
+      <select id="web-project-select" className="web-select" value={selected?.id ?? ""} disabled={disabled || state.loading}
         onChange={(e) => { const id = e.currentTarget.value; if (id) onSelect(id); }}>
         {state.loading && <option value="">Loading projects…</option>}
         {!state.loading && !selected && <option value="">Choose a project…</option>}

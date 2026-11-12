@@ -49,7 +49,7 @@ test("paired browser, desktop down at load: the chat screen is adopted and keeps
   assert.ok(m.getState().session, "adopted");
   assert.equal(m.getState().session.connection.state.kind, "reconnecting");
   const out = html(h(UI.App, { model: m }));
-  assert.match(out, /Reconnecting in 1 s/);
+  assert.match(out, /Reconnecting…/);
   assert.match(out, /isn&#x27;t reachable yet — retrying|isn't reachable yet — retrying/);
   assert.doesNotMatch(out, /Pairing PIN|LLMIDE_HOST_API_WEB_ORIGINS/);
   d.up = true; d.runTimers(); await tick(); await tick();

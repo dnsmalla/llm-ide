@@ -37,11 +37,38 @@ Open <http://127.0.0.1:5180>.
 - [ ] Reload the page: it reconnects with the stored token, without the PIN.
 - [ ] Desktop **Revoke** on that browser: the page returns to pairing with the
       revoked notice.
-- [ ] **Forget this host** returns to pairing and the token is gone.
+- [ ] Settings → **Forget this desktop** asks first, then returns to pairing and the token is gone.
 - [ ] Resize to phone width; the composer and cards remain usable.
 - [ ] Install the app from the browser's install control; it opens in its own window.
 - [ ] Stop the web server and reopen the installed app: the shell loads and shows an offline state, not a blank page.
 - [ ] Reconnect the host and reload: pairing/chat work again.
+
+## 3b. Navigation, theme and layout (the app shell)
+
+Run at a laptop width (at least 1100px) and again on an iPhone installed to the home screen (or a 390px-wide window).
+
+- [ ] At 900px or wider there is a left sidebar (Ask, Execute, Auto Tasks, Loop, History, Settings); below 900px it becomes a bottom tab bar
+      that clears the home indicator. No horizontal scroll at 360px.
+- [ ] The active section is highlighted and read as the current page by a screen reader (aria-current). Tab reaches the nav, header and
+      content in that order; **Skip to content** appears on the first Tab.
+- [ ] The URL hash follows the section (`#/ask`, `#/history`, `#/settings/sources`). Reload on each: you land on the same screen. Back and
+      Forward move between sections. An unknown hash falls back to Ask.
+- [ ] Execute, Auto Tasks and Loop show their "coming next" page. Against a host without `read` (or without `tool_approvals`) those
+      sections are absent from the nav. Against a hub, nothing offline-sync shows in Settings.
+- [ ] The header shows the desktop name, the project picker and one pill: **Live**; **Reconnecting…** (stop the desktop); **Waiting for the desktop**
+      (stop it mid-reply); the pill is announced when it changes. The offline copy page shows **Offline copy**.
+- [ ] Settings → Appearance: System, Dark, Light, Midnight each repaint at once. Reload: the choice is kept. System follows the device
+      (switch the OS between light and dark). With site data blocked, the choice still works for the session.
+- [ ] Ask: Enter sends, Shift+Enter adds a line, the box grows to about seven lines. Scroll up during a reply: **Jump to latest** appears and
+      works. A code block scrolls sideways (not the page) and **Copy** copies it. The empty chat shows three example prompts; one fills the box.
+- [ ] Switch Ask to History and back: the unsent draft is still there.
+- [ ] On iPhone: the keyboard does not hide the composer; the status bar and notch do not overlap the header; text stays readable in all
+      three themes (no low-contrast grey on grey).
+- [ ] Turn **Reduce Motion** on (OS setting): the pulsing status dot, shimmer and sheet slide stop.
+- [ ] Settings → Change address opens a sheet: Esc and the backdrop close it, Tab stays inside it, focus returns to the button.
+
+Dev only: `npm run dev`, then open `http://127.0.0.1:5180/#/__gallery` for every screen from fixtures
+(`#/__gallery/<screen>?theme=light|dark|midnight&w=360`). It is not in the production build.
 
 ## 4. Domain check (later)
 
@@ -56,10 +83,10 @@ from reaching a LAN/loopback host.
 
 Start the core yourself (`cd extension && LLMIDE_HOST_API_READ=1 npm run server`, with your `LLMIDE_DATA_DIR`) before the desktop app, which adopts it: a core the app starts never gets the switch, and then no panel appears.
 
-- The panel shows Usage (one line per model) and Chats; the phone chat, the one you can send into, reads "(live chat)".
+- History shows Usage (one line per model) and Chats; the phone chat, the one you can send into, reads "(live chat)".
 - Opening a chat shows "Read-only", no composer; Show older pages back; Back returns to the phone chat.
 - A browser paired before the switch shows no panel (it must re-pair).
-- While a past chat is open, a running reply's approval cards appear only after Back.
+- History opens a past chat read-only; Back returns to the list. The live chat stays in Ask, so a running reply and its approval cards are unaffected.
 
 ## Offline sync (MEGA) — once, with a throwaway dedicated MEGA account (2FA off)
 

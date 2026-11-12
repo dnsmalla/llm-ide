@@ -1,0 +1,7 @@
+.pair-cam { position: relative; display: grid; gap: var(--ui-s-2); }
+.pair-cam video { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--ui-r-lg); background: #000; }
+.pair-frame { position: absolute; inset: 18% 18% auto; aspect-ratio: 1; border: 3px solid rgba(255,255,255,.85); border-radius: var(--ui-r-md); pointer-events: none; box-shadow: 0 0 0 9999px rgba(0,0,0,.25); clip-path: inset(0 round 12px); }
+.pair-photo { cursor: pointer; }
+.pair-tries { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--ui-s-1); font-size: var(--ui-fs-sm); }
+.pair-tries li { display: flex; justify-content: space-between; gap: var(--ui-s-3); word-break: break-all; }
+.pair-fp { user-select: text; word-break: break-all; font-family: var(--ui-mono, monospace); }

@@ -2,11 +2,11 @@
 // body renders as React text, or through the shared Markdown view (no HTML strings, no images). A PDF is offered as a
 // download only (decision D2); nothing from a provider is rendered as HTML or executed.
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "@llmide/screens/chat/MarkdownView.tsx";
 import { TEXT, type SourcesController, type SourcesState } from "../sources/controller.ts";
 import type { Entry, Opened, Reason } from "../sources/model.ts";
 import type { Provider } from "../sources/oauth.ts";
+import { Banner, Button, TextField } from "../ui/index.ts";
 
 type Actions = Omit<SourcesController, "subscribe" | "getState" | "start" | "dispose">;
 export interface SourcesScreenProps { state: SourcesState; sources: Actions; onBack: () => void }
@@ -44,9 +44,9 @@ function ProviderCard({ p, state, sources }: { p: Provider; state: SourcesState;
         <span className="source-status" data-state={signed ? "live" : configured ? "ready" : "off"}>{signed ? "Connected" : configured ? "Ready" : "Not set up"}</span>
       </header>
       <div className="source-card-actions">
-        {configured && !signed && <button type="button" className="source-primary" disabled={state.busy || !state.online} onClick={() => void sources.signIn(p)}>Sign in to {NAME[p]}</button>}
-        {signed && <button type="button" className="source-primary" onClick={() => void sources.choose(p)}>Browse {NAME[p]}</button>}
-        {signed && <button type="button" className="source-quiet" onClick={() => void sources.signOut(p)}>Sign out</button>}
+        {configured && !signed && <Button variant="primary" disabled={state.busy || !state.online} onClick={() => void sources.signIn(p)}>Sign in to {NAME[p]}</Button>}
+        {signed && <Button variant="primary" onClick={() => void sources.choose(p)}>Browse {NAME[p]}</Button>}
+        {signed && <Button variant="secondary" onClick={() => void sources.signOut(p)}>Sign out</Button>}
       </div>
       <details className="source-setup" open={!configured}>
         <summary>{configured ? "App settings" : "Set up app"}</summary>
@@ -54,17 +54,15 @@ function ProviderCard({ p, state, sources }: { p: Provider; state: SourcesState;
         <p>{HELP[p]}</p>
         <p>Redirect URI to register: <code>{sources.redirectUri()}</code></p>
         <form className="web-form" onSubmit={(e) => void save(e)}>
-          <label htmlFor={ids[0]}>{p === "gitlab" ? "Application ID" : "Client ID"}</label>
-          <input id={ids[0]} value={id} autoComplete="off" spellCheck={false} maxLength={128} required onChange={(e) => setId(e.target.value)} />
+          <TextField id={ids[0]} label={p === "gitlab" ? "Application ID" : "Client ID"} value={id} autoComplete="off" spellCheck={false} maxLength={128} required onChange={(e) => setId(e.target.value)} />
           {p === "box" && (
             <>
-              <label htmlFor={ids[1]}>Client secret</label>
-              <input id={ids[1]} type="password" value={secret} autoComplete="off" maxLength={128} required onChange={(e) => setSecret(e.target.value)} />
+              <TextField id={ids[1]} label="Client secret" type="password" value={secret} autoComplete="off" maxLength={128} required onChange={(e) => setSecret(e.target.value)} />
             </>
           )}
           <div className="source-card-actions">
-            <button type="submit" className="source-primary">Save app</button>
-            {configured && <button type="button" className="source-quiet" onClick={() => void sources.forgetConfig(p)}>Forget app</button>}
+            <Button variant="primary" type="submit">Save app</Button>
+            {configured && <Button variant="secondary" onClick={() => void sources.forgetConfig(p)}>Forget app</Button>}
           </div>
         </form>
       </details>
@@ -88,10 +86,9 @@ function Browser({ state, sources }: { state: SourcesState; sources: Actions }) 
         </ol>
       </nav>
       <form className="web-search" role="search" onSubmit={(e) => { e.preventDefault(); void sources.search(q); }}>
-        <label htmlFor={searchId}>{label}</label>
-        <input id={searchId} type="search" value={q} maxLength={200} onChange={(e) => setQ(e.target.value)} />
-        <button type="submit" disabled={!q.trim() || state.busy || !state.online}>Search</button>
-        {state.query !== null && <button type="button" onClick={() => { setQ(""); void sources.clearSearch(); }}>Clear search</button>}
+        <TextField id={searchId} label={label} type="search" value={q} maxLength={200} onChange={(e) => setQ(e.target.value)} />
+        <Button variant="primary" type="submit" disabled={!q.trim() || state.busy || !state.online}>Search</Button>
+        {state.query !== null && <Button variant="secondary" onClick={() => { setQ(""); void sources.clearSearch(); }}>Clear search</Button>}
       </form>
       {state.query !== null && <p>Results for “{state.query}”</p>}
       <ul className="web-list" aria-label={state.query !== null ? "Search results" : "Items"}>
@@ -105,7 +102,7 @@ function Browser({ state, sources }: { state: SourcesState; sources: Actions }) 
         ))}
       </ul>
       {!state.busy && state.entries.length === 0 && <p className="chat-muted">{state.query !== null ? "No results." : "Nothing here."}</p>}
-      {state.next && state.query === null && <button type="button" onClick={() => void sources.more()} disabled={state.busy}>More</button>}
+      {state.next && state.query === null && <Button variant="secondary" onClick={() => void sources.more()} disabled={state.busy}>More</Button>}
     </section>
   );
 }
@@ -125,12 +122,12 @@ function FileView({ o, provider, onClose }: { o: Opened; provider: Provider; onC
   return (
     <section className="web-read" aria-label={`File ${o.entry.name}`}>
       <div className="web-read-head">
-        <button type="button" onClick={onClose}>Back to list</button>
+        <Button size="sm" variant="secondary" icon="chevron-left" onClick={onClose}>Back to list</Button>
         <h2 ref={head} tabIndex={-1}>{o.entry.name}</h2>
-        {o.webUrl && <button type="button" onClick={() => openLink(o.webUrl as string)}>Open on {NAME[provider]}</button>}
+        {o.webUrl && <Button size="sm" variant="secondary" onClick={() => openLink(o.webUrl as string)}>Open on {NAME[provider]}</Button>}
       </div>
       <p className="chat-muted">{o.entry.path}{o.language ? ` · ${o.language}` : ""} · read-only</p>
-      {o.truncated && <StatusBanner severity="warning" message="Only the first part is shown: the file is larger than this app shows." />}
+      {o.truncated && <Banner tone="warn">Only the first part is shown: the file is larger than this app shows.</Banner>}
       {o.reason && <p>{REASON[o.reason]}</p>}
       {o.kind === "markdown" && o.text !== null && <div className="web-doc"><Markdown text={o.text} onOpenLink={openLink} /></div>}
       {o.kind === "extracted" && <p className="chat-muted">Text extracted by Box. Layout and images are not shown.</p>}
@@ -138,7 +135,7 @@ function FileView({ o, provider, onClose }: { o: Opened; provider: Provider; onC
       {o.kind === "pdf" && o.bytes && (
         <>
           <p>PDF, {size(o.bytes.length)}. This app does not display PDFs. Save it and open it with your PDF viewer.</p>
-          <button type="button" onClick={savePdf}>Save PDF</button>
+          <Button variant="primary" onClick={savePdf}>Save PDF</Button>
         </>
       )}
     </section>
@@ -150,7 +147,7 @@ export function SourcesScreen({ state, sources, onBack }: SourcesScreenProps) {
     <main className="web-app sources-app">
       <header className="sources-topbar">
         <div className="sources-brand"><span className="web-mark" aria-hidden="true" /><div><span>LLM-IDE</span><h1>Documents &amp; code</h1></div></div>
-        <div className="sources-top-actions"><span className="sync-chip" data-tone="muted">Read-only</span><button type="button" className="source-quiet" onClick={state.provider ? () => void sources.choose(null) : onBack}>{state.provider ? "All sources" : "Back"}</button></div>
+        <div className="sources-top-actions"><span className="sync-chip" data-tone="muted">Read-only</span><Button size="sm" variant="secondary" icon="chevron-left" onClick={state.provider ? () => void sources.choose(null) : onBack}>{state.provider ? "All sources" : "Back"}</Button></div>
       </header>
       {!state.provider && (
         <section className="sources-hero">
@@ -159,9 +156,9 @@ export function SourcesScreen({ state, sources, onBack }: SourcesScreenProps) {
           <p>Read directly from your own GitLab and Box accounts, read-only. Nothing is copied into sync or stored on this device.</p>
         </section>
       )}
-      {!state.online && <StatusBanner severity="info" message={TEXT.offline} />}
+      {!state.online && <Banner tone="info">{TEXT.offline}</Banner>}
       <p className="web-status" role="status" aria-live="polite">{state.status}</p>
-      {state.error && <StatusBanner severity="error" message={state.error} />}
+      {state.error && <Banner tone="error">{state.error}</Banner>}
       {!state.provider ? (
         <div className="sources-grid">
           <ProviderCard p="gitlab" state={state} sources={sources} />
@@ -179,7 +176,7 @@ export function SourcesEntry({ onOpen }: { onOpen: () => void }) {
     <section className="web-form">
       <h2>Documents and code</h2>
       <p>Read your Box documents and GitLab code directly, read-only, even with the desktop off.</p>
-      <button type="button" onClick={onOpen}>Open documents and code</button>
+      <Button variant="primary" onClick={onOpen}>Open documents and code</Button>
     </section>
   );
 }

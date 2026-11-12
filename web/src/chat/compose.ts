@@ -13,7 +13,7 @@ export interface ComposeState {
   attachments: readonly WebAttachment[]; error: string | null;
 }
 export const initialComposeState: ComposeState = { modes: [], models: [], mode: "auto", model: null, attachments: [], error: null };
-const KNOWN_MODES: readonly string[] = ["auto", "ask", "plan", "assist_plan", "review", "document"];
+const KNOWN_MODES: readonly string[] = ["auto", "ask", "plan", "assist_plan", "review", "document", "execute"];
 const MAX_MODELS = 50;
 /** The host re-checks every pick, but a hostile or buggy reply must not reach the UI as-is: keep only well-formed entries. */
 export function decodeOptions(r: unknown): { modes: ComposeMode[]; models: ComposeModels } {
@@ -32,9 +32,11 @@ export function decodeOptions(r: unknown): { modes: ComposeMode[]; models: Compo
 }
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message.slice(0, 500) : "Something went wrong.");
 
-export function createComposeController(link: HostLink, { projectId, onProjectRefused }: {
+export function createComposeController(link: HostLink, { projectId, onProjectRefused, surface = "ask" }: {
   projectId?: () => string | null;
   onProjectRefused?: (e: unknown) => void;
+  /** "execute": the mode is fixed (the chat controller sends it) and the picker only lists what to choose besides it. */
+  surface?: "ask" | "execute";
 } = {}) {
   let state = initialComposeState;
   const subs = new Set<() => void>();
@@ -49,7 +51,9 @@ export function createComposeController(link: HostLink, { projectId, onProjectRe
     try {
       const r = decodeOptions(await link.send("chat.options", project ? { projectId: project } : {}).done);
       if (mine !== seq) return;
-      set({ modes: r.modes, models: r.models, error: null, mode: r.modes.includes(state.mode) ? state.mode : "auto", model: state.model && r.models.some((m) => m.model === state.model) ? state.model : null });
+      // Ask never offers "execute" (that is the other chat); the execute chat is fixed to it, and lists it only when the host does.
+      const modes = surface === "execute" ? r.modes : r.modes.filter((m) => m !== "execute");
+      set({ modes, models: r.models, error: null, mode: surface === "execute" ? (modes.includes("execute") ? "execute" : "auto") : modes.includes(state.mode) ? state.mode : "auto", model: state.model && r.models.some((m) => m.model === state.model) ? state.model : null });
     } catch (e) {
       if (mine !== seq) return;
       set({ modes: [], models: [], mode: "auto", model: null, error: messageOf(e) });
@@ -76,7 +80,7 @@ export function createComposeController(link: HostLink, { projectId, onProjectRe
     },
     remove(index: number) { set({ attachments: state.attachments.filter((_, i) => i !== index), error: null }); },
     extras(): SendExtras {
-      return { ...(can() && state.mode !== "auto" ? { mode: state.mode } : {}), ...(can() && state.model ? { model: state.model } : {}), ...(state.attachments.length ? { attachments: state.attachments.map(({ name, text }) => ({ name, text })) } : {}) };
+      return { ...(can() && surface === "ask" && state.mode !== "auto" ? { mode: state.mode } : {}), ...(can() && state.model ? { model: state.model } : {}), ...(state.attachments.length ? { attachments: state.attachments.map(({ name, text }) => ({ name, text })) } : {}) };
     },
     /** Drops only the attachments that were sent; ones added while the turn was starting stay. */
     removeSent(sent: readonly WebAttachment[]) { set({ attachments: state.attachments.filter((a) => !sent.includes(a)), error: null }); },

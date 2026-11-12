@@ -120,14 +120,14 @@ test("read panel: an open chat is read-only with Show older and Back", () => {
 
 const composeProps = (state, extra = {}) => ({ state: { ...UI.initialComposeState, ...state }, canChoose: true, disabled: false,
   onMode: noop, onModel: noop, onFiles: noop, onRemove: noop, ...extra });
-test("compose bar: labelled mode and model selects with only offered options; never Execute or Bypass", () => {
+test("compose bar: mode and model chips, no execute or bypass, the read-only hint in the chip tooltip", () => {
   const out = html(h(UI.ComposeBar, composeProps({ modes: ["auto", "ask", "plan"], models: [{ model: "claude-sonnet-5-5", label: "Sonnet 5.5" }] })));
-  assert.match(out, /aria-label="Mode"/); assert.match(out, /aria-label="Model"/); assert.match(out, />Plan</); assert.match(out, />Sonnet 5.5</);
-  assert.match(out, />Desktop default</); assert.doesNotMatch(out, /Execute|Bypass/); assert.match(out, /read-only on the desktop/);
+  assert.match(out, /aria-label="Mode: Auto"/); assert.match(out, /aria-label="Model: Desktop default"/);
+  assert.doesNotMatch(out, /Execute|Bypass/); assert.match(out, /read-only on the desktop/);
 });
-test("compose bar: without compose only the attach input shows; chips have labelled remove buttons", () => {
+test("compose bar: without compose only attach shows; chips have labelled remove buttons", () => {
   const out = html(h(UI.ComposeBar, composeProps({ attachments: [{ name: "<b>a.md</b>", text: "xyz", truncated: true }] }, { canChoose: false })));
-  assert.doesNotMatch(out, /aria-label="Mode"/); assert.match(out, /type="file"/); assert.match(out, /Attach text files/);
+  assert.doesNotMatch(out, /aria-label="Mode/); assert.match(out, /type="file"/); assert.match(out, /Attach text files/);
   assert.match(out, /aria-label="Remove &lt;b&gt;a.md&lt;\/b&gt;"/); assert.match(out, /cut to the limit/);
 });
 test("web chat: New chat only when offered, disabled during a turn; the compose slot renders", () => {

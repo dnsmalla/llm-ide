@@ -19,9 +19,16 @@ export interface ChatControllerOptions {
   scopeReady?: () => Promise<void>;
   /** Called for a refused frame so the project picker can show the host's reason. */
   onProjectRefused?: (e: unknown) => void;
+  /**
+   * Which of the desktop's two chats this controller drives. "execute" is the code-change chat: every chat.snapshot / chat.send /
+   * chat.new / chat.history.clear names it, and a send carries mode "execute". "ask" (default) adds nothing to the frames, so an
+   * older host sees exactly what it always saw.
+   */
+  surface?: "ask" | "execute";
 }
 
-export function createChatController(link: HostLink, { historyLimit = 200, projectId, scopeReady, onProjectRefused }: ChatControllerOptions = {}) {
+export function createChatController(link: HostLink, { historyLimit = 200, projectId, scopeReady, onProjectRefused, surface = "ask" }: ChatControllerOptions = {}) {
+  const scoped: { surface?: "execute" } = surface === "execute" ? { surface: "execute" } : {};
   let state: ChatState = initialChatState;
   const subs = new Set<() => void>();
   const dispatch = (a: ChatAction) => { state = reduce(state, a); for (const fn of subs) fn(); };
@@ -51,7 +58,7 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
           if (scopeReady) { await waitForScope(); scopePrimed = true; }
           const project = pid();
           try {
-            const r = await link.send("chat.snapshot", project ? { limit: historyLimit, projectId: project } : { limit: historyLimit }).done;
+            const r = await link.send("chat.snapshot", { limit: historyLimit, ...(project ? { projectId: project } : {}), ...scoped }).done;
             dispatch({ type: "snapshot", messages: r.messages });
             dispatch({ type: "capabilities", capabilities: link.capabilities });
           } catch (e) {
@@ -136,7 +143,7 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
       // A message typed before projects.list replied still names the selected project (L4).
       if (scopeReady) { await waitForScope(); if (state.turn) return false; } // another send won the wait
       const project = pid();
-      const payload = { text: t, ...extra, ...(project ? { projectId: project } : {}) };
+      const payload = { text: t, ...extra, ...(project ? { projectId: project } : {}), ...scoped, ...(surface === "execute" ? { mode: "execute" as const } : {}) };
       // The connection refuses an oversize frame too, but only after the line is shown as sent; say it up front.
       if (new TextEncoder().encode(JSON.stringify(payload)).length + FRAME_OVERHEAD_BYTES > HOST_API_LIMITS.maxFrameBytes) {
         dispatch({ type: "notice", text: "This message with its attachments is larger than 1 MiB. Remove a file or shorten it." });
@@ -155,7 +162,7 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
     async newChat(): Promise<boolean> {
       if (state.turn) return false;
       const project = pid();
-      try { await link.send("chat.new", project ? { projectId: project } : {}).done; dispatch({ type: "cleared" }); return true; }
+      try { await link.send("chat.new", { ...(project ? { projectId: project } : {}), ...scoped }).done; dispatch({ type: "cleared" }); return true; }
       catch (e) { dispatch({ type: "notice", text: messageOf(e) }); onProjectRefused?.(e); return false; }
     },
     async cancel() {
@@ -167,7 +174,7 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
     async clearHistory() {
       if (state.turn) return;
       const project = pid();
-      try { if ((await link.send("chat.history.clear", project ? { projectId: project } : {}).done).cleared) dispatch({ type: "cleared" }); }
+      try { if ((await link.send("chat.history.clear", { ...(project ? { projectId: project } : {}), ...scoped }).done).cleared) dispatch({ type: "cleared" }); }
       catch (e) { dispatch({ type: "notice", text: messageOf(e) }); onProjectRefused?.(e); }
     },
     answerQuestion: (requestId: string, answers: Record<string, string>) =>

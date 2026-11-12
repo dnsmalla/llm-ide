@@ -1,7 +1,6 @@
 // The offline sync tier (design 6): pair this browser, unlock MEGA or Box for this session, read the desktop's last verified
 // snapshot with its age, and queue chat prompts that run when the desktop is back. Every string renders as text.
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "@llmide/screens/chat/MarkdownView.tsx";
 import { ReadPanel } from "./ReadPanel.tsx";
 import { snapshotReadState } from "../read/snapshot.ts";
@@ -9,6 +8,7 @@ import { MAX_TEXT } from "../sync/device.ts";
 import { KINDS } from "../sync/kinds.ts";
 import { offlineProjectChoice, type CachedProject } from "../host-api/storage.ts";
 import type { SyncController, SyncState } from "../sync/controller.ts";
+import { Banner, Button, StatusPill, TextArea, TextField } from "../ui/index.ts";
 
 type Actions = Pick<SyncController, "pair" | "cancelPairing" | "unlock" | "send" | "refresh" | "lock" | "forget">;
 export interface SyncTierProps { state: SyncState; sync: Actions; hostPaired: boolean; onSources?: () => void; onHost?: () => void }
@@ -36,9 +36,10 @@ function Frame({ children, hostPaired, onSources, onHost }: { children: ReactNod
           <div><h1>Offline sync</h1><p>LLM-IDE · web companion</p></div>
         </div>
         <div className="sync-top-actions">
+          <StatusPill status="offline" />
           {hostPaired && <span className="sync-chip" data-tone="muted">Desktop not reachable</span>}
-          {onSources && <button type="button" className="sync-ghost" onClick={onSources}>Documents and code</button>}
-          {onHost && <button type="button" className="sync-ghost" onClick={onHost}>{hostPaired ? "Connect desktop" : "Pair a desktop"}</button>}
+          {onSources && <Button size="sm" variant="secondary" onClick={onSources}>Documents and code</Button>}
+          {onHost && <Button size="sm" variant="secondary" onClick={onHost}>{hostPaired ? "Connect desktop" : "Pair a desktop"}</Button>}
         </div>
       </header>
       {children}
@@ -68,7 +69,7 @@ function PairView({ state, sync }: { state: SyncState; sync: Actions }) {
         <p>The desktop shows a 6-digit code. If it is the same as this one, press <strong>Codes match</strong> on the desktop.</p>
         <output className="web-sync-sas" aria-label={`Pairing code ${sas.split("").join(" ")}`}>{sas.slice(0, 3)} {sas.slice(3)}</output>
         <p role="status" aria-live="polite">Waiting for the desktop…</p>
-        <button type="button" onClick={sync.cancelPairing}>Cancel</button>
+        <Button variant="secondary" onClick={sync.cancelPairing}>Cancel</Button>
       </section>
     );
   }
@@ -76,18 +77,16 @@ function PairView({ state, sync }: { state: SyncState; sync: Actions }) {
     <form className="web-form" onSubmit={submit} aria-describedby={ids[3]}>
       <h2>Add this browser to offline sync</h2>
       {box ? <p id={ids[3]}>Sign in to the Box account the desktop syncs to. A small Box window opens. Box gives this browser access to that whole Box account (Box has no single-folder access), so use a Box account kept for LLM-IDE. The sign-in lasts for this session only.</p> : <p id={ids[3]}>{state.login !== false ? "Use the dedicated MEGA account the desktop syncs to. The password is used for this session only and is never stored." : "This browser reaches its own folder on your server. Nothing to sign in to."}</p>}
-      {state.notice && <StatusBanner severity="info" message={state.notice} />}
-      <label htmlFor={ids[0]}>Name for this browser</label>
-      <input id={ids[0]} value={name} maxLength={64} required onChange={(e) => setName(e.target.value)} />
-      {!box && state.login !== false && (<><label htmlFor={ids[1]}>MEGA email</label>
-      <input id={ids[1]} type="email" autoComplete="username" value={email} required onChange={(e) => setEmail(e.target.value)} />
-      <label htmlFor={ids[2]}>MEGA password</label>
-      <input id={ids[2]} type="password" autoComplete="current-password" value={password} required onChange={(e) => setPassword(e.target.value)} /></>)}
+      {state.notice && <Banner tone="info">{state.notice}</Banner>}
+      <TextField id={ids[0]} label="Name for this browser" value={name} maxLength={64} required onChange={(e) => setName(e.target.value)} />
+      {!box && state.login !== false && (<>
+      <TextField id={ids[1]} label="MEGA email" type="email" autoComplete="username" value={email} required onChange={(e) => setEmail(e.target.value)} />
+      <TextField id={ids[2]} label="MEGA password" type="password" autoComplete="current-password" value={password} required onChange={(e) => setPassword(e.target.value)} /></>)}
       <p className="web-status" role="status" aria-live="polite">{state.busy ? (state.pairStep === "claiming" ? STEP.claiming : state.login !== false ? STEP.login : "Connecting to your server…") : ""}</p>
-      {state.error && <StatusBanner severity="error" message={state.error} />}
+      {state.error && <Banner tone="error">{state.error}</Banner>}
       <div className="web-actions">
-        <button type="submit" disabled={state.busy}>{box ? "Sign in to Box and continue" : "Continue"}</button>
-        <button type="button" onClick={sync.cancelPairing}>Cancel</button>
+        <Button variant="primary" type="submit" loading={state.busy}>{box ? "Sign in to Box and continue" : "Continue"}</Button>
+        <Button variant="secondary" onClick={sync.cancelPairing}>Cancel</Button>
       </div>
     </form>
   );
@@ -102,21 +101,21 @@ function UnlockView({ state, sync }: { state: SyncState; sync: Actions }) {
     <section className="web-form">
       <h2>Connect Box</h2>
       <p>Connect Box for this session. Nothing is kept after you close the page.</p>
-      {state.error && <StatusBanner severity="error" message={state.error} />}
-      {state.notice && <StatusBanner severity="info" message={state.notice} />}
+      {state.error && <Banner tone="error">{state.error}</Banner>}
+      {state.notice && <Banner tone="info">{state.notice}</Banner>}
       <div className="web-actions">
-        <button type="button" disabled={state.busy} onClick={() => void sync.unlock({ email: "", password: "" })}>{state.busy ? "Connecting…" : "Connect Box"}</button>
-        <button type="button" onClick={() => void sync.forget()}>Forget this browser</button>
+        <Button variant="primary" loading={state.busy} onClick={() => void sync.unlock({ email: "", password: "" })}>{state.busy ? "Connecting…" : "Connect Box"}</Button>
+        <Button variant="secondary" onClick={() => void sync.forget()}>Forget this browser</Button>
       </div>
     </section>
   );
   if (state.login === false) return (
     <section className="web-form">
       <h2>Offline sync</h2>
-      {state.error && <StatusBanner severity="error" message={state.error} />}
+      {state.error && <Banner tone="error">{state.error}</Banner>}
       <div className="web-actions">
-        <button type="button" disabled={state.busy} onClick={() => void sync.unlock({ email: "", password: "" })}>{state.busy ? "Connecting…" : "Connect"}</button>
-        <button type="button" onClick={() => void sync.forget()}>Forget this browser</button>
+        <Button variant="primary" loading={state.busy} onClick={() => void sync.unlock({ email: "", password: "" })}>{state.busy ? "Connecting…" : "Connect"}</Button>
+        <Button variant="secondary" onClick={() => void sync.forget()}>Forget this browser</Button>
       </div>
     </section>
   );
@@ -126,15 +125,13 @@ function UnlockView({ state, sync }: { state: SyncState; sync: Actions }) {
       <h2>Locked after reload</h2>
       <p>This offline sync session lives only in this page's memory, so reloading the page or opening a new tab locks it. Your pairing and queued prompts are safe.</p>
       <p className="web-muted">Enter the MEGA password to unlock this browser again. It is never stored.</p>
-      <label htmlFor={ids[0]}>MEGA email</label>
-      <input id={ids[0]} type="email" autoComplete="username" value={email} required onChange={(e) => setEmail(e.target.value)} />
-      <label htmlFor={ids[1]}>MEGA password</label>
-      <input id={ids[1]} type="password" autoComplete="current-password" value={password} required autoFocus={!!state.email} onChange={(e) => setPassword(e.target.value)} />
-      {state.error && <StatusBanner severity="error" message={state.error} />}
-      {state.notice && <StatusBanner severity="info" message={state.notice} />}
+      <TextField id={ids[0]} label="MEGA email" type="email" autoComplete="username" value={email} required onChange={(e) => setEmail(e.target.value)} />
+      <TextField id={ids[1]} label="MEGA password" type="password" autoComplete="current-password" value={password} required autoFocus={!!state.email} onChange={(e) => setPassword(e.target.value)} />
+      {state.error && <Banner tone="error">{state.error}</Banner>}
+      {state.notice && <Banner tone="info">{state.notice}</Banner>}
       <div className="web-actions">
-        <button type="submit" disabled={state.busy}>{state.busy ? "Unlocking…" : "Unlock with MEGA"}</button>
-        <button type="button" onClick={() => void sync.forget()}>Forget this browser</button>
+        <Button variant="primary" type="submit" loading={state.busy}>{state.busy ? "Unlocking…" : "Unlock with MEGA"}</Button>
+        <Button variant="secondary" onClick={() => void sync.forget()}>Forget this browser</Button>
       </div>
     </form>
   );
@@ -146,8 +143,8 @@ export function ProjectPicker({ projects, value, onChange }: { projects: readonl
   if (!projects.length) return null;
   return (
     <>
-      <label htmlFor={id}>Project</label>
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+      <label className="ui-label" htmlFor={id}>Project</label>
+      <select id={id} className="web-select web-select-wide" value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">Phone chat (no project)</option>
         {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
@@ -166,10 +163,9 @@ function Inbox({ state, sync }: { state: SyncState; sync: Actions }) {
       <h2>Ask the desktop later</h2>
       <p className="chat-muted">Prompts wait in your storage and run when the desktop is back, read-only: no file changes and no approvals.</p>
       <form className="web-form" onSubmit={(e) => void submit(e)}>
-        <label htmlFor={id}>Prompt for the desktop</label>
-        <textarea id={id} value={draft} maxLength={MAX_TEXT} rows={3} onChange={(e) => setDraft(e.target.value)} />
+        <TextArea id={id} label="Prompt for the desktop" value={draft} maxLength={MAX_TEXT} rows={3} autoGrow onChange={(e) => setDraft(e.target.value)} />
         <ProjectPicker projects={choice.projects} value={projectId} onChange={setProjectId} />
-        <button type="submit" disabled={!draft.trim() || !state.online}>Queue prompt</button>
+        <Button variant="primary" type="submit" disabled={!draft.trim() || !state.online}>Queue prompt</Button>
       </form>
       {state.pending.length > 0 && (
         <ul className="web-list" aria-label="Waiting for the desktop">
@@ -203,17 +199,17 @@ function ReadyView({ state, sync }: { state: SyncState; sync: Actions }) {
           <p role="status" aria-live="polite">{snap ? `Desktop last seen ${when(snap.generatedAt)}` : "No snapshot yet."}{state.checkedAt ? ` · checked ${when(state.checkedAt)}` : ""}</p>
         </div>
         <div className="sync-hero-actions">
-          <button type="button" className="sync-primary" onClick={() => void sync.refresh()} disabled={state.busy || !state.online}>{state.busy ? "Checking…" : "Check now"}</button>
-          <button type="button" className="sync-ghost" onClick={() => void sync.lock()}>Lock</button>
-          <button type="button" className="sync-ghost sync-danger" onClick={() => void sync.forget()}>Forget browser</button>
+          <Button variant="primary" onClick={() => void sync.refresh()} loading={state.busy} disabled={!state.online}>{state.busy ? "Checking…" : "Check now"}</Button>
+          <Button variant="secondary" onClick={() => void sync.lock()}>Lock</Button>
+          <Button variant="ghost" onClick={() => void sync.forget()}>Forget browser</Button>
         </div>
       </section>
-      {snap && state.stale && <StatusBanner severity="warning" message={`Desktop offline or storage withholding updates. This snapshot was due for renewal at ${when(snap.validUntil)}.`} />}
-      {!state.online && <StatusBanner severity="info" message="You are offline. Showing what was loaded in this session." />}
-      {state.notice && <StatusBanner severity="info" message={state.notice} />}
-      {state.error && <StatusBanner severity="error" message={state.error} />}
+      {snap && state.stale && <Banner tone="warn">{`Desktop offline or storage withholding updates. This snapshot was due for renewal at ${when(snap.validUntil)}.`}</Banner>}
+      {!state.online && <Banner tone="info">You are offline. Showing what was loaded in this session.</Banner>}
+      {state.notice && <Banner tone="info">{state.notice}</Banner>}
+      {state.error && <Banner tone="error">{state.error}</Banner>}
       {!!snap && KINDS.some((k) => snap.kinds[k]?.truncated) && (
-        <StatusBanner severity="info" message="Only the most recent items are on this device." />
+        <Banner tone="info">Only the most recent items are on this device.</Banner>
       )}
       <div className="sync-grid">
         <section className="sync-panel sync-panel-main" aria-label="Desktop snapshot">
@@ -234,7 +230,7 @@ export function SyncTier({ state, sync, hostPaired, onSources, onHost }: SyncTie
           <section>
             <h2>This browser was removed from sync</h2>
             <p>The desktop removed it, or its folder was deleted from the sync storage. Pair again from the desktop to keep using offline sync.</p>
-            <button type="button" onClick={() => void sync.forget()}>Forget this browser</button>
+            <Button variant="secondary" onClick={() => void sync.forget()}>Forget this browser</Button>
           </section>
         )
         : <ReadyView state={state} sync={sync} />}
@@ -248,7 +244,7 @@ export function OfflineCopyEntry({ onOpen }: { onOpen: () => void }) {
     <section className="web-form">
       <h2>Offline sync</h2>
       <p>This browser is linked to the desktop's sync storage. Read its last snapshot and queue prompts while it is off.</p>
-      <button type="button" onClick={onOpen}>Open offline copy</button>
+      <Button variant="primary" onClick={onOpen}>Open offline copy</Button>
     </section>
   );
 }
@@ -261,10 +257,9 @@ export function SyncLinkEntry({ onLink, error }: { onLink: (url: string) => bool
     <form className="web-form" onSubmit={(e) => { e.preventDefault(); if (onLink(v)) setV(""); }}>
       <h2>Offline sync</h2>
       <p>Read your desktop's last snapshot and queue prompts while it is off. On the desktop: Settings → sync → Add a phone or browser → Browser, then open that link here or paste it.</p>
-      <label htmlFor={id}>Pairing link</label>
-      <input id={id} type="url" autoComplete="off" spellCheck={false} value={v} onChange={(e) => setV(e.target.value)} />
+      <TextField id={id} label="Pairing link" type="url" autoComplete="off" spellCheck={false} value={v} onChange={(e) => setV(e.target.value)} />
       {error && <p role="alert" className="web-error">{error}</p>}
-      <button type="submit" disabled={!v.trim()}>Use link</button>
+      <Button variant="primary" type="submit" disabled={!v.trim()}>Use link</Button>
     </form>
   );
 }

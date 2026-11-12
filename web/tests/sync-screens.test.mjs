@@ -47,7 +47,7 @@ test('ready: last seen, stale and offline banners, chats (phone chat openable), 
   assert.match(out, /Desktop offline or storage withholding updates/);
   assert.match(out, /You are offline/);
   assert.match(out, /Desktop not reachable/);
-  assert.match(out, /<button[^>]*>Router plan<\/button>/);
+  assert.match(out, /<button[^>]*>(?:(?!<\/button>).)*Router plan/);
   assert.match(out, /Standup/); assert.match(out, /Ship it/);
   assert.match(out, /Write docs/); assert.match(out, /Go live/);
   assert.match(out, /<label[^>]*>Prompt for the desktop<\/label>/);
