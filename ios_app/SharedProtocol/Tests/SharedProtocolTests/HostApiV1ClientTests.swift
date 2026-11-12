@@ -156,6 +156,26 @@ struct HostApiV1ClientTests {
         #expect(c.capabilities == ["host"])
     }
 
+    @Test("an event pushed before the handshake finishes is not forwarded")
+    func eventsIgnoredBeforeReady() async throws {
+        socket.reply = { command, id in
+            switch command {
+            case "host.hello":
+                return [try! HostApiFrame.event("chat.delta", payload: HostApiChatDeltaEvent(text: "early"), rev: 0, replyTo: "c-1"),
+                        try! HostApiFrame.response(replyTo: id, command: .hostHello, result: Self.hello, rev: 0)]
+            case "host.auth.token": return [try! HostApiFrame.response(replyTo: id, command: .hostAuthToken,
+                                            result: HostApiHostAuthTokenResult(capabilities: ["host"]), rev: 0)]
+            default: return []
+            }
+        }
+        let c = client()
+        var events: [HostEvent] = []
+        c.onEvent = { events.append($0) }
+        _ = await c.connect(.token(Self.token))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(events.isEmpty)
+    }
+
     @Test("a socket that dies after connect reports disconnected host_unreachable; an unsolicited auth_failed reports auth_failed")
     func drops() async throws {
         happyHost()

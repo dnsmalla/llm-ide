@@ -12,7 +12,7 @@ public final class HostApiV1Client: HostConnection {
         public var helloTimeout: TimeInterval
         public var requestTimeout: TimeInterval
         public var pingInterval: TimeInterval
-        public init(clientName: String, clientVersion: String, helloTimeout: TimeInterval = 3,
+        public init(clientName: String, clientVersion: String, helloTimeout: TimeInterval = 10,
                     requestTimeout: TimeInterval = 15, pingInterval: TimeInterval = 10) {
             self.clientName = clientName; self.clientVersion = clientVersion
             self.helloTimeout = helloTimeout; self.requestTimeout = requestTimeout; self.pingInterval = pingInterval
@@ -271,7 +271,8 @@ public final class HostApiV1Client: HostConnection {
                 capabilities = Set(e.capabilities)
                 onEvent?(.capabilities(capabilities))
             }
-            onEvent?(.event(name, payload: payload, replyTo: replyTo))
+            // Nothing pushed mid-handshake belongs to a session yet: forward events only once connect has finished.
+            if state == .connected { onEvent?(.event(name, payload: payload, replyTo: replyTo)) }
         }
     }
 }

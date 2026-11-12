@@ -162,7 +162,7 @@ struct ConnectView: View {
                 if let info = scan.desktop {
                     errorMessage = nil
                     connectAttempted = true
-                    connectionStore.save(ip: info.ip, pin: info.pin, hostApiOffer: info.hostApiOffer, source: .qrScan)
+                    connectionStore.save(ip: info.ip, pin: info.pin, hostApiOffer: info.hostApiOffer, source: .qrScan, addresses: info.addresses)
                     connection.connect(ip: info.ip, pin: info.pin)
                 }
                 if let pair = scan.sync { syncStore.startEnrollment(pair) }

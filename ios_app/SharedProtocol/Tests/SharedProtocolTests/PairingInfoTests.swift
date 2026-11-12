@@ -56,4 +56,46 @@ struct PairingInfoTests {
         #expect(PairingInfo(from: qr("192.168.1.20", pin: "12a456")) == nil)
         #expect(PairingInfo(from: qr("\(String(repeating: "a", count: 300)).local")) == nil)
     }
+
+    private func multi(_ ips: [String]) -> String {
+        "llmide://pair?" + ips.map { "ip=\($0)&" }.joined() + "pin=123456&h1port=3016&h1fp=\(Self.fp)&api=1"
+    }
+
+    @Test("repeated ip items are all kept in QR order; ip is the first")
+    func multiIp() throws {
+        let p = try #require(PairingInfo(from: multi(["100.64.0.5", "192.168.1.20", "10.0.0.7"])))
+        #expect(p.addresses == ["100.64.0.5", "192.168.1.20", "10.0.0.7"])
+        #expect(p.ip == "100.64.0.5")
+    }
+
+    @Test("invalid addresses are dropped; the QR is refused only when none is valid")
+    func mixedValidity() throws {
+        let p = try #require(PairingInfo(from: multi(["8.8.8.8", "192.168.1.20", "192.168.1.1%25evil.com", "10.0.0.7"])))
+        #expect(p.addresses == ["192.168.1.20", "10.0.0.7"])
+        #expect(p.ip == "192.168.1.20")
+        #expect(PairingInfo(from: multi(["8.8.8.8", "1.1.1.1"])) == nil)
+    }
+
+    @Test("duplicates collapse, keeping the first position")
+    func dedupe() throws {
+        let p = try #require(PairingInfo(from: multi(["192.168.1.20", "10.0.0.7", "192.168.1.20"])))
+        #expect(p.addresses == ["192.168.1.20", "10.0.0.7"])
+    }
+
+    @Test("at most four addresses are kept")
+    func cap() throws {
+        let p = try #require(PairingInfo(from: multi(["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5"])))
+        #expect(p.addresses == ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"])
+    }
+
+    @Test("an old single-ip QR yields a one-element list")
+    func singleIp() throws {
+        let p = try #require(PairingInfo(from: qr("192.168.1.20")))
+        #expect(p.addresses == ["192.168.1.20"] && p.ip == "192.168.1.20")
+    }
+
+    @Test("the legacy aicontrol scheme is no longer accepted")
+    func legacySchemeRefused() {
+        #expect(PairingInfo(from: qr("192.168.1.20").replacingOccurrences(of: "llmide://", with: "aicontrol://")) == nil)
+    }
 }

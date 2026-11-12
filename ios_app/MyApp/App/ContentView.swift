@@ -37,9 +37,9 @@ struct ContentView: View {
                 // `onAppear` does NOT re-fire on foregrounding, and iOS suspends the socket in the background.
                 .onChange(of: scenePhase) { phase in
                     syncStore.setForeground(phase == .active)
-                    guard phase == .active, connectionStore.hasDevice,
-                          connection.connectionStatus == .disconnected, !connection.userClosed else { return }
-                    connection.connect(ip: connectionStore.deviceIP, pin: connectionStore.devicePIN)
+                    // Also skips a backoff wait and probes a live socket (see `reconnectNow`).
+                    guard phase == .active, connectionStore.hasDevice else { return }
+                    connection.reconnectNow()
                 }
         } else {
             NavigationStack {

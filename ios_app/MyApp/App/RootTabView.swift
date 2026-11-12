@@ -20,13 +20,13 @@ struct RootTabView: View {
     var body: some View {
         TabView(selection: $selection) {
             NavigationStack {
-                if connectionStore.hasDevice {
+                if connectionStore.hasDevice, !connection.requiresRepair {
                     LlmIdeControlView(embedded: true)
                         .safeAreaInset(edge: .top, spacing: 0) {
                             ContextBar(deviceName: deviceName)
                         }
                 } else {
-                    LiveChatPairingView { showLiveScanner = true }
+                    LiveChatPairingView(message: connection.requiresRepair ? connection.errorMessage : nil) { showLiveScanner = true }
                 }
             }
             .tabItem { Label("Ask", systemImage: "bubble.left.and.bubble.right.fill") }
@@ -68,7 +68,7 @@ struct RootTabView: View {
         .sheet(isPresented: $showLiveScanner) {
             QRScannerSheet { scan in
                 guard let info = scan.desktop else { return }
-                connectionStore.save(ip: info.ip, pin: info.pin, hostApiOffer: info.hostApiOffer, source: .qrScan)
+                connectionStore.save(ip: info.ip, pin: info.pin, hostApiOffer: info.hostApiOffer, source: .qrScan, addresses: info.addresses)
                 connection.connect(ip: info.ip, pin: info.pin)
             }
         }
@@ -105,6 +105,8 @@ struct RootTabView: View {
 
 /// Shown on the Chat tab when only offline sync is enrolled: sync is read-only, so live Chat needs a Host API pairing.
 struct LiveChatPairingView: View {
+    /// Why a saved pairing needs replacing (the desktop's identity changed); replaces the offline-sync explanation.
+    var message: String?
     let onScan: () -> Void
     var body: some View {
         VStack(spacing: DesignSystem.Spacing.lg) {
@@ -115,7 +117,7 @@ struct LiveChatPairingView: View {
                 .font(DesignSystem.Typography.titleFont.weight(.bold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
                 .multilineTextAlignment(.center)
-            Text("Offline sync only copies chats and history to this iPhone. To send messages, questions and approvals, pair the desktop's live connection.")
+            Text(message ?? "Offline sync only copies chats and history to this iPhone. To send messages, questions and approvals, pair the desktop's live connection.")
                 .font(DesignSystem.Typography.bodyFont)
                 .foregroundColor(DesignSystem.Colors.textSecondary)
                 .multilineTextAlignment(.center)

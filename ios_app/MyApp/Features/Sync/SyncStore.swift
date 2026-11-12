@@ -294,15 +294,18 @@ final class SyncStore: ObservableObject {
         } catch { fail(error, box: b) }
     }
 
-    func send(_ text: String) async {
-        guard phase == .ready, let device else { return }
-        guard let remote else { return }
+    /// True when the prompt was queued. On false the caller keeps the text and `lastError` says why.
+    @discardableResult
+    func send(_ text: String) async -> Bool {
+        guard phase == .ready, let device else { lastError = "Sync isn't ready, so the prompt was not queued."; return false }
+        guard let remote else { lastError = "No sync storage is connected, so the prompt was not queued."; return false }
         let b = box
         do {
             let id = try await device.sendRequest(remote, text: text, nowMs: nowMs)
             queued.append(Queued(id: id, text: text, issuedAtMs: nowMs))
             Self.write(queued, "queue.json"); lastError = nil
-        } catch { fail(error, box: b) }
+            return true
+        } catch { fail(error, box: b); return false }
     }
 
     /// After Box refused the saved sign-in (revoked, or unused for 60 days): sign in again with the same Box app.

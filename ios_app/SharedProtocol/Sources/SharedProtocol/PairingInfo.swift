@@ -1,7 +1,8 @@
 import Foundation
 
 /// Result of scanning the desktop's Host API pairing QR code (Settings → Host API pairing:
-/// `llmide://pair?ip=…&pin=…&h1port=…&h1fp=…&api=1`; also accepts the legacy `aicontrol://` scheme).
+/// `llmide://pair?ip=…&pin=…&h1port=…&h1fp=…&api=1`). `ip` may repeat (up to `maxAddresses`, in the desktop's
+/// preference order) so the phone can try another address when the first is unreachable.
 /// A sync enrollment QR shares the scheme; its fields are ignored here (`SyncEnroll.parsePair` reads them).
 ///
 /// Every field is VALIDATED before it is accepted. A scanned code — or any app
@@ -11,27 +12,47 @@ import Foundation
 /// mints, and the v1 listener must come with a well-formed certificate pin.
 /// Anything else is not a pairing code we are willing to act on.
 public struct PairingInfo {
+    /// The first valid address (kept for source compatibility); always `addresses[0]`.
     public let ip: String
+    /// Every valid, de-duplicated `ip` item in QR order, at most `maxAddresses`. Never empty.
+    public let addresses: [String]
     public let pin: String
     /// The host's v1 TLS listener and certificate pin (`h1port` + `h1fp`). Required: the phone pins from a QR only.
     public let hostApiOffer: HostApiPairingOffer
 
+    public static let maxAddresses = 4
+
     public init?(from string: String) {
         guard let components = URLComponents(string: string),
-              ["llmide", "aicontrol"].contains(components.scheme),
+              components.scheme == "llmide",
               let items = components.queryItems,
-              let host = items.first(where: { $0.name == "ip" })?.value,
               let pin = items.first(where: { $0.name == "pin" })?.value,
               let offer = HostApiPairingOffer(port: items.first(where: { $0.name == "h1port" })?.value,
                                               fingerprint: items.first(where: { $0.name == "h1fp" })?.value),
-              let canonicalHost = Self.canonicalHost(host, allowPublicWithPin: offer.fingerprint), Self.isWellFormedPin(pin)
+              Self.isWellFormedPin(pin)
         else { return nil }
+        // Each address is validated on its own; an invalid one is dropped, and only "none valid" refuses the QR.
+        let addresses = Self.canonicalAddresses(items.filter { $0.name == "ip" }.compactMap(\.value),
+                                                allowPublicWithPin: offer.fingerprint)
+        guard let first = addresses.first else { return nil }
         // Store the VALIDATED string, not the raw one: validating `bare` while
         // persisting `host` is a parser differential — `192.168.1.1%25evil.com`
         // validated as `192.168.1.1` and was saved with the suffix attached.
-        self.ip = canonicalHost
+        self.ip = first
+        self.addresses = addresses
         self.pin = pin
         self.hostApiOffer = offer
+    }
+
+    /// The valid hosts among `hosts`, canonicalised, de-duplicated keeping order, capped at `maxAddresses`.
+    static func canonicalAddresses(_ hosts: [String], allowPublicWithPin pin: String?) -> [String] {
+        var result: [String] = []
+        for host in hosts {
+            guard let canonical = canonicalHost(host, allowPublicWithPin: pin), !result.contains(canonical) else { continue }
+            result.append(canonical)
+            if result.count == maxAddresses { break }
+        }
+        return result
     }
 
     /// Exactly six ASCII digits — the shape the host's pairing PIN has.

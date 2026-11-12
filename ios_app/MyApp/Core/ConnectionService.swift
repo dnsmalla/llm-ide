@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import UIKit
 import SharedProtocol
 
@@ -94,12 +95,14 @@ final class ConnectionService: ObservableObject {
         // Already live against this exact host: nothing to do.
         if connectionStatus == .connected, directIP == ip { return }
         // Re-pointing at a DIFFERENT host: the stores still hold the previous one's transcript and usage.
-        if let previous = lastConnectedIP, previous != ip {
+        // An address this pairing lists is the same desktop (a failover moves `lastConnectedIP` between them).
+        if let previous = lastConnectedIP, previous != ip, connectionStore?.deviceAddresses.contains(previous) != true {
             resetStoresForNewDevice()
         }
         lastConnectedIP = ip
         directIP  = ip
         directPIN = pin
+        startPathMonitor()
         // Clear the previous attempt's reason so an unchanged message still re-triggers the banner.
         errorMessage = nil
         reconnectTask?.cancel()
@@ -114,8 +117,11 @@ final class ConnectionService: ObservableObject {
             connectionStatus = .disconnected
             return
         }
+        // Addresses to try, in order: the pairing's list with the requested one first.
+        let known = connectionStore?.deviceAddresses ?? []
+        let candidates = known.contains(ip) ? [ip] + known.filter { $0 != ip } : [ip] + known
         // The endpoint exists only after a QR scan stored the host's pin (or a DEBUG dev URL).
-        guard let endpoint = connectionStore?.hostApiEndpoint else {
+        guard let firstEndpoint = connectionStore?.hostApiEndpoint(for: ip) else {
             errorMessage = "Scan the pairing QR code in the desktop's Settings → Phone and browser → Live Chat pairing. This iPhone learns the desktop's security identity from the QR only."
             connectionStatus = .disconnected
             return
@@ -123,29 +129,54 @@ final class ConnectionService: ObservableObject {
         connectionStatus = .connecting
         let generation = connectionGeneration
         // wss without a stored pin is refused here, before any socket opens.
-        let trust: HostApiTrustEvaluating?
-        do { trust = try HostApiPinning.trust(for: endpoint, pin: connectionStore?.hostApiPin) } catch {
+        do { _ = try HostApiPinning.trust(for: firstEndpoint, pin: connectionStore?.hostApiPin) } catch {
             return handleRefusal(HostApiPinning.missingPin)
         }
-        let client = HostApiV1Client(
-            config: .init(clientName: UIDevice.current.name,
-                          clientVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"),
-            makeSocket: { URLSessionHostApiSocket(url: endpoint.url, trust: trust) })
-        client.onEvent = { [weak self] in self?.route($0) }
         let token = connectionStore?.hostApiToken ?? ""
         let credential: HostCredential = token.isEmpty ? .pin(pin) : .token(token)
-        connectingV1 = client
+        let clientName = UIDevice.current.name
+        let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        // A shorter hello wait per address when there are others to fall back to.
+        let helloTimeout: TimeInterval = candidates.count > 1 ? 8 : 10
         Task { @MainActor [weak self] in
-            let outcome = await client.connect(credential)
-            if self?.connectingV1 === client { self?.connectingV1 = nil }
-            guard let self, generation == self.connectionGeneration else { client.close(); return }
-            switch outcome {
+            var result: (client: HostApiV1Client, outcome: HostApiV1Client.ConnectOutcome, address: String)?
+            for address in candidates {
+                guard let self, generation == self.connectionGeneration else { return }
+                guard let endpoint = self.connectionStore?.hostApiEndpoint(for: address) else { continue }
+                // nil trust is legitimate (loopback ws://), so this is not a `try?`.
+                let trust: HostApiTrustEvaluating?
+                do { trust = try HostApiPinning.trust(for: endpoint, pin: self.connectionStore?.hostApiPin) } catch { continue }
+                let client = HostApiV1Client(
+                    config: .init(clientName: clientName, clientVersion: clientVersion, helloTimeout: helloTimeout),
+                    makeSocket: { URLSessionHostApiSocket(url: endpoint.url, trust: trust) })
+                client.onEvent = { [weak self] in self?.route($0) }
+                self.connectingV1 = client
+                let outcome = await client.connect(credential)
+                if self.connectingV1 === client { self.connectingV1 = nil }
+                guard generation == self.connectionGeneration else { client.close(); return }
+                result = (client, outcome, address)
+                // Only silence moves on to the next address. A refusal (including a pin_mismatch: another
+                // address must be the same desktop identity) came from a host that answered, so it is final.
+                guard case .unreachable = outcome else { break }
+                client.close()
+            }
+            guard let self else { return }
+            guard let result else {
+                return self.handleRefusal(HostApiRejection(replyTo: nil, code: "host_unreachable",
+                                                           message: "Couldn't reach the desktop. Retrying…", retryable: true))
+            }
+            let client = result.client
+            switch result.outcome {
             case .ready(let hello, let newToken):
                 self.v1Client = client
                 self.hostCapabilities = client.capabilities
                 self.errorMessage = nil
                 self.requiresRepair = false
                 self.reconnectAttempt = 0
+                // The address that answered leads next time.
+                self.directIP = result.address
+                self.lastConnectedIP = result.address
+                self.connectionStore?.promoteAddress(result.address)
                 self.connectionStore?.updateDeviceName(hello.hostName)
                 if let newToken {
                     self.directPIN = nil
@@ -156,14 +187,21 @@ final class ConnectionService: ObservableObject {
                 self.connectionStatus = .connected
                 PushRegistrar.shared.hostReady()
             case .unreachable:
-                self.handleRefusal(HostApiRejection(
-                    replyTo: nil, code: "host_unreachable",
-                    message: "Couldn't reach the desktop. Check it's awake and on the same network (or Tailscale). Retrying…",
-                    retryable: true))
+                var message = "Couldn't reach the desktop. Check it's awake and on the same network (or Tailscale). Retrying…"
+                // Repeated silence on a LAN address is the classic signature of a denied Local Network permission.
+                if self.reconnectAttempt >= 2, Self.isLanAddress(result.address) {
+                    message += " If this keeps happening, make sure iOS Settings → LLM-IDE → Local Network is on."
+                }
+                self.handleRefusal(HostApiRejection(replyTo: nil, code: "host_unreachable", message: message, retryable: true))
             case .refused(let r):
                 self.handleRefusal(r)
             }
         }
+    }
+
+    /// A private LAN host (not Tailscale), where iOS's Local Network permission applies.
+    private static func isLanAddress(_ address: String) -> Bool {
+        PairingInfo.isPrivateHost(address) && !address.hasPrefix("100.") && !address.lowercased().hasSuffix(".ts.net")
     }
 
     /// The host refused. Retryable (throttle, busy, unreachable) keeps the pairing and backs off. Only a
@@ -182,6 +220,9 @@ final class ConnectionService: ObservableObject {
             scheduleReconnect(retryAfterMs: r.retryAfterMs)
             return
         }
+        // The desktop's identity changed (or was never learned): only a new QR can fix it. The token stays (it is
+        // not deleted automatically), but the pairing screen must offer the scanner.
+        if r.code == HostApiPinning.mismatch.code || r.code == HostApiPinning.missingPin.code { requiresRepair = true }
         guard HostApiNegotiation.clearsCredentials(r) else { return closeConnection() }
         directPIN = nil
         connectionStore?.clearCredentials()
@@ -225,7 +266,10 @@ final class ConnectionService: ObservableObject {
         hostCapabilities = nil
     }
 
-    func disconnect() { disconnect(clearDirect: true) }
+    func disconnect() {
+        stopPathMonitor()
+        disconnect(clearDirect: true)
+    }
 
     /// Close the connection but keep the saved pairing (`directIP`/`directPIN`) so a later `connect`
     /// call — e.g. from a Reconnect action within this session — can re-establish the link without
@@ -256,6 +300,90 @@ final class ConnectionService: ObservableObject {
         connectingV1?.close()
         connectingV1 = nil
         reads.reset()
+    }
+
+    // MARK: — Foreground / network-change trigger
+
+    private var pathMonitor: NWPathMonitor?
+    private var seenFirstPath = false
+    /// Bumped by every probe and by every answered one, so a probe's deadline fires only if no answer arrived.
+    private var pingProbe = 0
+
+    /// One monitor, started with the first connect and stopped by `disconnect()`. A path that becomes
+    /// satisfied (Wi-Fi ↔ cellular, coming back online) means a backoff wait is pointless.
+    private func startPathMonitor() {
+        guard pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            Task { @MainActor [weak self] in self?.pathChanged(satisfied: satisfied) }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.llmide.connection-path"))
+        pathMonitor = monitor
+    }
+
+    private func stopPathMonitor() {
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        seenFirstPath = false
+    }
+
+    private func pathChanged(satisfied: Bool) {
+        // The first update only reports the current path; a connect is already in flight for it.
+        guard seenFirstPath else { seenFirstPath = true; return }
+        guard satisfied, pathMonitor != nil else { return }
+        reconnectNow()
+    }
+
+    /// The app became active or the network changed: do not sit out a backoff. Backing off → cancel the wait,
+    /// reset the attempt counter and dial now. Connected → one `host.ping`; reconnect if it is not answered.
+    func reconnectNow() {
+        guard !userClosed else { return }
+        switch connectionStatus {
+        case .connected:
+            probeConnection()
+        case .connecting:
+            // `reconnectTask` is non-nil only while waiting; a dial already in flight is left alone.
+            guard reconnectTask != nil, let ip = directIP else { return }
+            reconnectAttempt = 0
+            connect(ip: ip, pin: directPIN ?? "")
+        case .disconnected:
+            guard let store = connectionStore, store.hasDevice else { return }
+            reconnectAttempt = 0
+            connect(ip: store.deviceIP, pin: store.devicePIN)
+        }
+    }
+
+    private func probeConnection() {
+        pingProbe += 1
+        let probe = pingProbe
+        let generation = connectionGeneration
+        let sender = host
+        Task { @MainActor [weak self] in
+            do {
+                _ = try await sender.send(.hostPing, payload: try JSONEncoder().encode(HostApiHostPingRequest()), id: nil)
+                self?.pingProbe += 1
+            } catch let rejection as HostApiRejection where rejection.code != "host_unreachable" {
+                self?.pingProbe += 1   // a refusal still proves the host is alive
+            } catch {
+                self?.connectionLost(generation)
+            }
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard let self, self.pingProbe == probe else { return }
+            self.connectionLost(generation)
+        }
+    }
+
+    /// The socket looks dead (a network switch leaves it half-open): tear it down and dial again now.
+    private func connectionLost(_ generation: Int) {
+        guard generation == connectionGeneration, connectionStatus == .connected, let ip = directIP else { return }
+        liveSinks.forEach { $0.handleChatError(commandId: nil) }
+        reconnectAttempt = 0
+        invalidateSocket()
+        connectionStatus = .disconnected
+        connect(ip: ip, pin: directPIN ?? "")
     }
 
     private func scheduleReconnect(retryAfterMs: Int? = nil) {

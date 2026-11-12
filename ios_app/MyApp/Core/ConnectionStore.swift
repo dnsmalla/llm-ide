@@ -14,7 +14,11 @@ import SharedProtocol
 final class ConnectionStore: ObservableObject {
     private let defaults = UserDefaults.standard
 
-    @Published var deviceIP: String
+    /// Every address the desktop's QR listed, in preference order (the one that last worked first). Never holds
+    /// duplicates; empty until paired.
+    @Published private(set) var deviceAddresses: [String]
+    /// The preferred address (first of `deviceAddresses`); what the UI shows and a single dial uses.
+    var deviceIP: String { deviceAddresses.first ?? "" }
     @Published var devicePIN: String
     /// Host API v1 device token (spec "Security": in Keychain on iOS). Empty until paired.
     @Published private(set) var hostApiToken: String
@@ -43,7 +47,10 @@ final class ConnectionStore: ObservableObject {
     var displayName: String { deviceName.isEmpty ? deviceIP : deviceName }
 
     init() {
-        deviceIP   = defaults.string(forKey: "agent_ip")  ?? ""
+        // Migration: builds before multi-address stored one `agent_ip`; it becomes a one-element list.
+        let storedList = defaults.stringArray(forKey: "agent_ips") ?? []
+        let legacyIP = defaults.string(forKey: "agent_ip") ?? ""
+        deviceAddresses = !storedList.isEmpty ? storedList : (legacyIP.isEmpty ? [] : [legacyIP])
         deviceName = defaults.string(forKey: "agent_device_name") ?? ""
         // Leftovers of the retired MobileProtocol v2 Mac link: its port, device id and token.
         defaults.removeObject(forKey: "agent_port")
@@ -63,11 +70,20 @@ final class ConnectionStore: ObservableObject {
     ///
     /// `hostApiOffer` is what the QR offered. Pinning is QR-only (`HostApiPinning.pinAfterOffer`): a typed
     /// PIN keeps the same host's pin and port.
-    func save(ip: String, pin: String, hostApiOffer: HostApiPairingOffer? = nil, source: HostApiPairingSource) {
-        let sameHost = ip == deviceIP
-        deviceIP   = ip
+    ///
+    /// `addresses` is the QR's address list (preference order). A typed PIN names one `ip`; the other addresses are
+    /// kept only when it is already one of this pairing's.
+    func save(ip: String, pin: String, hostApiOffer: HostApiPairingOffer? = nil, source: HostApiPairingSource,
+              addresses: [String]? = nil) {
+        var list: [String] = []
+        // A typed PIN for an address this pairing already lists keeps the other addresses.
+        let base = addresses ?? (deviceAddresses.contains(ip) ? deviceAddresses : [])
+        for address in base + [ip] where !address.isEmpty && !list.contains(address) { list.append(address) }
+        // `ip` leads: it is the address the caller is about to dial.
+        if let index = list.firstIndex(of: ip), index != 0 { list.remove(at: index); list.insert(ip, at: 0) }
+        let sameHost = list.contains { deviceAddresses.contains($0) }
+        setAddresses(list)
         devicePIN  = pin
-        defaults.set(ip, forKey: "agent_ip")
         CredentialKeychain.save(pin, account: .pin)
         guard !pin.isEmpty else { return }
         clearToken()
@@ -81,6 +97,22 @@ final class ConnectionStore: ObservableObject {
         }
         hostApiPort = hostApiPin.isEmpty ? 0 : hostApiOffer?.port ?? 0
         defaults.set(hostApiPort, forKey: "agent_h1port")
+    }
+
+    private func setAddresses(_ list: [String]) {
+        deviceAddresses = list
+        defaults.set(list, forKey: "agent_ips")
+        // Kept in step so a downgrade (or anything still reading the old key) sees the preferred address.
+        if let first = list.first { defaults.set(first, forKey: "agent_ip") } else { defaults.removeObject(forKey: "agent_ip") }
+    }
+
+    /// An address connected: try it first next time. No-op for an unknown or already-first address.
+    func promoteAddress(_ address: String) {
+        guard let index = deviceAddresses.firstIndex(of: address), index != 0 else { return }
+        var list = deviceAddresses
+        list.remove(at: index)
+        list.insert(address, at: 0)
+        setAddresses(list)
     }
 
     /// The host accepted the PIN and issued a token. Keep the token, drop the PIN, which the host rotated.
@@ -102,12 +134,15 @@ final class ConnectionStore: ObservableObject {
     /// `wss://<ip>:<h1port>/host-api/v1`. Development only: a DEBUG build lets `LLMIDE_HOST_API_URL` from the
     /// Xcode scheme (Run → Environment) override it, e.g. `ws://127.0.0.1:3016/host-api/v1` for the Simulator
     /// against a desktop host started with `LLMIDE_HOST_API_DEV=1`.
-    var hostApiEndpoint: HostApiEndpoint? {
+    var hostApiEndpoint: HostApiEndpoint? { hostApiEndpoint(for: deviceIP) }
+
+    /// The endpoint at one specific address of this pairing (the connect loop dials each in turn).
+    func hostApiEndpoint(for address: String) -> HostApiEndpoint? {
         #if DEBUG
         if let dev = ProcessInfo.processInfo.environment["LLMIDE_HOST_API_URL"].flatMap(HostApiEndpoint.init) { return dev }
         #endif
-        guard !hostApiPin.isEmpty, !deviceIP.isEmpty, hostApiPort > 0 else { return nil }
-        return HostApiPairingOffer(port: hostApiPort, fingerprint: hostApiPin).endpoint(host: deviceIP)
+        guard !hostApiPin.isEmpty, !address.isEmpty, hostApiPort > 0 else { return nil }
+        return HostApiPairingOffer(port: hostApiPort, fingerprint: hostApiPin).endpoint(host: address)
     }
 
     private func clearToken() {
@@ -133,7 +168,7 @@ final class ConnectionStore: ObservableObject {
     }
 
     func clear() {
-        deviceIP    = ""
+        deviceAddresses = []
         devicePIN   = ""
         hostApiToken = ""
         hostApiPin = ""
@@ -141,6 +176,7 @@ final class ConnectionStore: ObservableObject {
         hostApiPairedAt = 0
         deviceName  = ""
         defaults.removeObject(forKey: "agent_ip")
+        defaults.removeObject(forKey: "agent_ips")
         defaults.removeObject(forKey: "agent_device_name")
         defaults.removeObject(forKey: "agent_h1port")
         defaults.removeObject(forKey: "agent_h1paired_at")

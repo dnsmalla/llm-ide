@@ -32,7 +32,7 @@ struct SyncOfflineSections: View {
         if syncStore.phase == .ready {
             Section("Ask the desktop") {
                 TextField("Prompt", text: $draft, axis: .vertical).lineLimit(2...5)
-                Button("Queue") { let t = draft; draft = ""; Task { await syncStore.send(t) } }
+                Button("Queue") { let t = draft; Task { if await syncStore.send(t), draft == t { draft = "" } } }
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
