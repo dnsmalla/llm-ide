@@ -143,9 +143,10 @@ const SKIP_RULES = [
   },
   {
     // Hosted issue writes check the bus host proof first; the replay server has no LLMIDE_HOST_APPROVAL_KEY, so only
-    // the HOST_PROOF_REQUIRED row replays. The rest are covered with a faked provider by tests/issue-writes.test.mjs.
+    // the HOST_PROOF_REQUIRED row replays. The rest (create, comment, close, update, and the detail read) are covered with a faked
+    // provider by tests/issue-writes.test.mjs.
     why: 'hosted issue writes: needs the bus host proof and a vault token; covered by tests/issue-writes.test.mjs',
-    when: (fx) => /^POST \/kb\/issues\/(create|comment|close)$/.test(fx.endpoint) && fx.response?.error?.code !== 'HOST_PROOF_REQUIRED',
+    when: (fx) => /^(POST \/kb\/issues\/(create|comment|close|update)|GET \/kb\/issues\/detail)$/.test(fx.endpoint) && fx.response?.error?.code !== 'HOST_PROOF_REQUIRED',
   },
   {
     // Factory Ship checks the bus host proof first; the replay server has no LLMIDE_HOST_APPROVAL_KEY, so only the

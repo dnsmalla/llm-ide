@@ -10,8 +10,8 @@
   },
   "response": {
     "error": {
-      "code": "REPO_NOT_ALLOWED",
-      "message": "This issue is not on your Issues board. Import its repository first."
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "This route is for the desktop app only"
     }
   }
 }
