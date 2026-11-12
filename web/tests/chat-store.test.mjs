@@ -50,8 +50,8 @@ test("approvals belong to the running turn, dedupe, clear, and follow capabiliti
   assert.equal(s.approvals.length, 0);
 });
 
-test("a lost connection interrupts the reply and drops every approval", () => {
-  const s = run({ type: "sent", commandId: "c-1", text: "hi" }, ev("approval.request", { requestId: "r-1", commandId: "c-1", questions: Q }, "c-1"), { type: "connectionLost" });
+test("a closed connection interrupts the reply and drops every approval", () => {
+  const s = run({ type: "sent", commandId: "c-1", text: "hi" }, ev("approval.request", { requestId: "r-1", commandId: "c-1", questions: Q }, "c-1"), { type: "connectionClosed" });
   assert.equal(s.messages.at(-1).status, "interrupted");
   assert.match(s.messages.at(-1).error, /connection closed/);
   assert.deepEqual([s.turn, s.approvals.length], [null, 0]);
@@ -80,4 +80,22 @@ test("sent respects the message cap", () => {
   const s = reduce(reduce(S0, { type: "snapshot", messages: msgs }), { type: "sent", commandId: "c-1", text: "new" });
   assert.equal(s.messages.length, 500);
   assert.equal(s.messages.at(-2).text, "new");
+});
+
+test("a dropped socket keeps the turn waiting instead of failing it", () => {
+  const s = run({ type: "sent", commandId: "c-1", text: "hi" }, ev("chat.delta", { text: "a" }, "c-1"), { type: "connectionLost" });
+  assert.deepEqual([s.turn, s.waiting, s.messages.at(-1).status, s.messages.at(-1).text], ["c-1", true, "streaming", "a"]);
+});
+
+test("resumed replaces the text, later deltas append, done ends the turn", () => {
+  let s = run({ type: "sent", commandId: "c-1", text: "hi" }, ev("chat.delta", { text: "a" }, "c-1"), { type: "connectionLost" }, { type: "resumed", text: "abc", truncated: true });
+  assert.deepEqual([s.waiting, s.messages.at(-1).text, s.messages.at(-1).truncated], [false, "abc", true]);
+  s = reduce(reduce(s, ev("chat.delta", { text: "d" }, "c-1")), ev("chat.done", { requestId: "c-1" }, "c-1"));
+  assert.deepEqual([s.messages.at(-1).text, s.messages.at(-1).status, s.turn], ["abcd", "done", null]);
+});
+
+test("a re-sent approval card does not duplicate", () => {
+  const card = ev("approval.request", { requestId: "r-1", commandId: "c-1", questions: Q }, "c-1");
+  const s = run({ type: "sent", commandId: "c-1", text: "hi" }, card, { type: "connectionLost" }, { type: "resumed", text: "", truncated: false }, card, card);
+  assert.equal(s.approvals.length, 1);
 });

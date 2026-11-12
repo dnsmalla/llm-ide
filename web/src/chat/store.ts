@@ -7,7 +7,7 @@ export const MAX_REPLY_CHARS = 1_000_000;
 const MAX_CONTENT = 100_000;
 
 export type MessageStatus = "done" | "streaming" | "error" | "cancelled" | "interrupted";
-export interface WebMessage { key: string; role: "user" | "assistant"; text: string; status: MessageStatus; error: string | null }
+export interface WebMessage { key: string; role: "user" | "assistant"; text: string; status: MessageStatus; error: string | null; truncated?: boolean }
 type Questions = HostApiEventMap["approval.request"]["questions"];
 interface CardState { requestId: string; commandId: string; submitting: boolean; error: string | null }
 export type WebApproval =
@@ -16,6 +16,8 @@ export type WebApproval =
 export interface ChatState {
   messages: readonly WebMessage[];
   turn: string | null;
+  /** The socket dropped mid-turn; the host keeps the turn running and chat.resume reattaches it. */
+  waiting: boolean;
   approvals: readonly WebApproval[];
   notice: string | null;
   loaded: boolean;
@@ -29,6 +31,10 @@ export type ChatAction =
   | { type: "sendFailed"; commandId: string; message: string }
   | { type: "event"; event: HostEvent }
   | { type: "connectionLost" }
+  | { type: "connectionClosed" }
+  | { type: "resumed"; text: string; truncated: boolean }
+  | { type: "resumeFinal"; text: string | null; status: MessageStatus; error: string | null }
+  | { type: "stoppedLocally" }
   | { type: "capabilities"; capabilities: ReadonlySet<HostApiCapability> }
   | { type: "approvalSubmitting"; requestId: string }
   | { type: "approvalFailed"; requestId: string; message: string }
@@ -36,7 +42,7 @@ export type ChatAction =
   | { type: "cleared" }
   | { type: "notice"; text: string | null };
 
-export const initialChatState: ChatState = { messages: [], turn: null, approvals: [], notice: null, loaded: false, seq: 0, capabilities: null };
+export const initialChatState: ChatState = { messages: [], turn: null, waiting: false, approvals: [], notice: null, loaded: false, seq: 0, capabilities: null };
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
 const cap = (m: WebMessage[]) => (m.length > MAX_MESSAGES ? m.slice(-MAX_MESSAGES) : m);
@@ -53,7 +59,7 @@ function patchLive(s: ChatState, fn: (m: WebMessage) => WebMessage): ChatState {
 
 function endTurn(s: ChatState, status: MessageStatus, error: string | null): ChatState {
   const turn = s.turn;
-  return { ...patchLive(s, (m) => ({ ...m, status, error })), turn: null, approvals: s.approvals.filter((a) => a.commandId !== turn) };
+  return { ...patchLive(s, (m) => ({ ...m, status, error })), turn: null, waiting: false, approvals: s.approvals.filter((a) => a.commandId !== turn) };
 }
 
 const patchCard = (s: ChatState, requestId: string, patch: Partial<CardState>): ChatState =>
@@ -86,8 +92,18 @@ export function reduce(s: ChatState, a: ChatAction): ChatState {
       };
     }
     case "sendFailed": return a.commandId === s.turn ? endTurn(s, "error", a.message) : s;
-    case "connectionLost":
-      return { ...(s.turn ? endTurn(s, "interrupted", "The connection closed; the host stopped this reply.") : s), approvals: [] };
+    // A drop does not cancel the turn on the host: keep it and wait for the reconnect to resume it.
+    case "connectionLost": return { ...s, waiting: s.turn !== null, approvals: [] };
+    case "connectionClosed":
+      return { ...(s.turn ? endTurn(s, "interrupted", "The connection closed before the reply finished.") : s), approvals: [] };
+    case "resumed":
+      return s.turn ? { ...patchLive(s, (m) => ({ ...m, text: a.text.slice(0, MAX_REPLY_CHARS), truncated: a.truncated })), waiting: false } : s;
+    case "resumeFinal": {
+      if (!s.turn) return s;
+      const text = a.text;
+      return endTurn(text === null ? s : patchLive(s, (m) => ({ ...m, text: text.slice(0, MAX_REPLY_CHARS) })), a.status, a.error);
+    }
+    case "stoppedLocally": return s.turn ? { ...endTurn(s, "cancelled", null), approvals: [] } : s;
     case "event": return onEvent(s, a.event);
     case "capabilities":
       return { ...s, capabilities: a.capabilities, approvals: s.approvals.filter((x) => a.capabilities.has(x.kind === "tool" ? "tool_approvals" : "approvals")) };

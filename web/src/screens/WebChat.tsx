@@ -63,12 +63,13 @@ function chipLabel(c: ConnectionState) {
   return "Offline";
 }
 
-function Message({ m }: { m: WebMessage }) {
+function Message({ m, waiting }: { m: WebMessage; waiting: boolean }) {
   if (m.role === "user") return <li className="web-msg web-user">{m.text}</li>;
-  const status = m.status === "streaming" ? "…" : m.status === "cancelled" ? "Stopped." : m.error;
+  const status = m.status === "streaming" ? (waiting ? "Waiting for the desktop…" : "…") : m.status === "cancelled" ? "Stopped." : m.error;
   return (
     <li className="web-msg web-assistant">
       {m.text && <Markdown text={m.text} onOpenLink={openLink} />}
+      {m.truncated && <p className="chat-muted">The start of this reply was trimmed while reconnecting.</p>}
       {status && <p className="chat-muted">{status}</p>}
     </li>
   );
@@ -119,8 +120,8 @@ export function WebChat(p: WebChatProps) {
       ))}
       {p.connection.kind === "failed" && <StatusBanner severity="error" message={p.connection.message} />}
       {msgs.length > shown && <button type="button" onClick={() => setShown(shown + PAGE)}>Show older</button>}
-      <p className="web-status" role="status" aria-live="polite">{state.turn ? "The assistant is replying…" : ""}</p>
-      <ul className="web-list">{visible.map((m) => <Message key={m.key} m={m} />)}</ul>
+      <p className="web-status" role="status" aria-live="polite">{state.turn ? (state.waiting ? "Waiting for the desktop…" : "The assistant is replying…") : ""}</p>
+      <ul className="web-list">{visible.map((m) => <Message key={m.key} m={m} waiting={state.waiting} />)}</ul>
       {state.approvals.map((a) =>
         a.kind === "question" ? (
           <div key={a.requestId}>

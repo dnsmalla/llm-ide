@@ -63,7 +63,7 @@ test("a connection drop interrupts; a refused clear shows the host's message", a
   const link = fakeLink({ "chat.send": { accepted: true }, "chat.history.clear": denied });
   const chat = createChatController(link);
   await chat.send("hi");
-  link.state({ kind: "reconnecting", attempt: 1, inMs: 1000 });
+  link.state({ kind: "failed", code: "host_unreachable", message: "x" });
   assert.equal(chat.getState().messages.at(-1).status, "interrupted");
   await chat.clearHistory();
   assert.match(chat.getState().notice, /does not allow clearing/);
@@ -163,4 +163,81 @@ test("a frame over 1 MiB (attachments included) is refused up front with a clear
   assert.equal(await chat.send("hi", { attachments }), false);
   assert.equal(link.calls.length, 0);
   assert.match(chat.getState().notice, /1 MiB/);
+});
+
+const drop = (link) => link.state({ kind: "reconnecting", attempt: 1, inMs: 1000, unopened: 0 });
+const back = (link) => { link.state({ kind: "ready" }); link.resync(); };
+const started = async (results) => {
+  const link = fakeLink({ "chat.send": { accepted: true }, ...results });
+  const chat = createChatController(link, { projectId: () => "p-1" });
+  await chat.send("hi");
+  link.emit({ command: "chat.delta", payload: { text: "Hel" }, rev: 1, replyTo: "c-1" });
+  return { link, chat };
+};
+
+test("deltas render incrementally mid-turn", async () => {
+  const { link, chat } = await started({});
+  assert.equal(chat.getState().messages.at(-1).text, "Hel");
+  link.emit({ command: "chat.delta", payload: { text: "lo" }, rev: 2, replyTo: "c-1" });
+  assert.deepEqual([chat.getState().messages.at(-1).text, chat.getState().messages.at(-1).status], ["Hello", "streaming"]);
+});
+
+test("drop mid-turn waits, resumes running (replace), later deltas append, done", async () => {
+  const { link, chat } = await started({ "chat.resume": { state: "running", text: "Hello wor", truncated: true } });
+  drop(link);
+  assert.deepEqual([chat.getState().turn, chat.getState().waiting], ["c-1", true]);
+  back(link); await tick();
+  const resume = link.calls.find((c) => c.command === "chat.resume");
+  assert.deepEqual(resume.payload, { requestId: "c-1", projectId: "p-1" });
+  assert.equal(chat.getState().messages.at(-1).text, "Hello wor");
+  assert.equal(chat.getState().messages.at(-1).truncated, true);
+  link.emit({ command: "chat.delta", payload: { text: "ld" }, rev: 3, replyTo: "c-1" });
+  link.emit({ command: "chat.done", payload: { requestId: "c-1" }, rev: 4, replyTo: "c-1" });
+  assert.deepEqual([chat.getState().messages.at(-1).text, chat.getState().messages.at(-1).status, chat.getState().turn], ["Hello world", "done", null]);
+});
+
+test("resume done finalizes with the full text", async () => {
+  const { link, chat } = await started({ "chat.resume": { state: "done", text: "Hello world" } });
+  drop(link); back(link); await tick();
+  assert.deepEqual([chat.getState().messages.at(-1).text, chat.getState().messages.at(-1).status, chat.getState().turn], ["Hello world", "done", null]);
+});
+
+test("resume error shows the host's message", async () => {
+  const { link, chat } = await started({ "chat.resume": { state: "error", message: "boom" } });
+  drop(link); back(link); await tick();
+  assert.deepEqual([chat.getState().messages.at(-1).status, chat.getState().messages.at(-1).error], ["error", "boom"]);
+});
+
+test("resume unknown falls back to the snapshot and finalizes from history", async () => {
+  const { link, chat } = await started({ "chat.resume": { state: "unknown" }, "chat.snapshot": { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "Hello world" }] } });
+  drop(link); back(link); await tick(); await tick();
+  assert.equal(link.calls.some((c) => c.command === "chat.snapshot"), true);
+  assert.deepEqual([chat.getState().turn, chat.getState().messages.map((m) => m.text)], [null, ["hi", "Hello world"]]);
+});
+
+test("unknown_command (old host) falls back to the snapshot", async () => {
+  const old = Object.assign(new Error("unknown command"), { code: "unknown_command" });
+  const { link, chat } = await started({ "chat.resume": old, "chat.snapshot": { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "done text" }] } });
+  drop(link); back(link); await tick(); await tick();
+  assert.deepEqual([chat.getState().turn, chat.getState().messages.at(-1).text, chat.getState().messages.at(-1).status], [null, "done text", "done"]);
+});
+
+test("Stop while disconnected cancels locally and sends chat.cancel after resuming a running turn", async () => {
+  const { link, chat } = await started({ "chat.resume": { state: "running", text: "Hel" }, "chat.cancel": { cancelled: true }, "chat.snapshot": { messages: [] } });
+  drop(link);
+  await chat.cancel();
+  assert.deepEqual([chat.getState().turn, chat.getState().messages.at(-1).status], [null, "cancelled"]);
+  assert.equal(link.calls.some((c) => c.command === "chat.cancel"), false);
+  back(link); await tick(); await tick();
+  const cmds = link.calls.map((c) => c.command);
+  assert.ok(cmds.indexOf("chat.cancel") > cmds.indexOf("chat.resume"));
+});
+
+test("an approval re-sent after resume does not duplicate its card", async () => {
+  const { link, chat } = await started({ "chat.resume": { state: "running", text: "Hel" } });
+  const card = { command: "approval.request", payload: { requestId: "r-1", commandId: "c-1", questions: [{ question: "Pick?", multiSelect: false, options: [{ label: "Yes" }] }] }, rev: 2, replyTo: "c-1" };
+  link.emit(card);
+  drop(link); back(link); await tick();
+  link.emit(card);
+  assert.equal(chat.getState().approvals.length, 1);
 });

@@ -25,6 +25,11 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
   let state: ChatState = initialChatState;
   const subs = new Set<() => void>();
   const dispatch = (a: ChatAction) => { state = reduce(state, a); for (const fn of subs) fn(); };
+  // The turn this controller is waiting on, and a Stop pressed while the socket was down.
+  let turnProject: string | null = null;
+  let pendingCancel: { requestId: string; project: string | null } | null = null;
+  let linkKind = "ready"; // tracked from onState; a link that never reports is taken as ready
+  let resuming: Promise<void> | null = null;
   let resyncing: Promise<void> | null = null;
   let resyncQueued = false; // a project change landed while a snapshot was in flight: run once more with the new id
   // A selection change fired by the first projects.list is not a reason for a second snapshot: the resync
@@ -60,6 +65,41 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
     })());
   };
 
+  // After a reconnect: reattach the detached turn (or send the Stop that was pressed offline), else plain resync.
+  const resumeTurn = (): Promise<void> => {
+    if (resuming) return resuming;
+    const requestId = pendingCancel?.requestId ?? (state.waiting ? state.turn : null);
+    if (!requestId) return resync();
+    const project = pendingCancel ? pendingCancel.project : turnProject;
+    const cancelling = pendingCancel;
+    return (resuming = (async () => {
+      try {
+        const r = await link.send("chat.resume", project ? { requestId, projectId: project } : { requestId }).done;
+        pendingCancel = null;
+        if (cancelling) {
+          if (r.state === "running") { try { await link.send("chat.cancel", project ? { projectId: project } : {}).done; } catch (e) { dispatch({ type: "notice", text: messageOf(e) }); } }
+          return await resync();
+        }
+        if (r.state === "running") return dispatch({ type: "resumed", text: r.text ?? "", truncated: r.truncated === true });
+        if (r.state === "done") return dispatch({ type: "resumeFinal", text: r.text ?? null, status: r.stopReason === "cancelled" ? "cancelled" : "done", error: null });
+        if (r.state === "error") return dispatch({ type: "resumeFinal", text: r.text ?? null, status: "error", error: (r.message ?? "").slice(0, 2000) || "The reply failed." });
+        await fallback(); // unknown: another device, expired, or an old host
+      } catch (e) {
+        // Dropped again while resuming: the next ready retries. Anything else (unknown_command on an old host) is not resumable.
+        if (linkKind !== "ready") return;
+        pendingCancel = null;
+        await fallback();
+      }
+    })().finally(() => { resuming = null; }));
+  };
+  // Not resumable: finish the turn from history. The host stores the reply when the turn ends.
+  const fallback = async () => {
+    dispatch({ type: "resumeFinal", text: null, status: "interrupted", error: null });
+    await resync();
+    const last = state.messages.at(-1);
+    if (last?.role === "user") dispatch({ type: "notice", text: "The reply could not be recovered. Ask again if it is missing." });
+  };
+
   const answer = async (requestId: string, go: (commandId: string, project: string | null) => Promise<unknown>, ok: (r: any) => boolean) => {
     const card = state.approvals.find((x) => x.requestId === requestId);
     if (!card || card.submitting) return;
@@ -77,8 +117,12 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
       dispatch({ type: "event", event });
       if (event.command === "host.capabilities") dispatch({ type: "capabilities", capabilities: link.capabilities });
     }),
-    link.onResync(() => { void resync(); }),
-    link.onState((s) => { if (s.kind === "reconnecting" || s.kind === "idle" || s.kind === "failed") dispatch({ type: "connectionLost" }); }),
+    link.onResync(() => { void resumeTurn(); }),
+    link.onState((s) => {
+      linkKind = s.kind;
+      if (s.kind === "reconnecting") dispatch({ type: "connectionLost" });
+      else if (s.kind === "idle" || s.kind === "failed") { pendingCancel = null; dispatch({ type: "connectionClosed" }); }
+    }),
   ];
 
   return {
@@ -99,6 +143,7 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
         return false;
       }
       const { id, done } = link.send("chat.send", payload);
+      turnProject = project;
       dispatch({ type: "sent", commandId: id, text: t });
       try {
         const r = await done;
@@ -116,6 +161,7 @@ export function createChatController(link: HostLink, { historyLimit = 200, proje
     async cancel() {
       if (!state.turn) return;
       const project = pid();
+      if (state.waiting) { pendingCancel = { requestId: state.turn, project: turnProject }; dispatch({ type: "stoppedLocally" }); return; }
       try { await link.send("chat.cancel", project ? { projectId: project } : {}).done; } catch (e) { dispatch({ type: "notice", text: messageOf(e) }); onProjectRefused?.(e); }
     },
     async clearHistory() {
