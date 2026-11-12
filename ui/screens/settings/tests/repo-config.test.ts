@@ -8,6 +8,7 @@ import {
   normalizeBase,
   readRepoConfig,
   removeSavedRepo,
+  repoPathOf,
   repoSlugOf,
   shouldProvision,
   repoTitle,
@@ -125,4 +126,14 @@ test("shouldProvision: only a finished, valid, not-yet-cloned repository is prov
   assert.equal(shouldProvision({ url: "https://github.com/owner", clonePath: "" }), false, "a bare owner has no repository to clone");
   assert.equal(shouldProvision({ url: "owner/has space", clonePath: "" }), false);
   assert.equal(shouldProvision({ url: "", clonePath: "" }), false);
+});
+
+test("GitLab nested groups: shorthand and URLs validate, provision on blur, and keep their full path", () => {
+  for (const ok of ["group/sub/project", "https://gitlab.com/group/sub/project", "https://gitlab.com/group/sub/project.git/"]) assert.equal(validateRepoUrl(ok), null, ok);
+  assert.equal(repoPathOf("https://gitlab.com/group/sub/project.git/"), "group/sub/project");
+  assert.equal(repoPathOf("group/sub/project"), "group/sub/project");
+  assert.equal(repoPathOf("https://gitlab.com/group"), null, "a bare group has no project");
+  assert.equal(repoPathOf("a//b"), null, "an empty segment is not a path");
+  assert.equal(shouldProvision({ url: "https://gitlab.com/group/sub/project", clonePath: "" }), true, "a nested GitLab project is cloned on blur");
+  assert.equal(repoSlugOf("https://gitlab.com/group/sub/project"), null, "the GitHub issue import still reads owner/repo only");
 });

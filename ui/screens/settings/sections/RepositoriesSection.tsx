@@ -16,6 +16,7 @@ import {
   shouldProvision,
   toggleAllowedOp,
   updateSavedRepo,
+  repoPathOf,
   repoSlugOf,
   validateRepoUrl,
   writeRepoConfig,
@@ -162,8 +163,9 @@ export default function RepositoriesSection() {
   };
 
   const repoFolderName = (r: SavedRepo): string | null => {
-    const fromUrl = /^(?:https?:\/\/[^/]+\/)?([^/]+\/[^/]+?)(?:\.git)?\/?$/i.exec(r.url.trim())?.[1];
-    if (fromUrl) return fromUrl.split("/")[1]!;
+    // The folder is the project's last path segment (GitLab: group/sub/project clones into code/project).
+    const path = repoPathOf(r.url);
+    if (path) return path.split("/").pop()!;
     const name = r.displayName.trim();
     return name ? name.replace(/[^A-Za-z0-9._-]+/g, "-") : null;
   };

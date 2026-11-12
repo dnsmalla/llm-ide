@@ -169,7 +169,8 @@ export function validateRepoUrl(raw: string): string | null {
       return "That is not a valid URL.";
     }
   }
-  if (/^[\w.-]+\/[\w.-]+$/.test(t)) return null;
+  // GitLab projects can sit in nested groups (group/sub/project, up to 20 segments); the clone checks the provider's own limit.
+  if (/^[\w.-]+(\/[\w.-]+){1,19}$/.test(t)) return null;
   return "Use https://host/owner/repo or owner/repo.";
 }
 
@@ -179,13 +180,20 @@ export function repoSlugOf(raw: string): string | null {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
+/** The full path a URL or shorthand names (`owner/repo`, or a GitLab `group/sub/project`); null when there are fewer than two segments. */
+export function repoPathOf(raw: string): string | null {
+  const m = /^(?:https?:\/\/[^/]+\/)?([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(raw.trim());
+  const segs = m ? m[1]!.split("/") : [];
+  return segs.length >= 2 && segs.length <= 20 && segs.every((x) => x !== "") ? segs.join("/") : null;
+}
+
 /**
  * Whether a repository should be cloned (and its issues imported) when its URL field loses focus: a finished, valid
  * owner/repo that is not cloned yet. A repository that already has a clone path is never re-attempted on blur.
  */
 export function shouldProvision(repo: Pick<SavedRepo, "url" | "clonePath">): boolean {
   if (repo.clonePath.trim() !== "") return false;
-  return validateRepoUrl(repo.url) === null && repoSlugOf(repo.url) !== null;
+  return validateRepoUrl(repo.url) === null && repoPathOf(repo.url) !== null;
 }
 
 export function newId(): string {

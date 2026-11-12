@@ -17,8 +17,17 @@ pub struct CloneResult {
     pub name: String,
 }
 
-/// `owner/repo` (GitHub shorthand) or an https GitHub/GitLab URL, stripped to owner/repo. Rejects path shapes.
-pub fn parse_repo(raw: &str) -> Option<(String, String)> {
+/// A parsed repository: the full path under the host (`owner/repo`, or a GitLab `group/sub/project`) and its last
+/// segment, which names the folder in `code/`.
+#[derive(Debug, PartialEq, Clone)]
+pub struct RepoRef {
+    pub path: String,
+    pub name: String,
+}
+
+/// `owner/repo` shorthand or an https github.com / gitlab.com URL, stripped to its path. GitHub is exactly
+/// `owner/repo`; GitLab allows nested groups (2 to 20 segments). Rejects any other path shape.
+pub fn parse_repo(raw: &str, provider: &str) -> Option<RepoRef> {
     let t = raw.trim();
     if t.is_empty() || t.len() > 500 || t.chars().any(|c| c.is_control()) {
         return None;
@@ -32,25 +41,28 @@ pub fn parse_repo(raw: &str) -> Option<(String, String)> {
     };
     let rest = rest.trim_end_matches('/');
     let rest = rest.strip_suffix(".git").unwrap_or(rest);
-    let mut parts = rest.split('/');
-    let owner = parts.next()?;
-    let repo = parts.next()?;
-    if parts.next().is_some() || owner.is_empty() || repo.is_empty() {
+    let segments: Vec<&str> = rest.split('/').collect();
+    let max = if provider == "gitlab" { 20 } else { 2 };
+    if segments.len() < 2 || segments.len() > max {
         return None;
     }
     let ok = |s: &str| {
-        s.len() <= 100
+        !s.is_empty()
+            && s.len() <= 100
             && s != "."
             && s != ".."
             && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
     };
-    (ok(owner) && ok(repo)).then(|| (owner.to_string(), repo.to_string()))
+    if !segments.iter().all(|s| ok(s)) {
+        return None;
+    }
+    Some(RepoRef { path: segments.join("/"), name: segments[segments.len() - 1].to_string() })
 }
 
 /// The clone URL for a provider (always https, `.git` suffix).
-pub fn remote_url(provider: &str, owner: &str, repo: &str) -> String {
+pub fn remote_url(provider: &str, path: &str) -> String {
     let host = if provider == "gitlab" { "gitlab.com" } else { "github.com" };
-    format!("https://{host}/{owner}/{repo}.git")
+    format!("https://{host}/{path}.git")
 }
 
 /// The folder name inside `code/`: the repository name, never a path.
@@ -81,7 +93,9 @@ pub fn auth_config(provider: &str, token: Option<&str>) -> (String, String) {
     let scope = if provider == "gitlab" { "https://gitlab.com" } else { "https://github.com" };
     let key = format!("http.{scope}.extraHeader");
     let value = if provider == "gitlab" {
-        format!("PRIVATE-TOKEN: {token}")
+        // GitLab's git endpoint ignores `PRIVATE-TOKEN` (that header is for its REST API): a private repository then
+        // fails with "could not read Username". It honours HTTP Basic with the literal user `oauth2` and the token.
+        format!("Authorization: Basic {}", base64(format!("oauth2:{token}").as_bytes()))
     } else {
         format!("Authorization: Basic {}", base64(format!("x-access-token:{token}").as_bytes()))
     };
@@ -107,17 +121,19 @@ pub async fn repo_clone(provider: String, url: String, token: Option<String>, fo
     if provider != "github" && provider != "gitlab" {
         return Err("provider must be github or gitlab".into());
     }
-    let (owner, repo) = parse_repo(&url).ok_or_else(|| "enter owner/repo or an https GitHub/GitLab repository URL".to_string())?;
+    let repo_ref = parse_repo(&url, &provider).ok_or_else(|| {
+        if provider == "gitlab" { "enter group/project (nested groups allowed) or an https gitlab.com repository URL".to_string() } else { "enter owner/repo or an https github.com repository URL".to_string() }
+    })?;
     let name = match folder.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(f) => folder_name("", f).ok_or_else(|| "invalid folder name".to_string())?,
-        None => folder_name(&owner, &repo).ok_or_else(|| "invalid repository name".to_string())?,
+        None => folder_name("", &repo_ref.name).ok_or_else(|| "invalid repository name".to_string())?,
     };
     let root = crate::project::active_root().ok_or_else(|| "open a project before cloning a repository".to_string())?;
     if crate::fs_ops::checked_root(&root).is_err() {
         return Err("the project folder is not usable".into());
     }
     let dest = destination(&root, &name)?;
-    let remote = remote_url(&provider, &owner, &repo);
+    let remote = remote_url(&provider, &repo_ref.path);
     let token = token.filter(|t| !t.trim().is_empty() && t.len() <= 512 && !t.chars().any(|c| c.is_control()));
     let dest_for_task = dest.clone();
     tauri::async_runtime::spawn_blocking(move || clone_with_fallback(&remote, &dest_for_task, &provider, token.as_deref()))
@@ -180,12 +196,22 @@ mod tests {
 
     #[test]
     fn repository_shapes_are_parsed_strictly() {
-        assert_eq!(parse_repo("owner/repo"), Some(("owner".into(), "repo".into())));
-        assert_eq!(parse_repo("https://github.com/owner/repo.git"), Some(("owner".into(), "repo".into())));
-        assert_eq!(parse_repo("https://gitlab.com/group/repo/"), Some(("group".into(), "repo".into())));
-        for bad in ["", "https://evil.com/o/r", "../r", "a/b/c", "a b/c", "https://github.com/o"] {
-            assert_eq!(parse_repo(bad), None, "{bad}");
+        let r = |path: &str, name: &str| Some(RepoRef { path: path.into(), name: name.into() });
+        assert_eq!(parse_repo("owner/repo", "github"), r("owner/repo", "repo"));
+        assert_eq!(parse_repo("https://github.com/owner/repo.git", "github"), r("owner/repo", "repo"));
+        assert_eq!(parse_repo("https://gitlab.com/group/repo/", "gitlab"), r("group/repo", "repo"));
+        // GitLab projects live in nested groups; GitHub stays exactly owner/repo.
+        assert_eq!(parse_repo("https://gitlab.com/gitlab-org/security-products/analyzers/semgrep.git", "gitlab"), r("gitlab-org/security-products/analyzers/semgrep", "semgrep"));
+        assert_eq!(parse_repo("group/sub/project", "gitlab"), r("group/sub/project", "project"));
+        assert_eq!(parse_repo("a/b/c", "github"), None);
+        for provider in ["github", "gitlab"] {
+            for bad in ["", "https://evil.com/o/r", "../r", "a b/c", "https://github.com/o", "o/..", "o//r"] {
+                assert_eq!(parse_repo(bad, provider), None, "{provider}: {bad}");
+            }
         }
+        assert_eq!(parse_repo(&format!("g/{}", vec!["s"; 20].join("/")), "gitlab"), None, "more than 20 segments");
+        assert_eq!(remote_url("gitlab", "group/sub/project"), "https://gitlab.com/group/sub/project.git");
+        assert_eq!(remote_url("github", "o/r"), "https://github.com/o/r.git");
     }
 
     #[test]
@@ -238,7 +264,8 @@ mod tests {
         assert_eq!(v, "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dG9r");
         let (k2, v2) = auth_config("gitlab", Some("glpat"));
         assert_eq!(k2, "http.https://gitlab.com.extraHeader");
-        assert_eq!(v2, "PRIVATE-TOKEN: glpat");
+        assert_eq!(v2, format!("Authorization: Basic {}", base64(b"oauth2:glpat")));
+        assert_eq!(base64(b"oauth2:glpat"), "b2F1dGgyOmdscGF0");
         assert_eq!(auth_config("github", None), (String::new(), String::new()));
         assert_eq!(base64(b"x-access-token:tok"), "eC1hY2Nlc3MtdG9rZW46dG9r");
     }
