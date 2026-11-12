@@ -45,8 +45,10 @@ export async function startIssueRuns(projectRoot: string, issueIds: readonly str
   installRunManagerHost();
   const fs = projectGuardedFs(createHostFs(), projectRoot, () => projectStore.getSnapshot().project?.root ?? null);
   // The phone names cached issues by the core's id; only the Factory's own cards become runs.
-  const listed = await core.requestRaw("/kb/issues?state=open", { method: "GET" }).catch(() => null);
-  const { rows, missing } = issueRowsFor(listed?.status === 200 ? listed.body : null, issueIds);
+  // Both providers the Issues screen imports; the phone's picker lists the same two.
+  const pages = await Promise.all(["github", "gitlab"].map((p) => core.requestRaw(`/kb/issues?state=open&provider=${p}&limit=100`, { method: "GET" }).catch(() => null)));
+  const merged = { issues: pages.flatMap((r) => (r?.status === 200 && r.body && typeof r.body === "object" && Array.isArray((r.body as { issues?: unknown }).issues) ? (r.body as { issues: unknown[] }).issues : [])) };
+  const { rows, missing } = issueRowsFor(merged, issueIds);
   const items: WorkItemRecord[] = rows.map((row) => workItemFromIssue({
     id: String(row.id), provider: String(row.provider ?? ""), repo: String(row.repo ?? ""),
     number: typeof row.number === "number" ? row.number : null, title: String(row.title),
