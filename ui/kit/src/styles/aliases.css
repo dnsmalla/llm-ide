@@ -21,3 +21,6 @@
   --tok-color-editor-background: var(--tok-color-body);
   --tok-color-editor-line-number: var(--tok-color-text-muted);
 }
+
+/* Light theme: tinted, lighter shadows read as elevation instead of smudges. */
+:root[data-theme="light"] { --ui-shadow: #1a2233; --ui-shadow-k: 0.45; }

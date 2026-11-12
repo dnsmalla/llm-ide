@@ -88,22 +88,22 @@
 }
 
 :root[data-theme="light"] {
-  --tok-color-body: rgb(97% 97% 98%);
+  --tok-color-body: rgb(95.5% 96% 97%);
   --tok-color-surface: rgb(100% 100% 100%);
-  --tok-color-surface2: rgb(95% 96% 98%);
-  --tok-color-border: rgb(0% 0% 0% / 10%);
-  --tok-color-text: rgb(12% 14% 18%);
-  --tok-color-text-muted: rgb(39% 43% 52%);
-  --tok-color-accent: rgb(18% 49% 56%);
-  --tok-color-accent2: rgb(20% 40% 85%);
-  --tok-color-accent3: rgb(18% 65% 40%);
-  --tok-color-accent4: rgb(85% 55% 10%);
-  --tok-color-danger: rgb(80% 20% 20%);
-  --tok-color-row-alt: rgb(0% 0% 0% / 2.5%);
-  --tok-color-grid-line: rgb(0% 0% 0% / 8%);
-  --tok-color-category-purple: rgb(52% 36% 78%);
-  --tok-color-category-teal: rgb(10% 52% 55%);
-  --tok-color-category-amber: rgb(72% 48% 8%);
+  --tok-color-surface2: rgb(93% 94% 95.5%);
+  --tok-color-border: rgb(0% 0% 0% / 14%);
+  --tok-color-text: rgb(9% 11% 15%);
+  --tok-color-text-muted: rgb(33% 37% 45%);
+  --tok-color-accent: rgb(10% 42% 50%);
+  --tok-color-accent2: rgb(15% 34% 80%);
+  --tok-color-accent3: rgb(7% 45% 26%);
+  --tok-color-accent4: rgb(58% 35% 3%);
+  --tok-color-danger: rgb(72% 12% 12%);
+  --tok-color-row-alt: rgb(0% 0% 0% / 3.5%);
+  --tok-color-grid-line: rgb(0% 0% 0% / 10%);
+  --tok-color-category-purple: rgb(42% 28% 72%);
+  --tok-color-category-teal: rgb(5% 45% 48%);
+  --tok-color-category-amber: rgb(58% 37% 4%);
 }
 
 :root[data-theme="midnight"] {

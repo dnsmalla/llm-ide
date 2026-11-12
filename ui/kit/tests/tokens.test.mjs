@@ -96,6 +96,18 @@ test("components use no raw colours (hex / rgb / hsl literals)", () => {
 });
 
 const GRAPHKIT_PENDING_LIGHT_TEXT_MUTED = "rgb(42% 46% 55%)";
+// The previous light palette, which graph-kit (separate repo) still carries until the pin is bumped
+// (`make graphkit-bump`). Only these exact old values are tolerated, and only for the light theme.
+const GRAPHKIT_PENDING_LIGHT = {
+  "--tok-color-body": "rgb(97% 97% 98%)", "--tok-color-surface2": "rgb(95% 96% 98%)",
+  "--tok-color-border": "rgb(0% 0% 0% / 10%)", "--tok-color-text": "rgb(12% 14% 18%)",
+  "--tok-color-text-muted": "rgb(39% 43% 52%)", "--tok-color-accent": "rgb(18% 49% 56%)",
+  "--tok-color-accent2": "rgb(20% 40% 85%)", "--tok-color-accent3": "rgb(18% 65% 40%)",
+  "--tok-color-accent4": "rgb(85% 55% 10%)", "--tok-color-danger": "rgb(80% 20% 20%)",
+  "--tok-color-row-alt": "rgb(0% 0% 0% / 2.5%)", "--tok-color-grid-line": "rgb(0% 0% 0% / 8%)",
+  "--tok-color-category-purple": "rgb(52% 36% 78%)", "--tok-color-category-teal": "rgb(10% 52% 55%)",
+  "--tok-color-category-amber": "rgb(72% 48% 8%)",
+};
 
 // U5: graph-kit keeps its own theme (separate repo); its role names must map onto tokens.json.
 test("graph-kit web theme conforms to tokens.json (skipped when the submodule is absent)", (t) => {
@@ -112,6 +124,7 @@ test("graph-kit web theme conforms to tokens.json (skipped when the submodule is
       // Pending until graph-kit (separate repo) takes the darker light textMuted and the pin is bumped
       // (`make graphkit-bump`); only the previous value is tolerated, and only for this one token.
       if (sel.includes('"light"') && k === "--tok-color-text-muted" && b.get(k) === GRAPHKIT_PENDING_LIGHT_TEXT_MUTED) continue;
+      if (sel.includes('"light"') && b.get(k) === GRAPHKIT_PENDING_LIGHT[k]) continue;
       assert.equal(b.get(k), v, `${sel} ${k}`);
     }
   }

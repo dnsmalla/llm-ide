@@ -193,3 +193,5 @@ textarea.st-input { padding: var(--st-gap-2) var(--st-gap-3); }
 .atn-limits-embed .atn-error { color: var(--tok-color-danger); }
 .atn-limits-embed .atn-notice { color: var(--tok-color-accent3); }
 .atn-limits-embed .atn-icon { border: 0; background: none; color: inherit; cursor: pointer; }
+
+.st-btn[data-tone="primary"]:disabled { background: var(--tok-color-surface2); border-color: var(--tok-color-border); color: var(--tok-color-text-muted); box-shadow: none; opacity: 1; }

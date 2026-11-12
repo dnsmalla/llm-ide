@@ -48,3 +48,17 @@ for (const t of src.themes) {
     }
   });
 }
+
+// Accent and category colors are used as text/badges on surface and surface2: AA there too.
+for (const t of src.themes) {
+  test(`${t.id}: accent and category colors meet WCAG AA on surface and surface2`, () => {
+    const body = toRgb(t.colors.body, [1, 1, 1]);
+    const beds = { surface: toRgb(t.colors.surface, body), surface2: toRgb(t.colors.surface2, body) };
+    for (const [bn, bg] of Object.entries(beds)) {
+      for (const k of ["accent", "accent2", "accent3", "accent4", "danger", "categoryPurple", "categoryTeal", "categoryAmber"]) {
+        const r = ratio(toRgb(t.colors[k], bg), bg);
+        assert.ok(r >= 4.5, `${t.id} ${k} on ${bn} = ${r.toFixed(2)}`);
+      }
+    }
+  });
+}

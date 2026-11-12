@@ -11,7 +11,7 @@ import type { GraphModel, LayoutResult } from "./model.ts";
 import { buildAdjacency, edgeWeights, type Adjacency, type FilterState } from "./filters.ts";
 import { planLod, weightHistogram, type LodPlan } from "./lod.ts";
 import { edgeFocusDim, edgeShown, labelShown, nodeTone, visibleNodes } from "./visibility.ts";
-import { communityColor, DIM_COLOR, EDGE_COLORS, NEIGHBOUR_COLOR, SELECT_COLOR } from "./colors.ts";
+import { communityColor, darken, DIM_COLOR, EDGE_COLORS, LIGHT_DIM_COLOR, LIGHT_EDGE_COLORS, NEIGHBOUR_COLOR, SELECT_COLOR } from "./colors.ts";
 
 export interface ViewCamera {
   x: number;
@@ -45,6 +45,21 @@ export interface ViewOptions {
 const CHUNK = 6000;
 const yieldToMain = () => new Promise<void>((r) => setTimeout(r, 0));
 
+/** A theme colour as `rgb(...)`: sigma cannot read the tokens' space-separated percentage syntax, the browser can. */
+export function themeColor(el: HTMLElement, token: string, fallback: string): string {
+  try {
+    const probe = document.createElement("span");
+    probe.style.color = `var(${token}, ${fallback})`;
+    probe.style.display = "none";
+    el.appendChild(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return c && c !== "" ? c : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export class GraphView {
   private sigma: Sigma | null = null;
   private graph: Graph | null = null;
@@ -56,6 +71,7 @@ export class GraphView {
   private neighbour: Uint8Array = new Uint8Array(0);
   private focusNeighbour: Uint8Array = new Uint8Array(0);
   private disposed = false;
+  private light = false;
   private showLabels = true;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly adj: Adjacency;
@@ -122,15 +138,24 @@ export class GraphView {
     this.recompute();
     const container = this.o.container;
     let sigma: Sigma;
+    const text = themeColor(container, "--tok-color-text", "#e6e8f0");
+    const m = text.match(/\d+(\.\d+)?/g);
+    this.light = !!m && m.length >= 3 && (Number(m[0]) + Number(m[1]) + Number(m[2])) / 3 < 128; // dark text = light theme
     try {
       sigma = new Sigma(g, container, {
         allowInvalidContainer: false,
         renderEdgeLabels: false,
         hideEdgesOnMove: true,
         hideLabelsOnMove: true,
-        labelDensity: 0.6,
-        labelGridCellSize: 90,
-        labelRenderedSizeThreshold: 4,
+        // Labels: the theme's text colour (sigma's default is black, unreadable on the dark canvas), a quiet size, and
+        // only the larger nodes until you zoom in, so a dense graph is not a wall of overlapping text.
+        labelColor: { color: text },
+        labelFont: "-apple-system, system-ui, sans-serif",
+        labelSize: 11,
+        labelWeight: "500",
+        labelDensity: 0.35,
+        labelGridCellSize: 110,
+        labelRenderedSizeThreshold: 7,
         enableEdgeEvents: false,
         zIndex: true,
         defaultEdgeType: "line",
@@ -190,6 +215,7 @@ export class GraphView {
     const sel = this.selected;
     const isNb = this.neighbour[i] === 1;
     let color = communityColor(layout.community[i]);
+    if (this.light) color = darken(color);
     let zIndex = 0;
     let size = d.size as number;
     // Focus (the Mac's double-click) wins over selection: outside the focused neighbourhood everything is dimmed.
@@ -197,7 +223,7 @@ export class GraphView {
     if (tone === "select") { color = SELECT_COLOR; zIndex = 3; size *= 1.6; }
     else if (tone === "neighbour") { color = NEIGHBOUR_COLOR; zIndex = 2; }
     else if (tone === "focus") { zIndex = 2; size *= 1.4; }
-    else if (tone === "dim") color = DIM_COLOR;
+    else if (tone === "dim") color = this.light ? LIGHT_DIM_COLOR : DIM_COLOR;
     return { ...d, color, size, zIndex, label: this.showLabels && labelShown(i, layout, this.plan, sel, isNb) ? model.titles[i] : null };
   }
 
@@ -210,7 +236,7 @@ export class GraphView {
     const bucket = w >= 0.85 ? 3 : w >= 0.6 ? 2 : w >= 0.35 ? 1 : 0;
     const focusDim = edgeFocusDim(model.from[e], model.to[e], this.focused);
     const hot = touches && !focusDim;
-    return { ...d, color: hot ? SELECT_COLOR : EDGE_COLORS[this.selected >= 0 || focusDim ? 0 : bucket], size: hot ? 1.6 : 0.4 + w * 0.8, zIndex: hot ? 1 : 0 };
+    return { ...d, color: hot ? SELECT_COLOR : (this.light ? LIGHT_EDGE_COLORS : EDGE_COLORS)[this.selected >= 0 || focusDim ? 0 : bucket], size: hot ? 1.6 : 0.4 + w * 0.8, zIndex: hot ? 1 : 0 };
   }
 
   private onCameraUpdated(): void {

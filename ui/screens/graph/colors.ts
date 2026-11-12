@@ -29,6 +29,17 @@ export const NEIGHBOUR_COLOR = "#ffb020";
 export const DIM_COLOR = "#8a8f9855";
 export const EDGE_COLORS = ["#8a8f9833", "#8a8f9855", "#8a8f9888", "#6c727e"] as const;
 
+/** Light-theme variants: on a pale canvas the dark-tuned edges vanish and bright hues wash out. */
+export const LIGHT_DIM_COLOR = "#5a627088";
+export const LIGHT_EDGE_COLORS = ["#4a526a30", "#4a526a55", "#4a526a88", "#3a4152"] as const;
+
+/** Darken a `#rrggbb` hue by `k` (0..1) so community colours keep contrast on a light canvas. */
+export function darken(hex: string, k = 0.22): string {
+  const n = parseInt(hex.slice(1, 7), 16);
+  const f = (v: number) => Math.round(v * (1 - k)).toString(16).padStart(2, "0");
+  return `#${f((n >> 16) & 255)}${f((n >> 8) & 255)}${f(n & 255)}`;
+}
+
 /** Node-kind colours, the Mac's `CGPalette.color(for:)` values (SwiftUI system colours and the custom UA hues).
  *  Used for the kind legend and the kind dots; nodes themselves are coloured by community, as on the Mac canvas. */
 const KIND_COLORS: Readonly<Record<string, string>> = {
