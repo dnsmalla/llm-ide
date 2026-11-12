@@ -14,6 +14,18 @@ byte for byte, plus the purposes below. Any change bumps `v` and the vectors (`n
 `desktopId` is the syncId (22 base64url chars). `session` is "" and `tier` is "web" or "ios" on a syncwrap, "" otherwise.
 Snapshot, manifest, request and reply plaintexts are UTF-8 JSON with closed schemas (design sections 4.2 to 4.4).
 
+## Request plaintext: v1 and v2 (project routing)
+
+- **v1**: `{"v":1,"class":"chat.send","requestId":<22 base64url>,"text":<1..4000 chars>}`. Runs in the desktop's global phone chat.
+- **v2**: the same plus `"projectId"`, exactly the keys `class, projectId, requestId, text, v` with `v` 2 and `projectId` matching
+  `^[A-Za-z0-9_-]{1,128}$` (the Host API project id). The turn runs in that project's phone chat, in that project's context, after
+  the same project check the Host API gateway makes for `chat.send` (team class, project grant / `max_mode`, USD cap). A client
+  with no project keeps sending v1; v2 never omits `projectId`.
+- Reply format is unchanged (`v` 1). New failure code `project_unavailable`: the project is unknown, or this user may not use it.
+  A desktop that predates v2 answers `refused` to a v2 request, so a client falls back to v1 on `refused`.
+- Snapshot, manifest and kinds are unchanged. The request plaintext is not covered by `typedNegatives` (those mutate the
+  envelope); the schema is exercised by `extension/tests/sync-consumer.test.mjs`.
+
 ## Enrollment (device contract)
 
 Adding `enroll`/`enrollack` is additive: no existing byte changes, so `v` stays 1; vectors: `enroll` in

@@ -18,7 +18,7 @@ const users = await import('../server/users.mjs');
 const st = await import('../kb/sync-state.mjs');
 const S = await import('../core/sync-envelope.mjs');
 const { createMemoryStore } = await import('../connectors/sync-store/index.mjs');
-const { drainOnce, sweepStuckRequests, LIMITS } = await import('../routes/sync/consumer.mjs');
+const { drainOnce, sweepStuckRequests, projectAllowed, LIMITS } = await import('../routes/sync/consumer.mjs');
 const { ensureSyncKeys } = await import('../routes/sync/keys.mjs');
 
 let n = 0;
@@ -48,7 +48,8 @@ function setup() {
   };
   const calls = [];
   const deps = (events = [{ type: 'delta', text: 'hi there' }, { type: 'result' }]) => ({
-    phoneChatId: async () => 'phone-chat',
+    phoneChatId: async (userId, projectId) => (projectId ? `phone-chat:${projectId}` : 'phone-chat'),
+    projectAllowed: (userId, projectId) => projectId !== 'proj-denied',
     cancel: (userId, id) => calls.push(['cancel', id]),
     turn: async (args) => { calls.push(['turn', args.chatSessionId, args.message, Object.keys(args).sort().join(',')]); for (const e of events) args.onEvent(e); },
   });
@@ -62,6 +63,40 @@ test('a valid queued prompt runs once through the turn dep and gets an encrypted
   assert.deepEqual(await t.reply(id), { v: 1, requestId: id, ok: true, text: 'hi there', finishedAt: NOW + 1000 });
   assert.deepEqual(t.calls[0], ['turn', 'phone-chat', 'hello', 'chatSessionId,message,onEvent,userId'], 'no mode or tool option reaches the turn');
   assert.deepEqual(await t.store.list(`${t.base}/in`), [], 'inbox file removed');
+});
+
+test('v2 runs in the project phone chat and passes the project to the turn', async () => {
+  const t = setup();
+  const id = await t.send({ v: 2, projectId: 'proj-1' });
+  await drainOnce({ userId: t.u, store: t.store, now: NOW + 1000, deps: t.deps() });
+  assert.deepEqual(await t.reply(id), { v: 1, requestId: id, ok: true, text: 'hi there', finishedAt: NOW + 1000 });
+  assert.deepEqual(t.calls[0], ['turn', 'phone-chat:proj-1', 'hello', 'chatSessionId,message,onEvent,projectId,userId']);
+});
+
+test('v2 with a refused project replies project_unavailable and never runs', async () => {
+  const t = setup();
+  const id = await t.send({ v: 2, projectId: 'proj-denied' });
+  await drainOnce({ userId: t.u, store: t.store, now: NOW, deps: t.deps() });
+  assert.deepEqual(await t.reply(id), { v: 1, requestId: id, ok: false, code: 'project_unavailable' });
+  assert.equal(t.calls.length, 0);
+});
+
+test('the real project check refuses an unknown project', async () => {
+  const t = setup();
+  assert.equal(projectAllowed(t.u, 'no-such-project'), false);
+});
+
+test('malformed v2 is refused: missing projectId, bad projectId, v1 with projectId, extra key', async () => {
+  const t = setup();
+  const ids = [];
+  ids.push(await t.send({ v: 2 }));
+  ids.push(await t.send({ v: 2, projectId: 'bad id!' }));
+  ids.push(await t.send({ v: 2, projectId: 'x'.repeat(129) }));
+  ids.push(await t.send({ v: 1, projectId: 'proj-1' }));
+  ids.push(await t.send({ v: 2, projectId: 'proj-1', extra: 1 }));
+  await drainOnce({ userId: t.u, store: t.store, now: NOW, deps: t.deps() });
+  for (const id of ids) assert.equal((await t.reply(id)).code, 'refused');
+  assert.equal(t.calls.length, 0);
 });
 
 test('a replayed request id never runs twice', async () => {

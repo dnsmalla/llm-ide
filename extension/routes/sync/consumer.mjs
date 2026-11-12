@@ -8,6 +8,9 @@ import { redactSecretsForStorage } from '../../core/redact-secrets.mjs';
 import { getSyncState, listSyncDevices, recordRequest, finishRequest, countRequestsSince, nextSeq } from '../../kb/sync-state.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getQuickChatId, setQuickChatId } from '../../kb/host-api-devices.mjs';
+import { getMember, classRefusal } from '../../kb/members.mjs';
+import { usedUsdMonthForProject } from '../../kb/project-usage.mjs';
+import { projectFrameAuthority } from '../host-api/projects.mjs';
 import { ensureSyncKeys, previousRoot } from './keys.mjs';
 import { folderPresent } from './registry.mjs';
 
@@ -19,36 +22,55 @@ export const LIMITS = Object.freeze({ maxFileBytes: 65536, maxText: 4000, maxAge
 const NAME_RE = /^([0-9]{13})-([A-Za-z0-9_-]{22})\.bin$/;
 const ID_RE = /^[A-Za-z0-9_-]{22}$/;
 const REQUEST_KEYS = ['class', 'requestId', 'text', 'v'];
+const REQUEST_KEYS_V2 = ['class', 'projectId', 'requestId', 'text', 'v'];
+const PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/; // the Host API project id pattern
 
+/** v1: exactly [class, requestId, text, v]. v2 adds a mandatory projectId (a client with no project sends v1). */
 export function parseRequest(plain) {
   let o;
   try { o = JSON.parse(Buffer.from(plain).toString('utf8')); } catch { return null; }
-  if (!o || typeof o !== 'object' || Object.keys(o).sort().join() !== REQUEST_KEYS.join()) return null;
-  if (o.v !== 1 || o.class !== 'chat.send' || !ID_RE.test(o.requestId)) return null;
+  if (!o || typeof o !== 'object') return null;
+  const keys = Object.keys(o).sort().join();
+  if (o.v === 1 ? keys !== REQUEST_KEYS.join() : o.v === 2 ? keys !== REQUEST_KEYS_V2.join() : true) return null;
+  if (o.class !== 'chat.send' || !ID_RE.test(o.requestId)) return null;
   if (typeof o.text !== 'string' || o.text.length < 1 || o.text.length > LIMITS.maxText) return null;
+  if (o.v === 2) {
+    if (typeof o.projectId !== 'string' || !PROJECT_ID_RE.test(o.projectId)) return null;
+    return { requestId: o.requestId, text: o.text, projectId: o.projectId };
+  }
   return { requestId: o.requestId, text: o.text };
+}
+
+export function projectAllowed(userId, projectId) {
+  const db = getDb();
+  if (classRefusal(getMember(db, userId), 'model.ask')) return false;
+  return projectFrameAuthority(db, userId, 'chat.send', { projectId }, { usedUsd: (id) => usedUsdMonthForProject(db, userId, id) }).ok;
 }
 
 const defaultDeps = {
   turn: async (args) => (await import('../agent-v2.mjs')).startHostTurn(args),
   cancel: async (userId, id) => (await import('../agent-v2.mjs')).cancelChatTurn(userId, id),
-  phoneChatId: async (userId) => {
-    const have = getQuickChatId(userId);
+  // projectId null = the global phone chat; else that project's 'ask' phone chat, as the Host API's quickChatFor makes it.
+  phoneChatId: async (userId, projectId = null) => {
+    const have = getQuickChatId(userId, projectId, 'ask');
     if (have) return have;
-    const id = (await import('../../kb/chat-sessions.mjs')).createChatSession(userId, { title: 'Phone chat', surface: 'any', mode: 'agent' }).id;
-    setQuickChatId(userId, id);
+    const id = (await import('../../kb/chat-sessions.mjs')).createChatSession(userId, { title: 'Phone chat', surface: 'any', mode: 'agent', ...(projectId ? { projectId } : {}) }).id;
+    setQuickChatId(userId, id, projectId, 'ask');
     return id;
   },
+  // The same check the Host API gateway runs on a chat.send frame that names a project: the member's team class,
+  // then the project row, its grant (role / max_mode) and USD cap.
+  projectAllowed: (userId, projectId) => projectAllowed(userId, projectId),
 };
 
-async function runTurn(userId, text, deps) {
-  const chatSessionId = await deps.phoneChatId(userId);
+async function runTurn(userId, text, deps, projectId = null) {
+  const chatSessionId = projectId ? await deps.phoneChatId(userId, projectId) : await deps.phoneChatId(userId);
   let reply = '';
   let failure = null;
   const timer = setTimeout(() => { failure ??= 'turn_failed'; void deps.cancel(userId, chatSessionId); }, LIMITS.turnMs);
   timer.unref?.();
   try {
-    await deps.turn({ userId, chatSessionId, message: text, onEvent: (e) => {
+    await deps.turn({ userId, chatSessionId, message: text, ...(projectId ? { projectId } : {}), onEvent: (e) => {
       if (e?.type === 'delta' && typeof e.text === 'string') reply += e.text;
       else if (e?.type === 'approval_request') { failure ??= 'needs_approval'; void deps.cancel(userId, chatSessionId); }
       else if (e?.type === 'error') failure ??= 'turn_failed';
@@ -136,7 +158,10 @@ export async function drainOnce({ userId, store, now = Date.now(), deps = defaul
       if (countRequestsSince(userId, dev.deviceId, now - 86_400_000) > LIMITS.perDay) {
         await writeReply(req.requestId, { ok: false, code: 'quota' }); finishRequest(userId, dev.deviceId, req.requestId, 'failed'); continue;
       }
-      const result = await runTurn(userId, req.text, deps);
+      if (req.projectId && !(await Promise.resolve(deps.projectAllowed?.(userId, req.projectId)).catch(() => false))) {
+        await writeReply(req.requestId, { ok: false, code: 'project_unavailable' }); finishRequest(userId, dev.deviceId, req.requestId, 'failed'); continue;
+      }
+      const result = await runTurn(userId, req.text, deps, req.projectId ?? null);
       out.ran += 1;
       await writeReply(req.requestId, result.ok ? { ok: true, text: result.text, finishedAt: now } : { ok: false, code: result.code });
       finishRequest(userId, dev.deviceId, req.requestId, result.ok ? 'done' : 'failed');
