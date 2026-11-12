@@ -221,10 +221,17 @@ class LlmIdeChatStore: ObservableObject {
                 // Stop still ends the local turn even when the host refuses the project.
                 _ = self?.noteProjectRefusal(error)
             }
-            guard let self, HostApiChatTurn.endsAfterCancel(cancelled: result?.cancelled) else { return }
-            self.cancelledCommandIds.remove(id)
-            // A late reply must not end the next turn's spinner.
-            if self.currentCommandId == id { self.handleChatError(commandId: id) }
+            guard let self else { return }
+            if HostApiChatTurn.endsAfterCancel(cancelled: result?.cancelled) {
+                self.cancelledCommandIds.remove(id)
+                // A late reply must not end the next turn's spinner.
+                if self.currentCommandId == id { self.handleChatError(commandId: id) }
+                return
+            }
+            // The host accepted the cancel but its answering event may never come (a turn parked on a prompt):
+            // Stop must always free the screen, so end the turn here after a short grace.
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            if self.currentCommandId == id { self.cancelledCommandIds.remove(id); self.handleChatError(commandId: id) }
         }
     }
 
