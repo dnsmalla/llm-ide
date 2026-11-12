@@ -26,7 +26,7 @@ export const PENDING_EXPIRY_MS = 7 * 86_400_000 + 600_000 + 600_000;
 
 export type SyncPhase = "none" | "pairing" | "locked" | "ready" | "removed";
 export type PairStep = "login" | "claiming" | "sas" | null;
-export interface QueuedPrompt { requestId: string; issuedAt: number; text: string | null }
+export interface QueuedPrompt { requestId: string; issuedAt: number; text: string | null; projectId?: string }
 export interface Answered extends QueuedPrompt { ok: boolean; reply: string | null; code: string | null }
 export interface SyncState {
   phase: SyncPhase; pairStep: PairStep; sas: string | null; busy: boolean; error: string | null; notice: string | null;
@@ -67,7 +67,10 @@ export const TEXT: Record<string, string> = {
   pair_timeout: "The code expired. Show a new one on the desktop.",
   bad_name: "The browser name is 1 to 64 characters.",
   bad_text: "A prompt is 1 to 4,000 characters.",
+  bad_project: "That project cannot be used for a queued prompt.",
 };
+export const OLDER_DESKTOP_NOTICE = "This desktop is older \u2014 the prompt went to the phone chat";
+export const PROJECT_UNAVAILABLE_NOTICE = "That project is not available on the desktop";
 const BOX_TEXT: Record<string, string> = {
   SYNC_AUTH_FAILED: "Box refused the sign-in. Connect Box again.",
   SYNC_SESSION_EXPIRED: "The Box session ended. Connect Box again.",
@@ -237,12 +240,20 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       catch (e) { if (codeOf(e) !== "updating") throw e; snap = await readSnapshot(s, dev, d.now(), cache); }
       const answered: Answered[] = [];
       let problem: unknown = null;
+      let replyNotice: string | null = null;
       for (const p of [...dev.pending]) {
         const text = texts.get(p.requestId) ?? null;
         try {
           const r = await readReply(s, dev, p.requestId, d.now());
-          if (r) { texts.delete(p.requestId); answered.push({ ...p, text, ok: r.ok, reply: r.ok ? r.text : null, code: r.ok ? null : r.code }); }
-          else if (d.now() - p.issuedAt > PENDING_EXPIRY_MS) {
+          if (r && !r.ok && r.code === "refused" && p.projectId && text !== null) {
+            // An older desktop refuses every v2 request: resend once as v1 (no projectId, so this cannot repeat).
+            texts.delete(p.requestId);
+            texts.set(await sendRequest(s, dev, text, d.now()), text);
+            replyNotice = OLDER_DESKTOP_NOTICE;
+          } else if (r) {
+            if (!r.ok && r.code === "project_unavailable") replyNotice = PROJECT_UNAVAILABLE_NOTICE;
+            texts.delete(p.requestId); answered.push({ ...p, text, ok: r.ok, reply: r.ok ? r.text : null, code: r.ok ? null : r.code });
+          } else if (d.now() - p.issuedAt > PENDING_EXPIRY_MS) {
             dev.pending = dev.pending.filter((x) => x.requestId !== p.requestId);
             answered.push({ ...p, text, ok: false, reply: null, code: "expired" });
           }
@@ -252,7 +263,7 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
       backoff = POLL_MS;
       const shown = snap ?? state.snapshot;
       set({ busy: false, snapshot: shown, stale: !!shown && d.now() > shown.validUntil, checkedAt: d.now(), error: problem ? t(problem) : null,
-        notice: shown ? null : "Waiting for the desktop's first snapshot.", pending: pendingView(), answered: [...answered, ...state.answered].slice(0, MAX_ANSWERED) });
+        notice: replyNotice ?? (shown ? null : "Waiting for the desktop's first snapshot."), pending: pendingView(), answered: [...answered, ...state.answered].slice(0, MAX_ANSWERED) });
     } catch (e) {
       const code = codeOf(e);
       await save();
@@ -265,12 +276,12 @@ export function createSyncController(deps: Partial<SyncDeps> = {}) {
     } finally { refreshing = false; schedule(); }
   }
 
-  async function send(text: string): Promise<boolean> {
+  async function send(text: string, projectId: string | null = null): Promise<boolean> {
     const s = store; const dev = device;
     if (!s || !dev || state.phase !== "ready") return false;
     if (dev.pending.length >= MAX_PENDING) { set({ error: `${MAX_PENDING} prompts are already waiting for the desktop.` }); return false; }
     try {
-      const id = await sendRequest(s, dev, text, d.now());
+      const id = await sendRequest(s, dev, text, d.now(), projectId);
       texts.set(id, text);
       await save();
       set({ pending: pendingView(), error: null, notice: "Queued. It runs when the desktop is back." });

@@ -11,7 +11,7 @@ export interface DeviceStore { get(path: string): Promise<Uint8Array | null>; pu
 export type BlobCache = Map<string, { sha256: string; frame: unknown }>;
 export const MAX_TEXT = 4000;
 export const PREV_REPLY_MS = 86_400_000;
-export const REPLY_CODES = ["expired", "quota", "needs_approval", "turn_failed", "refused", "stale_epoch"] as const;
+export const REPLY_CODES = ["expired", "quota", "needs_approval", "turn_failed", "refused", "stale_epoch", "project_unavailable"] as const;
 export type Reply = { v: 1; requestId: string; ok: true; text: string; finishedAt: number }
   | { v: 1; requestId: string; ok: false; code: (typeof REPLY_CODES)[number] };
 export interface Enrolling {
@@ -140,14 +140,17 @@ export async function readSnapshot(store: DeviceStore, d: LinkedDevice, now: num
 }
 
 /** Design 4.4: the only class a device may queue (read-only ceiling, design 6). */
-export async function sendRequest(store: DeviceStore, d: LinkedDevice, text: string, now: number): Promise<string> {
+export const PROJECT_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** v1 (global phone chat) without a project, v2 (that project's phone chat) with one; exact key sets either way. */
+export async function sendRequest(store: DeviceStore, d: LinkedDevice, text: string, now: number, projectId: string | null = null): Promise<string> {
   if (typeof text !== "string" || text.length < 1 || text.length > MAX_TEXT) fail("bad_text");
+  if (projectId !== null && !PROJECT_ID.test(projectId)) fail("bad_project");
   const requestId = newId22();
   const env = await seal({ header: { purpose: "request", userId: d.userId, desktopId: d.sid, from: d.deviceId, to: d.sid, epoch: d.epoch, session: "", seq: d.reqSeq + 1, issuedAt: now, tier: "" },
-    key: d.keys.request, plaintext: utf8(JSON.stringify({ v: 1, requestId, class: "chat.send", text })), signingKey: d.signingPrivate });
+    key: d.keys.request, plaintext: utf8(JSON.stringify(projectId === null ? { v: 1, requestId, class: "chat.send", text } : { v: 2, requestId, class: "chat.send", projectId, text })), signingKey: d.signingPrivate });
   await store.put(`${base(d)}/in/${String(now).padStart(13, "0")}-${requestId}.bin`, utf8(JSON.stringify(env)), 3);
   d.reqSeq += 1;
-  d.pending.push({ requestId, issuedAt: now });
+  d.pending.push(projectId === null ? { requestId, issuedAt: now } : { requestId, issuedAt: now, projectId });
   return requestId;
 }
 

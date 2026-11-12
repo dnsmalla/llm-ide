@@ -7,6 +7,7 @@ import { ReadPanel } from "./ReadPanel.tsx";
 import { snapshotReadState } from "../read/snapshot.ts";
 import { MAX_TEXT } from "../sync/device.ts";
 import { KINDS } from "../sync/kinds.ts";
+import { offlineProjectChoice, type CachedProject } from "../host-api/storage.ts";
 import type { SyncController, SyncState } from "../sync/controller.ts";
 
 type Actions = Pick<SyncController, "pair" | "cancelPairing" | "unlock" | "send" | "refresh" | "lock" | "forget">;
@@ -23,6 +24,7 @@ export const REPLY_TEXT: Record<string, string> = {
   turn_failed: "The desktop could not finish this prompt.",
   refused: "The desktop refused this prompt.",
   stale_epoch: "The desktop changed its keys. Send it again.",
+  project_unavailable: "That project is not available on the desktop",
 };
 
 function Frame({ children, hostPaired, onSources, onHost }: { children: ReactNode; hostPaired: boolean; onSources?: () => void; onHost?: () => void }) {
@@ -138,10 +140,27 @@ function UnlockView({ state, sync }: { state: SyncState; sync: Actions }) {
   );
 }
 
+/** Offline project choice from the last live session's cached list; with none cached only the phone chat exists. */
+export function ProjectPicker({ projects, value, onChange }: { projects: readonly CachedProject[]; value: string; onChange: (id: string) => void }) {
+  const id = useId();
+  if (!projects.length) return null;
+  return (
+    <>
+      <label htmlFor={id}>Project</label>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Phone chat (no project)</option>
+        {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+    </>
+  );
+}
+
 function Inbox({ state, sync }: { state: SyncState; sync: Actions }) {
   const id = useId();
   const [draft, setDraft] = useState("");
-  const submit = async (e: FormEvent) => { e.preventDefault(); const t = draft.trim(); if (t && (await sync.send(t))) setDraft(""); };
+  const [choice] = useState(() => offlineProjectChoice());
+  const [projectId, setProjectId] = useState<string>(choice.selectedId ?? "");
+  const submit = async (e: FormEvent) => { e.preventDefault(); const t = draft.trim(); if (t && (await sync.send(t, projectId || null))) setDraft(""); };
   return (
     <section className="web-read" aria-label="Queued prompts">
       <h2>Ask the desktop later</h2>
@@ -149,6 +168,7 @@ function Inbox({ state, sync }: { state: SyncState; sync: Actions }) {
       <form className="web-form" onSubmit={(e) => void submit(e)}>
         <label htmlFor={id}>Prompt for the desktop</label>
         <textarea id={id} value={draft} maxLength={MAX_TEXT} rows={3} onChange={(e) => setDraft(e.target.value)} />
+        <ProjectPicker projects={choice.projects} value={projectId} onChange={setProjectId} />
         <button type="submit" disabled={!draft.trim() || !state.online}>Queue prompt</button>
       </form>
       {state.pending.length > 0 && (

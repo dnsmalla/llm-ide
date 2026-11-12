@@ -3,7 +3,7 @@
 import { HostApiError, HostConnection, MISMATCH_NOTICE, type ConnectionState, type HostConnectionOptions, type TokenStore } from "./host-api/connection.ts";
 import { browserPushEnv } from "./push/controller.ts";
 import { checkHostUrl } from "./host-api/url.ts";
-import { lastHostUrl, projectStoreFor, tokenStoreFor } from "./host-api/storage.ts";
+import { lastHostUrl, projectListStoreFor, projectStoreFor, tokenStoreFor } from "./host-api/storage.ts";
 import { createChatController, type ChatController } from "./chat/controller.ts";
 import { createComposeController, type ComposeController } from "./chat/compose.ts";
 import { createProjectsController, type ProjectsController } from "./projects/controller.ts";
@@ -88,7 +88,8 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
     let compose: ComposeController | null = null;
     let read: ReadController | null = null;
     const projects = createProjectsController(connection, {
-      storage: projectStoreFor(url),
+      storage: projectStoreFor(url, undefined, from),
+      listStorage: projectListStoreFor(url, undefined, from),
       // A project switch rewires every scoped view: the chat, the compose options and the read-only
       // history (which clears the previous project's list before loading the new one).
       onSelectionChange: () => { void controller?.resync(); void compose?.load(); void read?.projectChanged(); },

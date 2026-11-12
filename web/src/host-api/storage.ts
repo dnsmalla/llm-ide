@@ -100,18 +100,78 @@ const PROJECT_PREFIX = "llmide.hostApi.v1.project:";
 const validProjectId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v);
 
 export interface ProjectStore { get(): string | null; set(id: string | null): void }
+export interface CachedProject { id: string; name: string }
+export interface ProjectListStore { get(): CachedProject[]; set(list: readonly CachedProject[]): void }
 
-export function projectStoreFor(url: string, storage: KeyValue | null = browserStorage()): ProjectStore {
-  const key = PROJECT_PREFIX + url;
+const PROJECT_LIST_PREFIX = "llmide.hostApi.v1.projectList:";
+const MAX_CACHED_PROJECTS = 200;
+
+/** The desktop's identity for per-desktop browser state: its certificate fingerprint when a device record has one, else
+ *  the URL (so it survives Change address). `legacy` are the URL keys older builds wrote. */
+function desktopKeys(storage: KeyValue | null, url: string, from: string | null): { id: string; legacy: string[] } {
+  const urls = from && from !== url ? [url, from] : [url];
+  try {
+    const raw = storage?.getItem(DEVICES);
+    if (raw) for (const rec of Object.values(JSON.parse(raw) as Record<string, DeviceRecord>)) {
+      if (rec && urls.includes(rec.url) && typeof rec.fingerprint === "string" && rec.fingerprint) return { id: `fp:${rec.fingerprint}`, legacy: urls };
+    }
+  } catch { /* fall back to the URL */ }
+  return { id: url, legacy: urls.slice(1) };
+}
+
+/** Selection per paired desktop. The old URL-keyed value is migrated on first read once the identity is known. */
+export function projectStoreFor(url: string, storage: KeyValue | null = browserStorage(), from: string | null = null): ProjectStore {
   let memory: string | null = null;
   return {
     get(): string | null {
-      try { const v = storage?.getItem(key); if (validProjectId(v)) return v; } catch { /* fall back to memory */ }
+      try {
+        const k = desktopKeys(storage, url, from);
+        const v = storage?.getItem(PROJECT_PREFIX + k.id);
+        if (validProjectId(v)) return v;
+        for (const u of k.legacy) {
+          const old = storage?.getItem(PROJECT_PREFIX + u);
+          if (validProjectId(old)) { storage?.setItem(PROJECT_PREFIX + k.id, old); storage?.removeItem(PROJECT_PREFIX + u); return old; }
+        }
+      } catch { /* fall back to memory */ }
       return memory;
     },
     set(id: string | null): void {
       memory = validProjectId(id) ? id : null;
-      try { if (memory) storage?.setItem(key, memory); else storage?.removeItem(key); } catch { /* memory keeps it */ }
+      try {
+        const key = PROJECT_PREFIX + desktopKeys(storage, url, from).id;
+        if (memory) storage?.setItem(key, memory); else storage?.removeItem(key);
+      } catch { /* memory keeps it */ }
     },
   };
+}
+
+/** The last project list of a live session (ids and names only, bounded), for the offline prompt picker. */
+export function projectListStoreFor(url: string, storage: KeyValue | null = browserStorage(), from: string | null = null): ProjectListStore {
+  return {
+    get(): CachedProject[] {
+      try {
+        const raw = storage?.getItem(PROJECT_LIST_PREFIX + desktopKeys(storage, url, from).id);
+        const list = raw ? (JSON.parse(raw) as unknown) : [];
+        if (!Array.isArray(list)) return [];
+        return list.filter((p): p is CachedProject => !!p && validProjectId(p.id) && typeof p.name === "string").slice(0, MAX_CACHED_PROJECTS)
+          .map((p) => ({ id: p.id, name: p.name.slice(0, 120) }));
+      } catch { return []; }
+    },
+    set(list): void {
+      try {
+        const key = PROJECT_LIST_PREFIX + desktopKeys(storage, url, from).id;
+        const keep = list.filter((p) => validProjectId(p.id)).slice(0, MAX_CACHED_PROJECTS).map((p) => ({ id: p.id, name: String(p.name).slice(0, 120) }));
+        if (keep.length) storage?.setItem(key, JSON.stringify(keep)); else storage?.removeItem(key);
+      } catch { /* not cached */ }
+    },
+  };
+}
+
+/** What the offline compose offers: the last live session's project list and selection for the last used desktop. */
+export function offlineProjectChoice(storage: KeyValue | null = browserStorage()): { projects: CachedProject[]; selectedId: string | null } {
+  const url = lastHostUrl(storage).get();
+  if (!url) return { projects: [], selectedId: null };
+  const projects = projectListStoreFor(url, storage).get();
+  const selected = projectStoreFor(url, storage).get();
+  return { projects, selectedId: projects.some((p) => p.id === selected) ? selected : null };
 }

@@ -314,3 +314,60 @@ test('Box: a box: device without its Box app never falls through to MEGA', async
   assert.equal(mega, 0);
   assert.match(c.getState().error, /Box refused the app in this pairing link/);
 });
+
+const keysOf = ({ name, header, ...plain }) => Object.keys(plain).sort().join(); // drain() adds name/header
+
+test('a prompt without a project is exactly v1; with a project exactly v2, and pending keeps the projectId', async () => {
+  const r = await ready();
+  assert.equal(await r.c.send('global'), true);
+  assert.equal(await r.c.send('scoped', 'proj_1-A'), true);
+  assert.equal(r.c.getState().pending.find((p) => p.text === 'scoped').projectId, 'proj_1-A');
+  assert.equal(r.c.getState().pending.find((p) => p.text === 'global').projectId, undefined);
+  const reqs = await r.desk.drain(r.dev, undefined, r.clock);
+  const v1 = reqs.find((q) => q.text === 'global'); const v2 = reqs.find((q) => q.text === 'scoped');
+  assert.equal(keysOf(v1), 'class,requestId,text,v');
+  assert.equal(v1.v, 1);
+  assert.equal(v2.v, 2); assert.equal(v2.projectId, 'proj_1-A');
+  assert.equal(keysOf(v2), 'class,projectId,requestId,text,v');
+});
+
+test('a bad project id is refused before anything is written', async () => {
+  const r = await ready();
+  assert.equal(await r.c.send('x', '../etc'), false);
+  assert.deepEqual(r.c.getState().pending, []);
+});
+
+test('v2 refused by an older desktop: resent once as v1 with a new requestId and a notice', async () => {
+  const r = await ready();
+  await r.c.send('hello', 'p1');
+  const first = r.c.getState().pending[0].requestId;
+  const seen = [];
+  await r.desk.drain(r.dev, (q) => { seen.push(q.v); return { ok: false, code: 'refused' }; }, r.clock);
+  await r.c.refresh();
+  let s = r.c.getState();
+  assert.equal(s.notice, 'This desktop is older — the prompt went to the phone chat');
+  assert.equal(s.pending.length, 1);
+  assert.notEqual(s.pending[0].requestId, first);
+  assert.equal(s.pending[0].projectId, undefined);
+  assert.equal(s.pending[0].text, 'hello');
+  assert.equal(s.answered.length, 0);
+  const again = await r.desk.drain(r.dev, (q) => { seen.push(q.v); return { ok: false, code: 'refused' }; }, r.clock);
+  assert.equal(again[0].v, 1);
+  await r.c.refresh();
+  s = r.c.getState();
+  assert.deepEqual(s.pending, [], 'a v1 refusal is final: no second resend');
+  assert.equal(s.answered[0].code, 'refused');
+  assert.deepEqual(seen, [2, 1]);
+});
+
+test('project_unavailable shows a notice and is not resent', async () => {
+  const r = await ready();
+  await r.c.send('hello', 'gone');
+  await r.desk.drain(r.dev, () => ({ ok: false, code: 'project_unavailable' }), r.clock);
+  await r.c.refresh();
+  const s = r.c.getState();
+  assert.equal(s.notice, 'That project is not available on the desktop');
+  assert.deepEqual(s.pending, []);
+  assert.equal(s.answered[0].code, 'project_unavailable');
+  assert.deepEqual(await r.desk.drain(r.dev, undefined, r.clock), []);
+});

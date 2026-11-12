@@ -3,7 +3,7 @@
 // No React here. A frame without `projectId` keeps the v1 team behavior, so an empty list still chats.
 import type { HostLink } from "../host-api/connection.ts";
 import type { HostApiResult } from "../host-api/types.generated.ts";
-import type { ProjectStore } from "../host-api/storage.ts";
+import type { ProjectListStore, ProjectStore } from "../host-api/storage.ts";
 
 export type Project = HostApiResult<"projects.list">["projects"][number];
 export type ProjectRole = Project["role"];
@@ -57,11 +57,13 @@ function readProjects(r: HostApiResult<"projects.list">): Project[] {
 
 export interface ProjectsControllerOptions {
   storage: ProjectStore;
+  /** The last list, kept for the offline prompt picker. */
+  listStorage?: ProjectListStore;
   /** Fires only when the selected id changes (including the first selection from projects.list). */
   onSelectionChange?: (id: string | null) => void;
 }
 
-export function createProjectsController(link: HostLink, { storage, onSelectionChange }: ProjectsControllerOptions) {
+export function createProjectsController(link: HostLink, { storage, listStorage, onSelectionChange }: ProjectsControllerOptions) {
   // The remembered project is the scope of the FIRST chat frame, before projects.list lands. The list
   // confirms or replaces it; without this seed a page load named no project and ran under the team grant.
   const seeded = storage.get();
@@ -89,6 +91,7 @@ export function createProjectsController(link: HostLink, { storage, onSelectionC
       const stored = storage.get();
       const keep = projects.some((p) => p.id === state.selectedId) ? state.selectedId : null;
       const next = keep ?? projects.find((p) => p.id === stored)?.id ?? projects[0]?.id ?? null;
+      listStorage?.set(projects.map((p) => ({ id: p.id, name: p.name })));
       const changed = next !== state.selectedId;
       set({ projects, loading: false, loaded: true, error: null, selectedId: next, refusal: changed ? null : state.refusal });
       // L5: an empty list must not erase the host's remembered choice. Only a real selection is persisted;
