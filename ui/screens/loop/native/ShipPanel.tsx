@@ -95,6 +95,8 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       .catch(() => undefined);
     // The project's own branch is the natural target only when the project root is the run's repo.
     if (info.repo === info.project) void fs.gitStatus().then((s) => { if (live && s.branch) setBase(s.branch); }).catch(() => undefined);
+    // A clone under code/ targets its own checked-out branch (e.g. dev), as the automatic MR does.
+    else void invokeHost<string | null>("loop_repo_branch", { runId: info.runId }).then((b) => { if (live && b) setBase(b); }).catch(() => undefined);
     return () => { live = false; };
   }, [fs, info.runId, info.repo, info.project, runPrefix, initialDiff]);
 
