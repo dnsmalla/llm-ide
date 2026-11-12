@@ -176,19 +176,21 @@ export default function RepositoriesSection() {
   };
   const addRepo = () => edit((c) => addSavedRepo(c, provider.id));
 
-  /** Import the cached GitHub issues a repository clone should make visible in Issues and Gantt. */
+  /** Import a repository's open issues into the core cache, so Issues and Gantt show them with no extra step. */
   const importIssuesFor = async (r: SavedRepo, quiet: boolean): Promise<number | null> => {
-    const slug = repoSlugOf(r.url);
-    if (provider.id !== "github" || !slug || imported.current.has(slug) || !connected) return null;
-    imported.current.add(slug);
+    // GitLab projects can sit in nested groups, so they keep their full path; GitHub is owner/name.
+    const slug = provider.id === "gitlab" ? repoPathOf(r.url) : repoSlugOf(r.url);
+    const key = `${provider.id}:${slug}`;
+    if (!slug || imported.current.has(key) || !connected) return null;
+    imported.current.add(key);
     try {
-      const body = await call(client, "POST", "/kb/connect-github-issues", { repo: slug, state: "open" });
-      const n = body && typeof body === "object" && typeof (body as { imported?: unknown }).imported === "number" ? (body as { imported: number }).imported : null;
+      const body = await call(client, "POST", "/kb/connect-github-issues", { provider: provider.id, repo: slug, state: "open" });
+      const n = body && typeof body === "object" && typeof (body as { count?: unknown }).count === "number" ? (body as { count: number }).count : null;
       shellBus.publish({ type: "project-changed" });
       if (!quiet) setStatus(n === null ? `Imported ${slug} issues.` : `Imported ${n} issue${n === 1 ? "" : "s"} from ${slug}.`);
       return n;
     } catch (e) {
-      imported.current.delete(slug);
+      imported.current.delete(key);
       if (!quiet) setError(sourcesError(e));
       return null;
     }
@@ -217,7 +219,7 @@ export default function RepositoriesSection() {
       setCloneToken("");
       shellBus.publish({ type: "project-changed" });
       setCloneNotice(`Cloned ${result.name} into code/. Open Library or Explorer to browse it.`);
-      // Make the same repository visible in Issues/Gantt: import its open GitHub issues into the core cache.
+      // Make the same repository visible in Issues/Gantt: import its open issues into the core cache.
       await importIssuesFor(r, true);
       return true;
     } catch (e) {

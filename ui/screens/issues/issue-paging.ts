@@ -118,3 +118,21 @@ export function pagingNote(s: { stop: PagingStop | null; loaded: number; total: 
   if (s.stop === "end" && s.total !== null && s.loaded < s.total) return `Loaded ${n(s.loaded)} of ${n(s.total)}; the list changed while it was read. Refresh to read it again.`;
   return "";
 }
+
+const STOP_RANK: Record<PagingStop, number> = { end: 0, aborted: 1, cap: 2, error: 3 };
+
+/**
+ * One result from the walks of several providers (a view over repositories on GitHub and GitLab). Rows are joined,
+ * totals added (unknown if any is unknown) and the most serious stop wins, so a failing provider is reported
+ * without hiding the other's rows.
+ */
+export function mergePaging(results: readonly PagingResult[]): PagingResult {
+  if (results.length === 1) return results[0]!;
+  const worst = results.reduce((a, b) => (STOP_RANK[b.stop] > STOP_RANK[a.stop] ? b : a), results[0]!);
+  return {
+    issues: results.flatMap((r) => r.issues),
+    total: results.every((r) => r.total !== null) ? results.reduce((n, r) => n + (r.total ?? 0), 0) : null,
+    stop: worst.stop,
+    status: results.find((r) => r.status !== null)?.status ?? null,
+  };
+}

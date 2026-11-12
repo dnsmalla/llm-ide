@@ -13,15 +13,13 @@ import {
   filterIssues,
   createKeyAfter,
   idemKeyFor,
-  importSummary,
   issueNumber,
   labelOptions,
-  repoOptions,
-  repoSlug,
   type Issue,
   type IssueFilters,
 } from "./issues-model.ts";
-import { issuesLoadError, loadIssuePages, pagingNote, type PagingProgress, type PagingResult } from "./issue-paging.ts";
+import { issuesLoadError, loadIssuePages, mergePaging, pagingNote, type PagingProgress, type PagingResult } from "./issue-paging.ts";
+import { missingChoices, repoChoices, resolveScope, syncRepos, type SyncOutcome } from "./repo-scope.ts";
 import "./issues.css";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { IssueDetail, type IssueDetailDeps } from "./IssueDetail.tsx";
@@ -39,15 +37,14 @@ export interface IssuesDeps extends IssueDetailDeps {
 
 type Phase = "idle" | "loading" | "ready" | "error";
 
-const REPO_SHAPE = /^[\w.-]+(?:\/[\w.-]+)+$/;
-
 export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps }): ReactNode {
-  const [filters, setFilters] = useState<IssueFilters>({ provider: "github", state: "open", repo: "", label: "", query: "" });
+  // Only the state, label and search are chosen here: the provider and repository come from the saved repositories.
+  const [filters, setFilters] = useState<IssueFilters>({ state: "open", repo: "", label: "", query: "" });
+  const [repoKey, setRepoKey] = useState("");
   const [rows, setRows] = useState<Issue[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createBody, setCreateBody] = useState("");
@@ -55,7 +52,6 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   // duplicates; an edited retry gets its own key, so it is not refused as a 409 against the old content.
   const createKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const [createRepo, setCreateRepo] = useState("");
-  const [repoDraft, setRepoDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Issue | null>(null);
   // Cards picked for "Send to Factory" (by id); rows that leave the list are simply not sent.
@@ -85,38 +81,71 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const [progress, setProgress] = useState<PagingProgress | null>(null);
   // Each load aborts the one before it: a page of a superseded load is never applied (the sequence guard).
   const abortRef = useRef<AbortController | null>(null);
-  const configuredRepos = useMemo(() => {
-    const c = readRepoConfig();
-    return [
-      ...c.saved.github.map((r) => ({ ...r, provider: "github" as const, slug: repoSlug(r.url) })),
-      ...c.saved.gitlab.map((r) => ({ ...r, provider: "gitlab" as const, slug: repoSlug(r.url) })),
-    ];
-  }, []);
+  // Re-read when the screen opens, so a repository added in Settings shows without a restart.
+  const choices = useMemo(() => repoChoices(readRepoConfig()), [active]);
+  const scope = useMemo(() => resolveScope(choices, repoKey), [choices, repoKey]);
+  // Repositories already tried this session: an empty one is imported once, not on every visit.
+  const tried = useRef<Set<string>>(new Set());
+  const scopeFilters = useMemo<IssueFilters>(
+    () => ({ ...filters, provider: scope.selected?.provider, repo: scope.selected?.slug ?? "", repoExact: scope.selected !== null }),
+    [filters, scope.selected],
+  );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts: { sync?: boolean } = {}) => {
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setPhase("loading");
     setError(null);
     setProgress(null);
-    const r = await loadIssuePages(deps.request, { provider: filters.provider, state: filters.state }, {
-      signal: ctrl.signal,
-      onProgress: (p) => { if (!ctrl.signal.aborted) setProgress(p); },
-    });
-    if (ctrl.signal.aborted) return;
-    if (r.stop === "error" && r.issues.length === 0) {
-      setPhase("error");
+    const inView = scope.selected ? [scope.selected] : choices;
+    // One walk per provider in view (a single repository reads just its own), joined into one list.
+    const read = async (): Promise<PagingResult> => mergePaging(await Promise.all(scope.providers.map((p) =>
+      loadIssuePages(deps.request, { provider: p, state: filters.state }, {
+        signal: ctrl.signal,
+        onProgress: (pr) => { if (!ctrl.signal.aborted) setProgress(pr); },
+      }))));
+    /** False when the walk failed with nothing to show. */
+    const apply = (r: PagingResult): boolean => {
+      if (r.stop === "error" && r.issues.length === 0) {
+        setPhase("error");
+        setError(issuesLoadError(r));
+        // The previous walk's count note must not sit next to this failure.
+        setPaging(null);
+        return false;
+      }
+      setRows(r.issues);
+      setPaging(r);
       setError(issuesLoadError(r));
-      // The previous walk's count note must not sit next to this failure.
-      setPaging(null);
-      return;
+      setPhase("ready");
+      return true;
+    };
+    const report = (out: SyncOutcome) => {
+      if (out.problems.length > 0) setError(out.problems.join(" · "));
+      else if (out.imported > 0) setNotice(`Imported ${out.imported} issue${out.imported === 1 ? "" : "s"}.`);
+    };
+    // Refresh brings the saved repositories up to date first.
+    if (opts.sync && inView.length > 0) {
+      report(await syncRepos(deps.request, inView));
+      if (ctrl.signal.aborted) return;
     }
-    setRows(r.issues);
-    setPaging(r);
-    setError(issuesLoadError(r));
-    setPhase("ready");
-  }, [deps, filters.provider, filters.state]);
+    let r = await read();
+    if (ctrl.signal.aborted || !apply(r)) return;
+    // A saved repository with no cached issue is imported once, without the user asking.
+    const todo = opts.sync ? [] : missingChoices(choices, scope, r.issues, tried.current);
+    if (todo.length > 0) {
+      for (const c of todo) tried.current.add(c.key);
+      setNotice(`Importing issues from ${todo.map((c) => c.slug).join(", ")}…`);
+      const out = await syncRepos(deps.request, todo);
+      if (ctrl.signal.aborted) return;
+      setNotice(null);
+      report(out);
+      if (out.imported > 0) {
+        r = await read();
+        if (!ctrl.signal.aborted) apply(r);
+      }
+    }
+  }, [deps, filters.state, scope, choices]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -125,39 +154,14 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   }, [active, load]);
   useEffect(() => shellBus.subscribe("project-changed", () => { if (active) void load(); }), [active, load]);
 
-  const importIssues = async () => {
-    const repo = repoDraft.trim();
-    if (!REPO_SHAPE.test(repo)) {
-      setError("Enter a repository as owner/name.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const r = await deps.request("POST", "/kb/connect-github-issues", { repo, state: filters.state });
-      if (r.status !== 200) {
-        setError(r.status === 401 ? "Sign in again to import issues." : errorMessageOf(r.body, `The GitHub import failed (${r.status}).`));
-        return;
-      }
-      setNotice(importSummary(r.body));
-      setImportOpen(false);
-      setRepoDraft("");
-      await load();
-    } catch {
-      setError("The GitHub import could not reach the core.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  // The repository a new issue goes to: the one being shown, the only saved one, or the one picked in the form.
+  const createChoice = scope.selected ?? choices.find((c) => c.key === createRepo) ?? null;
   const createIssue = async () => {
-    const repo = createRepo.trim();
-    if (!REPO_SHAPE.test(repo) || !createTitle.trim()) { setError("Enter an owner/name repository and a title."); return; }
+    if (!createChoice || !createTitle.trim()) { setError("Pick a repository and enter a title."); return; }
     setBusy(true); setError(null); setNotice(null);
     try {
-      createKey.current = idemKeyFor(createKey.current, createFingerprint(filters.provider, repo, createTitle, createBody), () => crypto.randomUUID());
-      const r = await deps.request("POST", "/kb/issues/create", { provider: filters.provider, repo, title: createTitle.trim(), body: createBody, idem: createKey.current.key });
+      createKey.current = idemKeyFor(createKey.current, createFingerprint(createChoice.provider, createChoice.slug, createTitle, createBody), () => crypto.randomUUID());
+      const r = await deps.request("POST", "/kb/issues/create", { provider: createChoice.provider, repo: createChoice.slug, title: createTitle.trim(), body: createBody, idem: createKey.current.key });
       if (r.status !== 200) {
         // A 409 means the key belongs to other content; anything else keeps it so a retry replays the same create.
         createKey.current = createKeyAfter(createKey.current, r.status === 409 ? "conflict" : "failed");
@@ -167,7 +171,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
       createKey.current = createKeyAfter(createKey.current, "created");
       setNotice("Issue created.");
       setCreateOpen(false); setCreateTitle(""); setCreateBody(""); setCreateRepo("");
-      await load();
+      await load({ sync: true });
     } catch {
       // Ambiguous: the create may have reached the core. The key is kept (see createKeyAfter).
       setError("The core could not be reached.");
@@ -178,18 +182,15 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
   const pageNote = phase === "loading"
     ? pagingNote({ stop: null, loaded: progress?.loaded ?? 0, total: progress?.total ?? null })
     : paging ? pagingNote({ stop: paging.stop, loaded: paging.issues.length, total: paging.total }) : "";
-  const visible = useMemo(() => filterIssues(rows, filters), [rows, filters]);
+  const visible = useMemo(() => filterIssues(rows, scopeFilters), [rows, scopeFilters]);
   const columns = useMemo(() => columnsFor(visible), [visible]);
-  const repos = useMemo(() => repoOptions(rows), [rows]);
   const labels = useMemo(() => labelOptions(rows), [rows]);
   const closeDetail = useCallback(() => setSelected(null), []);
   // The dialog shows the row as the latest reload has it (by id), so a changed or closed issue is not a stale snapshot.
   const detailIssue = useMemo(() => (selected ? rows.find((r) => r.id === selected.id) ?? selected : null), [rows, selected]);
 
-  // The saved repository the select shows is the natural default for a new issue; a typed substring is not a repo.
   const openCreate = () => {
-    const saved = configuredRepos.some((r) => r.provider === filters.provider && r.slug === filters.repo);
-    setCreateRepo(saved ? filters.repo : "");
+    setCreateRepo(choices[0]?.key ?? "");
     setCreateOpen(true);
   };
 
@@ -206,13 +207,15 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
     <div className="iss-root" data-active={active}>
       <header className="iss-head">
         <h2 className="iss-title">Issues</h2>
-        <label className="iss-field">
-          <span>Provider</span>
-          <select value={filters.provider} onChange={(e) => setFilters((f) => ({ ...f, provider: e.target.value as "github" | "gitlab" }))}>
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
-          </select>
-        </label>
+        {scope.picker ? (
+          <label className="iss-field">
+            <span>Repository</span>
+            <select value={scope.selected?.key ?? ""} onChange={(e) => setRepoKey(e.target.value)}>
+              <option value="">All repositories</option>
+              {choices.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </label>
+        ) : scope.selected ? <span className="iss-count" title="The repository added in Settings → Repositories">{scope.selected.label}</span> : null}
         <label className="iss-field">
           <span>State</span>
           <select value={filters.state} onChange={(e) => setFilters((f) => ({ ...f, state: e.target.value as IssueFilters["state"] }))}>
@@ -221,64 +224,37 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
             <option value="all">All</option>
           </select>
         </label>
+        {labels.length > 0 ? (
+          <label className="iss-field">
+            <span>Label</span>
+            <select value={filters.label} onChange={(e) => setFilters((f) => ({ ...f, label: e.target.value }))}>
+              <option value="">All labels</option>
+              {labels.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </label>
+        ) : null}
         <label className="iss-field iss-grow">
           <span>Search</span>
-          <input type="search" value={filters.query} placeholder="Title, label, repo, #number" onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))} />
-        </label>
-        <button type="button" className="iss-btn" onClick={() => void load()} disabled={phase === "loading"}>Refresh</button>
-        <button type="button" className="iss-btn iss-primary" onClick={openCreate} disabled={busy}>New issue</button>
-        <button type="button" className="iss-btn" onClick={() => setImportOpen((v) => !v)} disabled={filters.provider !== "github" || busy}>
-          Import GitHub issues
-        </button>
-      </header>
-
-      <div className="iss-sub">
-        <label className="iss-field">
-          <span>Saved repository</span>
-          <select value={configuredRepos.some((r) => r.provider === filters.provider && r.slug === filters.repo) ? filters.repo : ""} onChange={(e) => setFilters((f) => ({ ...f, repo: e.target.value, repoExact: true }))}>
-            <option value="">All repositories</option>
-            {configuredRepos.filter((r) => r.provider === filters.provider).map((r) => <option key={r.id} value={r.slug}>{r.displayName || r.slug}</option>)}
-          </select>
-        </label>
-        <label className="iss-field iss-grow">
-          <span>Repository filter</span>
-          <input list="iss-repos" value={filters.repo} placeholder="owner/name" onChange={(e) => setFilters((f) => ({ ...f, repo: e.target.value, repoExact: false }))} />
-          <datalist id="iss-repos">{repos.map((r) => <option key={r} value={r} />)}</datalist>
-        </label>
-        <label className="iss-field">
-          <span>Label</span>
-          <select value={filters.label} onChange={(e) => setFilters((f) => ({ ...f, label: e.target.value }))}>
-            <option value="">All labels</option>
-            {labels.map((l) => <option key={l} value={l}>{l}</option>)}
-          </select>
+          <input type="search" value={filters.query} placeholder="Title, label, #number" onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))} />
         </label>
         <span className="iss-count" role="status">{visible.length.toLocaleString("en")} issue{visible.length === 1 ? "" : "s"}</span>
         {pageNote ? <span className="iss-hint" role="status">{pageNote}</span> : null}
-      </div>
-
-      {importOpen ? (
-        <form className="iss-import" onSubmit={(e) => { e.preventDefault(); void importIssues(); }}>
-          <label className="iss-field iss-grow">
-            <span>GitHub repository</span>
-            <input value={repoDraft} placeholder="owner/name" onChange={(e) => setRepoDraft(e.target.value)} disabled={busy} autoFocus />
-          </label>
-          <button type="submit" className="iss-btn iss-primary" disabled={busy || repoDraft.trim() === ""}>{busy ? "Importing…" : "Import"}</button>
-          <button type="button" className="iss-btn" onClick={() => setImportOpen(false)} disabled={busy}>Cancel</button>
-          <p className="iss-hint">
-            Uses the GitHub token saved in Settings → Repositories. The import fetches the repository's issues into the
-            local KB; no issue is created or changed on GitHub.
-          </p>
-        </form>
-      ) : null}
+        <button type="button" className="iss-btn" onClick={() => void load({ sync: true })} disabled={phase === "loading" || busy} title="Fetch the latest issues from the provider">Refresh</button>
+        <button type="button" className="iss-btn iss-primary" onClick={openCreate} disabled={busy || choices.length === 0}>New issue</button>
+      </header>
 
       {createOpen ? (
         <form className="iss-import" onSubmit={(e) => { e.preventDefault(); void createIssue(); }}>
-          <label className="iss-field"><span>Repository</span><input value={createRepo} placeholder="owner/name" onChange={(e) => setCreateRepo(e.target.value)} disabled={busy} /></label>
+          {scope.selected || choices.length === 1 ? null : (
+            <label className="iss-field"><span>Repository</span>
+              <select value={createRepo} onChange={(e) => setCreateRepo(e.target.value)} disabled={busy}>{choices.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
+            </label>
+          )}
           <label className="iss-field iss-grow"><span>Title</span><input value={createTitle} placeholder="Issue title" onChange={(e) => setCreateTitle(e.target.value)} disabled={busy} autoFocus maxLength={500} /></label>
           <label className="iss-field iss-grow"><span>Description</span><textarea rows={3} value={createBody} placeholder="Optional description" onChange={(e) => setCreateBody(e.target.value)} disabled={busy} /></label>
-          <button type="submit" className="iss-btn iss-primary" disabled={busy || createTitle.trim() === ""}>{busy ? "Creating…" : "Create issue"}</button>
+          <button type="submit" className="iss-btn iss-primary" disabled={busy || createTitle.trim() === "" || !createChoice}>{busy ? "Creating…" : "Create issue"}</button>
           <button type="button" className="iss-btn" onClick={() => setCreateOpen(false)} disabled={busy}>Cancel</button>
-          <p className="iss-hint">Creates the issue on the selected provider, then reloads the board.</p>
+          <p className="iss-hint">Creates the issue in {createChoice?.slug ?? "the repository"}, then reloads the board.</p>
         </form>
       ) : null}
 
@@ -299,14 +275,17 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
         <p className="iss-empty">Issues are unavailable. Check the core, then Refresh.</p>
       ) : phase === "ready" && rows.length === 0 ? (
         <div className="iss-empty">
-          <p>No {filters.provider === "github" ? "GitHub" : "GitLab"} issues are cached yet.</p>
-          <p className="iss-hint">
-            {configuredRepos.length === 0
-              ? "Add a repository in Settings → Repositories first; that is also where the provider token lives."
-              : filters.provider === "github"
-                ? "Import a repository's issues above; the GitHub token lives in Settings → Repositories."
-                : "GitLab issue import is not available in the desktop yet. The Mac app imports GitLab issues through its provider client."}
-          </p>
+          {choices.length === 0 ? (
+            <>
+              <p>No repository yet.</p>
+              <p className="iss-hint">Add one in Settings → Repositories; its issues appear here on their own.</p>
+            </>
+          ) : (
+            <>
+              <p>No issues in {scope.selected?.slug ?? "your repositories"} yet.</p>
+              <p className="iss-hint">They are fetched when you open this page. Press Refresh to fetch again; the token is the one saved in Settings → Repositories.</p>
+            </>
+          )}
         </div>
       ) : visible.length === 0 ? (
         <p className="iss-empty">No issue matches these filters.</p>
@@ -341,10 +320,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
         <IssueDetail issue={detailIssue} deps={deps} onClose={closeDetail} onNotice={setNotice} onScheduleChanged={() => void load()} onChanged={() => void load()} onSendToFactory={deps.sendToFactory ? () => void sendIssues([detailIssue], false) : undefined} />
       ) : null}
 
-      <p className="iss-hint iss-foot">
-Create, comment and close use the core's provider write routes and the saved GitHub/GitLab token.
-Issues and saved repositories are per user, not per project: an import for any project shows here.
-      </p>
+      <p className="iss-hint iss-foot">Issues come from the repositories you added in Settings → Repositories, using their saved token.</p>
     </div>
   );
 }

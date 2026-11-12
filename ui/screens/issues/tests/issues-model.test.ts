@@ -266,3 +266,16 @@ test("the overlay's 255-character limit is inclusive, as in the core (review)", 
   assert.equal(overlayRepoSupported(`a/${"x".repeat(253)}`, "gitlab"), true, "255 characters");
   assert.equal(overlayRepoSupported(`a/${"x".repeat(254)}`, "gitlab"), false, "256 characters");
 });
+
+test("dueDate is GitLab's own YYYY-MM-DD day, else null; filters without a provider keep every provider", async () => {
+  const { decodeIssues, filterIssues } = await import("../issues-model.ts");
+  const rows = decodeIssues({ issues: [
+    { id: "1", title: "a", provider: "gitlab", repo: "g/p", number: 1, state: "open", labels: [], dueDate: "2026-12-24" },
+    { id: "2", title: "b", provider: "github", repo: "o/r", number: 2, state: "open", labels: [], dueDate: null },
+    { id: "3", title: "c", provider: "gitlab", repo: "g/p", number: 3, state: "open", labels: [], dueDate: "tomorrow" },
+  ] });
+  assert.deepEqual(rows.map((r) => r.dueDate), ["2026-12-24", null, null]);
+  const f = { state: "open" as const, repo: "", label: "", query: "" };
+  assert.equal(filterIssues(rows, f).length, 3);
+  assert.equal(filterIssues(rows, { ...f, provider: "gitlab" }).length, 2);
+});

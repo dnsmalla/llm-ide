@@ -359,7 +359,8 @@ test("Gantt load: a nested GitLab project reads its overlay; a GitHub nested pat
   assert.equal(failed.nestedHint, false);
   // The screen clears the hint before each load and sets it only from the result.
   const screen = readFileSync(new URL("../GanttScreen.tsx", import.meta.url), "utf8");
-  assert.match(screen, /setNestedNote\(false\);\s*const r = await loadTimeline\(/);
+  assert.match(screen, /setNestedNote\(false\);\s*const inView = /, "cleared before every read");
+  assert.match(screen, /loadScopeTimeline\(deps\.request, \{ providers: repoScope\.providers, repo \}/);
   assert.match(screen, /setNestedNote\(r\.nestedHint\);/);
   assert.equal((screen.match(/setNestedNote\(/g) ?? []).length, 2, "no other write can leave a stale hint");
 });
@@ -604,4 +605,42 @@ test("presetRange: today, two weeks, month and quarter", () => {
   assert.deepEqual(presetRange("month", today), { from: "2026-11-01", until: "2026-11-30" });
   assert.deepEqual(presetRange("quarter", today), { from: "2026-10-01", until: "2026-12-31" });
   assert.deepEqual(presetRange("all", today), { from: "", until: "" });
+});
+
+// --- one view over GitHub and GitLab: GitLab's own due date, any-provider rows, a joined multi-provider load ---
+
+test("a GitLab issue with its own due date is drawn from it; the overlay's dates still win", async () => {
+  const { effectiveSchedule } = await import("../gantt-model.ts");
+  const gl = issue({ provider: "gitlab", repo: "g/p", number: 5, dueDate: "2026-01-07" });
+  assert.deepEqual(buildRows([gl] as never, [], "gitlab", "")[0]!.start, span(sched({ dueDate: "2026-01-07" })).start, "no overlay: the provider's due date");
+  const own = sched({ provider: "gitlab", repo: "g/p", issueNumber: 5, startDate: "2026-01-05", dueDate: "2026-01-06" });
+  assert.deepEqual(effectiveSchedule(own, gl as never), own, "overlay dates win");
+  const est = sched({ provider: "gitlab", repo: "g/p", issueNumber: 5, estimateDays: 2 });
+  assert.deepEqual(span(effectiveSchedule(est, gl as never)), { start: 20458, end: 20459 }, "an overlay estimate shapes the provider's due date");
+  assert.equal(effectiveSchedule(null, issue({ provider: "github" }) as never), null, "GitHub has no date of its own");
+  assert.equal(buildRows([issue({ provider: "gitlab", dueDate: null })] as never, [], "gitlab", "")[0]!.start, null);
+});
+
+test("buildRows with no provider shows every provider's rows, and a repo still narrows them", () => {
+  const rows = [issue({ number: 1 }), issue({ number: 2, provider: "gitlab", repo: "g/p" })] as never;
+  assert.equal(buildRows(rows, [], "", "").length, 2);
+  assert.deepEqual(buildRows(rows, [], "", "g/p").map((r) => r.issue.number), [2]);
+  assert.deepEqual(buildRows(rows, [], "github", "").map((r) => r.issue.number), [1]);
+});
+
+test("loadScopeTimeline joins the providers; one failing provider is a warning, all failing is an error", async () => {
+  const { loadScopeTimeline } = await import("../gantt-model.ts");
+  const row = (provider: string) => ({ id: provider, title: provider, provider, repo: "x/y", number: 1, state: "open", labels: [] });
+  const make = (fail: string[]) => async (_m: "GET", path: string) => {
+    const u = new URL(path, "http://x");
+    const provider = u.searchParams.get("provider") ?? "";
+    if (fail.includes(provider)) return { status: 500, body: {} };
+    return u.pathname === "/kb/issues" ? { status: 200, body: { issues: [row(provider)], total: 1, hasMore: false, nextOffset: null } } : { status: 200, body: { schedules: [] } };
+  };
+  const both = await loadScopeTimeline(make([]), { providers: ["github", "gitlab"], repo: "" });
+  assert.ok(both.ok && both.issues.length === 2 && both.paging.total === 2);
+  const one = await loadScopeTimeline(make(["gitlab"]), { providers: ["github", "gitlab"], repo: "" });
+  assert.ok(one.ok && one.issues.length === 1 && one.warning !== null, "github rows survive a gitlab failure");
+  const none = await loadScopeTimeline(make(["github", "gitlab"]), { providers: ["github", "gitlab"], repo: "" });
+  assert.equal(none.ok, false);
 });

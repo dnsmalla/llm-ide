@@ -15,8 +15,8 @@ test("the Issues and Gantt screens walk the list with a cancellable, sequence-gu
     assert.match(src, /if \(ctrl\.signal\.aborted\) return;/, "a superseded walk never applies its rows");
     assert.match(src, /pagingNote\(/, "the count line says what was loaded and why it stopped");
   }
-  assert.match(issues, /loadIssuePages\(deps\.request, \{ provider: filters\.provider, state: filters\.state \}/);
-  assert.match(gantt, /loadTimeline\(deps\.request, provider, repo, \{\s*signal: ctrl\.signal/);
+  assert.match(issues, /loadIssuePages\(deps\.request, \{ provider: p, state: filters\.state \}/);
+  assert.match(gantt, /loadScopeTimeline\(deps\.request, \{ providers: repoScope\.providers, repo \}, \{\s*signal: ctrl\.signal/);
 });
 
 test("the detail opens only the vetted URL, and shows milestone and assignees as text", () => {
@@ -40,8 +40,8 @@ test("a failed first page clears the count note from the previous load, and a la
 test("New issue derives its idempotency key from the content, drops it only on a success or a 409, and keeps it through Cancel and ambiguous failures", () => {
   const issues = read("../IssuesScreen.tsx");
   assert.match(issues, /const createKey = useRef<\{ fingerprint: string; key: string \} \| null>\(null\);/);
-  assert.match(issues, /createKey\.current = idemKeyFor\(createKey\.current, createFingerprint\(filters\.provider, repo, createTitle, createBody\), \(\) => crypto\.randomUUID\(\)\);/);
-  assert.match(issues, /"\/kb\/issues\/create", \{ provider: filters\.provider, repo, title: createTitle\.trim\(\), body: createBody, idem: createKey\.current\.key \}/);
+  assert.match(issues, /createKey\.current = idemKeyFor\(createKey\.current, createFingerprint\(createChoice\.provider, createChoice\.slug, createTitle, createBody\), \(\) => crypto\.randomUUID\(\)\);/);
+  assert.match(issues, /"\/kb\/issues\/create", \{ provider: createChoice\.provider, repo: createChoice\.slug, title: createTitle\.trim\(\), body: createBody, idem: createKey\.current\.key \}/);
   assert.match(issues, /createKey\.current = createKeyAfter\(createKey\.current, r\.status === 409 \? "conflict" : "failed"\);/);
   assert.match(issues, /createKey\.current = createKeyAfter\(createKey\.current, "created"\);\s*setNotice\("Issue created\."\);/);
   assert.match(issues, /onClick=\{\(\) => setCreateOpen\(false\)\}/, "Cancel only closes the form");
@@ -50,17 +50,25 @@ test("New issue derives its idempotency key from the content, drops it only on a
   assert.equal(issues.includes("|| filters.repo"), false, "a substring repo filter never becomes the create repo");
 });
 
-test("the create form prefills from the saved repository select only", () => {
+test("the create form offers saved repositories only: the shown one, the only one, or a pick", () => {
   const issues = read("../IssuesScreen.tsx");
   assert.match(issues, /onClick=\{openCreate\}/);
-  assert.match(issues, /setCreateRepo\(saved \? filters\.repo : ""\);/);
+  assert.match(issues, /setCreateRepo\(choices\[0\]\?\.key \?\? ""\);/);
+  assert.match(issues, /const createChoice = scope\.selected \?\? choices\.find\(\(c\) => c\.key === createRepo\) \?\? null;/);
+  assert.equal(issues.includes('placeholder="owner/name"'), false, "no free-text repository field is left");
 });
 
-test("the import banner uses the core's message, and says when the import stopped early", () => {
+test("the user only adds repositories: no provider or import controls, Refresh imports first, an empty repository imports itself once", () => {
   const issues = read("../IssuesScreen.tsx");
-  assert.match(issues, /errorMessageOf\(r\.body, `The GitHub import failed \(\$\{r\.status\}\)\.`\)/);
-  assert.match(issues, /setNotice\(importSummary\(r\.body\)\);/);
-  assert.equal(issues.includes('`Imported ${n.toLocaleString'), false, "the bare count line is gone");
+  const gantt = read("../../gantt/GanttScreen.tsx");
+  for (const src of [issues, gantt]) {
+    assert.equal(/<span[^>]*>Provider<\/span>|sr">Provider/.test(src), false, "the provider is derived, never chosen");
+    assert.match(src, /void load\(\{ sync: true \}\)/, "Refresh fetches from the provider first");
+    assert.match(src, /missingChoices\(choices, [A-Za-z]*[sS]cope, r\.issues, tried\.current\)/, "an empty repository is imported automatically");
+    assert.match(src, /for \(const c of todo\) tried\.current\.add\(c\.key\);/, "and only once per session");
+    assert.match(src, /\{(?:scope|repoScope)\.picker \? \(/, "a repository picker appears only for several repositories");
+  }
+  assert.equal(issues.includes("Import GitHub issues"), false, "the manual import button is gone");
 });
 
 test("the detail dialog shows the row as the latest reload has it, by id, not the click-time snapshot", () => {
@@ -76,7 +84,7 @@ test("a successful close closes the dialog; the write resolves to whether it suc
 
 test("the board says it is per user, and project switches remount the section (so filters and selection reset)", () => {
   const issues = read("../IssuesScreen.tsx");
-  assert.match(issues, /per user, not per project/);
+  assert.match(issues, /Issues come from the repositories you added in Settings → Repositories/);
   const shell = readFileSync(new URL("../../shell/Shell.tsx", import.meta.url), "utf8");
   assert.match(shell, /key=\{`\$\{def\.id\}:\$\{def\.id === "spike" \? "" : \(project\?\.root \?\? ""\)\}`\}/, "the shell keys section slots by project root");
 });

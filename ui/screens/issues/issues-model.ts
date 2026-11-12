@@ -26,10 +26,13 @@ export interface Issue {
   milestone: IssueMilestone | null;
   /** Assignee logins, plain text; never a link. */
   assignees: string[];
+  /** GitLab's own due date (YYYY-MM-DD); null when there is none, and always null for GitHub. */
+  dueDate?: string | null;
 }
 
 export interface IssueFilters {
-  provider: "github" | "gitlab";
+  /** Only this provider's rows; absent = every provider (the screens derive it from the chosen saved repository). */
+  provider?: "github" | "gitlab";
   state: "open" | "closed" | "all";
   repo: string;
   /**
@@ -75,6 +78,12 @@ const validDate = (v: unknown): string | null => {
   return t && /^\d{4}-\d{2}-\d{2}/.test(t) && Number.isFinite(Date.parse(t)) ? t : null;
 };
 
+/** A plain calendar day (`YYYY-MM-DD`), else null: GitLab's own due date. */
+const validDay = (v: unknown): string | null => {
+  const t = text(v, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) && Number.isFinite(Date.parse(t)) ? t : null;
+};
+
 /**
  * `{ issues: [...] }`; malformed rows are dropped, labels and assignees bounded, URLs restricted to http(s). A row
  * with neither id nor number is keyed by its position in the walk (`base` is the page's offset), so pages never collide.
@@ -111,6 +120,7 @@ export function decodeIssues(body: unknown, base = 0): Issue[] {
       isPR: row.isPR === true,
       milestone: ms ? { title: ms, dueOn: isRecord(row.milestone) ? validDate(row.milestone.dueOn) : null } : null,
       assignees,
+      dueDate: validDay(row.dueDate),
     });
     if (out.length >= MAX_ISSUES) break;
   }
@@ -198,7 +208,7 @@ export function filterIssues(issues: readonly Issue[], f: IssueFilters): Issue[]
   const q = f.query.trim().toLowerCase();
   return issues.filter((i) => {
     if (i.isPR) return false;
-    if (i.provider !== f.provider) return false;
+    if (f.provider && i.provider !== f.provider) return false;
     if (f.state !== "all" && i.state !== f.state) return false;
     if (f.repo && !repoMatches(i.repo, f.repo, f.repoExact === true)) return false;
     if (f.label && !i.labels.some((l) => l.toLowerCase() === f.label.trim().toLowerCase())) return false;

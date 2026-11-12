@@ -3,7 +3,7 @@
 // this model decides each bar's span exactly as the Mac's GanttViewModel does (dates win, estimate fills a missing
 // end or start). Undated issues are kept in a separate list, never given a made-up span.
 import { MAX_LOADED, overlayRepoSupported, type Issue } from "../issues/issues-model.ts";
-import { issuesLoadError, loadIssuePages, type PagingProgress, type PagingResult } from "../issues/issue-paging.ts";
+import { issuesLoadError, loadIssuePages, mergePaging, type PagingProgress, type PagingResult } from "../issues/issue-paging.ts";
 
 
 /** GitHub titles imported by the local importer may already start with "#<number>"; don't render it twice. */
@@ -115,17 +115,30 @@ export function scheduleKey(provider: string, repo: string, number: number): str
   return `${provider}\u0000${repo}\u0000${number}`;
 }
 
-/** Merge issues with schedules for one provider (and optional repo). Pull requests are not rows. */
+/**
+ * The schedule a bar is drawn from. The overlay's own dates win; an issue the overlay has no dates for falls back to the
+ * provider's own due date (GitLab issues carry one), so the Issues board and the Gantt show the same day. The estimate
+ * and dependencies still come from the overlay.
+ */
+export function effectiveSchedule(schedule: Schedule | null, issue: Pick<Issue, "provider" | "repo" | "number" | "dueDate">): Schedule | null {
+  if (!issue.dueDate || (schedule && (schedule.startDate || schedule.dueDate))) return schedule;
+  return {
+    provider: issue.provider, repo: issue.repo, issueNumber: issue.number ?? 0,
+    startDate: null, dueDate: issue.dueDate, estimateDays: schedule?.estimateDays ?? null, dependsOn: schedule?.dependsOn ?? [],
+  };
+}
+
+/** Merge issues with schedules for one provider (`""` = any) and optional repo. Pull requests are not rows. */
 export function buildRows(issues: readonly Issue[], schedules: readonly Schedule[], provider: string, repo: string): GanttRow[] {
   const byKey = new Map<string, Schedule>();
   for (const s of schedules) byKey.set(scheduleKey(s.provider, s.repo, s.issueNumber), s);
   const out: GanttRow[] = [];
   for (const issue of issues) {
-    if (issue.isPR || issue.provider !== provider) continue;
+    if (issue.isPR || (provider && issue.provider !== provider)) continue;
     if (repo && issue.repo !== repo) continue;
     if (issue.number === null) continue;
     const schedule = byKey.get(scheduleKey(issue.provider, issue.repo, issue.number)) ?? null;
-    const { start, end } = span(schedule);
+    const { start, end } = span(effectiveSchedule(schedule, issue));
     out.push({ issue, schedule, start, end, dependsOn: schedule?.dependsOn ?? [] });
     if (out.length >= MAX_ROWS) break;
   }
@@ -533,6 +546,31 @@ export async function loadTimeline(
     return { ok: false, nestedHint: false, error: s.status === 401 ? "Sign in again to read the timeline." : "The core could not load the issues or their schedule." };
   }
   return { ok: true, issues: paging.issues, paging, schedules: decodeSchedules(s.body), nestedHint: !overlayOk, warning: issuesLoadError(paging) };
+}
+
+/**
+ * The timeline for a view of one repository, or of every saved repository: one `loadTimeline` per provider in view
+ * (a single repository reads just its own, with its path), joined. A provider that fails is reported only when
+ * nothing else loaded, so one broken token does not blank the other provider's bars.
+ */
+export async function loadScopeTimeline(
+  request: Request,
+  scope: { providers: readonly string[]; repo: string },
+  opts: { signal?: AbortSignal; onProgress?: (p: PagingProgress) => void } = {},
+): Promise<TimelineLoad> {
+  const all = await Promise.all(scope.providers.map((p) => loadTimeline(request, p, scope.repo, opts)));
+  const ok = all.filter((r): r is Extract<TimelineLoad, { ok: true }> => r.ok);
+  if (ok.length === 0) return all.find((r) => !r.ok) ?? { ok: false, error: "The core could not load the issues or their schedule.", nestedHint: false };
+  if (all.length === 1) return all[0]!;
+  const failed = all.find((r): r is Extract<TimelineLoad, { ok: false }> => !r.ok);
+  return {
+    ok: true,
+    issues: ok.flatMap((r) => r.issues),
+    paging: mergePaging(ok.map((r) => r.paging)),
+    schedules: ok.flatMap((r) => r.schedules),
+    nestedHint: ok.some((r) => r.nestedHint),
+    warning: failed?.error ?? ok.find((r) => r.warning)?.warning ?? null,
+  };
 }
 
 /**

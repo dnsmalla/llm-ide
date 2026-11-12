@@ -5,14 +5,15 @@ import { shellBus } from "../shell/bus";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
-import { issueOpenUrl, labelOptions, repoSlug, type Issue } from "../issues/issues-model.ts";
+import { issueOpenUrl, labelOptions, type Issue } from "../issues/issues-model.ts";
 import { pagingNote, type PagingProgress, type PagingResult } from "../issues/issue-paging.ts";
+import { missingChoices, repoChoices, resolveScope, syncRepos } from "../issues/repo-scope.ts";
 import { IssueDetail, gitlabOriginFromConfig } from "../issues/IssueDetail.tsx";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import {
   GANTT_CATEGORIES,
   GANTT_NESTED_HINT,
-  loadTimeline,
+  loadScopeTimeline,
   buildRows,
   countCategories,
   datedRows,
@@ -22,7 +23,6 @@ import {
   issueLabel,
   localToday,
   presetRange,
-  projectOptions,
   timelineRange,
   type GanttRangePreset,
   todayScrollLeft,
@@ -53,9 +53,8 @@ const ZOOM_WIDTH: Record<Zoom, number> = { day: 32, week: 14, month: 5 };
 const CATEGORY_LABEL: Record<GanttCategory, string> = { open: "Open", closed: "Closed", overdue: "Overdue" };
 
 export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }): ReactNode {
-  const [provider, setProvider] = useState<"github" | "gitlab">("github");
-  const [repo, setRepo] = useState("");
-  const [projectQuery, setProjectQuery] = useState("");
+  // Only the repository (when there are several) is chosen here: the provider is the repository's own.
+  const [repoKey, setRepoKey] = useState("");
   const [hideUndated, setHideUndated] = useState(false);
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState<"all" | "open" | "closed">("all");
@@ -85,6 +84,13 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const shiftQueueRef = useRef<QueuedShift[]>([]);
   // A failed move keeps its row and days so the user can retry it; the queue behind it is reported, not silently lost.
   const [shiftFailure, setShiftFailure] = useState<{ row: GanttRow; days: number; message: string; dropped: number } | null>(null);
+  // Re-read when the screen opens, so a repository added in Settings shows without a restart.
+  const choices = useMemo(() => repoChoices(readRepoConfig()), [active]);
+  const repoScope = useMemo(() => resolveScope(choices, repoKey), [choices, repoKey]);
+  const provider = repoScope.selected?.provider ?? "";
+  const repo = repoScope.selected?.slug ?? "";
+  // Repositories already tried this session: an empty one is imported once, not on every visit.
+  const tried = useRef<Set<string>>(new Set());
   // The view a queued shift belongs to. Rows of another provider or repo are never saved from this queue.
   const scope = `${provider}\u0000${repo}`;
   const scopeRef = useRef(scope);
@@ -96,7 +102,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
     setShiftFailure(null);
   }, [provider, repo]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts: { sync?: boolean } = {}) => {
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -105,25 +111,52 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
     setProgress(null);
     // Cleared first so a failed load or a retry never shows the previous project's hint.
     setNestedNote(false);
-    const r = await loadTimeline(deps.request, provider, repo, {
+    const inView = repoScope.selected ? [repoScope.selected] : choices;
+    const read = () => loadScopeTimeline(deps.request, { providers: repoScope.providers, repo }, {
       signal: ctrl.signal,
       onProgress: (p) => { if (!ctrl.signal.aborted) setProgress(p); },
     });
-    if (ctrl.signal.aborted) return;
-    setNestedNote(r.nestedHint);
-    if (!r.ok) {
-      setPhase("error");
-      setError(r.error);
-      // The previous walk's count note must not sit next to this failure.
-      setPaging(null);
-      return;
+    const apply = (r: Awaited<ReturnType<typeof read>>): boolean => {
+      setNestedNote(r.nestedHint);
+      if (!r.ok) {
+        setPhase("error");
+        setError(r.error);
+        // The previous walk's count note must not sit next to this failure.
+        setPaging(null);
+        return false;
+      }
+      setIssues(r.issues);
+      setPaging(r.paging);
+      setSchedules(r.schedules);
+      setError(r.warning);
+      setPhase("ready");
+      return true;
+    };
+    // Refresh brings the saved repositories up to date first; a failure is shown, the cached rows still load.
+    let syncProblem: string | null = null;
+    if (opts.sync && inView.length > 0) {
+      const out = await syncRepos(deps.request, inView);
+      if (ctrl.signal.aborted) return;
+      syncProblem = out.problems.length > 0 ? out.problems.join(" · ") : null;
     }
-    setIssues(r.issues);
-    setPaging(r.paging);
-    setSchedules(r.schedules);
-    setError(r.warning);
-    setPhase("ready");
-  }, [deps, provider, repo]);
+    let r = await read();
+    if (ctrl.signal.aborted || !apply(r)) return;
+    if (syncProblem) setError(syncProblem);
+    // A saved repository with no cached issue is imported once, without the user asking.
+    const todo = opts.sync || !r.ok ? [] : missingChoices(choices, repoScope, r.issues, tried.current);
+    if (todo.length > 0) {
+      for (const c of todo) tried.current.add(c.key);
+      setNotice(`Importing issues from ${todo.map((c) => c.slug).join(", ")}…`);
+      const out = await syncRepos(deps.request, todo);
+      if (ctrl.signal.aborted) return;
+      setNotice(null);
+      if (out.problems.length > 0) setError(out.problems.join(" · "));
+      if (out.imported > 0) {
+        r = await read();
+        if (!ctrl.signal.aborted) apply(r);
+      }
+    }
+  }, [deps, repoScope, choices, repo]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -209,10 +242,6 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   const range = useMemo<TimelineRange>(() => timelineRange(rows, today), [rows, today]);
   const labels = useMemo(() => labelOptions(issues), [issues]);
   const milestones = useMemo(() => [...new Set(issues.map((i) => i.milestone?.title).filter((x): x is string => typeof x === "string" && x !== ""))].sort(), [issues]);
-  // The Mac's project list is the saved repositories of this provider only (GitHubClient/GitLabClient listProjects):
-  // a repo removed from Settings, or another provider's, never shows. Re-read on load so a Settings edit applies.
-  const savedRepos = useMemo(() => readRepoConfig().saved[provider].map((r) => repoSlug(r.url)), [provider, issues]);
-  const repos = useMemo(() => projectOptions(savedRepos, [], projectQuery, repo), [savedRepos, projectQuery, repo]);
   // Stable (only setters inside), so the memoised chart rows do not re-render when an unrelated field changes.
   const rowAction = useCallback((r: GanttRow, target: RowTarget) => {
     if (GANTT_ROW_ACTIONS[target] === "details") setDetail(r.issue);
@@ -255,24 +284,15 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
   return (
     <div className="gnt-root" data-active={active}>
       <header className="gnt-head">
-        <label className="gnt-field">
-          <span className="gnt-sr">Search projects</span>
-          <input type="search" value={projectQuery} placeholder="Search projects…" onChange={(e) => setProjectQuery(e.target.value)} />
-        </label>
-        <label className="gnt-field">
-          <span className="gnt-sr">Repository</span>
-          <select value={repo} onChange={(e) => setRepo(e.target.value)}>
-            <option value="">All repositories</option>
-            {repos.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
-        </label>
-        <label className="gnt-field">
-          <span className="gnt-sr">Provider</span>
-          <select value={provider} onChange={(e) => { setProvider(e.target.value as "github" | "gitlab"); setRepo(""); }}>
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
-          </select>
-        </label>
+        {repoScope.picker ? (
+          <label className="gnt-field">
+            <span className="gnt-sr">Repository</span>
+            <select value={repoScope.selected?.key ?? ""} onChange={(e) => setRepoKey(e.target.value)}>
+              <option value="">All repositories</option>
+              {choices.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </label>
+        ) : repoScope.selected ? <span className="gnt-hint" title="The repository added in Settings → Repositories">{repoScope.selected.label}</span> : null}
         <div className="gnt-zoom" role="tablist" aria-label="Zoom">
           {(["day", "week", "month"] as const).map((z) => (
             <button key={z} type="button" role="tab" aria-selected={zoom === z} className="gnt-zbtn" onClick={() => setZoom(z)}>{z[0]!.toUpperCase() + z.slice(1)}</button>
@@ -287,7 +307,7 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
           ))}
         </div>
         <button type="button" className="gnt-btn" onClick={scrollToToday}>Today</button>
-        <button type="button" className="gnt-btn" onClick={() => void load()} disabled={phase === "loading"}>Refresh</button>
+        <button type="button" className="gnt-btn" onClick={() => void load({ sync: true })} disabled={phase === "loading"} title="Fetch the latest issues from the provider">Refresh</button>
       </header>
 
       <div className="gnt-filters">
@@ -323,8 +343,17 @@ export function GanttScreen({ active, deps }: SectionProps & { deps: GanttDeps }
         <p className="gnt-empty">The timeline is unavailable. Check the core, then Refresh.</p>
       ) : rows.length === 0 ? (
         <div className="gnt-empty">
-          <p>No {provider === "github" ? "GitHub" : "GitLab"} issues are cached for this view.</p>
-          <p className="gnt-hint">Import a repository's issues in Issues, then schedule them here.</p>
+          {choices.length === 0 ? (
+            <>
+              <p>No repository yet.</p>
+              <p className="gnt-hint">Add one in Settings → Repositories; its issues appear here on their own.</p>
+            </>
+          ) : (
+            <>
+              <p>No issues in {repoScope.selected?.slug ?? "your repositories"} yet.</p>
+              <p className="gnt-hint">They are fetched when you open this page. Press Refresh to fetch again.</p>
+            </>
+          )}
         </div>
       ) : (
         <>
