@@ -805,12 +805,35 @@ test('a device reconnecting at the per-user cap replaces its own stale sessions 
   const old = [s1];
   for (let i = 2; i <= MAX_SESSIONS_PER_USER; i += 1) old.push(await tokenSession(t, token, i));
   assert.equal(t.closed.length, 0);
+  for (const o of old) o.lastHeard = Date.now() - 60_000; // silent for longer than a ping interval
   const fresh = await tokenSession(t, token, 99);
   assert.ok(t.last().result?.capabilities, JSON.stringify(t.last()));
   assert.deepEqual(t.closed, old, 'every older socket of this device is closed');
   assert.ok(!t.sent.some(([s, f]) => old.includes(s) && f.error?.code === 'auth_failed'), 'no auth_failed: the client keeps its token');
   assert.equal(t.audits.filter(([e]) => e === 'session_replaced').length, MAX_SESSIONS_PER_USER);
   await t.g.receive(fresh, req('c-1', 'host.ping', {})); assert.deepEqual(t.last().result, {});
+});
+test('at the cap a recently heard same-device session is NOT replaced: the newcomer gets busy', async () => {
+  const { MAX_SESSIONS_PER_USER } = await import('../routes/host-api/gateway.mjs');
+  const t = harness(); const s1 = { n: 1 }; await t.paired(s1); const token = t.last().result.token;
+  const old = [s1];
+  for (let i = 2; i <= MAX_SESSIONS_PER_USER; i += 1) old.push(await tokenSession(t, token, i));
+  for (const o of old) o.lastHeard = Date.now();
+  await tokenSession(t, token, 99);
+  assert.equal(t.lastError(), 'busy');
+  assert.deepEqual(t.closed.filter((c) => old.includes(c)), []);
+  assert.equal(t.audits.filter(([e]) => e === 'session_replaced').length, 0);
+});
+test('at the cap only the silent same-device session is replaced', async () => {
+  const { MAX_SESSIONS_PER_USER } = await import('../routes/host-api/gateway.mjs');
+  const t = harness(); const s1 = { n: 1 }; await t.paired(s1); const token = t.last().result.token;
+  const old = [s1];
+  for (let i = 2; i <= MAX_SESSIONS_PER_USER; i += 1) old.push(await tokenSession(t, token, i));
+  for (const o of old) o.lastHeard = Date.now();
+  old[0].lastHeard = Date.now() - 60_000;
+  await tokenSession(t, token, 99);
+  assert.ok(t.last().result?.capabilities, JSON.stringify(t.last()));
+  assert.deepEqual(t.closed, [old[0]]);
 });
 test('below the cap a second socket of the same device is left open (two tabs of one web token)', async () => {
   const t = harness(); const s1 = { n: 1 }; await t.paired(s1); const token = t.last().result.token;

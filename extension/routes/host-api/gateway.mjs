@@ -34,6 +34,8 @@ import { Readable } from 'node:stream';
 // ADR 0021 hub: the cap belongs to ONE member (their phones and browsers), not to the whole install. The
 // global ceiling is hub-sized so a team's members do not shut each other out; it still bounds the core.
 export const MAX_SESSIONS_PER_USER = 4;
+/** A same-device session is superseded only after this long without inbound bytes: one listener liveness ping interval (LIVENESS_PING_MS). */
+export const SUPERSEDE_SILENCE_MS = 30_000;
 export const MAX_SESSIONS = 64;
 export const AUTH_DEADLINE_MS = 10_000; // a session not authenticated by then is closed
 const TOP_LEVEL_ID = /^\s*\{(?:\s*"(?:apiVersion|type|command|ts)"\s*:\s*(?:"[^"\\]*"|[0-9.eE+-]+)\s*,)*\s*"id"\s*:\s*"([^"\\]{1,128})"/;
@@ -671,11 +673,14 @@ export function createGateway(overrides) {
         tokenThrottle.success(entry.peer);
         // A device reconnecting supersedes its own older sockets once the member is at the cap: a phone that lost
         // Wi-Fi without a FIN must not hold slots until every reconnect is `busy`. Only at the cap, so two live tabs
-        // sharing one web token do not evict each other in a reconnect loop. Closed silently: an error frame such
+        // sharing one web token do not evict each other in a reconnect loop, and only sessions silent for a full liveness
+        // ping interval (the session is the listener's WsConnection; lastHeard = last inbound byte) are replaced:
+        // a tab that still answers pings is live, so the newcomer gets `busy` and backs off. Closed silently: an error frame such
         // as auth_failed could make a client forget its token.
         if (userSessionCount(auth.userId) >= MAX_SESSIONS_PER_USER) {
           for (const [other, e] of [...sessions]) {
             if (other === s || e.state.userId !== auth.userId || e.state.deviceId !== auth.deviceId) continue;
+            if (Date.now() - (other.lastHeard ?? 0) < SUPERSEDE_SILENCE_MS) continue;
             audit('session_replaced', { peer: e.peer, userId: auth.userId, deviceId: auth.deviceId, dedupeKey: `${auth.deviceId}:replaced` });
             deps.close(other);
             closed(other);
