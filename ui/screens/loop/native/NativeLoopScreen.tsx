@@ -12,7 +12,7 @@ import { core } from "../../shell/runtime";
 import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
-import { BUILT_IN_TEMPLATES, applyTemplate, deleteCustomTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, resetCustomTemplates, saveCustomTemplate, type LoopTemplate } from "./templates.ts";
+import { BUILT_IN_TEMPLATES, applyTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, type LoopTemplate } from "./templates.ts";
 import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode } from "./runner.ts";
 import { shellBus } from "../../shell/bus";
@@ -46,16 +46,6 @@ function stageCheck(s: LoopStage): string {
   if (s.graphOp) return `graph ${s.graphOp}`;
   if (s.kind === "regressionSweep") return "system/faults/";
   return stageKindLabel[s.kind] ?? s.kind;
-}
-
-function loopConfigTemplate() {
-  return {
-    stages: [], maxIterations: 10, consecutiveFailureStop: 2, wallClockBudgetSeconds: null,
-    pauseTimeoutSeconds: 1800, maxRepairsPerStage: 3, repairModel: null,
-    protectedPathPolicy: "revert" as const, writeSummaryNote: false, extraProtectedGlobs: [],
-    useWorktreesForConcurrentRuns: false, alwaysUseWorktree: false, openMergeRequest: true,
-    refactorBatchesPerRun: null, maxCostUsd: null,
-  };
 }
 
 /** The run's budgets as the run used them (the record's config snapshot), in the Mac inspector's wording. */
@@ -112,8 +102,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
-  const [templateDraft, setTemplateDraft] = useState<{ name: string; summary: string } | null>(null);
-  const [templateId, setTemplateId] = useState(BUILT_IN_TEMPLATES[0].id);
   const [testCommand, setTestCommand] = useState<string | null>(null);
   const [envReason, setEnvReason] = useState("Checking the project environment…");
   const [checkingEnv, setCheckingEnv] = useState(false);
@@ -156,9 +144,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   // A picker card for a loop the user has since left must not start that loop over the one now shown.
   useEffect(() => { setPickerLoop(null); }, [selectedLoopId]);
   const openSeq = useRef(0);
-  const [customLoad, setCustomLoad] = useState(() => loadCustomTemplatesState());
+  const [customLoad] = useState(() => loadCustomTemplatesState());
   const customTemplates = customLoad.templates;
-  const refreshTemplates = () => setCustomLoad(loadCustomTemplatesState());
 
   useEffect(() => {
     let live = true;
@@ -365,16 +352,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setNotice(null);
   };
 
-  const addLoop = () => {
-    if (!store) return;
-    const id = crypto.randomUUID();
-    mutateStore((s) => {
-      s.loops.push({ id, name: `New Loop ${s.loops.length + 1}`, isPrimary: s.loops.length === 0, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: null, runsOnSchedule: false, config: { ...loopConfigTemplate(), stages: [] } });
-    });
-    setSelectedLoopId(id);
-    setSelectedStageId(null);
-  };
-
   const addLoopFromTemplate = (t: LoopTemplate) => {
     if (t.id === FACTORY_TEMPLATE.id) {
       // The Factory is a default loop and runs use the project's one Factory loop, so the template opens it.
@@ -428,53 +405,6 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const setPrimary = () => {
     if (!loop) return;
     mutateStore((s) => { for (const l of s.loops) l.isPrimary = l.id === loop.id; });
-  };
-
-  const addStage = (kind: LoopStage["kind"] = "shellCommand") => {
-    if (!loop) return;
-    const id = crypto.randomUUID();
-    mutateStore((s) => {
-      const l = s.loops.find((x) => x.id === loop.id); if (!l) return;
-      l.config.stages.push({
-        id, name: stageKindLabel[kind] ?? "New Stage", kind, command: kind === "shellCommand" ? "" : null,
-        order: l.config.stages.length, skillId: null, targetPath: null, outputPath: null, prompt: null,
-        isDefault: false, enabled: true, defaultKey: null, severity: "blocking", timeoutSeconds: null,
-        detectedCommand: null, check: null, testOp: kind === "testMap" ? "structure" : null,
-        graphOp: kind === "codeGraph" ? "snapshot" : null, allowsRepair: true, runOnce: false, defaultRevision: null,
-        disabledByDetection: null, raw: null,
-      });
-    });
-    setSelectedStageId(id);
-  };
-
-  const deleteStage = () => {
-    if (!stage || stage.isDefault || !loop) return;
-    mutateStore((s) => { const l = s.loops.find((x) => x.id === loop.id); if (l) l.config.stages = l.config.stages.filter((x) => x.id !== stage.id); });
-    setSelectedStageId(loop.config.stages.find((x) => x.id !== stage.id)?.id ?? null);
-  };
-
-  const duplicateStage = () => {
-    if (!stage || !loop) return;
-    const id = crypto.randomUUID();
-    mutateStore((s) => {
-      const l = s.loops.find((x) => x.id === loop.id); if (!l) return;
-      const copy = structuredClone(stage); copy.id = id; copy.isDefault = false; copy.defaultKey = null; copy.order = l.config.stages.length; copy.name = `${stage.name} Copy`;
-      l.config.stages.push(copy);
-    });
-    setSelectedStageId(id);
-  };
-
-  const moveStage = (dir: -1 | 1) => {
-    if (!loop || !stage) return;
-    mutateStore((s) => {
-      const l = s.loops.find((x) => x.id === loop.id); if (!l) return;
-      const i = l.config.stages.findIndex((x) => x.id === stage.id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= l.config.stages.length) return;
-      const [moved] = l.config.stages.splice(i, 1);
-      l.config.stages.splice(j, 0, moved);
-      l.config.stages.forEach((x, k) => { x.order = k; });
-    });
   };
 
   const selectLoop = (l: LoopDefinition) => {
@@ -897,9 +827,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   return (
     <div className="loop-native" data-active={active}>
       <aside className="loop-pane loop-loops" aria-label="Loops">
-        <div className="loop-pane-head"><span>LOOPS</span><select className="loop-add-stage" aria-label="New loop or template" value="" onChange={(e) => { if (e.target.value === "__blank") addLoop(); else { const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === e.target.value); if (t) addLoopFromTemplate(t); } }}>
+        <div className="loop-pane-head"><span>Loops</span><select className="loop-add-stage" aria-label="New loop or template" value="" onChange={(e) => { { const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === e.target.value); if (t) addLoopFromTemplate(t); } }}>
           <option value="">＋ New loop…</option>
-          <option value="__blank">Blank loop</option>
           <optgroup label="Built-in">{BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
           {customTemplates.length > 0 ? <optgroup label="My templates">{customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup> : null}
         </select></div>
@@ -916,39 +845,31 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
               <button type="button" className="loop-row" data-on={l.id === loop.id || undefined} onClick={() => selectLoop(l)}>
                 <span className="loop-row-name">{l.name}</span>
                 <span className="loop-row-icons">{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}{l.defaultKey !== null ? <span className="loop-lock" title="Built-in loop: it can't be deleted">{LOCK_ICON}</span> : null}</span>
-                <span className="loop-row-menu" aria-hidden="true">⋯</span>
               </button>
             </li>
           ))}
         </ul>
         <section className="loop-recent" aria-label="Recent runs">
-          <h3>RECENT RUNS</h3>
+          <h3>Recent runs</h3>
           {runs.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <ul>{runs.slice(0, 6).map((r) => <li key={r.id}><button type="button" className="loop-run-link" onClick={() => void openRun(r)}><span>{r.loopName}</span><span className="loop-native-hint">{r.statusCode} · {Math.round(r.durationSeconds)}s</span></button></li>)}</ul>}
         </section>
         <div className="loop-pane-foot"><span className="loop-native-hint">{dirty ? "Unsaved changes" : "Saved to system/loop.json"}</span>{dirty ? <button type="button" className="loop-btn" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button> : null}</div>
       </aside>
 
       <aside className="loop-pane loop-stages" aria-label="Stages">
-        <div className="loop-pane-head"><span>STAGES</span><span className="loop-pane-sub">{loop.name}</span><select className="loop-add-stage" aria-label="Add stage" value="" onChange={(e) => { if (e.target.value) addStage(e.target.value as LoopStage["kind"]); }}>
-            <option value="">＋ Add stage…</option>
-            {Object.entries(stageKindLabel).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-          </select></div>
+        <div className="loop-pane-head"><span>Process</span><span className="loop-pane-sub">{loop.name}</span></div>
         {isFactoryLoop(loop) ? <p className="loop-native-hint" role="note">The Factory's steps come from system/factory-template.json (Factory → Process). Edits here are replaced at the next Factory run.</p> : null}
         <div className="loop-actions">
-          <button type="button" className="loop-btn" onClick={() => moveStage(-1)} disabled={!stage || loop.config.stages[0]?.id === stage.id}>↑</button>
-          <button type="button" className="loop-btn" onClick={() => moveStage(1)} disabled={!stage || loop.config.stages[loop.config.stages.length - 1]?.id === stage.id}>↓</button>
           <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !isNativeRunnable(stage) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
-          <button type="button" className="loop-btn" onClick={duplicateStage} disabled={!stage}>Duplicate</button>
-          <button type="button" className="loop-btn" onClick={deleteStage} disabled={!stage || stage.isDefault}>Delete</button>
         </div>
-        <ul className="loop-list">
-          {loop.config.stages.map((s) => (
-            <li key={s.id}>
-              <button type="button" className="loop-stage-row" data-on={s.id === stage?.id || undefined} onClick={() => setSelectedStageId(s.id)}>
-                <span className="loop-stage-name">{s.name}</span>
+        <ul className="loop-list loop-steps">
+          {loop.config.stages.map((s, i) => (
+            <li key={s.id} className="loop-step" data-enabled={s.enabled || undefined}>
+              <button type="button" className="loop-stage-row" data-on={s.id === stage?.id || undefined} onClick={() => setSelectedStageId(s.id)} aria-label={`Step ${i + 1}: ${s.name}${s.enabled ? "" : " (off)"}`}>
+                <span className="loop-step-num" aria-hidden="true">{i + 1}</span>
+                <span className="loop-step-text"><span className="loop-stage-name">{s.name}</span><span className="loop-step-kind">{s.enabled ? stageKindLabel[s.kind] ?? s.kind : "Off"}</span></span>
                 {s.enabled && s.kind === "shellCommand" && s.command && approvalState && !approvalState.approved ? <span className="loop-unapproved" title="The host has no valid approval for this loop's exact commands">needs host approval</span> : null}
                 {s.isDefault ? <span className="loop-lock" title="Default stage">🔒</span> : null}
-                <span className="loop-row-menu" aria-hidden="true">⋯</span>
               </button>
             </li>
           ))}
@@ -962,7 +883,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.reviewedPatchId ?? shipRun.diff?.patchId ?? null} requestProvider={shipRun.requestProvider ?? null} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <section className="loop-card loop-overview">
-          <h2>OVERVIEW</h2>
+          <h2>Overview</h2>
           <label className="loop-field"><span>Name</span><input value={loop.name} onChange={(e) => patchLoop((l) => { l.name = e.target.value; })} /></label>
           <label className="loop-field"><span>Goal — what is this loop trying to achieve?</span><textarea rows={2} value={loop.goal ?? ""} onChange={(e) => patchLoop((l) => { l.goal = e.target.value || null; })} /></label>
           <label className="loop-field"><span>Acceptance criteria — what observable condition means done?</span><textarea rows={2} value={loop.acceptanceCriteria ?? ""} placeholder="Optional; included in repair/skill prompts." onChange={(e) => patchLoop((l) => { l.acceptanceCriteria = e.target.value || null; })} /></label>
@@ -980,10 +901,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           </dl>
           <div className="loop-budgets">
             <label className="loop-field"><span>Max iterations</span><input type="number" min={1} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = Math.max(1, Number(e.target.value) || 1); })} /></label>
-            <label className="loop-field"><span>Time budget (minutes, empty = none)</span><input type="number" min={0} step={15} value={loop.config.wallClockBudgetSeconds === null ? "" : Math.round(loop.config.wallClockBudgetSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)) * 60; })} /></label>
+            <label className="loop-field"><span>Time budget (min)</span><input type="number" min={0} step={15} placeholder="none" title="Empty = no time limit" value={loop.config.wallClockBudgetSeconds === null ? "" : Math.round(loop.config.wallClockBudgetSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)) * 60; })} /></label>
             <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} max={10} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>
             <label className="loop-field"><span>Repairs per stage</span><input type="number" min={1} max={10} value={loop.config.maxRepairsPerStage} onChange={(e) => patchLoop((l) => { l.config.maxRepairsPerStage = Math.max(1, Number(e.target.value) || 1); })} /></label>
-            <label className="loop-field"><span>Pause timeout (minutes, 0 = none)</span><input type="number" min={0} step={15} value={Math.round(loop.config.pauseTimeoutSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.pauseTimeoutSeconds = Math.max(0, Number(e.target.value) || 0) * 60; })} /></label>
+            <label className="loop-field"><span>Pause timeout (min)</span><input type="number" min={0} step={15} title="0 = no timeout" value={Math.round(loop.config.pauseTimeoutSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.pauseTimeoutSeconds = Math.max(0, Number(e.target.value) || 0) * 60; })} /></label>
           </div>
           <details className="loop-advanced">
             <summary>Advanced budgets and policy</summary>
@@ -1005,7 +926,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         </section>
 
         <section className="loop-card">
-          <h2>ENVIRONMENT</h2>
+          <h2>Environment</h2>
           <p><span className="loop-ready" aria-hidden="true">●</span> {testCommand ? "Ready to run" : "No test command detected"}</p>
           <p>Recommended test command: <code>{testCommand ?? "none"}</code></p>
           <p className="loop-native-hint">{envReason} Nothing is installed or changed.</p>
@@ -1014,7 +935,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         </section>
 
         <section className="loop-card">
-          <h2>SCHEDULE</h2>
+          <h2>Schedule</h2>
           <label className="loop-field"><span>Cron (page-resident scheduler)</span><input value={scheduleCron} placeholder="0 2 * * *" onChange={(e) => saveSchedule(e.target.value)} /></label>
           <p className="loop-native-hint">{scheduleCron && validateCron(scheduleCron) ? `${describeCron(scheduleCron)}. Fires while the Loop page is open; background scheduling is not ported.` : "No valid schedule. The desktop scheduler runs only while this page is open."}</p>
           <p className="loop-native-hint">Loops marked “Run on schedule” are queued when the cron fires.</p>
@@ -1022,7 +943,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         </section>
 
         <section className="loop-card" aria-label="Output">
-          <h2>OUTPUT</h2>
+          <h2>Output</h2>
           <dl className="loop-meta">
             <dt>Run journal</dt><dd><span>system/loop-runs/ · one JSON record per run, plus an index</span>{outputExists.journal ? <button type="button" className="loop-btn" onClick={() => revealRel("system/loop-runs")}>Reveal</button> : <span className="loop-native-hint">not yet</span>}</dd>
             <dt>Fault state</dt><dd><span>system/faults.csv · refreshed by the Regression stage</span>{outputExists.faults ? <button type="button" className="loop-btn" onClick={() => revealRel("system/faults.csv")}>Reveal</button> : <span className="loop-native-hint">not yet</span>}</dd>
@@ -1032,81 +953,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           </dl>
         </section>
 
-        <section className="loop-card">
-          <h2>TEMPLATE</h2>
-          <div className="loop-inline">
-            <select aria-label="Template" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-              <optgroup label="Built-in">{BUILT_IN_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
-              {customTemplates.length > 0 ? <optgroup label="My templates">{customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup> : null}
-            </select>
-            <button type="button" className="loop-btn" onClick={() => {
-              const t = [...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === templateId);
-              if (!t) return;
-              if (t.id === FACTORY_TEMPLATE.id) { setNotice("The Factory is its own loop in the list on the left; it cannot be applied over another loop."); return; }
-              const config = applyTemplate(t, testCommand);
-              if (config.stages.length === 0) { setNotice("This recipe needs a detected test command; none was found."); return; }
-              patchLoop((l) => { l.config = config; });
-              setSelectedStageId(config.stages[0]?.id ?? null);
-              setNotice(`Applied ${t.name}. Save to keep it.`);
-            }}>Apply</button>
-          </div>
-          <div className="loop-inline">
-            <button type="button" className="loop-btn" aria-expanded={templateDraft !== null} onClick={() => setTemplateDraft({ name: `${loop.name} Recipe`, summary: "" })}>Save as…</button>
-            {customTemplates.some((t) => t.id === templateId) ? <button type="button" className="loop-btn" onClick={() => setAsk({ key: `template:${templateId}`, label: "Delete template", text: "Delete this saved template?" })}>Delete template</button> : null}
-          </div>
-          {templateDraft ? (
-            <form className="loop-confirm" aria-label="Save as template" onSubmit={(e) => {
-              e.preventDefault();
-              if (!templateDraft.name.trim()) return;
-              try {
-                const t = saveCustomTemplate(templateDraft.name, templateDraft.summary, loop.config);
-                refreshTemplates();
-                setTemplateId(t.id);
-                setNotice(`Saved template “${t.name}”.`);
-              } catch (err) { setNotice(err instanceof Error ? err.message : "The template could not be saved."); }
-              setTemplateDraft(null);
-            }}>
-              <label className="loop-field"><span>Save the current stages and budgets as a template named</span><input autoFocus value={templateDraft.name} maxLength={200} onChange={(e) => setTemplateDraft({ ...templateDraft, name: e.target.value })} /></label>
-              <label className="loop-field"><span>What does this loop do? (optional)</span><input value={templateDraft.summary} maxLength={500} onChange={(e) => setTemplateDraft({ ...templateDraft, summary: e.target.value })} /></label>
-              <div className="loop-inline">
-                <button type="button" className="loop-btn" onClick={() => setTemplateDraft(null)}>Cancel</button>
-                <button type="submit" className="loop-btn loop-btn-primary" disabled={!templateDraft.name.trim()}>Save template</button>
-              </div>
-            </form>
-          ) : null}
-          {ask?.key === `template:${templateId}` ? <ConfirmBar ask={ask} onDone={() => setAsk(null)} run={() => {
-            try {
-              deleteCustomTemplate(templateId);
-              refreshTemplates();
-              setTemplateId(BUILT_IN_TEMPLATES[0].id);
-            } catch (e) { setNotice(e instanceof Error ? e.message : "The template could not be deleted."); }
-          }} /> : null}
-          {customLoad.problem ? (
-            <div className="loop-inline">
-              <StatusBanner severity="error" message="Saved Loop recipes could not be read in full, so saving and deleting are refused to keep them. The old data is kept as a backup." />
-              <button type="button" className="loop-btn" onClick={() => setAsk({ key: "reset-templates", label: "Reset custom templates", text: "Reset custom templates? The stored recipes are kept as a backup in this app's storage, and the list starts empty." })}>Reset custom templates</button>
-              {ask?.key === "reset-templates" ? <ConfirmBar ask={ask} onDone={() => setAsk(null)} run={() => {
-                resetCustomTemplates();
-                refreshTemplates();
-                setTemplateId(BUILT_IN_TEMPLATES[0].id);
-                setNotice("Custom templates reset. The old data is kept as a backup.");
-              }} /> : null}
-            </div>
-          ) : null}
-          <p className="loop-native-hint">{[...BUILT_IN_TEMPLATES, ...customTemplates].find((x) => x.id === templateId)?.summary}</p>
-          <p className="loop-warn">Applying replaces this loop&apos;s stages and budgets. Nothing is saved until you press Save, and shell stages need approving again.</p>
-        </section>
-
         {stage ? (
           <section className="loop-card">
-            <h2>PROCESS</h2>
+            <h2>Step settings</h2>
             <div className="loop-stage-editor">
               <div className="loop-stage-editor-head"><span>{loop.config.stages.indexOf(stage) + 1}</span><span>{stage.enabled ? "●" : "○"} {stage.name}</span><span className="loop-native-hint">{stage.severity}</span></div>
               <label className="loop-field"><span>Name</span><input value={stage.name} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.name = e.target.value; })} /></label>
               <div className="loop-inline"><label className="loop-check"><input type="checkbox" checked={stage.enabled} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.enabled = e.target.checked; })} /> Enabled</label><label className="loop-field"><span>Severity</span><select value={stage.severity} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.severity = e.target.value as "blocking" | "advisory"; })}><option value="blocking">Blocking</option><option value="advisory">Advisory</option></select></label><label className="loop-check"><input type="checkbox" checked={stage.allowsRepair} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.allowsRepair = e.target.checked; })} /> Allows repair</label></div>
-              <label className="loop-field"><span>Kind</span><select value={stage.kind} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.kind = e.target.value as LoopStage["kind"]; })}>
-                {Object.entries(stageKindLabel).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-              </select></label>
               {stage.kind === "shellCommand" ? <label className="loop-field"><span>Command</span><input value={stage.command ?? ""} placeholder="npm test" onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.command = e.target.value; })} />{testCommand && stage.command !== testCommand ? <button type="button" className="loop-btn" onClick={() => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.command = testCommand; })}>Use detected: {testCommand}</button> : null}</label> : null}
               {stage.kind === "skill" ? <>
                 <label className="loop-field"><span>Skill id</span><input value={stage.skillId ?? ""} placeholder="family/skill" onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.skillId = e.target.value || null; })} /></label>
@@ -1125,7 +978,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       </main>
 
       <aside className="loop-log" aria-label="Run log">
-        <div className="loop-pane-head"><span>RUN LOG</span><span className="loop-spacer" /><button type="button" className="loop-native-hint loop-clear" onClick={() => { const text = runLog.join("\n"); if (text) void navigator.clipboard?.writeText(text).then(() => setNotice("Run log copied.")).catch(() => setNotice("Could not copy the run log.")); }}>Copy</button><button type="button" className="loop-native-hint loop-clear" onClick={() => setRunLog([])}>Clear</button></div>
+        <div className="loop-pane-head"><span>Run log</span><span className="loop-spacer" /><button type="button" className="loop-native-hint loop-clear" onClick={() => { const text = runLog.join("\n"); if (text) void navigator.clipboard?.writeText(text).then(() => setNotice("Run log copied.")).catch(() => setNotice("Could not copy the run log.")); }}>Copy</button><button type="button" className="loop-native-hint loop-clear" onClick={() => setRunLog([])}>Clear</button></div>
         {selectedRun ? (
           <div className="loop-past-run">
             <div className="loop-inline"><h3>{selectedRun.loopName}</h3><span className="loop-spacer" />{runRecord ? <button type="button" className="loop-btn" onClick={() => revealRunRecord(selectedRun)}>Reveal JSON</button> : null}<button type="button" className="loop-btn" onClick={closeRun}>Back</button></div>
