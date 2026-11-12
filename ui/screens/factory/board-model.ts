@@ -17,6 +17,8 @@ export interface CardView {
   lane: string;
   /** The status the card is in (the old column's label), shown as a badge. */
   status: string;
+  /** How far a live run is through its steps, 0..1; null when not running or not known. */
+  progress?: number | null;
   costUsd?: number | null; durationSeconds?: number | null; progressLabel?: string | null; lastLine?: string | null;
   verdict?: string | null; changed?: { files: number; additions: number | null; deletions: number | null; truncated: boolean } | null;
   test?: { command: string | null; ok: boolean | null } | null; failingStage?: { name: string; error: string } | null;
@@ -119,6 +121,30 @@ export function markerStage(text: string | null): string | null {
   }
 }
 
+export type CardTone = "run" | "alert" | "warn" | "ok" | "ghost" | "idle";
+/** The colour family of a card, from its status. */
+export function cardTone(status: string): CardTone {
+  switch (status) {
+    case "Working": return "run";
+    case "Needs you": return "alert";
+    case "Needs decision": return "warn";
+    case "Ready to ship": case "Shipped": case "Done": return "ok";
+    case "Open issue": return "ghost";
+    default: return "idle";
+  }
+}
+
+/** The board header's one-line summary, e.g. "12 in backlog · 2 running · 3 waiting to merge". */
+export function boardSummary(lanes: readonly Lane[], running: number, doneLane: string = LANE_DONE): string {
+  const backlog = lanes.find((l) => l.id === LANE_BACKLOG)?.cards.length ?? 0;
+  const done = lanes.find((l) => l.id === doneLane)?.cards.length ?? 0;
+  const attention = lanes.reduce((n, l) => n + l.cards.filter((c) => c.status === "Needs you" || c.status === "Needs decision").length, 0);
+  const parts = [`${backlog} in backlog`, `${running} running`];
+  if (attention > 0) parts.push(`${attention} need${attention === 1 ? "s" : ""} you`);
+  parts.push(`${done} waiting to merge`);
+  return parts.join(" · ");
+}
+
 /** An open issue not on the board yet, as a Backlog card whose only action is Start (it is stored when started). */
 export function openIssueCard(item: Pick<WorkItemRecord, "key" | "title">): CardView {
   return { key: item.key, title: item.title, source: "issue", note: null, lane: LANE_BACKLOG, status: "Open issue", actions: ["start"] };
@@ -131,7 +157,7 @@ export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, lane: laneFor(column, f, steps), status: COLUMN_LABELS[column], actions: actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, lane: laneFor(column, f, steps), status: COLUMN_LABELS[column], progress: f.live?.progress && f.live.progress.stageCount > 0 ? Math.min(1, (f.live.progress.stageIndex + 1) / f.live.progress.stageCount) : null, actions: actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null });
   }
   return board;
 }

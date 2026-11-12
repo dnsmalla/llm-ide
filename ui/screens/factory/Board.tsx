@@ -16,7 +16,7 @@ import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, openIssueCard, markerStage, LANE_BACKLOG, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { finishChecksAllowed, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
 import { isFactoryLoop, pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
 import { processHasIntake, processSteps } from "../loop/native/factory-template.ts";
@@ -24,8 +24,8 @@ import { loadLoops } from "../loop/native/store.ts";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
+import { LaneBoard } from "./LaneBoard.tsx";
 
-const emptyCopy = (lane: string): string => (lane === LANE_BACKLOG ? "No work items" : lane === LANE_DONE ? "Nothing waiting to merge" : "Nothing at this step");
 
 // Wire the run manager to the real host once, when this chunk loads: startRun throws without it, and runs must
 // outlive this component (the Issues entry installs it the same way before it starts an intake run).
@@ -262,6 +262,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   }, [board]);
   const byKey = useMemo(() => new Map(items.map((i) => [i.key, i])), [items]);
   const elsewhere = otherProjectsNote(live, projectRoot);
+  const summary = boardSummary(lanes, live.filter((r) => r.projectRoot === projectRoot).length, LANE_DONE);
 
   const act = async (fn: () => Promise<void>) => {
     try {
@@ -380,17 +381,21 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   return (
     <div className="fx-board-root">
       <header className="fx-head">
-        <label className="fx-field">
+        <div className="fx-head-title">
+          <h2>Factory</h2>
+          <p className="fx-summary">{summary}</p>
+        </div>
+        {elsewhere ? <span className="fx-hint" role="status">{elsewhere}</span> : null}
+        <span className="fx-spacer" />
+        <label className="fx-field fx-field-inline">
           <span>Parallel runs</span>
           <select value={cap} onChange={(e) => { setConcurrency(Number(e.target.value)); setCap(concurrency()); }}>
             {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </label>
-        {elsewhere ? <span className="fx-hint" role="status">{elsewhere}</span> : null}
-        <span className="fx-spacer" />
-        <button type="button" className="fx-btn fx-primary" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>Add</button>
         <button type="button" className="fx-btn" onClick={() => void (cleanup ? setCleanup(null) : openCleanup())} aria-expanded={cleanup !== null} disabled={worktrees.size === 0}>Clean up…</button>
         <button type="button" className="fx-btn" onClick={() => { setIssuesTick((n) => n + 1); void loadFacts().then(() => refreshStatus(true)); }}>Refresh</button>
+        <button type="button" className="fx-btn fx-primary" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>Add</button>
       </header>
       {cleanup ? (
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm worktree clean-up">
@@ -438,7 +443,9 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         </form>
       ) : null}
       <div className="fx-body">
-        <div className="fx-board" role="region" aria-label="Factory board" onKeyDown={(e) => {
+        <LaneBoard
+          lanes={lanes}
+          onKeyDown={(e) => {
           const t = e.target as HTMLElement;
           if (t.closest("input, textarea, select, [contenteditable=true]")) return;
           const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" } as const;
@@ -450,12 +457,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           if (!next) return;
           e.preventDefault();
           requestAnimationFrame(() => (document.querySelector(`[data-key="${CSS.escape(next)}"] .fx-card-title`) as HTMLElement | null)?.focus());
-        }}>
-          {lanes.map((lane) => (
-            <section key={lane.id} className="fx-col" role="group" aria-label={`${lane.label} (${lane.cards.length})`}>
-              <h3 className="fx-col-title">{lane.label} <span>{lane.cards.length}</span></h3>
-              <ul className="fx-cards" role="list" aria-label={`${lane.label} cards`}>
-                {lane.cards.map((view) => {
+        }}
+          renderCard={(view) => {
                   const open = byKey.has(view.key) ? null : openIssueItems.get(view.key) ?? null;
                   if (open) {
                     return (
@@ -478,12 +481,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                       } : undefined}
                     />
                   );
-                })}
-              </ul>
-              {lane.cards.length === 0 ? <p className="fx-hint">{emptyCopy(lane.id)}</p> : null}
-            </section>
-          ))}
-        </div>
+}}
+        />
         {selected ? (
           <aside className="fx-panel" ref={panelRef} tabIndex={-1} aria-label={`Details for ${selected.title}`}>
             <header className="fx-panel-head">

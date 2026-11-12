@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, markerStage, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, cardTone, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -21,7 +21,7 @@ test("buildBoard groups items by derived column and keeps insertion order", () =
   assert.deepEqual(Object.keys(board), ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"]);
   assert.deepEqual(board.inbox.map((c) => c.key), ["issue:a", "issue:c"]);
   assert.deepEqual(board.working.map((c) => c.key), ["issue:b"]);
-  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, lane: "done", status: "Ready to ship", actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, notShipped: null, shipOverride: null }]);
+  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, lane: "done", status: "Ready to ship", progress: null, actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, notShipped: null, shipOverride: null }]);
   assert.deepEqual(board.done, []);
   assert.equal(lastKnownFrom(board).get("issue:d"), "readyToShip");
 });
@@ -271,6 +271,14 @@ test("an interrupted run sits in the step its marker names; an MR closed without
   assert.deepEqual(at("Done"), []);
 });
 
+test("boardSummary counts backlog, running, cards that need you and work waiting to merge; cardTone follows the status", () => {
+  const card = (status) => ({ key: status, status });
+  const lanes = [{ id: "backlog", label: "Backlog", cards: [card("Inbox"), card("Open issue")] }, { id: "step:Verify", label: "Verify", cards: [card("Needs you")] }, { id: "done", label: "Done", cards: [card("Shipped")] }];
+  assert.equal(boardSummary(lanes, 2), "2 in backlog · 2 running · 1 needs you · 1 waiting to merge");
+  assert.equal(boardSummary([{ id: "backlog", label: "Backlog", cards: [] }, { id: "done", label: "Done", cards: [] }], 0), "0 in backlog · 0 running · 0 waiting to merge");
+  assert.deepEqual(["Working", "Needs you", "Needs decision", "Shipped", "Open issue", "Inbox"].map(cardTone), ["run", "alert", "warn", "ok", "ghost", "idle"]);
+});
+
 test("markerStage reads the step from a run marker and ignores older or bad markers", () => {
   assert.equal(markerStage(JSON.stringify({ runId: "r", stage: "Review" })), "Review");
   assert.equal(markerStage(JSON.stringify({ runId: "r" })), null);
@@ -287,7 +295,7 @@ test("Start and Run intake start their own run plan; only Finish checks reviews 
 
 test("D4: the board markup uses a region, labelled lists and a log", async () => {
   const { readFileSync } = await import("node:fs");
-  const src = readFileSync(new URL("../Board.tsx", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../Board.tsx", import.meta.url), "utf8") + readFileSync(new URL("../LaneBoard.tsx", import.meta.url), "utf8");
   assert.match(src, /role="region" aria-label="Factory board"/);
   assert.match(src, /<ul className="fx-cards" role="list"/);
   assert.match(src, /role="log"/);

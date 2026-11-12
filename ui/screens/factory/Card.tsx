@@ -1,6 +1,6 @@
 // One Factory card: title, source, the derived note and the actions its column allows.
 import { useState, type ReactNode } from "react";
-import { ACTION_LABELS, SOURCE_LABELS, formatDuration, type CardAction, type CardView } from "./board-model.ts";
+import { ACTION_LABELS, SOURCE_LABELS, cardTone, formatDuration, type CardAction, type CardView } from "./board-model.ts";
 import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
 
 export function Card({ view, selected, onOpen, onAction, onDiscardStatus, requestProvider = null }: {
@@ -19,17 +19,22 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
   const [note, setNote] = useState("");
   const [answer, setAnswer] = useState("");
   return (
-    <li className="fx-card" data-key={view.key} data-selected={selected} onKeyDown={(e) => { if (e.key === "Escape") { setConfirmDiscard(false); setSendBackOpen(false); setNote(""); } }}>
-      <button type="button" className="fx-card-title" onClick={onOpen} title="Show details">{view.title}</button>
-      <div className="fx-card-meta">
-        <span className="fx-source">{SOURCE_LABELS[view.source]}</span>
-        <span className="fx-status" data-status={view.status}>{view.status}</span>
+    <li className="fx-card" data-key={view.key} data-selected={selected} data-tone={cardTone(view.status)} onKeyDown={(e) => { if (e.key === "Escape") { setConfirmDiscard(false); setSendBackOpen(false); setNote(""); } }}>
+      <div className="fx-card-top">
+        <span className="fx-status">{view.status}</span>
         {view.note ? <span className="fx-note">{view.note}</span> : null}
-        {view.progressLabel ? <span className="fx-hint">{view.progressLabel}</span> : null}
-        {view.durationSeconds != null ? <span className="fx-hint">{formatDuration(view.durationSeconds)}</span> : null}
-        {view.costUsd != null && view.costUsd > 0 ? <span className="fx-hint">${view.costUsd.toFixed(2)}</span> : null}
-        {view.lastLine ? <span className="fx-hint" title={view.lastLine}>{view.lastLine.slice(0, 120)}</span> : null}
+        <span className="fx-source">{SOURCE_LABELS[view.source]}</span>
       </div>
+      <button type="button" className="fx-card-title" onClick={onOpen} title="Show details">{view.title}</button>
+      {view.progress != null ? <div className="fx-progress" role="progressbar" aria-label="Run progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(view.progress * 100)}><span style={{ width: `${Math.round(view.progress * 100)}%` }} /></div> : null}
+      {view.progressLabel || view.durationSeconds != null || (view.costUsd != null && view.costUsd > 0) ? (
+        <div className="fx-card-meta">
+          {view.progressLabel ? <span>{view.progressLabel}</span> : null}
+          {view.durationSeconds != null ? <span>{formatDuration(view.durationSeconds)}</span> : null}
+          {view.costUsd != null && view.costUsd > 0 ? <span>${view.costUsd.toFixed(2)}</span> : null}
+        </div>
+      ) : null}
+      {view.lastLine ? <p className="fx-card-line" title={view.lastLine}>{view.lastLine.slice(0, 120)}</p> : null}
       {view.verdict ? <p className="fx-hint">{view.verdict}</p> : null}
       {view.notShipped ? <p className="fx-hint" role="note">Not shipped: {view.notShipped}</p> : null}
       {view.shipOverride ? <p className="fx-hint">Shipped past a secret hit: {view.shipOverride.rule}{view.shipOverride.file ? ` at ${view.shipOverride.file}${view.shipOverride.line ? `:${view.shipOverride.line}` : ""}` : ""}.</p> : null}
