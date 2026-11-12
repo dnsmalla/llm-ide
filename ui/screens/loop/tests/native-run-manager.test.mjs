@@ -459,6 +459,31 @@ test("a Factory run writes .factory/RUN.json and removes it after the record", a
   assert.deepEqual(marks.find(([k]) => k === "remove")?.[1], "system/loop-worktrees/" + a + "/.factory/RUN.json");
 });
 
+test("the run marker names the step the run is on, and no step write lands after the marker is removed", async () => {
+  const marks = [];
+  let emit;
+  let releaseWrite;
+  setup({
+    fsFor: () => ({
+      write: async (path, text, opts) => { if (opts.force) await new Promise((r) => { releaseWrite = r; }); marks.push(["write", text, opts.force === true]); },
+      remove: async () => { marks.push(["remove"]); },
+    }),
+    runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; },
+  });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  emit({ type: "stage-start", stage: { id: "s1", name: "Implement" }, index: 0, count: 2, iteration: 1 });
+  const done = finish(a);
+  await settle();
+  assert.equal(marks.some(([k]) => k === "remove"), false, "the run waits for the pending step write before it ends");
+  releaseWrite();
+  await done;
+  await settle();
+  const stepWrite = marks.findIndex(([k, , force]) => k === "write" && force);
+  assert.equal(JSON.parse(marks[stepWrite][1]).stage, "Implement");
+  assert.ok(marks.findIndex(([k]) => k === "remove") > stepWrite, "the marker is removed after the last step write");
+});
+
 test("a finished stage is reported with its run, item and worktree path, and a throwing listener does not stop the run", async () => {
   let emit;
   const seen = [];

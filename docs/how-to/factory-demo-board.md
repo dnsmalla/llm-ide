@@ -19,6 +19,12 @@ process changes the lanes.
   project) that is not on the board yet, after any stored items. **Start** on such a card adds it and starts its run.
 - **Done** holds finished work that is **not merged yet**: ready to ship, or an MR/PR open (also when CI failed or a
   reviewer commented; the badge says so). Merged work leaves the board.
+- An MR/PR **closed without merge** goes back to **Backlog** (badge "Closed without merge"); Discard frees the issue to
+  start again.
+- A run the app stopped mid-way (**Interrupted**) sits in the step it was on: the run marker `.factory/RUN.json`
+  records the current step.
+- Clicking an open issue's title shows its text and **Start** in the side panel. Backlog loads up to 1,000 open issues
+  per provider (10 pages of 100).
 
 A card sits in the step it is running, or in the step where it stopped (a failed gate sits in the step it checks).
 Its status is a badge on the card. The lane and the badge are derived from the item's last run, its worktree and the

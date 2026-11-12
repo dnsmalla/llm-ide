@@ -24,7 +24,7 @@ export interface RunRecordFacts {
   reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null;
 }
 
-export interface ItemFacts { live: LiveRun | null; lastRecord: RunRecordFacts | null; worktreeExists: boolean; interrupted?: boolean; ship: ShipStatus | null; shipStatusError: boolean; lastKnownColumn: Column | null }
+export interface ItemFacts { live: LiveRun | null; lastRecord: RunRecordFacts | null; worktreeExists: boolean; interrupted?: boolean; /** The step an interrupted run's marker names. */ interruptedStage?: string | null; ship: ShipStatus | null; shipStatusError: boolean; lastKnownColumn: Column | null }
 
 export const COLUMNS: readonly Column[] = ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"];
 export const COLUMN_LABELS: Readonly<Record<Column, string>> = { inbox: "Inbox", needsDecision: "Needs decision", working: "Working", needsYou: "Needs you", readyToShip: "Ready to ship", shipped: "Shipped", done: "Done" };

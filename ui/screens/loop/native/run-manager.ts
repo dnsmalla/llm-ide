@@ -347,9 +347,9 @@ export function cancelRun(runId: string): void {
   emit();
 }
 
-async function writeMarker(fs: FsApi, path: string, text: string): Promise<boolean> {
+async function writeMarker(fs: FsApi, path: string, text: string, force = false): Promise<boolean> {
   if (typeof fs.write !== "function") return false;
-  try { await fs.write(path, text, { expected_hash: null }); return true; } catch { return false; }
+  try { await fs.write(path, text, { expected_hash: null, ...(force ? { force: true } : {}) }); return true; } catch { return false; }
 }
 
 async function clearMarker(fs: FsApi, path: string): Promise<void> {
@@ -417,7 +417,11 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   const verifyProblem = factoryVerifyProblem(config);
   if (verifyProblem) { fail(run, `${verifyProblem} The run did not start.`); return null; }
   const marker = `${repoPrefixFor(run.live.projectRoot, info.worktree)}/.factory/RUN.json`;
-  if (!(await writeMarker(fs, marker, JSON.stringify({ runId: run.live.runId, mode: run.live.mode, startedAt: new Date().toISOString(), itemKey: run.item.key })))) {
+  const markerBase = { runId: run.live.runId, mode: run.live.mode, startedAt: new Date().toISOString(), itemKey: run.item.key };
+  // The marker also names the step the run is on, so an interrupted run's card sits in that step. Writes are chained
+  // and awaited before the run ends, so a late write can never recreate the marker after it is cleared.
+  let markerWrites: Promise<unknown> = Promise.resolve();
+  if (!(await writeMarker(fs, marker, JSON.stringify(markerBase)))) {
     log("The run marker could not be written; an interrupted run may not offer Resume.");
   }
   const ctx: StageExecContext = {
@@ -431,6 +435,8 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   const onProgress = (e: RunProgressEvent) => {
     if (e.type === "iteration") progress.iteration = e.iteration;
     else if (e.type === "stage-start") {
+      const stage = e.stage.name;
+      markerWrites = markerWrites.then(() => writeMarker(fs, marker, JSON.stringify({ ...markerBase, stage }), true));
       progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = "running"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "running" });
@@ -451,7 +457,7 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     }
     emit();
   };
-  const outcome = await d.runLoop(config, { ...d.createStageDeps(ctx, loop), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress });
+  const outcome = await d.runLoop(config, { ...d.createStageDeps(ctx, loop), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress }).finally(() => markerWrites);
   log(outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`);
   return { loop, info, config, outcome };
 }

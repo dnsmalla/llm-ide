@@ -69,7 +69,12 @@ export function laneFor(column: Column, f: ItemFacts, steps: readonly string[]):
   const rec = f.lastRecord;
   // A live run shows its step first, also a send-back re-run of an item whose MR is already open.
   if (column === "working") return f.live?.state === "queued" ? LANE_BACKLOG : stageLane(f.live?.progress?.stageName, steps) ?? (steps[0] ? stepLane(steps[0]) : LANE_BACKLOG);
+  // Interrupted (the app stopped mid-run, also a re-run after a ship): the step the run's marker last named, else
+  // where its previous run ended.
+  if (f.interrupted) return stageLane(f.interruptedStage ?? rec?.failingStage?.name ?? rec?.lastStage, steps) ?? LANE_BACKLOG;
   if (column === "done") return LANE_MERGED;
+  // An MR closed without merge is not done: back to Backlog, where Discard frees the issue to start again.
+  if (rec?.ship && f.ship?.state === "closed") return LANE_BACKLOG;
   // Finished, not merged: ready to ship, or an MR open (also when CI failed or a reviewer commented).
   if (rec?.ship || column === "readyToShip") return LANE_DONE;
   if (column === "inbox") return LANE_BACKLOG;
@@ -100,6 +105,18 @@ export function buildLanes(board: Record<Column, CardView[]>, steps: readonly st
   const onBoard = new Set(cards.map((c) => c.key));
   lanes[0].cards.push(...openIssues.filter((c) => !onBoard.has(c.key)));
   return [...lanes, done];
+}
+
+/** The step a run marker (`.factory/RUN.json`) names, or null for an older marker, bad JSON or a bad value. */
+export function markerStage(text: string | null): string | null {
+  if (!text) return null;
+  try {
+    const v = JSON.parse(text) as unknown;
+    const stage = isRecord(v) ? v.stage : null;
+    return typeof stage === "string" && stage.trim() !== "" ? stage.slice(0, 120) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** An open issue not on the board yet, as a Backlog card whose only action is Start (it is stored when started). */
@@ -146,7 +163,7 @@ export function decodeWorktreeList(body: unknown): Map<string, WorktreeInfo> {
   return out;
 }
 
-export interface FactsContext { projectRoot: string; live: readonly LiveRun[]; records: ReadonlyMap<string, RunRecordFacts>; worktrees: ReadonlyMap<string, unknown>; interrupted?: ReadonlySet<string>; ship: ReadonlyMap<string, ShipStatus | "error">; lastKnown: ReadonlyMap<string, Column> }
+export interface FactsContext { projectRoot: string; live: readonly LiveRun[]; records: ReadonlyMap<string, RunRecordFacts>; worktrees: ReadonlyMap<string, unknown>; interrupted?: ReadonlySet<string>; interruptedStages?: ReadonlyMap<string, string>; ship: ReadonlyMap<string, ShipStatus | "error">; lastKnown: ReadonlyMap<string, Column> }
 
 /** The facts of one card: its last run's record, its worktree, the PR/MR status and its last known column. */
 export function assembleFacts(item: WorkItemRecord, ctx: FactsContext): ItemFacts {
@@ -160,6 +177,7 @@ export function assembleFacts(item: WorkItemRecord, ctx: FactsContext): ItemFact
     lastRecord,
     worktreeExists: runId !== null && ctx.worktrees.has(runId),
     interrupted: runId !== null && ctx.interrupted?.has(runId) === true,
+    interruptedStage: runId !== null ? ctx.interruptedStages?.get(runId) ?? null : null,
     ship: entry !== undefined && entry !== "error" ? entry : null,
     shipStatusError: entry === "error",
     lastKnownColumn: ctx.lastKnown.get(item.key) ?? null,

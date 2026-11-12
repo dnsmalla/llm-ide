@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, markerStage, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -253,6 +253,30 @@ test("Backlog lists every open issue not on the board; Done holds finished work 
   assert.equal(lanes.find((l) => l.label === "Done").cards[0].status, "Needs you");
   const fresh = lanes[0].cards[1];
   assert.deepEqual([fresh.status, fresh.actions], ["Open issue", ["start"]]);
+});
+
+test("an interrupted run sits in the step its marker names; an MR closed without merge goes back to Backlog", () => {
+  const steps = ["Plan", "Implement", "Verify"];
+  const shipped = { ...rec("rs"), ship: { provider: "github", url: "https://github.com/a/b/pull/4" } };
+  const facts = new Map([
+    ["issue:i", { ...EMPTY_FACTS, lastRecord: shipped, worktreeExists: true, interrupted: true, interruptedStage: "Verify", ship: { url: "https://github.com/a/b/pull/4", state: "open", ci: "success", ciSummary: null, comments: [] } }],
+    ["issue:j", { ...EMPTY_FACTS, worktreeExists: true, interrupted: true, interruptedStage: null }],
+    ["issue:c", { ...EMPTY_FACTS, lastRecord: { ...rec("rc"), ship: { provider: "github", url: "https://github.com/a/b/pull/5" } }, ship: { url: "https://github.com/a/b/pull/5", state: "closed", ci: "none", ciSummary: null, comments: [] } }],
+  ]);
+  const items = [item("issue:i", { runIds: ["rs"] }), item("issue:j", { runIds: ["rj"] }), item("issue:c", { runIds: ["rc"] })];
+  const lanes = buildLanes(buildBoard(items, facts, Date.now(), { steps }), steps);
+  const at = (label) => lanes.find((l) => l.label === label).cards.map((c) => `${c.key} ${c.note}`);
+  assert.deepEqual(at("Verify"), ["issue:i Interrupted"], "an interrupted re-run of a shipped item shows its step, not Done");
+  assert.deepEqual(at("Backlog"), ["issue:j Interrupted", "issue:c Closed without merge"]);
+  assert.deepEqual(at("Done"), []);
+});
+
+test("markerStage reads the step from a run marker and ignores older or bad markers", () => {
+  assert.equal(markerStage(JSON.stringify({ runId: "r", stage: "Review" })), "Review");
+  assert.equal(markerStage(JSON.stringify({ runId: "r" })), null);
+  assert.equal(markerStage("{not json"), null);
+  assert.equal(markerStage(JSON.stringify({ stage: 7 })), null);
+  assert.equal(markerStage(null), null);
 });
 
 test("Start and Run intake start their own run plan; only Finish checks reviews existing work", async () => {

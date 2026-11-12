@@ -16,7 +16,7 @@ import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, openIssueCard, LANE_BACKLOG, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, openIssueCard, markerStage, LANE_BACKLOG, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { finishChecksAllowed, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
 import { isFactoryLoop, pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
 import { processHasIntake, processSteps } from "../loop/native/factory-template.ts";
@@ -41,9 +41,20 @@ const STATUS_MIN_GAP_MS = 10_000;
 async function loadOpenIssues(projectRoot: string): Promise<PickerIssue[]> {
   const saved = readRepoConfig().saved;
   const providers = (["gitlab", "github"] as const).filter((p) => saved[p].some((r) => r.clonePath.trim() !== ""));
-  const pages = await Promise.all(providers.map((p) => core.requestRaw(`/kb/issues?provider=${p}&state=open&limit=100`, { method: "GET" }).catch(() => null)));
-  return pages.flatMap((r) => (r?.status === 200 ? pickerIssues(r.body) : []))
-    .filter((i) => repoForIssue({ provider: i.provider, repo: i.repo }, saved, projectRoot) !== null);
+  // Page by offset (the core caps a page at 100), up to 10 pages per provider.
+  const walk = async (p: string): Promise<PickerIssue[]> => {
+    const out: PickerIssue[] = [];
+    for (let page = 0; page < 10; page++) {
+      const r = await core.requestRaw(`/kb/issues?provider=${p}&state=open&limit=100&offset=${page * 100}`, { method: "GET" }).catch(() => null);
+      if (r?.status !== 200) break;
+      const rows = (r.body as { issues?: unknown[] } | null)?.issues;
+      out.push(...pickerIssues(r.body));
+      if (!Array.isArray(rows) || rows.length < 100) break;
+    }
+    return out;
+  };
+  const lists = await Promise.all(providers.map(walk));
+  return lists.flat().filter((i) => repoForIssue({ provider: i.provider, repo: i.repo }, saved, projectRoot) !== null);
 }
 
 export interface BoardProps {
@@ -60,6 +71,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [records, setRecords] = useState<Map<string, RunRecordFacts>>(() => new Map());
   const [worktrees, setWorktrees] = useState<Map<string, WorktreeInfo>>(() => new Map());
   const [interrupted, setInterrupted] = useState<ReadonlySet<string>>(() => new Set());
+  const [interruptedStages, setInterruptedStages] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [ship, setShip] = useState<Map<string, ShipStatus | "error">>(() => new Map());
   const [live, setLive] = useState<readonly LiveRun[]>(() => liveRuns());
   // One board timer for “4m 12s”, not one per card.
@@ -125,9 +137,16 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         invokeHost<unknown>("loop_worktree_list").then(decodeWorktreeList, () => new Map<string, WorktreeInfo>()),
       ]);
       const marks = new Set<string>();
+      const markStages = new Map<string, string>();
       await Promise.all([...wts].map(async ([runId, wt]) => {
         const prefix = repoPrefixFor(projectRoot, wt.worktree);
-        try { const r = await fs.read(`${prefix}/.factory/RUN.json`); if (r.status === "ok") marks.add(runId); } catch { /* no marker */ }
+        try {
+          const r = await fs.read(`${prefix}/.factory/RUN.json`);
+          if (r.status !== "ok") return;
+          marks.add(runId);
+          const stage = markerStage(r.text);
+          if (stage) markStages.set(runId, stage);
+        } catch { /* no marker */ }
       }));
       itemsRef.current = next;
       recordsRef.current = recs;
@@ -135,6 +154,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       setRecords(recs);
       setWorktrees(wts);
       setInterrupted(marks);
+      setInterruptedStages(markStages);
       setError(null);
       setOffline(false);
     } catch (e) {
@@ -215,9 +235,9 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
 
   const facts = useMemo(() => {
     const m = new Map<string, ItemFacts>();
-    for (const item of items) m.set(item.key, assembleFacts(item, { projectRoot: projectRoot ?? "", live, records, worktrees, interrupted, ship, lastKnown: lastKnown.current }));
+    for (const item of items) m.set(item.key, assembleFacts(item, { projectRoot: projectRoot ?? "", live, records, worktrees, interrupted, interruptedStages, ship, lastKnown: lastKnown.current }));
     return m;
-  }, [items, live, records, worktrees, ship, projectRoot]);
+  }, [items, live, records, worktrees, interrupted, interruptedStages, ship, projectRoot]);
   useEffect(() => {
     if (!live.some((r) => r.state === "running" || r.state === "paused") && retryAt === null) return;
     const t = setInterval(() => setNowMs(Date.now()), 1000);
@@ -343,7 +363,15 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   };
 
   if (!projectRoot) return <p className="fx-empty">Open a project to use the Factory.</p>;
-  const selected = selectedKey ? byKey.get(selectedKey) ?? null : null;
+  // An open issue not on the board yet opens a details panel too: its text and Start.
+  const selOpen = selectedKey && !byKey.has(selectedKey) ? openIssueItems.get(selectedKey) ?? null : null;
+  const selected = selectedKey ? byKey.get(selectedKey) ?? selOpen : null;
+  const startOpenIssue = (open: WorkItemRecord) => void act(async () => {
+    if (!projectRoot) return;
+    await sendToFactory(fs, [open], { runIntake: false, projectRoot, start: startRun });
+    onAction(open, "start");
+    setSelectedKey(open.key);
+  });
   const selFacts = selected ? facts.get(selected.key) ?? null : null;
   const selLive = selFacts?.live ?? null;
   const selRunId = selected?.runIds.at(-1) ?? null;
@@ -431,13 +459,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                   const open = byKey.has(view.key) ? null : openIssueItems.get(view.key) ?? null;
                   if (open) {
                     return (
-                      <Card key={view.key} view={view} selected={false} onOpen={() => undefined}
-                        onAction={() => void act(async () => {
-                          if (!projectRoot) return;
-                          await sendToFactory(fs, [open], { runIntake: false, projectRoot, start: startRun });
-                          onAction(open, "start");
-                          setSelectedKey(open.key);
-                        })} />
+                      <Card key={view.key} view={view} selected={view.key === selectedKey} onOpen={() => setSelectedKey(view.key)} onAction={() => startOpenIssue(open)} />
                     );
                   }
                   const it = byKey.get(view.key) ?? null;
@@ -479,6 +501,12 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
               </>
             ) : selFacts?.lastRecord ? (
               <p className="fx-hint">Last run {selFacts.lastRecord.runId}: {selFacts.lastRecord.statusCode}{selFacts.lastRecord.needsDecision ? ` — ${selFacts.lastRecord.needsDecision}` : ""}</p>
+            ) : selOpen ? (
+              <>
+                <p className="fx-hint">Open issue, not on the board yet. Start adds it and runs the process.</p>
+                {selOpen.body.trim() ? <pre className="fx-log">{selOpen.body.slice(0, 4000)}</pre> : null}
+                <div className="fx-actions"><button type="button" className="fx-btn fx-primary" onClick={() => startOpenIssue(selOpen)}>Start</button></div>
+              </>
             ) : (
               <p className="fx-hint">No run yet.</p>
             )}
