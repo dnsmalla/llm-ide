@@ -22,6 +22,7 @@ export const PROJECT_FRAME_CLASS = Object.freeze({
   'toolApprovals.answer': 'model.exec',
   'loop.issues': 'self.read',
   'loop.list': 'self.read',
+  'loop.history': 'self.read',
   'loop.start': 'model.exec',
 });
 

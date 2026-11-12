@@ -51,7 +51,7 @@ function gatewayFor(userId, { member = { teamRole: 'owner', maxMode: 'execute', 
     send: (_s, text) => sent.push(JSON.parse(text)), close: () => {}, hostName: () => 'T',
     capabilities: () => ['host', 'chat', 'approvals', 'read', 'compose'],
     member: () => member, projectRequired: () => false, chatClearEnabled: () => true,
-    bus: () => (withBus ? bus : null),
+    bus: () => (withBus ? bus : null), projectScope: () => ({ allowed: () => true }),
     pins: { consumePin: (pin) => (pin === '123456' ? userId : null) },
     devices: { issueDeviceToken: (_u, _n, _now, scopes) => ({ deviceId: `h-${userId}`, token: `tok-${userId}-0123456789`, scopes }), authenticateDeviceToken: () => null, revokeDevice: () => true },
     turn: () => Promise.resolve(), log: () => {}, audit: () => {},
@@ -138,4 +138,22 @@ test('tasks.list serves the registry through the real route', async () => {
   assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
   assert.ok(g.last().result.tasks.length > 0, 'the phone sees tasks');
   assert.ok(g.last().result.tasks.some((t) => t.available), 'some are runnable');
+});
+
+test('loop.history reads the desktop Loop journal newest first and survives a missing one', async () => {
+  const { registerProjectRoot } = await import('../kb/project-roots.mjs');
+  const histRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-loop-hist-'));
+  fs.mkdirSync(path.join(histRoot, 'system'), { recursive: true });
+  fs.writeFileSync(path.join(histRoot, 'system/project.json'), '{}');
+  registerProjectRoot(owner, { id: 'p-hist', root: histRoot });
+  registerProject(getDb(), owner, { id: 'p-hist', name: 'Hist', root: histRoot });
+  const g = gatewayFor(owner); await g.open();
+  await g.ask('h-0', 'loop.history', { projectId: 'p-hist' });
+  assert.deepEqual(g.last().result, { runs: [] });
+  fs.mkdirSync(path.join(histRoot, 'system/loop-runs'), { recursive: true });
+  const line = (id, at, status) => JSON.stringify({ id, loopName: 'Regression', startedAt: at, durationSeconds: 12, statusCode: status, statusSummary: `s-${id}`, trigger: 'manual' });
+  fs.writeFileSync(path.join(histRoot, 'system/loop-runs/index-2026-11.jsonl'), [line('a', '2026-11-01T00:00:00Z', 'success'), 'not json', line('b', '2026-11-02T00:00:00Z', 'failed')].join('\n') + '\n');
+  await g.ask('h-1', 'loop.history', { projectId: 'p-hist' });
+  assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
+  assert.deepEqual(g.last().result.runs.map((r) => [r.id, r.statusCode]), [['b', 'failed'], ['a', 'success']]);
 });

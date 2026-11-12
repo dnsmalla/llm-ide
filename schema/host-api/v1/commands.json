@@ -1810,6 +1810,78 @@
           }
         }
       }
+    },
+    "loop.history": {
+      "capability": "read",
+      "direction": "client_to_host",
+      "idempotent": true,
+      "v2Tag": null,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runs"
+        ],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "loopName",
+                "startedAt",
+                "statusCode"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "loopName": {
+                  "type": "string",
+                  "maxLength": 120
+                },
+                "startedAt": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "durationSeconds": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "statusCode": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "statusSummary": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "trigger": {
+                  "type": "string",
+                  "maxLength": 40
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

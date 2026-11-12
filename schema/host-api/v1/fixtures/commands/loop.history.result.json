@@ -1,0 +1,13 @@
+{
+  "runs": [
+    {
+      "id": "run-1",
+      "loopName": "Regression",
+      "startedAt": "2026-11-12T01:00:00.000Z",
+      "durationSeconds": 42,
+      "statusCode": "success",
+      "statusSummary": "All stages passed",
+      "trigger": "manual"
+    }
+  ]
+}

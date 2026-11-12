@@ -447,6 +447,42 @@ public struct HostApiLoopCancelResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiLoopHistoryRequest: Codable, Equatable, Sendable {
+    public var projectId: String
+
+    public init(projectId: String) {
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiLoopHistoryResultRunsItem: Codable, Equatable, Sendable {
+    public var durationSeconds: Double?
+    public var id: String
+    public var loopName: String
+    public var startedAt: String
+    public var statusCode: String
+    public var statusSummary: String?
+    public var trigger: String?
+
+    public init(durationSeconds: Double? = nil, id: String, loopName: String, startedAt: String, statusCode: String, statusSummary: String? = nil, trigger: String? = nil) {
+        self.durationSeconds = durationSeconds
+        self.id = id
+        self.loopName = loopName
+        self.startedAt = startedAt
+        self.statusCode = statusCode
+        self.statusSummary = statusSummary
+        self.trigger = trigger
+    }
+}
+
+public struct HostApiLoopHistoryResult: Codable, Equatable, Sendable {
+    public var runs: [HostApiLoopHistoryResultRunsItem]
+
+    public init(runs: [HostApiLoopHistoryResultRunsItem]) {
+        self.runs = runs
+    }
+}
+
 public struct HostApiLoopIssuesRequest: Codable, Equatable, Sendable {
     public var limit: Int?
     public var projectId: String?

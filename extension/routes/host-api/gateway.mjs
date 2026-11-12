@@ -88,6 +88,7 @@ export const COMMAND_CLASS = Object.freeze({
   'tasks.cancel': 'self.write',
   'loop.issues': 'self.read',
   'loop.list': 'self.read',
+  'loop.history': 'self.read',
   'loop.start': 'model.exec',
   'loop.cancel': 'self.write',
 });
@@ -111,6 +112,7 @@ function defaultDeps() {
     member: (userId) => getMember(getDb(), userId),
     // The command bus (server.mjs passes it once started); null while it is off, which refuses Loop commands.
     bus: () => null,
+    projectScope: () => ({}), // test hook: scopedProjectRoot options (resolve/allowed)
     chatClearEnabled: () => process.env.LLMIDE_HOST_API_CHAT_CLEAR === '1',
     turn: async (args) => (await agentV2()).startHostTurn(args),
     cancel: async (userId, chatSessionId) => (await agentV2()).cancelChatTurn(userId, chatSessionId),
@@ -176,11 +178,17 @@ export function messagesOf(lines, limit) {
 
 // Read-only project files: the phone sees only regular files inside the registered project's realpath, never a
 // denied secret path and never a directory outside it. Paths are project-relative and resolved through realpath.
-function projectFile(userId, projectId, rel, { directory = false } = {}) {
+function projectFile(userId, projectId, rel, { directory = false } = {}, scope = {}) {
   if (typeof rel !== 'string' || rel.length > 4096 || path.isAbsolute(rel)) throw Object.assign(new Error('The path is not valid.'), { code: 'invalid' });
   const parts = rel.replaceAll('\\', '/').split('/');
   if (parts.some((x) => x === '..')) throw Object.assign(new Error('The path is not valid.'), { code: 'invalid' });
-  const root = scopedProjectRoot(userId, projectId);
+  let root;
+  try { root = scopedProjectRoot(userId, projectId, scope); } catch (e) {
+    // Said plainly: an unlisted folder otherwise looks like an empty project on the phone.
+    throw Object.assign(new Error(e.message === 'project_not_allowed'
+      ? 'This project folder is not on the desktop\'s allowed list. Add it under Settings, then try again.'
+      : 'That project is not registered on this computer.'), { code: e.message === 'project_not_allowed' ? 'denied' : 'not_found' });
+  }
   let real;
   try { real = fs.realpathSync(path.resolve(root, rel || '.')); } catch { throw Object.assign(new Error('That path does not exist.'), { code: 'not_found' }); }
   if (real !== root && !real.startsWith(root + path.sep)) throw Object.assign(new Error('That path is outside the project.'), { code: 'denied' });
@@ -762,6 +770,33 @@ export function createGateway(overrides) {
           .map((r) => ({ id: String(r.id), title: clamp(String(r.title ?? ''), 300), ...(r.meta?.provider ? { provider: clamp(String(r.meta.provider), 40) } : {}),
             ...(r.meta?.repo ? { repo: clamp(String(r.meta.repo), 200) } : {}), ...(Number.isInteger(r.meta?.number) && r.meta.number >= 0 ? { number: r.meta.number } : {}) }));
         return respond(s, id, command, { issues });
+      }
+      // The desktop's own Loop journal (`system/loop-runs/index*.jsonl`, written by the Loop screen), newest first: what the
+      // phone shows as history. Read through the same realpath-confined project reader as files.read; a missing journal is normal.
+      case 'loop.history': {
+        if (readRefused(s, entry, id)) return;
+        const runs = [];
+        try {
+          const { real: dir } = projectFile(userId, p.projectId, 'system/loop-runs', { directory: true }, deps.projectScope?.() ?? {});
+          const names = fs.readdirSync(dir).filter((n) => /^index(-\d{4}-\d{2})?\.jsonl$/.test(n)).sort().reverse();
+          for (const name of names) {
+            const file = path.join(dir, name);
+            const st = fs.lstatSync(file);
+            if (!st.isFile() || st.size > 2_000_000) continue;
+            for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/).reverse()) {
+              let o; try { o = JSON.parse(line); } catch { continue; }
+              if (!o || typeof o.id !== 'string' || typeof o.startedAt !== 'string') continue;
+              runs.push({ id: clamp(o.id, 80), loopName: clamp(typeof o.loopName === 'string' ? o.loopName : 'Loop', 120), startedAt: clamp(o.startedAt, 40),
+                ...(Number.isFinite(o.durationSeconds) && o.durationSeconds >= 0 ? { durationSeconds: o.durationSeconds } : {}),
+                statusCode: clamp(typeof o.statusCode === 'string' ? o.statusCode : '', 40),
+                ...(typeof o.statusSummary === 'string' && o.statusSummary ? { statusSummary: clamp(o.statusSummary, 500) } : {}),
+                ...(typeof o.trigger === 'string' ? { trigger: clamp(o.trigger, 40) } : {}) });
+              if (runs.length >= 30) break;
+            }
+            if (runs.length >= 30) break;
+          }
+        } catch (e) { if (e.code && e.code !== 'not_found') return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'denied', String(e.message || e)); }
+        return respond(s, id, command, { runs });
       }
       case 'loop.list': {
         if (readRefused(s, entry, id)) return;

@@ -35,7 +35,7 @@ as `minLenght` fails the gate instead of being silently ignored.
 
 ## Commands
 
-All 32 commands are listed below.
+All 33 commands are listed below.
 
 | Command | Capability | Idempotent | v2 tag |
 |---|---|---|---|
@@ -68,6 +68,7 @@ All 32 commands are listed below.
 | `tasks.cancel` | compose | yes | — |
 | `loop.issues` | read | yes | — |
 | `loop.list` | read | yes | — |
+| `loop.history` | read | yes | — |
 | `loop.start` | compose | no | — |
 | `loop.cancel` | compose | yes | — |
 | `projects.list` | host | yes | — |

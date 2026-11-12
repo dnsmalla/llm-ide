@@ -33,6 +33,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
     case hostPing = "host.ping"
     case hostSnapshot = "host.snapshot"
     case loopCancel = "loop.cancel"
+    case loopHistory = "loop.history"
     case loopIssues = "loop.issues"
     case loopList = "loop.list"
     case loopStart = "loop.start"
@@ -68,6 +69,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .hostPing: return "host"
         case .hostSnapshot: return "host"
         case .loopCancel: return "compose"
+        case .loopHistory: return "read"
         case .loopIssues: return "read"
         case .loopList: return "read"
         case .loopStart: return "compose"
@@ -105,6 +107,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .hostPing: return true
         case .hostSnapshot: return true
         case .loopCancel: return true
+        case .loopHistory: return true
         case .loopIssues: return true
         case .loopList: return true
         case .loopStart: return false
@@ -145,6 +148,7 @@ public enum HostApi {
         "host.ping": .hostPing,
         "host.snapshot": .hostSnapshot,
         "loop.cancel": .loopCancel,
+        "loop.history": .loopHistory,
         "loop.issues": .loopIssues,
         "loop.list": .loopList,
         "loop.start": .loopStart,

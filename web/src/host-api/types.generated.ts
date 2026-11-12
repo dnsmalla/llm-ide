@@ -27,6 +27,7 @@ export const HOST_API_COMMANDS = {
   "host.ping": { capability: "host", idempotent: true },
   "host.snapshot": { capability: "host", idempotent: true },
   "loop.cancel": { capability: "compose", idempotent: true },
+  "loop.history": { capability: "read", idempotent: true },
   "loop.issues": { capability: "read", idempotent: true },
   "loop.list": { capability: "read", idempotent: true },
   "loop.start": { capability: "compose", idempotent: false },
@@ -62,6 +63,7 @@ export interface HostApiCommandMap {
   "host.ping": { request: Record<string, never>; result: Record<string, never> };
   "host.snapshot": { request: { topics: Array<"chat" | "status" | "autotasks" | "loop"> }; result: { snapshots: Record<string, Record<string, unknown>> } };
   "loop.cancel": { request: { id: string }; result: { cancelled: boolean } };
+  "loop.history": { request: { projectId: string }; result: { runs: Array<{ durationSeconds?: number; id: string; loopName: string; startedAt: string; statusCode: string; statusSummary?: string; trigger?: string }> } };
   "loop.issues": { request: { limit?: number; projectId?: string }; result: { issues: Array<{ id: string; number?: number; provider?: string; repo?: string; title: string }> } };
   "loop.list": { request: { projectId?: string }; result: { runs: Array<{ createdAt: string; errorCode?: string; finishedAt?: string; id: string; issueCount: number; readyToShip?: boolean; state: "awaiting_approval" | "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "denied" | "expired"; step?: string; summary?: string }> } };
   "loop.start": { request: { issueIds: Array<string>; projectId: string }; result: { id: string; state: "awaiting_approval" | "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "denied" | "expired" } };
