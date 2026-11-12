@@ -187,6 +187,11 @@ export function repoPathOf(raw: string): string | null {
   return segs.length >= 2 && segs.length <= 20 && segs.every((x) => x !== "") ? segs.join("/") : null;
 }
 
+/** The key issues are imported and matched under: GitLab keeps its full nested-group path, GitHub is owner/repo. */
+export function repoKeyOf(provider: RepoProvider, raw: string): string | null {
+  return provider === "gitlab" ? repoPathOf(raw) : repoSlugOf(raw);
+}
+
 /**
  * Whether a repository should be cloned (and its issues imported) when its URL field loses focus: a finished, valid
  * owner/repo that is not cloned yet. A repository that already has a clone path is never re-attempted on blur.

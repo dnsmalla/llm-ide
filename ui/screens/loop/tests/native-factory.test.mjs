@@ -158,6 +158,12 @@ test("work items come from issues, specs and free text", async () => {
   assert.equal(f.repoForIssue({ provider: "gitlab", repo: "grp/proj" }, saved, "/p"), null, "a clone outside the project is not used");
   assert.equal(f.repoForIssue({ provider: "github", repo: "acme/other" }, saved, "/p"), null);
 
+  // GitLab issues are imported under the full nested-group path, so the saved row must match on that path.
+  const nested = decodeRepoConfig({ saved: { gitlab: [{ id: "n", url: "https://gitlab.com/grid-devs/personal/dinesh/smart-input", clonePath: "/p/code/smart-input", active: true }] } }).saved;
+  assert.equal(f.repoForIssue({ provider: "gitlab", repo: "grid-devs/personal/dinesh/smart-input" }, nested, "/p"), "code/smart-input");
+  assert.equal(f.repoForIssue({ provider: "gitlab", repo: "Grid-Devs/Personal/Dinesh/Smart-Input" }, nested, "/p"), "code/smart-input");
+  assert.equal(f.repoForIssue({ provider: "gitlab", repo: "dinesh/smart-input" }, nested, "/p"), null, "a different project with the same tail is not a match");
+
   const files = ["llm-doc/c.md", "llm-doc/specs/a.md", "llm-doc/b.txt", "llm-doc/factory/2026/01/r-readiness.md", "llm-doc/loop/x.md"];
   const fs = {
     async list(dir) {

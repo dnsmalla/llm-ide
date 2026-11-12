@@ -1,6 +1,6 @@
 // Pure model behind the Factory's Review / Ship / Discard panel (spec A4). Node tests import it, so it imports only
 // types from the shell (shell/core and shell/host do not load under node --test's strip-only mode).
-import { DEFAULT_GITLAB_BASE, repoSlugOf, type RepoConfig, type RepoProvider } from "../../settings/repo-config.ts";
+import { DEFAULT_GITLAB_BASE, repoKeyOf, type RepoConfig, type RepoProvider } from "../../settings/repo-config.ts";
 import type { WorkItem } from "./factory.ts";
 import type { RunInfo } from "./worktree-run.ts";
 
@@ -77,7 +77,7 @@ export function shipTarget(info: Pick<RunInfo, "repo">, config: RepoConfig): { p
   for (const provider of ["github", "gitlab"] as const) {
     for (const r of config.saved[provider]) {
       if (r.clonePath.trim().replace(/\/+$/, "") !== want) continue;
-      const slug = repoSlugOf(r.url);
+      const slug = repoKeyOf(provider, r.url);
       if (slug) return { provider, slug };
     }
   }

@@ -39,6 +39,9 @@ test("shipRequest picks gitlab for a gitlab saved repo", () => {
   assert.equal(body.repo, "grp/web");
   assert.equal(body.base, "develop");
   assert.equal(m.shipTarget({ ...info, repo: "/p/code/unknown" }, config), null);
+  // A nested GitLab group keeps its full path: the MR is opened on that project, not on its last two segments.
+  const nested = decodeRepoConfig({ saved: { gitlab: [{ id: "n", url: "https://gitlab.com/grid-devs/personal/dinesh/smart-input", clonePath: "/p/code/smart-input", active: true }] } });
+  assert.deepEqual(m.shipTarget({ ...info, repo: "/p/code/smart-input" }, nested), { provider: "gitlab", slug: "grid-devs/personal/dinesh/smart-input" });
   assert.equal(m.shipBlockedReason(config, "gitlab"), null);
   assert.match(m.shipBlockedReason({ ...defaultRepoConfig(), operations: { github: ["push"], gitlab: [] } }, "github"), /Create PR/);
   assert.match(m.shipBlockedReason({ ...defaultRepoConfig(), gitlabBaseUrl: "https://git.example.com" }, "gitlab"), /gitlab\.com/);

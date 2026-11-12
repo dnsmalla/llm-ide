@@ -2,7 +2,7 @@
 // implement, verify, review — and the work-item helpers its picker uses. Pure: node tests import this module, so it
 // imports only types from the shell and explorer modules.
 import type { FsApi } from "../../explorer/fs";
-import { repoSlugOf, type RepoConfig } from "../../settings/repo-config.ts";
+import { repoKeyOf, type RepoConfig } from "../../settings/repo-config.ts";
 import { DETECTED_TEST } from "./environment.ts";
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { isCiHookPath } from "./protected.ts";
@@ -254,7 +254,7 @@ export function repoForIssue(issue: { provider: string; repo: string }, saved: R
   const provider = issue.provider === "gitlab" ? "gitlab" : issue.provider === "github" ? "github" : null;
   if (!provider || !issue.repo) return null;
   const want = issue.repo.toLowerCase();
-  const hit = saved[provider].find((r) => r.clonePath.trim() !== "" && repoSlugOf(r.url)?.toLowerCase() === want);
+  const hit = saved[provider].find((r) => r.clonePath.trim() !== "" && repoKeyOf(provider, r.url)?.toLowerCase() === want);
   if (!hit) return null;
   const clone = hit.clonePath.trim().replace(/\/+$/, "");
   const base = projectRoot.replace(/\/+$/, "");

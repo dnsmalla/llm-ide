@@ -16,8 +16,8 @@ import {
   shouldProvision,
   toggleAllowedOp,
   updateSavedRepo,
+  repoKeyOf,
   repoPathOf,
-  repoSlugOf,
   validateRepoUrl,
   writeRepoConfig,
   type RepoConfig,
@@ -179,7 +179,7 @@ export default function RepositoriesSection() {
   /** Import a repository's open issues into the core cache, so Issues and Gantt show them with no extra step. */
   const importIssuesFor = async (r: SavedRepo, quiet: boolean): Promise<number | null> => {
     // GitLab projects can sit in nested groups, so they keep their full path; GitHub is owner/name.
-    const slug = provider.id === "gitlab" ? repoPathOf(r.url) : repoSlugOf(r.url);
+    const slug = repoKeyOf(provider.id, r.url);
     const key = `${provider.id}:${slug}`;
     if (!slug || imported.current.has(key) || !connected) return null;
     imported.current.add(key);
