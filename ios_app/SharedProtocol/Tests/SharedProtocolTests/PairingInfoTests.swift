@@ -24,6 +24,15 @@ struct PairingInfoTests {
         #expect(PairingInfo(from: qr("192.168.1.20", fp: "sha256:short")) == nil)
     }
 
+    @Test("IPv4 octets with a leading zero are refused (octal parser differential)")
+    func leadingZeroOctets() throws {
+        #expect(PairingInfo(from: qr("010.1.2.3")) == nil)
+        #expect(PairingInfo(from: qr("0127.0.0.1")) == nil)
+        #expect(PairingInfo(from: qr("192.168.01.2")) == nil)
+        #expect(PairingInfo(from: qr("10.0.0.1")) != nil)
+        #expect(PairingInfo(from: qr("192.168.1.20")) != nil)
+    }
+
     @Test("an IPv6 zone id is kept; a %-suffix on an IPv4 host is rejected")
     func zoneIds() throws {
         let p = try #require(PairingInfo(from: qr("fe80::1%25en0")))

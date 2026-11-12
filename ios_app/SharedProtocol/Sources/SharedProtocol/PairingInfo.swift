@@ -113,6 +113,11 @@ public struct PairingInfo {
 
         let octets = host.split(separator: ".", omittingEmptySubsequences: false)
         if octets.count == 4, octets.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) {
+            // A leading zero ("010") is octal to some URL/network stacks, so the
+            // parsed value would differ from the one dialled; refuse it outright.
+            guard octets.allSatisfy({
+                $0.count <= 3 && $0.allSatisfy { $0.isASCII } && ($0 == "0" || !$0.hasPrefix("0"))
+            }) else { return nil }
             let values = octets.compactMap { Int($0) }
             guard values.count == 4, values.allSatisfy({ (0...255).contains($0) }) else { return nil }
             return isPrivateIPv4(values) ? host : nil
