@@ -17,15 +17,16 @@ async function graph(text: string) {
   return { model: r.model, layout: r.layout };
 }
 
-test("Symbols default off: opening a code graph hides its symbol kinds, files stay (the Mac's files-only view)", async () => {
+test("Symbols default on: opening a code graph hides no kind; turning Symbols off keeps the files-only view", async () => {
   const { model, layout } = await graph(fixture("merge-code"));
   const f = defaultFilters(model);
-  assert.deepEqual([...f.hiddenKinds].sort(), symbolKinds(model).sort());
-  assert.equal(symbolsShown(model, f), false);
+  assert.equal(f.hiddenKinds.size, 0);
+  assert.equal(symbolsShown(model, f), true);
   assert.ok(symbolKinds(model).includes("function"), "function is a symbol kind");
   assert.equal(FILES_ONLY_KINDS.has("file"), true);
-  const shown = countOnes(nodeMask(model, layout, f));
-  assert.ok(shown < model.n, "some nodes are hidden by default");
+  const filesOnly = { ...f, hiddenKinds: new Set(symbolKinds(model)) };
+  const shown = countOnes(nodeMask(model, layout, filesOnly));
+  assert.ok(shown < countOnes(nodeMask(model, layout, f)), "Symbols off hides the symbol nodes");
   assert.ok(shown > 0, "files are still drawn");
 });
 
@@ -63,7 +64,7 @@ test("node-kind colours are the Mac's CGPalette values; unknown kinds read as ot
   assert.equal(kindColor("notARealKind"), kindColor("other"));
 });
 
-test("store: focus is bounds-checked, cleared by a new graph, and filters reset to the files-only default", async () => {
+test("store: focus is bounds-checked, cleared by a new graph, and filters reset to the all-kinds default", async () => {
   const text = fixture("merge-code");
   const engine = {
     cancel() {},
@@ -76,7 +77,7 @@ test("store: focus is bounds-checked, cleared by a new graph, and filters reset 
   await s.load("/p");
   const n = s.getSnapshot().entry!.model.n;
   assert.equal(s.getSnapshot().focus, -1);
-  assert.equal(s.getSnapshot().filters.hiddenKinds.has("function"), true, "opens files-only");
+  assert.equal(s.getSnapshot().filters.hiddenKinds.has("function"), false, "opens with symbols shown");
   s.setFocus(1);
   assert.equal(s.getSnapshot().focus, 1);
   s.setFocus(n);
@@ -84,10 +85,10 @@ test("store: focus is bounds-checked, cleared by a new graph, and filters reset 
   s.setFocus(0.5);
   assert.equal(s.getSnapshot().focus, -1, "non-integer clears");
   s.setFocus(0);
-  s.setFilters({ hiddenKinds: new Set() });
+  s.setFilters({ hiddenKinds: new Set(["function"]) });
   await s.reload();
   assert.equal(s.getSnapshot().focus, -1, "a reload clears focus");
-  assert.equal(s.getSnapshot().filters.hiddenKinds.has("function"), true, "a reload restores the files-only default");
+  assert.equal(s.getSnapshot().filters.hiddenKinds.has("function"), false, "a reload restores the all-kinds default");
   assert.equal(s.getSnapshot().filters.hiddenKinds.size, defaultFilters(s.getSnapshot().entry!.model).hiddenKinds.size);
 });
 
@@ -104,13 +105,13 @@ test("every UA kind colour is the Mac's Color(red:green:blue:) value; article is
   for (const [k, [r, g, b]] of Object.entries(mac)) assert.equal(kindColor(k), hex(r, g, b), k);
 });
 
-test("a graph with no files-only kind opens with everything shown, never as an empty canvas", () => {
+test("every graph opens with everything shown, never as an empty canvas", () => {
   const symbolsOnly = { nodeKinds: ["function", "classType"] } as unknown as Parameters<typeof defaultFilters>[0];
   assert.equal(defaultFilters(symbolsOnly).hiddenKinds.size, 0);
   const entities = { nodeKinds: ["entity", "topic", "claim"] } as unknown as Parameters<typeof defaultFilters>[0];
   assert.equal(defaultFilters(entities).hiddenKinds.size, 0);
   const mixed = { nodeKinds: ["file", "function"] } as unknown as Parameters<typeof defaultFilters>[0];
-  assert.deepEqual([...defaultFilters(mixed).hiddenKinds], ["function"]);
+  assert.equal(defaultFilters(mixed).hiddenKinds.size, 0);
 });
 
 test("focus wins over selection, as in the Mac's nodeAlpha / edgeAlpha", () => {

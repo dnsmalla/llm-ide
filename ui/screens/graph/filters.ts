@@ -33,12 +33,9 @@ export function symbolKinds(model: GraphModel): string[] {
   return model.nodeKinds.filter((k) => !FILES_ONLY_KINDS.has(k));
 }
 
-/** Filters as the Mac opens a graph: symbols hidden (files-only), everything else on. A graph with no
- *  files-only kind at all (only symbols, or a plugin graph of entities/topics) opens with everything shown,
- *  so it never opens as an empty canvas. */
-export function defaultFilters(model: GraphModel): FilterState {
-  const hasFiles = model.nodeKinds.some((k) => FILES_ONLY_KINDS.has(k));
-  return { ...initialFilters(), hiddenKinds: hasFiles ? new Set(symbolKinds(model)) : new Set() };
+/** Filters a graph opens with: every kind shown (Symbols on). */
+export function defaultFilters(_model: GraphModel): FilterState {
+  return { ...initialFilters(), hiddenKinds: new Set() };
 }
 
 /** Whether "Symbols" is on: no symbol kind is hidden. Graphs without symbols (InfiniteBrain) have no toggle. */

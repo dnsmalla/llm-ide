@@ -181,11 +181,12 @@ async function loaded(text) {
   return store;
 }
 
-test("parity: a code graph opens with Symbols off, shows shown / total, and disables generate with no scan target", async () => {
+test("a code graph opens with Symbols on and Labels off, shows shown / total, and disables generate with no scan target", async () => {
   const store = await loaded(fixture("merge-code"));
   const screen = () => html(h(G.GraphScreen, { store, active: true, projectRoot: "/proj", openFile: noop, onGenerate: async () => {} }));
   const out = screen();
-  assert.match(out, /aria-pressed="false"[^>]*>Symbols<\/button>/, "Symbols is off on open, as on the Mac");
+  assert.match(out, /aria-pressed="true"[^>]*>Symbols<\/button>/, "Symbols is on when a graph opens");
+  assert.match(out, /aria-pressed="false"[^>]*>Labels<\/button>/, "Labels are off when a graph opens");
   assert.match(out, /aria-label="Nodes shown">[\d,]+ \/ [\d,]+ shown</);
   assert.match(out, /<button[^>]*disabled=""[^>]*>Generate Code Graph<\/button>/, "no repo in SSR, so generate is disabled");
   store.setFocus(0);

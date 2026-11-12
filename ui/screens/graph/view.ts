@@ -72,7 +72,7 @@ export class GraphView {
   private focusNeighbour: Uint8Array = new Uint8Array(0);
   private disposed = false;
   private light = false;
-  private showLabels = true;
+  private showLabels = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly adj: Adjacency;
   private readonly weights: Float32Array;
@@ -82,7 +82,7 @@ export class GraphView {
   private readonly maxRadius: number;
 
   private constructor(private readonly o: ViewOptions) {
-    this.showLabels = o.showLabels !== false;
+    this.showLabels = o.showLabels === true;
     this.filters = o.filters;
     this.selected = o.selected;
     this.focused = o.focused ?? -1;

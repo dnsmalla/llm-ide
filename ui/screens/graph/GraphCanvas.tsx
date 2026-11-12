@@ -90,7 +90,7 @@ export function GraphCanvas(p: GraphCanvasProps) {
   const stepRef = useRef<{ origin: number; k: number; current: number } | null>(null);
   const prevSel = useRef(-1);
   useEffect(() => {
-    view.current?.setLabels(p.showLabels !== false);
+    view.current?.setLabels(p.showLabels === true);
   }, [p.showLabels]);
   useEffect(() => {
     view.current?.update(p.filters, p.selected, p.focused);

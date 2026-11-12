@@ -45,7 +45,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const cancelRequested = useRef(false);
-  const [showLabels, setShowLabels] = useState(true);
+  const [showLabels, setShowLabels] = useState(false);
   const [repos, setRepos] = useState<string[]>([]);
   const [target, setTarget] = useState("");
   // Full page shows the canvas alone over the window (the Mac's expanded overlay). It is a view state, not a graph state.

@@ -377,8 +377,8 @@ test("store.refresh that changes the graph drops a community the new layout lack
   let text = doc(["symbol"]);
   const s = new GraphStore({ invoke: async () => text, engine: deps({}).engine as never });
   await s.load("/p");
-  assert.equal(s.getSnapshot().filters.hiddenKinds.has("symbol"), true, "Symbols is off on open");
-  s.setFilters({ community: 50 });
+  assert.equal(s.getSnapshot().filters.hiddenKinds.has("symbol"), false, "Symbols is on by default");
+  s.setFilters({ community: 50, hiddenKinds: new Set(["symbol"]) });
   text = doc(["symbol", "function"]);
   await s.refresh("/p");
   const f = s.getSnapshot().filters;
