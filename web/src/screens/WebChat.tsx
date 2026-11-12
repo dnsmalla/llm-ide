@@ -34,6 +34,8 @@ export interface WebChatProps {
   onStop: () => void;
   onClear: () => void;
   onForget: () => void;
+  /** Reconnect the paired desktop at a new wss address; resolves to an error text or null. Absent = no action. */
+  onChangeAddress?: (url: string) => Promise<string | null>;
   onAnswer: (requestId: string, answers: Record<string, string>) => void;
   onDecline: (requestId: string) => void;
   onTool: (requestId: string, decision: "allow_once" | "deny") => void;
@@ -79,6 +81,29 @@ function Message({ m, waiting }: { m: WebMessage; waiting: boolean }) {
   );
 }
 
+function ChangeAddress({ onSubmit }: { onSubmit: (url: string) => Promise<string | null> }) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!open) return <button type="button" className="web-chat-action" onClick={() => setOpen(true)}>Change address</button>;
+  const submit = async () => {
+    setBusy(true); setError(null);
+    const err = await onSubmit(url);
+    setBusy(false);
+    if (err) setError(err); else setOpen(false);
+  };
+  return (
+    <form className="web-unopened" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+      <label>New address <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="wss://host:port/host-api/v1" disabled={busy} /></label>
+      <span className="web-chat-eyebrow">Kept signed in only if the desktop there is the same one; otherwise you pair again with a PIN.</span>
+      {error && <StatusBanner severity="error" message={error} />}
+      <button type="submit" className="web-chat-action" disabled={busy || !url.trim()}>{busy ? "Connecting…" : "Connect"}</button>
+      <button type="button" className="web-chat-action web-chat-action-muted" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
+    </form>
+  );
+}
+
 export function WebChat(p: WebChatProps) {
   const [draft, setDraft] = useState("");
   const [shown, setShown] = useState(PAGE);
@@ -106,6 +131,7 @@ export function WebChat(p: WebChatProps) {
           <Chip label={chipLabel(p.connection)} />
           <button type="button" className="web-chat-action" onClick={p.onClear} disabled={disabledReason !== null || state.turn !== null}
             title={disabledReason ?? (state.turn ? "Wait for the reply to finish" : undefined)}>Clear history</button>
+          {p.onChangeAddress && <ChangeAddress onSubmit={p.onChangeAddress} />}
           <button type="button" className="web-chat-action web-chat-action-muted" onClick={p.onForget}>Forget this host</button>
         </div>
       </header>
@@ -115,6 +141,7 @@ export function WebChat(p: WebChatProps) {
         <div className="web-unopened">
           <StatusBanner severity="warning" message={`${ORIGIN_HINT} ${originText(p.pageOrigin ?? globalThis.location?.origin)} ${CERT_HINT}`.replace(/ {2,}/g, " ")} />
           {trustUrl(p.hostUrl) && <a className="web-chat-action" href={trustUrl(p.hostUrl) as string} target="_blank" rel="noopener noreferrer">Open the desktop's address to trust its certificate</a>}
+          {p.onChangeAddress && <ChangeAddress onSubmit={p.onChangeAddress} />}
           <button type="button" className="web-chat-action" onClick={p.onForget}>Forget and re-enter the address</button>
         </div>
       ) : (

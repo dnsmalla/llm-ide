@@ -1,7 +1,8 @@
 // The App's session lifecycle without React: auto-connect, pairing, adopting a session, and tearing it down when the
 // host revokes this browser. App.tsx renders it; tests drive it with a fake socket.
-import { HostApiError, HostConnection, type ConnectionState, type HostConnectionOptions, type TokenStore } from "./host-api/connection.ts";
+import { HostApiError, HostConnection, MISMATCH_NOTICE, type ConnectionState, type HostConnectionOptions, type TokenStore } from "./host-api/connection.ts";
 import { browserPushEnv } from "./push/controller.ts";
+import { checkHostUrl } from "./host-api/url.ts";
 import { lastHostUrl, projectStoreFor, tokenStoreFor } from "./host-api/storage.ts";
 import { createChatController, type ChatController } from "./chat/controller.ts";
 import { createComposeController, type ComposeController } from "./chat/compose.ts";
@@ -57,7 +58,7 @@ export function driveSync(sync: { start(): Promise<void>; pause(): void; resume(
 const dropBrowserPush = async () => { await (await browserPushEnv().subscription())?.unsubscribe(); };
 
 export interface AppDeps {
-  tokensFor: (url: string) => TokenStore;
+  tokensFor: (url: string, from?: string | null) => TokenStore;
   remember: (url: string) => void;
   confirm: (message: string) => boolean;
   connection: Partial<HostConnectionOptions>; // test seam: createSocket, timers
@@ -70,7 +71,7 @@ const errorText = (e: unknown) =>
 
 export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) {
   const d: AppDeps = {
-    tokensFor: tokenStoreFor, remember: (url) => lastHostUrl().set(url), confirm: (m) => globalThis.confirm?.(m) ?? true, connection: {},
+    tokensFor: (url, from) => tokenStoreFor(url, undefined, from), remember: (url) => lastHostUrl().set(url), confirm: (m) => globalThis.confirm?.(m) ?? true, connection: {},
     dropPush: dropBrowserPush, ...deps,
   };
   let state: AppState = { session: null, busy: false, error: null, notice: null };
@@ -80,8 +81,8 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
   const subs = new Set<() => void>();
   const set = (p: Partial<AppState>) => { state = { ...state, ...p }; for (const fn of subs) fn(); };
 
-  const open = (url: string): Session => {
-    const tokens = d.tokensFor(url);
+  const open = (url: string, from: string | null = null): Session => {
+    const tokens = d.tokensFor(url, from);
     const connection = new HostConnection({ url, clientName: "LLM-IDE Web", clientVersion: __APP_VERSION__, tokens, ...d.connection });
     let controller: ChatController | null = null;
     let compose: ComposeController | null = null;
@@ -108,19 +109,20 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
     if (live && live !== s) shut(live);
     live = s;
     // A token revoked or expired mid-session: the connection deleted it and now waits for a PIN only Pairing can take.
-    if (s) offState = s.connection.onState((c) => { if (c.kind === "needsPin") adopt(null, REVOKED); });
+    if (s) offState = s.connection.onState((c) => { if (c.kind === "needsPin") adopt(null, c.mismatch ? MISMATCH_NOTICE : REVOKED); });
     set({ session: s, notice });
   };
 
-  const attempt = async (url: string, pin?: string) => {
-    const s = open(url);
+  let initial = initialUrl;
+  const attempt = async (url: string, pin?: string, from: string | null = null) => {
+    const s = open(url, from);
     live = s; // so dispose closes it mid-connect
     set({ busy: true, error: null });
     try {
       const r = await s.connection.connect(pin);
       if (disposed) return;
       if (r === "ready") { d.remember(url); adopt(s); }
-      else { shut(s); live = null; set({ notice: REVOKED }); }
+      else { const mismatch = s.connection.mismatch; shut(s); live = null; set({ notice: mismatch ? MISMATCH_NOTICE : REVOKED }); }
     } catch (e) {
       if (disposed) return;
       // Paired but the desktop is down: keep the connection's backoff retry; Chat shows Reconnecting and resyncs on ready.
@@ -131,11 +133,34 @@ export function createAppModel(initialUrl: string, deps: Partial<AppDeps> = {}) 
   };
 
   return {
-    initialUrl,
+    get initialUrl() { return initial; },
     getState: () => state,
     subscribe: (fn: () => void) => { subs.add(fn); return () => { subs.delete(fn); }; },
     attempt,
     start() { if (d.tokensFor(initialUrl).get()) void attempt(initialUrl); },
+    /** Reconnect the paired desktop at a new address. The stored token is reused only when the host there has the same
+     *  certificate fingerprint; the record and the remembered address move on success. Returns an error text, or null. */
+    async changeAddress(raw: string): Promise<string | null> {
+      const old = live;
+      const checked = checkHostUrl(raw);
+      if (!old) return "Not connected to a desktop.";
+      if (!checked.ok) return checked.reason;
+      if (checked.url === old.url) return null;
+      const next = open(checked.url, old.url);
+      try {
+        const r = await next.connection.connect();
+        if (disposed) { shut(next); return null; }
+        if (r === "ready") { d.remember(checked.url); adopt(next); return null; }
+        // Another desktop (or a refused token): the PIN path. The old record stays until the user re-pairs or forgets.
+        const mismatch = next.connection.mismatch;
+        shut(next); d.remember(checked.url); initial = checked.url;
+        adopt(null, mismatch ? MISMATCH_NOTICE : REVOKED);
+        return null;
+      } catch (e) {
+        shut(next);
+        return errorText(e);
+      }
+    },
     forget() {
       const s = live;
       if (!s || !d.confirm(FORGET_CONFIRM)) return;

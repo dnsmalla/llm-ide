@@ -22,7 +22,7 @@ function useConnection(session: Session | null): ConnectionState | null {
   return session?.connection.state ?? null;
 }
 
-function Chat({ session, conn, onForget, onOpenOffline }: { session: Session; conn: ConnectionState; onForget: () => void; onOpenOffline?: () => void }) {
+function Chat({ session, conn, onForget, onChangeAddress, onOpenOffline }: { session: Session; conn: ConnectionState; onForget: () => void; onChangeAddress: (url: string) => Promise<string | null>; onOpenOffline?: () => void }) {
   const { connection: c, controller, read, compose, projects } = session;
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const readState = useSyncExternalStore(read.subscribe, read.getState, read.getState);
@@ -47,7 +47,7 @@ function Chat({ session, conn, onForget, onOpenOffline }: { session: Session; co
         <WebChat hostName={c.hello?.hostName ?? "Host"} hostUrl={session.url} connection={conn} capabilities={capabilities} state={state}
           projects={projectState} onSelectProject={(id) => { projects.select(id); }}
           onSend={send} onStop={() => void controller.cancel()} onClear={() => void controller.clearHistory()}
-          onForget={onForget} onOpenOffline={onOpenOffline} onAnswer={(r, a) => void controller.answerQuestion(r, a)} onDecline={(r) => void controller.declineQuestion(r)}
+          onForget={onForget} onChangeAddress={onChangeAddress} onOpenOffline={onOpenOffline} onAnswer={(r, a) => void controller.answerQuestion(r, a)} onDecline={(r) => void controller.declineQuestion(r)}
           onTool={(r, d) => void controller.answerTool(r, d)} onNewChat={canCompose ? newChat : undefined}
           compose={capabilities.has("chat") ? (
             <ComposeBar state={cs} canChoose={canCompose} disabled={conn.kind !== "ready" || state.turn !== null}
@@ -94,7 +94,7 @@ function AppMain({ model: given, sync: givenSync, sources: givenSources }: { mod
   const screen = chooseScreen({ hub, syncPhase: sy.phase, session: s.session !== null, down, view });
   if (screen === "sync") return <SyncTier state={sy} sync={sync} hostPaired={s.session !== null} onSources={openSources} onHost={() => setView("host")} />;
   const linked = !hub && sy.phase !== "none";
-  if (s.session && conn) return <Chat session={s.session} conn={conn} onForget={model.forget} onOpenOffline={linked ? () => setView("sync") : undefined} />;
+  if (s.session && conn) return <Chat session={s.session} conn={conn} onForget={model.forget} onChangeAddress={model.changeAddress} onOpenOffline={linked ? () => setView("sync") : undefined} />;
   return <PairingScreen initialUrl={model.initialUrl} busy={s.busy} error={s.error} revokedNotice={s.notice} onSubmit={(u, p) => void model.attempt(u, p)}
     footer={<>{!syncEntryVisible(s.session?.connection.hello) ? <p className="hub-note">{hubCopy(s.session?.connection.hello)}</p>
       : linked ? <OfflineCopyEntry onOpen={() => setView("sync")} />

@@ -10,7 +10,7 @@ import {
 export type ConnectionState =
   | { kind: "idle" }
   | { kind: "connecting" }
-  | { kind: "needsPin" }
+  | { kind: "needsPin"; mismatch?: true } // mismatch: the stored token was withheld, this address answers as another desktop
   | { kind: "ready" }
   | { kind: "reconnecting"; attempt: number; inMs: number; unopened: number } // unopened: consecutive attempts whose socket never opened
   | { kind: "failed"; code: HostApiErrorCode; message: string };
@@ -42,7 +42,18 @@ export interface SocketLike {
   onerror: (() => void) | null;
 }
 
-export interface TokenStore { get(): string | null; set(token: string | null): void }
+export interface TokenStore {
+  get(): string | null;
+  set(token: string | null): void;
+  /** Optional identity of the paired desktop: lets the handshake withhold the token from a different host. */
+  identity?(): { fingerprint: string | null } | null;
+  observe?(info: { fingerprint: string | null; hostName: string }): void;
+  confirm?(): void;
+}
+
+export const MISMATCH_NOTICE =
+  "This address now answers as a different desktop \u2014 pair again. (This is a mismatch check on the certificate fingerprint, " +
+  "not a cryptographic pin: the browser already verified TLS.)";
 
 export interface HostConnectionOptions {
   url: string;
@@ -82,7 +93,7 @@ export function trustUrl(hostUrl: string | undefined): string | null {
 /** Shown after UNOPENED_LIMIT attempts in a row where the socket never opened (origin refused, certificate, port). */
 export const CERT_HINT =
   "If the address uses wss://, open its https:// address in this browser once and trust the certificate. " +
-  "If the desktop's port or address changed, forget this host and enter the new address.";
+  "If the desktop's port or address changed, use Change address (or forget this host and enter the new address).";
 export const UNOPENED_LIMIT = 3;
 // A ping while idle finds a half-open socket (sleep, network change) before the user's next request does.
 export const PING_MS = 25_000;
@@ -132,6 +143,7 @@ export class HostConnection implements HostLink {
   #pin: string | null = null;
   #settle: Settle | null = null;
   #hello: HostApiResult<"host.hello"> | null = null;
+  #mismatch = false;
 
   constructor(o: HostConnectionOptions) {
     this.#o = {
@@ -148,6 +160,8 @@ export class HostConnection implements HostLink {
 
   get state(): ConnectionState { return this.#state; }
   get capabilities(): ReadonlySet<HostApiCapability> { return this.#caps; }
+  /** True when the last handshake withheld the stored token because the host's fingerprint differs. */
+  get mismatch(): boolean { return this.#mismatch; }
   get hello(): HostApiResult<"host.hello"> | null { return this.#hello; }
 
   onEvent(fn: (e: HostEvent) => void) { this.#onEvent.add(fn); return () => { this.#onEvent.delete(fn); }; }
@@ -257,11 +271,19 @@ export class HostConnection implements HostLink {
       }
       this.#hello = hello;
       this.#caps = this.#known(hello.capabilities);
+      const fingerprint = typeof hello.certificateFingerprint === "string" && hello.certificateFingerprint ? hello.certificateFingerprint : null;
+      this.#o.tokens.observe?.({ fingerprint, hostName: hello.hostName });
       if (!hello.requiresAuth) return this.#ready();
-      const token = this.#o.tokens.get();
+      let token = this.#o.tokens.get();
+      // Never hand the stored token to a host that is not the one it was issued by (a reused LAN IP, a new port).
+      const known = this.#o.tokens.identity?.()?.fingerprint ?? null;
+      let mismatch = false;
+      if (token && known && known !== fingerprint) { token = null; mismatch = true; }
+      this.#mismatch = mismatch;
       if (token) {
         try {
           this.#caps = this.#known((await this.#request("host.auth.token", { token }).done).capabilities);
+          this.#o.tokens.confirm?.();
           return this.#ready();
         } catch (e) {
           if (!(e instanceof HostApiError) || e.code !== "auth_failed" || e.retryable) throw e;
@@ -270,7 +292,7 @@ export class HostConnection implements HostLink {
       }
       const pin = this.#pin;
       this.#pin = null;
-      this.#setState({ kind: "needsPin" });
+      this.#setState(mismatch ? { kind: "needsPin", mismatch: true } : { kind: "needsPin" });
       if (!pin) return this.#resolve("needsPin");
       try { await this.pair(pin); } catch (e) { this.#reject(e instanceof HostApiError ? e : new HostApiError("internal", "Pairing failed.")); }
     } catch (e) {
@@ -313,8 +335,8 @@ export class HostConnection implements HostLink {
     this.#rejectAll("The connection to the host closed.");
     this.#reject(unreachable(opened ? "The connection to the host closed." : ORIGIN_HINT));
     if (!this.#wanted) return this.#setState({ kind: "idle" });
-    if (!this.#o.tokens.get()) {
-      this.#wanted = false; // never paired: nothing to resume
+    if (!this.#o.tokens.get() || (askedPin && this.#mismatch)) {
+      this.#wanted = false; // never paired (or the token was withheld from another host): nothing to resume
       return this.#setState(askedPin ? { kind: "idle" } : { kind: "failed", code: "host_unreachable", message: ORIGIN_HINT });
     }
     this.#attempt += 1;
