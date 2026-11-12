@@ -604,3 +604,34 @@ export function templateProblemMessage(errors: readonly TemplateError[]): string
   const more = errors.length > 5 ? ` (and ${errors.length - 5} more)` : "";
   return `Fix ${TEMPLATE_FILE} (Factory → Process): ${shown}${more}. The run did not start.`;
 }
+
+/**
+ * The enabled steps of a template, in order, as the board's lanes: the step names a run reports. Gates are not lanes
+ * (a failed gate sits in the step it checks), a setup step needs a command, and an `auto` command step is left out
+ * because detection decides whether it runs (a card that stops there still gets a lane).
+ */
+export function processStepNames(t: FactoryTemplate): string[] {
+  const out: string[] = [];
+  for (const ts of t.stages) {
+    if (ts.role === "intakeGate" || ts.role === "reviewGate" || ts.kind === "artifactCheck" || ts.enabled === false) continue;
+    if (ts.role === "setup" && !(ts.command ?? "").trim()) continue;
+    if (ts.role === "custom" && ts.kind === "shellCommand" && ts.command === "auto") continue;
+    const name = ts.name ?? (ts.role === "custom" ? "" : builtInStage(ts.role).name);
+    if (name) out.push(name);
+  }
+  return out;
+}
+
+/** The step names of the project's process (template file, else what the first run would write); null when unknown. */
+export async function processSteps(fs: Pick<FsApi, "read">, factoryLoop: () => Promise<LoopDefinition | null>): Promise<string[] | null> {
+  try {
+    const file = await readTemplateFile(fs);
+    if (file.kind === "ok") return file.parse.ok ? processStepNames(file.parse.template) : null;
+    const loop = await factoryLoop();
+    if (!loop) return null;
+    const migrated = templateFromLoop(loop).template;
+    return processStepNames(upgradeOldDefault(migrated) ?? migrated);
+  } catch {
+    return null;
+  }
+}

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { FACTORY_BUILT_IN_STAGES, FACTORY_TEMPLATE, factoryRole } from "../native/factory.ts";
 import { DETECTED_TEST } from "../native/environment.ts";
 import {
-  TEMPLATE_FILE, applyTemplate, defaultFactoryTemplate, processHasIntake, upgradeOldDefault, formatFactoryTemplate, lineDiff, lineStart, parseFactoryTemplate, problemCountLabel, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, writeTemplateIfMissing,
+  TEMPLATE_FILE, applyTemplate, defaultFactoryTemplate, processHasIntake, processStepNames, upgradeOldDefault, formatFactoryTemplate, lineDiff, lineStart, parseFactoryTemplate, problemCountLabel, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, writeTemplateIfMissing,
 } from "../native/factory-template.ts";
 
 const loopOf = (stages = structuredClone(FACTORY_TEMPLATE.config.stages)) => ({ id: "F", name: "Factory", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: "factory", runsOnSchedule: false, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages } });
@@ -262,4 +262,14 @@ test("processHasIntake reads the template, else what the first run would write, 
   assert.equal(await processHasIntake(memFs(), async () => loopOf(structuredClone(FACTORY_BUILT_IN_STAGES))), false, "the previous default moves to the new one");
   const edited = structuredClone(FACTORY_BUILT_IN_STAGES).map((s) => (s.name === "Intake" ? { ...s, prompt: "Mine." } : s));
   assert.equal(await processHasIntake(memFs(), async () => loopOf(edited)), true, "an edited loop keeps its Intake");
+});
+
+test("processStepNames: enabled steps in order are the board lanes; gates, an empty setup and auto-detected steps are not", () => {
+  assert.deepEqual(processStepNames(base()), ["Implement", "Verify", "Review"]);
+  const t = { version: 1, stages: [
+    { role: "setup" }, { role: "plan", name: "Design" }, { role: "custom", name: "Structure verify", kind: "shellCommand", command: "auto" },
+    { role: "implement", enabled: false }, { role: "custom", name: "Doc review", kind: "skill", skill: "doc-writer" }, { role: "review" }, { role: "reviewGate" },
+  ] };
+  assert.deepEqual(processStepNames(t), ["Design", "Doc review", "Review"]);
+  assert.deepEqual(processStepNames(defaultFactoryTemplate()).includes("Review gate"), false);
 });

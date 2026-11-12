@@ -62,3 +62,5 @@
 .fx-process-diff-line[data-kind="del"] { color: var(--tok-color-danger); }
 .fx-process-diff-line[data-kind="same"] { color: var(--tok-color-text-muted); }
 .fx-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.fx-status { border-radius: 999px; padding: 0 7px; background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); color: var(--tok-color-text); font-weight: 600; }
+.fx-status[data-status="Needs you"], .fx-status[data-status="Needs decision"] { background: color-mix(in srgb, var(--tok-color-danger) 14%, transparent); }

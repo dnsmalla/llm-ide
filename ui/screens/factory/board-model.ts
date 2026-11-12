@@ -3,7 +3,7 @@
 import { loadRunRecord, type HistoryFs } from "../loop/native/history.ts";
 import type { WorkItem } from "../loop/native/factory.ts";
 import type { LiveRun } from "../loop/native/run-manager.ts";
-import { COLUMNS, NOTE, columnFor, decodeRunRecordFacts, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
+import { COLUMNS, COLUMN_LABELS, NOTE, columnFor, decodeRunRecordFacts, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
 import type { WorkItemRecord } from "./items.ts";
 
 export { factoryAnchor, focusKeyFromAnchor } from "./anchor.ts";
@@ -13,6 +13,10 @@ export const SHIP_STATUS_BATCH = 20;
 export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "finishChecks" | "rerun" | "intake" | "answer";
 export interface CardView {
   key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[];
+  /** The board lane the card sits in (a process step, or backlog / MR / done). */
+  lane: string;
+  /** The status the card is in (the old column's label), shown as a badge. */
+  status: string;
   costUsd?: number | null; durationSeconds?: number | null; progressLabel?: string | null; lastLine?: string | null;
   verdict?: string | null; changed?: { files: number; additions: number | null; deletions: number | null; truncated: boolean } | null;
   test?: { command: string | null; ok: boolean | null } | null; failingStage?: { name: string; error: string } | null;
@@ -46,13 +50,59 @@ export function actionsFor(column: Column, note: string | null, process: { intak
   }
 }
 
+export const LANE_BACKLOG = "backlog";
+export const LANE_MR = "mr";
+export const LANE_DONE = "done";
+export const stepLane = (name: string): string => `step:${name}`;
+const norm = (n: string) => n.trim().toLowerCase().replace(/\s+gate$/, "");
+
+/** The step lane a stage name belongs to: an exact step, a gate of a step, else the stage's own (dynamic) lane. */
+function stageLane(stage: string | null | undefined, steps: readonly string[]): string | null {
+  if (!stage) return null;
+  const hit = steps.find((s) => norm(s) === norm(stage));
+  return stepLane(hit ?? stage.replace(/\s+gate$/i, ""));
+}
+
+/** Where a card sits on the process board: backlog, the step it is on or stopped at, the MR, or done. */
+export function laneFor(column: Column, f: ItemFacts, steps: readonly string[]): string {
+  const rec = f.lastRecord;
+  // A live run shows its step first, also a send-back re-run of an item whose MR is already open.
+  if (column === "working") return f.live?.state === "queued" ? LANE_BACKLOG : stageLane(f.live?.progress?.stageName, steps) ?? (steps[0] ? stepLane(steps[0]) : LANE_BACKLOG);
+  if (column === "done") return LANE_DONE;
+  if (rec?.ship || column === "readyToShip") return LANE_MR;
+  if (column === "inbox") return LANE_BACKLOG;
+  // Stopped: the failing step, else the last one reached; an interrupted run with no record has none.
+  return stageLane(rec?.failingStage?.name ?? rec?.lastStage, steps) ?? (rec && steps[0] ? stepLane(steps[0]) : LANE_BACKLOG);
+}
+
+export interface Lane { id: string; label: string; cards: CardView[] }
+/** The lanes in order: Backlog, each process step, any step a card stopped at that the process no longer lists, MR open, Done. */
+export function buildLanes(board: Record<Column, CardView[]>, steps: readonly string[]): Lane[] {
+  const cards = COLUMNS.flatMap((c) => board[c]);
+  const lanes: Lane[] = [{ id: LANE_BACKLOG, label: "Backlog", cards: [] }, ...steps.map((s) => ({ id: stepLane(s), label: s, cards: [] as CardView[] }))];
+  const mr: Lane = { id: LANE_MR, label: "MR open", cards: [] };
+  const done: Lane = { id: LANE_DONE, label: "Done", cards: [] };
+  const by = new Map<string, Lane>([...lanes, mr, done].map((l) => [l.id, l]));
+  for (const c of cards) {
+    let lane = by.get(c.lane);
+    if (!lane) {
+      lane = { id: c.lane, label: c.lane.startsWith("step:") ? c.lane.slice(5) : c.lane, cards: [] };
+      by.set(c.lane, lane);
+      lanes.push(lane);
+    }
+    lane.cards.push(c);
+  }
+  return [...lanes, mr, done];
+}
+
 /** One card per item, grouped by the column its facts derive. Insertion order is kept inside a column. */
-export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<string, ItemFacts>, nowMs = Date.now(), process: { intake?: boolean } = {}): Record<Column, CardView[]> {
+export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<string, ItemFacts>, nowMs = Date.now(), process: { intake?: boolean; steps?: readonly string[] | null } = {}): Record<Column, CardView[]> {
+  const steps = process.steps ?? [];
   const board = Object.fromEntries(COLUMNS.map((c) => [c, [] as CardView[]])) as Record<Column, CardView[]>;
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, actions: actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, lane: laneFor(column, f, steps), status: COLUMN_LABELS[column], actions: actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null });
   }
   return board;
 }
@@ -309,24 +359,21 @@ export function stageTimeline(live: { log: readonly string[]; progress?: { stage
   return (live.progress?.stages ?? []).map((r) => ({ id: r.id, name: r.name, state: r.state }));
 }
 
-/** The card key after `key` in column order, or the first/last when key is null. */
-export function nextCardKey(board: Record<Column, CardView[]>, key: string | null, direction: "left" | "right" | "up" | "down"): string | null {
-  const columns = COLUMNS.filter((c) => board[c].length > 0);
-  if (columns.length === 0) return null;
-  const flat = COLUMNS.flatMap((c) => board[c].map((v) => ({ key: v.key, col: c })));
+/** The card key after `key` in lane order, or the first when key is null. */
+export function nextCardKey(lanes: readonly Lane[], key: string | null, direction: "left" | "right" | "up" | "down"): string | null {
+  const flat = lanes.flatMap((l, li) => l.cards.map((v) => ({ key: v.key, li })));
+  if (flat.length === 0) return null;
   const current = key ? flat.find((x) => x.key === key) : null;
-  if (!current) return flat[0]?.key ?? null;
-  const allCols = COLUMNS;
-  const ci = allCols.indexOf(current.col);
-  const row = board[current.col].findIndex((v) => v.key === key);
+  if (!current) return flat[0].key;
+  const row = lanes[current.li].cards.findIndex((v) => v.key === key);
   if (direction === "left" || direction === "right") {
-    for (let i = ci + (direction === "right" ? 1 : -1); i >= 0 && i < allCols.length; i += direction === "right" ? 1 : -1) {
-      const col = board[allCols[i]];
-      if (col.length) return col[Math.min(row, col.length - 1)].key;
+    const step = direction === "right" ? 1 : -1;
+    for (let i = current.li + step; i >= 0 && i < lanes.length; i += step) {
+      const cards = lanes[i].cards;
+      if (cards.length) return cards[Math.min(row, cards.length - 1)].key;
     }
     return current.key;
   }
-  const col = board[current.col];
-  const next = direction === "down" ? row + 1 : row - 1;
-  return col[Math.max(0, Math.min(col.length - 1, next))].key;
+  const cards = lanes[current.li].cards;
+  return cards[Math.max(0, Math.min(cards.length - 1, row + (direction === "down" ? 1 : -1)))].key;
 }

@@ -11,24 +11,29 @@ See what each column of the Factory board looks like, and run the regression tes
 
 ## What the board is
 
-Factory turns issues, specs and free text into cards that move through seven columns. The column is derived from the
-item's last run, its worktree and the PR/MR status. It is never stored on the card.
+Factory turns issues, specs and free text into cards that move through the **process**. The board's lanes are
+**Backlog**, then one lane per enabled step of the process (Factory → Process, in order), then **MR open** and
+**Done**. Editing the process changes the lanes.
 
-A demo fixture has one card per column:
+A card sits in the step it is running, or in the step where it stopped (a failed gate sits in the step it checks).
+Its status is a badge on the card. The lane and the badge are derived from the item's last run, its worktree and the
+PR/MR status; they are never stored on the card.
 
-| Column | Demo card | What the card offers | Result |
-|--------|-----------|----------------------|--------|
-| Inbox | Demo 101 | Start · Run intake · Discard | no run yet |
-| Needs decision | Demo 102 | Run intake · Discard; answer form | Intake stopped for a decision |
-| Working | Free text idea | live progress and last log line | run is live |
-| Needs you | Demo 104 | Resume · Open diff · Discard | last run failed |
-| Ready to ship | Demo 105 | Open diff · Ship · Discard | run passed, no PR/MR |
-| Shipped | Demo 106 | Open PR/MR · Open diff | PR open, CI running |
-| Done | Demo 107 | Open PR/MR · Discard | PR merged |
+A demo fixture has one card per status. With the steps Plan, Implement, Verify, Test gaps, Doc review and Review:
+
+| Card | Lane | Status badge | What the card offers |
+|------|------|--------------|----------------------|
+| Demo 101 | Backlog | Inbox | Start · Run intake · Discard |
+| Demo 102 | Plan | Needs decision | Run intake · Discard; answer form |
+| Free text idea | Plan (the step it is running) | Working | live progress and last log line |
+| Demo 104 | Verify (where it failed) | Needs you | Resume · Open diff · Discard |
+| Demo 105 | MR open | Ready to ship | Open diff · Ship · Discard |
+| Demo 106 | MR open | Shipped (CI running) | Open PR/MR · Open diff |
+| Demo 107 | Done | Done | Open PR/MR · Discard |
 
 ## Run the test
 
-The same fixture is a regression test: one item per column, with assertions for actions, notes and ship state.
+The same fixture is a regression test: one item per status, with assertions for lanes, actions, notes and ship state.
 
 ```bash
 cd desktop

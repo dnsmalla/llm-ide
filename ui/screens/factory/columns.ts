@@ -16,6 +16,8 @@ export interface RunRecordFacts {
   changed: { files: number; additions: number | null; deletions: number | null; truncated: boolean } | null;
   test: { command: string | null; ok: boolean | null } | null;
   failingStage: { name: string; error: string } | null;
+  /** The last step the run reached (where it stopped or finished), or null. */
+  lastStage?: string | null;
   readiness: string | null;
   /** Why the run did not open its draft MR by itself (auto-ship refused or failed), or null. */
   autoShipBlocked?: string | null;
@@ -82,6 +84,7 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     changed: changedFiles === null ? null : { files: changedFiles, additions: typeof d?.additions === "number" ? d.additions : null, deletions: typeof d?.deletions === "number" ? d.deletions : null, truncated: d?.truncated === true },
     test: verify ? { command: typeof verifyConfig?.command === "string" ? verifyConfig.command.slice(0, 300) : null, ok: isRecord(verify.run) ? verify.run.exitCode === 0 : null } : null,
     failingStage: failed && typeof failed.stageName === "string" ? { name: failed.stageName.slice(0, 120), error: displayText(typeof (failed.run as Record<string, unknown>)?.stdout === "string" ? ((failed.run as Record<string, unknown>).stdout as string) : "").split("\n").slice(0, 3).join("\n").slice(0, 600) } : null,
+    lastStage: (() => { const n = stages.at(-1)?.stageName; return typeof n === "string" && n !== "" ? n.slice(0, 120) : null; })(),
     readiness,
     autoShipBlocked: isRecord(raw.autoShip) && typeof raw.autoShip.blocked === "string" && raw.autoShip.blocked.trim() !== "" ? displayText(raw.autoShip.blocked).slice(0, 300) : null,
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -21,7 +21,7 @@ test("buildBoard groups items by derived column and keeps insertion order", () =
   assert.deepEqual(Object.keys(board), ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"]);
   assert.deepEqual(board.inbox.map((c) => c.key), ["issue:a", "issue:c"]);
   assert.deepEqual(board.working.map((c) => c.key), ["issue:b"]);
-  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, notShipped: null, shipOverride: null }]);
+  assert.deepEqual(board.readyToShip, [{ key: "issue:d", title: "Title issue:d", source: "issue", note: null, lane: "mr", status: "Ready to ship", actions: ["openDiff", "ship", "discard"], costUsd: null, durationSeconds: null, progressLabel: null, lastLine: null, verdict: null, changed: null, test: null, failingStage: null, readiness: null, notShipped: null, shipOverride: null }]);
   assert.deepEqual(board.done, []);
   assert.equal(lastKnownFrom(board).get("issue:d"), "readyToShip");
 });
@@ -197,19 +197,47 @@ test("R-048: a typed timeline keeps early stages and resets a repeated stage to 
   assert.deepEqual(stageTimeline({ log: ["$ Same", "$ Same"], progress: null }), [], "log text is never parsed");
 });
 
-test("D4: nextCardKey moves within a column and into the next non-empty column", () => {
-  const board = { inbox: [{ key: "a" }, { key: "b" }], needsDecision: [], working: [{ key: "c" }], needsYou: [], readyToShip: [], shipped: [], done: [] };
-  assert.equal(nextCardKey(board, "a", "down"), "b");
-  assert.equal(nextCardKey(board, "a", "right"), "c");
-  assert.equal(nextCardKey(board, "c", "left"), "a");
-  assert.equal(nextCardKey(board, "b", "down"), "b");
-  assert.equal(nextCardKey(board, null, "down"), "a");
-  // Left/right keep the row (clamped to the target column's length), not the column number.
-  const tall = { inbox: [{ key: "a" }, { key: "b" }], needsDecision: [], working: [], needsYou: [{ key: "x" }, { key: "y" }, { key: "z" }], readyToShip: [], shipped: [], done: [{ key: "d" }] };
+test("D4: nextCardKey moves within a lane and into the next non-empty lane", () => {
+  const L = (...lanes) => lanes.map((cards, i) => ({ id: `l${i}`, label: `l${i}`, cards: cards.map((key) => ({ key })) }));
+  const lanes = L(["a", "b"], [], ["c"], [], [], [], []);
+  assert.equal(nextCardKey(lanes, "a", "down"), "b");
+  assert.equal(nextCardKey(lanes, "a", "right"), "c");
+  assert.equal(nextCardKey(lanes, "c", "left"), "a");
+  assert.equal(nextCardKey(lanes, "b", "down"), "b");
+  assert.equal(nextCardKey(lanes, null, "down"), "a");
+  // Left/right keep the row (clamped to the target lane's length), not the lane number.
+  const tall = L(["a", "b"], [], [], ["x", "y", "z"], [], [], ["d"]);
   assert.equal(nextCardKey(tall, "a", "right"), "x");
   assert.equal(nextCardKey(tall, "b", "right"), "y");
   assert.equal(nextCardKey(tall, "z", "left"), "b");
   assert.equal(nextCardKey(tall, "z", "right"), "d");
+});
+
+test("process lanes: backlog, each step, MR open, done; a card sits in the step it is on or stopped at", () => {
+  const steps = ["Plan", "Implement", "Verify", "Review"];
+  const items = [item("issue:a"), item("issue:b"), item("issue:c", { runIds: ["rc"] }), item("issue:d", { runIds: ["rd"] }), item("issue:e", { runIds: ["re"] })];
+  const facts = new Map([
+    ["issue:b", { ...EMPTY_FACTS, live: { ...live("issue:b"), progress: { stageName: "Implement", stageIndex: 1, stageCount: 4, iteration: 1, repairs: 0, stages: [], startedAt: null } } }],
+    ["issue:c", { ...EMPTY_FACTS, lastRecord: { ...rec("rc"), statusCode: "failed", failingStage: { name: "Review gate", error: "x" } } }],
+    ["issue:d", { ...EMPTY_FACTS, lastRecord: rec("rd") }],
+    ["issue:e", { ...EMPTY_FACTS, lastRecord: { ...rec("re"), statusCode: "failed", failingStage: { name: "Doc review", error: "x" } } }],
+  ]);
+  const lanes = buildLanes(buildBoard(items, facts, Date.now(), { steps }), steps);
+  assert.deepEqual(lanes.map((l) => l.label), ["Backlog", "Plan", "Implement", "Verify", "Review", "Doc review", "MR open", "Done"]);
+  const at = (label) => lanes.find((l) => l.label === label).cards.map((c) => c.key);
+  assert.deepEqual(at("Backlog"), ["issue:a"]);
+  assert.deepEqual(at("Implement"), ["issue:b"]);
+  assert.deepEqual(at("Review"), ["issue:c"], "a failed gate sits in the step it checks");
+  assert.deepEqual(at("Doc review"), ["issue:e"], "a step the process no longer lists still gets a lane");
+  assert.deepEqual(at("MR open"), ["issue:d"]);
+  assert.equal(lanes.find((l) => l.label === "Review").cards[0].status, "Needs you");
+  // A send-back re-run of a shipped item shows its running step, not MR open; a queued run waits in Backlog.
+  const shipped = { ...rec("rs"), ship: { provider: "github", url: "https://github.com/a/b/pull/1" } };
+  const rerun = { ...EMPTY_FACTS, lastRecord: shipped, live: { ...live("issue:s"), progress: { stageName: "Verify", stageIndex: 2, stageCount: 4, iteration: 1, repairs: 0, stages: [], startedAt: null } } };
+  const queued = { ...EMPTY_FACTS, live: live("issue:q", "/p", "queued") };
+  const two = buildLanes(buildBoard([item("issue:s", { runIds: ["rs"] }), item("issue:q")], new Map([["issue:s", rerun], ["issue:q", queued]]), Date.now(), { steps }), steps);
+  assert.deepEqual(two.find((l) => l.label === "Verify").cards.map((c) => c.key), ["issue:s"]);
+  assert.deepEqual(two.find((l) => l.label === "Backlog").cards.map((c) => c.key), ["issue:q"]);
 });
 
 test("D4: the board markup uses a region, labelled lists and a log", async () => {

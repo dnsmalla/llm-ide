@@ -23,6 +23,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       <button type="button" className="fx-card-title" onClick={onOpen} title="Show details">{view.title}</button>
       <div className="fx-card-meta">
         <span className="fx-source">{SOURCE_LABELS[view.source]}</span>
+        <span className="fx-status" data-status={view.status}>{view.status}</span>
         {view.note ? <span className="fx-note">{view.note}</span> : null}
         {view.progressLabel ? <span className="fx-hint">{view.progressLabel}</span> : null}
         {view.durationSeconds != null ? <span className="fx-hint">{formatDuration(view.durationSeconds)}</span> : null}

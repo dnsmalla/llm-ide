@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { newWorkItem } from "../items.ts";
-import { EMPTY_FACTS, buildBoard, assembleFacts } from "../board-model.ts";
+import { EMPTY_FACTS, buildBoard, buildLanes, assembleFacts } from "../board-model.ts";
 
 const at = new Date("2026-11-11T00:00:00.000Z");
 const item = (n, source = "issue", title = `Demo ${n}`) => {
@@ -19,7 +19,7 @@ test("demo data: one item per column keeps its card, actions, note and ship stat
     ["r1", record({ runId: "r1" })],
     ["r2", record({ runId: "r2", statusCode: "failed", needsDecision: "needs decision", verdict: "DECISION", readiness: "needs-decision" })],
     ["r3", record({ runId: "r3" })],
-    ["r4", record({ runId: "r4", statusCode: "failed", verdict: "FAIL", failingStage: "verify" })],
+    ["r4", record({ runId: "r4", statusCode: "failed", verdict: "FAIL", failingStage: { name: "Verify", error: "1 test failed" } })],
     ["r5", record({ runId: "r5" })],
     ["r6", record({ runId: "r6", ship: { provider: "github", url: url(6) } })],
     ["r7", record({ runId: "r7", ship: { provider: "github", url: url(7) } })],
@@ -44,6 +44,16 @@ test("demo data: one item per column keeps its card, actions, note and ship stat
   assert.deepEqual(board.done[0].actions, ["openRequest", "discard"]);
   assert.equal(board.shipped[0].note, "CI running");
   assert.equal(board.working[0].lastLine, "reading context");
+
+  // The board shows the process: Backlog, each step, MR open, Done; the status is a badge on the card.
+  const steps = ["Plan", "Implement", "Verify", "Test gaps", "Doc review", "Review"];
+  const withSteps = buildBoard(items, facts, at.getTime(), { steps });
+  const lanes = buildLanes(withSteps, steps);
+  const where = Object.fromEntries(lanes.flatMap((l) => l.cards.map((c) => [c.title, `${l.label} · ${c.status}`])));
+  assert.deepEqual(where, {
+    "Demo 101": "Backlog · Inbox", "Demo 102": "Plan · Needs decision", "Free text idea": "Plan · Working", "Demo 104": "Verify · Needs you",
+    "Demo 105": "MR open · Ready to ship", "Demo 106": "MR open · Shipped", "Demo 107": "Done · Done",
+  });
 
   const live = assembleFacts(items[2], { projectRoot: "/demo", live: [facts.get(items[2].key).live], records, worktrees: new Map([["r3", {}]]), ship: new Map(), lastKnown: new Map() });
   assert.equal(live.live?.state, "running");

@@ -1,5 +1,6 @@
-// The Factory board: one card per work item. A card's column is derived from facts every time the board is read
-// (run records, live runs, worktrees, PR/MR status) and is never stored. Runs live in the module-level run manager,
+// The Factory board: one card per work item, in lanes that follow the process (Backlog, each step, MR open, Done).
+// A card's lane and status badge are derived from facts every time the board is read (run records, live runs,
+// worktrees, PR/MR status) and are never stored. Runs live in the module-level run manager,
 // so they survive section and project switches; this view reads and starts them.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
@@ -14,17 +15,17 @@ import { decodeWorktreeDiff } from "../loop/native/ship-model.ts";
 import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import "../loop/native/native-loop.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
-import { COLUMNS, COLUMN_LABELS, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, LANE_BACKLOG, LANE_DONE, LANE_MR, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { finishChecksAllowed, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
 import { isFactoryLoop, pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
-import { processHasIntake } from "../loop/native/factory-template.ts";
+import { processHasIntake, processSteps } from "../loop/native/factory-template.ts";
 import { loadLoops } from "../loop/native/store.ts";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
 import { Card } from "./Card.tsx";
 
-const EMPTY_COPY: Record<Column, string> = { inbox: "No work items", needsDecision: "Nothing waiting for a decision", working: "No run in progress", needsYou: "Nothing needs you", readyToShip: "Nothing ready to ship", shipped: "No open PR/MR", done: "Nothing done yet" };
+const emptyCopy = (lane: string): string => (lane === LANE_BACKLOG ? "No work items" : lane === LANE_MR ? "No open PR/MR" : lane === LANE_DONE ? "Nothing done yet" : "Nothing at this step");
 
 // Wire the run manager to the real host once, when this chunk loads: startRun throws without it, and runs must
 // outlive this component (the Issues entry installs it the same way before it starts an intake run).
@@ -77,11 +78,16 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [addIntake, setAddIntake] = useState(false);
   // Whether the project's process has an Intake step; null = not known yet (Run intake stays offered, the run manager refuses it).
   const [hasIntake, setHasIntake] = useState<boolean | null>(null);
+  // The process steps in order (the board's lanes); null = not known yet.
+  const [steps, setSteps] = useState<string[] | null>(null);
   useEffect(() => {
     setHasIntake(null);
+    setSteps(null);
     if (!projectRoot || !active) return;
     let live = true;
-    void processHasIntake(fs, async () => (await loadLoops(fs).then((r) => (r.kind === "ok" ? r.store.loops.find(isFactoryLoop) ?? null : null), () => null))).then((v) => { if (live) setHasIntake(v); });
+    const factoryLoop = async () => (await loadLoops(fs).then((r) => (r.kind === "ok" ? r.store.loops.find(isFactoryLoop) ?? null : null), () => null));
+    void processHasIntake(fs, factoryLoop).then((v) => { if (live) setHasIntake(v); });
+    void processSteps(fs, factoryLoop).then((v) => { if (live) setSteps(v); });
     return () => { live = false; };
   }, [fs, projectRoot, active]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -216,7 +222,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     return () => clearInterval(t);
   }, [live, retryAt]);
 
-  const board = useMemo(() => buildBoard(items, facts, nowMs, { intake: hasIntake ?? undefined }), [items, facts, nowMs, hasIntake]);
+  const board = useMemo(() => buildBoard(items, facts, nowMs, { intake: hasIntake ?? undefined, steps }), [items, facts, nowMs, hasIntake, steps]);
+  const lanes = useMemo(() => buildLanes(board, steps ?? []), [board, steps]);
   const openCleanup = async () => {
     const merged = new Set(items.filter((i) => facts.get(i.key)?.ship?.state === "merged").flatMap((i) => i.runIds));
     const statuses = new Map();
@@ -400,16 +407,16 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           const dir = map[e.key as keyof typeof map];
           // Enter/Space are left alone: the card title is a button that opens the panel, and every other button keeps its own click.
           if (!dir) return;
-          const next = nextCardKey(board, cardKey, dir);
+          const next = nextCardKey(lanes, cardKey, dir);
           if (!next) return;
           e.preventDefault();
           requestAnimationFrame(() => (document.querySelector(`[data-key="${CSS.escape(next)}"] .fx-card-title`) as HTMLElement | null)?.focus());
         }}>
-          {COLUMNS.map((col) => (
-            <section key={col} className="fx-col" role="group" aria-label={`${COLUMN_LABELS[col]} (${board[col].length})`}>
-              <h3 className="fx-col-title">{COLUMN_LABELS[col]} <span>{board[col].length}</span></h3>
-              <ul className="fx-cards" role="list" aria-label={`${COLUMN_LABELS[col]} cards`}>
-                {board[col].map((view) => {
+          {lanes.map((lane) => (
+            <section key={lane.id} className="fx-col" role="group" aria-label={`${lane.label} (${lane.cards.length})`}>
+              <h3 className="fx-col-title">{lane.label} <span>{lane.cards.length}</span></h3>
+              <ul className="fx-cards" role="list" aria-label={`${lane.label} cards`}>
+                {lane.cards.map((view) => {
                   const it = byKey.get(view.key) ?? null;
                   return (
                     <Card
@@ -428,7 +435,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                   );
                 })}
               </ul>
-              {board[col].length === 0 ? <p className="fx-hint">{EMPTY_COPY[col]}</p> : null}
+              {lane.cards.length === 0 ? <p className="fx-hint">{emptyCopy(lane.id)}</p> : null}
             </section>
           ))}
         </div>
