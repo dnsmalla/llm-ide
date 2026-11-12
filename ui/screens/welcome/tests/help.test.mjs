@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HELP_TOPICS, HELP_GROUPS } from "../help.ts";
+import { HELP_TOPICS, HELP_GROUPS, HELP_FLOWS, topicFlow } from "../help.ts";
 import { SECTIONS } from "../../shell/sections.ts";
 import { ALL_GROUPS } from "../../settings/groups.ts";
 
@@ -32,4 +32,30 @@ test("every Screen and Settings topic can jump to its page; diagrams cover the m
   for (const kind of ["map", "project", "factory", "settings", "issue", "terminal"]) {
     assert.ok(HELP_TOPICS.some((t) => t.diagram === kind), `missing ${kind} diagram`);
   }
+});
+
+test("every Start, Screen and Recipe topic has a one-line answer and a clickable flowchart that explains each step", () => {
+  for (const t of HELP_TOPICS.filter((x) => x.group !== "Settings")) {
+    assert.ok(t.oneLine && t.oneLine.length > 20, `${t.id} needs a one-line answer`);
+    const flow = topicFlow(t);
+    assert.ok(flow && flow.length >= 3, `${t.id} needs a flowchart of at least three steps`);
+    for (const n of flow) assert.ok(n.label.length <= 24 && n.detail.length > 20, `${t.id}: "${n.label}" needs a short label and a real explanation`);
+    assert.equal(new Set(flow.map((n) => n.label)).size, flow.length, `${t.id}: step labels repeat`);
+  }
+  for (const [kind, flow] of Object.entries(HELP_FLOWS)) assert.ok(flow.length >= 3, `${kind} flow is too short`);
+});
+
+test("questions have answers and every Read next link points at a real topic", () => {
+  const ids = new Set(HELP_TOPICS.map((t) => t.id));
+  for (const t of HELP_TOPICS) {
+    for (const f of t.faq ?? []) assert.ok(f.q.trim() && f.a.length > 20, `${t.id}: empty question or answer`);
+    for (const r of t.related ?? []) { assert.ok(ids.has(r), `${t.id}: unknown related topic ${r}`); assert.notEqual(r, t.id); }
+  }
+});
+
+test("the Factory topic describes the process board, not the old status columns", () => {
+  const f = HELP_TOPICS.find((t) => t.id === "factory");
+  assert.match(f.what, /Backlog/);
+  assert.doesNotMatch(f.what, /Ready to ship, Shipped/);
+  assert.deepEqual(HELP_FLOWS.factory.map((n) => n.label), ["Backlog", "Plan", "Implement", "Verify", "Review", "Done"]);
 });

@@ -110,8 +110,10 @@ test("Guide dialog: searchable beginner guide with screens, settings and recipes
   const out = welcome({ guideOpen: true });
   assert.match(out, /role="dialog" aria-modal="true" aria-labelledby="wc-guide-title"/);
   for (const t of ["Help &amp; Support", "Your first 10 minutes", "Explorer", "Factory", "Settings overview", "Providers"]) assert.match(out, new RegExp(t));
-  assert.match(out, /Search screens, settings or a recipe/);
-  assert.match(out, /Try it/);
+  assert.match(out, /Search: “Factory”/);
+  // Home: paths in, the clickable "how it fits together" flowchart and common questions.
+  for (const t of ["How can we help?", "I&#x27;m new here", "How it all fits together", "Step 1 of 5", "Next →", "Common questions"]) assert.match(out, new RegExp(t));
+  assert.match(out, /aria-pressed="true"/);
   assert.equal(html(h(GuideDialog, { onClose() {} })).includes("Close"), true);
   assert.ok(!/[<>]/.test(JSON.stringify(help.HELP_TOPICS)), "help text has no markup");
 });

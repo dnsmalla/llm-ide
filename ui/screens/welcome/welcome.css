@@ -44,48 +44,104 @@
 .wc-modal-body { overflow-y: auto; padding: var(--tok-space-md) var(--tok-space-lg, 16px) var(--tok-space-lg, 16px); }
 .wc-steps { margin: 6px 0 0; padding-left: 22px; line-height: 1.5; }
 
-/* Help & Guide: searchable beginner guide with a topic rail and small diagrams. */
-.help-card { width: min(1040px, 100%); }
-.help-sub { margin: 4px 0 0; color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
-.help-search { padding: 10px 16px; border-bottom: 1px solid var(--tok-color-border); }
-.help-search input { width: 100%; box-sizing: border-box; font: inherit; color: inherit; background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: 8px; padding: 8px 10px; }
-.help-body { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 0; flex: 1; overflow: hidden; }
-.help-nav { overflow-y: auto; padding: 12px; border-right: 1px solid var(--tok-color-border); background: var(--tok-color-surface2); }
-.help-nav section + section { margin-top: 14px; }
-.help-nav-title { margin: 0 0 6px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--tok-color-text-muted); }
-.help-nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.help-nav-item { width: 100%; text-align: left; font: inherit; font-size: 12px; color: var(--tok-color-text); background: none; border: 0; border-radius: 6px; padding: 6px 8px; cursor: pointer; }
-.help-nav-item:hover { background: var(--tok-color-row-alt); }
-.help-nav-item[aria-current="page"] { background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); color: var(--tok-color-accent); }
-.help-empty { color: var(--tok-color-text-muted); font-size: 12px; }
-.help-content { overflow-y: auto; padding: 20px 24px 28px; }
-.help-kicker { margin: 0 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--tok-color-accent2); }
-.help-title { margin: 0 0 8px; font-size: 21px; letter-spacing: -.01em; }
-.help-what { margin: 0 0 14px; line-height: 1.6; color: var(--tok-color-text); }
-.help-h4 { margin: 16px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--tok-color-text-muted); }
-.help-steps { margin: 0; padding-left: 20px; line-height: 1.7; font-size: 13px; }
-.help-example { margin: 14px 0 0; padding: 10px 12px; border-left: 3px solid var(--tok-color-accent3); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--tok-color-accent3) 9%, var(--tok-color-surface2)); font-size: 12px; line-height: 1.55; }
-.help-diagram { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 4px; padding: 14px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-body); }
-.help-box { padding: 8px 10px; border: 1px solid var(--tok-color-border); border-radius: 7px; background: var(--tok-color-surface2); font-size: 11px; font-weight: 600; }
-.help-box-accent { border-color: color-mix(in srgb, var(--tok-color-accent) 45%, var(--tok-color-border)); color: var(--tok-color-accent); }
-.help-box-muted { color: var(--tok-color-text-muted); }
-.help-arrow { color: var(--tok-color-text-muted); }
-.help-project { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; }
-.help-box-main { grid-row: span 2; display: grid; place-items: center; }
-.help-flow { gap: 6px; }
-.help-step { padding: 6px 8px; border: 1px solid var(--tok-color-border); border-radius: 999px; background: var(--tok-color-surface2); font-size: 10px; white-space: nowrap; }
-.help-step + .help-step::before { content: "→"; margin-right: 6px; color: var(--tok-color-text-muted); }
-.help-settings { display: grid; grid-template-columns: 1fr 1fr; }
-@media (max-width: 760px) { .help-body { grid-template-columns: 1fr; } .help-nav { border-right: 0; border-bottom: 1px solid var(--tok-color-border); max-height: 170px; } }
-
+/* Help & Support: a beginner guide. Topic rail, a Home page, clickable flowcharts, tick-off steps and question cards. */
+.help-card { width: min(1120px, 100%); height: min(86vh, 860px); max-height: 86vh; color: var(--tok-color-text); }
+.help-head { padding: 16px 20px; }
+.help-sub { margin: 4px 0 0; color: var(--tok-color-text-muted); font-size: 12px; }
+.help-search { padding: 12px 20px; border-bottom: 1px solid var(--tok-color-border); }
+.help-search input { width: 100%; min-height: 36px; box-sizing: border-box; font: inherit; font-size: 13px; color: inherit; background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: 10px; padding: 0 12px; }
+.help-search input:focus { outline: none; border-color: var(--tok-color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tok-color-accent) 18%, transparent); }
+.help-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; flex: 1; overflow: hidden; }
+.help-nav { overflow-y: auto; padding: 12px 10px; border-right: 1px solid var(--tok-color-border); background: var(--tok-color-surface2); }
+.help-nav section { margin-top: 14px; }
+.help-nav-title { margin: 0 0 4px; padding: 0 8px; font-size: 11px; font-weight: 700; color: var(--tok-color-text-muted); }
+.help-nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .help-nav-row { display: flex; align-items: center; gap: 2px; }
 .help-nav-row .help-nav-item { flex: 1; }
-.help-nav-go { flex: none; font: inherit; font-size: 11px; border: 0; background: none; color: var(--tok-color-text-muted); cursor: pointer; padding: 4px 6px; border-radius: 5px; }
+.help-nav-item { width: 100%; text-align: left; font: inherit; font-size: 13px; color: var(--tok-color-text); background: none; border: 0; border-radius: 7px; padding: 6px 8px; cursor: pointer; }
+.help-nav-item:hover { background: var(--tok-color-row-alt); }
+.help-nav-item[aria-current="page"] { background: color-mix(in srgb, var(--tok-color-accent) 15%, transparent); color: var(--tok-color-accent); font-weight: 600; }
+.help-nav-home { font-weight: 700; }
+.help-nav-go { flex: none; font: inherit; font-size: 11px; border: 0; background: none; color: var(--tok-color-text-muted); cursor: pointer; padding: 4px 6px; border-radius: 5px; opacity: 0; }
+.help-nav-row:hover .help-nav-go, .help-nav-go:focus-visible { opacity: 1; }
 .help-nav-go:hover { background: var(--tok-color-row-alt); color: var(--tok-color-accent); }
-.help-open { align-self: flex-start; margin-top: 14px; font: inherit; font-size: 12px; font-weight: 600; color: var(--tok-color-body); background: var(--tok-color-accent); border: 0; border-radius: 7px; padding: 8px 12px; cursor: pointer; }
-.help-open:hover { filter: brightness(1.06); }
-.help-svg { display: block; width: 100%; height: auto; margin: 14px 0 4px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-body); }
-.help-svg text { font-family: var(--tok-type-sans-family); }
+.help-empty { padding: 0 8px; color: var(--tok-color-text-muted); font-size: 12px; }
+.help-content { overflow-y: auto; padding: 24px 28px 32px; }
+.help-kicker { margin: 0 0 4px; font-size: 11px; font-weight: 700; color: var(--tok-color-accent2); }
+.help-title { margin: 0 0 12px; font-size: 22px; font-weight: 700; letter-spacing: -.015em; }
+.help-oneline { display: flex; gap: 10px; align-items: baseline; margin: 0 0 14px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--tok-color-accent) 10%, var(--tok-color-surface)); border: 1px solid color-mix(in srgb, var(--tok-color-accent) 30%, var(--tok-color-border)); font-size: 14px; font-weight: 600; line-height: 1.5; }
+.help-oneline-tag { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--tok-color-accent); color: var(--tok-color-body); font-size: 10px; font-weight: 700; }
+.help-what { margin: 0 0 18px; font-size: 13px; line-height: 1.65; color: var(--tok-color-text); }
+.help-section { margin: 0 0 20px; }
+.help-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.help-h4 { margin: 0 0 10px; font-size: 13px; font-weight: 700; color: var(--tok-color-text); }
+.help-progress { font-size: 11px; color: var(--tok-color-text-muted); }
+
+/* Clickable flowchart */
+.help-flow { margin: 0; padding: 14px; border: 1px solid var(--tok-color-border); border-radius: 14px; background: var(--tok-color-body); }
+.help-flow-row { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 10px; }
+.help-flow-item { display: flex; align-items: center; }
+.help-flow-node { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 12px 6px 6px; border: 1px solid var(--tok-color-border); border-radius: 999px; background: var(--tok-color-surface); color: var(--tok-color-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s, transform .12s; }
+.help-flow-node:hover { border-color: var(--tok-color-accent); transform: translateY(-1px); }
+.help-flow-node:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 2px; }
+.help-flow-num { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-size: 11px; font-weight: 700; color: var(--tok-color-accent); background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }
+.help-flow-node[data-tone="check"] .help-flow-num { color: var(--tok-color-accent4); background: color-mix(in srgb, var(--tok-color-accent4) 15%, transparent); }
+.help-flow-node[data-tone="end"] .help-flow-num { color: var(--tok-color-accent3); background: color-mix(in srgb, var(--tok-color-accent3) 15%, transparent); }
+.help-flow-node[data-past] { border-color: color-mix(in srgb, var(--tok-color-accent) 40%, var(--tok-color-border)); }
+.help-flow-node[data-on] { border-color: var(--tok-color-accent); background: color-mix(in srgb, var(--tok-color-accent) 12%, var(--tok-color-surface)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tok-color-accent) 16%, transparent); }
+.help-flow-node[data-on] .help-flow-num { color: var(--tok-color-body); background: var(--tok-color-accent); }
+.help-flow-arrow { position: relative; width: 26px; height: 2px; margin: 0 2px; background: var(--tok-color-border); }
+.help-flow-arrow::after { content: ""; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; border-right: 0; border-left: 7px solid var(--tok-color-border); }
+.help-flow-detail { margin-top: 14px; padding: 14px 16px; border-radius: 12px; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); }
+.help-flow-step { margin: 0 0 2px; font-size: 11px; font-weight: 700; color: var(--tok-color-text-muted); }
+.help-flow-title { margin: 0 0 6px; font-size: 15px; font-weight: 700; }
+.help-flow-text { margin: 0; font-size: 13px; line-height: 1.6; }
+.help-flow-nav { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+/* Buttons, chips */
+.help-btn { min-height: 30px; padding: 0 12px; border: 1px solid var(--tok-color-border); border-radius: 8px; background: var(--tok-color-surface); color: var(--tok-color-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.help-btn:hover:not(:disabled) { border-color: var(--tok-color-accent); }
+.help-btn:disabled { opacity: .45; cursor: default; }
+.help-btn-primary { background: var(--tok-color-accent); border-color: var(--tok-color-accent); color: var(--tok-color-body); }
+.help-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.help-btn-primary:disabled { opacity: 1; background: var(--tok-color-surface2); border-color: var(--tok-color-border); color: var(--tok-color-text-muted); }
+.help-chip { min-height: 26px; padding: 0 10px; border: 1px solid var(--tok-color-border); border-radius: 999px; background: var(--tok-color-surface); color: var(--tok-color-accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.help-chip:hover { border-color: var(--tok-color-accent); }
+
+/* Try it: steps you can tick */
+.help-try { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.help-try-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-surface); color: var(--tok-color-text); font: inherit; font-size: 13px; line-height: 1.5; text-align: left; cursor: pointer; }
+.help-try-item:hover { border-color: color-mix(in srgb, var(--tok-color-accent) 50%, var(--tok-color-border)); }
+.help-try-box { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--tok-color-border); font-size: 11px; font-weight: 700; color: var(--tok-color-text-muted); }
+.help-try-item[aria-pressed="true"] { background: color-mix(in srgb, var(--tok-color-accent3) 8%, var(--tok-color-surface)); border-color: color-mix(in srgb, var(--tok-color-accent3) 45%, var(--tok-color-border)); }
+.help-try-item[aria-pressed="true"] > span:last-child { color: var(--tok-color-text-muted); text-decoration: line-through; }
+.help-try-item[aria-pressed="true"] .help-try-box { background: var(--tok-color-accent3); border-color: var(--tok-color-accent3); color: var(--tok-color-body); }
+
+.help-example { display: flex; flex-direction: column; gap: 4px; margin: 0 0 20px; padding: 12px 14px; border-left: 3px solid var(--tok-color-accent3); border-radius: 0 10px 10px 0; background: color-mix(in srgb, var(--tok-color-accent3) 8%, var(--tok-color-surface)); font-size: 13px; line-height: 1.55; }
+.help-example strong { font-size: 11px; color: var(--tok-color-accent3); }
+
+/* Good to know: question cards */
+.help-faq { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.help-faq-item { border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-surface); padding: 0 14px; }
+.help-faq-item summary { cursor: pointer; padding: 11px 0; font-size: 13px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; gap: 8px; }
+.help-faq-item summary::-webkit-details-marker { display: none; }
+.help-faq-item summary::after { content: "+"; color: var(--tok-color-accent); font-weight: 700; }
+.help-faq-item[open] summary::after { content: "−"; }
+.help-faq-item p { margin: 0 0 12px; font-size: 13px; line-height: 1.55; color: var(--tok-color-text-muted); }
+.help-faq-item .help-chip { margin: 0 0 12px; }
+
+.help-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 16px; border-top: 1px solid var(--tok-color-border); }
+.help-related { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--tok-color-text-muted); }
+
+/* Home: paths in */
+.help-paths { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 0 0 22px; }
+.help-path { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px; border: 1px solid var(--tok-color-border); border-radius: 12px; background: var(--tok-color-surface); color: var(--tok-color-text); font: inherit; text-align: left; cursor: pointer; transition: border-color .12s, transform .12s, box-shadow .12s; }
+.help-path:hover, .help-path:focus-visible { border-color: var(--tok-color-accent); transform: translateY(-2px); box-shadow: 0 10px 24px color-mix(in srgb, var(--ui-shadow, #000) calc(20% * var(--ui-shadow-k, 1)), transparent); outline: none; }
+.help-path-glyph { display: inline-grid; place-items: center; width: 32px; height: 32px; margin-bottom: 6px; border-radius: 9px; background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); color: var(--tok-color-accent); font-size: 15px; }
+.help-path-title { font-size: 14px; font-weight: 700; }
+.help-path-text { font-size: 12px; color: var(--tok-color-text-muted); }
+@media (max-width: 760px) { .help-body { grid-template-columns: 1fr; } .help-nav { border-right: 0; border-bottom: 1px solid var(--tok-color-border); max-height: 170px; } .help-content { padding: 18px; } }
+@media (prefers-reduced-motion: reduce) { .help-flow-node, .help-path { transition: none; } .help-flow-node:hover, .help-path:hover { transform: none; } }
 
 /* Premium home: a soft stage, one strong hero and calmer action cards. */
 .wc { background: radial-gradient(ellipse at 50% -10%, color-mix(in srgb, var(--tok-color-accent) 10%, var(--tok-color-body)) 0%, var(--tok-color-body) 55%) no-repeat; background-attachment: fixed; }

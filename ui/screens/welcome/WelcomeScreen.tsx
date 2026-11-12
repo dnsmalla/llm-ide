@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { FolderIcon, ChatIcon } from "@llmide/ui-kit";
 import type { ProjectInfo, RecentEntry, RecentList } from "../shell/host";
 import { safeText } from "../shell/safe-text";
 import { openedAgo } from "../shell/relative-time";
 import { NAME_MAX, PROJECT_EXPLAINER, validateProjectName } from "./model";
-import { HELP_GROUPS, HELP_TOPICS, type HelpTopic } from "./help";
+import { GuideDialog } from "./HelpGuide";
+
+export { GuideDialog };
 
 /** What the Welcome page needs from the shell. Every function is host- or core-backed in the app and a fake in tests. */
 export interface WelcomeActions {
@@ -32,140 +34,6 @@ export interface WelcomeProps {
 }
 
 const dateless = (s: string, max: number) => safeText(s, max);
-
-function HelpDiagram({ kind }: { kind: NonNullable<HelpTopic["diagram"]> }) {
-  const box = (x: number, y: number, w: number, h: number, text: string, accent = false) => (
-    <g key={`${x}-${y}-${text}`}>
-      <rect x={x} y={y} width={w} height={h} rx="8" fill={accent ? "color-mix(in srgb, var(--tok-color-accent) 18%, var(--tok-color-surface2))" : "var(--tok-color-surface2)"} stroke={accent ? "var(--tok-color-accent)" : "var(--tok-color-border)"} />
-      <text x={x + w / 2} y={y + h / 2 + 4 - (text.split("\n").length - 1) * 7} textAnchor="middle" fontSize="11" fill={accent ? "var(--tok-color-accent)" : "var(--tok-color-text)"}>
-        {text.split("\n").map((line, i) => <tspan key={line} x={x + w / 2} dy={i === 0 ? 0 : 14}>{line}</tspan>)}
-      </text>
-    </g>
-  );
-  const arrow = (x1: number, y1: number, x2: number, y2: number) => (
-    <line key={`${x1}-${y1}-${x2}-${y2}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="var(--tok-color-text-muted)" strokeWidth="1.5" markerEnd="url(#help-arrow)" />
-  );
-  const frame = (label: string, children: ReactNode) => (
-    <svg className="help-svg" viewBox="0 0 720 210" role="img" aria-label={label}>
-      <defs><marker id="help-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--tok-color-text-muted)" /></marker></defs>
-      {children}
-    </svg>
-  );
-  if (kind === "project") {
-    return frame("Project folder layout: source, code, data, llm-doc and system", <>
-      {box(20, 76, 120, 46, "project/", true)}
-      {box(190, 16, 150, 40, "source/")}{box(190, 68, 150, 40, "code/")}{box(190, 120, 150, 40, "data/")}
-      {box(390, 68, 190, 40, "llm-doc/ notes & plans", true)}{box(390, 120, 190, 40, "system/ settings", false)}
-      {arrow(140, 99, 190, 36)}{arrow(140, 99, 190, 88)}{arrow(140, 99, 190, 140)}{arrow(340, 88, 390, 88)}
-    </>);
-  }
-  if (kind === "factory") {
-    const labels = ["Inbox", "Needs decision", "Working", "Needs you", "Ready to ship", "Shipped", "Done"];
-    return frame("Factory flow: Inbox to Needs decision, Working, Needs you, Ready to ship, Shipped, Done", <>
-      {labels.map((label, i) => box(16 + (i % 4) * 172, i < 4 ? 44 : 118, 150, 42, label, i === 6))}
-      {[0, 1, 2, 3, 4, 5].map((i) => arrow(166 + (i % 4) * 172, (i < 4 ? 65 : 139), 188 + (i % 4) * 172, (i < 4 ? 65 : 139)))}
-    </>);
-  }
-  if (kind === "settings") {
-    return frame("App settings apply everywhere; project settings apply to this folder", <>
-      {box(40, 40, 300, 130, "App settings\nworkspace · providers · models", true)}
-      {box(380, 40, 300, 130, "Project settings\npaths · repos · memory · graph", false)}
-      {arrow(340, 105, 380, 105)}
-    </>);
-  }
-  if (kind === "issue") {
-    return frame("Issue page: discussion on the left, editable settings on the right", <>
-      {box(24, 28, 400, 152, "Issue\ncomments · description", true)}
-      {box(470, 28, 220, 152, "Settings\nstatus · labels · milestone\nassignees · dates", false)}
-      {arrow(424, 104, 470, 104)}
-    </>);
-  }
-  if (kind === "terminal") {
-    return frame("Terminal dock inside the project", <>
-      <rect x="30" y="26" width="660" height="158" rx="10" fill="var(--tok-color-body)" stroke="var(--tok-color-border)" />
-      <circle cx="52" cy="48" r="4" fill="var(--tok-color-danger)" /><circle cx="68" cy="48" r="4" fill="var(--tok-color-accent4)" /><circle cx="84" cy="48" r="4" fill="var(--tok-color-accent3)" />
-      <text x="48" y="92" fontFamily="var(--tok-type-mono-family)" fontSize="13" fill="var(--tok-color-text)">$ npm test</text>
-      <text x="48" y="118" fontFamily="var(--tok-type-mono-family)" fontSize="13" fill="var(--tok-color-accent3)">✓ 397 tests passed</text>
-      <text x="48" y="158" fontFamily="var(--tok-type-mono-family)" fontSize="12" fill="var(--tok-color-text-muted)">$ █</text>
-    </>);
-  }
-  return frame("Workspace flow: project to Library and Explorer, to Chat, Graph and Issues, to Loop and Factory", <>
-    {box(18, 80, 120, 46, "Project", true)}
-    {box(180, 80, 160, 46, "Library / Explorer")}
-    {box(382, 80, 160, 46, "Chat · Graph · Issues")}
-    {box(584, 80, 118, 46, "Loop · Factory", false)}
-    {arrow(138, 103, 180, 103)}{arrow(340, 103, 382, 103)}{arrow(542, 103, 584, 103)}
-  </>);
-}
-
-export function GuideDialog({ onClose, onNavigate }: { onClose: () => void; onNavigate?: (target: NonNullable<HelpTopic["target"]>, settingsGroup?: string) => void }) {
-  const close = useRef<HTMLButtonElement>(null);
-  const [query, setQuery] = useState("");
-  const [activeId, setActiveId] = useState(HELP_TOPICS[0]!.id);
-  useEffect(() => {
-    close.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  const q = query.trim().toLowerCase();
-  const topics = q === "" ? HELP_TOPICS : HELP_TOPICS.filter((t) => `${t.title} ${t.what} ${t.steps.join(" ")} ${t.example ?? ""}`.toLowerCase().includes(q));
-  const active = topics.find((t) => t.id === activeId) ?? topics[0] ?? null;
-  return (
-    <div className="wc-modal" role="dialog" aria-modal="true" aria-labelledby="wc-guide-title" data-testid="guide">
-      <div className="wc-modal-card help-card">
-        <div className="wc-modal-head">
-          <div>
-            <h2 id="wc-guide-title" className="wc-h2">Help &amp; Support</h2>
-            <p className="help-sub">Every screen and every setting, in beginner steps.</p>
-          </div>
-          <button ref={close} type="button" className="sh-button" onClick={onClose}>Close</button>
-        </div>
-        <div className="help-search">
-          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search screens, settings or a recipe…" aria-label="Search help" autoComplete="off" />
-        </div>
-        <div className="help-body">
-          <nav className="help-nav" aria-label="Help topics">
-            {HELP_GROUPS.map((group) => {
-              const list = HELP_TOPICS.filter((t) => t.group === group);
-              if (list.length === 0 || (q !== "" && !list.some((t) => topics.includes(t)))) return null;
-              return (
-                <section key={group}>
-                  <h3 className="help-nav-title">{group}</h3>
-                  <ul>
-                    {list.filter((t) => topics.includes(t)).map((t) => (
-                      <li key={t.id} className="help-nav-row">
-                        <button type="button" className="help-nav-item" aria-current={active?.id === t.id ? "page" : undefined} onClick={() => setActiveId(t.id)}>{t.title}</button>
-                        {t.target && onNavigate ? <button type="button" className="help-nav-go" aria-label={`Open ${t.title}`} title={`Open ${t.title}`} onClick={() => onNavigate(t.target!, t.settingsGroup)}>↗</button> : null}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              );
-            })}
-            {topics.length === 0 ? <p className="help-empty">No topic matches “{query.trim()}”.</p> : null}
-          </nav>
-          <article className="help-content" aria-live="polite">
-            {active ? (
-              <>
-                <p className="help-kicker">{active.group}</p>
-                <h3 className="help-title">{active.title}</h3>
-                <p className="help-what">{active.what}</p>
-                {active.diagram ? <HelpDiagram kind={active.diagram} /> : null}
-                <h4 className="help-h4">Try it</h4>
-                <ol className="help-steps">{active.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
-                {active.example ? <p className="help-example"><strong>Example:</strong> {active.example}</p> : null}
-                {active.target && onNavigate ? <button type="button" className="help-open" onClick={() => onNavigate(active.target!, active.settingsGroup)}>{active.group === "Settings" ? "Open Settings" : `Open ${active.title}`} →</button> : null}
-              </>
-            ) : null}
-          </article>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function RecentRow({ entry, busy, onOpen, onForget }: { entry: RecentEntry; busy: boolean; onOpen: () => void; onForget: () => void }) {
   const name = dateless(entry.name, 60) || "project";
