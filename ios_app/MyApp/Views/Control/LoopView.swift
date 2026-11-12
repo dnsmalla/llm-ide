@@ -32,7 +32,12 @@ struct LoopView: View {
                 Section { Text(error).foregroundColor(DesignSystem.Colors.danger) }
             }
             if projects.selectedId == nil {
-                Section { Text("Choose a project on the Chat tab first.").foregroundColor(DesignSystem.Colors.textSecondary) }
+                Section {
+                    Text(projects.state.loaded && projects.state.projects.isEmpty
+                         ? "No project is registered on the desktop yet. Open a project in the desktop app first."
+                         : "Choose a project on the Chat tab first.")
+                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                }
             } else if loop.runs.isEmpty {
                 Section {
                     Text("No runs from this phone yet.").foregroundColor(DesignSystem.Colors.textSecondary)
@@ -53,6 +58,22 @@ struct LoopView: View {
                     if isActive(run.state) {
                         Button("Cancel", role: .destructive) { Task { await loop.cancel(run, projectId: projects.selectedId) } }
                             .font(.caption)
+                    }
+                }
+            }
+            if !loop.history.isEmpty {
+                Section("Desktop Loop history") {
+                    ForEach(loop.history, id: \.id) { h in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(h.loopName).font(.body.weight(.medium))
+                                Spacer()
+                                Text(h.statusCode).font(.caption)
+                                    .foregroundColor(h.statusCode == "success" ? .green : h.statusCode.isEmpty ? .secondary : .red)
+                            }
+                            Text(h.startedAt).font(.caption2).foregroundColor(DesignSystem.Colors.textTertiary)
+                            if let summary = h.statusSummary, !summary.isEmpty { Text(summary).font(.caption).foregroundColor(DesignSystem.Colors.textSecondary) }
+                        }
                     }
                 }
             }

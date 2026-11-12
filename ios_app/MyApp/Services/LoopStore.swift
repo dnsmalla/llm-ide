@@ -7,6 +7,8 @@ import SharedProtocol
 final class LoopStore: ObservableObject {
     @Published private(set) var runs: [HostApiLoopListResultRunsItem] = []
     @Published private(set) var issues: [HostApiLoopIssuesResultIssuesItem] = []
+    /// The desktop's own Loop journal for the project (Regression, Test, Factory… runs), newest first.
+    @Published private(set) var history: [HostApiLoopHistoryResultRunsItem] = []
     @Published private(set) var loading = false
     @Published var error: String?
     weak var connection: ConnectionService?
@@ -22,6 +24,9 @@ final class LoopStore: ObservableObject {
         guard let host else { return }
         do {
             runs = try await host.send(.loopList, HostApiLoopListRequest(projectId: projectId), as: HostApiLoopListResult.self).runs
+            if let projectId {
+                history = try await host.send(.loopHistory, HostApiLoopHistoryRequest(projectId: projectId), as: HostApiLoopHistoryResult.self).runs
+            } else { history = [] }
             error = nil
         } catch { self.error = message(error) }
     }
