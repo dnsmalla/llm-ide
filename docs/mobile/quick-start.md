@@ -120,11 +120,21 @@ then pair again (a device paired before keeps its old grant).
 | Area | Path |
 |------|------|
 | v1 client, pinning, QR parser | `ios_app/SharedProtocol/Sources/SharedProtocol/HostApiV1Client.swift`, `HostApiPinning.swift`, `PairingInfo.swift` |
-| Connection and pairing store | `ios_app/MyApp/Services/ConnectionService.swift`, `ConnectionStore.swift` |
-| Chat | `ios_app/MyApp/Services/LlmIdeChatStore.swift`, `ios_app/MyApp/Views/Control/LlmIdeControlView.swift` |
-| Offline sync, direct reads | `ios_app/MyApp/Services/SyncStore.swift`, `SourceReadStore.swift` |
+| Connection and pairing store | `ios_app/MyApp/Core/ConnectionService.swift`, `ConnectionStore.swift` |
+| Chat (Ask) and Execute stores, Tasks and Loop stores | `ios_app/SharedProtocol/Sources/SharedProtocol/Stores/` (tested: `StoresTests.swift`) |
+| Chat, Execute, Tasks, Loop screens | `ios_app/MyApp/Features/Chat/`, `Execute/`, `Tasks/`, `Loop/` |
+| Offline sync, direct reads | `ios_app/MyApp/Features/Sync/` |
 | Desktop pairing card | `ui/screens/settings/sections/HostApiPairing.tsx` |
 | Wire contract | `schema/host-api/v1/` |
+
+## App layout
+
+`ios_app/MyApp/` is grouped by feature. `App/` holds the composition root (`AppModel` builds the connection and every
+store once) and the tab shell; `Core/` the connection; `Features/<Name>/` one folder per tab or flow; `Shared/` the
+components every feature uses, including `.hostScreenChrome()` (connection banner, error banner, project picker).
+Store logic lives in `SharedProtocol/Stores/` behind `HostContext` / `ChatHostContext`, so `swift test` covers it; a store
+registers itself as a `HostEventSink` and the connection routes events to every sink. To add a tab: a store in
+`SharedProtocol/Stores/`, its wiring in `AppModel`, a folder under `Features/`, and `.hostScreenChrome()` on its screen.
 
 ## Related
 

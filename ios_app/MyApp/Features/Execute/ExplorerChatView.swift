@@ -48,14 +48,6 @@ struct ExplorerChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if connection.connectionStatus != .connected {
-                StatusBanner(.connection(isConnecting: connection.connectionStatus == .connecting))
-            }
-            if let err = connection.errorMessage {
-                StatusBanner(.error(message: err) { connection.errorMessage = nil })
-            }
-            // The project this run works in; it is the same choice the Ask, Auto Tasks and Loop tabs use.
-            ProjectPickerBar(isBusy: store.isStreaming) { id in _ = projects.select(id) }
             transcript
             if let tool = store.pendingToolApproval {
                 ToolApprovalCard(request: tool, enabled: connection.connectionStatus == .connected) { store.submitToolApproval(allow: $0) }
@@ -78,6 +70,7 @@ struct ExplorerChatView: View {
             }
             .padding(DesignSystem.Spacing.md)
         }
+        .hostScreenChrome(isBusy: store.isStreaming)
         .navigationTitle("Execute")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

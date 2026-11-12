@@ -80,7 +80,7 @@ struct TasksView: View {
                 Task { await tasks.run(task, projectId: projects.selectedId, args: args) }
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) { ProjectPickerBar(isBusy: false) { id in _ = projects.select(id) } }
+        .hostScreenChrome()
         .navigationTitle("Auto Tasks")
         .task { await tasks.refresh() }
         .onChange(of: projects.selectedId) { _ in Task { await tasks.refresh() } }

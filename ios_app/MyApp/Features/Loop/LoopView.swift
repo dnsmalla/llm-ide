@@ -78,7 +78,7 @@ struct LoopView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) { ProjectPickerBar(isBusy: false) { id in _ = projects.select(id) } }
+        .hostScreenChrome()
         .navigationTitle("Loop")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

@@ -252,7 +252,8 @@ struct ConnectView: View {
 /// Local, offline sample data so an App Review reviewer can evaluate the app without a desktop.
 /// Nothing here connects to the network, reads the Keychain or represents real user data.
 struct DemoRootView: View {
-    @AppStorage("llmide.demo") private var demo = true
+    /// The demo switch lives in `ContentView` (`llmide.demo`); this view only asks to leave.
+    let onExit: () -> Void
     @State private var tab = 0
 
     var body: some View {
@@ -263,7 +264,7 @@ struct DemoRootView: View {
             DemoHistoryView()
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
                 .tag(1)
-            DemoSettingsView()
+            DemoSettingsView(onExit: onExit)
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(2)
         }
@@ -360,13 +361,13 @@ private struct DemoHistoryView: View {
 }
 
 private struct DemoSettingsView: View {
-    @AppStorage("llmide.demo") private var demo = true
+    let onExit: () -> Void
     var body: some View {
         NavigationStack {
             Form {
                 Section("Reviewer demo") {
                     Text("This mode uses local sample data. It does not pair with a desktop, does not use the network and does not collect anything.")
-                    Button("Exit demo") { demo = false }
+                    Button("Exit demo", action: onExit)
                 }
                 Section("About") {
                     LabeledContent("App", value: "LLM-IDE")

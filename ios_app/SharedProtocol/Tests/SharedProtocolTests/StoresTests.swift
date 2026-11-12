@@ -122,7 +122,7 @@ struct ChatStoreTests {
         await settle()
         #expect(e.isStreaming)
         e.cancelStreaming()
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        for _ in 0..<500 where e.isStreaming { try? await Task.sleep(nanoseconds: 10_000_000) } // up to 5 s
         #expect(!e.isStreaming)
     }
 

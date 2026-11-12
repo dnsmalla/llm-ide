@@ -9,7 +9,7 @@ struct ContentView: View {
 
     var body: some View {
         if demo {
-            DemoRootView()
+            DemoRootView(onExit: { demo = false })
         } else {
             connectedShell
         }
