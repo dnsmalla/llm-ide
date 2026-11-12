@@ -1,8 +1,8 @@
 # Roadmap: done, running, waiting on you, next, later
 
-Updated 2026-11-05 (written at `e377d3b6`; 318 commits since the 2026-11-02 update at `86bf3874`: Host API v1 Plans 1-6 with the TLS gate, Windows CI green, the `:3006` desktop-class review closed, desktop Waves 1-4, the installable web client and the 2026-11-05 review fixes). This page is a short, readable view. **Item-by-item status lives in [MASTER-PLAN.md](MASTER-PLAN.md)** (checkboxes, evidence, owners; `node scripts/plan-status.mjs` computes its dashboard). This page does not repeat checkbox state: when the two disagree, the master plan wins. Your own to-do list with exact commands is [USER-CHECKLIST.md](USER-CHECKLIST.md).
+Updated 2026-11-13 (written at `c712f6617`; the Swift Mac app is gone, sync replaced the relay, and the 2026-11-08 to 11-12 work is under "Landed 2026-11-08 to 11-12" in section 2; the older sections below were last rewritten 2026-11-05, so check them with git). This page is a short, readable view. **Item-by-item status lives in [MASTER-PLAN.md](MASTER-PLAN.md)** (checkboxes, evidence, owners; `node scripts/plan-status.mjs` computes its dashboard). This page does not repeat checkbox state: when the two disagree, the master plan wins. Your own to-do list with exact commands is [USER-CHECKLIST.md](USER-CHECKLIST.md).
 
-Current numbers: `SERVER_API_VERSION` 110, migration head 0062 (`host_api_security`; 0061 `host_api_devices`, 0060 `ical_sources`, 0059 `google_connectors`); the HTTP contract and generated types are in `schema/`.
+Current numbers: `SERVER_API_VERSION` 146, migration head 0077 (`issue_source_links`); the HTTP contract and generated types are in `schema/`.
 
 ## Principles (kept at the top on purpose)
 
@@ -57,6 +57,12 @@ Pushed. The items below were written before 2026-11-02; check each with git befo
 - **Doc Gen and Visual** (Tauri): request model, sources, run state machine, screen with templates and history, hostile-output tests, shell section, parity rows (`9b2fa3f6`, `392a70ed`, `46dae4df`, `885e6fe6`). Built and unit-tested; checked by you in a real window 2026-11-04.
 - **Google connectors**: server side G1-G5 and the iCal core connector (migration 0060, API 104) and the Tauri Google pane (G6) are built and fixture-tested (source: the header of `plans/2026-10-31-google-connectors-plan.md`). Open: G7 scheduled sync, G8, the catalog flip, Mac screens, a real-account test, and your answers to Q-G1 to Q-G3 (the plan's recommendations are followed meanwhile).
 - Nothing is running as a background job that I know of. Re-check `ps` for leftover test or server processes before you start the app (section 3).
+
+**Landed 2026-11-08 to 11-12 (local until pushed; full list in MASTER-PLAN S2, S3 and S4)**
+- **Phone and browser**: Online/Offline Settings tabs, streaming chat that resumes after a dropped connection, separate Ask and Execute chats, Loop and Auto Tasks from the iPhone, offline prompts queued into a project, hub chat history, web client premium redesign, iPhone app restructure (`AppModel`, `make test-ios-app`).
+- **Factory**: new default process, per-step issue comments, a draft MR for every finished run, background MR watch that restarts a run, an editable step template.
+- **Desktop**: Settings consolidated on one type/spacing scale, Help & Support, chat cost and budget with a cheap-Ask/strong-Execute default, GitLab issue sheet and import, Issues/Gantt on saved repositories, Graph premium redesign and a premium AA-checked light theme (graph-kit keeps the old light palette until `make graphkit-bump`).
+- Not done: pushing is yours to call; the Factory and phone flows have unit/contract tests but no recorded real-window run (UN-001, UN-002).
 
 **Landed 2026-11-01 to 11-05 (Tauri desktop and web; details in MASTER-PLAN S2 and S3/S4)**
 - **Loop native**: the desktop now runs Loop itself (committed `system/loop.json`, six starter loops, iteration and repair engine, per-project shell approvals, artifact/test/code-graph stages, queue, journal, cron while open); not ported: incident triage, worktrees, merge-request shipping, background scheduling.

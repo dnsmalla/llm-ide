@@ -13,16 +13,16 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 9 | 0 | 0 | 9 | Retired 2026-11-06: removed from the repo; the Tauri desktop app replaces it |
-| Desktop multi-OS (Tauri) | 24 | 42 | 7 | 73 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every section except Live as a screen; Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop checked by you in a real window on 2026-11-04 (UN-001), later work and the other sections not yet; CI green on macOS, Linux and Windows |
-| Mobile (iPhone native, PWA) | 17 | 6 | 5 | 28 | Native iPhone client on Host API v1 (desktop) with chat, approvals and History, plus the offline sync tier (SP4); the web client is an installable PWA; push notifications are built (off unless `LLMIDE_HOST_API_PUSH=1`; open: the Xcode Push capability and the APNs key) |
-| Web app and relay | 7 | 16 | 3 | 26 | Host API web client (pairing, chat, approvals, read views), installable PWA, public site with the app at /app; offline sync tier (SP3); the account service, device linking and relay were retired by ADR 0020 and removed (`3891a2d5`, web client 2026-11-07) |
+| Desktop multi-OS (Tauri) | 29 | 42 | 7 | 78 | ADR 0018 accepted for Phase 3 (conditional); macOS app builds with every section except Live as a screen; Gantt, Graph, Explorer, Library, Chat, Settings, Shell, Welcome, Doc Gen and Loop checked by you in a real window on 2026-11-04 (UN-001), later work and the other sections not yet; CI green on macOS, Linux and Windows |
+| Mobile (iPhone native, PWA) | 23 | 6 | 5 | 34 | Native iPhone client on Host API v1 (desktop) with chat, approvals and History, plus the offline sync tier (SP4); the web client is an installable PWA; push notifications are built (off unless `LLMIDE_HOST_API_PUSH=1`; open: the Xcode Push capability and the APNs key) |
+| Web app and relay | 9 | 16 | 3 | 28 | Host API web client (pairing, chat, approvals, read views), installable PWA, public site with the app at /app; offline sync tier (SP3); the account service, device linking and relay were retired by ADR 0020 and removed (`3891a2d5`, web client 2026-11-07) |
 | Chrome extension | 8 | 4 | 5 | 17 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 21 | 3 | 2 | 26 | API 128, contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
+| Shared server and core | 21 | 3 | 2 | 26 | API 146 (migration head 0077), contract gates, feature matrix, Host API v1 (contract, Mac + desktop adapters, web client, iOS transport, TLS hardening) landed; kit K1 moves still ahead |
 | Data and storage | 6 | 2 | 5 | 13 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 16 | 0 | 11 | 27 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 18 | 4 | 4 | 26 | Loopback, vault, guardrails, Host API v1 TLS pinning, the `:3006` desktop-class review and Tauri per-window command/capability scopes, team and project-scoped roles (ADR 0021/0022) and the hub limits are in place; signing not started |
 | Release and CI | 7 | 2 | 5 | 14 | Mac release/notarize and 8 workflows exist; desktop CI green on macOS, Linux and Windows; Tauri release builds for Windows and Linux do not exist |
-| Total | 133 | 79 | 47 | 259 |  |
+| Total | 146 | 79 | 47 | 272 |  |
 
 ## What to do next
 
@@ -274,6 +274,11 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 
 **Complete means (macOS, Windows, Linux):** Tauri 2 + React app over the Node sidecar, feature parity with the Mac app, signed and auto-updating on three OSes, then Swift retired (ADR 0018, Tauri plan phases 3, 5, 6).
 **Connection:** the sidecar is the same Node core on loopback; becomes the main worker with one company API key; talks to the relay (S4).
+- [x] Settings consolidated (Phone and browser, security, memory and graph, optional components, one type/spacing/control scale) and a visible Help & Support button with a searchable beginner guide (`832151e80`, `1130bf848`, `d53ad84f8`, `e1dbc6c0f`, `9b4fae636`) (me)
+- [x] Graph screen premium redesign (normal controls default, Advanced collapsed) and a premium light theme with AA-checked tokens, theme-aware graph colours and shadows (`bb229058a`, `2c4d06e01`) (me)
+- [x] Issues and Gantt follow the saved repositories, import GitLab, mirror the GitLab issue sheet (edit title, labels, milestone, assignees, comments), Gantt milestone/date views and assignee avatars (`2f1a1a047`, `8959f6c67`, `029a40304`, `d084b02ad`, `054e33c5e`) (me)
+- [x] Chat cost and budget: per-reply and per-chat cost and tokens, budget warnings with a fresh chat from a local recap, cheap model for Ask and strong for Plan/Execute, local memory context pack, `/self-heal` (`daac97635`, `3009a863a`, `3688263bb`, `ba3ea4658`, `12839591f`, `15cf04205`) (me)
+- [x] Factory board: new default process (structure verify, test gaps, doc review, no intake stop), per-step issue comments, draft MR opened for every finished run and watched in the background (a closed or commented MR restarts its run), editable validated step template, ship only after review (`1c8f4487e`, `4d6a7000a`, `6939bb10e`, `e6afaac20`, `8a8f3886d`, `f66fd6cfb`) (me)
 
 - [x] ADR 0018 written (`375fc325`); status now accepted for the Phase 3 start, conditional (see below) (me)
 - [x] Phase 0 spike built and tracked on `main` (`desktop/`, 87 files; `23ff0813`, `d4e80fd1`, `4a73b581`) (me)
@@ -388,6 +393,12 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Command bus S6: relay transport + TLS pin on the direct path (wait)
 - [~] sync-kit K0 map done (`docs/kits/sync-kit.md`, `845aa869`); K1-K4 not started (me)
 - [-] Phone PWA served by the relay (decided: Q-WEB-1 = A; built last in sync-kit; today `web/` serves it from a local static server) (wait) **Replaced 2026-11-05** by Sync SP3 (ADR 0020).
+- [x] Desktop Settings: **Phone and browser** split into Online (PIN, QR, copyable pairing link) and Offline (encrypted sync storage) tabs; removing a phone offers to revoke it from both (`db5f026fb`, `6de07c812`, `e75e2c013`) (me)
+- [x] Phone chat over Host API v1: separate Ask (read-only) and Execute chats per project, new/delete, a global side Chat panel and read-only popup on the desktop (`4d596a664`, `efc474d06`, `ecf570d11`, `0defd9b79`) (me)
+- [x] Streaming replies that survive a dropped connection and resume on iPhone and web; reconnect on wake or network change across every desktop address (`080c1294e`, `ca5301c84`, `91392ddb7`, `8ee945609`, `bce816356`) (me)
+- [x] iPhone Loop tab (list, start, watch, cancel Factory runs; desktop Loop history over `loop.*` commands) and Auto Tasks run/edit from the phone, execute authority required (`55434ed45`, `7c6725797`, `385fe2424`, `9178419e1`, `1a6139728`) (me)
+- [x] Offline prompt queued into a project, run in that project when the desktop is back (`bc6323bac`, `d7c4e72d2`, `beba19b3e`) (me)
+- [x] iPhone app restructured: composition root (`AppModel`), chat/Tasks/Loop store logic in `SharedProtocol`, feature folders, an app test target and `make test-ios-app` (`dc25aa284`, `edb1237d1`, `f5c9e2e67`) (me)
 
 ## S4. Web app and relay
 
@@ -429,6 +440,8 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Sync SP8, park and retire: done 2026-11-06 — ADR 0019 marked superseded, site copy rewritten for no-account + encrypted sync; then the account service, relay (desktop `relay/`, `account_oauth.rs`, core relay bridge) and their UI, CI and VPS units were removed from the repo (history keeps them); the relay v1 envelope crypto stays as sync v1's byte format (`schema/relay/v1`, `scripts/relay-reference.mjs`). Follow-up (you): run the one-time retire note on the VPS (`deploy/vps/README.md` "Retire the account service") and redeploy `marketing/` (you)
 - [ ] Sync setup: create a separate MEGA account just for LLM-IDE (two-factor off on that account only) and enter it in Settings, Sync (you)
 - [~] Public LLM-IDE site: marketing pages under `marketing/` with a guide and product tour, and the web app mounted at `/app` (`77e5df3e`, `2ca46173`, `d72b4324`); PWA tests and asset pruning fixed for the `/app` base path (`03fa55c3`) (me)
+- [x] Web client premium redesign with the iPhone app's sections; one chat turn at a time across Ask and Execute; remembers a paired desktop by identity, lets the user change its address; the desktop can allow browser origins and guides certificate trust (`667d82678`, `f65c40f40`, `dfe01fa90`, `25357bb1c`) (me)
+- [x] Hub phones and browsers read chat history from a hub (`74e1f0f38`) (me)
 
 ## S5. Chrome extension
 
