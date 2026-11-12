@@ -193,6 +193,8 @@ function projectFile(userId, projectId, rel, { directory = false } = {}) {
 // The desktop task routes are host-proof only. The gateway runs in the same core, so it reuses that route with a
 // short-lived user token and the in-process host proof instead of duplicating task validation. The phone only ever
 // names a registry task id and an optional project; it never supplies a command, prompt, or repository path.
+// The registry's `app` scope (no project needed) is `global` on the wire; one unknown value must never void the whole list.
+const TASK_SCOPE = Object.freeze({ project: 'project', repo: 'repo', global: 'global', app: 'global' });
 const taskJobs = new Map();
 const TASK_JOB_TTL_MS = 60 * 60 * 1000;
 
@@ -695,7 +697,7 @@ export function createGateway(overrides) {
           const source = TASKS.find((x) => x.id === t.id || x.aliases?.includes(t.id));
           return {
             id: String(t.id), label: String(t.label), group: String(t.group ?? ''),
-            description: String(t.description ?? ''), scope: String(t.scope ?? 'project'),
+            description: String(t.description ?? ''), scope: TASK_SCOPE[t.scope] ?? 'project',
             available: t.availability?.status === 'available', requiresRepo: t.requiresRepo === true,
             args: Object.entries(source?.runner?.args ?? {}).filter(([, spec]) => spec?.type === 'string').map(([name, spec]) => ({
               name, type: 'string', maxLength: Number(spec?.maxLength) || 100000, maxItems: 50,
@@ -756,7 +758,7 @@ export function createGateway(overrides) {
       case 'loop.issues': {
         if (readRefused(s, entry, id)) return;
         const rows = ['github', 'gitlab'].flatMap((provider) => listTicketSources(userId, { provider, repo: null, state: 'open', limit: p.limit ?? 50, offset: 0 }).rows);
-        const issues = rows.filter((r) => /^[A-Za-z0-9_-]{8,64}$/.test(String(r.id)) && r.meta?.isPR !== true).slice(0, p.limit ?? 50)
+        const issues = rows.filter((r) => /^[A-Za-z0-9_-]{1,64}$/.test(String(r.id)) && r.meta?.isPR !== true).slice(0, p.limit ?? 50)
           .map((r) => ({ id: String(r.id), title: clamp(String(r.title ?? ''), 300), ...(r.meta?.provider ? { provider: clamp(String(r.meta.provider), 40) } : {}),
             ...(r.meta?.repo ? { repo: clamp(String(r.meta.repo), 200) } : {}), ...(Number.isInteger(r.meta?.number) && r.meta.number >= 0 ? { number: r.meta.number } : {}) }));
         return respond(s, id, command, { issues });

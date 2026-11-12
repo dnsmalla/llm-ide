@@ -100,8 +100,42 @@ test('loop.cancel refuses a command that is not a Loop run', async () => {
   assert.equal(g.last().error?.code, 'not_found');
 });
 
-test('loop.issues answers an empty list when nothing is cached', async () => {
+test('loop.issues lists cached open issues (short numeric ids) and loop.start accepts them', async () => {
   const g = gatewayFor(owner); await g.open();
   await g.ask('i-1', 'loop.issues', { projectId: 'p-alpha' });
   assert.deepEqual(g.last().result, { issues: [] });
+  const { ingestSources } = await import('../kb/sources.mjs');
+  ingestSources(owner, [
+    { kind: 'ticket', ref: 'https://github.com/o/r/issues/7', title: 'Fix login', body: 'b', meta: { provider: 'github', repo: 'o/r', number: 7, state: 'open', updatedAt: 1 } },
+    { kind: 'ticket', ref: 'https://github.com/o/r/issues/8', title: 'Closed one', body: 'b', meta: { provider: 'github', repo: 'o/r', number: 8, state: 'closed', updatedAt: 1 } },
+  ]);
+  await g.ask('i-2', 'loop.issues', { projectId: 'p-alpha' });
+  assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
+  const issues = g.last().result.issues;
+  assert.deepEqual(issues.map((i) => [i.title, i.number, i.repo]), [['Fix login', 7, 'o/r']]);
+  await g.ask('i-3', 'loop.start', { projectId: 'p-alpha', issueIds: [issues[0].id] });
+  assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
+});
+
+test('chat.delete removes a chat from chat.sessions for good', async () => {
+  const chats = await import('../kb/chat-sessions.mjs');
+  const keep = chats.createChatSession(owner, { title: 'keep', surface: 'any', mode: 'agent', projectId: 'p-alpha' }).id;
+  const gone = chats.createChatSession(owner, { title: 'gone', surface: 'any', mode: 'agent', projectId: 'p-alpha' }).id;
+  chats.appendChatMessage(owner, gone, { role: 'user', content: 'hi' });
+  const g = gatewayFor(owner); await g.open();
+  await g.ask('d-1', 'chat.sessions', { projectId: 'p-alpha' });
+  assert.deepEqual(g.last().result.sessions.map((s) => s.id).sort(), [keep, gone].sort());
+  await g.ask('d-2', 'chat.delete', { sessionId: gone });
+  assert.deepEqual(g.last().result, { deleted: true });
+  await new Promise((r) => setTimeout(r, 50));
+  await g.ask('d-3', 'chat.sessions', { projectId: 'p-alpha' });
+  assert.deepEqual(g.last().result.sessions.map((s) => s.id), [keep]);
+});
+
+test('tasks.list serves the registry through the real route', async () => {
+  const g = gatewayFor(owner); await g.open();
+  await g.ask('t-1', 'tasks.list', {});
+  assert.equal(g.last().type, 'response', JSON.stringify(g.last()));
+  assert.ok(g.last().result.tasks.length > 0, 'the phone sees tasks');
+  assert.ok(g.last().result.tasks.some((t) => t.available), 'some are runnable');
 });

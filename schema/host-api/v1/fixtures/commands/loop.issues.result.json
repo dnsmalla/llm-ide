@@ -1,7 +1,7 @@
 {
   "issues": [
     {
-      "id": "issue-0001",
+      "id": "42",
       "title": "Fix the login redirect",
       "provider": "github",
       "repo": "o/r",

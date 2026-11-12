@@ -1613,7 +1613,7 @@
               "properties": {
                 "id": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{8,64}$"
+                  "pattern": "^[A-Za-z0-9_-]{1,64}$"
                 },
                 "title": {
                   "type": "string",
@@ -1742,7 +1742,7 @@
             "maxItems": 20,
             "items": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_-]{8,64}$"
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
             }
           }
         },
