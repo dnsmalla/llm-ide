@@ -1,12 +1,14 @@
 // Settings → Phone and web sync → "Add a phone or browser": QR (sync fields; the one-time secret lives only in this
 // component's state and the QR), the 6-digit code to compare, the device list with revoke, and key rotation.
 // Polls every 2 s while adding; leaving the card keeps it alive so the code survives navigation.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useEnv } from "../context.tsx";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import { invokeHost, isHostAvailable } from "../../shell/host.ts";
-import { PairingQr } from "./HostApiPairing.tsx";
+import { PairingQr, loadDevices, revokeDevice } from "./HostApiPairing.tsx";
+import AlsoRevoke, { type AlsoState } from "./AlsoRevoke.tsx";
+import { LIVE_UNAVAILABLE_NOTE, SEPARATE_LISTS_HINT, liveCandidates, runRevokes, summarizeRevokes } from "../device-link-model.ts";
 import { startEnroll, pollEnrollSerially, confirmEnroll, cancelEnroll, revokeSyncDevice, rotateSyncKeys, markSyncPasswordChanged, enrollFailureText, enrollScreen, describeSyncError,
   type EnrollStart, type EnrollPoll, type SyncStatus } from "../sync-model.ts";
 
@@ -27,6 +29,10 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
   // C5: a revoked phone keeps a working MEGA session until the account password changes; remind, then record it.
   const [passwordNotice, setPasswordNotice] = useState(false);
   const [passwordDone, setPasswordDone] = useState(false);
+  const [also, setAlso] = useState<AlsoState | null>(null);
+  const [alsoChecked, setAlsoChecked] = useState<string[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const askSeq = useRef(0);
   const [showLink, setShowLink] = useState(false);
   const [copied, setCopied] = useState(false);
   const { host } = useEnv();
@@ -50,6 +56,34 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
   useEffect(() => { // the backend restarted mid-enrollment: its QR is dead, so stop polling and say so
     if (start && screen === "start") { setStart(null); setPoll(null); setError("Adding the device stopped because LLM-IDE restarted. Start again."); }
   }, [start, screen]);
+
+  const closeConfirm = () => { askSeq.current++; setConfirming(null); setAlso(null); setAlsoChecked([]); };
+  // Which Live Chat devices could be the same phone: read fresh when the confirmation opens. A null list (pairing listener
+  // off) or any failure only turns the extra list into a note; the sync revoke never depends on it.
+  const askRevoke = (d: SyncStatus["devices"][number]) => {
+    const seq = ++askSeq.current;
+    setConfirming(d.deviceId); setAlso(null); setAlsoChecked([]); setNotice(null);
+    void loadDevices(client).catch(() => null).then((live) => {
+      if (askSeq.current !== seq) return;
+      const candidates = live ? liveCandidates(d, live) : [];
+      setAlso({ candidates, unavailable: live === null });
+      setAlsoChecked(candidates.filter((c) => c.checked).map((c) => c.deviceId));
+    });
+  };
+  const toggleAlso = (id: string) => setAlsoChecked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  const revokeSelected = async (d: SyncStatus["devices"][number]) => {
+    const extras = (also?.candidates ?? []).filter((c) => alsoChecked.includes(c.deviceId));
+    let latest: SyncStatus | null = null;
+    const outcomes = await runRevokes([
+      { label: d.name, run: async () => { latest = await revokeSyncDevice(client, d.deviceId); return true; } },
+      ...extras.map((c) => ({ label: `${c.label} (Live Chat)`, run: () => revokeDevice(client, c.deviceId) })),
+    ], (e) => describeSyncError(e) ?? describeError(e));
+    const summary = summarizeRevokes(outcomes);
+    if (latest) onStatus(latest);
+    if (outcomes[0].ok) { closeConfirm(); setPasswordNotice(true); }
+    if (summary.ok) setNotice(extras.length ? summary.text : null);
+    else setError(summary.text);
+  };
 
   return (
     <div className="st-stack" role="group" aria-label="Sync devices">
@@ -111,15 +145,16 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
               <div className="st-row">
                 <span className="st-grow">{d.name} · {d.tier === "ios" ? "iPhone app" : "browser"}</span>
                 <span className="st-hint">added {new Date(d.addedAt).toLocaleString()} · folder {d.folderHint}…</span>
-                <Button tone="danger" label={`Revoke ${d.name}`} disabled={busy || confirming !== null} onClick={() => setConfirming(d.deviceId)}>Revoke…</Button>
+                <Button tone="danger" label={`Revoke ${d.name}`} disabled={busy || confirming !== null} onClick={() => askRevoke(d)}>Revoke…</Button>
               </div>
               {confirming === d.deviceId ? (
                 <div className="st-dialog" role="alertdialog" aria-label={`Revoke ${d.name}`}>
                   <strong>Revoke {d.name}?</strong>
                   <p className="st-hint">Its sync folder is deleted and the keys of every other device are replaced. It must be added again to sync.</p>
+                  <AlsoRevoke heading="Also unpair from Live Chat" note={LIVE_UNAVAILABLE_NOTE} state={also} checked={alsoChecked} busy={busy} onToggle={toggleAlso} />
                   <div className="st-row">
-                    <button type="button" className="st-btn" onClick={() => setConfirming(null)} disabled={busy}>Cancel</button>
-                    <Button tone="danger" disabled={busy} onClick={() => void run(async () => { onStatus(await revokeSyncDevice(client, d.deviceId)); setConfirming(null); setPasswordNotice(true); })}>Revoke</Button>
+                    <button type="button" className="st-btn" onClick={closeConfirm} disabled={busy}>Cancel</button>
+                    <Button tone="danger" disabled={busy} onClick={() => void run(() => revokeSelected(d))}>Revoke</Button>
                   </div>
                 </div>
               ) : null}
@@ -127,6 +162,8 @@ export default function SyncDevices({ status, onStatus }: { status: SyncStatus; 
           ))}
         </ul>
       )}
+      <p className="st-hint">{SEPARATE_LISTS_HINT}</p>
+      {notice ? <p className="st-hint" role="status">{notice}</p> : null}
       {passwordNotice ? (
         <div className="st-dialog" role="note" aria-label="Change the sync password">
           <strong>

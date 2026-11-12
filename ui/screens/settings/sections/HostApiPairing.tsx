@@ -11,6 +11,9 @@ import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { shellBus } from "../../shell/bus";
 import { describeError } from "../errors.ts";
 import { Button, ErrorText, Switch } from "../ui.tsx";
+import AlsoRevoke, { type AlsoState } from "./AlsoRevoke.tsx";
+import { OFFLINE_UNAVAILABLE_NOTE, SEPARATE_LISTS_HINT, offlineCandidates, runRevokes, summarizeRevokes } from "../device-link-model.ts";
+import { describeSyncError, loadSyncStatus, revokeSyncDevice } from "../sync-model.ts";
 
 /** `fingerprint`: the TLS listener's certificate pin (`sha256:` + 43 base64url characters); null for the dev listener.
  *  `addresses`: this computer's IPv4s for the pairing QR, best first; [] for the dev listener (or an older core). */
@@ -102,13 +105,16 @@ const remaining = (ms: number): string => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-function RevokeConfirm({ device, busy, onCancel, onRevoke }: { device: HostDevice; busy: boolean; onCancel: () => void; onRevoke: () => void }) {
+function RevokeConfirm({ device, busy, also, alsoChecked, onToggleAlso, onCancel, onRevoke }: {
+  device: HostDevice; busy: boolean; also?: AlsoState | null; alsoChecked?: readonly string[]; onToggleAlso?: (id: string) => void; onCancel: () => void; onRevoke: () => void;
+}) {
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
   return (
     <div className="st-dialog" role="alertdialog" aria-label={`Revoke ${device.name}`}>
       <strong>Revoke {device.name}?</strong>
       <p className="st-hint">It is disconnected now and must pair again with a new PIN.</p>
+      <AlsoRevoke heading="Also remove from offline sync" note={OFFLINE_UNAVAILABLE_NOTE} state={also ?? null} checked={alsoChecked ?? []} busy={busy} onToggle={(id) => onToggleAlso?.(id)} />
       <div className="st-row">
         <button ref={cancel} type="button" className="st-btn" onClick={onCancel} disabled={busy}>Cancel</button>
         <Button tone="danger" disabled={busy} onClick={onRevoke}>Revoke</Button>
@@ -117,13 +123,17 @@ function RevokeConfirm({ device, busy, onCancel, onRevoke }: { device: HostDevic
   );
 }
 
-export function HostApiPairingView({ devices, pin, now, busy, error, confirming, onShowPin, onAskRevoke, onCancelRevoke, onRevoke }: {
+export function HostApiPairingView({ devices, pin, now, busy, error, notice, confirming, also, alsoChecked, onToggleAlso, onShowPin, onAskRevoke, onCancelRevoke, onRevoke }: {
   devices: HostDevice[];
   pin: HostPin | null;
   now: number;
   busy: boolean;
   error: string | null;
+  notice?: string | null;
   confirming: string | null;
+  also?: AlsoState | null;
+  alsoChecked?: readonly string[];
+  onToggleAlso?: (deviceId: string) => void;
   onShowPin: () => void;
   onAskRevoke: (deviceId: string) => void;
   onCancelRevoke: () => void;
@@ -163,11 +173,13 @@ export function HostApiPairingView({ devices, pin, now, busy, error, confirming,
                 <span className="st-hint">last seen {new Date(d.lastSeenAt).toLocaleString()}</span>
                 <Button tone="danger" label={`Revoke ${d.name}`} disabled={busy || confirming !== null} onClick={() => onAskRevoke(d.deviceId)}>Revoke…</Button>
               </div>
-              {confirming === d.deviceId ? <RevokeConfirm device={d} busy={busy} onCancel={onCancelRevoke} onRevoke={() => onRevoke(d.deviceId)} /> : null}
+              {confirming === d.deviceId ? <RevokeConfirm device={d} busy={busy} also={also} alsoChecked={alsoChecked} onToggleAlso={onToggleAlso} onCancel={onCancelRevoke} onRevoke={() => onRevoke(d.deviceId)} /> : null}
             </li>
           ))}
         </ul>
       )}
+      <p className="st-hint">{SEPARATE_LISTS_HINT}</p>
+      {notice ? <p className="st-hint" role="status">{notice}</p> : null}
       <ErrorText text={error} />
     </div>
   );
@@ -207,6 +219,10 @@ export default function HostApiPairing(): ReactNode {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [also, setAlso] = useState<AlsoState | null>(null);
+  const [alsoChecked, setAlsoChecked] = useState<string[]>([]);
+  const askSeq = useRef(0);
 
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
@@ -248,6 +264,33 @@ export default function HostApiPairing(): ReactNode {
     setError(null);
     try { await f(); } catch (e) { setError(describeError(e)); } finally { setBusy(false); }
   };
+  const closeConfirm = () => { askSeq.current++; setConfirming(null); setAlso(null); setAlsoChecked([]); };
+  // Which offline-sync devices could be the same phone: read fresh when the confirmation opens. Any failure (feature off,
+  // 404, core down) only turns the extra list into a note: the Live Chat revoke itself never depends on it.
+  const askRevoke = (id: string) => {
+    const seq = ++askSeq.current;
+    setConfirming(id); setAlso(null); setAlsoChecked([]); setNotice(null);
+    const device = devices?.find((d) => d.deviceId === id);
+    void loadSyncStatus(client).catch(() => null).then((status) => {
+      if (!alive.current || askSeq.current !== seq || !device) return;
+      const candidates = status ? offlineCandidates(device, status.devices) : [];
+      setAlso({ candidates, unavailable: status === null });
+      setAlsoChecked(candidates.filter((c) => c.checked).map((c) => c.deviceId));
+    });
+  };
+  const toggleAlso = (id: string) => setAlsoChecked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  const revokeSelected = async (id: string) => {
+    const device = devices?.find((d) => d.deviceId === id);
+    const extras = (also?.candidates ?? []).filter((c) => alsoChecked.includes(c.deviceId));
+    const outcomes = await runRevokes([
+      { label: device?.name ?? "this device", run: () => revokeDevice(client, id) },
+      ...extras.map((c) => ({ label: `${c.label} (offline sync)`, run: async () => { await revokeSyncDevice(client, c.deviceId); return true; } })),
+    ], (e) => describeSyncError(e) ?? describeError(e));
+    const summary = summarizeRevokes(outcomes);
+    if (outcomes[0].ok) { closeConfirm(); await refresh(); }
+    if (summary.ok) setNotice(extras.length ? `${summary.text} Change the sync storage password too (Phone and web sync).` : null);
+    else setError(summary.text);
+  };
   return (
     <div className="st-stack">
       {prefs && host.getExtraPrefs ? <HostApiSettingsView prefs={prefs} onSave={(patch) => void savePrefs(patch)} /> : null}
@@ -257,11 +300,12 @@ export default function HostApiPairing(): ReactNode {
             {prefs?.hostApiTls ? <div className="st-row"><Button onClick={() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "server" })}>Open Server &amp; Backend</Button></div> : null}
           </div>
         : <HostApiPairingView
-            devices={devices} pin={pin} now={now} busy={busy} error={error} confirming={confirming}
+            devices={devices} pin={pin} now={now} busy={busy} error={error} notice={notice} confirming={confirming}
+            also={also} alsoChecked={alsoChecked} onToggleAlso={toggleAlso}
             onShowPin={() => void run(async () => { const p = await mintPin(client); setNow(Date.now()); setPin(p); })}
-            onAskRevoke={setConfirming}
-            onCancelRevoke={() => setConfirming(null)}
-            onRevoke={(id) => void run(async () => { await revokeDevice(client, id); setConfirming(null); await refresh(); })}
+            onAskRevoke={askRevoke}
+            onCancelRevoke={closeConfirm}
+            onRevoke={(id) => void run(() => revokeSelected(id))}
           />}
     </div>
   );

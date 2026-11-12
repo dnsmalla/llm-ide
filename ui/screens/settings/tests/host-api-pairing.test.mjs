@@ -171,3 +171,15 @@ test("when the PIN route answers 404 the card shows the pairing hint instead of 
   assert.match(html, /restart the core/);
   assert.doesNotMatch(html, /Show pairing PIN/);
 });
+
+test("the revoke confirmation lists offline-sync devices (pre-checked one ticked), or says they could not be checked; the card explains the two lists", () => {
+  const devices = m.decodeDevices(reply("get-host-api-devices-200").body);
+  const id = devices[0].deviceId;
+  const also = { unavailable: false, candidates: [{ deviceId: "s1", label: "iPhone · iPhone app", checked: true }, { deviceId: "s2", label: "Mac browser · browser", checked: false }] };
+  const html = view({ devices, confirming: id, also, alsoChecked: ["s1"] });
+  assert.match(html, /Also remove from offline sync/);
+  assert.equal((html.match(/type="checkbox"/g) ?? []).length, 2);
+  assert.equal((html.match(/checked=""/g) ?? []).length, 1);
+  assert.match(view({ devices, confirming: id, also: { unavailable: true, candidates: [] } }), /Offline sync could not be checked/);
+  assert.match(view({ devices }), /separate lists/);
+});
