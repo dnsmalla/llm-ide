@@ -14,6 +14,10 @@ final class SyncStore: ObservableObject {
         let id: String
         let text: String
         let issuedAtMs: Int
+        /// The project the prompt was queued for (v2); nil means the phone chat (v1). Absent in older queue files.
+        var projectId: String?
+        /// A one-line explanation shown under the prompt (the older-desktop fallback).
+        var note: String?
         var answer: String?
         var code: String?
         var isPending: Bool { answer == nil && code == nil }
@@ -29,6 +33,10 @@ final class SyncStore: ObservableObject {
     @Published private(set) var refreshing = false
     @Published private(set) var enrollStep: EnrollStep?
     @Published private(set) var megaEmail = ""
+    /// Projects the phone knew in its last live session, for the queue's project picker. Bounded, ids and names only.
+    @Published private(set) var knownProjects: [SyncProjectChoice] = []
+    /// The project that was selected live when the list was last noted; the picker defaults to it.
+    @Published private(set) var lastSelectedProjectId: String?
 
     private var device: SyncDevice?
     private var mega: MegaClient?
@@ -79,6 +87,7 @@ final class SyncStore: ObservableObject {
         attach(d)
         storeKind = kind
         queued = Self.read([Queued].self, "queue.json") ?? []
+        loadProjects()
         switch kind {
         case .sftp:
             if let server = try? SyncHttpsClient(host: String(d.state.pair.st.dropFirst(5))) { self.server = server; phase = .ready } else { phase = .off }
@@ -213,7 +222,7 @@ final class SyncStore: ObservableObject {
             prepared = nil; pendingPair = nil
             await retireStores(keeping: .sftp)  // re-pairing to the own server drops the old MEGA or Box session secrets
             attach(d); server = store; megaEmail = ""
-            queued = []; Self.write(queued, "queue.json"); phase = .ready; enrollStep = .done
+            queued = []; Self.write(queued, "queue.json"); setProjects([], selected: nil); phase = .ready; enrollStep = .done
             await refresh()
         } catch is CancellationError { } catch { enrollStep = .failed(Self.message(for: error)) }
     }
@@ -245,7 +254,7 @@ final class SyncStore: ObservableObject {
             }
             prepared = nil; pendingPair = nil; opened = nil
             attach(d); attachBox(store, folder: folder); megaEmail = ""
-            queued = []; Self.write(queued, "queue.json"); phase = .ready; enrollStep = .done
+            queued = []; Self.write(queued, "queue.json"); setProjects([], selected: nil); phase = .ready; enrollStep = .done
             await refresh()
         } catch is CancellationError {
             if let opened { Task { await opened.revoke() } }  // a new task: this one is cancelled
@@ -275,7 +284,7 @@ final class SyncStore: ObservableObject {
                 Self.write(rec.fetched, "snapshot-cache.json")
             }
             phase = .ready
-            var resend: [String] = []
+            var resend: [(text: String, projectId: String?, note: String?)] = []
             let replies = try await device.readReplies(store, requestIds: queued.filter(\.isPending).map(\.id), nowMs: nowMs)
             for i in queued.indices {
                 guard let r = replies[queued[i].id] else { continue }
@@ -283,29 +292,55 @@ final class SyncStore: ObservableObject {
                 case .answered(let text, _): queued[i].answer = text
                 case .failed(let code):
                     queued[i].code = code
-                    if code == "stale_epoch" { resend.append(queued[i].text) }
+                    if code == "stale_epoch" { resend.append((queued[i].text, queued[i].projectId, queued[i].note)) }
+                    // An older desktop answers `refused` to every v2 request: resend once as v1 (a v1 entry never loops).
+                    if code == "refused", queued[i].projectId != nil {
+                        resend.append((queued[i].text, nil, Self.olderDesktopNote)); queued[i].code = "stale_epoch"
+                    }
                 }
             }
             let cutoff = nowMs - 7 * 86_400_000
             queued.removeAll { $0.issuedAtMs < cutoff || $0.code == "stale_epoch" }
             Self.write(queued, "queue.json")
             lastError = nil
-            for text in resend { await send(text) }
+            for r in resend { await send(r.text, projectId: r.projectId, note: r.note) }
         } catch { fail(error, box: b) }
     }
 
     /// True when the prompt was queued. On false the caller keeps the text and `lastError` says why.
     @discardableResult
-    func send(_ text: String) async -> Bool {
+    func send(_ text: String, projectId: String? = nil, note: String? = nil) async -> Bool {
         guard phase == .ready, let device else { lastError = "Sync isn't ready, so the prompt was not queued."; return false }
         guard let remote else { lastError = "No sync storage is connected, so the prompt was not queued."; return false }
         let b = box
         do {
-            let id = try await device.sendRequest(remote, text: text, nowMs: nowMs)
-            queued.append(Queued(id: id, text: text, issuedAtMs: nowMs))
+            let id = try await device.sendRequest(remote, text: text, nowMs: nowMs, projectId: projectId)
+            queued.append(Queued(id: id, text: text, issuedAtMs: nowMs, projectId: projectId, note: note))
             Self.write(queued, "queue.json"); lastError = nil
             return true
         } catch { fail(error, box: b); return false }
+    }
+
+    static let olderDesktopNote = "This desktop is older \u{2014} the prompt went to the phone chat"
+
+    /// Remember the projects the live session knows, so the picker still works with the desktop off.
+    /// An empty list from a failed or not-yet-loaded session never overwrites a good one.
+    func noteProjects(_ projects: [(id: String, name: String)], selected: String?) {
+        guard phase != .off, !projects.isEmpty else { return }
+        setProjects(SyncProjectChoice.bounded(projects), selected: selected)
+    }
+
+    private struct StoredProjects: Codable { var projects: [SyncProjectChoice]; var selected: String? }
+    private func setProjects(_ list: [SyncProjectChoice], selected: String?) {
+        let sel = selected.flatMap { id in list.contains { $0.id == id } ? id : nil }
+        guard list != knownProjects || sel != lastSelectedProjectId else { return }
+        knownProjects = list; lastSelectedProjectId = sel
+        Self.write(StoredProjects(projects: list, selected: sel), "projects.json")
+    }
+    private func loadProjects() {
+        let stored = Self.read(StoredProjects.self, "projects.json")
+        knownProjects = SyncProjectChoice.bounded((stored?.projects ?? []).map { ($0.id, $0.name) })
+        lastSelectedProjectId = stored?.selected.flatMap { id in knownProjects.contains { $0.id == id } ? id : nil }
     }
 
     /// After Box refused the saved sign-in (revoked, or unused for 60 days): sign in again with the same Box app.
@@ -345,7 +380,7 @@ final class SyncStore: ObservableObject {
         await oldMega?.logout(); await oldBox?.revoke()
         for item in [Keychain.Item.state, .keys, .mega, .box] { Keychain.delete(item) }
         try? FileManager.default.removeItem(at: Self.dir)
-        device = nil; mega = nil; box = nil; server = nil; snapshot = nil; queued = []; lastError = nil; megaEmail = ""
+        device = nil; mega = nil; box = nil; server = nil; snapshot = nil; queued = []; knownProjects = []; lastSelectedProjectId = nil; lastError = nil; megaEmail = ""
         phase = .off
     }
 
@@ -435,6 +470,7 @@ final class SyncStore: ObservableObject {
         case "quota": return "Today's limit for queued prompts was reached."
         case "needs_approval": return "The desktop needed an approval it can't take from a queued prompt."
         case "turn_failed": return "The desktop could not finish this prompt."
+        case "project_unavailable": return "That project is not available on the desktop"
         case "refused": return "The desktop refused this prompt."
         default: return "The desktop could not answer (\(code))."
         }

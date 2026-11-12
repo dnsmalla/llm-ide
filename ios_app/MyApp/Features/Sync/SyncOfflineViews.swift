@@ -4,7 +4,11 @@ import SharedProtocol
 /// The History tab when the desktop is not reachable: the verified snapshot and the prompt queue.
 struct SyncOfflineSections: View {
     @EnvironmentObject var syncStore: SyncStore
+    @EnvironmentObject var projectsStore: ProjectsStore
     @State private var draft = ""
+    /// nil is "Phone chat (no project)" and sends v1. Seeded from the live selection or the remembered one.
+    @State private var projectChoice: String?
+    @State private var choiceSeeded = false
 
     var body: some View {
         SourceRootSection()
@@ -32,21 +36,41 @@ struct SyncOfflineSections: View {
         if syncStore.phase == .ready {
             Section("Ask the desktop") {
                 TextField("Prompt", text: $draft, axis: .vertical).lineLimit(2...5)
-                Button("Queue") { let t = draft; Task { if await syncStore.send(t), draft == t { draft = "" } } }
+                if !syncStore.knownProjects.isEmpty {
+                    Picker("Project", selection: $projectChoice) {
+                        Text("Phone chat (no project)").tag(String?.none)
+                        ForEach(syncStore.knownProjects) { p in Text(p.name).tag(String?.some(p.id)) }
+                    }
+                }
+                // The draft is cleared only when the send succeeded, and only if it was not edited meanwhile.
+                Button("Queue") { let t = draft; let pid = effectiveProject; Task { if await syncStore.send(t, projectId: pid), draft == t { draft = "" } } }
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            .onAppear { seedChoice() }
+            .onChange(of: syncStore.knownProjects) { _ in seedChoice() }
         }
         if !syncStore.queued.isEmpty {
             Section("Queued prompts") {
                 ForEach(syncStore.queued) { q in
                     VStack(alignment: .leading) {
                         Text(q.text)
+                        if let n = q.note { Text(n).font(.footnote).foregroundColor(.secondary) }
                         if let a = q.answer { Text(a).font(.footnote).foregroundColor(.secondary) }
                         else if let c = q.code { Text(SyncStore.replyText(c)).font(.footnote).foregroundColor(.secondary) }
                     }
                 }
             }
         }
+    }
+    /// The chosen project, or nil when none is chosen or it is no longer in the list.
+    private var effectiveProject: String? {
+        projectChoice.flatMap { id in syncStore.knownProjects.contains { $0.id == id } ? id : nil }
+    }
+    private func seedChoice() {
+        guard !choiceSeeded, !syncStore.knownProjects.isEmpty else { return }
+        choiceSeeded = true
+        let live = projectsStore.selectedId ?? syncStore.lastSelectedProjectId
+        projectChoice = live.flatMap { id in syncStore.knownProjects.contains { $0.id == id } ? id : nil }
     }
     private func freshness(_ s: SyncSnapshot) -> String {
         switch SyncFreshness(s.manifest, nowMs: Int(Date().timeIntervalSince1970 * 1000)) {

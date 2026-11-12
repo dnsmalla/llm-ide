@@ -51,6 +51,30 @@ struct SyncDeviceTests {
         #expect(try await device.readReply(store, requestId: id, nowMs: 1) == .answered(text: "Two PRs merged.", finishedAt: 5))
     }
 
+    @Test("project request: v2 has exactly class/projectId/requestId/text/v; no project stays v1")
+    func projectRequest() async throws {
+        let (device, desk, store, c) = try await Self.enrolled()
+        _ = try await device.sendRequest(store, text: "hi", nowMs: 1_762_300_000_123, projectId: "proj_A-1")
+        let reqs = try desk.readRequests(store, c)
+        #expect(Set(reqs[0].plain.keys) == ["v", "requestId", "class", "text", "projectId"])
+        #expect(reqs[0].plain["v"] as? Int == 2 && reqs[0].plain["projectId"] as? String == "proj_A-1")
+        let enc = JSONEncoder(); enc.outputFormatting = .sortedKeys
+        let v2 = String(decoding: try enc.encode(SyncRequestPlain(requestId: "r", text: "t", projectId: "p1")), as: UTF8.self)
+        #expect(v2 == #"{"class":"chat.send","projectId":"p1","requestId":"r","text":"t","v":2}"#)
+        let v1 = String(decoding: try enc.encode(SyncRequestPlain(requestId: "r", text: "t")), as: UTF8.self)
+        #expect(v1 == #"{"class":"chat.send","requestId":"r","text":"t","v":1}"#)
+        await #expect(throws: SyncCryptoError("bad_project")) { _ = try await device.sendRequest(store, text: "x", nowMs: 2, projectId: "a/b") }
+    }
+
+    @Test("project choices: invalid and duplicate ids dropped, bounded")
+    func projectChoices() {
+        let many = (0..<80).map { (id: "p\($0)", name: "n") }
+        #expect(SyncProjectChoice.bounded(many).count == 50)
+        let out = SyncProjectChoice.bounded([(id: "a", name: "A"), (id: "a", name: "dup"), (id: "bad id", name: "x"), (id: "", name: "y")])
+        #expect(out == [SyncProjectChoice(id: "a", name: "A")])
+        #expect(!SyncProjectChoice.isValidId(String(repeating: "a", count: 129)) && SyncProjectChoice.isValidId("A_-9"))
+    }
+
     @Test("prompt limits: empty and over 4,000 UTF-16 units are refused before anything is written")
     func limits() async throws {
         let (device, _, store, _) = try await Self.enrolled()

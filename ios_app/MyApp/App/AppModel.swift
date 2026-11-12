@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import SharedProtocol
 
 /// The one place the app's object graph is built. The connection is created first; each feature store takes it
@@ -16,6 +17,7 @@ final class AppModel: ObservableObject {
     let sourceReadStore = SourceReadStore()
     let tasksStore: TasksStore
     let loopStore: LoopStore
+    private var projectsSink: AnyCancellable?
 
     init() {
         connection.connectionStore = connectionStore
@@ -26,6 +28,11 @@ final class AppModel: ObservableObject {
         projectsStore = ProjectsStore(connection: connection, connectionStore: connectionStore)
         tasksStore = TasksStore(context: connection)
         loopStore = LoopStore(context: connection)
+        // Remember the live project list for the offline-sync queue's picker (ids and names only).
+        // `noteProjects` ignores an empty list, so a failed or still-loading session never erases it.
+        projectsSink = projectsStore.$state.sink { [weak syncStore] state in
+            syncStore?.noteProjects(state.projects.map { ($0.id, $0.name) }, selected: state.selectedId)
+        }
     }
 }
 

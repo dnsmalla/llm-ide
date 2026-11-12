@@ -242,14 +242,15 @@ public final class SyncDevice {
         if truncated { s.truncated.insert(kind) }
     }
 
-    public func sendRequest(_ store: SyncRemoteStore, text: String, nowMs: Int) async throws -> String {
+    public func sendRequest(_ store: SyncRemoteStore, text: String, nowMs: Int, projectId: String? = nil) async throws -> String {
         guard let wk = state.wrapKeys, let userId = state.userId else { throw SyncCryptoError("not_enrolled") }
         guard !text.isEmpty else { throw SyncCryptoError("empty") }
         guard text.utf16.count <= Self.maxText else { throw SyncCryptoError("too_long") }
+        if let projectId { guard SyncProjectChoice.isValidId(projectId) else { throw SyncCryptoError("bad_project") } }
         let requestId = SyncB64.newId22()
         let enc = JSONEncoder()
         enc.outputFormatting = .sortedKeys
-        let plain = try enc.encode(SyncRequestPlain(requestId: requestId, text: text))
+        let plain = try enc.encode(SyncRequestPlain(requestId: requestId, text: text, projectId: projectId))
         let seq = state.requestSeq + 1
         let header = SyncHeader(purpose: "request", userId: userId, desktopId: state.pair.sid, from: state.deviceId, to: state.pair.sid,
                                 epoch: state.epoch, session: "", seq: seq, issuedAt: nowMs, tier: "")

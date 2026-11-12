@@ -73,13 +73,45 @@ public struct SyncSnapshot: Equatable, Sendable {
     public var usageState: UsageState? { usage.map(HostApiReadMapping.usageState) }
 }
 
+/// The request plaintext the desktop opens. v1 is the global phone chat; v2 adds `projectId` and runs in that
+/// project's phone chat. The key set is exact for each version (the desktop rejects extra keys); `projectId`
+/// is nil for v1 so synthesized encoding omits it.
 public struct SyncRequestPlain: Codable, Equatable, Sendable {
-    public var v = 1
+    public var v: Int
     public var requestId: String
     public var kind: String = "chat.send"
+    public var projectId: String?
     public var text: String
-    enum CodingKeys: String, CodingKey { case v, requestId, kind = "class", text }
-    public init(requestId: String, text: String) { self.requestId = requestId; self.text = text }
+    enum CodingKeys: String, CodingKey { case v, requestId, kind = "class", projectId, text }
+    public init(requestId: String, text: String, projectId: String? = nil) {
+        self.v = projectId == nil ? 1 : 2
+        self.requestId = requestId; self.text = text; self.projectId = projectId
+    }
+}
+
+/// A project the phone may name in an offline prompt, remembered from its last live session.
+public struct SyncProjectChoice: Codable, Equatable, Identifiable, Sendable {
+    public static let maxCount = 50, maxNameUTF16 = 80
+    public let id: String
+    public let name: String
+    public init(id: String, name: String) { self.id = id; self.name = name }
+
+    /// Contract shape for `projectId` (`^[A-Za-z0-9_-]{1,128}$`).
+    public static func isValidId(_ raw: String) -> Bool {
+        (1...128).contains(raw.utf8.count) && raw.utf8.allSatisfy {
+            ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 95 || $0 == 45
+        }
+    }
+
+    /// Drops invalid and duplicate ids, shortens names, and caps the list, so what is persisted is bounded.
+    public static func bounded(_ items: [(id: String, name: String)]) -> [SyncProjectChoice] {
+        var seen = Set<String>(), out: [SyncProjectChoice] = []
+        for item in items where isValidId(item.id) && seen.insert(item.id).inserted {
+            out.append(SyncProjectChoice(id: item.id, name: String(item.name.prefix(maxNameUTF16))))
+            if out.count == maxCount { break }
+        }
+        return out
+    }
 }
 
 public enum SyncReply: Equatable, Sendable {
