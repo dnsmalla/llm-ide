@@ -26,6 +26,46 @@ cd desktop && npm run tauri dev
 
 ---
 
+## Load the Chrome extension
+
+```bash
+cd extension && npm run build     # writes extension/dist/ (gitignored, so build before loading)
+cd extension && npm run server    # the core on http://127.0.0.1:3456; keep it running
+```
+
+1. Open `chrome://extensions` and enable **Developer mode**.
+2. **Load unpacked**, then pick `llm-ide/extension/dist/`.
+3. Pin the extension icon in the toolbar.
+
+## Build and install the macOS app
+
+`npm run tauri dev` is the debug app. For normal use build the release app:
+
+```bash
+bash scripts/build-desktop-mac.sh
+open desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app
+ditto desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app /Applications/LLM-IDE.app   # optional: install
+```
+
+The desktop app starts its own core; Settings → Features switches features off (applied on the next core start). The release
+app and the debug binary are different macOS programs, so a folder allowed by macOS privacy (TCC) for one is not
+automatically allowed for the other. Grant the debug binary Desktop / Full Disk Access, or keep the project outside
+`~/Desktop`, `~/Documents` and `~/Downloads`. Full checklist: [desktop/RUN-ON-MAC.md](desktop/RUN-ON-MAC.md).
+
+## Check your tools
+
+```bash
+node --version     # v22 or newer
+npm --version      # v10 or newer
+claude --version   # then `claude login`
+git --version
+cargo --version    # desktop app only
+```
+
+Xcode is optional: it is needed for the iPhone app (a physical device), `make test-shared-protocol` and `make test-ios-app`.
+
+---
+
 ## After `git pull` on any machine
 
 **Always run setup if you pulled changes:**
@@ -112,28 +152,21 @@ Already covered elsewhere: Serena (semantic code retrieval) and context7
 (library docs). Skipped: code-review-graph (overlaps LLM-IDE's code graph) and
 chop (same job as rtk, little adoption).
 
-## Common Errors After Pull
-
-### ❌ "Cannot find module 'docx'"
-→ Run `./setup.sh`
-
-### ❌ "Cannot find module 'js-yaml'"  
-→ Run `./setup.sh`
-
-### ❌ "Server starts but gives 404 on routes"
-→ Make sure Node server running: `cd extension && npm run server`
-
----
-
 ## Troubleshooting
 
-If `./setup.sh` fails:
+| Problem | Fix |
+|---------|-----|
+| "Cannot find module 'docx'", "js-yaml" or any other npm error | `./setup.sh`, or clean: `rm -rf extension/node_modules && npm ci --prefix extension` |
+| "Node.js 22+ is required" / "node: command not found" | Install Node 22+ ([nodejs.org](https://nodejs.org/) or `brew install node`); Node 20 is no longer supported |
+| "cargo: command not found" (desktop app) | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh`, open a new shell, run `./setup.sh` |
+| "resource path `../resources/core` doesn't exist" (`tauri dev`) | The desktop core is not staged: `./setup.sh`, or `node desktop/scripts/stage-core.mjs` |
+| "Could not load …/graph-kit/web/node_modules/three/build/three.module.js" | `git submodule update --init --recursive graph-kit && npm ci --prefix graph-kit/web` (`./setup.sh` does both) |
+| "claude: command not found" | Install it ([guide](https://docs.claude.com/en/docs/claude-code/quickstart)), then `claude login` |
+| "Port 3456 already in use" | `lsof -i :3456`, stop that process, start the server again. If another program holds it, the desktop falls back to 3457-3459 |
+| Server starts but routes answer 404 | The Node server is not running: `cd extension && npm run server` |
+| Chrome extension not updating | `cd extension && npm run build`, refresh at `chrome://extensions`, then hard-reload the meeting tab (Cmd+Shift+R) |
+| "Load unpacked" fails: no `dist` folder | `extension/dist/` is gitignored: `cd extension && npm run build` first |
+| iPhone: Execute, Auto Tasks or Loop tabs missing | Restart the desktop core, then pair the phone again (a device paired earlier keeps its old grants) |
+| Settings or data lost after a pull | Your data is safe, a pull only changes code. Meetings and the KB live in the app data directory; user settings in `~/.llmide/` |
 
-```bash
-# Clean install
-rm -rf extension/node_modules
-npm ci --prefix extension     # Uses package-lock.json for exact versions
-
-# Or use the full setup
-./setup.sh --force
-```
+If `./setup.sh` itself fails, read the ❌ lines it prints (each names the missing prerequisite), fix those, and run it again. It is safe to repeat.

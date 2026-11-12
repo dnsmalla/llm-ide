@@ -1,477 +1,111 @@
 # LLM-IDE
 
-> Local-first AI workspace — capture meetings and sources, plan in a searchable library, automate code review and implementation, and dispatch to GitHub/GitLab/tickets. Everything runs on `127.0.0.1` unless you approve an outbound action.
+> A local-first AI workspace. Capture meetings and sources, plan in a searchable library, automate code review and implementation, and send work to GitHub or GitLab when you approve it. Everything runs on your computer unless you allow an outbound action.
 
 [![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](./extension/package.json)
-[![API](https://img.shields.io/badge/wire%20API-v130-green.svg)](./extension/server.mjs)
+[![API](https://img.shields.io/badge/wire%20API-v144-green.svg)](./extension/server.mjs)
 [![Manifest](https://img.shields.io/badge/manifest-V3-orange.svg)](./extension/manifest.json)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)](#license)
 
-## What this is
+## What you can do
 
-A **Chrome extension**, a **desktop app** (Tauri: macOS, Windows, Linux), a **web app**, an **iPhone app** and a **Node core** that share one knowledge base and per-user SQLite store. The core runs on your computer by default, or as an always-online **team hub** on a server you own. Capture from meetings, email, Slack, and files; search and plan; run scheduled **Auto Tasks** (review, implement, regression, doc gen, **Loop Engineering**); visualize code and issues; dispatch work when you approve it.
+- **Capture:** Google Meet, Teams and Zoom captions, live mic, email, Slack, Box, repos and MCP connectors all land in one searchable **Library**.
+- **Plan:** search with FTS5, summarize, turn notes into issues, plans and a Gantt view.
+- **Automate:** built-in and custom **Auto Tasks** (review, implement, regression, docs) on a schedule, plus **Loop** and the **Factory** board for issue-to-PR runs.
+- **Code:** Explorer with a docked Code Assistant, code graph, guardrail-scanned diffs, and PR/ticket dispatch after your approval.
+- **Take it with you:** chat, run tasks and start Loop runs from your **iPhone** or browser.
+- **Work as a team:** run the same core as an always-online **hub** with invites, roles and per-member limits.
 
-**Local by default.** Data and AI orchestration stay on your machine (or on the hub you run). Optional per-user API keys (Claude, OpenAI, Google, OpenAI-compatible) live in an encrypted vault; when none are set, the server falls back to your logged-in **Claude CLI**. Outbound dispatch (PRs, tickets, Slack) is always opt-in.
-
-## System at a glance
-
-**Library is the hub.** Every source (meetings, email, Slack, Box, repos, MCP connectors) lands in the KB. From there you search, plan, automate, visualize, and dispatch — all on `127.0.0.1`.
-
-<p align="center">
-  <img src="docs/assets/system-map.svg" alt="LLM-IDE system map: Library hub with Sources, Automation, and Visualize &amp; control" width="920"/>
-</p>
+Your data stays in a per-user SQLite store on your machine (or on the hub you run). Model calls use your logged-in **Claude CLI**, or per-user API keys kept in an encrypted vault. Outbound actions (PRs, tickets, Slack) are always opt-in.
 
 <p align="center">
-  <img src="docs/assets/data-flow.svg" alt="LLM-IDE pipeline: Capture → Library → Plan → Automate → Dispatch → Outcomes" width="860"/>
+  <img src="docs/assets/system-map.svg" alt="LLM-IDE system map: the Library at the centre, fed by sources and driving automation and visualization" width="860"/>
 </p>
 
-| Pillar | What you get | Desktop | Extension | iPhone / web |
-|--------|----------------|-----|-----------|--------|
-| **Sources** | Meet · Teams · Zoom · live mic · **Email** · **Slack** · Box · **MCP** → notes in Library | ✅ full ingest | ✅ web CC capture | — |
-| **Library** | Unified notes, code, data, plugins · FTS5 search · re-summarize | ✅ hub | ✅ meetings | — |
-| **Automation** | **13 built-in Auto Tasks** + **custom tasks** (review/implement mode, per-task cron) · **Loop Engineering** | ✅ run + configure | — | ✅ monitor + run |
-| **Code** | Explorer chat, codegen, workflows, guardrails, PR/ticket dispatch · **SCIP** symbol graph | ✅ | — | ✅ Explorer |
-| **Visualize** | **Code graph**, **Issues**, **Gantt**, **Visual**, conflicts, **Loop Engineering** | ✅ | — | — |
-| **Control** | Source control, search, live session, settings, mobile pairing | ✅ | side panel | companion |
-| **Team** | Hub mode, invites, team and per-project roles, per-member limits | ✅ Settings → Team | — | ✅ |
+## Get started
 
-```mermaid
-flowchart LR
-  subgraph sources [Sources]
-    M[Meet Teams Zoom]
-    E[Email]
-    S[Slack]
-    L[Live mic]
-    MCP[MCP connectors]
-  end
-  LIB[(Library + KB)]
-  subgraph auto [Automation]
-    AT[Auto Tasks]
-    LE[Loop Engineering]
-    CT[Custom tasks]
-    CG[Code generation]
-  end
-  subgraph viz [Visualize and control]
-    G[Code graph]
-    I[Issues]
-    GN[Gantt]
-    V[Visual]
-    EX[Explorer]
-  end
-  M --> LIB
-  E --> LIB
-  S --> LIB
-  L --> LIB
-  MCP --> LIB
-  LIB --> AT & LE & EX & G & I & GN
-  AT --> CT & CG
-  LE --> CG
-```
-
-**Built-in Auto Tasks (13, cron-schedulable on the desktop):**
-
-| Pipeline | Tasks |
-|----------|--------|
-| Ingest → issues | Source Update · Sources → Issue · Implement Issues · Review & Merge |
-| Review | Review Code · Review Doc · Review Conflicts · Regression |
-| Generate | Knowledge · Generate Documentation |
-| Maintain | Update Issues · Update Plan Status · **Loop** |
-
-**Custom Auto Tasks** — create your own name + prompt; choose **Review** (discard edits) or **Implement** (commit on `fix/custom-*` branch); optional **cron** per task.
-
-### Factory board, with demo data
-
-Factory turns issues, specs and free text into cards that move through seven columns. The column is derived from the item's last run, its worktree and the PR/MR status — never stored on the card.
-
-A demo fixture with one card per column:
-
-| Column | Demo card | What the card offers | Result |
-|--------|-----------|----------------------|--------|
-| Inbox | Demo 101 | Start · Run intake · Discard | no run yet |
-| Needs decision | Demo 102 | Run intake · Discard; answer form | Intake stopped for a decision |
-| Working | Free text idea | live progress and last log line | run is live |
-| Needs you | Demo 104 | Resume · Open diff · Discard | last run failed |
-| Ready to ship | Demo 105 | Open diff · Ship · Discard | run passed, no PR/MR |
-| Shipped | Demo 106 | Open PR/MR · Open diff | PR open, CI running |
-| Done | Demo 107 | Open PR/MR · Discard | PR merged |
-
-The same fixture is a regression test — one item per column, with assertions for actions, notes and ship state:
-
-```bash
-cd desktop
-node --test --experimental-strip-types ../ui/screens/factory/tests/demo-board.test.mjs
-```
-
-See the test at [`ui/screens/factory/tests/demo-board.test.mjs`](ui/screens/factory/tests/demo-board.test.mjs).
-
-**Integrations (opt-in dispatch):** GitHub · GitLab · Backlog · Linear · Slack · **MCP-backed connectors** · **user plugins** (skills, slash commands, subagents).
-
-## Architecture
-
-The surfaces share one core. By default it runs on the desktop and all traffic stays on `127.0.0.1`. Remote access is opt-in: a team hub (`LLMIDE_HUB=1`, behind TLS, invite-only; [ADR 0021](docs/decisions/0021-team-hub.md)) or the pinned Host API v1 listener.
-
-```mermaid
-flowchart TB
-    subgraph ext [Chrome Extension]
-        CC[Caption scraper 800ms]
-        SP[Side panel UI]
-    end
-    subgraph desk [Desktop app Tauri]
-        HOST[Rust host: core supervisor, secrets, files, git, PTY]
-        UI[React screens ui/]
-    end
-    subgraph srv [Node core]
-        KB[(SQLite WAL+FTS5)]
-        AI[Provider router<br/>CLI or vaulted API keys]
-        GR[Guardrails + tool approvals]
-        HA[Host API v1 + sync producer]
-        HUB[Hub mode: TLS, invites,<br/>team and project roles]
-    end
-    subgraph remote [Phone and browser]
-        IOS[iPhone app]
-        WEB[Web app]
-    end
-    CC --> srv
-    SP --> srv
-    HOST -->|spawns| srv
-    UI --> srv
-    IOS -->|Host API v1 pinned WSS| HA
-    WEB -->|Host API v1| HA
-    IOS -->|your hub, when deployed| HUB
-    WEB -->|your hub, when deployed| HUB
-    HA -->|encrypted snapshots| STORE[(Your storage: own server, Box, MEGA)]
-    STORE --> IOS
-    STORE --> WEB
-```
-
-| Surface | Role | Talks to |
-|---------|------|----------|
-| Chrome extension | Meet/Teams/Zoom web CC capture + side panel | the core on `127.0.0.1` |
-| Node core (`extension/`) | Auth, KB, AI orchestration, persistence, connectors; hub mode for teams | — |
-| Team hub (`deploy/hub/`) | The same core on your server (nginx TLS, systemd, backups) so every member works while your computer is off | desktop, web, iPhone |
-| Desktop app (`desktop/` + `ui/`) | Full KB, Explorer + Code Assistant, Issues, Gantt, Graph, Auto Tasks, Loop | spawns and supervises the core |
-| Web app (`web/`) | Chat, history, approvals; offline reads from encrypted sync | Host API v1 or your sync storage |
-| iPhone app (`ios_app/`) | Chat, history; offline reads from encrypted sync | Host API v1 or your sync storage |
-
-**AI routing:** `extension/providers/` prefers each user's vaulted API key when present; otherwise shells out to the operator's Claude/Codex/Gemini CLI. See [ADR-0015](docs/decisions/0015-multi-provider-vaulted-api-keys.md).
-
-**Tenancy and roles:** JWT auth, per-user rows, HKDF-derived vault keys. FTS5 is shared; hydration queries are scoped by `user_id`. In hub mode every route is checked against the member's team role (`owner`, `admin`, `member`, viewer) and, per project, a project role ([ADR 0022](docs/decisions/0022-project-scoped-team-roles.md)).
-
-Deep dive: [Architecture overview](docs/explanation/architecture.md) · [Server internals](docs/explanation/server-internals.md) · [Engineering invariants](docs/explanation/invariants.md) · [Project folder layout](docs/reference/project-layout.md) · [Naming convention](docs/decisions/0016-naming-convention.md)
-
-### Naming
-
-| Context | Form | Example |
-|---------|------|---------|
-| User-visible brand | **LLM-IDE** | menus, extension title, docs |
-| Repo / package slug | **llm-ide** | `github.com/…/llm-ide`, npm package |
-| Code identifiers | **LlmIde** | `LlmIdeAPIClient` |
-| Wire / bundle | **llmide** | `com.llmide.desktop`, `llmide://` |
-
-## Quick Start (3 Minutes)
-
-Needs Node 22+, the Claude CLI and, for the desktop app, Rust 1.88+ (see [Prerequisites](#prerequisites)).
+You need Node 22+, Git and the [Claude CLI](https://docs.claude.com/en/docs/claude-code/quickstart) (`claude login`). The desktop app also needs Rust 1.88+.
 
 ```bash
 git clone --recurse-submodules git@github.com:dnsmalla/llm-ide.git
 cd llm-ide
-./setup.sh                        # checks prerequisites, installs deps, submodules, skills, git hooks
-cd extension && npm run build     # extension/dist/ is gitignored — build before loading Chrome
-cd extension && npm run server
+./setup.sh                      # checks prerequisites, installs everything, safe to repeat
+cd desktop && npm run tauri dev # the desktop app starts its own core
 ```
 
-`./setup.sh` is safe to repeat. It prints a ❌ line for each missing prerequisite and exits non-zero at the end, so a half-finished setup never looks like a success.
+For the Chrome extension, also run `cd extension && npm run build && npm run server`, then load `extension/dist/` at `chrome://extensions` (Developer mode, **Load unpacked**). First meeting: [Record your first meeting](docs/tutorials/01-first-meeting.md). New machine, after a `git pull`, or something failing: [FIRST_TIME_SETUP.md](FIRST_TIME_SETUP.md).
 
-Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Record your first meeting](docs/tutorials/01-first-meeting.md).
+## Where to use it
 
-> Already cloned without `--recurse-submodules`? Run `./setup.sh` — it initializes both
-> submodules (`.skills` and `graph-kit`). The desktop build and `make regression`'s graph
-> gates read the graph-kit checkout, so keep it initialized.
+| Surface | Use it for | Start here |
+|---------|-----------|------------|
+| **Desktop app** (macOS, Windows, Linux) | Everything: Library, Explorer + Code Assistant, Issues, Gantt, Graph, Auto Tasks, Loop, Settings | `cd desktop && npm run tauri dev` · [build the Mac app](desktop/RUN-ON-MAC.md) |
+| **Chrome extension** | Capture live captions from Meet, Teams and Zoom (web) and read notes in the side panel | `extension/dist/` |
+| **iPhone app** | **Ask** (read-only chat), **Execute**, **Auto Tasks**, **Loop**, History | pair in the desktop's Settings → Phone and browser |
+| **Web app** | Chat, history and approvals | `cd web && npm run dev` |
+| **Team hub** | The same core on a server you own, for every member | [run a hub](docs/how-to/run-a-hub.md) · [connect the desktop](docs/how-to/configure-remote-server.md) |
 
----
+**Phone and browser:** in the desktop, Settings → **Phone and browser** has two tabs. **Online** pairs a device for live chat while the desktop is on (PIN and QR). **Offline** sets up encrypted sync storage (your own server, Box or MEGA) so history stays readable when the desktop is off. A phone can start Execute and Loop runs, but every start waits for your approval on the desktop.
 
-## Complete Installation Guide (For Beginners)
+**Team and roles:** Settings → Team (owners and admins on a hub): [members](docs/how-to/manage-team-members.md) and [project roles](docs/how-to/project-roles.md).
 
-### Prerequisites
+**Integrations:** GitHub · GitLab (gitlab.com, nested groups) · Backlog · Linear · Slack · Box · MCP connectors · user plugins.
 
-- **macOS, Windows or Linux** for the desktop app (the iPhone app needs Xcode + a physical device)
-- **Xcode Command Line Tools** (macOS) — `xcode-select --install`
-- **Node.js 22+** — [Download](https://nodejs.org/) or `brew install node` ([Homebrew](https://brew.sh))
-- **Claude CLI** — [Install guide](https://docs.claude.com/en/docs/claude-code/quickstart) (`claude login`)
-- **Git**
-- **Rust 1.88+** (stable, via [rustup](https://rustup.rs)) — for the desktop app only; open a new shell after installing
-- **Chrome** — for the extension
-- **Xcode** (optional) — for the iPhone app and `make test-shared-protocol`
+## How it fits together
 
-**Check what you have:**
-
-```bash
-node --version        # v22+
-npm --version         # v10+
-claude --version      # should work
-git --version
-cargo --version       # for the desktop app
-```
-
-### Step 1: Clone the Repository
-
-```bash
-git clone --recurse-submodules git@github.com:dnsmalla/llm-ide.git
-cd llm-ide
-ls -la   # docs/ extension/ desktop/ ui/ web/ ios_app/ graph-kit/ .skills/ setup.sh
-```
-
-### Step 2: Run Setup
-
-```bash
-./setup.sh
-# ✅ Node.js 22+, npm, backend deps (better-sqlite3)
-# ✅ Claude CLI
-# ✅ graph-kit + .skills submodules, agent symlinks (Claude / Cursor / Codex / …)
-# ✅ Rust and Xcode Command Line Tools present
-# ✅ npm ci in ui/kit, desktop and graph-kit/web; desktop core staged (desktop/resources/core)
-# ✅ git hooks (pre-push runs the gates for what changed)
-```
-
-If setup fails, see [Troubleshooting](#troubleshooting).
-
-### Step 3: Build the Extension
-
-```bash
-cd extension && npm run build
-# Writes extension/dist/ — required before loading in Chrome
-```
-
-### Step 4: Start the Node Server
-
-```bash
-cd extension && npm run server
-# Server listening on http://127.0.0.1:3456
-```
-
-Keep this terminal running.
-
-### Step 5: Load Chrome Extension
-
-1. Open `chrome://extensions`
-2. Enable **Developer mode**
-3. **Load unpacked** → select `llm-ide/extension/dist/`
-4. Pin the extension icon in the toolbar
-
-### Step 6: Run the Desktop App
-
-```bash
-cd desktop && npm run tauri dev     # dependencies and the staged core come from ./setup.sh
-```
-
-Build and open the release app (recommended for normal use):
-
-```bash
-cd ~/llm-ide
-PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH" \
-  bash scripts/build-desktop-mac.sh
-open ~/llm-ide/desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app
-```
-
-Install it into Applications:
-
-```bash
-ditto ~/llm-ide/desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app \
-  /Applications/LLM-IDE.app
-```
-
-The desktop app starts its own core; Settings → Features switches features off (applied on the next core start).
-The release app and the `tauri dev` debug binary are different macOS programs: a desktop folder allowed by TCC
-for the release app is not automatically allowed for the debug binary. Grant the debug binary Desktop/Full Disk
-Access, or move the project outside `~/Desktop`, `~/Documents` and `~/Downloads`. See
-[desktop/RUN-ON-MAC.md](desktop/RUN-ON-MAC.md) for the full build, permissions and troubleshooting checklist.
-
----
-
-## Usage
-
-### Chrome Extension
-- Open Google Meet, Microsoft Teams, or Zoom (web)
-- Extension captures **live captions** (not microphone audio)
-- Side panel: notes, questions, entities, DOCX export
-
-### Desktop App
-- Full Library, Issues, Gantt, Graph, Explorer + Code Assistant, Live capture
-- **Auto Tasks** page: built-in + custom tasks, cron schedules, Loop Engineering
-- **Plugins**, **MCP connectors**, **SCIP ingestion** (`POST /kb/ingest-scip`)
-- Settings → Phone and web sync: encrypted sync to your own server, Box or MEGA
-- Settings → Server & Backend → Remote server: enter a running hub’s **Server URL**, **email** and **password**, then **Connect**. Public-CA TLS needs no pin; SSH deploy/update/uninstall lives under **Advanced**. See [connect the desktop to a server](docs/how-to/configure-remote-server.md), [install a server](docs/how-to/install-a-server.md) and [run an always-online hub](docs/how-to/run-a-hub.md).
-- Settings → Team (owners and admins on a hub): members, invites, team roles, max mode and monthly USD caps. See [manage team members](docs/how-to/manage-team-members.md) and [project roles](docs/how-to/project-roles.md).
-
-### iPhone and Web
-- Pair with the desktop (Settings → Phone and web sync, or Host API v1 pairing)
-- Chat, history and approvals; offline reads from encrypted snapshots when the desktop is off
-- See [ADR 0020](docs/decisions/0020-box-encrypted-sync.md)
-
-### Server API
-- REST on `http://127.0.0.1:3456` — used by the extension and the desktop app
-- Wire protocol version tracked in `SERVER_API_VERSION` (`extension/server.mjs`); `GET /health` reports it with the enabled endpoints and features
-- [API Reference](docs/reference/api/overview.md) · [OpenAPI spec](docs/reference/api/openapi.yaml)
-
----
-
-## After Pulling New Code
-
-```bash
-git pull origin main
-./setup.sh                    # deps, submodules, skills symlinks
-cd extension && npm run build # refresh extension/dist if UI changed
-cd extension && npm run server
-```
-
-See [FIRST_TIME_SETUP.md](FIRST_TIME_SETUP.md) for the post-pull checklist.
-
----
-
-## Development Commands
-
-```bash
-# Terminal 1: Node server
-cd extension && npm run server
-
-# Terminal 2: Extension dev (hot reload)
-cd extension && npm run dev
-
-# Terminal 3: Desktop app
-cd desktop && npm run tauri dev
-
-# Tests
-make test                  # extension (Node test runner)
-make test-desktop          # desktop node checks + cargo test --lib
-make test-shared-protocol  # iOS wire types (ios_app/SharedProtocol)
-make regression            # pre-push gate (contracts, desktop/ui/web, agent/v2, graph-kit)
-
-# Lint / docs
-make lint && make format
-make docs-serve            # localhost:8000
-make docs-check            # links, frontmatter, API coverage
-```
-
-Central agent skills live in the [`.skills`](https://github.com/dnsmalla/agent-kit) submodule. Refresh after pull:
-
-```bash
-git submodule update --init --recursive .skills
-bash scripts/install-skills.sh
-cd extension && npm run sync:skills   # agent tool defs only
-```
-
-Agent/developer guide: [CLAUDE.md](CLAUDE.md)
-
----
-
-## Troubleshooting
-
-### ❌ "Cannot find module 'docx'" or other npm errors
-```bash
-./setup.sh
-# or: rm -rf extension/node_modules && npm ci --prefix extension
-```
-
-### ❌ "node: command not found" or "Node.js 22+ is required"
-Install Node.js 22+ from https://nodejs.org/ (`brew install node`). Node 20 is no longer supported.
-
-### ❌ "cargo: command not found" (desktop app)
-Install Rust with `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`, open a new shell, then re-run `./setup.sh`.
-
-### ❌ "resource path `../resources/core` doesn't exist" (`tauri dev`)
-The desktop core is not staged. Run `./setup.sh`, or `node desktop/scripts/stage-core.mjs`.
-
-### ❌ "Could not load .../graph-kit/web/node_modules/three/build/three.module.js"
-The graph-kit submodule or its dependencies are missing: `git submodule update --init --recursive graph-kit && npm ci --prefix graph-kit/web` (`./setup.sh` does both).
-
-### ❌ "claude: command not found"
-Install and authenticate: https://docs.claude.com/en/docs/claude-code/quickstart → `claude login`
-
-### ❌ "Port 3456 already in use"
-```bash
-lsof -i :3456 && kill -9 <PID>
-cd extension && npm run server
-```
-
-### ❌ Chrome extension not updating
-Run `cd extension && npm run build`, refresh on `chrome://extensions`, then hard-reload the meeting tab (Cmd+Shift+R).
-
-### ❌ "Load unpacked" fails — no dist folder
-`extension/dist/` is gitignored. Run `cd extension && npm run build` first.
-
-### ❌ Settings/data lost after pull
-Your data is safe — only code is pulled:
-- Meetings/KB: `kb/` (gitignored per install)
-- User settings: `~/.llmide/`
-
----
-
-## Project Structure
+One Node **core** (`extension/`, pure HTTP on `127.0.0.1:3456`) owns auth, the knowledge base, AI routing and guardrails. The desktop app starts and supervises it. The extension, the web app and the iPhone app talk to it; phones and browsers use a pinned, encrypted **Host API**. More: [architecture](docs/explanation/architecture.md) · [server internals](docs/explanation/server-internals.md) · [engineering invariants](docs/explanation/invariants.md).
 
 ```
 llm-ide/
-├── extension/          Chrome extension + Node server (:3456)
-│   ├── server.mjs      HTTP entry (no framework)
-│   ├── core/           Framework-free primitives
-│   ├── server/         Routing, JWT, vault, rate limits
-│   ├── kb/             SQLite + FTS5 + append-only numbered migrations
-│   ├── routes/         HTTP route modules (agent, chat, KB, plugins/MCP, hub; host-api/, sync/, bus/)
-│   ├── providers/      Model dispatch (CLI shell-out + vaulted API keys)
-│   ├── connectors/     GitHub, GitLab, Slack, Box, email, SCIP, MCP, …
-│   ├── agents/         Planner, codegen, dispatch pipelines
-│   ├── llm_agent/      Agent runtime + synced tool definitions
-│   ├── graphkit/       Code-graph engine + memory writer
-│   ├── guardrails/     Secret/PII/destructive-op scanners
-│   ├── plugins/        Extension plugin loader/installer
-│   ├── llm-sources/    LLM source registry (feeds kb/sources.mjs)
-│   ├── mcp/            MCP server config + connector catalog
-│   ├── src/            React side panel + content scripts
-│   └── dist/           Built extension (load in Chrome; gitignored)
-├── desktop/            Tauri desktop app (Rust host in src-tauri/)
-├── ui/                 React screens + ui-kit shared by desktop and web
-├── web/                Browser app (Host API v1 + encrypted sync)
-├── deploy/             Hub deployment: nginx template, systemd units, llmide-deploy, backup timer (hub/, vps/)
-├── graph-kit/          Graph engine submodule (separate repo)
-├── ios_app/            iPhone app (SwiftUI + SharedProtocol)
-├── .skills/            Central agent skills submodule
-├── scripts/            setup helpers, contract generators, install-skills
-├── docs/               MkDocs site (architecture, API, ADRs)
-├── kb/                 Runtime SQLite (gitignored content)
-├── setup.sh            One-shot install: prerequisites, all JS deps, core staging, skills wiring
-└── CLAUDE.md           Agent/developer guide
+├── extension/   Chrome extension + the Node core (server.mjs, kb/, routes/, providers/, agents/)
+├── desktop/     Tauri desktop app (Rust host in src-tauri/)
+├── ui/          React screens and shared kit used by the desktop and the web app
+├── web/         Browser app        ios_app/   iPhone app (SwiftUI + SharedProtocol)
+├── deploy/      Team hub deployment (nginx, systemd, backups)
+├── graph-kit/ and .skills/   Submodules: graph engine, shared agent skills
+├── docs/        Documentation site      scripts/   setup, generators, gates
+└── setup.sh     One-shot install
 ```
 
-Inside each **project**, LLM-IDE scaffolds `source/{meetings,emails,documents}/`, `llm-doc/`, `code/`, `system/`, etc. See [Project folder layout](docs/reference/project-layout.md).
+## Everyday commands
 
----
+```bash
+cd extension && npm run server       # the core on 127.0.0.1:3456
+cd desktop && npm run tauri dev      # desktop app (starts its own core)
+make test                            # core tests          make test-desktop   # desktop + Rust
+make test-shared-protocol            # iOS wire types      make test-ios-app   # iPhone app tests
+make regression                      # the pre-push gate   make lint && make format
+make docs-serve                      # docs at localhost:8000   make docs-check
+```
+
+Agent and developer guide: [CLAUDE.md](CLAUDE.md). Shared agent skills come from the `.skills` submodule: `bash scripts/install-skills.sh` after a pull.
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| "Cannot find module …" or other npm errors | `./setup.sh` |
+| "Node.js 22+ is required" | install Node 22+ ([nodejs.org](https://nodejs.org/) or `brew install node`) |
+| "cargo: command not found" | install Rust from [rustup.rs](https://rustup.rs), open a new shell, run `./setup.sh` |
+| "Port 3456 already in use" | `lsof -i :3456`, stop that process, start the server again |
+| Extension won't load or is out of date | `cd extension && npm run build`, reload it at `chrome://extensions` |
+| iPhone tabs missing (Execute, Auto Tasks, Loop) | restart the desktop core and pair the phone again |
+
+More fixes and the full install walk-through: [FIRST_TIME_SETUP.md](FIRST_TIME_SETUP.md) · [runbooks](docs/runbooks/index.md).
 
 ## Documentation
 
-📚 **Full docs site:** https://grid-devs.gitlab.io/personal/dinesh/notes-extension/
+Full site: https://grid-devs.gitlab.io/personal/dinesh/notes-extension/
 
 | Topic | Link |
 |-------|------|
-| Architecture | [docs/explanation/architecture.md](docs/explanation/architecture.md) |
-| Server internals | [docs/explanation/server-internals.md](docs/explanation/server-internals.md) |
-| Invariants (read before changing hot paths) | [docs/explanation/invariants.md](docs/explanation/invariants.md) |
-| API overview | [docs/reference/api/overview.md](docs/reference/api/overview.md) |
-| Project folder layout | [docs/reference/project-layout.md](docs/reference/project-layout.md) |
-| Architecture decisions | [docs/decisions/](docs/decisions/) (ADRs 0001–0022) |
-| Remote server and team hub | [connect-to-a-server](docs/how-to/configure-remote-server.md) · [install-a-server](docs/how-to/install-a-server.md) · [run-a-hub](docs/how-to/run-a-hub.md) · [manage-team-members](docs/how-to/manage-team-members.md) · [project-roles](docs/how-to/project-roles.md) |
-| Runbooks (restore, rotate keys, server won't start) | [docs/runbooks/](docs/runbooks/index.md) |
-| Central skills install | [docs/how-to/install-central-skills.md](docs/how-to/install-central-skills.md) |
-| Contribute | [docs/how-to/contribute.md](docs/how-to/contribute.md) |
-
----
-
-## Next Steps
-
-1. ✅ Setup done → [Record your first meeting](docs/tutorials/01-first-meeting.md)
-2. Configure Auto Tasks → desktop app → **Auto Tasks** (built-in + custom)
-3. Pair a phone or browser → desktop Settings → Phone and web sync
-4. Understand the system → [Architecture overview](docs/explanation/architecture.md)
-
----
+| Architecture and invariants | [architecture](docs/explanation/architecture.md) · [invariants](docs/explanation/invariants.md) |
+| API | [overview](docs/reference/api/overview.md) · [OpenAPI](docs/reference/api/openapi.yaml) |
+| Phone and web | [iPhone quick start](docs/mobile/quick-start.md) · [encrypted sync (ADR 0020)](docs/decisions/0020-box-encrypted-sync.md) |
+| Decisions | [docs/decisions/](docs/decisions/) (ADRs 0001–0022) |
+| Auto Tasks and Factory | [configure Auto Tasks](docs/how-to/configure-auto-tasks.md) · [Factory demo board](docs/how-to/factory-demo-board.md) |
+| Project folder layout | [project-layout](docs/reference/project-layout.md) |
+| Contribute | [contribute](docs/how-to/contribute.md) · [naming convention](docs/decisions/0016-naming-convention.md) |
 
 ## License
 
