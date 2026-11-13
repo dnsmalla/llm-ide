@@ -340,12 +340,24 @@ fn pin_blocking(hub_url: String, fingerprint: String) -> Result<(), FsError> {
     Ok(())
 }
 
+/// Only the already-stored hub URL may be unpinned.
+fn unpin_target_allowed(stored_hub_url: &str, canonical: &str) -> Result<(), FsError> {
+    if stored_hub_url.is_empty() || stored_hub_url != canonical {
+        return Err(herr("unknown_hub", "that is not the hub this app is configured for; connect to it first"));
+    }
+    Ok(())
+}
+
 /// Drop the optional pin after the user explicitly chooses public-CA trust again. No native
-/// prompt is needed: removing a pin only restores ordinary WebPKI validation, never weakens it.
+/// prompt is needed: removing a pin only restores ordinary WebPKI validation, never weakens it,
+/// and it can only act on the hub URL that is already stored.
 #[tauri::command]
 pub async fn remote_tls_unpin(hub_url: String) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let (canonical, _host, _port) = validate_hub_url(&hub_url, cfg!(debug_assertions))?;
+        // Unpin must never introduce a hub URL: the URL is written only by the probe/trust path and the
+        // confirmed login, so a webview-chosen URL is refused here.
+        unpin_target_allowed(&crate::prefs::stored().remote_server.hub_url, &canonical)?;
         let view = crate::prefs::set_remote_pin(canonical, String::new())?;
         if !view.persisted { return Err(herr("prefs_unavailable", "the pin could not be saved (no data folder)")); }
         Ok(())
@@ -371,6 +383,13 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(include_str!("../../../schema/host-api/v1/fixtures/security/identity-vector.json")).unwrap();
         let spki = base64::engine::general_purpose::STANDARD.decode(v["spkiDerBase64"].as_str().unwrap()).unwrap();
         assert_eq!(fingerprint_from_spki(&spki), v["fingerprint"].as_str().unwrap());
+    }
+
+    #[test]
+    fn unpin_refuses_any_url_that_is_not_the_stored_hub() {
+        assert_eq!(unpin_target_allowed("", "https://evil.example.com").unwrap_err().code, "unknown_hub");
+        assert_eq!(unpin_target_allowed("https://hub.example.com", "https://evil.example.com").unwrap_err().code, "unknown_hub");
+        assert!(unpin_target_allowed("https://hub.example.com", "https://hub.example.com").is_ok());
     }
 
     #[test]
