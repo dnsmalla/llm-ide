@@ -172,7 +172,7 @@ export function Composer(p: ComposerProps) {
   const startSystemDictation = () => {
     form.current?.querySelector("textarea")?.focus();
     setDictError(null);
-    invokeHost<void>("start_system_dictation").catch(() => setDictError("Dictation could not start. Turn it on in System Settings → Keyboard → Dictation."));
+    invokeHost<void>("start_system_dictation").catch((e: unknown) => setDictError(`${typeof e === "string" ? e : "Dictation could not start."} Check System Settings → Keyboard → Dictation.`));
   };
   const dictate = mode === "system" ? startSystemDictation : mode === "web" ? toggleVoice : null;
   toggleRef.current = dictate ?? toggleVoice;
