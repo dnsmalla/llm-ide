@@ -44,6 +44,11 @@ export interface RunState {
   revising: boolean;
 }
 
+/** A fresh Generate would throw away a finished document (and its refinements) that was never saved. */
+export function replacesUnsavedDocument(s: RunState): boolean {
+  return s.phase === "done" && s.dirty && s.doc.trim() !== "";
+}
+
 export const INITIAL_RUN: RunState = Object.freeze({
   phase: "idle",
   progress: null,

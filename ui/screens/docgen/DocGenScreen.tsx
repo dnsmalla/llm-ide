@@ -10,7 +10,7 @@ import { ResultPanel } from "./ResultPanel";
 import type { MermaidRuntimeApi } from "./mermaid/renderer.ts";
 import type { DocCommand, DocTemplate, FitReport } from "./model.ts";
 import type { Failure } from "./errors.ts";
-import type { RunState } from "./run.ts";
+import { replacesUnsavedDocument, type RunState } from "./run.ts";
 import { SourcePanel, type SourceEnv } from "./SourcePanel";
 import { checklistSteps } from "./checklist.ts";
 import { MAX_COMMAND, MAX_PROMPT, formatBytes } from "./model.ts";
@@ -306,12 +306,21 @@ const OUTPUT_DESTINATIONS: readonly { id: string; label: string; available: bool
 
 function PromptBar(p: { surface: "doc" | "visual"; prompt: string; sourceCount: number; hasShape: boolean; missing: string | null; fit: FitReport | null; run: RunState; useChat: boolean; chatReply: string | null; chatSaved: { reply: string; path: string } | null; chatSaveError: Failure | null; onSaveChat: () => void; onPrompt: (text: string) => void; onGenerate: () => void; onCancel: () => void }): ReactNode {
   const busy = p.run.phase === "reading" || p.run.phase === "generating";
+  // Generate replaces the result. An unsaved document cost model calls to make, so it asks once before it goes.
+  const replaces = replacesUnsavedDocument(p.run);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  useEffect(() => { if (!replaces) setConfirmReplace(false); }, [replaces]);
+  const generate = () => {
+    if (replaces && !confirmReplace) { setConfirmReplace(true); return; }
+    setConfirmReplace(false);
+    p.onGenerate();
+  };
   // Mac's "Save chat output" row (Use chat only): the chat's latest reply goes to its own file, never into the document.
   const chatSavedNow = p.chatReply !== null && p.chatSaved !== null && p.chatSaved.reply === p.chatReply;
   return (
     <section className="dg-prompt" aria-label="Prompt">
       <label className="dg-field"><span className="dg-sr">Prompt</span><textarea rows={2} value={p.prompt} maxLength={MAX_PROMPT} placeholder="Add a short prompt (optional)" onChange={(e) => p.onPrompt(e.target.value)} /></label>
-      <div className="dg-prompt-actions"><span className="dg-muted">{p.missing ?? `${p.sourceCount} source${p.sourceCount === 1 ? "" : "s"}${p.fit ? ` · ${p.fit.tokens.toLocaleString("en")} tokens` : ""}`}</span>{busy ? <button type="button" className="dg-btn" onClick={p.onCancel}>Cancel</button> : <button type="button" className="dg-btn dg-primary" disabled={p.missing !== null} aria-describedby={p.missing ? "dg-prompt-missing" : undefined} onClick={p.onGenerate}>Generate</button>}</div>{p.missing ? <p id="dg-prompt-missing" className="dg-muted">{p.missing}</p> : null}
+      <div className="dg-prompt-actions"><span className="dg-muted">{p.missing ?? `${p.sourceCount} source${p.sourceCount === 1 ? "" : "s"}${p.fit ? ` · ${p.fit.tokens.toLocaleString("en")} tokens` : ""}`}</span>{busy ? <button type="button" className="dg-btn" onClick={p.onCancel}>Cancel</button> : confirmReplace ? <><button type="button" className="dg-btn" onClick={() => setConfirmReplace(false)}>Keep document</button><button type="button" className="dg-btn dg-primary" disabled={p.missing !== null} onClick={generate}>Replace it</button></> : <button type="button" className="dg-btn dg-primary" disabled={p.missing !== null} aria-describedby={p.missing ? "dg-prompt-missing" : undefined} onClick={generate}>Generate</button>}</div>{confirmReplace ? <p className="dg-muted" role="alert">The current document is not saved. Generating again replaces it.</p> : null}{p.missing ? <p id="dg-prompt-missing" className="dg-muted">{p.missing}</p> : null}
       {p.useChat ? (
         <div className="dg-chat-save">
           <button type="button" className="dg-btn" disabled={p.chatReply === null || chatSavedNow} title={p.chatReply === null ? "No finished assistant reply yet. Send a message in the chat first." : chatSavedNow ? "Already saved this reply. Send another message to save again." : "Save the chat's latest reply to the output folder (does not change the document)."} onClick={p.onSaveChat}>

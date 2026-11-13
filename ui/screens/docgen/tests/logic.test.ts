@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { buildGenerateBody, estimateFit, fitNotice, formatBytes, MAX_BODY_CHARS, MAX_COMMAND, MAX_PROMPT, MAX_SOURCE_CONTENT, MAX_TOTAL_SOURCE_CHARS, validateDocRequest, type DocTemplate } from "../model.ts";
 import { candidateName, documentStem, slugify } from "../naming.ts";
 import { describeFailure, isCancel } from "../errors.ts";
+import { INITIAL_RUN, replacesUnsavedDocument } from "../run.ts";
 import { folderForName, projectIdFor, PROJECT_ID_RE } from "../docs-api.ts";
 import { budget } from "../../test-support/perf.ts";
 
@@ -120,4 +121,20 @@ test("project ids are stable, valid and root-specific; folder names are safe", a
   assert.equal(formatBytes(0), "0 B");
   assert.equal(formatBytes(1536), "1.5 KB");
   assert.equal(formatBytes(50 * 1024 * 1024), "50 MB");
+});
+
+test("Generate asks first only when it would replace a finished document that was never saved", () => {
+  const done = { ...INITIAL_RUN, phase: "done" as const, doc: "# Notes", dirty: true };
+  assert.equal(replacesUnsavedDocument(done), true);
+  assert.equal(replacesUnsavedDocument({ ...done, dirty: false }), false, "a saved document is safe to replace");
+  assert.equal(replacesUnsavedDocument({ ...done, doc: "  " }), false, "nothing to lose");
+  assert.equal(replacesUnsavedDocument(INITIAL_RUN), false);
+  assert.equal(replacesUnsavedDocument({ ...done, phase: "error" as const }), false);
+});
+
+test("the prompt bar routes Generate through the replace check", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../DocGenScreen.tsx", import.meta.url), "utf8");
+  assert.match(src, /if \(replaces && !confirmReplace\) \{ setConfirmReplace\(true\); return; \}/);
+  assert.doesNotMatch(src, /onClick=\{p\.onGenerate\}/, "no button calls onGenerate without the check");
 });
