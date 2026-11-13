@@ -182,8 +182,10 @@ export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind"
   const skill = stage && stage.kind === "skill" ? stage.skillId : null;
   if (!isFactoryLoop(loop)) {
     if (skill === null || !(TEST_WRITING_SKILLS.has(skill) || REFACTOR_MOVE_SKILLS.has(skill))) return [...paths];
-    // Only a NEW file named like a test is exempt: a new conftest.py or helper in tests/ can skip every test.
-    const kept = REFACTOR_MOVE_SKILLS.has(skill) ? new Set(importOnly.filter((p) => isTestFileName(p))) : new Set<string>();
+    // A test writer may edit test-named files (test_*.py, *.spec.ts, …). A conftest.py, helper or build file in
+    // tests/ is not a test file and stays protected. A refactor move keeps only its explicit import-only tests.
+    if (!REFACTOR_MOVE_SKILLS.has(skill)) return paths.filter((p) => !isTestFileName(p));
+    const kept = new Set(importOnly.filter((p) => isTestFileName(p)));
     return paths.filter((p) => !(created.includes(p) && isTestFileName(p)) && !kept.has(p));
   }
   if (skill !== null && TEST_WRITING_SKILLS.has(skill)) {
