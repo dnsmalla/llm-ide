@@ -126,6 +126,9 @@ export function dictationMode(webSpeech: boolean, host: boolean, mac: boolean): 
   return host && mac ? "system" : webSpeech ? "web" : null;
 }
 
+/** How long the mic stays shown as listening for macOS Dictation without new text (the app cannot see it end). */
+export const SYSTEM_DICTATION_IDLE_MS = 30_000;
+
 export const dictationEnabled = (active: boolean, voice: unknown): boolean => active && voice !== null && voice !== undefined;
 
 /** Window-level shortcut: skip events the focused composer already handled (it calls preventDefault). */
@@ -169,12 +172,50 @@ export function Composer(p: ComposerProps) {
   const form = useRef<HTMLFormElement | null>(null);
   const [dictError, setDictError] = useState<string | null>(null);
   const mode = dictationMode(voice !== null, isHostAvailable(), isMacPlatform());
-  const startSystemDictation = () => {
-    form.current?.querySelector("textarea")?.focus();
-    setDictError(null);
-    invokeHost<void>("start_system_dictation").catch((e: unknown) => setDictError(`${typeof e === "string" ? e : "Dictation could not start."} Check System Settings → Keyboard → Dictation.`));
+  // The mic toggles macOS Dictation: a second press stops it (a second start is skipped by macOS as an "ongoing
+  // request" and the session ends with nothing typed). `listening` drives the same pressed look as web speech.
+  // The host waits up to ~0.5 s for the box's input context before it starts Dictation: a stop pressed in that window
+  // must follow the pending start, or the start would fire after it and leave Dictation running with the button off.
+  const systemStart = useRef<Promise<unknown> | null>(null);
+  const stopSystemDictation = () => {
+    const stop = () => invokeHost<void>("stop_system_dictation").catch((e: unknown) => setDictError(typeof e === "string" ? e : "Dictation could not stop."));
+    void (systemStart.current ? systemStart.current.then(stop, stop) : stop());
   };
-  const dictate = mode === "system" ? startSystemDictation : mode === "web" ? toggleVoice : null;
+  const toggleSystemDictation = () => {
+    setDictError(null);
+    if (listening) {
+      setListening(false);
+      stopSystemDictation();
+      return;
+    }
+    form.current?.querySelector("textarea")?.focus();
+    setListening(true);
+    const started = invokeHost<void>("start_system_dictation").catch((e: unknown) => {
+      setListening(false);
+      setDictError(`${typeof e === "string" ? e : "Dictation could not start."} Check System Settings → Keyboard → Dictation.`);
+    }).finally(() => { if (systemStart.current === started) systemStart.current = null; });
+    systemStart.current = started;
+  };
+  // macOS can end Dictation on its own (Esc, focus leaving the box, silence) without telling the app: clear the
+  // pressed look then, or after SYSTEM_DICTATION_IDLE_MS with no new text, so the next press starts again.
+  useEffect(() => {
+    if (mode !== "system" || !listening) return undefined;
+    const box = form.current?.querySelector("textarea");
+    const off = () => setListening(false);
+    // An Esc that only cancels an input-method conversion leaves Dictation running.
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape" && !e.isComposing) off(); };
+    box?.addEventListener("blur", off);
+    box?.addEventListener("keydown", onKey);
+    const idle = setTimeout(off, SYSTEM_DICTATION_IDLE_MS);
+    return () => { box?.removeEventListener("blur", off); box?.removeEventListener("keydown", onKey); clearTimeout(idle); };
+  }, [mode, listening, p.draft]);
+  // Leaving the chat (section switch, closed dock) while macOS Dictation runs stops it: its target box is gone.
+  const listeningRef = useRef(false);
+  listeningRef.current = mode === "system" && listening;
+  const stopOnUnmount = useRef(stopSystemDictation);
+  stopOnUnmount.current = stopSystemDictation;
+  useEffect(() => () => { if (listeningRef.current) stopOnUnmount.current(); }, []);
+  const dictate = mode === "system" ? toggleSystemDictation : mode === "web" ? toggleVoice : null;
   toggleRef.current = dictate ?? toggleVoice;
   useEffect(() => {
     if (!dictationEnabled(p.active === true, dictate)) return undefined;

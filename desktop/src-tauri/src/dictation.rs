@@ -24,6 +24,32 @@ pub async fn start_system_dictation(app: tauri::AppHandle) -> Result<(), String>
     }
 }
 
+/// Stops macOS Dictation (`stopDictation:`, the second press of the composer's mic). The system finishes the session
+/// and inserts what it heard. A second `startDictation:` would not stop it: macOS skips it as an "ongoing request".
+#[tauri::command]
+pub fn stop_system_dictation(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        app.run_on_main_thread(|| {
+            let Some(mtm) = objc2::MainThreadMarker::new() else {
+                return;
+            };
+            let ns_app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+            let nil: *mut objc2::runtime::AnyObject = std::ptr::null_mut();
+            // SAFETY: NSApplication implements stopDictation:; sent on the main thread with nil target and sender.
+            let _sent: objc2::runtime::Bool = unsafe {
+                objc2::msg_send![&*ns_app, sendAction: objc2::sel!(stopDictation:), to: nil, from: nil]
+            };
+        })
+        .map_err(|e| format!("Dictation could not stop: {e}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err("System dictation is only available on macOS.".into())
+    }
+}
+
 #[cfg(target_os = "macos")]
 const READY_ATTEMPTS: u32 = 10;
 #[cfg(target_os = "macos")]

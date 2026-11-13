@@ -303,6 +303,7 @@ macro_rules! product_handlers {
                 capture_host::capture_status,
                 capture_host::capture_request_permission,
                 dictation::start_system_dictation,
+                dictation::stop_system_dictation,
                 capture_host::capture_open_settings,
                 capture_host::capture_start,
                 capture_host::capture_stop,
