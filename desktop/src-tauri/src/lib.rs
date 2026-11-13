@@ -65,6 +65,8 @@ mod source_pick;
 #[cfg(feature = "spike")]
 mod sse_replay;
 mod trash_guard;
+#[cfg(not(windows))]
+mod user_path;
 mod updater;
 mod notify;
 mod tray;

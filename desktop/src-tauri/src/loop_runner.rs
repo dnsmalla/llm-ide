@@ -538,10 +538,29 @@ fn run_command_keyed(work: &Path, command: &str, timeout_secs: Option<u64>, key:
 
 /// The shell a saved stage command runs in: `/bin/sh -lc`, like the Mac app's Loop. Windows has no `/bin/sh`, so
 /// there it is the system `cmd.exe /D /S /C` (`/D` skips AutoRun hooks; `/S` takes the quoted command verbatim).
+/// Unix: a Finder/Dock launch gives the app a minimal PATH, and `-l` reads only /etc/profile and ~/.profile, so tools
+/// from ~/.zshrc (conda, pyenv, nvm, Homebrew) are missing. When the user's login-shell PATH can be read it is used
+/// with `-c`, not `-lc`: on macOS a login `sh` runs `path_helper`, which puts /usr/bin back first and so picks Xcode's
+/// `python3` over the user's. That PATH already holds what the login shell sets up. Otherwise `-lc` as before.
 #[cfg(not(windows))]
 fn stage_shell(command: &str) -> Command {
+    stage_shell_with(command, crate::user_path::user_shell_env())
+}
+
+#[cfg(not(windows))]
+fn stage_shell_with(command: &str, user_env: Option<crate::user_path::UserShellEnv>) -> Command {
     let mut c = Command::new("/bin/sh");
-    c.arg("-lc").arg(command);
+    match user_env {
+        Some(env) => {
+            c.arg("-c").arg(command).env("PATH", env.path);
+            for (k, v) in env.vars {
+                c.env(k, v);
+            }
+        }
+        None => {
+            c.arg("-lc").arg(command);
+        }
+    }
     c
 }
 
@@ -973,6 +992,25 @@ pub async fn loop_run_fault_verify(rel: String, approval_token: Option<String>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The user's PATH must win: a login `sh` on macOS would put /usr/bin first again (path_helper).
+    #[cfg(not(windows))]
+    #[test]
+    fn a_stage_uses_the_users_path_first_and_falls_back_to_a_login_shell() {
+        let dir = std::env::temp_dir().join(format!("llmide-userpath-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let tool = dir.join("llmide-probe-tool");
+        std::fs::write(&tool, "#!/bin/sh\necho from-user-path\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:/usr/bin:/bin", dir.display());
+        let env = crate::user_path::UserShellEnv { path, vars: vec![("JAVA_HOME".into(), "/probe/jdk".into())] };
+        let out = stage_shell_with("llmide-probe-tool; printf '%s' \"$JAVA_HOME\"", Some(env)).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "from-user-path\n/probe/jdk", "the user's tool and tool variables");
+        let args: Vec<String> = stage_shell_with("x", None).get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, ["-lc", "x"], "no user PATH: the login shell as before");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// A stage command for the host's stage shell: `printf` under `/bin/sh`, `echo` under `cmd.exe` (whose output
     /// then ends in CRLF, so tests compare `trim_end`).
