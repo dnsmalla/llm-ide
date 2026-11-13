@@ -252,13 +252,17 @@ pub struct Launch {
 }
 
 pub struct LaunchCtx<'a> {
+    /// The preferences this core run is started with (see `CoreHost::run_prefs`).
+    pub prefs: &'a crate::prefs::Prefs,
     pub port: u16,
     pub nonce: &'a str,
     pub data_dir: &'a Path,
 }
 
 pub type Launcher = Arc<dyn for<'a> Fn(&LaunchCtx<'a>) -> Result<Launch, String> + Send + Sync>;
-pub type ClaudeProbe = Arc<dyn Fn(&Path) -> ClaudeInfo + Send + Sync>;
+pub type ClaudeProbe = Arc<dyn Fn(&Path, &crate::prefs::Prefs) -> ClaudeInfo + Send + Sync>;
+/// Where a user-initiated start reads the CURRENT stored preferences (tests inject their own).
+pub type PrefsSource = Arc<dyn Fn() -> crate::prefs::Prefs + Send + Sync>;
 
 struct Inner {
     status: Mutex<Status>,
@@ -281,6 +285,10 @@ struct Inner {
     /// and the `Starting` write must be one step: otherwise two quick starts both pass the guard and run two
     /// supervisors, i.e. two cores on one SQLite DB.
     lifecycle: Mutex<()>,
+    /// Preferences the current core run was started with. `None` until a user Start/Restart: the launch
+    /// snapshot applies then. The supervisor's own crash restarts reuse it, so nothing changes by itself.
+    run_prefs: Mutex<Option<crate::prefs::Prefs>>,
+    prefs_source: PrefsSource,
 }
 
 struct Status {
@@ -374,8 +382,25 @@ impl CoreHost {
                 mode: std::sync::atomic::AtomicU8::new(0),
                 remote_proxy: Mutex::new(None),
                 lifecycle: Mutex::new(()),
+                run_prefs: Mutex::new(None),
+                prefs_source: Arc::new(crate::prefs::stored),
             }),
         }
+    }
+
+    /// Where a user-initiated start reads the stored preferences. Tests only; production uses `prefs::stored`.
+    #[cfg(test)]
+    fn with_prefs_source(mut self, source: PrefsSource) -> Self {
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner.prefs_source = source;
+        }
+        self
+    }
+
+    /// The preferences this core run uses: what the last user Start/Restart read, else the launch snapshot.
+    /// Automatic crash restarts never re-read the file, so a stored change applies only on a user's next start.
+    fn run_prefs(&self) -> crate::prefs::Prefs {
+        lock(&self.inner.run_prefs).clone().unwrap_or_else(crate::prefs::launch)
     }
 
     /// The URL of the core this app SPAWNED and verified, right now: `Some` only while the phase is
@@ -528,6 +553,7 @@ impl CoreHost {
             let s = lock(&self.inner.status);
             if matches!(s.state, Phase::Starting | Phase::Remote) { return Ok(()); }
             drop(s);
+            *lock(&self.inner.run_prefs) = Some((self.inner.prefs_source)());
             self.start_in_background(lock(&self.inner.data_dir).clone());
             return Ok(());
         }
@@ -541,6 +567,9 @@ impl CoreHost {
         if let Some(handle) = lock(&self.inner.startup).take() {
             let _ = handle.join();
         }
+        // A user asked for this start, so it is the point where Settings changes ("Restart the core to apply")
+        // are picked up.
+        *lock(&self.inner.run_prefs) = Some((self.inner.prefs_source)());
         {
             let mut s = lock(&self.inner.status);
             s.closing = false;
@@ -567,7 +596,7 @@ impl CoreHost {
         let started = Instant::now();
         let t = &self.inner.tuning;
         if self.mode() == ServerMode::Remote {
-            let cfg = crate::prefs::launch().remote_server;
+            let cfg = self.run_prefs().remote_server;
             let result = if cfg.hub_url.trim().is_empty() {
                 Err(crate::fs_ops::FsError { code: "REMOTE_NOT_CONFIGURED", message: "connect to a hub URL before switching to remote mode".into() })
             } else {
@@ -721,7 +750,7 @@ impl CoreHost {
             }
         };
         lock(&self.inner.literals).push(nonce.clone());
-        let prefs_now = crate::prefs::launch();
+        let prefs_now = self.run_prefs();
         let ports = if prefs_now.backend_source && prefs_now.backend_port > 0 {
             vec![prefs_now.backend_port]
         } else {
@@ -900,7 +929,7 @@ impl CoreHost {
         };
         let host = self.clone();
         thread::spawn(move || {
-            let info = (host.inner.claude_probe)(&data_dir);
+            let info = (host.inner.claude_probe)(&data_dir, &host.run_prefs());
             lock(&host.inner.status).claude = info;
             host.inner.claude_in_flight.store(false, Ordering::SeqCst);
         });
@@ -924,7 +953,8 @@ impl CoreHost {
     }
 
     fn spawn_server(&self, port: u16, nonce: &str, data_dir: &Path) -> Result<u32, String> {
-        let launch = (self.inner.launcher)(&LaunchCtx { port, nonce, data_dir })?;
+        let prefs = self.run_prefs();
+        let launch = (self.inner.launcher)(&LaunchCtx { prefs: &prefs, port, nonce, data_dir })?;
         lock(&self.inner.literals).extend(launch.secrets);
         let mut cmd = launch.cmd;
         let secrets_line = launch.stdin_secrets;
@@ -1303,7 +1333,7 @@ fn wire_secrets(cmd: &mut Command, jwt: &str, vault: &str, approval: &str) -> St
 /// The spawn used in production: the bundled (or repo) node running `server.mjs` with a
 /// scrubbed environment, the two secrets, and the data dir. Fails closed without secrets.
 fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
-    let p = crate::prefs::launch();
+    let p = ctx.prefs.clone();
     let rt = runtime_for(&p)?;
     eprintln!("core: runtime={} node={} root={} port={}", rt.mode, rt.node.display(), rt.root.display(), ctx.port);
     let db_dir = fsutil::private_dir(&ctx.data_dir.join("core"))?;
@@ -1458,9 +1488,8 @@ process.stdout.write('\\nLLMIDE_CLAUDE_PROBE ' + JSON.stringify({ found: Boolean
 
 /// Runs the server's own `claude-path.mjs` under the core's node and environment, so the
 /// answer is exactly what the engine will find. Any failure is `unknown`, never `missing`.
-fn real_claude_probe(data_dir: &Path) -> ClaudeInfo {
-    let prefs = crate::prefs::launch();
-    let Ok(rt) = runtime_for(&prefs) else { return ClaudeInfo::unknown() };
+fn real_claude_probe(data_dir: &Path, prefs: &crate::prefs::Prefs) -> ClaudeInfo {
+    let Ok(rt) = runtime_for(prefs) else { return ClaudeInfo::unknown() };
     let Ok(db_dir) = fsutil::private_dir(&data_dir.join("core")) else { return ClaudeInfo::unknown() };
     let mut cmd = core_command(&rt, &db_dir);
     cmd.args(["--input-type=module", "-e", CLAUDE_PROBE_JS])
@@ -1895,7 +1924,7 @@ process.on('SIGTERM', () => process.exit(0));
                     .env("PATH", std::env::var_os("PATH").unwrap_or_default());
                 Ok(Launch { cmd, secrets: vec![], stdin_secrets: None })
             });
-            let probe: ClaudeProbe = Arc::new(|_| ClaudeInfo {
+            let probe: ClaudeProbe = Arc::new(|_, _| ClaudeInfo {
                 state: "missing",
                 source: None,
                 notice: Some("install claude".into()),
@@ -1948,7 +1977,7 @@ process.on('SIGTERM', () => process.exit(0));
     }
 
     fn no_claude() -> ClaudeProbe {
-        Arc::new(|_| ClaudeInfo::unknown())
+        Arc::new(|_, _| ClaudeInfo::unknown())
     }
 
     #[test]
@@ -2029,6 +2058,42 @@ process.on('SIGTERM', () => process.exit(0));
         thread::sleep(Duration::from_millis(300));
         assert_eq!(launches.load(std::sync::atomic::Ordering::SeqCst), 1, "two supervisors ran");
         release.store(true, std::sync::atomic::Ordering::SeqCst);
+        host.stop().unwrap();
+    }
+
+    #[test]
+    fn a_user_start_reads_the_stored_prefs_but_a_running_core_keeps_its_own() {
+        let stored_port = Arc::new(std::sync::atomic::AtomicU16::new(41001));
+        let seen: Arc<Mutex<Vec<u16>>> = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&seen);
+        let launcher: Launcher = Arc::new(move |ctx: &LaunchCtx<'_>| {
+            lock(&log).push(ctx.prefs.backend_port);
+            Err("test launcher".into())
+        });
+        let source = Arc::clone(&stored_port);
+        let host = CoreHost::with(tuning_fast(vec![41555]), launcher, no_claude()).with_prefs_source(Arc::new(
+            move || crate::prefs::Prefs { backend_port: source.load(Ordering::SeqCst), ..Default::default() },
+        ));
+        host.mark_stopped(Some(std::env::temp_dir()));
+        assert_eq!(host.run_prefs(), crate::prefs::launch(), "before any user start the launch snapshot applies");
+
+        host.start().unwrap();
+        let end = Instant::now() + Duration::from_secs(5);
+        while lock(&seen).is_empty() && Instant::now() < end {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(lock(&seen).clone(), vec![41001]);
+
+        // A Settings change after the start must not leak into anything the supervisor does by itself.
+        stored_port.store(41002, Ordering::SeqCst);
+        assert_eq!(host.run_prefs().backend_port, 41001);
+
+        host.restart().unwrap();
+        let end = Instant::now() + Duration::from_secs(5);
+        while lock(&seen).len() < 2 && Instant::now() < end {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(lock(&seen).clone(), vec![41001, 41002], "Kill & Restart picks up the changed prefs");
         host.stop().unwrap();
     }
 
@@ -2159,7 +2224,7 @@ process.on('SIGTERM', () => process.exit(0));
         let host = CoreHost::with(
             tuning_fast(vec![free_ports(1)[0]]),
             Arc::new(move |_| { n.fetch_add(1, Ordering::SeqCst); Err("must not spawn".into()) }),
-            Arc::new(|_| ClaudeInfo::unknown()),
+            Arc::new(|_, _| ClaudeInfo::unknown()),
         );
         host.set_mode(ServerMode::Remote);
         host.start_in_background(Some(std::env::temp_dir()));
