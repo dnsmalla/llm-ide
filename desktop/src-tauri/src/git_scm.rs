@@ -289,6 +289,9 @@ pub struct DiscardResult {
 enum Plan {
     Restore(String),
     Trash(String),
+    /// One untracked file of an untracked FOLDER that also holds ignored files (`.env`, build caches): only the
+    /// file moves, so the ignored ones stay. The second field is the folder it was planned from.
+    TrashIn(String, String),
 }
 
 /// Classifies each requested path from a fresh status. Nothing is touched here.
@@ -320,7 +323,11 @@ fn plan_discard(root: &Path, paths: &[String]) -> R<Vec<Plan>> {
                 if let Some(why) = keep_reason(root, &rel).filter(|w| *w != "missing") {
                     return gerr("kept", format!("{rel} is {why}; it is left in place"));
                 }
-                plan.push(Plan::Trash(rel))
+                if folder_holds_ignored(root, &rel)? {
+                    plan_folder_files(root, &rel, &mut plan)?;
+                } else {
+                    plan.push(Plan::Trash(rel))
+                }
             }
             _ if e.worktree == '.' => return gerr("nothing_to_discard", format!("{rel} has only staged changes; unstage it instead")),
             _ => plan.push(Plan::Restore(rel)),
@@ -329,13 +336,76 @@ fn plan_discard(root: &Path, paths: &[String]) -> R<Vec<Plan>> {
     Ok(plan)
 }
 
+/// True when the untracked folder `rel` holds ignored files or folders. Moving the folder would take them along
+/// (`.env`, keys, build caches), which `discard_all` deliberately never does. Output is collapsed (`--directory`)
+/// and capped; a truncated listing counts as "yes", the safe side.
+fn folder_holds_ignored(root: &Path, rel: &str) -> R<bool> {
+    if !root.join(rel).is_dir() {
+        return Ok(false);
+    }
+    let out = run_git(root, &["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--", rel], 64 * 1024)?;
+    Ok(out.truncated || !out.stdout.is_empty())
+}
+
+/// Plans an untracked folder file by file (what `discard_all` does with `ls-files --others --exclude-standard`),
+/// so ignored files stay in place. A nested repository (`sub/` in the listing) refuses the whole discard.
+fn plan_folder_files(root: &Path, rel: &str, plan: &mut Vec<Plan>) -> R<()> {
+    let out = run_git(root, &["ls-files", "-z", "--others", "--exclude-standard", "--", rel], 8 * 1024 * 1024)?;
+    if out.truncated {
+        return gerr("too_many", format!("{rel} holds too many untracked files to list in one step. Nothing was changed."));
+    }
+    let files: Vec<String> = out.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect();
+    if files.iter().any(|f| f.ends_with('/')) {
+        return gerr("nested_repo", format!("{rel} contains a nested git repository; discard it inside that repository"));
+    }
+    if files.len() > MAX_TRASH_ENTRIES {
+        return gerr("too_many", format!("{rel} holds {} untracked files, more than the {MAX_TRASH_ENTRIES} allowed in one step. Nothing was changed.", files.len()));
+    }
+    for f in files {
+        if f.chars().any(char::is_control) || rel_arg(&f).is_err() {
+            return gerr("kept", format!("{} has a name that cannot be moved to the trash safely; {rel} is left in place", line(&f, 80)));
+        }
+        match keep_reason(root, &f) {
+            None => plan.push(Plan::TrashIn(f, rel.to_string())),
+            Some("missing") => {}
+            Some(why) => return gerr("kept", format!("{f} is {why}; {rel} is left in place")),
+        }
+    }
+    Ok(())
+}
+
+/// After a folder's files moved: removes the folders that are now EMPTY, deepest first, up to and including
+/// `within`. `remove_dir` refuses a non-empty folder, so ignored files keep their folders.
+fn remove_emptied_dirs(root: &Path, files: &[&str], within: &str) {
+    let mut dirs: Vec<PathBuf> = files
+        .iter()
+        .filter_map(|f| Path::new(f).parent().map(|p| root.join(p)))
+        .filter(|p| p.starts_with(root.join(within)))
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    for d in dirs {
+        let mut cur = d;
+        while cur.starts_with(root.join(within)) {
+            if std::fs::remove_dir(&cur).is_err() {
+                break;
+            }
+            match cur.parent() {
+                Some(p) => cur = p.to_path_buf(),
+                None => break,
+            }
+        }
+    }
+}
+
 fn discard_prompt(plan: &[Plan]) -> String {
     let mut s = String::new();
     let (mut r, mut t) = (0, 0);
     for p in plan {
         match p {
             Plan::Restore(_) => r += 1,
-            Plan::Trash(_) => t += 1,
+            Plan::Trash(_) | Plan::TrashIn(..) => t += 1,
         }
     }
     if r > 0 {
@@ -346,7 +416,7 @@ fn discard_prompt(plan: &[Plan]) -> String {
     }
     s.push('\n');
     for p in plan.iter().take(12) {
-        let (Plan::Restore(n) | Plan::Trash(n)) = p;
+        let (Plan::Restore(n) | Plan::Trash(n) | Plan::TrashIn(n, _)) = p;
         s.push_str(&format!("  {}\n", line(n, 80)));
     }
     if plan.len() > 12 {
@@ -355,13 +425,15 @@ fn discard_prompt(plan: &[Plan]) -> String {
     s
 }
 
-/// What a path looks like right now: file = SHA-256 of its content (size+mtime past 64 MB), folder = a bounded
+/// What a path looks like right now: file = SHA-256 of its content (size+mtime past 4 MB), folder = a bounded
 /// digest of its entries' names, kinds, sizes and mtimes, symlink = its target. Taken before the confirm
 /// dialog and compared after it, so a file edited while the dialog was open is never discarded.
 fn fingerprint(root: &Path, rel: &str) -> String {
     use sha2::{Digest, Sha256};
     use std::time::UNIX_EPOCH;
-    const FILE_HASH_MAX: u64 = 64 * 1024 * 1024;
+    // Past a few MB a file is identified by size + mtime: reading up to 20k entries twice (before and after the
+    // dialog) at 64 MB each could stall the confirm for minutes.
+    const FILE_HASH_MAX: u64 = 4 * 1024 * 1024;
     const DIR_ENTRIES_MAX: usize = 20_000;
     let mtime = |m: &std::fs::Metadata| m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
     let mut h = Sha256::new();
@@ -408,7 +480,7 @@ fn fingerprint(root: &Path, rel: &str) -> String {
 
 fn fingerprints(root: &Path, plan: &[Plan]) -> Vec<String> {
     plan.iter().map(|p| fingerprint(root, match p {
-        Plan::Restore(n) | Plan::Trash(n) => n,
+        Plan::Restore(n) | Plan::Trash(n) | Plan::TrashIn(n, _) => n,
     })).collect()
 }
 
@@ -438,11 +510,27 @@ pub fn discard_with(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> boo
         run_git(root, &args, 64 * 1024)?;
         res.restored = restore.len() as u32;
     }
+    let mut moved_in: Vec<(&str, &str)> = Vec::new();
     for p in &plan {
-        if let Plan::Trash(n) = p {
-            crate::fs_ops::delete_with(root, n, trasher)?;
-            res.trashed += 1;
+        match p {
+            Plan::Trash(n) => {
+                crate::fs_ops::delete_with(root, n, trasher)?;
+                res.trashed += 1;
+            }
+            Plan::TrashIn(n, within) => {
+                crate::fs_ops::delete_with(root, n, trasher)?;
+                res.trashed += 1;
+                moved_in.push((n.as_str(), within.as_str()));
+            }
+            Plan::Restore(_) => {}
         }
+    }
+    let mut folders: Vec<&str> = moved_in.iter().map(|(_, w)| *w).collect();
+    folders.sort();
+    folders.dedup();
+    for folder in folders {
+        let files: Vec<&str> = moved_in.iter().filter(|(_, w)| *w == folder).map(|(f, _)| *f).collect();
+        remove_emptied_dirs(root, &files, folder);
     }
     Ok(res)
 }
@@ -1483,10 +1571,23 @@ fn keep_reason(root: &Path, rel: &str) -> Option<&'static str> {
     None
 }
 
+/// Folders `has_nested_repo` visits before giving up.
+const NESTED_WALK_MAX: usize = 20_000;
+
 /// True when `dir` or any folder under it holds a `.git` (ignored folders included). Symlinks are not followed.
+/// Hitting the walk cap also answers true: "could not rule it out" must refuse, never pass.
 fn has_nested_repo(dir: &Path) -> bool {
+    has_nested_repo_capped(dir, NESTED_WALK_MAX)
+}
+
+fn has_nested_repo_capped(dir: &Path, max_dirs: usize) -> bool {
     let mut stack = vec![dir.to_path_buf()];
+    let mut visited = 0usize;
     while let Some(d) = stack.pop() {
+        visited += 1;
+        if visited > max_dirs {
+            return true;
+        }
         if d.join(".git").exists() {
             return true;
         }
@@ -2153,6 +2254,77 @@ mod tests {
         let res = discard_with(&r, &["outer/".into()], &yes, &crate::trash_guard::tests::FakeTrash::into(&trash));
         assert_eq!(code(res), "nested_repo");
         assert!(r.join("outer/f.txt").exists() && r.join("outer/inner/deep/.git").exists(), "nothing moved");
+    }
+
+    #[test]
+    fn discarding_an_untracked_folder_leaves_its_ignored_files_in_place() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("discard-ignored");
+        fs::write(r.join(".gitignore"), "*.env\ncache/\n").unwrap();
+        fs::write(r.join("a.txt"), "x\n").unwrap();
+        g(&r, &["add", "."]);
+        g(&r, &["commit", "-q", "-m", "i"]);
+        fs::create_dir_all(r.join("proj/sub")).unwrap();
+        fs::create_dir_all(r.join("proj/cache")).unwrap();
+        fs::write(r.join("proj/code.rs"), "c\n").unwrap();
+        fs::write(r.join("proj/sub/lib.rs"), "l\n").unwrap();
+        fs::write(r.join("proj/secret.env"), "KEY=1\n").unwrap();
+        fs::write(r.join("proj/cache/blob"), "b\n").unwrap();
+        let trash = scratch("discard-ignored-trash");
+        let res = discard_with(&r, &["proj/".into()], &yes, &crate::trash_guard::tests::FakeTrash::into(&trash)).unwrap();
+        assert_eq!(res.trashed, 2, "only the two untracked, non-ignored files move");
+        assert!(r.join("proj/secret.env").exists() && r.join("proj/cache/blob").exists(), "ignored files stay");
+        assert!(!r.join("proj/code.rs").exists() && !r.join("proj/sub/lib.rs").exists());
+        assert!(!r.join("proj/sub").exists(), "a folder that became empty is removed");
+        assert!(r.join("proj").is_dir(), "a folder that still holds ignored files stays");
+    }
+
+    #[test]
+    fn a_folder_without_ignored_files_is_still_moved_whole_and_fully_removed() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("discard-plain-folder");
+        fs::write(r.join("a.txt"), "x\n").unwrap();
+        g(&r, &["add", "."]);
+        g(&r, &["commit", "-q", "-m", "i"]);
+        fs::create_dir_all(r.join("plain/in")).unwrap();
+        fs::write(r.join("plain/in/f.txt"), "f\n").unwrap();
+        assert_eq!(plan_discard(&r, &["plain/".into()]).unwrap(), vec![Plan::Trash("plain".into())]);
+    }
+
+    #[test]
+    fn a_nested_repo_walk_that_hits_its_cap_refuses_instead_of_passing() {
+        let base = scratch("nested-cap");
+        for i in 0..6 {
+            fs::create_dir_all(base.join(format!("d{i}"))).unwrap();
+        }
+        assert!(!has_nested_repo_capped(&base, 100), "a small tree without a repo passes");
+        assert!(has_nested_repo_capped(&base, 3), "the cap is hit: refuse, never 'no nested repo'");
+        fs::create_dir_all(base.join("d2/.git")).unwrap();
+        assert!(has_nested_repo_capped(&base, 100));
+    }
+
+    #[test]
+    fn big_files_are_fingerprinted_by_size_and_mtime_not_content() {
+        let d = scratch("fp-big");
+        let big = d.join("big.bin");
+        let small = d.join("small.txt");
+        fs::write(&big, vec![1u8; 5 * 1024 * 1024]).unwrap();
+        fs::write(&small, "aaaa").unwrap();
+        let stamp = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let set_mtime = |p: &Path| fs::File::options().write(true).open(p).unwrap().set_modified(stamp).unwrap();
+        set_mtime(&big);
+        set_mtime(&small);
+        let (fb, fs_) = (fingerprint(&d, "big.bin"), fingerprint(&d, "small.txt"));
+        fs::write(&big, vec![2u8; 5 * 1024 * 1024]).unwrap();
+        fs::write(&small, "bbbb").unwrap();
+        set_mtime(&big);
+        set_mtime(&small);
+        assert_eq!(fingerprint(&d, "big.bin"), fb, "past 4 MB the content is not read");
+        assert_ne!(fingerprint(&d, "small.txt"), fs_, "a small file is still hashed by content");
     }
 
     #[test]
