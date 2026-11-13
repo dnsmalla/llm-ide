@@ -174,6 +174,12 @@ impl ChatService {
     pub fn quit_archive_default(&self) -> Option<ArchiveReport> {
         self.quit_archive(QUIT_CAP)
     }
+
+    /// Makes the quit run possible again. The updater runs it before an install that can still fail; without
+    /// this the rest of that session would never archive on quit.
+    pub fn rearm_quit_archive(&self) {
+        self.0.quit_started.store(false, Ordering::SeqCst);
+    }
 }
 
 // ---- command argument and result types -------------------------------------------------------
@@ -487,6 +493,14 @@ mod tests {
 
     fn layout(t: &Tmp) -> impl Fn(&str) -> Result<StoreLayout, String> + '_ {
         move |u| Ok(StoreLayout { base: t.0.join("chats").join(u), sessions: t.0.join("chats").join(u).join("sessions") })
+    }
+
+    #[test]
+    fn rearming_lets_the_quit_run_start_again() {
+        let svc = ChatService::new();
+        svc.0.quit_started.store(true, Ordering::SeqCst);
+        svc.rearm_quit_archive();
+        assert!(!svc.0.quit_started.load(Ordering::SeqCst));
     }
 
     #[test]

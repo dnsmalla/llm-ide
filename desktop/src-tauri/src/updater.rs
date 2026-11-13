@@ -157,16 +157,42 @@ pub async fn update_install(app: tauri::AppHandle, host: tauri::State<'_, crate:
         eprintln!("updater: download failed: {}", confirm::sanitize_line(&e.to_string(), 200));
         herr("download_failed", "The update could not be downloaded.")
     })?;
-    // Same order as a normal quit (the Windows installer exits the process without running the exit handler),
-    // then stop() so the state is Stopped, node.exe has exited, and a failure path can start() again.
-    crate::exit_cleanup(&app);
+    // Only what the install itself needs is stopped before it: the chat quit-archive (it needs the core up), the
+    // core (node.exe must not hold files the installer replaces) and the terminals. The full `exit_cleanup` also
+    // permanently refuses new Loop stages, so it runs only on the path that really restarts the app.
+    use tauri::Manager;
+    let was_running = core_was_running(host.status().state);
+    let chat = app.state::<crate::chat_cmds::ChatService>();
+    let _ = chat.quit_archive_default();
     let _ = host.stop();
+    crate::pty::kill_all();
+    // The Windows installer exits the process from inside `install()` without running the exit handler, so
+    // there is no later point for the full cleanup there.
+    #[cfg(windows)]
+    crate::exit_cleanup(&app);
     if let Err(e) = update.install(bytes) {
         eprintln!("updater: install failed: {}", confirm::sanitize_line(&e.to_string(), 200));
-        let _ = host.start();
+        restore_after_failed_install(was_running, || { let _ = host.start(); }, || chat.rearm_quit_archive());
         return Err(herr("install_failed", "The update could not be installed."));
     }
+    #[cfg(not(windows))]
+    crate::exit_cleanup(&app);
     app.restart();
+}
+
+/// Whether the user had a core running before the install stopped it. A core the user stopped on purpose must
+/// stay stopped when the install fails.
+fn core_was_running(phase: crate::core_host::Phase) -> bool {
+    use crate::core_host::Phase;
+    matches!(phase, Phase::Starting | Phase::Ready | Phase::Restarting | Phase::Remote)
+}
+
+/// Undoes exactly what the pre-install steps changed: the core only if it was running, the quit-archive always.
+fn restore_after_failed_install(was_running: bool, start_core: impl FnOnce(), rearm_quit_archive: impl FnOnce()) {
+    if was_running {
+        start_core();
+    }
+    rearm_quit_archive();
 }
 
 struct InstallGuard;
@@ -225,6 +251,19 @@ mod tests {
         assert_eq!(install_kind("linux", Some("/home/u/LLM-IDE.AppImage")), InstallKind::SelfUpdate);
         assert_eq!(install_kind("macos", None), InstallKind::SelfUpdate);
         assert_eq!(install_kind("windows", None), InstallKind::SelfUpdate);
+    }
+
+    #[test]
+    fn a_failed_install_restores_only_what_was_running() {
+        use crate::core_host::Phase;
+        assert!(core_was_running(Phase::Ready) && core_was_running(Phase::Restarting) && core_was_running(Phase::Remote));
+        assert!(!core_was_running(Phase::Stopped) && !core_was_running(Phase::Failed));
+        let (mut started, mut rearmed) = (false, false);
+        restore_after_failed_install(false, || started = true, || rearmed = true);
+        assert!(!started && rearmed, "a core the user stopped stays stopped; quit-archive is re-armed");
+        let (mut started, mut rearmed) = (false, false);
+        restore_after_failed_install(true, || started = true, || rearmed = true);
+        assert!(started && rearmed);
     }
 
     #[test]
