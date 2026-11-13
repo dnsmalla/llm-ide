@@ -76,6 +76,18 @@ async function checkApply(input: SkillResultInput): Promise<string | null> {
   return null;
 }
 
+/**
+ * The file paths on one plan `- Files:` value. A real planner writes notes beside them (`tax.py` (new), `a.py` (moved from
+ * b.py)), so parenthesised notes are dropped and only words that look like a path (a `.` or `/` in them) are kept.
+ */
+export function planFiles(value: string): string[] {
+  // Only a parenthesised note after a space is dropped, so a path segment like `app/(auth)/page.tsx` is kept.
+  return value.replace(/(^|\s)\([^)]*\)/g, " ").replace(/[`*]/g, "").split(/[\s,;]+/)
+    .map((w) => normal(w.replace(/[.:]+$/, ""))).filter((w) => w !== "" && w !== "none" && (/[./]/.test(w) || EXTENSIONLESS.test(w)));
+}
+/** Common files with no extension that a plan may list. */
+const EXTENSIONLESS = /^(Makefile|GNUmakefile|Dockerfile|Containerfile|Procfile|Gemfile|Rakefile|Podfile|Brewfile|Justfile|Vagrantfile|LICENSE|CODEOWNERS)$/;
+
 /** Every `- Files:` entry of every batch must be inside the input path. */
 function checkPlannerScope(plan: string, scope: string): string | null {
   let batch = "";
@@ -84,9 +96,7 @@ function checkPlannerScope(plan: string, scope: string): string | null {
     if (head) { batch = head[1]; continue; }
     const m = /^\s*-\s*Files:\s*(.*)$/.exec(l);
     if (!m || batch === "") continue;
-    for (const raw of m[1].replace(/`/g, "").split(/[\s,]+/)) {
-      const file = normal(raw);
-      if (file === "" || file === "none") continue;
+    for (const file of planFiles(m[1])) {
       if (!pathInside(scope, file)) return `batch ${batch} lists ${file}, which is outside the input path ${scope}`;
     }
   }

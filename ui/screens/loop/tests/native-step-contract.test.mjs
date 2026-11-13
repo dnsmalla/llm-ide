@@ -183,3 +183,18 @@ test("refactor-conform in a scoped Loop: an outside change that is more than an 
   assert.equal(await checkSkillResult({ ...conform, outside: [{ path: "src/other/x.py", importOnly: false }, { path: "tests/test_x.py", importOnly: true }] }), "Conform changed src/other/x.py, which is outside the input path src/billing and is more than an import update");
   assert.equal(await checkSkillResult({ ...conform, outside: [{ path: "tests/test_x.py", importOnly: true }] }), null);
 });
+
+test("plan Files lines are read the way a real planner writes them", async () => {
+  const { planFiles } = await import("../native/step-contract.ts");
+  assert.deepEqual(planFiles("`shop.py`, `tax.py` (new)"), ["shop.py", "tax.py"]);
+  assert.deepEqual(planFiles("`src/a.py` (moved from `src/b.py`), ./src/c.py; none"), ["src/a.py", "src/c.py"]);
+  assert.deepEqual(planFiles("**utils.py**, `shop.py`."), ["utils.py", "shop.py"], "markdown and a sentence-ending period are dropped");
+  const scoped = input({ inputPath: "src", readPlan: async () => "### R1 Move (status: todo)\n- Files: `src/tax.py` (new), `src/shop.py`\n" });
+  assert.equal(await checkSkillResult(scoped), null, "a (new) note is not a file outside the input path");
+});
+
+test("plan Files keep extensionless files and parentheses inside a path", async () => {
+  const { planFiles } = await import("../native/step-contract.ts");
+  assert.deepEqual(planFiles("`Makefile`, `Dockerfile` (new), `app/(auth)/page.tsx`"), ["Makefile", "Dockerfile", "app/(auth)/page.tsx"]);
+  assert.deepEqual(planFiles("`a.py` (moved from b.py)"), ["a.py"]);
+});
