@@ -145,8 +145,10 @@
   background: transparent;
 }
 .ui-tab:hover { background: color-mix(in srgb, var(--tok-color-text) 6%, transparent); }
-.ui-tab[aria-selected="true"] { background: var(--tok-color-body); color: var(--tok-color-text); }
-.ui-tab[aria-selected="true"]::after {
+.ui-tab[aria-selected="true"],
+.ui-tab[data-active="true"] { background: var(--tok-color-body); color: var(--tok-color-text); }
+.ui-tab[aria-selected="true"]::after,
+.ui-tab[data-active="true"]::after {
   content: "";
   position: absolute;
   left: 0;
@@ -184,7 +186,8 @@
   cursor: pointer;
 }
 .ui-tab:hover .ui-tab-close,
-.ui-tab[aria-selected="true"] .ui-tab-close { opacity: 1; }
+.ui-tab[aria-selected="true"] .ui-tab-close,
+.ui-tab[data-active="true"] .ui-tab-close { opacity: 1; }
 .ui-tab-close:hover { color: var(--tok-color-text); background: color-mix(in srgb, var(--tok-color-text) 15%, transparent); }
 .ui-tab-divider { width: 1px; height: 18px; margin-left: 6px; align-self: center; background: var(--tok-color-border); flex: none; }
 

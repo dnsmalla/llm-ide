@@ -38,12 +38,27 @@ test("Chip: a button exposes aria-pressed; a static chip is labelled", () => {
   assert.match(html(h(kit.Chip, { label: "Tag" })), /aria-label="Tag"/);
 });
 
-test("EditorTabBar: tablist, selected state, named close buttons", () => {
-  const out = html(h(kit.EditorTabBar, { tabs: [{ id: "a", label: "a.ts", dirty: true }, { id: "b", label: "b.ts" }], activeId: "a", onSelect() {}, onClose() {} }));
+test("EditorTabBar: tablist, tab role on the focusable button, roving tabindex, dirty state in the name", () => {
+  const out = html(h(kit.EditorTabBar, { tabs: [{ id: "a", label: "a.ts", dirty: true }, { id: "b", label: "b.ts" }], activeId: "b", onSelect() {}, onClose() {} }));
   assert.match(out, /role="tablist"/);
-  assert.match(out, /aria-selected="true"/);
+  assert.match(out, /<button[^>]*role="tab"[^>]*aria-selected="true"[^>]*tabindex="0"[^>]*>(?:(?!<\/button>).)*b\.ts/s, "the active tab is the one tab stop");
+  assert.match(out, /<button[^>]*role="tab"[^>]*aria-selected="false"[^>]*tabindex="-1"/);
+  assert.doesNotMatch(out, /<div[^>]*role="tab"/, "the non-focusable wrapper carries no tab role");
   assert.match(out, /aria-label="Close a\.ts"/);
-  assert.match(out, /aria-label="Unsaved changes"/);
+  assert.match(out, /aria-label="a\.ts, unsaved changes"/);
+  assert.doesNotMatch(out, /aria-label="Unsaved changes"/);
+  assert.equal(kit.tabAccessibleName({ id: "x", label: "x.ts" }), "x.ts");
+  const none = html(h(kit.EditorTabBar, { tabs: [{ id: "a", label: "a.ts" }, { id: "b", label: "b.ts" }], activeId: null, onSelect() {}, onClose() {} }));
+  assert.equal((none.match(/tabindex="0"/g) ?? []).length, 1, "with no active tab the first one is reachable");
+});
+
+test("tabKeyTarget: Left/Right wrap, Home/End jump, other keys are ignored", () => {
+  assert.equal(kit.tabKeyTarget("ArrowRight", 2, 3), 0);
+  assert.equal(kit.tabKeyTarget("ArrowLeft", 0, 3), 2);
+  assert.equal(kit.tabKeyTarget("Home", 2, 3), 0);
+  assert.equal(kit.tabKeyTarget("End", 0, 3), 2);
+  assert.equal(kit.tabKeyTarget("Enter", 0, 3), null);
+  assert.equal(kit.tabKeyTarget("ArrowRight", 0, 0), null);
 });
 
 test("ResizableDivider: keyboard-focusable separator with value range and a name", () => {
