@@ -198,7 +198,12 @@
 .chat-dock-mode .chat-composer-bar [role="img"] { display: none; }
 .chat-dock-mode .chat-composer-bar .chat-pick { width: 100%; }
 .chat-dock-mode .chat-composer-bar .chat-pick select { width: 100%; max-width: 100%; }
-.chat-dock-mode .chat-composer-bar .chat-btn[type="submit"] { grid-column: 1 / -1; width: 100%; }
+.chat-composer-actions { display: flex; align-items: center; gap: var(--tok-space-sm); flex: none; }
+/* Dock: the action group takes its own content width at the row's end, never a full-width Send. */
+.chat-dock-mode .chat-composer-bar .chat-composer-actions { grid-column: 1 / -1; justify-self: end; gap: 6px; }
+/* Options collapsed: only the toggle and the actions remain, so they share one row. */
+.chat-dock-mode .chat-composer-bar[data-options="false"] { display: flex; flex-wrap: wrap; }
+.chat-dock-mode .chat-composer-bar[data-options="false"] .chat-composer-actions { margin-left: auto; }
 .chat-dock-mode .chat-composer-bar .chat-error { grid-column: 1 / -1; }
 .chat-options-toggle[hidden] { display: none; }
 .chat-dock-mode .chat-options-toggle { justify-self: start; }
