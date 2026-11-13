@@ -654,7 +654,23 @@ fn set_prefs_now(patch: PrefsPatch) -> Result<PrefsView, FsError> {
     if !LIMIT.allow() {
         return Err(herr("rate_limited", "too many preference changes"));
     }
+    gate_host_api_tls(stored().host_api_tls, patch.host_api_tls, || {
+        crate::confirm::ask(
+            "Let devices on this network pair with this app?",
+            "Let phones and browsers on this network pair with this app? It will listen on your local network.",
+            "Allow pairing",
+            true,
+        )
+    })?;
     apply(patch)
+}
+
+/// Turning the LAN listener on is a native decision; the webview alone cannot make it. Only the off-to-on change asks.
+fn gate_host_api_tls(current: bool, requested: Option<bool>, ask: impl FnOnce() -> bool) -> Result<(), FsError> {
+    if !current && requested == Some(true) && !ask() {
+        return Err(herr("cancelled", "pairing on the local network was not enabled"));
+    }
+    Ok(())
 }
 
 fn apply(patch: PrefsPatch) -> Result<PrefsView, FsError> {
@@ -1119,6 +1135,15 @@ mod tests {
         assert!(!graph.restart_needed, "the timer reads stored() live");
         let diff = view(Prefs { learn: true, ..Prefs::default() }, true);
         assert!(diff.restart_needed);
+    }
+
+    #[test]
+    fn enabling_the_lan_listener_needs_a_native_yes_only_on_the_off_to_on_change() {
+        assert_eq!(gate_host_api_tls(false, Some(true), || false).unwrap_err().code, "cancelled");
+        assert!(gate_host_api_tls(false, Some(true), || true).is_ok());
+        assert!(gate_host_api_tls(true, Some(true), || panic!("already on")).is_ok());
+        assert!(gate_host_api_tls(true, Some(false), || panic!("turning off")).is_ok());
+        assert!(gate_host_api_tls(false, None, || panic!("untouched")).is_ok());
     }
 
     #[test]
