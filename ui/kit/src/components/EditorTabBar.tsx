@@ -71,6 +71,8 @@ export function EditorTabBar({ tabs, activeId, onSelect, onClose }: Props) {
             <button
               type="button"
               className="ui-tab-close"
+              // One tab stop for the strip (the selected tab): Tab must not walk every tab's close button.
+              tabIndex={-1}
               aria-label={`Close ${tab.label}`}
               onClick={() => onClose(tab.id)}
             >

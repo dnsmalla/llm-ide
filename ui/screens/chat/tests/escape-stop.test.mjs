@@ -61,3 +61,11 @@ test("the dictation shortcut applies only where the user is working", () => {
   assert.equal(c.ownsDictationShortcut(body, root, true), true, "nothing focused on the Chat section");
   assert.equal(c.ownsDictationShortcut(body, root, false), false, "nothing focused, but this is only a popup");
 });
+
+test("Esc with a dialog open outside the chat is the dialog's, even when focus sits on the page body", async () => {
+  const c = await (await import("./helpers.mjs")).loadChat("escape-modal");
+  const body = { closest: () => null, contains: () => false };
+  const ev = { key: "Escape", defaultPrevented: false, target: body };
+  assert.equal(c.stopsOnEscape(ev, true, true, null, false), true, "no dialog: Esc stops the turn as before");
+  assert.equal(c.stopsOnEscape(ev, true, true, null, true), false, "a shell dialog is open: the turn keeps running");
+});

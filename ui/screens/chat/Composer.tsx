@@ -88,8 +88,11 @@ export function escapeIsForeign(target: KeyNodeLike | null | undefined, root: Ke
  * A key a popover, the textarea or an input method already handled is left alone, and so is one aimed at an
  * unrelated dialog or field (scope). Pure.
  */
-export function stopsOnEscape(e: { key: string; defaultPrevented: boolean; isComposing?: boolean; target?: unknown }, active: boolean, busy: boolean, root?: KeyNodeLike | null): boolean {
+export function stopsOnEscape(e: { key: string; defaultPrevented: boolean; isComposing?: boolean; target?: unknown }, active: boolean, busy: boolean, root?: KeyNodeLike | null, modalOutside = false): boolean {
   if (!(active && busy && e.key === "Escape" && !e.defaultPrevented && e.isComposing !== true)) return false;
+  // A dialog is open outside this chat and focus is not in it (on the page body, say): the Esc is meant for the
+  // dialog. This listener runs before the dialog's own, so the dialog cannot claim the key first.
+  if (modalOutside) return false;
   return !escapeIsForeign((e.target ?? null) as KeyNodeLike | null, root);
 }
 
@@ -279,7 +282,12 @@ export function Composer(p: ComposerProps) {
   stopRef.current = p.onStop;
   useEffect(() => {
     if (!p.active || !p.busy) return undefined;
-    const onKey = (e: globalThis.KeyboardEvent) => { if (stopsOnEscape(e, true, true, form.current?.closest(".chat-screen") ?? null)) { e.preventDefault(); stopRef.current(); } };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const root = form.current?.closest(".chat-screen") ?? null;
+      // Any dialog that is open and not part of this chat (the chat's own popovers live inside the root).
+      const modalOutside = [...document.querySelectorAll(MODAL_SELECTOR)].some((m) => !root || (!root.contains(m) && !m.contains(root)));
+      if (stopsOnEscape(e, true, true, root, modalOutside)) { e.preventDefault(); stopRef.current(); }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [p.active, p.busy]);
