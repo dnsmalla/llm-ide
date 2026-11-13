@@ -230,19 +230,8 @@ pub struct WatchStarted {
 }
 
 /// Starts (replacing any previous) the watcher for the active root; batches arrive on `on_event`.
-///
-/// Async + `spawn_blocking`: a sync command runs on the main thread, and canonicalising a root that sits on
-/// a stalled network share would freeze the whole window. `CURRENT` is a plain `Mutex`, safe off-thread.
 #[tauri::command]
-pub async fn fs_watch_start(on_event: Channel<WatchBatch>) -> R<WatchStarted> {
-    tauri::async_runtime::spawn_blocking(move || watch_start_now(on_event)).await.map_err(join_err)?
-}
-
-fn join_err(e: tauri::Error) -> FsError {
-    FsError { code: "io", message: format!("watcher task failed: {e}") }
-}
-
-fn watch_start_now(on_event: Channel<WatchBatch>) -> R<WatchStarted> {
+pub fn fs_watch_start(on_event: Channel<WatchBatch>) -> R<WatchStarted> {
     let root = crate::fs_ops::active_root()?;
     let w = Watch::start(&root, false, Box::new(move |b| {
         let _ = on_event.send(b);
@@ -253,16 +242,11 @@ fn watch_start_now(on_event: Channel<WatchBatch>) -> R<WatchStarted> {
     Ok(WatchStarted { mode })
 }
 
-/// Async for the same reason as `fs_watch_start`: up to `MAX_DIRS` `canonicalize` calls.
 #[tauri::command]
-pub async fn fs_watch_set(dirs: Vec<String>) -> R<()> {
-    tauri::async_runtime::spawn_blocking(move || watch_set_now(&dirs)).await.map_err(join_err)?
-}
-
-fn watch_set_now(dirs: &[String]) -> R<()> {
+pub fn fs_watch_set(dirs: Vec<String>) -> R<()> {
     let mut g = CURRENT.lock().map_err(|_| FsError { code: "io", message: "watcher lock poisoned".into() })?;
     match g.as_mut() {
-        Some(w) => w.set_dirs(dirs),
+        Some(w) => w.set_dirs(&dirs),
         None => Err(FsError { code: "no_watch", message: "the file watcher is not running".into() }),
     }
 }
