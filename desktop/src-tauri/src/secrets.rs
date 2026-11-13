@@ -55,7 +55,7 @@ impl fmt::Display for SecretError {
                  refusing to replace it automatically because that would make the vault \
                  unreadable. Remove the '{SERVICE}' entry in your OS credential manager to reset."
             ),
-            Self::BadBackend(v) => write!(f, "{BACKEND_ENV}={v:?} is not supported (unset uses the OS keychain; \"memory\" works in debug builds only)"),
+            Self::BadBackend(v) => write!(f, "{BACKEND_ENV}={v:?} is not supported (unset uses the OS keychain; \"memory\" is the in-process store for tests)"),
             Self::Random(why) => write!(f, "cannot generate a random secret: {why}"),
         }
     }
@@ -113,13 +113,21 @@ impl SecretBackend for OsBackend {
     }
 }
 
-/// `memory` selects the in-process store (debug builds and tests only); unset or empty selects the OS store.
+/// `memory` selects the in-process store; unset or empty selects the OS store.
+///
+/// The in-process store is allowed in release builds too: the packaged-app smoke test and the autobench of the
+/// release pipeline launch the real release binary with it, because a CI runner has no usable OS keychain. What a
+/// release build must not do is use it SILENTLY (it forgets everything at exit, so the core gets fresh secrets and an
+/// unreadable vault on every launch), so there it is announced on stderr.
 pub fn backend_from_env(value: Option<&str>) -> Result<Box<dyn SecretBackend>, SecretError> {
-    backend_from_env_with(value, cfg!(debug_assertions))
+    let backend = backend_from_env_with(value, true)?;
+    if !cfg!(debug_assertions) && backend.name() == "memory" {
+        eprintln!("secrets: {BACKEND_ENV}=memory is set: secrets are kept in memory only and are lost when the app exits (meant for tests)");
+    }
+    Ok(backend)
 }
 
-/// `allow_memory` is false in release builds: the in-process store forgets everything at exit, so honouring the env
-/// var there would silently give the core fresh secrets (and an unreadable vault) on every launch.
+/// `allow_memory` false refuses the in-process store (kept for callers that must never use it).
 fn backend_from_env_with(value: Option<&str>, allow_memory: bool) -> Result<Box<dyn SecretBackend>, SecretError> {
     match value.map(str::trim).filter(|v| !v.is_empty()) {
         None => Ok(Box::new(OsBackend)),
