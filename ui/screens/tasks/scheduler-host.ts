@@ -3,6 +3,7 @@
 // write-run check and the two run histories.
 import { core } from "../shell/runtime";
 import { invokeHost } from "../shell/host";
+import { changedPathArgs } from "../loop/native/worktree-run.ts";
 import { createHostFs } from "../explorer/fs";
 import { notifyTask } from "../shell/notify/notify";
 import { tryAcquireAutoTask, releaseAutoTask } from "../autotasks/native/lock.ts";
@@ -16,12 +17,14 @@ import { hasLinkedRepo, runRegisteredTask } from "./run-registered.ts";
 import { appendTaskRun } from "./run-history.ts";
 import { startTaskScheduler, type ScheduledItem, type ScheduledOutcome, type ScheduledRecord } from "./schedule.ts";
 
-async function runCustom(task: CustomAutoTask): Promise<ScheduledOutcome> {
+async function runCustom(task: CustomAutoTask, root: string): Promise<ScheduledOutcome> {
   const result = await runCustomTask(task, {
     request: (path, init) => core.request(path, init as never),
     workRoot: () => invokeHost<string>("loop_work_root"),
-    changedPaths: async () => { try { return await invokeHost<string[]>("loop_changed_paths"); } catch { return null; } },
-    revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
+    // A scheduled task can outlive a project switch: both calls name the project it started in, and the host refuses
+    // once another project is active (it would otherwise revert that project's uncommitted edits).
+    changedPaths: async () => { try { return await invokeHost<string[]>("loop_changed_paths", changedPathArgs(null, root)); } catch { return null; } },
+    revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created, ...changedPathArgs(null, root) }); },
   });
   const firstLine = result.reply.trim().split("\n")[0]?.slice(0, 260) ?? "";
   const summary = `${firstLine || result.error || (result.ok ? "completed" : "failed")}${result.writes.length ? ` (left: ${result.writes.join(", ")})` : ""}`.slice(0, 300);
@@ -42,7 +45,7 @@ function record(rec: ScheduledRecord): void {
 }
 
 async function run(item: ScheduledItem, root: string): Promise<ScheduledOutcome> {
-  if (item.kind === "custom") return runCustom(item.task);
+  if (item.kind === "custom") return runCustom(item.task, root);
   const config = loadTaskState(root).configs[item.id];
   return runRegisteredTask(item.id, {
     projectRoot: root,

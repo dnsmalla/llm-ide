@@ -16,7 +16,7 @@ import { runRegression } from "./regression.ts";
 import type { RunnerDeps, StageOutcome, StageRunResult } from "./runner.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
-import { repoPrefixFor, stageHostArgs } from "./worktree-run.ts";
+import { changedPathArgs, repoPrefixFor, stageHostArgs } from "./worktree-run.ts";
 
 /** `invokeHost`'s shape; tests pass a fake. */
 export type HostInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -53,12 +53,12 @@ type Prior = readonly StageOutcome[];
 
 /** Paths with uncommitted changes before an agent call. `null` = the snapshot failed, so nothing may be reverted. */
 async function dirtyBefore(ctx: StageExecContext): Promise<Set<string> | null> {
-  try { return new Set(await ctx.host<string[]>("loop_changed_paths", stageHostArgs(ctx.runId))); } catch { return null; }
+  try { return new Set(await ctx.host<string[]>("loop_changed_paths", changedPathArgs(ctx.runId, ctx.projectRoot))); } catch { return null; }
 }
 
 /** Paths git reports as changed right now; null when git cannot say (the post-throw check needs this). */
 async function changedPathsNow(ctx: StageExecContext): Promise<string[] | null> {
-  try { return await ctx.host<string[]>("loop_changed_paths", stageHostArgs(ctx.runId)); } catch { return null; }
+  try { return await ctx.host<string[]>("loop_changed_paths", changedPathArgs(ctx.runId, ctx.projectRoot)); } catch { return null; }
 }
 
 /** Protected-path and scope guard for one agent call (the Mac's checkScope + policy). */
@@ -68,7 +68,7 @@ function guardProtected(ctx: StageExecContext, paths: readonly string[], target:
     { policy: target.config.protectedPathPolicy, extraProtectedGlobs: target.config.extraProtectedGlobs, scopeGlobs: target.scopeGlobs },
     before,
     created,
-    async (p, c) => { await ctx.host("loop_revert_paths", { paths: p, created: c, ...stageHostArgs(ctx.runId) }); },
+    async (p, c) => { await ctx.host("loop_revert_paths", { paths: p, created: c, ...changedPathArgs(ctx.runId, ctx.projectRoot) }); },
     (line) => ctx.log(line),
   );
 }

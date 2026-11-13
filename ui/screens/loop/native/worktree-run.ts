@@ -44,6 +44,17 @@ export function stageHostArgs(runId: string | null): { runId?: string } {
 }
 
 /**
+ * Args for the host commands that read or revert a run's changed paths (`loop_changed_paths`, `loop_revert_paths`).
+ * A worktree run is pinned by its run id. A main-tree run works in whatever project is active when the call lands, so
+ * it names the project it started in: the host then refuses once the user has opened another project, instead of
+ * judging that project's uncommitted edits against this run's snapshot and reverting them.
+ */
+export function changedPathArgs(runId: string | null, projectRoot: string | null | undefined): { runId?: string; expectedRoot?: string } {
+  if (runId) return { runId };
+  return projectRoot ? { expectedRoot: projectRoot } : {};
+}
+
+/**
  * The first enabled stage a worktree run cannot honour. A Regression stage re-runs fault verify commands through
  * `loop_run_fault_verify`, which takes no run id and so would run in the main working tree.
  */

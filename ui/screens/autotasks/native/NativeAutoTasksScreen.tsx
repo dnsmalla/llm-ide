@@ -6,6 +6,7 @@ import type { SectionProps } from "@llmide/screens/shell";
 import { shellBus } from "../../shell/bus";
 import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
+import { changedPathArgs } from "../../loop/native/worktree-run.ts";
 import { createHostFs } from "../../explorer/fs";
 import { GROUPS, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, AUTO_TASK_ROWS, enabledTaskOrder, AUTO_TASK_BY_ID, composeTaskMessage, desktopRunnable, isSchedulable, takeMergedNotice, taskUnavailableReason, scheduleStatusLine, normalizeProjectPath, requiresLinkedRepo, type AutoTaskId } from "./model.ts";
 import { describeCron, validateCron } from "./cron.ts";
@@ -24,8 +25,8 @@ import { appendCustomRun, CUSTOM_RUNS_EVENT, readCustomRuns, type CustomTaskRun 
 import "./native-autotasks.css";
 
 /** Paths git reports as changed right now; null when git cannot say. */
-async function changedPathsNow(): Promise<string[] | null> {
-  try { return await invokeHost<string[]>("loop_changed_paths"); } catch { return null; }
+async function changedPathsNow(projectRoot: string | null): Promise<string[] | null> {
+  try { return await invokeHost<string[]>("loop_changed_paths", changedPathArgs(null, projectRoot)); } catch { return null; }
 }
 
 /** The focus text a task runs with: the user's own when it is set, else the registry's. */
@@ -264,8 +265,10 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         request: (path, init) => core.request(path, init as never),
         signal: abort.signal,
         workRoot: () => invokeHost<string>("loop_work_root"),
-        changedPaths: changedPathsNow,
-        revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
+        // Named with this screen's project: leaving the project aborts the task, and its write check must not then
+        // read or revert the project the user switched to.
+        changedPaths: () => changedPathsNow(projectRoot),
+        revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created, ...changedPathArgs(null, projectRoot) }); },
       });
       if (result.warning) setLog((l) => [...l, result.warning!]);
       if (result.writes.length) setLog((l) => [...l, `left behind: ${result.writes.join(", ")}`]);

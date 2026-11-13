@@ -683,15 +683,35 @@ pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Res
     Ok(())
 }
 
+/// True when `expected` (the project root the UI was given when the run started) names `active`.
+fn same_project_root(active: &Path, expected: &str) -> bool {
+    let trim = |s: &str| s.trim_end_matches(['/', '\\']).to_string();
+    trim(&active.to_string_lossy()) == trim(expected)
+}
+
+/// A main-tree run (no run id) works in whatever project is active at the moment of the call. If the user opened
+/// another project mid-run, the run's "dirty before" snapshot belongs to the old project, and a revert judged against
+/// it would discard the new project's uncommitted edits. So such a call is refused once the project has changed.
+/// A worktree run is pinned by its run id and needs no check.
+fn check_expected_root(run_id: Option<&str>, project: &Path, expected_root: Option<&str>) -> Result<(), String> {
+    match (run_id, expected_root) {
+        (None, Some(expected)) if !same_project_root(project, expected) => {
+            Err("the project changed while this run was working; nothing was read or reverted in the other project".into())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// `loop_revert_paths` without Tauri: the legacy work root, or the run's worktree when `run_id` is given.
-pub(crate) fn revert_paths_for(run_id: Option<&str>, paths: &[String], created: &[String]) -> Result<(), String> {
-    let (_, work) = root_for(run_id)?;
+pub(crate) fn revert_paths_for(run_id: Option<&str>, expected_root: Option<&str>, paths: &[String], created: &[String]) -> Result<(), String> {
+    let (project, work) = root_for(run_id)?;
+    check_expected_root(run_id, &project, expected_root)?;
     revert_paths_in(&work, paths, created)
 }
 
 #[tauri::command]
-pub async fn loop_revert_paths(paths: Vec<String>, created: Option<Vec<String>>, run_id: Option<String>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || revert_paths_for(run_id.as_deref(), &paths, &created.unwrap_or_default()))
+pub async fn loop_revert_paths(paths: Vec<String>, created: Option<Vec<String>>, run_id: Option<String>, expected_root: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || revert_paths_for(run_id.as_deref(), expected_root.as_deref(), &paths, &created.unwrap_or_default()))
         .await.map_err(|e| format!("revert task failed: {e}"))?
 }
 
@@ -731,14 +751,15 @@ fn parse_porcelain_z(text: &str) -> Result<Vec<String>, String> {
 }
 
 /// `loop_changed_paths` without Tauri: the legacy work root, or the run's worktree when `run_id` is given.
-pub(crate) fn changed_paths_for(run_id: Option<&str>) -> Result<Vec<String>, String> {
-    let (_, work) = root_for(run_id)?;
+pub(crate) fn changed_paths_for(run_id: Option<&str>, expected_root: Option<&str>) -> Result<Vec<String>, String> {
+    let (project, work) = root_for(run_id)?;
+    check_expected_root(run_id, &project, expected_root)?;
     changed_paths_in(&work)
 }
 
 #[tauri::command]
-pub async fn loop_changed_paths(run_id: Option<String>) -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || changed_paths_for(run_id.as_deref()))
+pub async fn loop_changed_paths(run_id: Option<String>, expected_root: Option<String>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || changed_paths_for(run_id.as_deref(), expected_root.as_deref()))
         .await.map_err(|e| format!("changed paths task failed: {e}"))?
 }
 
@@ -1185,6 +1206,22 @@ mod tests {
         root.canonicalize().unwrap()
     }
 
+    #[test]
+    fn a_main_tree_call_is_refused_once_the_project_changed() {
+        let a = Path::new("/projects/a");
+        // Same project (a trailing separator is not a different project): allowed.
+        assert!(check_expected_root(None, a, Some("/projects/a")).is_ok());
+        assert!(check_expected_root(None, a, Some("/projects/a/")).is_ok());
+        // The user opened project B mid-run: the run's snapshot is A's, so nothing may be read or reverted in B.
+        let err = check_expected_root(None, Path::new("/projects/b"), Some("/projects/a")).unwrap_err();
+        assert!(err.contains("the project changed"), "{err}");
+        assert!(check_expected_root(None, Path::new("/projects/ab"), Some("/projects/a")).is_err(), "a prefix is not the same project");
+        // No expectation given (an older caller): unchanged behaviour.
+        assert!(check_expected_root(None, Path::new("/projects/b"), None).is_ok());
+        // A worktree run is pinned by its id, whatever project is active.
+        assert!(check_expected_root(Some("run-1"), Path::new("/projects/b"), Some("/projects/a")).is_ok());
+    }
+
     #[cfg(unix)]
     #[test]
     fn work_root_for_run_uses_worktree_not_active_root() {
@@ -1196,7 +1233,7 @@ mod tests {
         assert_ne!(work, work_root(&root), "not the project's main work root");
         // The main tree is edited; the run's stage and changed paths see only the worktree.
         std::fs::write(root.join("a.txt"), "main edit\n").unwrap();
-        assert_eq!(changed_paths_for(Some("t5-root")).unwrap(), vec![".factory/".to_string()]);
+        assert_eq!(changed_paths_for(Some("t5-root"), None).unwrap(), vec![".factory/".to_string()]);
         let store = ApprovalStore::new();
         let token = approve_stage(&store, &root, "s1"); // minted for the project, as the Loop page does today
         let r = run_stage_gated_at(&project, Some((work.as_path(), "t5-root")), "s1", Some("l1"), Some(10), &store, Some(&token)).unwrap();
@@ -1254,11 +1291,11 @@ mod tests {
         std::fs::write(root.join("a.txt"), "user edit in main\n").unwrap();
         std::fs::write(wt.join("a.txt"), "agent edit in worktree\n").unwrap();
         std::fs::write(wt.join("new.txt"), "agent new\n").unwrap();
-        revert_paths_for(Some("t5-revert"), &["a.txt".to_string(), "new.txt".to_string()], &["new.txt".to_string()]).unwrap();
+        revert_paths_for(Some("t5-revert"), None, &["a.txt".to_string(), "new.txt".to_string()], &["new.txt".to_string()]).unwrap();
         assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "committed\n");
         assert!(!wt.join("new.txt").exists());
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "user edit in main\n", "the same path in the main tree is unchanged");
-        assert!(revert_paths_for(Some("../x"), &["a.txt".to_string()], &[]).is_err());
+        assert!(revert_paths_for(Some("../x"), None, &["a.txt".to_string()], &[]).is_err());
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "user edit in main\n");
         crate::loop_worktree::remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&root);

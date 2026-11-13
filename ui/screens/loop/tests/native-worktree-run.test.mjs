@@ -49,3 +49,36 @@ test("worktreeBlockedStage finds an enabled Regression stage only", () => {
   assert.equal(worktreeBlockedStage(stages)?.name, "Sweep");
   assert.equal(worktreeBlockedStage(stages.slice(0, 2)), null);
 });
+
+test("changed-path host calls are pinned: a worktree run by its id, a main-tree run by the project it started in", async () => {
+  const { changedPathArgs } = await import("../native/worktree-run.ts");
+  assert.deepEqual(changedPathArgs("run-1", "/p/a"), { runId: "run-1" });
+  assert.deepEqual(changedPathArgs(null, "/p/a"), { expectedRoot: "/p/a" });
+  assert.deepEqual(changedPathArgs(null, null), {});
+  assert.deepEqual(changedPathArgs(null, ""), {});
+});
+
+test("no screen reads or reverts changed paths without saying which run or project it means", async () => {
+  const { readFileSync, readdirSync, statSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const root = new URL("../../", import.meta.url).pathname;
+  const files = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      if (name === "tests" || name === "node_modules") continue;
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.tsx?$/.test(name)) files.push(p);
+    }
+  };
+  walk(root);
+  const bare = [];
+  for (const f of files) {
+    const src = readFileSync(f, "utf8");
+    for (const m of src.matchAll(/"loop_(?:changed|revert)_paths"[^\n]*/g)) {
+      // The run manager's worktree call passes its run id literally; every other call goes through changedPathArgs.
+      if (!/changedPathArgs\(|\{ runId: live\.runId \}/.test(m[0])) bare.push(`${f}: ${m[0].slice(0, 80)}`);
+    }
+  }
+  assert.deepEqual(bare, []);
+});

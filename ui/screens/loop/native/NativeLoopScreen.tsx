@@ -23,7 +23,7 @@ import { clearQueue, loadQueue, saveQueue } from "./queue.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
-import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
+import { changedPathArgs, newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
@@ -604,7 +604,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       if (needsDecision) outcome.statusSummary = needsDecision;
       if (activeRun) setRunLog((l) => [...l, `worktree kept: system/loop-worktrees/${activeRun.runId} (branch ${activeRun.branch}); your main working tree was not touched`]);
       let changedPaths: string[] = [];
-      try { changedPaths = await invokeHost<string[]>("loop_changed_paths", hostRunArgs()); } catch { changedPaths = []; }
+      try { changedPaths = await invokeHost<string[]>("loop_changed_paths", changedPathArgs(activeRunRef.current?.runId ?? null, projectRoot)); } catch { changedPaths = []; }
       if (changedPaths.length) setRunLog((l) => [...l, `changed paths: ${changedPaths.join(", ")}`]);
       setRunLog((l) => [...l, outcome.cancelled ? (cancelledRef.current ? "Loop cancelled." : `Loop aborted: ${outcome.statusSummary}`) : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
       if (!outcome.cancelled && !outcome.passed && outcome.failedStage?.kind === "regressionSweep") {

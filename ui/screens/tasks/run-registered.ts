@@ -4,6 +4,7 @@
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { createHostFs, type FsApi } from "../explorer/fs";
 import { invokeHost } from "../shell/host";
+import { changedPathArgs } from "../loop/native/worktree-run.ts";
 import { shellBus } from "../shell/bus";
 import type { CoreClient } from "../shell/core";
 import { loadLoops } from "../loop/native/store.ts";
@@ -33,8 +34,8 @@ export function hasLinkedRepo(): boolean {
 }
 
 /** Paths git reports as changed right now; null when git cannot say. */
-async function changedPathsNow(): Promise<string[] | null> {
-  try { return await invokeHost<string[]>("loop_changed_paths"); } catch { return null; }
+async function changedPathsNow(projectRoot: string): Promise<string[] | null> {
+  try { return await invokeHost<string[]>("loop_changed_paths", changedPathArgs(null, projectRoot)); } catch { return null; }
 }
 
 /** The Factory's own run path (the bus uses the same functions), loaded on first use as the Issues screen does. */
@@ -107,8 +108,10 @@ export async function runRegisteredTask(id: string, input: RegisteredRunInput): 
     log: input.log,
     ...(input.signal ? { signal: input.signal } : {}),
     approvalToken: async () => approvalToken,
-    changedPaths: changedPathsNow,
-    revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created }); },
+    // Both name the project the task started in: after a project switch the host refuses, so this task can never
+    // revert the other project's uncommitted edits.
+    changedPaths: () => changedPathsNow(projectRoot),
+    revert: async (paths, created) => { await invokeHost("loop_revert_paths", { paths, created, ...changedPathArgs(null, projectRoot) }); },
     actions: taskActions,
   });
   input.log(result.output);
