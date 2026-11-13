@@ -33,6 +33,7 @@ import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
 import { decodeWorktreeDiff, shipTarget, type WorktreeDiff } from "./ship-model.ts";
+import { stageIdForLogLine } from "./stage-follow.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
 import { readRepoConfig } from "../../settings/repo-config";
 import { createStartGate } from "./start-gate.ts";
@@ -682,7 +683,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const runDeps: RunnerDeps = {
         ...createStageDeps(stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), target),
         isCancelled() { return cancelledRef.current; },
-        log(line) { setRunLog((l) => [...l, line]); },
+        log(line) {
+          setRunLog((l) => [...l, line]);
+          const stageId = stageIdForLogLine(target.config.stages, line);
+          if (stageId !== null) setSelectedStageId(stageId);
+        },
         holdWhilePaused,
         onProgress(e) {
           if (trail && e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration }));
