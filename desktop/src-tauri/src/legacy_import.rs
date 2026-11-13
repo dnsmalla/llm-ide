@@ -237,6 +237,13 @@ fn completed(report: &Value) -> bool {
     matches!(report.get("status").and_then(Value::as_str), Some("completed"))
 }
 
+/// Whether the import must stop the app's own core first: by lifecycle, not by pid (a core waiting out a restart
+/// backoff has no pid yet). An adopted server is never stopped; a stopped, failed or remote host has no core
+/// that could write the DB.
+fn should_stop_core(adopted: bool, state: Phase) -> bool {
+    !adopted && matches!(state, Phase::Starting | Phase::Ready | Phase::Restarting)
+}
+
 /// The explicit desktop action. `force` is only sent by the page after the user chooses to replace;
 /// the native dialog below is the actual consent.
 #[tauri::command]
@@ -280,39 +287,60 @@ fn run_blocking(host: CoreHost, force: bool) -> Result<Value, FsError> {
         return Ok(cancelled);
     }
 
-    // Secrets first, but only after a backup that would let a rollback restore them.
-    let backend = secrets::default_backend().map_err(|e| herr("io", e.to_string()))?;
-    let current = secrets::load_or_create(backend.as_ref()).map_err(|e| herr("io", e.to_string()))?;
+    // Stop the app's own core FIRST, by lifecycle (a core in a restart backoff has no pid but would be respawned
+    // onto the DB being replaced), and only then touch the keychain: a crash-restart between the two would start
+    // a core with the legacy vault key against the old DB. `stop()` ends the supervisor, so nothing respawns until
+    // the explicit `start()` below. An adopted server is never stopped: if it holds the target DB the helper
+    // reports `target-in-use` and the rollback below keeps the keychain as it was.
+    let before = host.status();
+    let was_running = should_stop_core(before.adopted, before.state);
+    if was_running {
+        host.stop().map_err(|e| herr("io", format!("cannot stop the core for the import: {e}")))?;
+    }
+    let restart_core = |host: &CoreHost| {
+        if was_running {
+            let _ = host.start();
+        }
+    };
+
+    // Secrets next, but only after a backup that would let a rollback restore them.
+    let backend = secrets::default_backend().map_err(|e| herr("io", e.to_string()));
+    let backend = match backend {
+        Ok(b) => b,
+        Err(e) => {
+            restart_core(&host);
+            return Err(e);
+        }
+    };
+    let current = match secrets::load_or_create(backend.as_ref()).map_err(|e| herr("io", e.to_string())) {
+        Ok(c) => c,
+        Err(e) => {
+            restart_core(&host);
+            return Err(e);
+        }
+    };
     let keychain_backup = if legacy_secrets.is_some() {
-        Some(backup_keychain_secrets(&target, &stamp_now(), &current)?)
+        match backup_keychain_secrets(&target, &stamp_now(), &current) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                restart_core(&host);
+                return Err(e);
+            }
+        }
     } else {
         None
     };
     let mut keychain_changed = false;
     if let Some(ls) = &legacy_secrets {
-        backend
-            .set(secrets::ACCOUNT_JWT, &ls.jwt_secret)
-            .map_err(|e| herr("io", format!("cannot store the old app JWT secret in the OS keychain: {e}")))?;
+        if let Err(e) = backend.set(secrets::ACCOUNT_JWT, &ls.jwt_secret) {
+            restart_core(&host);
+            return Err(herr("io", format!("cannot store the old app JWT secret in the OS keychain: {e}")));
+        }
         keychain_changed = true;
         if let Err(e) = backend.set(secrets::ACCOUNT_VAULT, &ls.vault_key) {
             let _ = backend.set(secrets::ACCOUNT_JWT, &current.jwt_secret);
+            restart_core(&host);
             return Err(herr("io", format!("cannot store the old app vault key in the OS keychain: {e}")));
-        }
-    }
-
-    // Stop the app's own core, not an adopted server. If an adopted server holds the target DB the
-    // helper reports `target-in-use` and the rollback below keeps the keychain as it was.
-    let before = host.status();
-    let was_running = before.pid.is_some()
-        && !before.adopted
-        && matches!(before.state, Phase::Ready | Phase::Starting | Phase::Restarting);
-    if was_running {
-        if let Err(e) = host.stop() {
-            if keychain_changed {
-                let _ = backend.set(secrets::ACCOUNT_JWT, &current.jwt_secret);
-                let _ = backend.set(secrets::ACCOUNT_VAULT, &current.vault_key);
-            }
-            return Err(herr("io", format!("cannot stop the core for the import: {e}")));
         }
     }
 
@@ -445,6 +473,18 @@ mod tests {
         let (body, accept) = dialog_text(&status, false);
         assert!(body.contains("nothing is replaced"));
         assert_eq!(accept, "Import");
+    }
+
+    #[test]
+    fn the_import_stops_the_core_by_lifecycle_not_by_pid() {
+        // Restarting has pid = None: the old pid check skipped it and the supervisor respawned onto the DB.
+        for state in [Phase::Starting, Phase::Ready, Phase::Restarting] {
+            assert!(should_stop_core(false, state), "{state:?}");
+            assert!(!should_stop_core(true, state), "an adopted server is never stopped: {state:?}");
+        }
+        for state in [Phase::Stopped, Phase::Failed, Phase::Remote] {
+            assert!(!should_stop_core(false, state), "{state:?}");
+        }
     }
 
     #[test]
