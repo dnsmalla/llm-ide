@@ -1,7 +1,7 @@
 //! Read and clear the core's log files for Settings > Server & Backend.
 //!
-//! The paths are fixed under the app data directory (`core/server.log`, the core's own live log, then
-//! `core.log`, the host's redacted failure log); the webview never supplies one. Reads are bounded to a
+//! The paths are fixed under the app data directory (`core/server.log`, the core's own live log, and
+//! `core.log`, the host's redacted failure log; the newer one is shown); the webview never supplies one. Reads are bounded to a
 //! tail so a long-running install cannot hand megabytes to the page. Text only: the page renders it escaped.
 
 use std::io::{Read, Seek, SeekFrom};
@@ -52,14 +52,21 @@ fn plain_file(path: &Path) -> bool {
     std::fs::symlink_metadata(path).map(|m| m.is_file() && !m.file_type().is_symlink()).unwrap_or(false)
 }
 
-/// The first existing candidate, with its tail.
+/// The most recently modified existing candidate, with its tail; on a tie (or no readable mtime) the earlier
+/// candidate wins. `core.log` is what every host failure message points at, so a failure newer than the core's
+/// own `server.log` must be the one shown.
 pub fn read_from(candidates: &[PathBuf]) -> Result<CoreLog, String> {
-    for p in candidates {
-        if plain_file(p) {
-            return Ok(CoreLog { path: p.to_string_lossy().into_owned(), text: read_tail(p)?, exists: true });
+    let mut best: Option<(&PathBuf, Option<std::time::SystemTime>)> = None;
+    for p in candidates.iter().filter(|p| plain_file(p)) {
+        let modified = std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        if best.as_ref().map_or(true, |(_, cur)| modified > *cur) {
+            best = Some((p, modified));
         }
     }
-    Ok(CoreLog { path: String::new(), text: String::new(), exists: false })
+    match best {
+        Some((p, _)) => Ok(CoreLog { path: p.to_string_lossy().into_owned(), text: read_tail(p)?, exists: true }),
+        None => Ok(CoreLog { path: String::new(), text: String::new(), exists: false }),
+    }
 }
 
 /// Truncates every existing candidate. Missing files are fine (nothing to clear).
@@ -174,16 +181,28 @@ mod tests {
     }
 
     #[test]
-    fn the_first_existing_candidate_wins() {
+    fn the_newer_candidate_wins_and_a_tie_goes_to_the_first() {
         let d = scratch("order");
         let a = d.join("core.log");
         let b = d.join("server.log");
         fs::write(&b, "second\n").unwrap();
         assert_eq!(read_from(&[a.clone(), b.clone()]).unwrap().path, b.to_string_lossy());
         fs::write(&a, "first\n").unwrap();
-        let got = read_from(&[a.clone(), b.clone()]).unwrap();
+        let t0 = std::time::SystemTime::now();
+        let set_mtime = |p: &PathBuf, t: std::time::SystemTime| {
+            fs::OpenOptions::new().write(true).open(p).unwrap().set_modified(t).unwrap();
+        };
+        set_mtime(&a, t0);
+        set_mtime(&b, t0);
+        assert_eq!(read_from(&[a.clone(), b.clone()]).unwrap().path, a.to_string_lossy(), "a tie goes to the first");
+        // server.log (listed first in production) older than core.log: the failure log is the one shown.
+        set_mtime(&b, t0 - std::time::Duration::from_secs(60));
+        let got = read_from(&[b.clone(), a.clone()]).unwrap();
         assert_eq!(got.path, a.to_string_lossy());
         assert_eq!(got.text, "first\n");
+        // and the other way round: a healthy newer server.log wins over a stale failure log.
+        set_mtime(&b, t0 + std::time::Duration::from_secs(60));
+        assert_eq!(read_from(&[b.clone(), a.clone()]).unwrap().path, b.to_string_lossy());
         let _ = fs::remove_dir_all(&d);
     }
 }
