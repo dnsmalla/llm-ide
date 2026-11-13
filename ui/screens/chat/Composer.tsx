@@ -92,7 +92,7 @@ interface SpeechRecognitionLike {
   lang: string; continuous: boolean; interimResults: boolean;
   start(): void; stop(): void;
   onresult: ((e: SpeechEventLike) => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
   onend: (() => void) | null;
 }
 type SpeechCtor = new () => SpeechRecognitionLike;
@@ -149,9 +149,16 @@ export function Composer(p: ComposerProps) {
       for (let i = 0; i < e.results.length; i++) text += e.results[i][0]?.transcript ?? "";
       if (text.trim()) p.onDraft(`${p.draft}${p.draft.trim() ? " " : ""}${text.trim()}`);
     };
-    rec.onerror = () => { speech.current = null; setListening(false); };
+    rec.onerror = (e) => {
+      speech.current = null; setListening(false);
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      // The web engine was refused or is unavailable: on the Mac app fall back to system Dictation, else say why.
+      if (isHostAvailable() && isMacPlatform()) startSystemDictation();
+      else setDictError(`Dictation failed (${e.error ?? "unknown error"}). Allow the microphone and speech recognition for this app.`);
+    };
     rec.onend = () => { speech.current = null; setListening(false); };
     speech.current = rec;
+    setDictError(null);
     setListening(true);
     try { rec.start(); } catch { speech.current = null; setListening(false); }
   };
