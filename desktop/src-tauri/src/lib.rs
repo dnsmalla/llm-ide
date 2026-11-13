@@ -656,6 +656,7 @@ pub fn run() {
             if let Err(e) = ctrlc::set_handler(move || {
                 let _ = signal_chat.quit_archive(std::time::Duration::from_secs(3));
                 signal_host.shutdown();
+                loop_runner::stop_all_for_exit();
                 graph_gen::graph_cancel();
                 pty::kill_all();
                 std::process::exit(0);
@@ -699,6 +700,8 @@ pub(crate) fn exit_cleanup(app: &tauri::AppHandle) {
     capture_host::shutdown();
     let _ = app.state::<chat_cmds::ChatService>().quit_archive_default();
     app.state::<CoreHost>().shutdown();
+    // Loop and Self-Heal stage commands lead their own process groups: without this they outlive the app on unix.
+    loop_runner::stop_all_for_exit();
     pty::kill_all();
     #[cfg(feature = "spike")]
     sse_replay::stop();

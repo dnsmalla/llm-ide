@@ -41,6 +41,42 @@ pub(crate) fn request_cancel(key: &str) {
     cancel_set().insert(key.to_string());
 }
 
+/// App exit: every stage command still running is stopped, and none starts afterwards.
+///
+/// A stage leads its own process group on unix, so it does not die with the app: a `make regression` started by a
+/// Loop or by Self-Heal would keep writing in the project (or its worktree) with nothing watching it, and the next
+/// launch would know nothing about it. Windows ends the stage's job with the process, so this only makes it prompt.
+pub(crate) struct ExitGate {
+    exiting: AtomicBool,
+    live: std::sync::atomic::AtomicUsize,
+}
+
+impl ExitGate {
+    pub(crate) const fn new() -> Self {
+        ExitGate { exiting: AtomicBool::new(false), live: std::sync::atomic::AtomicUsize::new(0) }
+    }
+    fn exiting(&self) -> bool { self.exiting.load(Ordering::SeqCst) }
+    /// Asks every running stage to stop and waits until they have (each is terminated with its process group), up to
+    /// `wait`. Returns how many were still running when the wait ended.
+    pub(crate) fn stop_all(&self, wait: Duration) -> usize {
+        self.exiting.store(true, Ordering::SeqCst);
+        let until = Instant::now() + wait;
+        loop {
+            let live = self.live.load(Ordering::SeqCst);
+            if live == 0 || Instant::now() >= until { return live; }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+static EXIT_GATE: ExitGate = ExitGate::new();
+
+/// Called from the app's exit paths (`exit_cleanup`, the signal handler). A stage gets 2 s to end after SIGTERM before
+/// it is killed, so the wait covers that and a little more.
+pub(crate) fn stop_all_for_exit() -> usize {
+    EXIT_GATE.stop_all(Duration::from_millis(3500))
+}
+
 use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -456,6 +492,18 @@ pub(crate) fn run_command_cancellable(root: &Path, command: &str, timeout_secs: 
 }
 
 fn run_command_at_cancellable(work: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, stop_requested: &dyn Fn() -> bool) -> Result<StageRun, String> {
+    run_command_at_gated(work, command, timeout_secs, sink, stop_requested, &EXIT_GATE)
+}
+
+fn run_command_at_gated(work: &Path, command: &str, timeout_secs: Option<u64>, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, stop_requested: &dyn Fn() -> bool, gate: &ExitGate) -> Result<StageRun, String> {
+    // Counted for the whole call, so the exit path waits until the child (and its group) has really been stopped.
+    struct Live<'a>(&'a ExitGate);
+    impl Drop for Live<'_> {
+        fn drop(&mut self) { self.0.live.fetch_sub(1, Ordering::SeqCst); }
+    }
+    gate.live.fetch_add(1, Ordering::SeqCst);
+    let _live = Live(gate);
+    let stop_requested = || stop_requested() || gate.exiting();
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, 86_400));
     let started = Instant::now();
     if stop_requested() {
@@ -1206,6 +1254,41 @@ mod tests {
         git(&root, &["add", "a.txt"]);
         git(&root, &["commit", "-q", "-m", "init"]);
         root.canonicalize().unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn app_exit_stops_a_running_stage_and_its_children_and_starts_none_after() {
+        let dir = std::env::temp_dir();
+        let gate = Arc::new(ExitGate::new());
+        let pid_file = dir.join(format!("llmide-exit-gate-{}.pid", std::process::id()));
+        let _ = std::fs::remove_file(&pid_file);
+        // The stage leaves a grandchild behind (as `make` or `npm test` do) and then waits a long time.
+        let command = format!("sleep 300 & echo $! > '{}'; wait", pid_file.display());
+        let g = gate.clone();
+        let d = dir.clone();
+        let stage = std::thread::spawn(move || run_command_at_gated(&d, &command, Some(600), None, &|| false, &g).unwrap());
+        let started = Instant::now();
+        while !pid_file.exists() || std::fs::read_to_string(&pid_file).map(|s| s.trim().is_empty()).unwrap_or(true) {
+            assert!(started.elapsed() < Duration::from_secs(10), "the stage never started");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let grandchild: i32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+        let alive = |pid: i32| unsafe { libc::kill(pid, 0) == 0 };
+        assert!(alive(grandchild));
+
+        assert_eq!(gate.stop_all(Duration::from_secs(5)), 0, "the exit path waited until the stage was stopped");
+        let run = stage.join().unwrap();
+        assert!(run.cancelled && !run.timed_out);
+        let gone = Instant::now();
+        while alive(grandchild) && gone.elapsed() < Duration::from_secs(3) { std::thread::sleep(Duration::from_millis(20)); }
+        assert!(!alive(grandchild), "the stage's own children are stopped with it, not left running after the app");
+
+        // Nothing starts once the app is exiting.
+        let late = run_command_at_gated(&dir, "printf late", Some(5), None, &|| false, &gate).unwrap();
+        assert!(late.cancelled && late.stdout.is_empty());
+        assert_eq!(gate.stop_all(Duration::from_millis(10)), 0);
+        let _ = std::fs::remove_file(&pid_file);
     }
 
     #[test]
