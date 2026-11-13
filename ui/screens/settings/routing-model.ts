@@ -133,12 +133,21 @@ export class RoutingModel extends Store<RoutingState> {
     this.#client = client;
   }
 
-  async load(): Promise<void> {
+  /**
+   * Loads the saved tiers. `keepEdits` is for background refreshes (window focus): unsaved edits made before or
+   * during the request stay in the draft, and only `loaded` moves. A plain load replaces the draft.
+   */
+  async load(keepEdits = false): Promise<void> {
     const gen = ++this.#generation;
     this.set({ phase: this.getState().loaded ? "ready" : "loading", error: null });
     try {
       const loaded = decodeRoutingTiers(await call(this.#client, "GET", "/kb/routing-tiers"));
       if (gen !== this.#generation) return;
+      const now = this.getState();
+      if (keepEdits && isDirty(now.loaded, now.draft)) {
+        this.set({ phase: "ready", loaded });
+        return;
+      }
       this.set({ phase: "ready", loaded, draft: { tiers: { ...loaded.tiers }, features: { ...loaded.features } } });
     } catch (e) {
       if (gen !== this.#generation) return;

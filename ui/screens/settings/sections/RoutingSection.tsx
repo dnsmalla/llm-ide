@@ -15,7 +15,8 @@ export default function RoutingSection() {
   const providers = sharedProvidersModel(client);
   const r = useStore(routing);
   const p = useStore(providers);
-  useRefreshOnFocus(() => { void routing.load(); void providers.load(); });
+  // A focus refresh must not throw away edits the user has not saved yet (they often leave to copy a model id).
+  useRefreshOnFocus(() => { void routing.load(true); void providers.load(); });
 
   const rows = useMemo(() => (p.catalog ? rowsFromCatalog(p.catalog) : []), [p.catalog]);
   const options = useMemo(() => [{ id: ANTHROPIC, name: "Anthropic (Claude)" }, ...rows.map((x) => ({ id: x.provider, name: x.name }))], [rows]);

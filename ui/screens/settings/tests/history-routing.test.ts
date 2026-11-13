@@ -169,6 +169,22 @@ test("routing: draft starts from the loaded table; saving sends the WHOLE table 
   assert.match(m.getState().notice!, /ignored 2 entries: tiers\.image \(that tier is not used by the server\); features\.chatPlanning/);
 });
 
+test("routing: a focus refresh keeps unsaved edits; a plain load and a clean draft take the server's table", async () => {
+  const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiersBody() }) });
+  const m = new RoutingModel(client);
+  await m.load();
+  const clean = JSON.stringify(m.getState().draft);
+  await m.load(true);
+  assert.equal(JSON.stringify(m.getState().draft), clean, "a clean draft follows the server");
+  m.setTier("strong", { provider: "edited-provider", model: "edited-model" });
+  assert.equal(isDirty(m.getState().loaded, m.getState().draft), true);
+  await m.load(true);
+  assert.deepEqual(m.getState().draft!.tiers.strong, { provider: "edited-provider", model: "edited-model" }, "the edit survives a focus refresh");
+  assert.equal(isDirty(m.getState().loaded, m.getState().draft), true, "Save is still offered");
+  await m.load();
+  assert.equal(JSON.stringify(m.getState().draft), clean, "an explicit load replaces the draft");
+});
+
 test("routing: removing a tier resets roles that used it; invalid drafts never reach the network", async () => {
   const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiersBody() }), "POST /kb/routing-tiers": () => ({ status: 200, body: { success: true, dropped: [] } }) });
   const m = new RoutingModel(client);
