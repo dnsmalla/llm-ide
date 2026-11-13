@@ -70,7 +70,21 @@ export const mapFetchError = (err) => {
  * @param {{ userId: string, url: string, ref?: string, commit?: string, path?: string }} req
  * @param {{ fetch?: typeof fetch, signal?: AbortSignal }} [deps]
  */
-export async function installFromGithub({ userId, url, ref, commit, path: subpathIn }, { fetch: fetchImpl, signal } = {}) {
+/**
+ * The switches match an item by kind and name (gate.mjs), so a second item of one kind and name would share them: an
+ * install (recorded off) would switch the existing one off too. Such an install is refused, naming what holds the name.
+ * `taken(kind, name)` answers for the legacy lists (Plugins, MCP Plugins, LLM Sources); null = free.
+ */
+export function nameClash(userId, id, kind, name, taken) {
+  for (const [otherId] of readInstalled(userId).items) {
+    if (otherId === id) continue;
+    const o = parseItemId(otherId);
+    if (o && o.kind === kind && o.name === name) return `another ${kind} named '${name}' is installed (${otherId}); remove it first`;
+  }
+  return typeof taken === 'function' ? taken(kind, name) : null;
+}
+
+export async function installFromGithub({ userId, url, ref, commit, path: subpathIn }, { fetch: fetchImpl, signal, taken } = {}) {
   if (!catalogEnabled()) throw new InstallError('catalog_disabled', 'the extensions catalog is switched off');
   if (typeof userId !== 'string' || !userId) throw new InstallError('invalid_user', 'no user');
   const repo = parseRepoUrl(url);
@@ -113,9 +127,16 @@ export async function installFromGithub({ userId, url, ref, commit, path: subpat
     throw new InstallError('already_installed', 'this item is installed at another commit; use update', { id: info.id, installed: prior.pinnedCommit, requested: sha, use: '/auth/me/extensions/update' });
   }
 
-  const lock = `${userId}\u0000${info.id}`;
-  if (busy.has(lock)) throw new InstallError('busy', 'this item is being installed');
+  // One install per user, kind and switch name at a time (the switch key is the id's name segment, gate.mjs, not the
+  // display name), so two publishers' copies cannot both pass the clash check; the same id maps to the same lock.
+  const idName = parseItemId(info.id)?.name ?? '';
+  const lock = `${userId}\u0000${info.id}`; // the per-item lock uninstall, update and repair share
+  const nameLock = `${userId}\u0000name\u0000${info.kind}\u0000${idName}`;
+  if (busy.has(lock) || busy.has(nameLock)) throw new InstallError('busy', 'this item is being installed');
+  const clash = nameClash(userId, info.id, info.kind, idName, taken);
+  if (clash) throw new InstallError('name_taken', clash, { id: info.id });
   busy.add(lock);
+  busy.add(nameLock);
   const itemDir = itemStoreDir(userId, info.id);
   const finalDir = join(itemDir, sha);
   const staging = join(itemDir, `.staging-${randomBytes(6).toString('hex')}`);
@@ -143,7 +164,7 @@ export async function installFromGithub({ userId, url, ref, commit, path: subpat
   } catch (err) {
     rmSync(staging, { recursive: true, force: true });
     throw err instanceof InstallError ? err : new InstallError('write_failed', 'could not store the item');
-  } finally { busy.delete(lock); }
+  } finally { busy.delete(lock); busy.delete(nameLock); }
   return { ok: true, item: view(userId, info.id) };
 }
 

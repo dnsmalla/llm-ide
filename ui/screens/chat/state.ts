@@ -231,7 +231,7 @@ export const lastAssistantIndex = (messages: Message[]) => {
 };
 
 /** Info notices the user must see: the folder-trust prompt, and a chat continued from a summary (API 119). */
-const SHOWN_INFO_KINDS: ReadonlySet<string> = new Set(["workspace_trust", "chat_continued"]);
+const SHOWN_INFO_KINDS: ReadonlySet<string> = new Set(["workspace_trust", "chat_continued", "extensions_loaded"]);
 
 function noticeOf(ev: Extract<AgentEvent, { type: "notice" }>): Notice {
   return { kind: ev.kind, level: ev.level, text: ev.text, count: 1, visible: ev.level !== "info" || SHOWN_INFO_KINDS.has(ev.kind) };

@@ -46,13 +46,17 @@ const SPAWN_PORTS: [u16; 4] = [3456, 3457, 3458, 3459];
 /// keeps every draft in `no-ack` and an ack releases nothing. An adopted server keeps its own env.
 /// `LLMIDE_HOST_API_CHAT_CLEAR`: the phone's own "clear / delete this chat" (behind a confirmation there) works; without it the
 /// core refuses and the phone's cleared chat reappears on the next reload. It has no Settings switch.
+/// `LLMIDE_EXT_ACTIVE_SET`: an extension switched on in Library → Extensions loads into Claude chats (the catalog's
+/// active set); with it off the core ignores those switches. Installing an item whose kind and name another item
+/// already holds is refused by the core, so a shared switch never turns an existing plugin off.
 /// NOTE: `LLMIDE_HOST_API_READ` / `_COMPOSE` / `_TOOL_APPROVALS` are NOT here: they are Settings switches, on by default,
 /// and `prefs::core_env_pairs` passes each one as an explicit `1` or `0` so turning one off is honoured.
-const SPAWNED_CORE_FLAGS: [(&str, &str); 4] = [
+const SPAWNED_CORE_FLAGS: [(&str, &str); 5] = [
     ("LLMIDE_ENGINE_PREWARM", "0"),
     ("LLMIDE_BACKUP_INTERVAL_HOURS", "0"),
     ("LLMIDE_LIVE_ACK", "1"),
     ("LLMIDE_HOST_API_CHAT_CLEAR", "1"),
+    ("LLMIDE_EXT_ACTIVE_SET", "1"),
 ];
 /// On a supervised restart, how long the port our just-exited core held may stay busy before it is skipped.
 const RESTART_PORT_WAIT: Duration = Duration::from_secs(3);
@@ -2347,6 +2351,12 @@ process.on('SIGTERM', () => process.exit(0));
     fn the_spawned_core_holds_extension_captures_for_the_archivist() {
         assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_LIVE_ACK", "1")));
         let host = vec![("LLMIDE_LIVE_ACK".to_string(), "0".to_string())];
+        assert!(crate::core_env::scrub(&host, crate::fsutil::Os::Mac).is_empty(), "never taken from the host env");
+    }
+    #[test]
+    fn the_spawned_core_loads_switched_on_catalog_extensions() {
+        assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_EXT_ACTIVE_SET", "1")));
+        let host = vec![("LLMIDE_EXT_ACTIVE_SET".to_string(), "0".to_string())];
         assert!(crate::core_env::scrub(&host, crate::fsutil::Os::Mac).is_empty(), "never taken from the host env");
     }
     #[test]

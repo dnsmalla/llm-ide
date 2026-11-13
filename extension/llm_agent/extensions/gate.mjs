@@ -17,15 +17,27 @@
 
 import { logger } from '../../core/logger.mjs';
 import { readOverlay } from './store.mjs';
+import { readInstalled } from './installed.mjs';
 import { parseItemId } from './model.mjs';
 import { activeSetEnabled } from './flags.mjs';
 
 const log = logger.child({ component: 'extensions-gate' });
 let warnedCorrupt = false;
 
-function indexOverlay(overlay) {
+/** Ids of this user's catalog installs (an unreadable record reads as none: entries then restrict as before). */
+function installedIdsOf(userId) {
+  try {
+    const r = readInstalled(userId);
+    return r.corrupt ? new Set() : new Set(r.items.keys());
+  } catch {
+    return new Set();
+  }
+}
+
+function indexOverlay(overlay, skip = null) {
   const byKindName = new Map();
   for (const [id, entry] of overlay.items) {
+    if (skip?.has(id)) continue;
     const p = parseItemId(id);
     if (!p) continue;
     const key = `${p.kind}\u0000${p.name}`;
@@ -46,25 +58,31 @@ function indexOverlay(overlay) {
  * @param {string} userId
  * @param {{ overlay?: ReturnType<typeof readOverlay> }} [o]
  */
-export function makeGate(userId, { overlay = readOverlay(userId) } = {}) {
+export function makeGate(userId, { overlay = readOverlay(userId), installedIds = installedIdsOf(userId) } = {}) {
   const failClosed = overlay.corrupt === true;
   if (failClosed && !warnedCorrupt) {
     warnedCorrupt = true;
     log.warn('extensions_state_unreadable', { note: 'extensions-state.json cannot be read; extensions are switched off for catalog-driven consumers until it is fixed or removed' });
   }
   const idx = indexOverlay(overlay);
+  // A catalog install's own switch (it is recorded off at install) must never restrict a legacy Plugins / MCP Plugins /
+  // LLM Sources item of the same kind and name: the legacy builders read only entries that are not catalog installs.
+  const legacyIdx = installedIds.size ? indexOverlay(overlay, installedIds) : idx;
   const entry = (kind, name) => idx.get(`${kind}\u0000${name}`);
-  const itemOn = (kind, name) => !failClosed && entry(kind, name)?.off !== true;
-  const memberOn = (kind, name, type, member) => itemOn(kind, name) && !entry(kind, name)?.disabled.has(`${type}:${member}`);
+  const legacyEntry = (kind, name) => legacyIdx.get(`${kind}\u0000${name}`);
+  // `installed` = the asker is a catalog install itself (a plugin with `installedItem`): it reads every switch.
+  const pick = (installed) => (installed ? entry : legacyEntry);
+  const itemOn = (kind, name, installed = false) => !failClosed && pick(installed)(kind, name)?.off !== true;
+  const memberOn = (kind, name, type, member, installed = false) => itemOn(kind, name, installed) && !pick(installed)(kind, name)?.disabled.has(`${type}:${member}`);
   // A stable fingerprint of the restrictions, for caches keyed by the gate.
-  const signature = failClosed ? 'closed' : JSON.stringify([...idx].map(([k, v]) => [k, v.off, v.on, [...v.disabled].sort()]).sort());
+  const signature = failClosed ? 'closed' : JSON.stringify([[...idx], [...legacyIdx]].map((m) => m.map(([k, v]) => [k, v.off, v.on, [...v.disabled].sort()]).sort()));
   return {
     failClosed,
     signature,
-    pluginActive: (name) => itemOn('plugin', name),
-    pluginMemberActive: (name, type, member) => memberOn('plugin', name, type, member),
+    pluginActive: (name, installed = false) => itemOn('plugin', name, installed),
+    pluginMemberActive: (name, type, member, installed = false) => memberOn('plugin', name, type, member, installed),
     /** Names of this plugin's unchecked members, as `<type>:<name>` ids. */
-    pluginDisabledMembers: (name) => [...(entry('plugin', name)?.disabled ?? [])].sort(),
+    pluginDisabledMembers: (name, installed = false) => [...(pick(installed)('plugin', name)?.disabled ?? [])].sort(),
     llmSourceActive: (sourceId) => itemOn('llm-source', sourceId),
     librarySkillActive: (sourceId, skillName) => memberOn('llm-source', sourceId, 'skill', skillName),
     mcpActive: (id) => itemOn('mcp', id),

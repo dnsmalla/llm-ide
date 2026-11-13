@@ -86,6 +86,32 @@ test('install: the same commit again is a no-op; another commit of an installed 
   await rejects(inst.installFromGithub({ userId: 'u1', url: 'https://github.com/acme/skills', commit: SHA2 }, { fetch: f }), 'already_installed');
 });
 
+test('install: a second item of the same kind and name is refused, so a shared switch never turns the first one off', async () => {
+  const f = fixtureFetch({
+    [archiveUrl('acme', 'skills', SHA)]: repoArchive({ 'SKILL.md': SKILL }),
+    [archiveUrl('other', 'skills', SHA)]: repoArchive({ 'SKILL.md': SKILL }),
+  });
+  const first = await inst.installFromGithub({ userId: 'u9', url: 'https://github.com/acme/skills', commit: SHA }, { fetch: f });
+  assert.equal(first.item.id, 'skill:acme/code-reviewer');
+  await rejects(inst.installFromGithub({ userId: 'u9', url: 'https://github.com/other/skills', commit: SHA }, { fetch: f }), 'name_taken');
+  assert.equal(installedMod.readInstalled('u9').items.has('skill:other/code-reviewer'), false, 'nothing was written');
+  assert.equal(store.readOverlay('u9').items.has('skill:other/code-reviewer'), false, 'and no switch was recorded');
+  // Another user is not affected by this user's installs.
+  const other = await inst.installFromGithub({ userId: 'u10', url: 'https://github.com/other/skills', commit: SHA }, { fetch: f });
+  assert.equal(other.item.id, 'skill:other/code-reviewer');
+});
+
+test('install: a name already held by a legacy list (Plugins, MCP Plugins, LLM Sources) is refused before anything is written', async () => {
+  const f = fixtureFetch({ [archiveUrl('acme', 'plug9', SHA)]: repoArchive(PLUGIN) });
+  const asked = [];
+  const taken = (kind, name) => { asked.push(`${kind}:${name}`); return kind === 'plugin' && name === 'fancy' ? "a plugin named 'fancy' is already in Plugins" : null; };
+  await rejects(inst.installFromGithub({ userId: 'u11', url: 'https://github.com/acme/plug9', commit: SHA }, { fetch: f, taken }), 'name_taken');
+  assert.deepEqual(asked, ['plugin:fancy']);
+  assert.equal(installedMod.readInstalled('u11').items.size, 0);
+  assert.equal(store.readOverlay('u11').items.size, 0);
+  assert.equal(inst.nameClash('u11', 'plugin:acme/fancy', 'plugin', 'fancy', () => null), null, 'free when nothing holds it');
+});
+
 test('install: a ref is resolved to a SHA once and the SHA is what is recorded', async () => {
   const f = fixtureFetch({
     'https://api.github.com/repos/acme/plug/commits/main': SHA,
@@ -204,3 +230,4 @@ test('an unreadable installed record is never overwritten', async () => {
   assert.equal(fs.readFileSync(installedMod.installedFilePath(), 'utf8'), '{broken');
   assert.equal(inst.listInstalled('uz').corrupt, true);
 });
+

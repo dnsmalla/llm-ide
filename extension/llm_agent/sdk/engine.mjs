@@ -46,6 +46,7 @@ import {
 } from '../skills/index.mjs';
 import { buildUserMcpServers } from '../extensions/mcp-servers.mjs';
 import { runTurnShadow } from '../extensions/shadow.mjs';
+import { gateFor } from '../extensions/gate.mjs';
 import { composeSystemContext, composeRecentContext, composeGitContext, gitStateKey } from '../internal/context/compose.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
@@ -431,6 +432,34 @@ function loadedExtensionIdentities(userSet, delivery, userMcp) {
     subagents: entries(userSet?.subagents).map(([n, s]) => `${s?.pluginName}/${n}`),
     mcpServers: Object.keys(userMcp?.servers ?? {}),
   };
+}
+
+// The last extensions notice per (user, chat), so a chat hears it once and again only after a switch changes it.
+const lastLoadedNotice = new Map();
+const MAX_LOADED_NOTICE_KEYS = 2000;
+const NOTE_LIST = 6;
+
+/**
+ * An info notice naming the plugins and MCP servers this chat's turns load (from `loadedExtensionIdentities`), or
+ * null when it is unchanged since this chat's last notice. Nothing loaded after something was loaded says so too.
+ */
+export function extensionsLoadedNotice(userId, chatId, ids) {
+  // Names come from third-party manifests: control characters out, each one capped.
+  const clean = (x) => String(x).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g, '').trim().slice(0, 60);
+  const plugins = [...new Set([...(ids?.nativePlugins ?? []).map((p) => (typeof p === 'string' ? p : p?.name)).filter(Boolean),
+    ...[...(ids?.pluginSkills ?? []), ...(ids?.commands ?? []), ...(ids?.subagents ?? [])].map((x) => String(x).split('/')[0]).filter((x) => x && x !== 'undefined')].map(clean).filter(Boolean))].sort();
+  const servers = [...new Set((ids?.mcpServers ?? []).map(clean).filter(Boolean))].sort();
+  const key = `${userId}\u0000${chatId ?? ''}`;
+  const sig = JSON.stringify([plugins, servers]);
+  const prev = lastLoadedNotice.get(key);
+  if (prev === sig || (prev === undefined && plugins.length === 0 && servers.length === 0)) return null;
+  if (lastLoadedNotice.size >= MAX_LOADED_NOTICE_KEYS) lastLoadedNotice.delete(lastLoadedNotice.keys().next().value);
+  lastLoadedNotice.set(key, sig);
+  const list = (xs) => (xs.length > NOTE_LIST ? `${xs.slice(0, NOTE_LIST).join(', ')} and ${xs.length - NOTE_LIST} more` : xs.join(', '));
+  const parts = [plugins.length ? `plugins ${list(plugins)}` : '', servers.length ? `MCP servers ${list(servers)}` : ''].filter(Boolean);
+  return { type: 'notice', kind: 'extensions_loaded', level: 'info',
+    text: parts.length ? `This chat uses your extensions: ${parts.join('; ')}.` : 'This chat now uses none of your plugins or MCP servers.',
+    data: { plugins, mcpServers: servers } };
 }
 
 // buildUserMcpServers lives in ../extensions/mcp-servers.mjs (no SDK import, so a
@@ -1781,9 +1810,16 @@ export async function runAgentV2Turn(
   });
   // Shadow compare of the catalog's active set against what this turn loaded
   // (extensions/shadow.mjs): once per user per day, counts only, never blocks.
-  runTurnShadow(userId, mode, loadedExtensionIdentities(userSet, pluginDelivery, userMcp), {
+  const loadedIds = loadedExtensionIdentities(userSet, pluginDelivery, userMcp);
+  runTurnShadow(userId, mode, loadedIds, {
     computeOpts: { nativeEnabled: nativePluginsEnabled(userId), cwd: queryOptions.cwd },
   });
+  // Proof of use: what this chat loads from the user's extensions, said once and again only when it changes.
+  const loadedNote = extensionsLoadedNotice(userId, chatSessionId, loadedIds);
+  if (loadedNote) onEvent?.(loadedNote);
+  // An unreadable switch file turns every extension off (fail closed, gate.mjs): say so instead of loading nothing quietly.
+  if (gateFor(userId)?.failClosed) onEvent?.({ type: 'notice', kind: 'extensions_loaded', level: 'warning',
+    text: 'Your extension switches (extensions-state.json) cannot be read, so no plugin, MCP server or LLM source is loaded in this chat. Fix or remove that file in the app data folder.' });
   // Workspace trust (extensions/workspace-trust.mjs): in a folder the user has not trusted, the folder's own
   // `.mcp.json` servers (any, including parents') are withheld (the CLI reads that file from cwd) and a notice names
   // what was skipped. Nothing changes for a folder that carries none, a trusted folder, or LLMIDE_WORKSPACE_TRUST=off.

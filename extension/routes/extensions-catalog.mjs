@@ -32,6 +32,9 @@
 import { config } from '../core/config.mjs';
 import { send, readJson, clientIp, safeAudit } from '../server/route-http.mjs';
 import { parseItemId } from '../llm_agent/extensions/model.mjs';
+import { loadedPlugins } from '../llm_agent/skills/registry.mjs';
+import { listSources } from '../llm-sources/registry.mjs';
+import { listMcpPluginsWithState } from '../mcp/state.mjs';
 import { activeSetEnabled, adapterEnabled } from '../llm_agent/extensions/flags.mjs';
 import {
   installFromGithub, listInstalled, setInstalledEnabled, setInstalledMembers, uninstall, InstallError,
@@ -64,13 +67,21 @@ export function isCatalogRoute(url) {
 
 const STATUS = {
   invalid_url: 400, invalid_ref: 400, invalid_commit: 400, invalid_path: 400, invalid_member: 400, invalid_user: 400,
-  not_found: 404, catalog_disabled: 404, source_not_allowed: 403, consent_required: 409, already_installed: 409, busy: 409,
+  not_found: 404, catalog_disabled: 404, source_not_allowed: 403, consent_required: 409, already_installed: 409, name_taken: 409, busy: 409,
   invalid_source: 400, too_many_sources: 400, source_exceeds_ceiling: 403,
   already_current: 409, update_changed: 409, commit_changed: 409, bytes_missing: 409, integrity_mismatch: 409, no_previous: 404, previous_unavailable: 409, identity_changed: 422,
   marketplace: 422, nothing_installable: 422, unsafe_path: 422, too_large: 422, bad_archive: 422,
   commit_not_in_repo: 422, verify_unavailable: 503,
   blocked: 403, upstream: 502, redirect_refused: 502, aborted: 499, state_unreadable: 500, write_failed: 500,
 };
+
+/** The legacy list that already holds this kind and name (its switch would be shared, gate.mjs), or null. */
+export function legacyNameTaken(userId, kind, name) {
+  if (kind === 'plugin' && loadedPlugins().some((p) => p.name === name)) return `a plugin named '${name}' is already in Plugins; remove it there first`;
+  if (kind === 'mcp' && listMcpPluginsWithState(userId).plugins.some((p) => p.id === name)) return `an MCP server '${name}' is already in MCP Plugins; remove it there first`;
+  if (kind === 'llm-source' && listSources().some((s) => s.id === name)) return `an LLM source '${name}' is already in LLM Sources; remove it there first`;
+  return null;
+}
 
 function fail(res, err) {
   if (err instanceof InstallError || err instanceof AllowlistError) {
@@ -163,7 +174,7 @@ export async function handleCatalogRoute(req, res, { db, requestId }) {
     if (url === '/auth/me/extensions/install') {
       const ac = new AbortController();
       req.once('close', () => { if (!res.writableEnded) ac.abort(); });
-      const r = await installFromGithub({ userId, url: str(body.url) ?? '', ref: str(body.ref), commit: str(body.commit), path: str(body.path) }, { signal: ac.signal });
+      const r = await installFromGithub({ userId, url: str(body.url) ?? '', ref: str(body.ref), commit: str(body.commit), path: str(body.path) }, { signal: ac.signal, taken: (kind, name) => legacyNameTaken(userId, kind, name) });
       audit('extension.install', r.item.id, 'success', { commit: r.item.pinnedCommit, trust: r.item.publisher.trust, findings: r.item.scan.count });
       send(res, 200, r);
       return;

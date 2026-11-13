@@ -56,7 +56,9 @@ A gate only restricts what the legacy builders already allow. Items match by kin
 
 `gateFor(userId)` returns `null` unless `LLMIDE_EXT_ACTIVE_SET` is on. Every legacy builder takes an optional `gate`: `undefined` resolves `gateFor`, `null` forces the legacy behaviour, an object forces that gate.
 
-## §5 Consumers behind `LLMIDE_EXT_ACTIVE_SET` (default off)
+## §5 Consumers behind `LLMIDE_EXT_ACTIVE_SET` (default off; the desktop app turns it on)
+
+The core the desktop app spawns runs with `LLMIDE_EXT_ACTIVE_SET=1` (`SPAWNED_CORE_FLAGS`, `desktop/src-tauri/src/core_host.rs`), so an item switched on in Library → Extensions loads into Claude chats. Because the switches match by kind and name (§4), an install whose kind and name another item already holds is refused with `409 name_taken` (`installFromGithub` → `nameClash`; the route adds the legacy Plugins, MCP Plugins and LLM Sources lists through `legacyNameTaken`), so installing never switches an existing item off. The gate also keeps the two apart for items installed before that guard: a catalog install's own switch never restricts a legacy item of the same kind and name (`makeGate` indexes the overlay twice; a catalog plugin passes `installed = true` to `pluginActive` / `pluginMemberActive` / `pluginDisabledMembers`). An unreadable switch file still fails closed, and a Claude chat then shows a warning notice. A Claude chat says which plugins and MCP servers it loads in one `extensions_loaded` info notice, once per chat and again when that set changes (`extensionsLoadedNotice`, `llm_agent/sdk/engine.mjs`).
 
 | Consumer | With the flag on |
 |---|---|

@@ -236,11 +236,11 @@ export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env
   const installedPlugins = g ? activeInstalled(userId, g, { legacyPluginNames: new Set(pluginRegistry.plugins.keys()) }).plugins : [];
   for (const p of [...pluginRegistry.plugins.values(), ...installedPlugins]) {
     if (!p.installedItem && !enabled.has(p.name)) continue;
-    if (g && !g.pluginActive(p.name)) continue;
+    if (g && !g.pluginActive(p.name, !!p.installedItem)) continue;
     // Catalog member switches (flag on only): the hooks component off means the
     // plugin's hooks run through NEITHER mechanism; any other unchecked member
     // means the SDK is handed a generated view without it (extensions/view.mjs).
-    const unchecked = g ? g.pluginDisabledMembers(p.name) : [];
+    const unchecked = g ? g.pluginDisabledMembers(p.name, !!p.installedItem) : [];
     const hooksOff = unchecked.includes('hook:hooks');
     const hooks = hooksOff ? [] : (Array.isArray(p.hooks) ? p.hooks : []);
     const sdkReadable = p.format === 'claude'
@@ -498,7 +498,7 @@ export function buildPerUserSkillSet(userId, { gate } = {}) {
   const installedPlugins = g ? activeInstalled(userId, g, { legacyPluginNames: new Set(pluginRegistry.plugins.keys()) }).plugins : [];
   for (const p of [...pluginRegistry.plugins.values(), ...installedPlugins]) {
     if (!p.installedItem && !enabled.has(p.name)) continue;
-    if (g && !g.pluginActive(p.name)) continue;
+    if (g && !g.pluginActive(p.name, !!p.installedItem)) continue;
     // Skill files: re-run the strict skill-loader on the plugin's
     // skills/ directory so we get the same validation guarantees the
     // core skills get. Bad plugin skills are dropped with a warning
@@ -509,7 +509,7 @@ export function buildPerUserSkillSet(userId, { gate } = {}) {
         console.warn(`[plugin:${p.name}] skill warnings:`, pluginSkills.warnings);
       }
       for (const [name, skill] of pluginSkills.skills) {
-        if (g && !g.pluginMemberActive(p.name, 'skill', name)) continue;
+        if (g && !g.pluginMemberActive(p.name, 'skill', name, !!p.installedItem)) continue;
         if (skills.has(name)) {
           // Core wins by design (a plugin must not shadow ask-internal
           // etc.) — but say so, or the plugin author has no way to know
@@ -524,7 +524,7 @@ export function buildPerUserSkillSet(userId, { gate } = {}) {
     // wins on collision (deterministic since plugins are loaded in
     // directory order).
     for (const [trigger, cmd] of Object.entries(p.commands)) {
-      if (g && !g.pluginMemberActive(p.name, 'command', trigger)) continue;
+      if (g && !g.pluginMemberActive(p.name, 'command', trigger, !!p.installedItem)) continue;
       if (p.installedItem && commands.has(trigger)) continue; // a legacy command keeps its trigger
       commands.set(trigger, { ...cmd, pluginName: p.name });
     }
@@ -532,7 +532,7 @@ export function buildPerUserSkillSet(userId, { gate } = {}) {
     // plugin to declare a name wins (deterministic order), so a
     // malicious second plugin can't hijack a known name.
     for (const [name, sub] of Object.entries(p.subagents || {})) {
-      if (g && !g.pluginMemberActive(p.name, 'agent', name)) continue;
+      if (g && !g.pluginMemberActive(p.name, 'agent', name, !!p.installedItem)) continue;
       if (subagents.has(name)) continue;
       subagents.set(name, { ...sub, pluginName: p.name });
     }
