@@ -1320,6 +1320,9 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     cmd.arg(rt.root.join("extension").join("server.mjs"))
         .env("LLMIDE_PORT", ctx.port.to_string())
         .env("LLMIDE_CORE_NONCE", ctx.nonce)
+        // The core exits by itself when this process is gone (core/parent-watch.mjs). Without it a force quit or a
+        // crash here leaves an orphan on unix, and the next launch would start a second writer on the same database.
+        .env("LLMIDE_PARENT_PID", std::process::id().to_string())
         // Spawned core only (this is the spawn path): lets the packaged webview call it. Exact origins.
         .env("LLMIDE_CORS_ORIGINS", crate::core_env::spawned_core_cors_origins());
     // Secrets go on the child's stdin, not its environment; the core reads them before config (core/secrets-stdin.mjs).

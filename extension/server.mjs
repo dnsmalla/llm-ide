@@ -2,6 +2,7 @@
 import './core/env-compat.mjs';
 // The desktop hands the spawned core its secrets on stdin; this must run before config.mjs reads them.
 import './core/secrets-stdin.mjs';
+import { parentPidFrom, watchParent } from './core/parent-watch.mjs';
 // Must precede every import that reads config/logger/DB (see the module).
 import { dataDirMigration } from './kb/data-dir-boot.mjs';
 import { completeGraceAfterHealthyBoot } from './kb/data-dir-migration.mjs';
@@ -1542,6 +1543,9 @@ function shutdown(signal) {
 }
 process.on('SIGINT',  () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+// A core spawned by the desktop host must not outlive it: after a force quit or crash of the app it would stay on
+// the port with the database open, and the next launch would start a second writer on the same SQLite file.
+watchParent({ pid: parentPidFrom(), onGone: () => shutdown('PARENT_GONE') });
 // Ignore SIGPIPE — prevents the process from terminating when a client
 // disconnects mid-response (broken pipe on the socket write).
 process.on('SIGPIPE', () => {});
