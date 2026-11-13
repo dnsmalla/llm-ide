@@ -342,6 +342,25 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// How long a core found on the live port at launch is given to go away before it is treated as someone else's.
+const ORPHAN_SETTLE: Duration = if cfg!(test) { Duration::ZERO } else { Duration::from_millis(1500) };
+
+/// True when `healthy` answers yes now and keeps answering yes for `settle` (checked every `interval`). The first no
+/// ends the wait: the core that was there has gone.
+fn still_healthy_after(settle: Duration, interval: Duration, mut healthy: impl FnMut() -> bool) -> bool {
+    if !healthy() {
+        return false;
+    }
+    let until = Instant::now() + settle;
+    while Instant::now() < until {
+        std::thread::sleep(interval.min(until.saturating_duration_since(Instant::now())));
+        if !healthy() {
+            return false;
+        }
+    }
+    true
+}
+
 impl CoreHost {
     pub fn new() -> Self {
         Self::with(Tuning::default(), Arc::new(real_launch), Arc::new(real_claude_probe))
@@ -624,7 +643,12 @@ impl CoreHost {
             return;
         }
 
-        let live_healthy = matches!(probe(t.live_port, PROBE_TIMEOUT), Probe::Healthy { .. });
+        // A core left behind by a force-quit app notices within half a second that its host is gone and shuts down
+        // (extension/core/parent-watch.mjs). An app relaunched straight after the force quit would still find it
+        // answering: it would then keep its own core off the usual port for the whole session (the browser extension
+        // expects that port), or, in a dev build, adopt a core that is about to exit. So a healthy answer is believed
+        // only if it is still there after a short wait. A core someone really runs there costs this wait once.
+        let live_healthy = still_healthy_after(ORPHAN_SETTLE, Duration::from_millis(150), || matches!(probe(t.live_port, PROBE_TIMEOUT), Probe::Healthy { .. }));
         if t.adopt && live_healthy {
             eprintln!("core: adopting existing server on 127.0.0.1:{} (identity unverified)", t.live_port);
             let ms = started.elapsed().as_millis() as u64;
@@ -1841,6 +1865,25 @@ mod tests {
         let s = host.status();
         assert_eq!(s.state, Phase::Failed);
         assert!(s.error.is_some() && s.pid.is_none());
+    }
+
+    #[test]
+    fn a_core_on_the_live_port_is_believed_only_if_it_stays() {
+        let fast = Duration::from_millis(5);
+        // Nothing there: no wait at all.
+        let mut calls = 0;
+        assert!(!still_healthy_after(Duration::from_millis(200), fast, || { calls += 1; false }));
+        assert_eq!(calls, 1);
+        // An orphan that is shutting down: healthy at first, gone within the wait. Not someone else's core.
+        let mut n = 0;
+        let started = Instant::now();
+        assert!(!still_healthy_after(Duration::from_secs(5), fast, || { n += 1; n < 4 }));
+        assert!(started.elapsed() < Duration::from_secs(2), "the first no ends the wait");
+        // A core that really runs there stays healthy for the whole wait.
+        let started = Instant::now();
+        assert!(still_healthy_after(Duration::from_millis(60), fast, || true));
+        assert!(started.elapsed() >= Duration::from_millis(60));
+        assert!(still_healthy_after(Duration::ZERO, fast, || true), "tests use a zero wait");
     }
 
     #[test]
