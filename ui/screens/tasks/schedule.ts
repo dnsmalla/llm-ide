@@ -13,7 +13,7 @@ const FIRED_KEY = "llmide.tasks.v2.fired";
 const MAX_FIRED = 200;
 /** Outcomes recorded as a skipped slot, not a failure: the refusal is the answer, and no engine call was made. */
 export const SKIP_CODES: ReadonlySet<string> = new Set(["USD_CAP", "PAUSED_BY_LIMITS", "NEEDS_APPROVAL", "WRITE_RUN_LIVE"]);
-const BUSY_SUMMARY = "Another Auto Task run was active (busy); this slot was skipped.";
+const BUSY_SUMMARY = "Another Auto Task run was active (busy) for the whole catch-up time; this slot was skipped.";
 
 export type ScheduledItem = { kind: "task"; id: string } | { kind: "custom"; task: CustomAutoTask };
 export interface ScheduledOutcome { ok: boolean; summary: string; code?: string }
@@ -33,9 +33,19 @@ export interface SchedulerDeps {
   shouldStop?(): boolean;
   /** Fired marks that survive a failed write of the persisted list. Defaults to one set per scheduler module. */
   memory?: Set<string>;
+  /** Slots that were due while the lock was taken and still wait for it. Defaults to one list per scheduler module. */
+  waiting?: WaitingSlot[];
 }
 
+/** A due slot that found the Auto Task lock taken: it runs as soon as the lock is free, within the catch-up window. */
+export interface WaitingSlot { item: ScheduledItem; projectRoot: string; dueAt: number }
+
+/** How long a slot that found the lock taken keeps waiting for it before it is recorded as skipped. */
+export const BUSY_CATCH_UP_MS = 10 * 60_000;
+const MAX_WAITING = 50;
+
 const moduleMemory = new Set<string>();
+const moduleWaiting: WaitingSlot[] = [];
 
 /** App-scoped tasks (`sources.update`, `plan.status`) are one key for every project: they run once, not per project. */
 const fireKey = (root: string, scope: "project" | "app", id: string): string => (scope === "app" ? id : `${root}|${id}`);
@@ -109,19 +119,40 @@ function takeDueItems(root: string, deps: SchedulerDeps): ScheduledItem[] {
   return items;
 }
 
-/** One scheduler pass for `projectRoot`. Returns how many slots were started or recorded as skipped. */
+/**
+ * One scheduler pass for `projectRoot`. Returns how many slots were started or recorded as skipped.
+ *
+ * Due matching is exact to the minute, so a slot that finds the Auto Task lock taken cannot simply be left for the
+ * next pass: once its minute is over it would vanish without a record. It cannot be dropped at once either: a manual
+ * run of a few seconds at 02:00 would then cost the whole day's 02:00 task. So such a slot waits. It is marked fired
+ * (it can never start twice), runs on the first pass that finds the lock free, and is recorded as skipped only when
+ * the lock stayed taken for the whole catch-up window.
+ */
 export async function runDueScheduled(projectRoot: string, deps: SchedulerDeps): Promise<number> {
   const root = normaliseProjectRoot(projectRoot);
   if (!root) return 0;
-  // Due slots are computed (and marked) before the lock is tried: due matching is exact to the minute, so a slot
-  // that finds the lock taken would otherwise vanish without a record.
-  const items = takeDueItems(root, deps);
-  if (items.length === 0) return 0;
-  if (!deps.acquire()) {
-    for (const item of items) deps.record({ item, projectRoot: root, at: deps.now().toISOString(), status: "skipped", summary: BUSY_SUMMARY });
-    return items.length;
+  const waiting = deps.waiting ?? moduleWaiting;
+  const nowMs = deps.now().getTime();
+  let counted = 0;
+  // Slots that waited too long are given up, with a record that says why.
+  for (let i = waiting.length - 1; i >= 0; i--) {
+    const w = waiting[i]!;
+    if (w.projectRoot !== root || nowMs - w.dueAt <= BUSY_CATCH_UP_MS) continue;
+    waiting.splice(i, 1);
+    deps.record({ item: w.item, projectRoot: root, at: new Date(w.dueAt).toISOString(), status: "skipped", summary: BUSY_SUMMARY });
+    counted++;
   }
-  let started = 0;
+  const fresh = takeDueItems(root, deps);
+  const mine = waiting.filter((w) => w.projectRoot === root);
+  if (fresh.length === 0 && mine.length === 0) return counted;
+  if (!deps.acquire()) {
+    for (const item of fresh) waiting.push({ item, projectRoot: root, dueAt: nowMs });
+    while (waiting.length > MAX_WAITING) waiting.shift();
+    return counted;
+  }
+  // The lock is ours: the slots that waited go first, in the order they came due, then the ones due now.
+  for (const w of mine) waiting.splice(waiting.indexOf(w), 1);
+  const items = [...mine.map((w) => w.item), ...fresh];
   try {
     for (const item of items) {
       if (deps.shouldStop?.()) break;
@@ -129,10 +160,10 @@ export async function runDueScheduled(projectRoot: string, deps: SchedulerDeps):
       const outcome = await runOne(item, root, deps);
       const status = outcome.ok ? "ok" : SKIP_CODES.has(outcome.code ?? "") ? "skipped" : "failed";
       deps.record({ item, projectRoot: root, at, status, summary: outcome.summary });
-      started++;
+      counted++;
     }
   } finally { deps.release(); }
-  return started;
+  return counted;
 }
 
 /** Starts the scheduler for the open project. Returns the stop function; a stopped scheduler starts nothing new. */

@@ -107,19 +107,62 @@ test("due tasks run one at a time", async () => {
   assert.equal(peak, 1);
 });
 
-test("a slot due while another task holds the lock is recorded as skipped (busy), once, and starts nothing", async () => {
+test("a slot due while the lock is taken waits and runs once as soon as the lock is free", async () => {
   const s = storage();
   armed(ROOT, s, ["review.code"]);
-  const busy = deps(s, { acquire: () => false });
-  assert.equal(await runDueScheduled(ROOT, busy), 1, "the skipped slot is counted");
+  const waiting = [];
+  // 02:00:10, a short manual run holds the lock: nothing runs, nothing is recorded, the slot waits.
+  const busy = deps(s, { acquire: () => false, waiting });
+  assert.equal(await runDueScheduled(ROOT, busy), 0);
   assert.equal(busy.runs.length, 0);
-  assert.equal(busy.records.length, 1);
-  assert.equal(busy.records[0].status, "skipped");
-  assert.match(busy.records[0].summary, /busy/);
-  assert.deepEqual(busy.records[0].item, { kind: "task", id: "review.code" });
-  const again = deps(s, { acquire: () => false, memory: busy.memory });
-  assert.equal(await runDueScheduled(ROOT, again), 0, "the next tick in the same minute does not record it twice");
-  assert.equal(again.records.length, 0);
+  assert.equal(busy.records.length, 0, "not given up yet");
+  assert.equal(waiting.length, 1);
+  // 02:00:40, the next pass, the lock is free: the 02:00 task runs (it used to be lost for the whole day).
+  const free = deps(s, { now: () => new Date("2026-11-05T02:00:40"), memory: busy.memory, waiting });
+  assert.equal(await runDueScheduled(ROOT, free), 1);
+  assert.deepEqual(free.runs, [{ kind: "task", id: "review.code" }]);
+  assert.equal(free.records[0].status, "ok");
+  assert.equal(waiting.length, 0);
+  // And never a second time, in that minute or later.
+  const later = deps(s, { now: () => new Date("2026-11-05T02:00:55"), memory: busy.memory, waiting });
+  assert.equal(await runDueScheduled(ROOT, later), 0);
+  assert.equal(later.runs.length, 0);
+});
+
+test("a slot that waits past the catch-up window is recorded once as skipped (busy) and never runs late", async () => {
+  const s = storage();
+  armed(ROOT, s, ["review.code"]);
+  const waiting = [];
+  const busy = deps(s, { acquire: () => false, waiting });
+  await runDueScheduled(ROOT, busy);
+  // Still taken five minutes later: keeps waiting, still silent.
+  const mid = deps(s, { acquire: () => false, now: () => new Date("2026-11-05T02:05:10"), memory: busy.memory, waiting });
+  assert.equal(await runDueScheduled(ROOT, mid), 0);
+  assert.equal(mid.records.length, 0);
+  assert.equal(waiting.length, 1);
+  // Past the window, with the lock free again: it is given up with a record, not started eleven minutes late.
+  const late = deps(s, { now: () => new Date("2026-11-05T02:11:10"), memory: busy.memory, waiting });
+  assert.equal(await runDueScheduled(ROOT, late), 1);
+  assert.equal(late.runs.length, 0);
+  assert.equal(late.records.length, 1);
+  assert.equal(late.records[0].status, "skipped");
+  assert.match(late.records[0].summary, /busy/);
+  assert.deepEqual(late.records[0].item, { kind: "task", id: "review.code" });
+  assert.equal(late.records[0].at, new Date("2026-11-05T02:00:10").toISOString(), "recorded at the time it was due");
+  assert.equal(waiting.length, 0);
+});
+
+test("a waiting slot belongs to its project: another project's pass neither runs nor drops it", async () => {
+  const s = storage();
+  armed(ROOT, s, ["review.code"]);
+  armed(OTHER, s, []);
+  const waiting = [];
+  const busy = deps(s, { acquire: () => false, waiting });
+  await runDueScheduled(ROOT, busy);
+  const other = deps(s, { now: () => new Date("2026-11-05T02:00:40"), memory: busy.memory, waiting });
+  assert.equal(await runDueScheduled(OTHER, other), 0);
+  assert.equal(other.runs.length, 0);
+  assert.equal(waiting.length, 1);
 });
 
 test("nothing due and a busy lock records nothing", async () => {
