@@ -336,9 +336,12 @@ pub(crate) fn approve_loop_with(
         return Ok(Some(approval_from(token, expires, &req)));
     }
     let text = approval_text(&req)?;
+    let opened = std::time::Instant::now();
     if !ask(dialog_title(&req), &text) {
         return Ok(None);
     }
+    // The grant starts when the dialog closes, not when it opened: time spent reading it must not eat into the 4 h.
+    let now = now.saturating_add(opened.elapsed().as_millis() as u64);
     let after = loop_request(root, loop_id)?;
     if after.data != req.data {
         return Err("system/loop.json or the fault reports changed while the approval was open; nothing was approved".into());
@@ -364,9 +367,12 @@ pub(crate) fn approve_stage_with(
         return Ok(Some(approval_from(token, expires, &req)));
     }
     let text = approval_text(&req)?;
+    let opened = std::time::Instant::now();
     if !ask(dialog_title(&req), &text) {
         return Ok(None);
     }
+    // The grant starts when the dialog closes, not when it opened: time spent reading it must not eat into the 4 h.
+    let now = now.saturating_add(opened.elapsed().as_millis() as u64);
     let after = stage_request(root, stage_id, loop_id)?;
     if after.data != req.data {
         return Err("system/loop.json or the fault reports changed while the approval was open; nothing was approved".into());
@@ -474,6 +480,19 @@ mod tests {
             stages: HashMap::from([("l1".to_string(), HashMap::from([(stage.to_string(), command_hash(command))]))]),
             faults: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn the_grant_is_stamped_when_the_dialog_closes_not_when_it_opened() {
+        let root = project("stamp", "printf approved", "");
+        let store = ApprovalStore::new();
+        let out = approve_loop_with(&store, &root, "l1", 1_000, |_, _| {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            true
+        })
+        .unwrap()
+        .expect("accepted");
+        assert!(out.expires_at_ms >= 1_000 + 70 + GRANT_TTL_MS, "grant expiry ignores the time the dialog was open: {out:?}");
     }
 
     #[test]
