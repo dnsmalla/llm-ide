@@ -60,7 +60,7 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
           {groups.map((g) => (
             <optgroup key={g.id} label={g.label}>
               {g.models.map((m) => (
-                <option key={`${m.provider}|${m.model}`} value={`${m.provider}|${m.model}`}>
+                <option key={`${m.provider}|${m.model}`} value={`${m.provider}|${m.model}`} disabled={!!m.unavailable && value !== `${m.provider}|${m.model}`} title={m.unavailable}>
                   {modelOptionText(g, m, value === `${m.provider}|${m.model}`)}
                 </option>
               ))}
@@ -70,6 +70,8 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
       </label>
       {unlisted && <span className="chat-note" role="note">This chat is pinned to “{unlistedModel}”, which is not in the provider’s current model list. It is sent as-is; choose a listed model to use the provider’s current one.</span>}
       {groups.filter((g) => g.note).map((g) => <span key={g.id} className="chat-muted">{g.label}: {g.note}</span>)}
+      {/* The select's popup shows no option tooltips, so the greyed-out rows' reasons are spelled out here. */}
+      {[...new Set(listed.map((m) => m.unavailable).filter((r): r is string => !!r))].map((r) => <span key={r} className="chat-muted">Greyed out: {r}</span>)}
       {groups.length > 0 && groups.every((g) => g.id === "anthropic") && <span className="chat-muted chat-more-providers">{MORE_PROVIDERS_HINT}</span>}
       {plainChat && <span className="chat-note" role="note" title={plainChatDetail(plainChat)}>{PLAIN_CHAT_TITLE}</span>}
       {addGroup && onAdd && <AddModelControl groupLabel={addGroup.label} onAdd={(id) => onAdd(addGroup.id, id)} />}

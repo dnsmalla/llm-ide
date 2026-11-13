@@ -47,6 +47,8 @@ export interface ModelChoice {
   toolsSupported?: boolean;
   /** Claude models only: the SDK's effort levels for this model (`[]` = none). */
   effortLevels?: string[];
+  /** Set in Settings but the chat cannot run it: the reason, shown on a disabled option. */
+  unavailable?: string;
 }
 export interface ModelGroup { id: string; label: string; catalog: boolean; models: ModelChoice[]; note?: string; /** The provider a model id of this group runs on (the connection's; Claude's is "anthropic"). */ provider?: string }
 
@@ -148,7 +150,7 @@ export const PROVIDER_BLOCKED_NOTE = "Chat runs on Claude, a custom provider wit
  */
 export function providerCannotChat(provider: string | null | undefined, groups: readonly ModelGroup[]): boolean {
   if (!provider || provider === "anthropic") return false;
-  return !groups.some((g) => g.note !== undefined || g.models.some((m) => m.provider === provider));
+  return !groups.some((g) => g.note !== undefined || g.models.some((m) => m.provider === provider && !m.unavailable));
 }
 
 /** The Mac's delete-chat confirmation (ChatSessionHeader.swift): the title and the sentence under it. */
@@ -321,6 +323,68 @@ export async function loadModelGroups(core: CoreTransport, signal?: AbortSignal)
 }
 
 /**
+ * GET /kb/routing-tiers, or null (older core, no access, failure). Loaded apart from loadModelGroups because the core
+ * may wait up to ~3 s for a keyless CLI health probe: the picker must not wait for it. An abort rethrows.
+ */
+export async function loadTierRouting(core: CoreTransport, signal?: AbortSignal): Promise<TierRoutingStatus | null> {
+  try {
+    return await core.json<TierRoutingStatus>("GET", "/kb/routing-tiers", undefined, signal);
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    return null;
+  }
+}
+
+/** GET /kb/routing-tiers: the Tiers & Roles config (`tiers`) and whether each tier can run right now (`status`). */
+export interface TierRoutingStatus {
+  tiers?: Record<string, { provider?: string; model?: string }>;
+  status?: Record<string, { usable?: boolean; reason?: string; via?: string }>;
+}
+
+const TIER_LABELS: Readonly<Record<string, string>> = { strong: "Strong", standard: "Standard", cheap: "Cheap", decision: "Decision" };
+/** Media tiers name generation models, never chat models: not listed in the chat picker. */
+const MEDIA_TIERS: ReadonlySet<string> = new Set(["image", "video"]);
+const CLI_NAMES: Readonly<Record<string, string>> = { openai: "Codex CLI", google: "Gemini CLI" };
+
+/** Why the chat cannot run a Tiers & Roles model, or null when it can (a Claude model runs on the Agent SDK). Pure. */
+export function tierModelUnavailable(provider: string, status: { usable?: boolean; reason?: string; via?: string } | undefined): string | null {
+  // Claude runs on the Agent SDK; an owned custom provider takes any model id as typed ("Add model…").
+  if (provider === "anthropic" || provider.startsWith("custom:")) return null;
+  const cli = CLI_NAMES[provider];
+  if (cli && status?.via === "cli") return `Runs through the ${cli} for Tiers & Roles only. To chat with it, add the provider from the catalog with an API key (Settings → Providers).`;
+  if (cli) return "Used by Tiers & Roles; the chat runs this provider only as a catalog connection. Add it from Settings → Providers to chat with it.";
+  if (status && status.usable === false && status.reason) return `Not usable now (${status.reason}). Check it in Settings → Tiers & Roles.`;
+  return "Used by Tiers & Roles; the chat cannot run this provider. Add it from Settings → Providers to chat with it.";
+}
+
+/**
+ * Every model set in Settings → Tiers & Roles that the chat's own groups do not already list, as one group, so the
+ * picker shows all configured providers. Models the chat cannot run are listed disabled with the reason. Pure.
+ */
+export function tierRoutingGroup(cfg: TierRoutingStatus | null, listed: readonly ModelGroup[]): ModelGroup | null {
+  const have = new Set(listed.flatMap((g) => g.models).map((m) => `${m.provider}|${m.model}`));
+  const byKey = new Map<string, { provider: string; model: string; tiers: string[]; viaCli: boolean; unavailable: string | null }>();
+  for (const [tier, route] of Object.entries(cfg?.tiers ?? {})) {
+    if (MEDIA_TIERS.has(tier)) continue;
+    const provider = typeof route?.provider === "string" ? route.provider : "";
+    const model = typeof route?.model === "string" ? route.model : "";
+    const key = `${provider}|${model}`;
+    if (!provider || !model || have.has(key)) continue;
+    const status = cfg?.status?.[tier];
+    const entry = byKey.get(key) ?? { provider, model, tiers: [], viaCli: status?.via === "cli", unavailable: tierModelUnavailable(provider, status) };
+    entry.tiers.push(TIER_LABELS[tier] ?? tier);
+    byKey.set(key, entry);
+  }
+  if (byKey.size === 0) return null;
+  const models: ModelChoice[] = [...byKey.values()].map((e) => ({
+    provider: e.provider, model: e.model,
+    label: `${e.viaCli && CLI_NAMES[e.provider] ? `${CLI_NAMES[e.provider]} · ` : ""}${e.model} (${e.tiers.join(", ")})${e.unavailable ? " — not available in chat" : ""}`,
+    ...(e.unavailable ? { unavailable: e.unavailable } : {}),
+  }));
+  return { id: "tier-routing", label: "Settings → Tiers & Roles", catalog: false, models };
+}
+
+/**
  * Whether the progress header shows: only during a plan run started from this chat's plan card (the Mac's
  * PlanExecutionCard rides a PlanExecutionTracker), never for an ordinary turn's task list. Pure.
  */
@@ -351,7 +415,7 @@ const STRONG = /(opus|sonnet|pro|max|large|gpt-5|o3|o4|4\.1)/i;
  * stored in the chat prefs and this helper is never consulted for it. Pure.
  */
 export function defaultModelForMode(groups: readonly ModelGroup[], mode: string): ModelChoice | null {
-  const models = groups.flatMap((g) => g.models);
+  const models = groups.flatMap((g) => g.models).filter((m) => !m.unavailable);
   if (models.length === 0) return null;
   const cheap = CHEAP_MODES.has(mode);
   const match = models.find((m) => (cheap ? CHEAP : STRONG).test(`${m.model} ${m.label}`));

@@ -31,7 +31,7 @@ import { pendingCount, reportChatProblem } from "../shell/self-heal";
 import { reportFromChat } from "./self-heal-report";
 import { chatOutputStore } from "../shell/chat-output";
 import {
-  AUTO_MODE, MODES, READ_ONLY_MODES, PROVIDER_BLOCKED_NOTE, defaultModelForMode, planProgress, showsPlanProgress, getRoute, loadModelGroups, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
+  AUTO_MODE, MODES, READ_ONLY_MODES, PROVIDER_BLOCKED_NOTE, defaultModelForMode, planProgress, showsPlanProgress, getRoute, loadModelGroups, loadTierRouting, tierRoutingGroup, type TierRoutingStatus, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
   restoreFailedPick, routeRereadDue, type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import { memoryClient } from "./memory-client";
@@ -133,7 +133,13 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const [listedGroups, setListedGroups] = useState<ModelGroup[]>([]);
   // The ids the user added ("Add model…"), kept per connection in this browser and joined onto the listed groups.
   const [userModels, setUserModels] = useState<UserModels>(loadUserModels);
-  const groups = useMemo(() => withUserModels(listedGroups, userModels), [listedGroups, userModels]);
+  const [tierRouting, setTierRouting] = useState<TierRoutingStatus | null>(null);
+  // Tiers & Roles models come last and are de-duplicated against everything listed, the user's added ids included.
+  const groups = useMemo(() => {
+    const own = withUserModels(listedGroups, userModels);
+    const settings = tierRoutingGroup(tierRouting, own);
+    return settings ? [...own, settings] : own;
+  }, [listedGroups, userModels, tierRouting]);
   const [modelNotice, setModelNotice] = useState<string | null>(null);
   const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [toolsEnabled, setToolsEnabled] = useState(false);
@@ -203,6 +209,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   useEffect(() => {
     const ac = new AbortController();
     loadModelGroups(core, ac.signal).then((r) => { setListedGroups(r.groups); setToolsEnabled(r.toolsEnabled); setGroupsLoaded(true); }).catch(() => undefined);
+    // Separately: the core may wait for a CLI health probe here, and the picker must not wait with it.
+    loadTierRouting(core, ac.signal).then(setTierRouting).catch(() => undefined);
     return () => ac.abort();
   }, [core, coreRestarts]);
 
