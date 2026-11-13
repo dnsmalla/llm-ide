@@ -17,12 +17,15 @@ export function parentPidFrom(env = process.env) {
 }
 
 /**
- * True while `pid` is still this process's live parent.
+ * True while the host `pid` is still alive.
  * - signal 0 only asks whether the process exists: ESRCH means gone, EPERM means it exists (and is not ours to signal).
- * - on POSIX an orphan is re-parented, so a changed ppid means the parent is gone even if its pid was reused since.
+ * - on POSIX an orphan is re-parented, so a ppid that CHANGED since the watch began (`bornUnder`) means our parent is
+ *   gone even if the host's pid was reused since. The comparison is against the ppid at the start, not against the
+ *   host pid: when node is started through a wrapper that stays its parent, ppid never equals the host pid, and a
+ *   strict comparison would stop a healthy core two seconds after boot.
  */
-export function parentAlive(pid, { kill = process.kill.bind(process), ppid = () => process.ppid, platform = process.platform } = {}) {
-  if (platform !== 'win32' && ppid() !== pid) return false;
+export function parentAlive(pid, { kill = process.kill.bind(process), ppid = () => process.ppid, platform = process.platform, bornUnder = pid } = {}) {
+  if (platform !== 'win32' && ppid() !== bornUnder) return false;
   try {
     kill(pid, 0);
     return true;
@@ -35,11 +38,14 @@ export function parentAlive(pid, { kill = process.kill.bind(process), ppid = () 
  * Polls the parent and calls `onGone` once when it has gone. Returns a stop function. The timer is unref'd: it never
  * keeps the process alive on its own.
  */
-export function watchParent({ pid, onGone, intervalMs = 2000, alive = parentAlive, setTimer = setInterval, clearTimer = clearInterval }) {
+export function watchParent({ pid, onGone, intervalMs = 500, alive = parentAlive, setTimer = setInterval, clearTimer = clearInterval, ppid = () => process.ppid }) {
   if (pid === null || pid === undefined) return () => {};
   let done = false;
+  const bornUnder = ppid();
+  // A short interval: the sooner an orphan stops, the smaller the window in which a relaunched app finds it still
+  // holding the port and the database. The check is one syscall.
   const timer = setTimer(() => {
-    if (done || alive(pid)) return;
+    if (done || alive(pid, { bornUnder })) return;
     done = true;
     clearTimer(timer);
     onGone();

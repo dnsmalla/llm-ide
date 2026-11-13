@@ -20,6 +20,11 @@ test('parentAlive: gone on ESRCH, alive on EPERM, and a changed ppid means gone 
   // Windows does not re-parent, so only the existence check counts there.
   assert.equal(parentAlive(10, { kill: ok, ppid: () => 999, platform: 'win32' }), true);
   assert.equal(parentAlive(10, { kill: esrch, ppid: () => 999, platform: 'win32' }), false);
+  // Node started through a wrapper that stays its parent: ppid is the wrapper (77), never the host (10). The core is
+  // healthy while the host exists and the wrapper is still its parent; it is orphaned once either changes.
+  assert.equal(parentAlive(10, { kill: ok, ppid: () => 77, platform: 'darwin', bornUnder: 77 }), true, 'a wrapper parent is not a dead host');
+  assert.equal(parentAlive(10, { kill: esrch, ppid: () => 77, platform: 'darwin', bornUnder: 77 }), false);
+  assert.equal(parentAlive(10, { kill: ok, ppid: () => 1, platform: 'darwin', bornUnder: 77 }), false);
 });
 
 test('watchParent calls onGone once, stops polling after it, and does nothing without a pid', () => {
@@ -28,12 +33,14 @@ test('watchParent calls onGone once, stops polling after it, and does nothing wi
   const timers = { setTimer: (fn) => { tick = fn; return { unref() {} }; }, clearTimer: () => { cleared += 1; } };
   let alive = true;
   let gone = 0;
-  watchParent({ pid: 10, onGone: () => { gone += 1; }, alive: () => alive, ...timers });
+  const seen = [];
+  watchParent({ pid: 10, onGone: () => { gone += 1; }, alive: (pid, o) => { seen.push([pid, o.bornUnder]); return alive; }, ppid: () => 77, ...timers });
   tick(); tick();
   assert.equal(gone, 0);
   alive = false;
   tick(); tick();
   assert.equal(gone, 1, 'reported once');
+  assert.deepEqual(seen[0], [10, 77], 'the ppid at the start of the watch is what a later change is measured against');
   assert.equal(cleared, 1);
 
   let armed = false;
@@ -87,6 +94,8 @@ test('the core shuts itself down after its host is force-quit, and frees the por
     ...process.env,
     LLMIDE_PORT: String(port), LLMIDE_HOST: '127.0.0.1',
     LLMIDE_DATA_DIR: dir, LLMIDE_DB_PATH: path.join(dir, 'kb.db'), LLMIDE_LOG_FILE: 'none',
+    // A spawned-core test never touches the developer's real add-on state (extension/CLAUDE.md, "Add-on state location").
+    LLMIDE_PLUGIN_DIR: path.join(dir, 'plugins'),
     LLMIDE_BACKUP_INTERVAL_HOURS: '0', LLMIDE_ENGINE_PREWARM: '0', LLMIDE_BCRYPT_COST: '10',
     LLMIDE_JWT_SECRET: 'j'.repeat(48), LLMIDE_VAULT_KEY: 'v'.repeat(48),
   };
@@ -112,8 +121,8 @@ test('the core shuts itself down after its host is force-quit, and frees the por
       await new Promise((r) => setTimeout(r, 100));
     }
     assert.ok(up, 'the core answered /health under its host');
-    // While the host lives, the watch leaves the core alone (two polls of 2 s).
-    await new Promise((r) => setTimeout(r, 4500));
+    // While the host lives, the watch leaves the core alone (several polls).
+    await new Promise((r) => setTimeout(r, 2000));
     assert.equal(await healthy(), true, 'a live host never stops its core');
 
     host.kill('SIGKILL'); // force quit: no shutdown hook runs in the host
