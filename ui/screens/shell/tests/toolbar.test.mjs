@@ -195,3 +195,9 @@ test("sign-out copy names exactly what sign-out removes, in plain words (no 'cha
     assert.ok(SIGN_OUT_BODY.includes(item), `names: ${item}`);
   }
 });
+
+test("the toolbar lists no local-only section in remote mode", () => {
+  const ids = tb.toolbarSections(false, undefined, new Set(), "remote").map((d) => d.id);
+  assert.ok(ids.every((id) => ["welcome","issues","gantt","library","chat","settings"].includes(id)));
+  assert.ok(tb.toolbarSections(false, undefined, new Set(), "local").some((d) => d.id === "explorer"));
+});

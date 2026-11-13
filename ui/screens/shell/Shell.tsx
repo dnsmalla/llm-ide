@@ -24,7 +24,7 @@ import { setTerminalDockOpen, toggleTerminalDock, useTerminalDockOpen } from "..
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { deepLinkSection } from "./deep-link.ts";
-import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type SectionDef, type SectionId } from "./sections";
+import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, isSelectable, isSelectableFor, LOCAL_ONLY_NOTICE, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type NavAction, type NavMode, type SectionDef, type SectionId } from "./sections";
 import { RemoteProjectBar } from "./RemoteProjectBar";
 import { getHubError, remoteBanner, subscribeHubError } from "./remote-status";
 import { bindRemoteSession } from "./remote-session";
@@ -69,7 +69,7 @@ const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, inert,
 });
 
 export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
-  const [nav, dispatch] = useReducer(navReducer, undefined, () => {
+  const [nav, rawDispatch] = useReducer(navReducer, undefined, () => {
     if (initialSection === "spike") enableDevToolsForSession(); // a spike launch needs its own item
     return initialNav(initialSection ?? null);
   });
@@ -166,6 +166,16 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const [sectionNotice, setSectionNotice] = useState<SectionNotice | null>(null);
   // Shown only on the section it was left on: navigating anywhere else clears it (declared before the effect that sets it).
   useEffect(() => setSectionNotice((n) => keepSectionNotice(n, nav.active)), [nav.active]);
+  // The reducer refuses a local-only section while connected to a hub; say why instead of leaving the click dead.
+  const navMode: NavMode = remoteMode ? "remote" : "local";
+  const navRef = useRef({ active: nav.active, mode: navMode });
+  navRef.current = { active: nav.active, mode: navMode };
+  useEffect(() => { if (modeKnown) rawDispatch({ type: "mode", mode: navMode }); }, [modeKnown, navMode]);
+  const dispatch = useCallback((action: NavAction) => {
+    const { active, mode } = navRef.current;
+    if (action.type === "select" && isSelectable(action.id) && !isSelectableFor(action.id, mode)) setSectionNotice({ text: LOCAL_ONLY_NOTICE, at: active });
+    rawDispatch(action);
+  }, []);
   const [apiWarning, setApiWarning] = useState<string | null>(null);
   // Checked each time the core comes up (the public /health route; no token needed).
   useEffect(() => {
@@ -272,7 +282,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         else setGuideOpen(true);
         return;
       }
-      const id = sectionForShortcut(e);
+      const id = sectionForShortcut(e, navRef.current.mode);
       if (id) {
         e.preventDefault();
         dispatch({ type: "select", id });

@@ -108,8 +108,8 @@ export function isSelectable(id: string): id is SectionId {
 }
 
 /** Sections reachable by keyboard navigation, in nav order. */
-export function selectableSections(): readonly SectionDef[] {
-  return visibleSections().filter((s) => s.enabled);
+export function selectableSections(mode: NavMode = "local"): readonly SectionDef[] {
+  return visibleSectionsFor(mode).filter((s) => s.enabled);
 }
 
 /** What opens when nothing else is known: the Welcome page (it explains the next step). */
@@ -119,9 +119,13 @@ export interface NavState {
   active: SectionId;
   /** Sections that were opened at least once: they stay mounted (hidden) to keep their state. */
   visited: readonly SectionId[];
+  /** Connection mode; a section the hub cannot serve is not selectable in "remote". Absent = local. */
+  mode?: NavMode;
 }
 
-export type NavAction = { type: "select"; id: string } | { type: "step"; delta: 1 | -1 };
+export type NavMode = "local" | "remote";
+
+export type NavAction = { type: "select"; id: string } | { type: "step"; delta: 1 | -1 } | { type: "mode"; mode: NavMode };
 
 export function initialNav(active: string | null | undefined): NavState {
   const id: SectionId = active && isSelectable(active) ? active : DEFAULT_SECTION;
@@ -130,10 +134,16 @@ export function initialNav(active: string | null | undefined): NavState {
 
 export function navReducer(state: NavState, action: NavAction): NavState {
   let id: SectionId | null = null;
-  if (action.type === "select") {
-    if (isSelectable(action.id)) id = action.id;
+  const mode = state.mode ?? "local";
+  if (action.type === "mode") {
+    if (action.mode === mode) return state;
+    // A restored local-only section (stored choice, deep link) would render nothing once the hub connects.
+    const next = { ...state, mode: action.mode };
+    return isSelectableFor(state.active, action.mode) ? next : { ...next, active: DEFAULT_SECTION, visited: state.visited.includes(DEFAULT_SECTION) ? state.visited : [...state.visited, DEFAULT_SECTION] };
+  } else if (action.type === "select") {
+    if (isSelectableFor(action.id, mode)) id = action.id;
   } else {
-    const list = selectableSections();
+    const list = selectableSections(mode);
     const i = list.findIndex((s) => s.id === state.active);
     const n = list.length;
     id = list[(i + action.delta + n) % n]?.id ?? null;
@@ -149,11 +159,11 @@ export const REMOTE_SECTIONS: readonly SectionId[] = ["welcome", "issues", "gant
 export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "token-saving", "paths", "repositories", "memory", "code-graph", "doc-gen", "optional-components", "self-heal"];
 export const LOCAL_ONLY_NOTICE = "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to a hub.";
 
-export function visibleSectionsFor(mode: "local" | "remote"): readonly SectionDef[] {
+export function visibleSectionsFor(mode: NavMode): readonly SectionDef[] {
   if (mode === "remote") return SECTIONS.filter((s) => REMOTE_SECTIONS.includes(s.id));
   return visibleSections();
 }
-export function isSelectableFor(id: string, mode: "local" | "remote"): boolean {
+export function isSelectableFor(id: string, mode: NavMode): id is SectionId {
   return visibleSectionsFor(mode).some((s) => s.id === id) && BY_ID.get(id)?.enabled === true && (id !== "spike" || devToolsEnabled());
 }
 
@@ -173,11 +183,11 @@ export interface KeyLike {
 }
 
 /** `Ctrl/Cmd+1..4` -> section id; `Ctrl/Cmd+[` / `]` handled by `stepForKey`. */
-export function sectionForShortcut(e: KeyLike): SectionId | null {
+export function sectionForShortcut(e: KeyLike, mode: NavMode = "local"): SectionId | null {
   if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return null;
   if (!/^[1-9]$/.test(e.key)) return null;
   const n = Number(e.key);
-  return selectableSections().find((s) => s.shortcut === n)?.id ?? null;
+  return selectableSections(mode).find((s) => s.shortcut === n)?.id ?? null;
 }
 
 /** Roving-tabindex keys inside the nav list. */
