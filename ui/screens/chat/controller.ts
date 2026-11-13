@@ -617,7 +617,11 @@ export class ChatController {
   private afterTurn(id: string): void {
     const r = this.rt(id);
     const last = [...r.state.messages].reverse().find((m): m is AssistantMessage => m.role === "assistant");
-    if (last && last.seq === undefined && !r.gap) {
+    if (last && last.seq === undefined && r.gap) {
+      // NOTE: a re-attached reply with a replay gap is incomplete (the ring dropped its head), but the tail is
+      // all there is: save it marked interrupted, as a dead turn's partial is, instead of losing it on reload.
+      this.persistPartial(id);
+    } else if (last && last.seq === undefined) {
       // A dead turn keeps what had arrived: "Interrupted", not a vanished reply (core restart or engine death).
       if (last.status === "error") this.persistPartial(id);
       else if (last.status === "done" || last.status === "aborted") {

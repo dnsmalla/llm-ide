@@ -58,7 +58,7 @@ test("replay frames: non-monotonic, repeated and unnumbered frames are never app
   assert.equal(text(ctl.getState("a")), "AB");
 });
 
-test("reattachRunning attaches at 0, shows a gap marker for replay_info, and does not save an incomplete reply", async () => {
+test("reattachRunning attaches at 0, shows a gap marker for replay_info, and saves the received tail as interrupted", async () => {
   const core = fakeCore({
     json: { "GET /agent/v2/turns": { turns: [{ sessionId: "a", startedAt: "t0", mode: "ask" }] } },
     attaches: [[{ id: null, data: JSON.stringify({ type: "replay_info", gap: 5, dropped: 5, ended: false }) }, frame(6, delta("tail")), frame(7, { type: "replay_truncated", originalType: "tool_result" }), frame(8, FX.result)]],
@@ -74,7 +74,10 @@ test("reattachRunning attaches at 0, shows a gap marker for replay_info, and doe
   assert.deepEqual(kinds, ["replay_gap", "replay_truncated"]);
   assert.ok(st.messages.at(-1).notices.every((n) => n.visible && n.level === "warning"));
   await tick(10);
-  assert.equal((await store.loadMessages("a", { limit: 50 })).messages.length, 1, "an incomplete reply is not written to the history");
+  const rows = (await store.loadMessages("a", { limit: 50 })).messages;
+  assert.equal(rows.length, 2, "the received tail of a gapped reply is saved");
+  assert.equal(rows[1].content, "tail");
+  assert.equal(rows[1].meta?.interrupted, true, "and marked incomplete like an interrupted reply");
 });
 
 test("a chat already live here is not re-attached; a missing or malformed list attaches nothing", async () => {
