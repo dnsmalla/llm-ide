@@ -175,3 +175,23 @@ test("F9: pytest -q output (bare dots, no file) records only the summary's named
   assert.deepEqual(m.parseTestResults(out), { failing: ["tests/test_tax.py::test_rate"], passing: [] });
   assert.deepEqual(m.parseTestResults("...F  [100%]\n"), { failing: [], passing: [] });
 });
+
+test("without a usable graph, the map lists source files; a file no test names is untested, test files are not entries", async () => {
+  const fs = mem({
+    "a.py": "def f(): pass",
+    "b.py": "def g(): pass",
+    "system/x.py": "",
+    "tests/test_a.py": "import a\n\ndef test_f():\n    a.f()\n",
+  });
+  const structure = { generatedAt: "", status: "ok", notes: [], roots: [{ packageDir: "", testDir: "tests", runner: "pytest", command: "pytest", languages: ["py"] }] };
+  const map = await m.buildTestMap(fs, "", structure, "system/graph/graph-code.json", new Date("2026-01-01T00:00:00Z"));
+  assert.equal(map.source, "files");
+  assert.deepEqual(map.entries.map((e) => e.path).sort(), ["a.py", "b.py"]);
+  const a = map.entries.find((e) => e.path === "a.py");
+  const b = map.entries.find((e) => e.path === "b.py");
+  assert.equal(a.function, "*");
+  assert.deepEqual(a.testedBy, ["tests/test_a.py"]);
+  assert.deepEqual(b.testedBy, []);
+  assert.equal(map.untestedFunctions, 1);
+  assert.equal(map.testedFunctions, 1);
+});

@@ -308,3 +308,17 @@ test("a batch that breaks the tests and cannot be repaired is rolled back, and t
   assert.match(plan, /### R1 .*\(status: done\)/);
   assert.match(plan, /### R2 .*\(status: blocked\)\n- Blocked: Test — Test failed; repair did not complete\n/);
 });
+
+test("the Test loop's map finds untested functions even when the project has no graph yet", { skip, timeout: 240_000 }, async () => {
+  const p = makeProject();
+  assert.ok(!fs.existsSync(path.join(p.project, "system/graph/graph-code.json")), "no project graph before the run");
+  const testLoop = initialProjectStore("python3 -m pytest -q -p no:cacheprovider").loops.find((l) => l.defaultKey === "test");
+  const { outcome } = await runRefactoring({ ...p, loop: testLoop }, null);
+  const map = outcome.stages.find((o) => o.stage.name === "Test Map");
+  const m = /(\d+) function\(s\) · (\d+) untested/.exec(map.output);
+  assert.ok(m, map.output);
+  assert.ok(Number(m[1]) >= 20, `the map sees the app's functions, not just its test files: ${map.output}`);
+  assert.ok(Number(m[2]) > 0, `some functions are untested (utils.py, legacy.py): ${map.output}`);
+  const json = JSON.parse(fs.readFileSync(path.join(p.repo, "system/loop/test/TEST-MAP.json"), "utf8"));
+  assert.ok(json.entries.some((e) => e.path === "utils.py" && e.testedBy.length === 0), "utils.py is listed as untested");
+});

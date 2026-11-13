@@ -311,6 +311,48 @@ test("a Graph snapshot in a main-tree run sends no out and snapshots the project
   assert.deepEqual(writes, [["system/loop/refactor/graph/before.json", graph]]);
 });
 
+test("a Test Map stage refreshes the run's graph into its worktree folder unless a Graph stage already ran in this run", async () => {
+  const graph = JSON.stringify({ files: [{ path: "a.py", name: "a.py", loc: 2, functions: [{ name: "run", line: 1 }] }], calls: [] });
+  const { fs } = fakeWritableFs({ "system/loop-runs/r1/graph/graph-code.json": graph });
+  const { host, calls } = fakeHost();
+  const { ctx } = ctxOf({ host, fs });
+  const s = stage({ id: "t1", name: "Test Map", kind: "testMap", command: null, testOp: "map" });
+  const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
+  assert.equal(r.ok, true);
+  assert.deepEqual(calls.find(([c]) => c === "graph_generate"), ["graph_generate", { mode: "code", target: "system/loop-worktrees/r1", out: "system/loop-runs/r1/graph" }]);
+  assert.match(r.output, /^1 function\(s\)/);
+
+  const { host: host2, calls: calls2 } = fakeHost();
+  const graphStage = stage({ id: "g1", name: "Graph", kind: "codeGraph", command: null, graphOp: "snapshot" });
+  const prior = [{ stage: graphStage, ok: true, output: "" }];
+  await createStageDeps(ctxOf({ host: host2, fs }).ctx, loopOf([s])).runStage(s, prior);
+  assert.equal(calls2.some(([c]) => c === "graph_generate"), false, "a Graph stage earlier in the run already refreshed the graph");
+});
+
+test("a main-tree Test Map stage maps a fresh graph in its own folder and never rewrites the project graph", async () => {
+  const graph = JSON.stringify({ files: [{ path: "a.py", name: "a.py", loc: 2, functions: [{ name: "run", line: 1 }] }], calls: [] });
+  const { fs } = fakeWritableFs({ "system/loop-runs/main-tree/graph/graph-code.json": graph });
+  const { host, calls } = fakeHost();
+  const { ctx } = ctxOf({ host, fs, runId: null, runRoot: "/p" });
+  const s = stage({ id: "t1", name: "Test Map", kind: "testMap", command: null, testOp: "map" });
+  const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
+  const args = calls.find(([c]) => c === "graph_generate")[1];
+  assert.equal(args.mode, "code");
+  assert.equal(args.out, "system/loop-runs/main-tree/graph", "a multi-repo project's whole graph is left alone");
+  assert.match(r.output, /^1 function\(s\)/, "the map reads the graph it just made");
+});
+
+test("a Test Map stage still maps when graph_generate throws, and logs that the graph was not refreshed", async () => {
+  const { fs } = fakeWritableFs({ "system/loop-runs/r1/graph/graph-code.json": "not json" });
+  const { host } = fakeHost({ graph_generate: () => { throw new Error("boom"); } });
+  const { ctx, log } = ctxOf({ host, fs });
+  const s = stage({ id: "t1", name: "Test Map", kind: "testMap", command: null, testOp: "map" });
+  const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
+  assert.equal(r.ok, true);
+  assert.match(r.output, /function\(s\)/);
+  assert.ok(log.includes("graph not refreshed: boom; the map uses the last graph or file matching"), log.join("\n"));
+});
+
 test("R3: a stage that throws fails with its message, halts the run as an error, and no repair agent runs", async () => {
   const { ctx, log } = ctxOf();
   const odd = stage({ id: "x1", name: "Odd", kind: "unknownKind" });

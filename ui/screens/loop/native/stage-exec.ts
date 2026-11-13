@@ -252,15 +252,27 @@ async function runLedger(ctx: StageExecContext, prior: Prior, prefix: string): P
   return { ok: true, output: [`${ledger.failing.length} failing · ${ledger.passing.length} passing`, `new failures: ${diff.newFailures.length ? diff.newFailures.join(", ") : "none"}`, `still failing: ${diff.stillFailing.length ? diff.stillFailing.join(", ") : "none"}`, `fixed: ${diff.fixed.length ? diff.fixed.join(", ") : "none"}`, `wrote ${path}`].join("\n") };
 }
 
-async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string): Promise<StageRunResult> {
+async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, prior: Prior): Promise<StageRunResult> {
   if (s.testOp !== "structure" && s.testOp !== "map") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
   const structure = await detectTestStructure(ctx.fs, prefix);
   if (s.testOp === "structure") {
     const writes = await writeTestStructure(ctx.fs, prefix, structure);
     return { ok: structure.status === "ok", output: [`${structure.roots.length} test root(s)`, ...structure.roots.map((r) => `${r.packageDir || "."}: ${r.runner} · ${r.command}`), ...structure.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
   }
-  // graph_generate("code") writes this file; a missing or non-graph file falls back to file matching.
-  const map = await buildTestMap(ctx.fs, prefix, structure, graphPathFor(ctx.runId));
+  // graph_generate("code") writes graph-code.json; a missing or non-graph file falls back to file matching.
+  let graphPath = graphPathFor(ctx.runId);
+  // A Test loop has no graph stage of its own, so refresh the run's graph here unless a graph stage already ran in this run.
+  if (s.testOp === "map" && !prior.some((o) => o.stage.kind === "codeGraph")) {
+    // A main-tree run maps into a folder of its own too: the project's graph may cover more repos than this run's one.
+    const out = runGraphOut(ctx.runId) ?? "system/loop-runs/main-tree/graph";
+    try {
+      await ctx.host("graph_generate", { mode: "code", target: prefix || undefined, out });
+      graphPath = `${out}/graph-code.json`;
+    } catch (e) {
+      ctx.log(`graph not refreshed: ${e instanceof Error ? e.message : String(e)}; the map uses the last graph or file matching`);
+    }
+  }
+  const map = await buildTestMap(ctx.fs, prefix, structure, graphPath);
   const writes = await writeTestMap(ctx.fs, prefix, map);
   return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
 }
@@ -303,7 +315,7 @@ export async function runOneStage(ctx: StageExecContext, s: LoopStage, target: L
   if (s.kind === "regressionSweep") return runRegressionStage(ctx, s, prefix);
   if (s.kind === "skill") return runSkill(ctx, s, target, halt);
   if (s.kind === "testMap" && s.testOp === "ledger") return runLedger(ctx, prior, prefix);
-  if (s.kind === "testMap") return runTestMap(ctx, s, prefix);
+  if (s.kind === "testMap") return runTestMap(ctx, s, prefix, prior);
   if (s.kind === "testPrune") return runTestPruneStage(ctx, prefix);
   if (s.kind === "codeGraph") return runGraph(ctx, s, prefix);
   if (s.kind === "artifactCheck") return runArtifact(ctx, s, target, prefix);

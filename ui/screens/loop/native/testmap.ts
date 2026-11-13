@@ -2,6 +2,7 @@
 // This slice covers SwiftPM, Node, pytest, Go and Cargo at package depth 0–2. `map` and `ledger` are separate,
 // larger operations and are refused rather than approximated.
 import type { FsApi } from "../../explorer/fs";
+import { isTestFileName } from "./protected.ts";
 
 export interface TestRoot { packageDir: string; testDir: string; runner: string; command: string; languages: string[] }
 export interface TestStructure { generatedAt: string; roots: TestRoot[]; status: "ok" | "missing"; notes: string[] }
@@ -119,6 +120,22 @@ function tokensOf(text: string): Set<string> {
 
 const TEST_MARKER = /(describe|it|test|specify|@Test|def test_|func test[A-Z])/;
 
+const CODE_FILE = /\.(py|ts|tsx|js|mjs|cjs|swift|kt|go|rs)$/;
+
+/** Repo-relative source files under the prefix: no test files or test roots, and no system/ or llm-doc/ folders. */
+async function sourceFiles(fs: TestMapFs, repoPrefix: string, structure: TestStructure): Promise<string[]> {
+  const prefix = repoPrefix ? `${repoPrefix}/` : "";
+  const testDirs = structure.roots.map((r) => r.testDir).filter((d) => d && d !== ".");
+  const out: string[] = [];
+  for (const f of await walkFiles(fs, prefix.replace(/\/$/, "") || ".")) {
+    const rel = repoPrefix && f.startsWith(`${repoPrefix}/`) ? f.slice(repoPrefix.length + 1) : f;
+    if (!CODE_FILE.test(rel) || isTestFileName(rel) || /^(system|llm-doc)\//.test(rel)) continue;
+    if (testDirs.some((d) => rel.startsWith(`${d}/`))) continue;
+    out.push(rel);
+  }
+  return out;
+}
+
 export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure: TestStructure, graphPath: string, now = new Date()): Promise<TestMap> {
   const prefix = repoPrefix ? `${repoPrefix}/` : "";
   const tests: { path: string; tokens: Set<string> }[] = [];
@@ -161,8 +178,13 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
     } catch { source = "files"; }
   }
   if (entries.length === 0) {
+    // No usable graph: every source file is an entry, "tested" when a test names its base name (the graph path's rule).
     source = "files";
-    for (const t of tests) entries.push({ path: t.path.replace(/\.(test|spec)\.[^.]+$/, ""), function: "*", line: 1, fanIn: 0, loc: 0, testedBy: [t.path] });
+    for (const rel of await sourceFiles(fs, repoPrefix, structure)) {
+      const base = rel.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+      const testedBy = tests.filter((t) => t.tokens.has(base)).map((t) => t.path).sort();
+      entries.push({ path: rel, function: "*", line: 1, fanIn: 0, loc: 0, testedBy });
+    }
   }
   entries.sort((a, b) => Number(a.testedBy.length > 0) - Number(b.testedBy.length > 0) || b.fanIn - a.fanIn || a.path.localeCompare(b.path) || a.function.localeCompare(b.function));
   const tested = entries.filter((e) => e.testedBy.length > 0).length;
