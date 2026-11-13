@@ -384,7 +384,10 @@ pub(crate) fn uses_lfs(root: &Path) -> bool {
 pub(crate) fn needs_filters(args: &[&str]) -> bool {
     let has = |x: &str| args.contains(&x);
     match subcommand(args) {
-        "add" | "apply" | "checkout" | "merge" | "reset" => true,
+        // Aborting a merge puts back the content the user had before it; refusing that would leave a merge started in
+        // a terminal with no way out from the panel.
+        "merge" => !has("--abort"),
+        "add" | "apply" | "checkout" | "reset" => true,
         "restore" => !has("--staged") || has("--worktree"),
         "switch" => !args.iter().skip_while(|a| **a != "switch").any(|a| *a == "-c"),
         "stash" => has("push") || has("apply") || has("pop"),
@@ -875,10 +878,10 @@ mod tests {
         assert!(attributes_use_lfs("# media\n  assets/** filter=lfs\n"));
         assert!(!attributes_use_lfs("# *.psd filter=lfs\n*.txt text\n*.x filter=other\n"));
         assert!(!attributes_use_lfs(""));
-        for writes in [&["add", "--", "a"][..], &["apply", "--cached", "-"], &["switch", "--no-guess", "x"], &["restore", "--worktree", "--", "a"], &["restore", "--", "a"], &["-c", "commit.gpgsign=false", "stash", "push"], &["stash", "pop"], &["merge", "x"], &["merge", "--abort"]] {
+        for writes in [&["add", "--", "a"][..], &["apply", "--cached", "-"], &["switch", "--no-guess", "x"], &["restore", "--worktree", "--", "a"], &["restore", "--", "a"], &["-c", "commit.gpgsign=false", "stash", "push"], &["stash", "pop"], &["merge", "x"]] {
             assert!(needs_filters(writes), "{writes:?}");
         }
-        for safe in [&["status"][..], &["restore", "--staged", "--", "a"], &["switch", "-c", "new"], &["stash", "list", "-z"], &["stash", "drop"], &["commit", "-F", "-"], &["diff"], &["rm", "--cached", "-r", "--", "a"], &["config", "--get", "user.name"]] {
+        for safe in [&["status"][..], &["restore", "--staged", "--", "a"], &["switch", "-c", "new"], &["stash", "list", "-z"], &["stash", "drop"], &["commit", "-F", "-"], &["diff"], &["rm", "--cached", "-r", "--", "a"], &["config", "--get", "user.name"], &["merge", "--abort"]] {
             assert!(!needs_filters(safe), "{safe:?}");
         }
     }

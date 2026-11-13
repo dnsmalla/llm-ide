@@ -494,6 +494,11 @@ pub fn discard(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> bool) ->
 /// nothing is touched.
 pub fn discard_with(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> bool, trasher: &dyn crate::trash_guard::Trasher) -> R<DiscardResult> {
     let plan = plan_discard(root, paths)?;
+    // Refused BEFORE the dialog: restoring a file runs the content filters, which an LFS repository needs and this
+    // runner never starts. Asking first and refusing afterwards looked as if the discard had happened.
+    if plan.iter().any(|p| matches!(p, Plan::Restore(_))) && crate::git::uses_lfs(root) {
+        return gerr("lfs_unsupported", crate::git::LFS_REFUSED);
+    }
     let before = fingerprints(root, &plan);
     if !confirm(&discard_prompt(&plan)) {
         return gerr("cancelled", "discard cancelled");
@@ -511,6 +516,8 @@ pub fn discard_with(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> boo
         res.restored = restore.len() as u32;
     }
     let mut moved_in: Vec<(&str, &str)> = Vec::new();
+    let mut failed: Option<(String, String)> = None;
+    let mut failed_count = 0u32;
     for p in &plan {
         match p {
             Plan::Trash(n) => {
@@ -518,9 +525,18 @@ pub fn discard_with(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> boo
                 res.trashed += 1;
             }
             Plan::TrashIn(n, within) => {
-                crate::fs_ops::delete_with(root, n, trasher)?;
-                res.trashed += 1;
-                moved_in.push((n.as_str(), within.as_str()));
+                // One file of a folder failing must not stop half-way with no account of it: the rest are still
+                // moved, the emptied folders are still removed, and the result says how many stayed.
+                match crate::fs_ops::delete_with(root, n, trasher) {
+                    Ok(_) => {
+                        res.trashed += 1;
+                        moved_in.push((n.as_str(), within.as_str()));
+                    }
+                    Err(e) => {
+                        if failed.is_none() { failed = Some((n.clone(), e.message)); }
+                        failed_count += 1;
+                    }
+                }
             }
             Plan::Restore(_) => {}
         }
@@ -531,6 +547,9 @@ pub fn discard_with(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> boo
     for folder in folders {
         let files: Vec<&str> = moved_in.iter().filter(|(_, w)| *w == folder).map(|(f, _)| *f).collect();
         remove_emptied_dirs(root, &files, folder);
+    }
+    if let Some((name, why)) = failed {
+        return gerr("partial", format!("{} file(s) were moved to the trash, but {failed_count} could not be and are still in place (first: {name}: {why})", res.trashed));
     }
     Ok(res)
 }
@@ -1698,6 +1717,12 @@ pub fn discard_all_with(root: &Path, include_untracked: bool, confirm: &dyn Fn(&
     let plan = plan_discard_all(root, include_untracked)?;
     if plan.restore.is_empty() && plan.trash.is_empty() {
         return gerr("nothing_to_discard", "there are no changes to discard");
+    }
+    // Refused before anything runs. Discard All is two steps (reset the index, then the working tree); the first is
+    // index-only and allowed in an LFS repository while the second is refused, which left the index reset and the
+    // files untouched after the user had confirmed.
+    if !plan.restore.is_empty() && crate::git::uses_lfs(root) {
+        return gerr("lfs_unsupported", crate::git::LFS_REFUSED);
     }
     let fingerprints_of = |p: &AllPlan| -> Vec<String> { p.restore.iter().chain(p.trash.iter()).map(|rel| fingerprint(root, rel)).collect() };
     let before = fingerprints_of(&plan);
@@ -4062,6 +4087,32 @@ mod merge_amend_discard_tests {
         };
         assert_eq!(code(discard_all_with(&r, false, &ask, &FakeTrash::refusing())), "changed_since_confirm");
         assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "edited during the dialog\n");
+    }
+
+    #[test]
+    fn discard_in_an_lfs_repository_is_refused_before_the_dialog_and_changes_nothing() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("lfs-discard");
+        fs::write(r.join("a.txt"), "one\n").unwrap();
+        g(&r, &["add", "a.txt"]);
+        g(&r, &["commit", "-q", "-m", "base"]);
+        fs::write(r.join(".gitattributes"), "*.bin filter=lfs\n").unwrap();
+        fs::write(r.join("a.txt"), "staged\n").unwrap();
+        g(&r, &["add", "a.txt"]);
+        fs::write(r.join("a.txt"), "working\n").unwrap();
+        let asked = std::cell::Cell::new(0);
+        let ask = |_: &str| { asked.set(asked.get() + 1); true };
+        let all = discard_all_with(&r, false, &ask, &FakeTrash::refusing());
+        assert_eq!(all.err().map(|e| e.code), Some("lfs_unsupported"));
+        let one = discard_with(&r, &["a.txt".into()], &ask, &FakeTrash::refusing());
+        assert_eq!(one.err().map(|e| e.code), Some("lfs_unsupported"));
+        assert_eq!(asked.get(), 0, "refused before the user is asked");
+        // The staged version is still staged: the index was not reset and then abandoned.
+        let staged = Command::new("git").args(["show", ":a.txt"]).current_dir(&r).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&staged.stdout), "staged\n");
+        assert_eq!(fs::read_to_string(r.join("a.txt")).unwrap(), "working\n");
     }
 
     #[test]
