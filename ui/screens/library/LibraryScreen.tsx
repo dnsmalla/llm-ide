@@ -44,6 +44,8 @@ export interface LibraryScreenProps {
   /** Opens an allowlisted URL through the host; reject when it cannot (a notice is shown). */
   onOpenExternal?: (url: string) => void | Promise<void>;
   extensions?: readonly LibraryExtension[];
+  /** Switched-on counts for the Extensions groups' badges; absent = no badges. */
+  loadExtensionCounts?: (signal: AbortSignal) => Promise<Readonly<Record<string, number | null>>>;
   /** False while another section is shown (the shell keeps this screen mounted). */
   active?: boolean;
   /** True inside the desktop app: the folder dialog exists. */
@@ -57,9 +59,21 @@ export interface LibraryScreenProps {
   initialHeight?: number;
 }
 
-export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, onExportFile, initialHeight }: LibraryScreenProps): ReactNode {
+export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, loadExtensionCounts, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, onExportFile, initialHeight }: LibraryScreenProps): ReactNode {
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
+  // Reloaded on every pane change, so a count catches up after the user switches items on or off in a pane.
+  const [extensionCounts, setExtensionCounts] = useState<Readonly<Record<string, number | null>>>({});
+  useEffect(() => {
+    if (!loadExtensionCounts || !active) return undefined;
+    const ac = new AbortController();
+    loadExtensionCounts(ac.signal).then(setExtensionCounts).catch(() => undefined);
+    return () => ac.abort();
+  }, [loadExtensionCounts, active, extensionId]);
+  const countedExtensions = useMemo(
+    () => extensions.map((x) => (x.id in extensionCounts ? { ...x, count: extensionCounts[x.id] } : x)),
+    [extensions, extensionCounts],
+  );
   const [rebuild, setRebuild] = useState<RebuildProgress | null>(null);
   const rebuildAbort = useRef<AbortController | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -226,7 +240,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
               <LibraryNav
                 state={state}
                 extensionId={extensionId}
-                extensions={extensions}
+                extensions={countedExtensions}
                 connections={connections}
                 projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={(path) => selectProjectFile(path)} active={active} /> : undefined}
                 onSection={(id) => {

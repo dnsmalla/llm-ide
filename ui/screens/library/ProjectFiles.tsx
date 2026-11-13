@@ -184,7 +184,7 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
               })}>
                 <span className="lib-project-caret">{open ? "▾" : "▸"}</span> <span className="lib-project-icon" aria-hidden="true">{root.path === "code" ? <CodeIcon /> : <TableIcon />}</span> {root.label}
               </button>
-              {root.path === "code" && counts[root.path] !== undefined ? <span className="lib-count">{counts[root.path]!.toLocaleString()}</span> : null}
+              {counts[root.path] !== undefined ? <span className="lib-count" aria-label={`${counts[root.path]} files`}>{counts[root.path]!.toLocaleString()}</span> : null}
               {categoryHead(root.path, root.label)}
             </div>
             {open ? (

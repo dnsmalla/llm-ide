@@ -211,3 +211,18 @@ test("a long document renders in sections: the first ones now, a labelled contro
   assert.equal(count(out, /<p>/g), 240);
   assert.match(out, /Show more \(\d+ sections left\)/);
 });
+
+test("Extensions groups show how many items are switched on, like the note sections; unknown shows no badge", async () => {
+  const { store } = await mkStore();
+  const extensions = [
+    { id: "plugins", label: "Plugins", count: 3 },
+    { id: "llm-sources", label: "LLM Sources", count: 0 },
+    { id: "mcp-plugins", label: "MCP Plugins", count: null },
+    { id: "extensions", label: "Extensions" },
+  ];
+  const out = html(h(L.LibraryNav, { state: store.getSnapshot(), extensionId: null, extensions, onSection() {}, onExtension() {}, onRefresh() {}, onChangeFolder: null, rebuild: null, onRebuild: null, onCancelRebuild() {} }));
+  assert.match(out, /Plugins<\/span><span class="lib-count" aria-label="3 switched on"[^>]*>3<\/span>/);
+  assert.match(out, /LLM Sources<\/span><span class="lib-count" aria-label="0 switched on"[^>]*>0<\/span>/, "zero is a real count");
+  assert.doesNotMatch(out, /MCP Plugins<\/span><span class="lib-count"/, "a list that could not be read shows nothing, not 0");
+  assert.doesNotMatch(out, /Extensions<\/span><span class="lib-count"/);
+});

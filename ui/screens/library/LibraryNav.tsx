@@ -13,6 +13,8 @@ export interface LibraryExtension {
   label: string;
   /** Shown while there is no `render`. */
   note?: string;
+  /** How many of this group's items are switched on; null/absent = unknown (no badge). */
+  count?: number | null;
   render?: () => ReactNode;
 }
 
@@ -137,6 +139,7 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
               }}
             >
               <span className="lib-nav-chevron" aria-hidden="true">{open(x.id) ? "▾" : "▸"}</span><PuzzleIcon /> <span className="lib-nav-label">{x.label}</span>
+              {x.count !== null && x.count !== undefined ? <span className="lib-count" aria-label={`${x.count} switched on`} title={`${x.count} switched on`}>{x.count.toLocaleString()}</span> : null}
             </button>
             <button type="button" className="lib-plus" aria-label={`Open ${x.label}`} title={`Open ${x.label}`} onClick={() => p.onExtension(x.id)}>＋</button>
             {open(x.id) ? <button type="button" className="lib-nav-close" aria-label={`Close ${x.label}`} title={`Close ${x.label}`} onClick={() => toggle(x.id)}>×</button> : null}

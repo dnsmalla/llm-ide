@@ -12,6 +12,7 @@ import type { LegacyApi } from "./legacy.ts";
 import { projectRelativeOf, type LocationReveal } from "./legacy-labels.ts";
 import { host as shellHost, invokeHost, projectStore } from "@llmide/screens/shell";
 import { publicHttpsUrl } from "../safe-url.ts";
+import { loadExtensionCounts, type ExtensionCounts } from "./counts.ts";
 
 /** The shell's core client as the Extensions screen's request function. It keeps error bodies (the screen maps codes). */
 export function extCoreFrom(client: Pick<CoreClient, "requestRaw">): ExtCore {
@@ -41,6 +42,14 @@ export function openRepository(url: string): void {
     return;
   }
   void invokeHost("open_external_url", { url: safe }).catch(() => undefined);
+}
+
+/** The sidebar's switched-on counts, through the same core calls the panes use. */
+export function extensionCounter(client: Pick<CoreClient, "requestRaw">): (signal?: AbortSignal) => Promise<ExtensionCounts> {
+  const core = extCoreFrom(client);
+  const legacy = createLegacyApi(core);
+  const api = createExtensionsApi(core);
+  return (signal) => loadExtensionCounts(legacy, api, signal);
 }
 
 export function libraryExtensions(client: Pick<CoreClient, "requestRaw">, base: readonly LibraryExtension[]): LibraryExtension[] {

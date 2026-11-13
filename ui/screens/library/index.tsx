@@ -16,7 +16,7 @@ import { LibraryStore } from "./library-store.ts";
 import { makeSearchRun } from "./search.ts";
 import { LibraryScreen } from "./LibraryScreen";
 import { EXTENSION_PLACEHOLDERS } from "./LibraryNav";
-import { libraryExtensions } from "./extensions/index.tsx";
+import { extensionCounter, libraryExtensions } from "./extensions/index.tsx";
 import { sourcesCoreFrom, summarizeCoreFrom } from "./sources/adapter.ts";
 import { withCreatedHook } from "./sources/created-hook.ts";
 import { sourceConnections } from "./sources/SourcePanes";
@@ -64,6 +64,7 @@ export default function Library({ active, projectRoot }: SectionProps) {
     [host],
   );
   const extensions = useMemo(() => libraryExtensions(shellCore, EXTENSION_PLACEHOLDERS), []);
+  const loadExtensionCounts = useMemo(() => extensionCounter(shellCore), []);
   // The write side exists only inside the desktop app (it needs the notes_write host commands).
   const available = shellHost.isAvailable();
   const write = useMemo(() => (available ? { host: writeHost, summarize: summarizeCoreFrom(shellCore) } : null), [available, writeHost]);
@@ -108,6 +109,7 @@ export default function Library({ active, projectRoot }: SectionProps) {
     runRebuild={runRebuild}
     onOpenExternal={openExternal}
     extensions={extensions}
+    loadExtensionCounts={loadExtensionCounts}
     active={active}
     hostAvailable={available}
     projectOpen={projectRoot !== null}
