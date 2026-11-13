@@ -365,7 +365,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         >
           <HomeIcon />
         </button>
-        <SectionToolbar active={nav.active} onSelect={onSelect} devTools={devToolsEnabled()} />
+        <SectionToolbar active={nav.active} onSelect={onSelect} devTools={devToolsEnabled()} mode={remoteMode ? "remote" : "local"} />
         {nav.active === "explorer" && (
           <button
             type="button"

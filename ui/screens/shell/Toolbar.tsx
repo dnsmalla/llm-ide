@@ -5,7 +5,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { Icon, type IconName } from "@llmide/ui-kit";
 import { MenuButton, type MenuItem } from "./MenuButton";
 import { estimateWidth, partitionToolbar, readHiddenToolbar, rovingStop, samePartition, toolbarKeyTarget, toolbarSections, type Partition } from "./toolbar-model";
-import type { SectionDef, SectionId } from "./sections";
+import type { NavMode, SectionDef, SectionId } from "./sections";
 import { useFeatures } from "./use-shell";
 
 const ICONS: Partial<Record<SectionId, IconName>> = {
@@ -30,6 +30,8 @@ export interface ToolbarProps {
   onSelect: (id: SectionId) => void;
   /** Developer tools on: the Spike item joins the list. */
   devTools: boolean;
+  /** Connected to a hub: local-only sections are not offered (they cannot be opened there). */
+  mode?: NavMode;
 }
 
 const ToolButton = memo(function ToolButton({ def, active, stop, onSelect, onFocus, setRef }: { def: SectionDef; active: boolean; stop: boolean; onSelect: (id: SectionId) => void; onFocus: (id: string) => void; setRef: (id: string, el: HTMLElement | null) => void }) {
@@ -55,7 +57,7 @@ const ToolButton = memo(function ToolButton({ def, active, stop, onSelect, onFoc
   );
 });
 
-export const SectionToolbar = memo(function SectionToolbar({ active, onSelect, devTools }: ToolbarProps) {
+export const SectionToolbar = memo(function SectionToolbar({ active, onSelect, devTools, mode = "local" }: ToolbarProps) {
   const features = useFeatures();
   const [hiddenIds, setHiddenIds] = useState(() => readHiddenToolbar());
   useEffect(() => {
@@ -63,7 +65,7 @@ export const SectionToolbar = memo(function SectionToolbar({ active, onSelect, d
     window.addEventListener("llmide-toolbar", refresh);
     return () => window.removeEventListener("llmide-toolbar", refresh);
   }, []);
-  const defs = useMemo(() => toolbarSections(devTools, features.usable, hiddenIds), [devTools, features.usable, hiddenIds]);
+  const defs = useMemo(() => toolbarSections(devTools, features.usable, hiddenIds, mode), [devTools, features.usable, hiddenIds, mode]);
   const bar = useRef<HTMLDivElement>(null);
   const els = useRef(new Map<string, HTMLElement>());
   const widths = useRef(new Map<string, number>());
