@@ -254,3 +254,58 @@ test("a scoped test map without a graph lists only the source files inside the f
   assert.equal(scoped.untestedFiles, 1);
   assert.equal(scoped.untestedFunctions, 1);
 });
+
+test("a graph over the read cap falls back to file matching and says so in the map's notes", async () => {
+  const files = { "tests/a.test.ts": "test('adds', () => { math.add(1,2) })", "src/math.ts": "export function add() {}" };
+  const fs = {
+    async read(p, max) {
+      if (p === "system/graph/graph.json") return { status: "too_large", size: 40 * 1024 * 1024, text: null };
+      if (!(p in files)) throw Object.assign(new Error("missing"), { code: "missing" });
+      return { status: "ok", text: files[p] };
+    },
+    async list(dir) { const prefix = dir === "." ? "" : `${dir}/`; const names = new Map(); for (const p of Object.keys(files)) { if (!p.startsWith(prefix)) continue; const rest = p.slice(prefix.length); names.set(rest.split("/")[0], rest.includes("/") ? "dir" : "file"); } if (!names.size && dir !== ".") throw Object.assign(new Error("missing"), { code: "missing" }); return { entries: [...names].map(([name, kind]) => ({ name, kind, path: `${prefix}${name}` })) }; },
+    async create() {}, async write() {},
+  };
+  const structure = { generatedAt: "", status: "ok", notes: [], roots: [{ packageDir: "", testDir: "tests", runner: "npm", command: "npm test", languages: ["ts"] }] };
+  const map = await m.buildTestMap(fs, "", structure, "system/graph/graph.json", new Date("2026-01-01T00:00:00Z"));
+  assert.equal(map.source, "files");
+  assert.deepEqual(map.notes, ["graph too large to read (over 32 MB); the map fell back to matching files by name"]);
+  assert.equal(map.entries[0].path, "src/math.ts");
+  assert.equal(map.entries[0].testedBy.length, 1, "the file is matched by name");
+});
+
+/** A fake listing for `count` files in one folder, plus the folder's subfolders; `read` answers "" for each file. */
+function wideFs(folders) {
+  return {
+    async list(dir) {
+      const entries = folders[dir === "." ? "" : dir];
+      if (!entries) throw Object.assign(new Error("missing"), { code: "missing" });
+      return { entries };
+    },
+    async read() { return { status: "ok", text: "" }; },
+    async create() {}, async write() {},
+  };
+}
+
+test("walkFiles counts only the files the keep predicate accepts, and reports a stop at the limit", async () => {
+  const src = Array.from({ length: m.WALK_LIMIT + 5 }, (_, i) => ({ name: `d${i}.json`, path: `src/d${i}.json`, kind: "file" }));
+  src.push({ name: "a.py", path: "src/a.py", kind: "file" });
+  const fs = wideFs({ src, "": [{ name: "src", path: "src", kind: "dir" }] });
+  const report = { stopped: false };
+  const kept = await m.walkFiles(fs, "", (p) => p.endsWith(".py"), report);
+  assert.deepEqual(kept, ["src/a.py"]);
+  assert.equal(report.stopped, false, "the json files are not counted, so the walk is not stopped");
+  const big = { stopped: false };
+  const all = await m.walkFiles(fs, "", () => true, big);
+  assert.equal(all.length, m.WALK_LIMIT);
+  assert.equal(big.stopped, true);
+});
+
+test("a walk that stops at the limit is in the test map's notes", async () => {
+  const tests = Array.from({ length: m.WALK_LIMIT + 1 }, (_, i) => ({ name: `test_${i}.py`, path: `tests/test_${i}.py`, kind: "file" }));
+  const fs = wideFs({ tests, "": [] });
+  const structure = { generatedAt: "", status: "ok", notes: [], roots: [{ packageDir: "", testDir: "tests", runner: "pytest", command: "python3 -m pytest", languages: ["py"] }] };
+  const map = await m.buildTestMap(fs, "", structure, "system/graph/graph.json", new Date("2026-01-01T00:00:00Z"));
+  assert.deepEqual(map.notes, [m.WALK_STOP_NOTE]);
+  assert.equal(m.WALK_STOP_NOTE, "stopped after 20000 files; the map is incomplete");
+});

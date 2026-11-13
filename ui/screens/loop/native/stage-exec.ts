@@ -7,10 +7,11 @@ import type { CoreClient } from "../../shell/core";
 import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { guardedAgentCall, type AgentWrites, type GuardedCallOutcome } from "./agent-call.ts";
 import { evaluateArtifact } from "./artifact.ts";
-import { runCodeGraph } from "./codegraph.ts";
+import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, REFACTOR_MOVE_SKILLS, agentRunBody, guardedPaths, isFactoryLoop, reviewDiffSection } from "./factory.ts";
 import { importOnlyFiles } from "./import-only.ts";
 import { followsRegistry, registrySource, stagePromptText } from "./default-stage.ts";
+import { graphDigest, rulesDigest } from "./graph-digest.ts";
 import { INPUT_PATH_SKILLS, pathInside } from "./input-path.ts";
 import type { LoopDefinition, LoopStage } from "./model.ts";
 import { checkWrites, isTestFileName } from "./protected.ts";
@@ -350,14 +351,15 @@ async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, p
   }
   const map = await buildTestMap(ctx.fs, prefix, structure, graphPath, new Date(), target.inputPath ?? "");
   const writes = await writeTestMap(ctx.fs, prefix, map);
-  return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
+  return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, ...map.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
 }
 
 async function runTestPruneStage(ctx: StageExecContext, prefix: string): Promise<StageRunResult> {
   const structure = await detectTestStructure(ctx.fs, prefix);
-  const findings = await scanTestPrune(ctx.fs, prefix, structure);
+  const notes: string[] = [];
+  const findings = await scanTestPrune(ctx.fs, prefix, structure, notes);
   const path = await writeTestPrune(ctx.fs, prefix, findings);
-  return { ok: true, output: `${findings.length} finding(s); report only at ${path}` };
+  return { ok: true, output: [`${findings.length} finding(s); report only at ${path}`, ...notes].join("\n") };
 }
 
 /** A worktree run's graph folder, so its graph never touches the project's main graph or the MR diff; null = the project's. */
@@ -365,7 +367,34 @@ const runGraphOut = (runId: string | null): string | null => (runId !== null ? `
 /** The code graph a stage reads: the run's own snapshot in a worktree run, else the project's. */
 const graphPathFor = (runId: string | null): string => `${runGraphOut(runId) ?? "system/graph"}/graph-code.json`;
 
-async function runGraph(ctx: StageExecContext, s: LoopStage, prefix: string): Promise<StageRunResult> {
+/** Writes GRAPH.md and RULES.md beside the plan, where the planner reads them. A failed write is logged, never a failed stage. */
+async function writeRefactorDigests(ctx: StageExecContext, prefix: string, scope: string, graph: GraphDoc): Promise<void> {
+  const dir = prefix ? `${prefix}/llm-doc/loop/refactor` : "llm-doc/loop/refactor";
+  const write = async (name: string, make: () => Promise<string>) => {
+    try {
+      const text = await make();
+      await ensureDir(ctx.fs, `${dir}/${name}`);
+      await ctx.fs.write(`${dir}/${name}`, text, { expected_hash: null, force: true });
+    } catch (e) {
+      ctx.log(`${name} not written: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  await write("GRAPH.md", async () => graphDigest(graph, { scope }));
+  await write("RULES.md", async () => {
+    const quoted: { name: string; text: string }[] = [];
+    for (const name of ["CLAUDE.md", "AGENTS.md", ".cursorrules", "CONTRIBUTING.md"]) {
+      try {
+        const r = await ctx.fs.read(prefix ? `${prefix}/${name}` : name, 2_000_000);
+        if (r.status === "ok" && r.text !== null) quoted.push({ name, text: r.text });
+      } catch { /* missing: skipped */ }
+    }
+    const names = (await ctx.fs.list(prefix || ".")).entries.map((e) => e.name);
+    const tooling = names.filter((n) => ["pyproject.toml", "package.json", "Makefile", "ruff.toml"].includes(n) || /^\.eslintrc/.test(n) || /^eslint\.config\./.test(n));
+    return rulesDigest(quoted, tooling);
+  });
+}
+
+async function runGraph(ctx: StageExecContext, s: LoopStage, prefix: string, target: LoopDefinition): Promise<StageRunResult> {
   if (s.graphOp !== "snapshot" && s.graphOp !== "verify") return { ok: false, output: "this graph stage has no operation chosen" };
   const out = runGraphOut(ctx.runId);
   const graphPath = graphPathFor(ctx.runId);
@@ -373,6 +402,7 @@ async function runGraph(ctx: StageExecContext, s: LoopStage, prefix: string): Pr
   const r = await runCodeGraph(ctx.fs, s.graphOp, graphPath, before, async () => {
     await ctx.host("graph_generate", { mode: "code", target: prefix || undefined, ...(out ? { out } : {}) });
   });
+  if (r.passed && r.graph) await writeRefactorDigests(ctx, prefix, target.inputPath ?? "", r.graph);
   return { ok: r.passed, output: r.output };
 }
 
@@ -393,7 +423,7 @@ export async function runOneStage(ctx: StageExecContext, s: LoopStage, target: L
   if (s.kind === "testMap" && s.testOp === "ledger") return runLedger(ctx, prior, prefix, target);
   if (s.kind === "testMap") return runTestMap(ctx, s, prefix, prior, target);
   if (s.kind === "testPrune") return runTestPruneStage(ctx, prefix);
-  if (s.kind === "codeGraph") return runGraph(ctx, s, prefix);
+  if (s.kind === "codeGraph") return runGraph(ctx, s, prefix, target);
   if (s.kind === "artifactCheck") return runArtifact(ctx, s, target, prefix);
   throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
 }

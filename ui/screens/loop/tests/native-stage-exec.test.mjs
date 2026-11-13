@@ -297,7 +297,8 @@ test("a Graph snapshot in a worktree run writes its graph and before.json under 
   const s = stage({ id: "g1", name: "Graph", kind: "codeGraph", command: null, graphOp: "snapshot" });
   assert.equal((await createStageDeps(ctx, loopOf([s])).runStage(s, [])).ok, true);
   assert.deepEqual(calls.find(([c]) => c === "graph_generate"), ["graph_generate", { mode: "code", target: "system/loop-worktrees/r1", out: "system/loop-runs/r1/graph" }]);
-  assert.deepEqual(writes, [["system/loop-runs/r1/graph/before.json", graph]]);
+  assert.deepEqual(writes.filter(([p]) => p.endsWith("before.json")), [["system/loop-runs/r1/graph/before.json", graph]]);
+  assert.deepEqual(writes.map(([p]) => p).filter((p) => p.includes("llm-doc")), ["system/loop-worktrees/r1/llm-doc/loop/refactor/GRAPH.md", "system/loop-worktrees/r1/llm-doc/loop/refactor/RULES.md"], "the digests sit beside the plan");
 });
 
 test("a Graph snapshot in a main-tree run sends no out and snapshots the project graph", async () => {
@@ -309,7 +310,7 @@ test("a Graph snapshot in a main-tree run sends no out and snapshots the project
   assert.equal((await createStageDeps(ctx, loopOf([s])).runStage(s, [])).ok, true);
   const args = calls.find(([c]) => c === "graph_generate")[1];
   assert.equal("out" in args, false, "the legacy run sends no out folder");
-  assert.deepEqual(writes, [["system/loop/refactor/graph/before.json", graph]]);
+  assert.deepEqual(writes.filter(([p]) => p.endsWith("before.json")), [["system/loop/refactor/graph/before.json", graph]]);
 });
 
 test("a Test Map stage refreshes the run's graph into its worktree folder unless a Graph stage already ran in this run", async () => {
@@ -753,4 +754,80 @@ test("a ledger fails when the loop has an enabled Test stage that did not run fi
   const r = await deps.runStage(ledger, [{ stage: baseline, ok: true, output: "PASSED tests/test_a.py::test_x" }]);
   assert.equal(r.ok, false, "the baseline's output is not the Test stage's");
   assert.match(r.output, /Test stage did not run before the ledger/);
+});
+
+/** A worktree's files: reads answer from `files`, lists answer the root's names, writes are recorded (or refused by `failWrite`). */
+function digestFs(files, { failWrite = null } = {}) {
+  const writes = [];
+  const names = [...new Set(Object.keys(files).filter((p) => p.startsWith("system/loop-worktrees/r1/")).map((p) => p.slice("system/loop-worktrees/r1/".length).split("/")[0]))];
+  return {
+    writes,
+    fs: {
+      async read(path) {
+        if (!(path in files)) throw Object.assign(new Error(`not found: ${path}`), { code: "not_found" });
+        return { status: "ok", text: files[path], hash: "h" };
+      },
+      async list(dir) {
+        if (dir !== "system/loop-worktrees/r1") throw Object.assign(new Error("missing"), { code: "not_found" });
+        return { entries: names.map((name) => ({ name, kind: "file", path: `${dir}/${name}` })) };
+      },
+      async create() {},
+      async write(path, text) { if (failWrite?.(path)) throw Object.assign(new Error("disk full"), { code: "io" }); writes.push([path, text]); },
+    },
+  };
+}
+
+test("a successful snapshot writes GRAPH.md and RULES.md beside the plan, in the worktree", async () => {
+  const graph = JSON.stringify({ schemaVersion: 1, nodes: [{ id: "file:shop.py", kind: "file" }, { id: "file:utils.py", kind: "file" }], edges: [{ fromId: "file:shop.py", toId: "file:utils.py", kind: "imports" }, { fromId: "file:utils.py", toId: "file:shop.py", kind: "imports" }] });
+  const W = "system/loop-worktrees/r1";
+  const { fs, writes } = digestFs({ [`${W}/AGENTS.md`]: "Never edit tests/golden/.", [`${W}/pyproject.toml`]: "[tool.pytest]", "system/loop-runs/r1/graph/graph-code.json": graph });
+  const { host } = fakeHost({ graph_generate: { path: "x", nodes: 2, edges: 2 } });
+  const { ctx, log } = ctxOf({ host, fs });
+  const s = stage({ id: "g1", name: "Graph", kind: "codeGraph", command: null, graphOp: "snapshot" });
+  const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
+  assert.equal(r.ok, true, r.output);
+  const graphMd = writes.find(([p]) => p === `${W}/llm-doc/loop/refactor/GRAPH.md`);
+  assert.ok(graphMd, writes.map(([p]) => p).join(", "));
+  assert.match(graphMd[1], /^- cycle 1: shop\.py, utils\.py$/m);
+  const rules = writes.find(([p]) => p === `${W}/llm-doc/loop/refactor/RULES.md`);
+  assert.match(rules[1], /Never edit tests\/golden\//);
+  assert.match(rules[1], /Tooling files present: pyproject\.toml/);
+  assert.deepEqual(log.filter((l) => /not written/.test(l)), []);
+});
+
+test("a failed digest write is logged and the snapshot still passes", async () => {
+  const graph = JSON.stringify({ schemaVersion: 1, nodes: [{ id: "file:a.py", kind: "file" }], edges: [] });
+  const { fs, writes } = digestFs({ "system/loop-runs/r1/graph/graph-code.json": graph }, { failWrite: (p) => p.endsWith(".md") });
+  const { host } = fakeHost({ graph_generate: { path: "x", nodes: 1, edges: 0 } });
+  const { ctx, log } = ctxOf({ host, fs });
+  const s = stage({ id: "g1", name: "Graph", kind: "codeGraph", command: null, graphOp: "snapshot" });
+  const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
+  assert.equal(r.ok, true, r.output);
+  assert.ok(writes.some(([p]) => p.endsWith("before.json")), "the baseline is still saved");
+  assert.ok(log.includes("GRAPH.md not written: disk full"), log.join("\n"));
+  assert.ok(log.includes("RULES.md not written: disk full"), log.join("\n"));
+});
+
+test("a graph over the read cap fails the Graph stage with the Input path advice", async () => {
+  const { fs } = digestFs({});
+  const big = { ...fs, async read() { return { status: "too_large", size: 29 * 1048576, text: null }; } };
+  const { host } = fakeHost({ graph_generate: { path: "x", nodes: 0, edges: 0 } });
+  const { ctx } = ctxOf({ host, fs: big });
+  const s = stage({ id: "g1", name: "Graph", kind: "codeGraph", command: null, graphOp: "snapshot" });
+  const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
+  assert.equal(r.ok, false);
+  assert.match(r.output, /^the code graph is 29 MB, over the 32 MB the app can read; set the loop's Input path to a folder to scan less$/);
+});
+
+test("a Test Map stage that falls back to file matching prints the too-large note in its output", async () => {
+  const W = "system/loop-worktrees/r1";
+  const files = { [`${W}/tests/test_a.py`]: "def test_run():\n    assert run()\n", [`${W}/pytest.ini`]: "[pytest]\n", [`${W}/a.py`]: "def run():\n    pass\n" };
+  const base = digestFs(files).fs;
+  const fs = { ...base, async read(path, max) { if (path === "system/loop-runs/r1/graph/graph-code.json") return { status: "too_large", size: 40 * 1048576, text: null }; return base.read(path, max); } };
+  const { host } = fakeHost();
+  const { ctx } = ctxOf({ host, fs });
+  const s = stage({ id: "t1", name: "Test map", kind: "testMap", command: null, testOp: "map" });
+  const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
+  assert.equal(r.ok, true, r.output);
+  assert.match(r.output, /\ngraph too large to read \(over 32 MB\); the map fell back to matching files by name\n/);
 });

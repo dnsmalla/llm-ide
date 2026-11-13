@@ -9,9 +9,14 @@ import type { FsApi } from "../../explorer/fs";
 
 export type CodeGraphFs = Pick<FsApi, "read" | "write" | "create">;
 export interface GraphShape { files: number; nodes: number; edges: number; cycles: number; over500: number }
-export interface CodeGraphResult { passed: boolean; output: string }
+/** `graph` is the validated snapshot document, set on a successful snapshot (the digest is built from it). */
+export interface CodeGraphResult { passed: boolean; output: string; graph?: GraphDoc }
+/** The most a loop reads of a code graph: the host's read cap (fs_ops.rs READ_HARD_MAX). */
+export const GRAPH_READ_MAX = 32 * 1024 * 1024;
+/** graph-kit stops scanning at this many files; a snapshot that reaches it says so. */
+export const GRAPH_FILE_LIMIT = 20_000;
 
-interface GraphDoc {
+export interface GraphDoc {
   nodes?: Array<{ id?: string; kind?: string }>; edges?: Array<{ fromId?: string; toId?: string; kind?: string }>;
   calls?: Array<{ from?: string; to?: string }>; files?: Array<{ path?: string; loc?: number; functions?: unknown[] }>;
 }
@@ -73,15 +78,20 @@ function checkGraph(text: string): { doc: GraphDoc } | { error: string } {
   return error ? { error } : { doc: doc as GraphDoc };
 }
 
-async function readText(fs: CodeGraphFs, path: string): Promise<string | null> {
+type GraphRead = { text: string } | { tooLarge: number | null } | null;
+
+async function readText(fs: CodeGraphFs, path: string): Promise<GraphRead> {
   try {
-    const r = await fs.read(path, 20_000_000);
-    return r.status === "ok" && r.text ? r.text : null;
+    const r = await fs.read(path, GRAPH_READ_MAX);
+    if (r.status === "too_large") return { tooLarge: typeof r.size === "number" ? r.size : null };
+    return r.status === "ok" && r.text ? { text: r.text } : null;
   } catch { return null; }
 }
 
-/** Tarjan SCC count: an SCC with more than one file, or a self-edge, is one import cycle. */
-export function cycleCount(calls: readonly { from?: string; to?: string }[]): number {
+const tooLarge = (size: number | null): string => `the code graph is ${size === null ? "" : `${Math.round(size / 1048576)} MB, `}over the 32 MB the app can read; set the loop's Input path to a folder to scan less`;
+
+/** Tarjan SCC: each group of files in an import cycle (a group of more than one file, or a self-edge). */
+export function cycleGroups(calls: readonly { from?: string; to?: string }[]): string[][] {
   const adj = new Map<string, string[]>();
   for (const c of calls) {
     if (!c.from || !c.to) continue;
@@ -89,7 +99,7 @@ export function cycleCount(calls: readonly { from?: string; to?: string }[]): nu
     adj.get(c.from)!.push(c.to);
     if (!adj.has(c.to)) adj.set(c.to, []);
   }
-  let index = 0; let cycles = 0;
+  let index = 0; const cycles: string[][] = [];
   const idx = new Map<string, number>(); const low = new Map<string, number>(); const stack: string[] = []; const on = new Set<string>();
   const strong = (v: string) => {
     idx.set(v, index); low.set(v, index); index++; stack.push(v); on.add(v);
@@ -100,14 +110,19 @@ export function cycleCount(calls: readonly { from?: string; to?: string }[]): nu
     if (low.get(v) === idx.get(v)) {
       const comp: string[] = []; let w: string;
       do { w = stack.pop()!; on.delete(w); comp.push(w); } while (w !== v);
-      if (comp.length > 1 || (adj.get(v) ?? []).includes(v)) cycles += 1;
+      if (comp.length > 1 || (adj.get(v) ?? []).includes(v)) cycles.push(comp);
     }
   };
   for (const v of adj.keys()) if (!idx.has(v)) strong(v);
   return cycles;
 }
 
-async function ensureDir(fs: CodeGraphFs, path: string): Promise<void> {
+export function cycleCount(calls: readonly { from?: string; to?: string }[]): number {
+  return cycleGroups(calls).length;
+}
+
+/** Creates the folders above a file path (the last segment is the file). */
+export async function ensureDir(fs: CodeGraphFs, path: string): Promise<void> {
   let at = "";
   for (const seg of path.split("/").slice(0, -1)) { at = at ? `${at}/${seg}` : seg; try { await fs.create(at, "dir"); } catch (e) { if ((e as { code?: string })?.code !== "exists") throw e; } }
 }
@@ -116,8 +131,10 @@ export async function runCodeGraph(fs: CodeGraphFs, op: "snapshot" | "verify", g
   if (rescan) {
     try { await rescan(); } catch (e) { return { passed: false, output: `graph rescan failed: ${e instanceof Error ? e.message : String(e)}` }; }
   }
-  const text = await readText(fs, graphPath);
-  if (text === null) return { passed: false, output: `no readable graph at ${graphPath}; run the Graph page scan first` };
+  const read = await readText(fs, graphPath);
+  if (read === null) return { passed: false, output: `no readable graph at ${graphPath}; run the Graph page scan first` };
+  if ("tooLarge" in read) return { passed: false, output: tooLarge(read.tooLarge) };
+  const text = read.text;
   const cur = checkGraph(text);
   if ("error" in cur) return { passed: false, output: `graph invalid: ${cur.error}` };
   const current = graphShape(cur.doc);
@@ -126,11 +143,13 @@ export async function runCodeGraph(fs: CodeGraphFs, op: "snapshot" | "verify", g
     // The validated text is what gets saved, so the baseline is exactly the graph that passed.
     await ensureDir(fs, beforePath);
     await fs.write(beforePath, text, { expected_hash: null, force: true });
-    return { passed: true, output: `snapshot · ${current.files} file(s), ${current.nodes} node(s), ${current.edges} edge(s), ${current.cycles} cycle(s), ${current.over500} over 500 lines → ${beforePath}` };
+    const limit = Array.isArray(cur.doc.nodes) && current.files >= GRAPH_FILE_LIMIT ? `\nwarning: the scan reached graph-kit's ${GRAPH_FILE_LIMIT}-file limit; files beyond it are not in the graph` : "";
+    return { passed: true, output: `snapshot · ${current.files} file(s), ${current.nodes} node(s), ${current.edges} edge(s), ${current.cycles} cycle(s), ${current.over500} over 500 lines → ${beforePath}${limit}`, graph: cur.doc };
   }
-  const baseText = await readText(fs, beforePath);
-  if (baseText === null) return { passed: false, output: `no snapshot at ${beforePath}; run the snapshot graph stage first` };
-  const base = checkGraph(baseText);
+  const baseRead = await readText(fs, beforePath);
+  if (baseRead === null) return { passed: false, output: `no snapshot at ${beforePath}; run the snapshot graph stage first` };
+  if ("tooLarge" in baseRead) return { passed: false, output: tooLarge(baseRead.tooLarge) };
+  const base = checkGraph(baseRead.text);
   if ("error" in base) return { passed: false, output: `the baseline snapshot is invalid: ${base.error}; run the snapshot stage again` };
   const before = graphShape(base.doc);
   const worse: string[] = [];

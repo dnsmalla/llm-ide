@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cycleCount, graphShape, runCodeGraph, validateGraphDoc } from "../native/codegraph.ts";
+import { cycleCount, cycleGroups, GRAPH_FILE_LIMIT, GRAPH_READ_MAX, graphShape, runCodeGraph, validateGraphDoc } from "../native/codegraph.ts";
 
 function mem(files) {
   return {
@@ -175,4 +175,34 @@ test("a rescan is awaited before the graph is read, and only read, write and cre
   assert.equal(r.passed, true, r.output);
   assert.equal(rescanned, true);
   assert.ok(calls.every((c) => ["read", "write", "create"].includes(c)));
+});
+
+test("a graph over the 32 MB read cap fails with the size and the Input path advice, and is read with that cap", async () => {
+  const seen = [];
+  const fs = { async read(path, max) { seen.push(max); return { status: "too_large", size: 29 * 1024 * 1024, text: null }; }, async write() {}, async create() {} };
+  const r = await runCodeGraph(fs, "snapshot", G, B);
+  assert.equal(r.passed, false);
+  assert.equal(r.output, "the code graph is 29 MB, over the 32 MB the app can read; set the loop's Input path to a folder to scan less");
+  assert.deepEqual(seen, [GRAPH_READ_MAX]);
+  const noSize = await runCodeGraph({ async read() { return { status: "too_large", text: null }; }, async write() {}, async create() {} }, "verify", G, B);
+  assert.equal(noSize.output, "the code graph is over the 32 MB the app can read; set the loop's Input path to a folder to scan less");
+});
+
+test("a snapshot at graph-kit's file limit passes with a warning; one file under it has none", async () => {
+  const many = (n) => Array.from({ length: n }, (_, i) => `f${i}.py`);
+  const at = await runCodeGraph(mem({ [G]: kit(many(GRAPH_FILE_LIMIT), []) }), "snapshot", G, B);
+  assert.equal(at.passed, true);
+  assert.match(at.output, /\nwarning: the scan reached graph-kit's 20000-file limit; files beyond it are not in the graph$/);
+  const under = await runCodeGraph(mem({ [G]: kit(many(GRAPH_FILE_LIMIT - 1), []) }), "snapshot", G, B);
+  assert.equal(under.passed, true);
+  assert.doesNotMatch(under.output, /warning/);
+});
+
+test("the snapshot result carries the validated document for the digest", async () => {
+  const r = await runCodeGraph(mem({ [G]: kit(["a.py"], []) }), "snapshot", G, B);
+  assert.equal(r.graph.nodes[0].id, "file:a.py");
+});
+
+test("cycleGroups returns each cycle's files", async () => {
+  assert.deepEqual(cycleGroups([{ from: "a", to: "b" }, { from: "b", to: "a" }, { from: "c", to: "c" }]).map((g) => g.sort()), [["a", "b"], ["c"]]);
 });

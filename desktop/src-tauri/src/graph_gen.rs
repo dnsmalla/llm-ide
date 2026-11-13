@@ -108,6 +108,16 @@ fn valid_out(out: &str) -> bool {
         && out.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/'))
 }
 
+/// `graph-kit code` arguments. A Loop run (`light`) passes `--no-calls`: call edges are most of a large graph
+/// and the Loop never reads them, while the Graph screen keeps the full graph.
+fn code_args(scan: &str, out: &str, light: bool) -> Vec<String> {
+    let mut args = vec!["code".to_string(), scan.to_string(), "--out".to_string(), out.to_string()];
+    if light {
+        args.push("--no-calls".to_string());
+    }
+    args
+}
+
 fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>, out: Option<&str>) -> Result<GraphGenerated, String> {
     let (node, cli) = toolchain(app)?;
     let root = crate::project::active_root().ok_or_else(|| "open a project before generating a graph".to_string())?;
@@ -156,7 +166,7 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>, out: Optio
     let result = (|| -> Result<PathBuf, String> {
         match mode {
             "code" => {
-                run_gk(&node, &cli, &["code".into(), scan_code.to_string_lossy().into_owned(), "--out".into(), code_out.to_string_lossy().into_owned()])?;
+                run_gk(&node, &cli, &code_args(&scan_code.to_string_lossy(), &code_out.to_string_lossy(), out.is_some()))?;
                 Ok(code_out.clone())
             }
             "memory" => {
@@ -165,7 +175,7 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>, out: Optio
                 Ok(doc_out.clone())
             }
             "all" => {
-                run_gk(&node, &cli, &["code".into(), scan_code.to_string_lossy().into_owned(), "--out".into(), code_out.to_string_lossy().into_owned()])?;
+                run_gk(&node, &cli, &code_args(&scan_code.to_string_lossy(), &code_out.to_string_lossy(), out.is_some()))?;
                 if !scan_docs.is_dir() { return Err("this project has no folder to scan for documents".into()); }
                 run_gk(&node, &cli, &["memory".into(), scan_docs.to_string_lossy().into_owned(), "--out".into(), doc_out.to_string_lossy().into_owned()])?;
                 // `memory` emits additive `chunks`/`docCount` keys, but `merge` parses the doc strictly. Split them
@@ -308,6 +318,14 @@ mod tests {
         assert_eq!(graph_rel("memory"), "system/graph/graph-memory.json");
         assert_eq!(graph_rel("all"), "system/graph/graph-all.json");
         assert!(!Path::new(graph_rel("code")).is_absolute());
+    }
+
+    #[test]
+    fn a_loop_run_scan_skips_call_edges_and_the_graph_screen_keeps_them() {
+        let light = code_args("/repo", "/out.json", true);
+        assert_eq!(light, ["code", "/repo", "--out", "/out.json", "--no-calls"]);
+        let full = code_args("/repo", "/out.json", false);
+        assert_eq!(full, ["code", "/repo", "--out", "/out.json"]);
     }
 
     #[test]

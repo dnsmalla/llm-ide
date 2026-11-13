@@ -2,7 +2,7 @@
 // (.only / fit / fdescribe), gap duplicates and tests whose source file is gone. Integration/performance tests are
 // exempt from the source-gone rule. Mirrors the Mac scanner's finding kinds this slice can verify.
 import type { FsApi } from "../../explorer/fs";
-import { walkFiles, type TestMapFs, type TestStructure } from "./testmap.ts";
+import { CODE_FILE, WALK_STOP_NOTE, walkFiles, type TestMapFs, type TestStructure } from "./testmap.ts";
 
 export type PruneReason = "noAssertion" | "commentedOutTest" | "focusedTest" | "gapDuplicate" | "sourceGone";
 export interface PruneFinding { path: string; reason: PruneReason; line?: number }
@@ -28,9 +28,13 @@ function gapSibling(path: string): string | null {
   return segs.length ? `${segs.join("/")}/${sibling}` : sibling;
 }
 
-export async function scanTestPrune(fs: PruneFs, repoPrefix: string, structure: TestStructure): Promise<PruneFinding[]> {
+/** `notes` gets the walk-limit note when the source walk stops early (its stems would be incomplete). */
+export async function scanTestPrune(fs: PruneFs, repoPrefix: string, structure: TestStructure, notes: string[] = []): Promise<PruneFinding[]> {
   const prefix = repoPrefix ? `${repoPrefix}/` : "";
-  const all = await walkFiles(fs, prefix.replace(/\/$/, "") || ".");
+  // Source files too: a test is judged by whether its source file exists, so the walk keeps every code file.
+  const report = { stopped: false };
+  const all = await walkFiles(fs, prefix.replace(/\/$/, "") || ".", (p) => CODE_FILE.test(p), report);
+  if (report.stopped) notes.push(WALK_STOP_NOTE);
   const rel = (p: string) => repoPrefix && p.startsWith(`${repoPrefix}/`) ? p.slice(repoPrefix.length + 1) : p;
   const fileSet = new Set(all.map(rel));
   const stems = new Set([...fileSet].map((p) => p.split("/").pop()?.replace(/\.[^.]+$/, "") ?? ""));

@@ -3,8 +3,9 @@
 // larger operations and are refused rather than approximated.
 import type { FsApi } from "../../explorer/fs";
 import { pathInside } from "./input-path.ts";
-import { isTestFileName } from "./protected.ts";
+import { isTestFileName, isTestPath } from "./protected.ts";
 import { pytestCommand } from "./environment.ts";
+import { GRAPH_READ_MAX } from "./codegraph.ts";
 
 export interface TestRoot { packageDir: string; testDir: string; runner: string; command: string; languages: string[] }
 export interface TestStructure { generatedAt: string; roots: TestRoot[]; status: "ok" | "missing"; notes: string[] }
@@ -96,19 +97,25 @@ export async function writeTestStructure(fs: TestMapFs, repoPrefix: string, s: T
 }
 
 export interface TestMapEntry { path: string; function: string; line: number; fanIn: number; loc: number; testedBy: string[] }
-export interface TestMap { generatedAt: string; source: "graph" | "files"; entries: TestMapEntry[]; untestedFunctions: number; testedFunctions: number; untestedFiles: number }
+export interface TestMap { generatedAt: string; source: "graph" | "files"; entries: TestMapEntry[]; untestedFunctions: number; testedFunctions: number; untestedFiles: number; notes: string[] }
 
-export async function walkFiles(fs: TestMapFs, dir: string, out: string[] = [], limit = 5000): Promise<string[]> {
-  if (out.length >= limit) return out;
+/** Files one walk collects before it stops; a bigger repo gets an incomplete map and says so. */
+export const WALK_LIMIT = 20_000;
+export const WALK_STOP_NOTE = `stopped after ${WALK_LIMIT} files; the map is incomplete`;
+const GRAPH_TOO_LARGE_NOTE = "graph too large to read (over 32 MB); the map fell back to matching files by name";
+
+/** Files under `dir` that `keep` accepts; `report.stopped` is set when the walk hit WALK_LIMIT. */
+export async function walkFiles(fs: TestMapFs, dir: string, keep: (path: string) => boolean = () => true, report = { stopped: false }, out: string[] = []): Promise<string[]> {
+  if (out.length >= WALK_LIMIT) { report.stopped = true; return out; }
   let entries;
   try { entries = (await fs.list(dir)).entries; } catch { return out; }
   for (const e of entries) {
-    if (out.length >= limit) return out;
+    if (out.length >= WALK_LIMIT) { report.stopped = true; return out; }
     if (e.name.startsWith(".") || SKIP.has(e.name)) continue;
     // Other runs' worktrees are not this repo's files (a main-tree walk from the project root would reach them).
     if (e.kind === "dir" && /(^|\/)system\/loop-worktrees$/.test(e.path)) continue;
-    if (e.kind === "dir") await walkFiles(fs, e.path, out, limit);
-    else if (e.kind === "file") out.push(e.path);
+    if (e.kind === "dir") await walkFiles(fs, e.path, keep, report, out);
+    else if (e.kind === "file" && keep(e.path)) out.push(e.path);
   }
   return out;
 }
@@ -122,14 +129,14 @@ function tokensOf(text: string): Set<string> {
 
 const TEST_MARKER = /(describe|it|test|specify|@Test|def test_|func test[A-Z])/;
 
-const CODE_FILE = /\.(py|ts|tsx|js|mjs|cjs|swift|kt|go|rs)$/;
+export const CODE_FILE = /\.(py|ts|tsx|js|mjs|cjs|swift|kt|go|rs)$/;
 
 /** Repo-relative source files under the prefix: no test files or test roots, and no system/ or llm-doc/ folders. */
-async function sourceFiles(fs: TestMapFs, repoPrefix: string, structure: TestStructure): Promise<string[]> {
+async function sourceFiles(fs: TestMapFs, repoPrefix: string, structure: TestStructure, report: { stopped: boolean }): Promise<string[]> {
   const prefix = repoPrefix ? `${repoPrefix}/` : "";
   const testDirs = structure.roots.map((r) => r.testDir).filter((d) => d && d !== ".");
   const out: string[] = [];
-  for (const f of await walkFiles(fs, prefix.replace(/\/$/, "") || ".")) {
+  for (const f of await walkFiles(fs, prefix.replace(/\/$/, "") || ".", (p) => CODE_FILE.test(p), report)) {
     const rel = repoPrefix && f.startsWith(`${repoPrefix}/`) ? f.slice(repoPrefix.length + 1) : f;
     if (!CODE_FILE.test(rel) || isTestFileName(rel) || /^(system|llm-doc)\//.test(rel)) continue;
     if (testDirs.some((d) => rel.startsWith(`${d}/`))) continue;
@@ -142,8 +149,10 @@ async function sourceFiles(fs: TestMapFs, repoPrefix: string, structure: TestStr
 export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure: TestStructure, graphPath: string, now = new Date(), scope = ""): Promise<TestMap> {
   const prefix = repoPrefix ? `${repoPrefix}/` : "";
   const tests: { path: string; tokens: Set<string> }[] = [];
+  const notes: string[] = [];
+  const report = { stopped: false };
   for (const root of structure.roots) {
-    const files = await walkFiles(fs, `${prefix}${root.testDir}`.replace(/\/$/, ""));
+    const files = await walkFiles(fs, `${prefix}${root.testDir}`.replace(/\/$/, ""), isTestPath, report);
     for (const f of files) {
       const text = await file(fs, f);
       if (text === null || !TEST_MARKER.test(text)) continue;
@@ -153,7 +162,12 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
   }
   const entries: TestMapEntry[] = [];
   let source: "graph" | "files" = "files";
-  const graphText = await file(fs, graphPath);
+  let graphText: string | null = null;
+  try {
+    const r = await fs.read(graphPath, GRAPH_READ_MAX);
+    if (r.status === "ok") graphText = r.text;
+    else if (r.status === "too_large") notes.push(GRAPH_TOO_LARGE_NOTE);
+  } catch { /* no graph: file matching */ }
   if (graphText) {
     try {
       const g = JSON.parse(graphText) as {
@@ -183,7 +197,7 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
   if (entries.length === 0) {
     // No usable graph: every source file is an entry, "tested" when a test names its base name (the graph path's rule).
     source = "files";
-    for (const rel of await sourceFiles(fs, repoPrefix, structure)) {
+    for (const rel of await sourceFiles(fs, repoPrefix, structure, report)) {
       if (!pathInside(scope, rel)) continue;
       const base = rel.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
       const testedBy = tests.filter((t) => t.tokens.has(base)).map((t) => t.path).sort();
@@ -194,7 +208,8 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
   const tested = entries.filter((e) => e.testedBy.length > 0).length;
   const files = new Set(entries.map((e) => e.path));
   const testedFiles = new Set(entries.filter((e) => e.testedBy.length > 0).map((e) => e.path));
-  return { generatedAt: now.toISOString(), source, entries, untestedFunctions: entries.length - tested, testedFunctions: tested, untestedFiles: [...files].filter((f) => !testedFiles.has(f)).length };
+  if (report.stopped) notes.push(WALK_STOP_NOTE);
+  return { generatedAt: now.toISOString(), source, entries, untestedFunctions: entries.length - tested, testedFunctions: tested, untestedFiles: [...files].filter((f) => !testedFiles.has(f)).length, notes };
 }
 
 function renderTestMap(m: TestMap): string {

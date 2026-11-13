@@ -45,3 +45,25 @@ test("F7: a main-tree prune scan does not descend into other runs' worktrees", a
   const findings = await scanTestPrune(fs, "", structure);
   assert.deepEqual(findings, [{ path: "tests/orphan.test.ts", reason: "sourceGone" }]);
 });
+
+test("the prune walk keeps code files only: 20,000 data files neither stop it nor hide a source file", async () => {
+  const folders = { "": [{ name: "tests", path: "tests", kind: "dir" }, { name: "src", path: "src", kind: "dir" }, { name: "data", path: "data", kind: "dir" }], tests: [{ name: "math.test.ts", path: "tests/math.test.ts", kind: "file" }], src: [{ name: "math.ts", path: "src/math.ts", kind: "file" }], data: Array.from({ length: 20_000 }, (_, i) => ({ name: `d${i}.json`, path: `data/d${i}.json`, kind: "file" })) };
+  const fs = {
+    async read(p) { return { status: "ok", text: p === "tests/math.test.ts" ? "test('adds', () => { expect(1).toBe(1) })" : "" }; },
+    async list(dir) { const entries = folders[dir === "." ? "" : dir]; if (!entries) throw Object.assign(new Error("missing"), { code: "missing" }); return { entries }; },
+    async write() {}, async create() {},
+  };
+  const structure = { generatedAt: "", status: "ok", notes: [], roots: [{ packageDir: "", testDir: "tests", runner: "npm", command: "npm test", languages: ["ts"] }] };
+  const notes = [];
+  assert.deepEqual(await scanTestPrune(fs, "", structure, notes), [], "math.ts is found, so the test is not source-gone");
+  assert.deepEqual(notes, []);
+});
+
+test("a prune walk over more code files than the limit says the scan is incomplete", async () => {
+  const folders = { "": [{ name: "src", path: "src", kind: "dir" }], src: Array.from({ length: 20_001 }, (_, i) => ({ name: `m${i}.py`, path: `src/m${i}.py`, kind: "file" })) };
+  const fs = { async read() { return { status: "ok", text: "" }; }, async list(dir) { const entries = folders[dir === "." ? "" : dir]; if (!entries) throw Object.assign(new Error("missing"), { code: "missing" }); return { entries }; }, async write() {}, async create() {} };
+  const structure = { generatedAt: "", status: "ok", notes: [], roots: [{ packageDir: "", testDir: "tests", runner: "pytest", command: "python3 -m pytest", languages: ["py"] }] };
+  const notes = [];
+  await scanTestPrune(fs, "", structure, notes);
+  assert.deepEqual(notes, ["stopped after 20000 files; the map is incomplete"]);
+});

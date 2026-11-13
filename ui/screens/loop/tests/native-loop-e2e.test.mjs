@@ -252,6 +252,11 @@ test("a full Refactoring run passes every stage on a real repo, and a second run
     assert.ok(fs.existsSync(path.join(p.repo, "legacy.py")), "the main checkout is untouched");
     assert.ok(fs.existsSync(path.join(p.project, `system/loop-runs/${runId}/graph/before.json`)), "the snapshot is the run's own");
     assert.ok(!fs.existsSync(path.join(p.project, "system/graph/graph-code.json")), "the project's main graph is never written by a worktree run");
+    // The planner reads these beside the plan: the graph digest names the import cycle, the rules digest quotes AGENTS.md.
+    const graphMd = fs.readFileSync(path.join(worktree, "llm-doc/loop/refactor/GRAPH.md"), "utf8");
+    assert.match(graphMd, /^- cycle 1: shop\.py, utils\.py$/m, graphMd);
+    const rulesMd = fs.readFileSync(path.join(worktree, "llm-doc/loop/refactor/RULES.md"), "utf8");
+    assert.match(rulesMd, /Never edit\*\* `tests\/golden\/`/, "the sample's AGENTS.md is quoted");
   }
 });
 
@@ -405,4 +410,61 @@ test("a Refactoring run whose tests cannot start stops before any model call, an
   assert.deepEqual(agentCalls, [], "the scripted agent was never called");
   assert.ok(!fs.existsSync(path.join(worktree, PLAN_REL)), "no plan was written");
   assert.ok(fs.existsSync(path.join(worktree, "legacy.py")), "nothing was applied");
+});
+
+/** A synthetic package of `n` small modules: each imports the one before it and defines two functions. */
+function writeBigPackage(root, n) {
+  fs.mkdirSync(path.join(root, "pkg"), { recursive: true });
+  fs.mkdirSync(path.join(root, "tests"), { recursive: true });
+  fs.writeFileSync(path.join(root, "pkg", "__init__.py"), "");
+  for (let i = 0; i < n; i++) {
+    const id = String(i).padStart(4, "0");
+    const head = i > 0 ? `from pkg import m${String(i - 1).padStart(4, "0")}\n\n` : "";
+    fs.writeFileSync(path.join(root, "pkg", `m${id}.py`), `${head}\ndef f${id}_a(x):\n    return x + ${i}\n\n\ndef f${id}_b(x):\n    return f${id}_a(x) * 2\n`);
+  }
+  fs.writeFileSync(path.join(root, "tests", "test_smoke.py"), "import pkg\n\n\ndef test_smoke():\n    assert pkg is not None\n");
+  fs.writeFileSync(path.join(root, "pyproject.toml"), "[tool.pytest.ini_options]\ntestpaths = [\"tests\"]\n");
+}
+
+test("a 2,500-module repo: the graph snapshot passes, the test map counts its functions, and GRAPH.md stays bounded", { skip, timeout: 120_000 }, async () => {
+  const started = Date.now();
+  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "loop-scale-")));
+  const runId = "scale";
+  const worktree = path.join(project, "system", "loop-worktrees", runId);
+  writeBigPackage(worktree, 2500);
+  fs.mkdirSync(path.join(project, "system", "graph"), { recursive: true });
+  const store = initialProjectStore("python3 -m pytest -q -p no:cacheprovider");
+  const refactor = store.loops.find((l) => l.defaultKey === "refactor");
+  const graphStage = refactor.config.stages.find((st) => st.kind === "codeGraph" && st.graphOp === "snapshot");
+  const mapStage = store.loops.find((l) => l.defaultKey === "test").config.stages.find((st) => st.kind === "testMap" && st.testOp === "map");
+  const host = async (command, args = {}) => {
+    if (command !== "graph_generate") throw new Error(`the scale scenario has no host command ${command}`);
+    const outDir = path.join(project, args.out ?? "system/graph");
+    fs.mkdirSync(outDir, { recursive: true });
+    execFileSync(process.execPath, [GRAPH_KIT, "code", path.join(project, args.target ?? ""), "--out", path.join(outDir, "graph-code.json")], { stdio: "ignore" });
+    return { path: `${args.out ?? "system/graph"}/graph-code.json`, nodes: 0, edges: 0 };
+  };
+  const log = [];
+  const ctx = {
+    projectRoot: project, runId, runRoot: worktree, fs: hostFs(project), host,
+    core: { async request() { throw new Error("the scale scenario makes no model call"); } },
+    log: (l) => log.push(l), approvalToken: async () => "token", isCancelled: () => false, markCancelled() {},
+  };
+  const deps = createStageDeps(ctx, refactor);
+  const snapshot = await deps.runStage(graphStage, []);
+  assert.equal(snapshot.ok, true, snapshot.output);
+  const files = Number(/snapshot · (\d+) file\(s\)/.exec(snapshot.output)?.[1]);
+  const warned = snapshot.output.includes("warning: the scan reached graph-kit's 20000-file limit");
+  if (warned) console.log(`scale: graph-kit stopped at its limit with ${files} file(s); the warning is in the output`);
+  else assert.ok(files >= 2500, `the graph has the package's modules: ${snapshot.output}`);
+  const map = await deps.runStage(mapStage, [{ stage: graphStage, ok: true, output: snapshot.output }]);
+  assert.equal(map.ok, true, map.output);
+  const functions = Number(/^(\d+) function\(s\)/m.exec(map.output)?.[1]);
+  assert.ok(functions > 2000, `the map counts the package's functions: ${map.output}`);
+  const graphMd = fs.readFileSync(path.join(worktree, "llm-doc/loop/refactor/GRAPH.md"), "utf8");
+  const lines = graphMd.trimEnd().split("\n").length;
+  assert.ok(lines <= 400, `GRAPH.md is ${lines} lines`);
+  const elapsed = Date.now() - started;
+  console.log(`scale: ${files} file(s), ${functions} function(s), GRAPH.md ${lines} lines, ${(elapsed / 1000).toFixed(1)} s`);
+  assert.ok(elapsed < 60_000, `the scenario took ${elapsed} ms`);
 });
