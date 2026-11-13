@@ -7,6 +7,7 @@ import { shellBus } from "../../shell/bus";
 import { core } from "../../shell/runtime";
 import { invokeHost } from "../../shell/host";
 import { changedPathArgs } from "../../loop/native/worktree-run.ts";
+import { unsavedWork } from "../../shell/unsaved-work.ts";
 import { createHostFs } from "../../explorer/fs";
 import { GROUPS, RESET_TEMPLATE_MESSAGE, resetTemplateTitle, AUTO_TASK_ROWS, enabledTaskOrder, AUTO_TASK_BY_ID, composeTaskMessage, desktopRunnable, isSchedulable, takeMergedNotice, taskUnavailableReason, scheduleStatusLine, normalizeProjectPath, requiresLinkedRepo, type AutoTaskId } from "./model.ts";
 import { describeCron, validateCron } from "./cron.ts";
@@ -56,6 +57,10 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const [customDraft, setCustomDraft] = useState({ name: "", prompt: "", mode: "review" as CustomTaskMode, cron: "", enabled: true });
   const [customError, setCustomError] = useState<string | null>(null);
   const [customRunning, setCustomRunning] = useState(false);
+  const customRunningRef = useRef(false);
+  customRunningRef.current = customRunning;
+  // A project change remounts this screen and aborts the task it started: the shell asks first.
+  useEffect(() => unsavedWork.register(() => (runningRef.current || customRunningRef.current ? "An Auto Task in progress (it would be stopped)" : null)), []);
   const [customRuns, setCustomRuns] = useState<CustomTaskRun[]>(() => readCustomRuns(undefined, projectRoot ?? undefined));
   const [folderPick, setFolderPick] = useState<null | "inputPath" | "outputPath">(null);
   const [folderList, setFolderList] = useState<LibraryFolder[] | null>(null);

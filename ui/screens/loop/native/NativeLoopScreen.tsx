@@ -32,6 +32,7 @@ import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
 import { decodeWorktreeDiff, type WorktreeDiff } from "./ship-model.ts";
 import { createStartGate } from "./start-gate.ts";
+import { unsavedWork } from "../../shell/unsaved-work.ts";
 import "./native-loop.css";
 
 const stageKindLabel: Record<string, string> = {
@@ -122,6 +123,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const startGateRef = useRef(createStartGate());
   // True once the gated start reached the point where the run is marked running (see executeLoop).
   const ranRef = useRef(false);
+  // Loop ids queued while a start held the gate. Only these may start by themselves when that start never becomes a
+  // run; a queue restored after a remount waits for the user's "Resume".
+  const waitingRef = useRef(new Set<string>());
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  // A project change remounts this screen: the run in flight is cancelled and unsaved loop edits are gone. The shell
+  // asks first.
+  useEffect(() => unsavedWork.register(() => (runningRef.current ? "A Loop run in progress (it would be stopped)" : dirtyRef.current ? "Unsaved Loop changes" : null)), []);
   /** Set when the screen unmounts, so a finishing run does not start the next queued one in a stale project. */
   const unmountedRef = useRef(false);
   const pausedRef = useRef(false);
@@ -687,7 +696,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     if (!startGateRef.current.tryAcquire()) {
       // A picked Factory item cannot wait in the queue (the queue holds loops, not work items).
       if (start) setNotice("Another run is starting; start this item again when it has begun.");
-      else enqueueLoop(target, scheduled);
+      else { waitingRef.current.add(target.id); enqueueLoop(target, scheduled); }
       return;
     }
     ranRef.current = false;
@@ -695,14 +704,20 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       await executeLoopGated(target, scheduled, start);
     } finally {
       startGateRef.current.release();
-      // A start that never became a run (approval refused, worktree failed) must not strand what queued behind it;
-      // a real run drains the queue itself when it ends.
-      if (!ranRef.current && !unmountedRef.current) {
-        const next = queueRef.current.shift();
-        if (next) {
+      const waiting = waitingRef.current;
+      waitingRef.current = new Set();
+      // A start that never became a run (approval refused, worktree failed) must not strand what queued behind it
+      // while it held the gate. Nothing else starts by itself: a restored queue waits for Resume, and with unsaved
+      // loop edits every start returns at once, which would empty the queue without running anything. A real run
+      // drains the whole queue itself when it ends.
+      if (!ranRef.current && !unmountedRef.current && !dirtyRef.current) {
+        const at = queueRef.current.findIndex((x) => waiting.has(x.loop.id));
+        if (at >= 0) {
+          const [next] = queueRef.current.splice(at, 1);
+          for (const x of queueRef.current) if (waiting.has(x.loop.id)) waitingRef.current.add(x.loop.id);
           setQueued(queueRef.current.length);
           persistQueue();
-          window.setTimeout(() => void executeLoop(next.loop, next.scheduled), 0);
+          window.setTimeout(() => void executeLoop(next!.loop, next!.scheduled), 0);
         }
       }
     }

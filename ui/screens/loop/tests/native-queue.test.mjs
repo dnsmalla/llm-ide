@@ -32,3 +32,14 @@ test("every Loop start goes through the gate before its first await, and blocked
   assert.match(wrapper, /finally \{\s*startGateRef\.current\.release\(\)/);
   assert.match(src, /if \(runningRef\.current \|\| startGateRef\.current\.held\) \{\s*enqueueLoop/);
 });
+
+test("a start that never ran drains only what queued behind it, and nothing while the editor has unsaved changes", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
+  const wrapper = src.slice(src.indexOf("const executeLoop = async"), src.indexOf("const runLoop ="));
+  // Only ids recorded while the gate was held are eligible; a restored queue (never recorded) waits for Resume.
+  assert.match(wrapper, /else \{ waitingRef\.current\.add\(target\.id\); enqueueLoop\(target, scheduled\); \}/);
+  assert.match(wrapper, /findIndex\(\(x\) => waiting\.has\(x\.loop\.id\)\)/);
+  assert.doesNotMatch(wrapper, /queueRef\.current\.shift\(\)/, "the head of the queue is never taken blindly");
+  assert.match(wrapper, /if \(!ranRef\.current && !unmountedRef\.current && !dirtyRef\.current\)/);
+});
