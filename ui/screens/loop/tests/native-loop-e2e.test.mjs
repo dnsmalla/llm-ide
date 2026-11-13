@@ -393,3 +393,16 @@ test("an Apply that edits a file outside the input path fails with the contract 
   assert.match(apply.output, /Apply changed shop\.py, which is outside the input path tools and is more than an import update/, apply.output);
   assert.match(fs.readFileSync(path.join(worktree, "shop.py"), "utf8"), /a body change outside the input path/, "the edit is in the worktree, and the contract is what failed it");
 });
+
+test("a Refactoring run whose tests cannot start stops before any model call, and changes nothing", { skip, timeout: 240_000 }, async () => {
+  const p = makeProject();
+  // The stale-launcher case: the test command cannot even import its runner.
+  for (const st of p.loop.config.stages) if (st.defaultKey === "refactor-test-baseline" || st.defaultKey === "refactor-test") st.command = 'python3 -c "import pluggy_missing_xyz"';
+  const { outcome, log, agentCalls, worktree } = await runRefactoring(p, "f1", {}, { maxBatches: 3 });
+  if (DISCOVER) console.log(`--- tests cannot start: ${outcome.statusSummary}\n--- log ---\n${log.join("\n")}`);
+  assert.equal(outcome.passed, false, outcome.statusSummary);
+  assert.match(outcome.statusSummary, /^the tests do not pass before any change/, outcome.statusSummary);
+  assert.deepEqual(agentCalls, [], "the scripted agent was never called");
+  assert.ok(!fs.existsSync(path.join(worktree, PLAN_REL)), "no plan was written");
+  assert.ok(fs.existsSync(path.join(worktree, "legacy.py")), "nothing was applied");
+});

@@ -22,6 +22,14 @@ async function exists(fs: DetectFs, path: string): Promise<boolean> {
 }
 
 /** The Mac's ProjectEnvironmentInspector shape, limited to a test command the desktop can prove from a manifest. */
+/**
+ * The pytest command for this machine: `-m` runs pytest with the same interpreter that runs the code, so a stale `pytest`
+ * launcher on the PATH cannot break it. Windows usually has `python`, not `python3` (the shell there is cmd.exe).
+ */
+export function pytestCommand(platform: string = typeof navigator !== "undefined" ? navigator.platform ?? "" : ""): string {
+  return /^win/i.test(platform) ? "python -m pytest" : "python3 -m pytest";
+}
+
 export async function detectTestCommand(fs: DetectFs, prefix = ""): Promise<{ command: string | null; reason: string }> {
   const path = (name: string) => (prefix ? `${prefix}/${name}` : name);
   try {
@@ -34,7 +42,7 @@ export async function detectTestCommand(fs: DetectFs, prefix = ""): Promise<{ co
     }
   } catch { /* no package.json */ }
   if (await exists(fs, path("Package.swift"))) return { command: "swift test", reason: "Swift Package manifest found." };
-  if (await exists(fs, path("pyproject.toml")) || await exists(fs, path("pytest.ini")) || await exists(fs, path("tox.ini"))) return { command: "pytest", reason: "Python test configuration found." };
+  if (await exists(fs, path("pyproject.toml")) || await exists(fs, path("pytest.ini")) || await exists(fs, path("tox.ini"))) return { command: pytestCommand(), reason: "Python test configuration found." };
   if (await exists(fs, path("Makefile"))) {
     try {
       const mk = await fs.read(path("Makefile"), 500_000);

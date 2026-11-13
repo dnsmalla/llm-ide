@@ -34,6 +34,13 @@ test("test structure detects a Swift package and a Node package", async () => {
   assert.equal(s.roots.find((r) => r.runner === "npm").command, "cd web && npm test");
 });
 
+test("a Python root runs pytest through the interpreter, not a bare launcher", async () => {
+  const s = await detectTestStructure(mem({ "pytest.ini": "[pytest]\n", "tests/test_a.py": "" }), "", new Date("2026-01-01T00:00:00Z"));
+  assert.equal(s.roots.find((r) => r.runner === "pytest").command, "python3 -m pytest");
+  const sub = await detectTestStructure(mem({ "svc/pytest.ini": "[pytest]\n", "svc/tests/test_a.py": "" }), "", new Date("2026-01-01T00:00:00Z"));
+  assert.equal(sub.roots.find((r) => r.runner === "pytest").command, "cd svc && python3 -m pytest");
+});
+
 test("missing test roots are reported, not invented", async () => {
   const s = await detectTestStructure(mem({ "README.md": "" }), "", new Date("2026-01-01T00:00:00Z"));
   assert.equal(s.status, "missing");

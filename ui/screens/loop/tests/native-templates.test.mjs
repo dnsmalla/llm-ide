@@ -20,6 +20,8 @@ test("project environment detection reads manifests without executing anything",
   assert.equal((await e.detectTestCommand(swift)).command, "swift test");
   const none = { async read() { throw Object.assign(new Error("missing"), { code: "missing" }); } };
   assert.equal((await e.detectTestCommand(none)).command, null);
+  const py = { async read(path) { if (path === "pytest.ini") return { status: "ok", text: "" }; throw Object.assign(new Error("missing"), { code: "missing" }); } };
+  assert.equal((await e.detectTestCommand(py)).command, "python3 -m pytest", "the same interpreter that runs the code, never a stale pytest launcher");
 });
 
 test("custom Loop templates persist, unique-name and delete", () => {
@@ -134,4 +136,11 @@ test("Structure verify detection: lint script, then TypeScript, then Ruff; nothi
   assert.equal((await e.detectStructureCommand(files({ "w/tsconfig.json": "{}" }), "w")).command, "npx tsc --noEmit", "reads a run worktree when given a prefix");
   assert.deepEqual(await e.detectProjectStructureCommand(files({ "code/app/package.json": '{"scripts":{"lint":"x"}}' })), { command: "npm run lint", prefix: "code/app" });
   assert.notEqual(e.DETECTED_STRUCTURE, e.DETECTED_TEST);
+});
+
+test("pytest runs through the interpreter: python3 on macOS and Linux, python on Windows", async () => {
+  const { pytestCommand } = await import("../native/environment.ts");
+  assert.equal(pytestCommand("MacIntel"), "python3 -m pytest");
+  assert.equal(pytestCommand("Linux x86_64"), "python3 -m pytest");
+  assert.equal(pytestCommand("Win32"), "python -m pytest");
 });

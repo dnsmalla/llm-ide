@@ -4,6 +4,7 @@
 import type { FsApi } from "../../explorer/fs";
 import { pathInside } from "./input-path.ts";
 import { isTestFileName } from "./protected.ts";
+import { pytestCommand } from "./environment.ts";
 
 export interface TestRoot { packageDir: string; testDir: string; runner: string; command: string; languages: string[] }
 export interface TestStructure { generatedAt: string; roots: TestRoot[]; status: "ok" | "missing"; notes: string[] }
@@ -61,7 +62,7 @@ export async function detectTestStructure(fs: TestMapFs, repoPrefix: string, now
     }
     if (await file(fs, `${join(base, "pytest.ini")}`) !== null || ((await file(fs, `${join(base, "pyproject.toml")}`))?.includes("pytest") ?? false)) {
       const pyDir = await firstDir(fs, base, ["tests", "test"]);
-      if (pyDir) roots.push({ packageDir: pkg, testDir: `${pkg ? `${pkg}/` : ""}${pyDir}`, runner: "pytest", command: pkg ? `cd ${pkg} && pytest` : "pytest", languages: ["py"] });
+      if (pyDir) roots.push({ packageDir: pkg, testDir: `${pkg ? `${pkg}/` : ""}${pyDir}`, runner: "pytest", command: pkg ? `cd ${pkg} && ${pytestCommand()}` : pytestCommand(), languages: ["py"] });
       else notes.push(`${label}: pytest configured but no tests directory`);
     }
     if (await file(fs, `${join(base, "go.mod")}`) !== null) roots.push({ packageDir: pkg, testDir: pkg || ".", runner: "go", command: pkg ? `cd ${pkg} && go test ./...` : "go test ./...", languages: ["go"] });

@@ -98,7 +98,7 @@ test("a user Stop ends the run without restoring the tree", async () => {
 test("a plan with no todo batch runs the planning stages only", async () => {
   const { state, deps, opts } = fakeRun({ plan: "### R1 — x (status: done)\n" });
   const out = await runRefactorBatches(config(ALL), deps, opts);
-  assert.deepEqual(state.ran, ["plan", "snap"]);
+  assert.deepEqual(state.ran, ["test", "plan", "snap"], "the preflight Refactor Test runs first (no baseline stage: first blocking shell stage)");
   assert.equal(out.passed, true, "an up-to-date plan is not a failure");
   assert.equal(out.statusSummary, "0 batches applied; no todo batches in the plan");
 });
@@ -124,7 +124,7 @@ test("maxBatches defaults to the config's refactorBatchesPerRun and is clamped t
 test("batch 2 retakes the graph baseline before its batch stages, batch 1 does not", async () => {
   const { state, deps, opts } = fakeRun({ plan: TODO("R1") + "\n" + TODO("R2") });
   await runRefactorBatches(config(ALL), deps, opts);
-  assert.deepEqual(state.ran, ["plan", "snap", "write", "apply", "test", "check", "snap", "write", "apply", "test", "check"]);
+  assert.deepEqual(state.ran, ["test", "plan", "snap", "write", "apply", "test", "check", "snap", "write", "apply", "test", "check"], "the preflight Refactor Test leads");
 });
 
 test("a batch that passed but is still todo stops the run instead of applying it again", async () => {
@@ -155,7 +155,11 @@ test("a batch whose only outcome is skipped still passes the run", async () => {
 });
 
 test("a red Test Baseline restores the batch and leaves it todo instead of blocking it", async () => {
-  const { state, deps, opts } = fakeRun({ plan: TODO("R1"), baselineFails: true });
+  // The first baseline run is the preflight before planning; the red one must be the batch's own baseline.
+  const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
+  const inner = deps.runStage;
+  let baselines = 0;
+  deps.runStage = async (s, prior) => { if (s.id === "baseline" && ++baselines === 2) { state.ran.push(s.id); return { ok: false, output: "baseline red" }; } return inner(s, prior); };
   const out = await runRefactorBatches(config([PLAN, SNAP, WRITE, BASELINE, APPLY, TEST, CHECK]), deps, opts);
   assert.equal(out.passed, false);
   assert.deepEqual(state.restores, ["tree1"]);
@@ -234,4 +238,33 @@ test("a host error during a batch rolls the batch back and ends the run as an er
   assert.equal(out2.errored, true);
   assert.match(out2.statusSummary, /stopped: git write-tree failed/);
   assert.equal(s2.restores.length, 0, "nothing to roll back before the checkpoint existed");
+});
+
+test("a red preflight Test Baseline stops the run before any model call: nothing planned, changed or restored", async () => {
+  const { state, deps, opts } = fakeRun({ plan: TODO("R1"), baselineFails: true });
+  const out = await runRefactorBatches(config([PLAN, SNAP, BASELINE, WRITE, APPLY, TEST, CHECK]), deps, opts);
+  assert.deepEqual(state.ran, ["baseline"], "the planner never runs");
+  assert.equal(out.passed, false);
+  assert.equal(out.failedStage?.id, "baseline");
+  assert.equal(out.statusSummary, "the tests do not pass before any change, so nothing was planned or applied: Test Baseline failed — fix the test command or the failing tests first");
+  assert.equal(state.checkpoints, 0, "no checkpoint");
+  assert.deepEqual(state.restores, [], "no restore");
+});
+
+test("a passing preflight Test Baseline runs before planning, and its stage leads the outcome", async () => {
+  const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
+  const out = await runRefactorBatches(config([PLAN, SNAP, BASELINE, WRITE, APPLY, TEST, CHECK]), deps, opts);
+  assert.equal(out.passed, true, out.statusSummary);
+  assert.equal(out.statusSummary, "1 batch applied (R1)");
+  assert.equal(out.stages[0].stage.id, "baseline");
+  assert.equal(out.stages.filter((s) => s.stage.id === "baseline").length, 2, "the preflight and the batch's own baseline");
+  assert.deepEqual(state.ran.slice(0, 3), ["baseline", "plan", "snap"]);
+  assert.ok(out.stages.some((s) => s.stage.id === "apply"));
+});
+
+test("a loop with no shell stage in the batch phase has no preflight: planning runs first, as before", async () => {
+  const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
+  const out = await runRefactorBatches(config([PLAN, SNAP, WRITE, APPLY, CHECK]), deps, opts);
+  assert.equal(out.passed, true, out.statusSummary);
+  assert.deepEqual(state.ran, ["plan", "snap", "write", "apply", "check"]);
 });

@@ -92,13 +92,34 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
       : r.maxCostUsd !== null && r.maxCostUsd <= 0 ? "cost ceiling reached" : null;
   const budgetStop = (summary: string) => /^(wall-clock budget reached|cost ceiling reached)/.test(summary);
 
-  const plan = await runNativeLoop({ ...config, ...remaining(0), stages: planning }, deps);
-  if (!plan.passed) return plan;
+  // Nothing is planned or changed until the tests can start and pass: a red baseline here means the test command or the tree.
+  // Only a test stage is a baseline: a custom lint or build step must never become this gate.
+  const baseline = config.stages.find((s) => s.enabled && s.kind === "shellCommand" && s.defaultKey === "refactor-test-baseline")
+    ?? config.stages.find((s) => s.enabled && s.kind === "shellCommand" && s.defaultKey === "refactor-test") ?? null;
+  // Its own name, so the run record and the issue trail tell it apart from the batch's own Test Baseline.
+  const pre = baseline ? await runNativeLoop({ ...config, ...remaining(0), maxIterations: 1, stages: [{ ...baseline, name: `${baseline.name} (pre-check)`, allowsRepair: false }] }, deps) : null;
+  if (pre?.cancelled) return pre;
+  if (baseline && pre && !pre.passed) {
+    return {
+      passed: false,
+      iterationsUsed: pre.iterationsUsed,
+      stages: pre.stages,
+      iterations: pre.iterations,
+      costUsd: pre.costUsd ?? 0,
+      failedStage: baseline,
+      statusSummary: `the tests do not pass before any change, so nothing was planned or applied: ${baseline.name} failed — fix the test command or the failing tests first`,
+      ...(pre.errored ? { errored: true } : {}),
+    };
+  }
+  const preCost = pre?.costUsd ?? 0;
+  if (pre) await pauseBetween(deps, config.stageDelaySeconds);
 
-  const stages: StageOutcome[] = [...plan.stages];
-  const iterations: LoopIterationOutcome[] = [...plan.iterations];
-  let iterationsUsed = plan.iterationsUsed;
-  let costUsd = plan.costUsd ?? 0;
+  const plan = await runNativeLoop({ ...config, ...remaining(preCost), stages: planning }, deps);
+  const stages: StageOutcome[] = [...(pre?.stages ?? []), ...plan.stages];
+  const iterations: LoopIterationOutcome[] = [...(pre?.iterations ?? []), ...plan.iterations];
+  let iterationsUsed = (pre?.iterationsUsed ?? 0) + plan.iterationsUsed;
+  let costUsd = preCost + (plan.costUsd ?? 0);
+  if (!plan.passed) return { ...plan, stages, iterations: iterations.map((it, i) => ({ ...it, index: i + 1 })), iterationsUsed, costUsd };
   let last: LoopRunOutcome = plan;
   const applied: string[] = [];
   const skipped: string[] = [];
