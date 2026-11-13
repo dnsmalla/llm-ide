@@ -97,6 +97,18 @@ fn confirmations() -> &'static Mutex<HashMap<String, ConfirmedHostKey>> {
     CONFIRMED.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// The host key the last successful Test SSH actually saw per host:port. A confirm is accepted only for
+/// this value, so the webview cannot confirm a fingerprint the host never observed.
+fn observed() -> &'static Mutex<HashMap<String, ConfirmedHostKey>> {
+    static OBSERVED: OnceLock<Mutex<HashMap<String, ConfirmedHostKey>>> = OnceLock::new();
+    OBSERVED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn record_observed(target: &PreparedTarget, key_type: &str, fingerprint: &str) {
+    let key = ConfirmedHostKey { key_type: key_type.to_string(), fingerprint: fingerprint.to_string() };
+    observed().lock().unwrap_or_else(|e| e.into_inner()).insert(confirm_key(target), key);
+}
+
 fn confirm_key(target: &PreparedTarget) -> String {
     format!("{}:{}", target.host.to_ascii_lowercase(), target.port)
 }
@@ -128,6 +140,7 @@ pub fn confirm_host_key(target: &PreparedTarget, key_type: &str, fingerprint: &s
         return Err(herr("invalid_fingerprint", "the fingerprint is not an SSH SHA256 fingerprint"));
     }
     let key = ConfirmedHostKey { key_type: key_type.to_string(), fingerprint: fingerprint.to_string() };
+    check_observed(target, key_type, fingerprint)?;
     confirmations().lock().unwrap_or_else(|e| e.into_inner()).insert(confirm_key(target), key.clone());
     Ok(key)
 }
@@ -381,6 +394,7 @@ pub fn execute<R: Runner>(target: &PreparedTarget, runner: &R) -> Result<SshTest
     let (host_key_type, fingerprint) = parse_host_key(&output.stderr).ok_or_else(|| {
         herr("no_host_key", "SSH connected but did not report the server's host key fingerprint")
     })?;
+    record_observed(target, &host_key_type, &fingerprint);
     let uname = marker(&output.stdout, "__LLMIDE_UNAME__=")
         .filter(|v| !v.is_empty())
         .ok_or_else(|| herr("no_uname", "the remote shell did not report its uname"))?;
@@ -474,8 +488,42 @@ pub async fn remote_ssh_test(target: SshTarget) -> Result<SshTestResult, FsError
 /// uninstall refuse until this is called for the same host:port in this app session.
 #[tauri::command]
 pub async fn remote_ssh_confirm(target: SshTarget, host_key_type: String, fingerprint: String) -> Result<ConfirmedHostKey, FsError> {
-    let prepared = prepare(&target)?;
-    confirm_host_key(&prepared, &host_key_type, &fingerprint)
+    tauri::async_runtime::spawn_blocking(move || {
+        let prepared = prepare(&target)?;
+        // Check against what Test SSH observed BEFORE bothering the user with a dialog about a value that cannot be accepted.
+        confirm_host_key_with(&prepared, &host_key_type, &fingerprint, |host, key_type, fp| {
+            crate::confirm::ask(
+                "Trust this SSH host key?",
+                &format!("Trust {key_type} key {fp} for {host}? Deploys to this server will refuse any other key."),
+                "Trust host key",
+                true,
+            )
+        })
+    })
+    .await
+    .map_err(|e| herr("internal", format!("the host-key confirmation did not finish: {e}")))?
+}
+
+/// `confirm_host_key` plus a consent step; `ask` is the native dialog in production and a closure in tests.
+pub fn confirm_host_key_with(
+    target: &PreparedTarget,
+    key_type: &str,
+    fingerprint: &str,
+    ask: impl FnOnce(&str, &str, &str) -> bool,
+) -> Result<ConfirmedHostKey, FsError> {
+    check_observed(target, key_type, fingerprint)?;
+    if !ask(&format!("{}:{}", target.host, target.port), key_type, fingerprint) {
+        return Err(herr("cancelled", "the host key was not trusted"));
+    }
+    confirm_host_key(target, key_type, fingerprint)
+}
+
+fn check_observed(target: &PreparedTarget, key_type: &str, fingerprint: &str) -> Result<(), FsError> {
+    let seen = observed().lock().unwrap_or_else(|e| e.into_inner()).get(&confirm_key(target)).cloned();
+    match seen {
+        Some(k) if k.key_type == key_type && k.fingerprint == fingerprint => Ok(()),
+        _ => Err(herr("host_key_not_observed", "that host key was not the one Test SSH saw for this server; run Test SSH again")),
+    }
 }
 
 #[cfg(test)]
@@ -582,7 +630,14 @@ mod tests {
         assert!(!valid_fingerprint("MD5:aa:bb"));
         assert!(!valid_fingerprint("SHA256:bad space"));
         assert!(!valid_host_key_type("-oProxyCommand=x"));
-        confirm_host_key(&prepared, "ssh-ed25519", "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff").unwrap();
+        // A confirm for a key Test SSH never saw is refused, whatever its shape.
+        assert_eq!(confirm_host_key(&prepared, "ssh-ed25519", "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff").unwrap_err().code, "host_key_not_observed");
+        execute(&prepared, &fake_run).unwrap();
+        assert_eq!(confirm_host_key(&prepared, "ssh-ed25519", "SHA256:other0000").unwrap_err().code, "host_key_not_observed");
+        let declined = confirm_host_key_with(&prepared, "ssh-ed25519", "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff", |_, _, _| false);
+        assert_eq!(declined.unwrap_err().code, "cancelled");
+        assert_eq!(require_confirmed_host_key(&prepared).unwrap_err().code, "host_key_unconfirmed", "a declined dialog stores nothing");
+        confirm_host_key_with(&prepared, "ssh-ed25519", "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff", |host, _, _| host == "example.com:22").unwrap();
         assert_eq!(require_confirmed_host_key(&prepared).unwrap().key_type, "ssh-ed25519");
         // Same host on another port is a different key entry.
         let other = prepare(&SshTarget { port: 2222, ..target("example.com", "alice", "/home/alice/.ssh/id_ed25519") }).unwrap();
