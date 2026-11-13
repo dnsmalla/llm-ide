@@ -85,7 +85,55 @@ fn diff_lock(run_id: &str) -> Arc<Mutex<()>> {
 }
 
 fn register(info: RunInfo) {
+    remember_project(&info.run_id, &info.project);
     runs().insert(info.run_id.clone(), info);
+}
+
+// ---- run id -> project, persisted -----------------------------------------------------------------------------
+// The registry above is memory only, so after an app restart with ANOTHER project active a run of this one could not
+// be found (`resolve` only looked at the active project). The host keeps the mapping in its private data folder and
+// `resolve` re-checks ownership through `resolve_in`, exactly as for the active project.
+
+const INDEX_FILE: &str = "loop-run-projects.json";
+const INDEX_MAX_BYTES: usize = 1024 * 1024;
+/// Entries kept; the oldest ids (they start with a timestamp) are dropped first.
+const INDEX_MAX_ENTRIES: usize = 2000;
+static INDEX_LOCK: Mutex<()> = Mutex::new(());
+
+/// Tests never touch the real app data folder.
+fn index_dir() -> Option<PathBuf> {
+    if cfg!(test) { None } else { crate::fsutil::desktop_data_dir().ok() }
+}
+
+fn read_index_in(dir: &Path) -> BTreeMap<String, String> {
+    std::fs::read(dir.join(INDEX_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+fn update_index_in(dir: &Path, change: impl FnOnce(&mut BTreeMap<String, String>)) {
+    let _guard = INDEX_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut map = read_index_in(dir);
+    change(&mut map);
+    while map.len() > INDEX_MAX_ENTRIES {
+        let Some(oldest) = map.keys().next().cloned() else { break };
+        map.remove(&oldest);
+    }
+    let Ok(body) = serde_json::to_vec(&map) else { return };
+    if crate::fsutil::private_dir(dir).is_ok() {
+        // Best effort: without the file a restart falls back to the active project, as before.
+        let _ = crate::fsutil::write_private_atomic(&dir.join(INDEX_FILE), &body, INDEX_MAX_BYTES);
+    }
+}
+
+fn remember_project(run_id: &str, project: &str) {
+    if let Some(dir) = index_dir() {
+        update_index_in(&dir, |m| { m.insert(run_id.to_string(), project.to_string()); });
+    }
+}
+
+fn forget_project(run_id: &str) {
+    if let Some(dir) = index_dir() {
+        update_index_in(&dir, |m| { m.remove(run_id); });
+    }
 }
 
 fn registered(run_id: &str) -> Option<RunInfo> {
@@ -316,15 +364,27 @@ fn check(info: &RunInfo) -> Result<RunInfo, String> {
     Ok(RunInfo { base_commit: info.base_commit.clone(), ..fresh })
 }
 
-/// The run, from the registry (whatever project is active now), else from the active project's worktrees folder.
+/// The run, from the registry (whatever project is active now), else from the project the persisted index names,
+/// else from the active project's worktrees folder.
 pub fn resolve(run_id: &str) -> Result<RunInfo, String> {
+    resolve_via(run_id, index_dir().as_deref(), crate::project::active_root)
+}
+
+fn resolve_via(run_id: &str, dir: Option<&Path>, active: impl FnOnce() -> Option<PathBuf>) -> Result<RunInfo, String> {
     if !valid_run_id(run_id) {
         return Err("invalid run id".into());
     }
     if let Some(info) = registered(run_id) {
         return check(&info);
     }
-    let project = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
+    if let Some(project) = dir.and_then(|d| read_index_in(d).remove(run_id)) {
+        // Same ownership checks as for the active project; a stale or tampered entry fails them and falls through.
+        if let Ok(info) = resolve_in(Path::new(&project), run_id) {
+            register(info.clone());
+            return Ok(info);
+        }
+    }
+    let project = active().ok_or_else(|| "open a project first".to_string())?;
     let info = resolve_in(&project, run_id)?;
     register(info.clone());
     Ok(info)
@@ -539,6 +599,7 @@ pub fn remove_in(info: &RunInfo) -> Result<(), String> {
     }
     let _ = git(&repo, &["branch", "-D", &format!("factory/{}", info.run_id)]);
     unregister(&info.run_id);
+    forget_project(&info.run_id);
     Ok(())
 }
 
@@ -816,6 +877,30 @@ mod tests {
         assert_eq!(listed[0].worktree, info.worktree);
         remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_of_another_project_is_found_through_the_persisted_index_after_a_restart() {
+        let p = project_repo("index-a");
+        let other = project_repo("index-b");
+        let data = temp("index-data");
+        let info = prepare_in(&p, &p, "idx1", None, "task").unwrap();
+        runs().remove("idx1"); // as after an app restart; project B is now the active one
+        let active_b = || Some(other.clone());
+        // Without the index only the active project is searched.
+        assert!(resolve_via("idx1", Some(&data), active_b).is_err());
+        update_index_in(&data, |m| { m.insert("idx1".into(), info.project.clone()); });
+        assert_eq!(resolve_via("idx1", Some(&data), active_b).unwrap(), info);
+        // A tampered entry pointing at a project that does not own the worktree is refused.
+        runs().remove("idx1");
+        update_index_in(&data, |m| { m.insert("idx1".into(), other.to_string_lossy().into_owned()); });
+        assert!(resolve_via("idx1", Some(&data), active_b).is_err());
+        // The entry is removed with the run.
+        update_index_in(&data, |m| { m.remove("idx1"); });
+        assert!(read_index_in(&data).is_empty());
+        remove_in(&info).unwrap();
+        for d in [p, other, data] { let _ = std::fs::remove_dir_all(&d); }
     }
 
     #[cfg(unix)]
