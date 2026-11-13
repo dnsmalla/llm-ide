@@ -1,5 +1,5 @@
 //! Generate a project's graph with the GraphKit TypeScript CLI (the schema-compatible sibling of the Mac's
-//! Swift scanners), writing the canonical `system/graph/graph.json` the Graph screen reads.
+//! Swift scanners), writing one file per mode: `system/graph/graph-code.json`, `graph-memory.json` or `graph-all.json`, which the Graph screen reads.
 //!
 //! Modes match the Mac's Code / InfiniteBrain / All: `code` scans the project, `memory` scans `llm-doc/`, and
 //! `all` merges both canonical documents. Runs the bundled CLI with the bundled node; a dev build falls back to
@@ -101,14 +101,26 @@ fn run_gk(node: &Path, cli: &Path, args: &[String]) -> Result<(), String> {
     Err("the GraphKit generator failed".into())
 }
 
-fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<GraphGenerated, String> {
+/// A project-relative graph output folder a Loop run may use: under `system/loop-runs/`, no `..`, safe characters only.
+fn valid_out(out: &str) -> bool {
+    out.starts_with("system/loop-runs/")
+        && out.split('/').all(|seg| !seg.is_empty() && seg != "..")
+        && out.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/'))
+}
+
+fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>, out: Option<&str>) -> Result<GraphGenerated, String> {
     let (node, cli) = toolchain(app)?;
     let root = crate::project::active_root().ok_or_else(|| "open a project before generating a graph".to_string())?;
     if crate::fs_ops::checked_root(&root).is_err() {
         return Err("the project folder is not usable".into());
     }
-    let out_dir = root.join("system").join("graph");
-    std::fs::create_dir_all(&out_dir).map_err(|e| format!("cannot create system/graph: {e}"))?;
+    // A worktree run writes into its own system/loop-runs folder, so the project's main graph is never replaced.
+    let out_dir = match out {
+        Some(o) if !valid_out(o) => return Err("the graph output folder must be under system/loop-runs/".into()),
+        Some(o) => root.join(o),
+        None => root.join("system").join("graph"),
+    };
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("cannot create {}: {e}", out.unwrap_or("system/graph")))?;
     let explicit = match target.map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => {
             let p = crate::fs_ops::resolve_existing(&root, t).map_err(|e| e.message)?;
@@ -191,14 +203,18 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>) -> Result<
     if mode == "memory" && nodes == 0 {
         return Err("This target has no .md/.txt documents to graph yet.".into());
     }
-    let rel = graph_rel(mode);
-    let dest = out_dir.join(rel.rsplit('/').next().unwrap_or("graph.json"));
+    let file = graph_rel(mode).rsplit('/').next().unwrap_or("graph.json");
+    let rel = match out {
+        Some(o) => format!("{o}/{file}"),
+        None => graph_rel(mode).to_string(),
+    };
+    let dest = out_dir.join(file);
     // One graph per mode: a memory graph never replaces the code graph. Write a sibling then rename so
     // a reader never sees half a graph.
     let partial = dest.with_extension("json.partial");
     std::fs::write(&partial, text.as_bytes()).map_err(|e| format!("cannot write {rel}: {e}"))?;
     std::fs::rename(&partial, &dest).map_err(|e| format!("cannot install {rel}: {e}"))?;
-    Ok(GraphGenerated { path: rel.into(), nodes, edges })
+    Ok(GraphGenerated { path: rel, nodes, edges })
 }
 
 /// The repo the Graph screen picks by default: the only `code/<child>`, or None when there are zero/many.
@@ -240,7 +256,7 @@ pub fn start_auto(app: tauri::AppHandle) {
             if !changed && !auto_due(minutes, last_run.elapsed().as_secs()) { continue; }
             if RUNNING.load(Ordering::SeqCst) { continue; }
             let target = root.as_ref().and_then(|r| default_auto_target(Path::new(r)));
-            let result = tauri::async_runtime::block_on(graph_generate(app.clone(), Some("code".into()), target));
+            let result = tauri::async_runtime::block_on(graph_generate(app.clone(), Some("code".into()), target, None));
             last_run = Instant::now();
             match result {
                 Ok(_) => { let _ = tauri::Emitter::emit(&app, "graph-auto-updated", serde_json::json!({})); }
@@ -251,7 +267,7 @@ pub fn start_auto(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
-pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target: Option<String>) -> Result<GraphGenerated, String> {
+pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target: Option<String>, out: Option<String>) -> Result<GraphGenerated, String> {
     let mode = mode.unwrap_or_else(|| "code".into());
     let result = tauri::async_runtime::spawn_blocking(move || {
         // A manual/loop request waits for an in-flight auto run instead of failing the caller. The wait is
@@ -262,7 +278,7 @@ pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target:
             if Instant::now() >= deadline { return Err("a graph generation is still running".into()); }
             std::thread::sleep(Duration::from_millis(100));
         }
-        let result = generate(&app, &mode, target.as_deref());
+        let result = generate(&app, &mode, target.as_deref(), out.as_deref());
         RUNNING.store(false, Ordering::SeqCst);
         result
     }).await.map_err(|e| format!("graph task failed: {e}"));
@@ -292,6 +308,15 @@ mod tests {
         assert_eq!(graph_rel("memory"), "system/graph/graph-memory.json");
         assert_eq!(graph_rel("all"), "system/graph/graph-all.json");
         assert!(!Path::new(graph_rel("code")).is_absolute());
+    }
+
+    #[test]
+    fn only_loop_run_folders_are_valid_graph_outputs() {
+        assert!(valid_out("system/loop-runs/r1/graph"));
+        assert!(!valid_out("system/graph"));
+        assert!(!valid_out("system/loop-runs/../x"));
+        assert!(!valid_out("/abs"));
+        assert!(!valid_out("system/loop-runs/a b"));
     }
 
     #[cfg(unix)]

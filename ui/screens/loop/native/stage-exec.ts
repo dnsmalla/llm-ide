@@ -205,7 +205,8 @@ async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string): 
     const writes = await writeTestStructure(ctx.fs, prefix, structure);
     return { ok: structure.status === "ok", output: [`${structure.roots.length} test root(s)`, ...structure.roots.map((r) => `${r.packageDir || "."}: ${r.runner} · ${r.command}`), ...structure.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
   }
-  const map = await buildTestMap(ctx.fs, prefix, structure, "system/graph/graph.json");
+  // graph_generate("code") writes this file; a missing or non-graph file falls back to file matching.
+  const map = await buildTestMap(ctx.fs, prefix, structure, "system/graph/graph-code.json");
   const writes = await writeTestMap(ctx.fs, prefix, map);
   return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
 }
@@ -219,9 +220,12 @@ async function runTestPruneStage(ctx: StageExecContext, prefix: string): Promise
 
 async function runGraph(ctx: StageExecContext, s: LoopStage, prefix: string): Promise<StageRunResult> {
   if (s.graphOp !== "snapshot" && s.graphOp !== "verify") return { ok: false, output: "this graph stage has no operation chosen" };
-  const before = `${prefix ? `${prefix}/` : ""}system/loop/refactor/graph/before.json`;
-  const r = await runCodeGraph(ctx.fs, s.graphOp, "system/graph/graph.json", before, async () => {
-    await ctx.host("graph_generate", { mode: "code", target: prefix || undefined });
+  // A worktree run keeps its graph in its own system/loop-runs folder: the project's main graph and the MR diff stay untouched.
+  const out = ctx.runId !== null ? `system/loop-runs/${ctx.runId}/graph` : null;
+  const graphPath = out ? `${out}/graph-code.json` : "system/graph/graph-code.json";
+  const before = out ? `${out}/before.json` : `${prefix ? `${prefix}/` : ""}system/loop/refactor/graph/before.json`;
+  const r = await runCodeGraph(ctx.fs, s.graphOp, graphPath, before, async () => {
+    await ctx.host("graph_generate", { mode: "code", target: prefix || undefined, ...(out ? { out } : {}) });
   });
   return { ok: r.passed, output: r.output };
 }

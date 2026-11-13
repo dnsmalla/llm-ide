@@ -279,3 +279,33 @@ test("the Refactor Structure stage discovers tests and writes both structure rep
   assert.match(r.output, /1 test root/);
   assert.deepEqual(writes.map(([p]) => p), ["llm-doc/loop/test/TEST-STRUCTURE.md", "system/loop/test/TEST-STRUCTURE.json"]);
 });
+
+/** `fakeFs` plus the write/create the Graph snapshot needs; writes are recorded in `writes`. */
+function fakeWritableFs(files) {
+  const writes = [];
+  const base = fakeFs(files).fs;
+  return { writes, fs: { ...base, async create() {}, async write(path, text) { writes.push([path, text]); } } };
+}
+
+test("a Graph snapshot in a worktree run writes its graph and before.json under the run's loop-runs folder", async () => {
+  const graph = JSON.stringify({ nodes: [{ id: "file:a.ts", kind: "file" }], edges: [] });
+  const { fs, writes } = fakeWritableFs({ "system/loop-runs/r1/graph/graph-code.json": graph });
+  const { host, calls } = fakeHost({ graph_generate: { path: "system/loop-runs/r1/graph/graph-code.json", nodes: 1, edges: 0 } });
+  const { ctx } = ctxOf({ host, fs });
+  const s = stage({ id: "g1", name: "Graph", kind: "codeGraph", command: null, graphOp: "snapshot" });
+  assert.equal((await createStageDeps(ctx, loopOf([s])).runStage(s, [])).ok, true);
+  assert.deepEqual(calls.find(([c]) => c === "graph_generate"), ["graph_generate", { mode: "code", target: "system/loop-worktrees/r1", out: "system/loop-runs/r1/graph" }]);
+  assert.deepEqual(writes, [["system/loop-runs/r1/graph/before.json", graph]]);
+});
+
+test("a Graph snapshot in a main-tree run sends no out and snapshots the project graph", async () => {
+  const graph = JSON.stringify({ nodes: [{ id: "file:a.ts", kind: "file" }], edges: [] });
+  const { fs, writes } = fakeWritableFs({ "system/graph/graph-code.json": graph });
+  const { host, calls } = fakeHost({ graph_generate: { path: "system/graph/graph-code.json", nodes: 1, edges: 0 } });
+  const { ctx } = ctxOf({ host, fs, runId: null, runRoot: "/p" });
+  const s = stage({ id: "g1", name: "Graph", kind: "codeGraph", command: null, graphOp: "snapshot" });
+  assert.equal((await createStageDeps(ctx, loopOf([s])).runStage(s, [])).ok, true);
+  const args = calls.find(([c]) => c === "graph_generate")[1];
+  assert.equal("out" in args, false, "the legacy run sends no out folder");
+  assert.deepEqual(writes, [["system/loop/refactor/graph/before.json", graph]]);
+});

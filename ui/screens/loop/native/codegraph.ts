@@ -1,28 +1,41 @@
-// Native code-graph stage. The Mac rescans and writes before/after graph snapshots plus GRAPH.md; this slice reads the
-// graph the desktop already generated, snapshots it under system/loop/refactor/graph/, and verifies that the node/edge
-// shape did not shrink. It does not rescan or compute the Mac's cycle/boundary report yet.
+// Native code-graph stage. It rescans the run's repository, snapshots the graph under system/loop/refactor/graph/, and
+// verifies the batch did not make the structure worse. It reads both graph shapes: graph-kit's canonical document
+// (`nodes` + `edges`, which the desktop writes) and the Mac's older `files` + `calls` report.
+//
+// A refactor may rightly shrink the graph (a dead file deleted, duplicates merged), so fewer nodes or edges is reported,
+// not failed. What fails: a new import cycle, a new file over 500 lines (old shape only), or a graph that came back empty.
 import type { FsApi } from "../../explorer/fs";
 
 export type CodeGraphFs = Pick<FsApi, "read" | "write" | "create">;
 export interface GraphShape { files: number; nodes: number; edges: number; cycles: number; over500: number }
 export interface CodeGraphResult { passed: boolean; output: string }
 
+interface GraphDoc {
+  nodes?: Array<{ id?: string; kind?: string }>; edges?: Array<{ fromId?: string; toId?: string; kind?: string }>;
+  calls?: Array<{ from?: string; to?: string }>; files?: Array<{ path?: string; loc?: number; functions?: unknown[] }>;
+}
+
+/** The shape of a parsed graph document (either format). */
+export function graphShape(g: GraphDoc): GraphShape {
+  const fnCount = (g.files ?? []).reduce((n, f) => n + (Array.isArray(f.functions) ? f.functions.length : 0), 0);
+  // graph-kit: file→file `imports` edges are the import graph; anything else (a module node, a symbol) is not a file cycle.
+  const fileImports = (g.edges ?? [])
+    .filter((e) => e.kind === "imports" && e.fromId?.startsWith("file:") && e.toId?.startsWith("file:"))
+    .map((e) => ({ from: e.fromId, to: e.toId }));
+  return {
+    nodes: g.nodes?.length ?? fnCount,
+    edges: (g.edges?.length ?? 0) + (g.calls?.length ?? 0),
+    files: g.files ? g.files.length : (g.nodes ?? []).filter((n) => n.kind === "file").length,
+    cycles: cycleCount(g.calls ?? []) + cycleCount(fileImports),
+    over500: (g.files ?? []).filter((f) => (f.loc ?? 0) > 500).length,
+  };
+}
+
 async function readShape(fs: CodeGraphFs, path: string): Promise<GraphShape | null> {
   try {
     const r = await fs.read(path, 20_000_000);
     if (r.status !== "ok" || !r.text) return null;
-    const g = JSON.parse(r.text) as {
-      nodes?: unknown[]; edges?: unknown[]; calls?: Array<{ from?: string; to?: string }>;
-      files?: Array<{ path?: string; loc?: number; functions?: unknown[] }>;
-    };
-    const fnCount = (g.files ?? []).reduce((n, f) => n + (Array.isArray(f.functions) ? f.functions.length : 0), 0);
-    return {
-      nodes: g.nodes?.length ?? fnCount,
-      edges: (g.edges?.length ?? 0) + (g.calls?.length ?? 0),
-      files: g.files?.length ?? 0,
-      cycles: cycleCount(g.calls ?? []),
-      over500: (g.files ?? []).filter((f) => (f.loc ?? 0) > 500).length,
-    };
+    return graphShape(JSON.parse(r.text) as GraphDoc);
   } catch { return null; }
 }
 
@@ -73,11 +86,13 @@ export async function runCodeGraph(fs: CodeGraphFs, op: "snapshot" | "verify", g
   }
   const before = await readShape(fs, beforePath);
   if (!before) return { passed: false, output: `no snapshot at ${beforePath}; run the snapshot graph stage first` };
-  const drops: string[] = [];
-  if (current.nodes < before.nodes) drops.push(`nodes ${before.nodes} → ${current.nodes}`);
-  if (current.edges < before.edges) drops.push(`edges ${before.edges} → ${current.edges}`);
-  if (current.cycles > before.cycles) drops.push(`cycles ${before.cycles} → ${current.cycles}`);
-  return drops.length
-    ? { passed: false, output: `graph regressed: ${drops.join(", ")}` }
-    : { passed: true, output: `graph stable · ${current.files} file(s), ${current.nodes} node(s), ${current.edges} edge(s), ${current.cycles} cycle(s)` };
+  const worse: string[] = [];
+  if (current.cycles > before.cycles) worse.push(`cycles ${before.cycles} → ${current.cycles}`);
+  if (current.over500 > before.over500) worse.push(`files over 500 lines ${before.over500} → ${current.over500}`);
+  if (before.nodes > 0 && current.nodes === 0) worse.push("the graph came back empty");
+  const delta = (name: string, a: number, b: number) => `${b} ${name}${a === b ? "" : ` (${b > a ? "+" : ""}${b - a})`}`;
+  const shape = [delta("file(s)", before.files, current.files), delta("node(s)", before.nodes, current.nodes), delta("edge(s)", before.edges, current.edges), delta("cycle(s)", before.cycles, current.cycles)].join(", ");
+  return worse.length
+    ? { passed: false, output: `graph regressed: ${worse.join(", ")} · ${shape}` }
+    : { passed: true, output: `graph ok · ${shape}` };
 }

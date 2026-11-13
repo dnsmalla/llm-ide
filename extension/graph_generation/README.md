@@ -5,7 +5,7 @@ How LLM-IDE gets its graphs.
 - **Generator.** The desktop host runs graph-kit's TypeScript CLI (`graph-kit/bin/graph-kit.js`, the
   `graph-kit/` submodule; bundled into the app by `desktop/scripts/stage-core.mjs`) from
   `desktop/src-tauri/src/graph_gen.rs`. Modes: `code` scans the project, `memory` scans `llm-doc/`, `all`
-  merges both. It writes the canonical `system/graph/graph.json`.
+  merges both. It writes one file per mode: `system/graph/graph-code.json`, `graph-memory.json` or `graph-all.json`.
 - **Contract.** The document shape is graph-kit's
   [`schema/graph.schema.json`](../../graph-kit/schema/graph.schema.json).
 - **Core side.** `extension/graphkit/` (graph model, memory writer, project paths) is what the planner and
