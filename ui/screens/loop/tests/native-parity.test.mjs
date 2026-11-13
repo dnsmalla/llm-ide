@@ -23,14 +23,60 @@ test("a complete project store gains nothing when defaults are re-ensured", () =
   assert.deepEqual(t.ensureDefaultLoops(full, null).added, []);
 });
 
-test("a refactor loop is refused by the desktop runner because batch rollback is not ported", () => {
+test("a new refactor loop runs on the desktop: isolated worktree, and a test stage after Apply", () => {
   const full = t.initialProjectStore("npm test");
   const refactor = full.loops.find((l) => l.defaultKey === "refactor");
-  assert.match(s.batchRollbackReason(refactor), /batch rollback is not ported to the desktop/);
+  assert.equal(refactor.config.alwaysUseWorktree, true, "the worktree is its rollback");
+  assert.equal(s.batchRollbackReason(refactor), null);
+  const keys = refactor.config.stages.map((st) => st.defaultKey);
+  assert.ok(keys.indexOf("refactor-test") > keys.indexOf("refactor-apply"), "Test runs after Apply");
+  assert.equal(refactor.config.stages.find((st) => st.defaultKey === "refactor-test").command, "npm test");
   assert.equal(s.batchRollbackReason(full.loops.find((l) => l.defaultKey === "regression")), null);
-  const custom = { ...full.loops[0], defaultKey: null, config: { ...full.loops[0].config, stages: [{ ...full.loops[0].config.stages[0], kind: "skill", skillId: "skills/refactor-apply", enabled: true }] } };
-  assert.match(s.batchRollbackReason(custom), /refactor batches/);
   assert.equal(s.isBatchSkill("skills/test-gap-writer"), false, "test writing is not a batch");
+});
+
+test("batch stages are refused outside a worktree, or with no test stage after them", () => {
+  const refactor = t.initialProjectStore("npm test").loops.find((l) => l.defaultKey === "refactor");
+  const inPlace = { ...refactor, config: { ...refactor.config, alwaysUseWorktree: false } };
+  assert.match(s.batchRollbackReason(inPlace), /isolated worktree/);
+  const untested = { ...refactor, config: { ...refactor.config, stages: refactor.config.stages.map((st) => st.kind === "shellCommand" ? { ...st, enabled: false } : st) } };
+  assert.match(s.batchRollbackReason(untested), /no test stage after them/);
+  const full = t.initialProjectStore("npm test");
+  const custom = { ...full.loops[0], defaultKey: null, config: { ...full.loops[0].config, alwaysUseWorktree: false, stages: [{ ...full.loops[0].config.stages[0], kind: "skill", skillId: "skills/refactor-apply", enabled: true }] } };
+  assert.match(s.batchRollbackReason(custom), /refactor batches/);
+});
+
+test("without a test command the refactor loop only plans: no test, apply, conform or graph-check stage", () => {
+  const refactor = t.initialProjectStore(null).loops.find((l) => l.defaultKey === "refactor");
+  const keys = refactor.config.stages.map((st) => st.defaultKey);
+  for (const k of ["refactor-test-write", "refactor-test-baseline", "refactor-apply", "refactor-conform", "refactor-test", "refactor-ledger", "refactor-graph-check"]) {
+    assert.ok(!keys.includes(k), `${k} is omitted`);
+  }
+  assert.ok(keys.includes("refactor-plan"));
+  assert.equal(s.batchRollbackReason(refactor), null);
+  assert.deepEqual(refactor.config.stages.map((st) => st.order), keys.map((_, i) => i));
+});
+
+test("a refactor loop saved without tests gets its test stages back once the project has a test command", () => {
+  const before = t.initialProjectStore(null);
+  // The shape a project created before its repo was cloned has: test stages gone, Apply and Conform still there.
+  const reference = t.initialProjectStore("pytest").loops.find((l) => l.defaultKey === "refactor");
+  const broken = { ...reference, config: { ...reference.config, alwaysUseWorktree: false, stages: reference.config.stages.filter((st) => st.kind !== "shellCommand").map((st, i) => ({ ...st, order: i })) } };
+  broken.config.stages[0] = { ...broken.config.stages[0], name: "My structure" };
+  const store = { ...before, loops: before.loops.map((l) => l.defaultKey === "refactor" ? broken : l) };
+  const r = t.ensureDefaultLoops(store, "pytest");
+  const fixed = r.store.loops.find((l) => l.defaultKey === "refactor");
+  assert.ok(r.upgraded.includes("Refactoring"));
+  assert.equal(fixed.config.alwaysUseWorktree, true);
+  const keys = fixed.config.stages.map((st) => st.defaultKey);
+  assert.deepEqual(keys, reference.config.stages.map((st) => st.defaultKey), "every stage back in template order");
+  assert.equal(fixed.config.stages.find((st) => st.defaultKey === "refactor-test-baseline").command, "pytest");
+  assert.equal(fixed.config.stages[0].name, "My structure", "an edited stage is kept as it is");
+  assert.deepEqual(fixed.config.stages.map((st) => st.order), keys.map((_, i) => i));
+  assert.equal(s.batchRollbackReason(fixed), null);
+  const again = t.ensureDefaultLoops(r.store, "pytest");
+  assert.ok(!again.upgraded.includes("Refactoring"), "repairing twice changes nothing");
+  assert.equal(t.ensureDefaultLoops(store, null).store.loops.find((l) => l.defaultKey === "refactor"), broken, "no command, no repair");
 });
 
 test("scheduled runs are journalled as autoTask and manual runs as manual", () => {

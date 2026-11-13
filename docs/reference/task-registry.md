@@ -65,9 +65,7 @@ The Factory stage prompts are read from the registry too, but the Factory recipe
 
 - **Factory stages carry no `promptRef`.** A registry prompt change does not reach an existing Factory loop. New
   Factory loops read the current prompt.
-- **`loop.refactor_apply` and `loop.refactor_conform` are registered `available`.** The Loop still refuses an enabled
-  batch stage, because batch rollback is not ported to the desktop. The registry should mark them `unported` with that
-  reason; until it does, the gate lives in `ui/screens/loop/native/store.ts` (`batchRollbackReason`).
+- **`loop.refactor_apply` and `loop.refactor_conform` are available on the desktop only when the Refactoring loop runs in an isolated worktree with a test stage after Apply.** The gate is `batchRollbackReason` in `ui/screens/loop/native/store.ts`.
 - **`loopEngineering` has no registry entry.** The Loop screen owns that run; the usage ledger reports it under its
   legacy name.
 - **The Loop's own schedule is a second scheduler.** Loop stages schedule from the Loop page and fire only while it is

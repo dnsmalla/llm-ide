@@ -59,17 +59,27 @@ export function isManualOnly(loop: LoopProjectStore["loops"][number]): boolean {
   return loop.defaultKey === "refactor" || loop.config.stages.some((s) => s.enabled && s.kind === "skill" && s.skillId !== null && CODE_APPLY_SKILLS.has(s.skillId) && s.skillId !== "skills/test-gap-writer");
 }
 
-/** Skills that apply refactor batches. The Mac runs them with a Mikado rollback base; the desktop has no batch
- *  rollback, so a run that would apply one is refused here rather than leaving a half-applied refactor behind. */
+/**
+ * Skills that apply refactor batches. The Mac restores a failed batch's own paths (its Mikado rollback); the desktop
+ * instead runs such a loop in an isolated worktree, where a failed batch never reaches the main tree and discarding
+ * the worktree is the rollback.
+ */
 const BATCH_SKILLS = new Set(["skills/refactor-apply", "skills/refactor-conform"]);
 export function isBatchSkill(skillId: string | null): boolean {
   return skillId !== null && BATCH_SKILLS.has(skillId);
 }
+/** Why a run that applies refactor batches cannot start, or null when it may (or applies none). */
 export function batchRollbackReason(loop: LoopProjectStore["loops"][number]): string | null {
-  // Only an ENABLED batch stage is refused: the refactor loop with Refactor Apply/Conform switched off only plans and
-  // checks, which the desktop runs safely (it stays manual-only through isManualOnly).
-  if (loop.config.stages.some((s) => s.enabled && s.kind === "skill" && isBatchSkill(s.skillId))) {
-    return `“${loop.name}” applies refactor batches, and batch rollback is not ported to the desktop yet, so this run is refused. Turn off its Refactor Apply and Refactor Conform stages to run the rest.`;
+  // Only an ENABLED batch stage needs this: with Refactor Apply/Conform off the loop only plans and checks.
+  const ordered = [...loop.config.stages].sort((a, b) => a.order - b.order);
+  const first = ordered.findIndex((s) => s.enabled && s.kind === "skill" && isBatchSkill(s.skillId));
+  if (first === -1) return null;
+  if (!loop.config.alwaysUseWorktree) {
+    return `“${loop.name}” applies refactor batches, so it must run in an isolated worktree, where a failed batch is discarded instead of left half-applied in your tree. Turn on “Always run in an isolated worktree” in its options.`;
+  }
+  // Code is never edited without a stage after it that runs the tests.
+  if (!ordered.slice(first + 1).some((s) => s.enabled && s.kind === "shellCommand" && s.severity === "blocking" && (s.command ?? "").trim() !== "")) {
+    return `“${loop.name}” applies refactor batches but has no test stage after them, so nothing would check the change. Add the project's test command as a Test stage after Refactor Apply, or turn off Refactor Apply and Refactor Conform to only plan.`;
   }
   return null;
 }

@@ -139,17 +139,62 @@ export function initialProjectStore(testCommand: string | null, defaults?: LoopD
   return { schemaVersion: 2 as const, loops };
 }
 
+/**
+ * The Refactoring stages that need a test command. Without one the loop only plans: code is never edited (or tests
+ * written, or the batch graph-checked) without a stage that runs the tests (loop-engineering.md, Refactoring row).
+ */
+const REFACTOR_NEEDS_TESTS = new Set([
+  "refactor-test-write", "refactor-test-baseline", "refactor-apply", "refactor-conform",
+  "refactor-test", "refactor-ledger", "refactor-graph-check",
+]);
+const REFACTOR_KEY = "refactor";
+
+type SpecStage = (typeof DEFAULT_LOOP_SPECS)[number]["config"]["stages"][number];
+
+function starterStage(s: SpecStage, testCommand: string | null) {
+  const command = s.command === DETECTED_TEST ? testCommand : s.command;
+  return { ...structuredClone(s), id: crypto.randomUUID(), command, isDefault: true };
+}
+
 function starterLoop(spec: (typeof DEFAULT_LOOP_SPECS)[number], testCommand: string | null): LoopDefinition {
+  const planOnly = spec.defaultKey === REFACTOR_KEY && !testCommand;
   const stages = spec.config.stages.flatMap((s) => {
-    const command = s.command === DETECTED_TEST ? testCommand : s.command;
-    if (s.command === DETECTED_TEST && !command) return [];
-    return [{ ...structuredClone(s), id: crypto.randomUUID(), command, isDefault: true }];
+    if (s.command === DETECTED_TEST && !testCommand) return [];
+    if (planOnly && s.defaultKey && REFACTOR_NEEDS_TESTS.has(s.defaultKey)) return [];
+    return [starterStage(s, testCommand)];
   }).map((s, i) => ({ ...s, order: i }));
   const config = structuredClone(spec.config);
+  // The Refactoring loop always runs in an isolated worktree: a batch that fails stays there, and discarding the
+  // worktree is its rollback, so the main tree is never left half-refactored.
+  const isolation = spec.defaultKey === REFACTOR_KEY ? { alwaysUseWorktree: true } : {};
   return {
     ...structuredClone(spec), id: crypto.randomUUID(), isPrimary: Boolean(spec.isPrimary),
-    config: { ...config, stages },
+    config: { ...config, ...isolation, stages },
   };
+}
+
+/**
+ * A saved Refactoring loop made while the project had no test command (so it lost its test stages, or only plans)
+ * gets the missing test-dependent stages back once a command is detected, each placed after its template
+ * predecessor, and is switched to an isolated worktree. Null when nothing is missing. Existing stages are untouched.
+ */
+export function repairRefactorLoop(loop: LoopDefinition, testCommand: string | null): LoopDefinition | null {
+  if (loop.defaultKey !== REFACTOR_KEY || !testCommand) return null;
+  const spec = DEFAULT_LOOP_SPECS.find((sp) => sp.defaultKey === REFACTOR_KEY);
+  if (!spec) return null;
+  const have = new Set(loop.config.stages.map((s) => s.defaultKey).filter(Boolean));
+  const missing = spec.config.stages.filter((s) => s.defaultKey && REFACTOR_NEEDS_TESTS.has(s.defaultKey) && !have.has(s.defaultKey));
+  if (missing.length === 0) return null;
+  const order = spec.config.stages.map((s) => s.defaultKey);
+  const stages = [...loop.config.stages].sort((a, b) => a.order - b.order);
+  for (const m of missing) {
+    // After the nearest earlier template stage this loop has; first when it has none.
+    const at = order.indexOf(m.defaultKey);
+    let after = -1;
+    for (let i = at - 1; i >= 0 && after === -1; i--) after = stages.findIndex((s) => s.defaultKey === order[i]);
+    stages.splice(after + 1, 0, starterStage(m, testCommand));
+  }
+  return { ...loop, config: { ...loop.config, alwaysUseWorktree: true, stages: stages.map((s, i) => ({ ...s, order: i })) } };
 }
 
 /** Apply the host's app-wide Loop defaults to a loop that is being added. Existing loops are never touched. */
@@ -189,6 +234,8 @@ export function ensureDefaultLoops(store: LoopProjectStore, testCommand: string 
   // An unedited built-in stage that is behind the registry takes the registry prompt; an edited one is left alone.
   const upgraded: string[] = [];
   const current = loops.map((loop) => {
+    const repaired = repairRefactorLoop(loop, testCommand);
+    if (repaired) { upgraded.push(loop.name); loop = repaired; }
     let changed = false;
     const stages = loop.config.stages.map((s) => {
       const source = registrySource(s);
@@ -197,7 +244,7 @@ export function ensureDefaultLoops(store: LoopProjectStore, testCommand: string 
       return next;
     });
     if (!changed) return loop;
-    upgraded.push(loop.name);
+    if (!upgraded.includes(loop.name)) upgraded.push(loop.name);
     return { ...loop, config: { ...loop.config, stages } };
   });
   return { store: { ...store, loops: current }, added, upgraded };
