@@ -50,7 +50,9 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     // The Mac's View menu is empty in this WindowGroup; keep the group so the menu bar structure matches.
     let view = SubmenuBuilder::new(app, "View").build()?;
 
-    let minimize = PredefinedMenuItem::minimize(app, None)?;
+    // NOTE: not the predefined Minimize: its fixed Cmd+M would swallow the chat's Cmd+M dictation shortcut
+    // before the web view ever sees the key.
+    let minimize = MenuItemBuilder::with_id("menu_minimize", "Minimize").build(app)?;
     let zoom = PredefinedMenuItem::maximize(app, Some("Zoom"))?;
     let front = PredefinedMenuItem::bring_all_to_front(app, None)?;
     let quick = MenuItemBuilder::with_id("menu_quick_switch", "Quick Switch Project…")
@@ -76,6 +78,11 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         match event.id().as_ref() {
             "menu_quick_switch" | "menu_chat" | "menu_help" => {
                 let _ = app.emit("app-menu", event.id().as_ref());
+            }
+            "menu_minimize" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.minimize();
+                }
             }
             "menu_close_all" => {
                 for (_, window) in app.webview_windows() {
