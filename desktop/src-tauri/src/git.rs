@@ -162,6 +162,11 @@ fn find_git() -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// The hardened `git` lookup (absolute PATH entries only) for callers outside this module.
+pub(crate) fn git_binary() -> Option<PathBuf> {
+    find_git()
+}
+
 /// The arguments that precede every git subcommand (config overrides).
 pub fn base_args() -> Vec<String> {
     [

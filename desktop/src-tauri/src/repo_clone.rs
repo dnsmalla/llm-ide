@@ -6,7 +6,9 @@
 //! destination is host-chosen under the active project's `code/`, so a page can never write elsewhere.
 
 use std::path::{Path, PathBuf};
+use std::io::Read;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -166,26 +168,87 @@ fn clone_with_fallback(remote: &str, dest: &Path, provider: &str, token: Option<
     }
 }
 
+/// A stalled transfer (below 1000 B/s for 60 s) ends by itself; the wall-clock cap below bounds everything else.
+const LOW_SPEED_ARGS: [&str; 4] = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=60"];
+/// Overall cap for one clone attempt. Generous (large repositories), but finite.
+const CLONE_CAP: Duration = Duration::from_secs(30 * 60);
+
+/// argv (after the program) and environment of one `git clone`. Pure, so it is testable. The token only ever
+/// appears in the environment, never in argv. `windows` is a parameter for the test.
+pub(crate) fn clone_invocation(remote: &str, dest: &Path, provider: &str, token: Option<&str>, windows: bool) -> (Vec<String>, Vec<(String, String)>) {
+    let mut args: Vec<String> = LOW_SPEED_ARGS.iter().map(|s| s.to_string()).collect();
+    args.extend(["clone".into(), "--".into(), remote.to_string(), dest.to_string_lossy().into_owned()]);
+    let mut env = vec![("GIT_TERMINAL_PROMPT".to_string(), "0".to_string())];
+    // No /usr/bin/true on Windows: there GIT_TERMINAL_PROMPT=0 alone stops the prompt.
+    if !windows {
+        env.push(("GIT_ASKPASS".into(), "/usr/bin/true".into()));
+    }
+    let (key, value) = auth_config(provider, token);
+    if !key.is_empty() {
+        env.push(("GIT_CONFIG_COUNT".into(), "1".into()));
+        env.push(("GIT_CONFIG_KEY_0".into(), key));
+        env.push(("GIT_CONFIG_VALUE_0".into(), value));
+    }
+    (args, env)
+}
+
+/// Waits for `child` for at most `cap`; the whole process tree is killed on expiry. Returns the status and stderr.
+fn wait_capped(mut child: std::process::Child, cap: Duration) -> Result<(std::process::ExitStatus, String), String> {
+    let mut stderr = child.stderr.take();
+    // Drained on its own thread: a full pipe would otherwise stall git while we poll.
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(s) = stderr.as_mut() {
+            let _ = s.take(64 * 1024).read_to_end(&mut buf);
+            let _ = std::io::copy(s, &mut std::io::sink());
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    });
+    let deadline = Instant::now() + cap;
+    loop {
+        match child.try_wait().map_err(|e| format!("cannot wait for git: {e}"))? {
+            Some(status) => return Ok((status, reader.join().unwrap_or_default())),
+            None if Instant::now() >= deadline => {
+                crate::git::kill_tree(&mut child);
+                let _ = child.wait();
+                return Err(format!("git clone timed out after {} minutes", cap.as_secs() / 60));
+            }
+            None => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
+}
+
 fn clone_into(remote: &str, dest: &Path, provider: &str, token: Option<&str>) -> Result<(), String> {
+    clone_into_capped(remote, dest, provider, token, CLONE_CAP)
+}
+
+fn clone_into_capped(remote: &str, dest: &Path, provider: &str, token: Option<&str>, cap: Duration) -> Result<(), String> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("cannot create code/: {e}"))?;
     }
-    let mut cmd = Command::new("git");
-    cmd.arg("clone").arg("--").arg(remote).arg(dest)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "/usr/bin/true")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    let (key, value) = auth_config(provider, token);
-    if !key.is_empty() {
-        cmd.env("GIT_CONFIG_COUNT", "1").env("GIT_CONFIG_KEY_0", key).env("GIT_CONFIG_VALUE_0", value);
+    // The hardened lookup (absolute PATH entries only) rather than whatever the GUI process's PATH holds.
+    let git = crate::git::git_binary().ok_or_else(|| "git was not found on PATH".to_string())?;
+    let (args, env) = clone_invocation(remote, dest, provider, token, cfg!(windows));
+    let mut cmd = Command::new(git);
+    cmd.args(&args).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        // Own process group, so the cap can kill git together with its helpers (kill_tree).
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
     }
-    let out = cmd.output().map_err(|e| format!("cannot run git: {e}"))?;
-    if out.status.success() {
+    let child = cmd.spawn().map_err(|e| format!("cannot run git: {e}"))?;
+    let (status, err) = match wait_capped(child, cap) {
+        Ok(v) => v,
+        Err(e) => {
+            // A killed clone leaves a partial folder; `destination` guaranteed it did not exist before.
+            let _ = std::fs::remove_dir_all(dest);
+            return Err(e);
+        }
+    };
+    if status.success() {
         return Ok(());
     }
-    let err = String::from_utf8_lossy(&out.stderr);
     let msg: String = err.chars().filter(|c| !c.is_control()).take(400).collect();
     Err(if msg.trim().is_empty() { "git clone failed".into() } else { format!("git clone failed: {msg}") })
 }
@@ -247,6 +310,33 @@ mod tests {
         clone_into(base.to_str().unwrap(), &dest2, "github", Some("tok")).unwrap();
         assert_eq!(std::fs::read_to_string(dest2.join("README.md")).unwrap(), "hello");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_clone_invocation_ends_stalls_keeps_the_token_out_of_argv_and_is_os_aware() {
+        let dest = Path::new("/p/code/r");
+        let (args, env) = clone_invocation("https://github.com/o/r.git", dest, "github", Some("sekret"), false);
+        assert_eq!(&args[..4], ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=60"]);
+        assert_eq!(&args[4..], ["clone", "--", "https://github.com/o/r.git", "/p/code/r"]);
+        assert!(!args.iter().any(|a| a.contains("sekret")));
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("GIT_TERMINAL_PROMPT"), Some("0"));
+        assert_eq!(get("GIT_ASKPASS"), Some("/usr/bin/true"));
+        assert_eq!(get("GIT_CONFIG_COUNT"), Some("1"));
+        let (_, win_env) = clone_invocation("u", dest, "github", None, true);
+        assert!(win_env.iter().all(|(n, _)| n != "GIT_ASKPASS"), "no /usr/bin/true on Windows");
+        assert!(win_env.iter().any(|(n, v)| n == "GIT_TERMINAL_PROMPT" && v == "0"));
+        assert!(win_env.iter().all(|(n, _)| n != "GIT_CONFIG_COUNT"), "no token, no config pair");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_clone_that_outlives_the_cap_is_killed() {
+        let child = Command::new("sleep").arg("30").stderr(Stdio::piped()).spawn().unwrap();
+        let start = Instant::now();
+        let r = wait_capped(child, Duration::from_millis(300));
+        assert!(r.unwrap_err().contains("timed out"));
+        assert!(start.elapsed() < Duration::from_secs(10));
     }
 
     #[test]
