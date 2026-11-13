@@ -21,12 +21,21 @@ const ALLOWED: &[(&str, bool, &[&str])] = &[
             "repositoryformatversion", "filemode", "bare", "logallrefupdates", "ignorecase", "precomposeunicode", "symlinks",
             "autocrlf", "eol", "safecrlf", "longpaths", "sparsecheckout", "sparsecheckoutcone", "quotepath", "whitespace",
             "trustctime", "checkstat", "protecthfs", "protectntfs", "abbrev", "commentchar", "untrackedcache",
+            // Husky and other hook managers write this into most JavaScript repositories. It names a folder of
+            // programs, but it can never take effect here: the runner passes `-c core.hooksPath=<null device>` on
+            // every call (`git::base_args`), and a command-line value always wins over the repository's. Refusing
+            // the whole repository over a key that is already switched off locked Source Control for no gain.
+            "hookspath",
         ],
     ),
     ("extensions", false, &["objectformat"]),
     ("user", false, &["name", "email"]),
     ("remote", true, &["url", "pushurl", "fetch", "push", "tagopt", "prune", "prunetags"]),
-    ("branch", true, &["remote", "merge", "rebase", "description", "pushremote"]),
+    // `vscode-merge-base` is a branch name VS Code records; plain data.
+    ("branch", true, &["remote", "merge", "rebase", "description", "pushremote", "vscode-merge-base"]),
+    // Plain data. `[merge "<driver>"]` (a subsection, which can name a program) stays refused.
+    ("merge", false, &["conflictstyle", "ff"]),
+    ("rerere", false, &["enabled", "autoupdate"]),
     ("submodule", true, &["url", "active"]),
     ("pull", false, &["rebase", "ff"]),
     ("push", false, &["default", "autosetupremote"]),
@@ -197,11 +206,27 @@ mod tests {
     }
 
     #[test]
+    fn accepts_the_common_keys_that_cannot_run_anything_here() {
+        for ok in [
+            "[core]\n\thooksPath = .husky/_\n",
+            "[branch \"main\"]\n\tvscode-merge-base = origin/main\n",
+            "[merge]\n\tconflictstyle = zdiff3\n\tff = only\n",
+            "[rerere]\n\tenabled = true\n",
+        ] {
+            assert!(check_config(ok.as_bytes()).is_ok(), "{ok:?}");
+        }
+        // The hook folder a repository names is never used: the runner overrides it on every call.
+        let args = crate::git::base_args();
+        let at = args.iter().position(|a| a.starts_with("core.hooksPath=")).expect("the override is always passed");
+        assert_eq!(args[at - 1], "-c");
+        assert!(args[at] == "core.hooksPath=/dev/null" || args[at] == "core.hooksPath=NUL");
+    }
+
+    #[test]
     fn rejects_everything_unknown() {
         for bad in [
             "[core]\n\tfsmonitor = x\n",
             "[core]\n\tworktree = /\n",
-            "[core]\n\thookspath = x\n",
             "[core]\n\tsshcommand = x\n",
             "[core]\n\tpager = x\n",
             "[core]\n\teditor = x\n",
