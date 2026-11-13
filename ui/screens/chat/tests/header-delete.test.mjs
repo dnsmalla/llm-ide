@@ -36,5 +36,8 @@ test("a chat whose turn is running cannot be deleted: the turn would run on with
   assert.match(running, new RegExp(c.DELETE_WHILE_RUNNING_TITLE));
   const idle = html(h(c.DockHeader, { ...props, onDelete: noop, hasMessages: true }));
   assert.doesNotMatch(idle, /aria-label="Delete current chat"[^>]*disabled/);
-  assert.match(readFileSync(join(CHAT, "ChatScreen.tsx"), "utf8"), /if \(controller\.busyIds\(\)\.includes\(id\)\) return;/);
+  // The screen's own guard sits before the store is touched, and covers a turn the core runs that is not read here yet.
+  const del = readFileSync(join(CHAT, "ChatScreen.tsx"), "utf8").split("const deleteSession = (id: string) => {")[1];
+  const guard = del.indexOf("if (controller.busyIds().includes(id) || controller.isRemoteBusy(id)) return;");
+  assert.ok(guard >= 0 && guard < del.indexOf("store.deleteSession(id)"), "the guard runs before the delete");
 });

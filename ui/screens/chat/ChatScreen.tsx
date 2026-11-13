@@ -471,7 +471,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const deleteSession = (id: string) => {
     // The header disables Delete for a running chat; this is the same rule for any other caller. A deleted chat's
     // turn would keep running on the core (editing files, spending tokens) with no Stop button left to reach it.
-    if (controller.busyIds().includes(id)) return;
+    if (controller.busyIds().includes(id) || controller.isRemoteBusy(id)) return;
     store.deleteSession(id).then(() => { controller.forget(id); setSessions((cur) => cur.filter((s) => s.id !== id)); if (activeId === id) setActiveId(null); bumpSessions(); })
       .catch(reportStoreError);
   };
