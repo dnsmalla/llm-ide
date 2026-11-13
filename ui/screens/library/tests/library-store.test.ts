@@ -292,3 +292,31 @@ test("benchmark: 50,000 notes list, enrich and render rows (numbers printed)", a
   assert.ok(tRows < 1500, "grouping and sorting 43k rows is interactive");
   assert.ok(tFilter < 1500);
 });
+
+test("a note written during a scan at a path the cursor already passed survives the end-of-scan sweep", async () => {
+  const host = new FakeHost();
+  for (let i = 0; i < 2500; i++) host.add(`m/n${String(i).padStart(5, "0")}.md`, meetingText(i));
+  const s = mk(host);
+  const orig = host.list.bind(host);
+  let calls = 0;
+  host.list = async (cursor, limit) => {
+    // Between the first and second page: a note is created at "a/new.md", which sorts before the cursor.
+    if (++calls === 2) s.noteWritten({ rel: "a/new.md", size: 5, mtimeMs: 1 }, "hello");
+    return orig(cursor, limit);
+  };
+  await s.init();
+  await settle(s);
+  assert.equal(calls, 2);
+  assert.ok(s.record("a/new.md"), "the new note is still listed");
+  assert.equal(s.getSnapshot().records.length, 2501);
+  // A renamed note is protected the same way.
+  let calls2 = 0;
+  const orig2 = host.list;
+  host.list = async (cursor, limit) => {
+    if (++calls2 === 2) s.noteRenamed("a/new.md", { rel: "a/renamed.md", size: 5, mtimeMs: 2 }, "hello");
+    return orig2(cursor, limit);
+  };
+  await s.scan();
+  assert.ok(s.record("a/renamed.md"));
+  assert.equal(s.record("a/new.md"), undefined);
+});

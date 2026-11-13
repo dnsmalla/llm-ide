@@ -253,12 +253,16 @@ export class LibraryStore {
 
   // ---- scanning -------------------------------------------------------------------------
 
+  /** Paths written or renamed since the current scan began; the end-of-scan sweep must not delete them. */
+  private writtenDuringScan = new Set<string>();
+
   /** (Re)lists the whole folder. A newer scan supersedes this one. */
   async scan(): Promise<void> {
     const gen = ++this.gen;
     this.stopHeads();
     this.patch({ listing: { phase: "listing", loaded: 0 }, error: null });
     const seen = new Set<string>();
+    this.writtenDuringScan.clear();
     let cursor: string | null = null;
     let loaded = 0;
     try {
@@ -285,7 +289,9 @@ export class LibraryStore {
     // Files that disappeared since the last scan.
     let removed = false;
     for (const rel of [...this.byRel.keys()]) {
-      if (!seen.has(rel)) {
+      // A note written or renamed while the scan ran may sit at a path the cursor already passed: it is not in `seen`
+      // but it is not gone either.
+      if (!seen.has(rel) && !this.writtenDuringScan.has(rel)) {
         this.byRel.delete(rel);
         removed = true;
       }
@@ -350,6 +356,7 @@ export class LibraryStore {
     let rec = recordFromEntry({ rel: entry.rel, size: entry.size, mtimeMs: entry.mtimeMs, placeholder: false });
     if (text !== undefined) rec = applyHead(rec, text.slice(0, HEAD_BYTES));
     this.byRel.set(entry.rel, rec);
+    this.writtenDuringScan.add(entry.rel);
     this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done" });
     this.refilterHits();
   }
@@ -383,6 +390,7 @@ export class LibraryStore {
     if (text !== undefined) rec = applyHead(rec, text.slice(0, HEAD_BYTES));
     else if (old?.headRead) rec = { ...old, rel: rec.rel, name: rec.name, size: rec.size, mtimeMs: rec.mtimeMs, area: rec.area, typeDir: rec.typeDir };
     this.byRel.set(entry.rel, rec);
+    this.writtenDuringScan.add(entry.rel);
     this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done" });
     this.refilterHits();
     if (wasSelected) this.patch({ selectedRel: entry.rel });
