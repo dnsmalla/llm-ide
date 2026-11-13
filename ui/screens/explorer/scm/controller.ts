@@ -355,7 +355,7 @@ export class ScmController {
     const message = this.snap.message;
     const res = await this.run("Committing", () => this.api.commit(message));
     if (res) {
-      this.set({ message: "", notice: { kind: "info", info: null, text: `Committed ${res.hash}. ` }, history: { ...this.snap.history, entries: [], hasMore: false, open: null } });
+      this.set({ message: "", notice: { kind: "info", info: null, text: committedText(res.hash, res.skipped ?? []) }, history: { ...this.snap.history, entries: [], hasMore: false, open: null } });
       if (this.snap.tab === "history") void this.loadLog(true);
     } else if (this.snap.notice?.info?.code === "identity_missing") {
       this.set({ identity: { state: "missing", value: null } });
@@ -666,3 +666,13 @@ export class ScmController {
 }
 
 export { GROUP_ORDER, ScmError };
+
+/**
+ * The notice after a commit. The host never runs commit hooks and never signs; when this repository or user relies on
+ * either, the notice says so, since a skipped secret scanner or an unsigned commit is otherwise noticed only at push.
+ */
+export function committedText(hash: string, skipped: readonly string[]): string {
+  const hooks = skipped.includes("hooks") ? "This repository's commit hooks were not run. " : "";
+  const signing = skipped.includes("signing") ? "The commit is not signed (your git is set to sign commits; LLM-IDE does not). " : "";
+  return `Committed ${hash}. ${hooks}${signing}`;
+}

@@ -441,3 +441,17 @@ test("discard all: the Trash choice goes to the host and the result is reported 
   assert.match(snap().notice.text, /Moved 1 untracked item\(s\) to the Trash/);
   assert.equal(changed, 2);
 });
+
+test("the commit notice says when hooks or signing were skipped", async () => {
+  const { c, api, snap } = await ctl({ entries: [entry("a", "M", ".")] });
+  c.setMessage("feat: x");
+  await c.commit();
+  assert.equal(snap().notice.text, "Committed deadbee. ", "nothing skipped, nothing added");
+  api.commit = async () => ({ hash: "abc1234", skipped: ["hooks", "signing"] });
+  c.setMessage("feat: y");
+  await c.commit();
+  assert.equal(snap().notice.kind, "info");
+  assert.match(snap().notice.text, /^Committed abc1234\. /);
+  assert.match(snap().notice.text, /commit hooks were not run/);
+  assert.match(snap().notice.text, /not signed/);
+});

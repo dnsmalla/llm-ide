@@ -73,7 +73,8 @@ export interface ScmApi {
   stageHunks(path: string, staged: boolean, diffId: string, hunks: number[]): Promise<void>;
   discard(paths: string[]): Promise<{ restored: number; trashed: number }>;
   identity(): Promise<Identity>;
-  commit(message: string): Promise<{ hash: string }>;
+  /** `skipped` names what the user's own git would have run and the host did not: "hooks", "signing". */
+  commit(message: string): Promise<{ hash: string; skipped?: readonly string[] }>;
   branches(): Promise<BranchList>;
   checkout(name: string): Promise<void>;
   createBranch(name: string): Promise<void>;

@@ -499,11 +499,45 @@ pub fn validate_message(raw: &str) -> R<String> {
 #[derive(Serialize, Debug)]
 pub struct CommitResult {
     pub hash: String,
+    /// What the user's own git would have done for this commit and this app did not: `"hooks"`, `"signing"`. The
+    /// panel says so, because a skipped secret scanner or an unsigned commit is otherwise found out only at push.
+    pub skipped: Vec<&'static str>,
+}
+
+const COMMIT_HOOKS: [&str; 4] = ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"];
+
+/// The commit-time steps this app never runs (hooks are forced off and nothing is signed) that this repository or
+/// user has set up. Best effort: an unreadable hooks folder counts as none.
+fn commit_skips(root: &Path, home: &Option<PathBuf>) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    let hooks_path_set = run_git(root, &["config", "--local", "--get", "core.hooksPath"], 4096).is_ok_and(|o| !o.stdout.iter().all(u8::is_ascii_whitespace));
+    let hook_files = || {
+        // Not `--git-path hooks`: the runner points `core.hooksPath` at the null device, and git answers with that.
+        let out = run_git(root, &["rev-parse", "--git-common-dir"], 4096).ok()?;
+        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let dir = if Path::new(&p).is_absolute() { PathBuf::from(p) } else { root.join(p) }.join("hooks");
+        Some(COMMIT_HOOKS.iter().any(|h| dir.join(h).is_file()))
+    };
+    if hooks_path_set || hook_files().unwrap_or(false) {
+        out.push("hooks");
+    }
+    if config_value(root, "commit.gpgsign", home).ok().flatten().is_some_and(|v| v.eq_ignore_ascii_case("true")) {
+        out.push("signing");
+    }
+    out
 }
 
 pub fn commit(root: &Path, message: &str, home: &Option<PathBuf>) -> R<CommitResult> {
     let msg = validate_message(message)?;
     let id = identity(root, home)?;
+    // A commit made here is authored as the current user and takes this message. In the middle of a rebase,
+    // cherry-pick or revert that would replace the original author and bypass the operation's own message, so those
+    // are finished with git's `--continue` in a terminal. Concluding a merge is an ordinary commit and is allowed.
+    if let Some(what) = operation_in_progress(root)? {
+        if what != "A merge" {
+            return gerr("in_progress", format!("{what} is in progress. Finish it with git in a terminal (--continue) or abort it first: a commit made here would not keep the original author."));
+        }
+    }
     let st = status(root)?;
     if st.entries.iter().any(|e| e.kind == "unmerged") {
         return gerr("conflict", "resolve the conflicted files (and stage them) before committing");
@@ -526,7 +560,7 @@ pub fn commit(root: &Path, message: &str, home: &Option<PathBuf>) -> R<CommitRes
         &Opts { stdin: Some(msg.as_bytes()), env, ..Opts::default() },
     )?;
     let out = run_git(root, &["rev-parse", "--short", "HEAD"], 256)?;
-    Ok(CommitResult { hash: String::from_utf8_lossy(&out.stdout).trim().to_string() })
+    Ok(CommitResult { hash: String::from_utf8_lossy(&out.stdout).trim().to_string(), skipped: commit_skips(root, home) })
 }
 
 // ---- branches -------------------------------------------------------------------------
@@ -1403,7 +1437,7 @@ pub fn commit_amend(root: &Path, message: Option<&str>, force: bool, home: &Opti
         args.push("--no-edit");
     }
     run_git_opts(root, &args, 64 * 1024, &Opts { stdin: msg.as_deref().map(str::as_bytes), env, ..Opts::default() })?;
-    Ok(CommitResult { hash: short_head(root)? })
+    Ok(CommitResult { hash: short_head(root)?, skipped: commit_skips(root, home) })
 }
 
 // ---- discard all -----------------------------------------------------------------------
@@ -1544,8 +1578,8 @@ fn discard_all_prompt(plan: &AllPlan, include_untracked: bool) -> String {
     if plan.skipped > 0 {
         s.push_str(&format!("{} item(s) will be left in place (symbolic links, nested repositories, names with control characters).\n", plan.skipped));
     }
-    // Only the repository's own ignore rules apply: the runner never reads the user's global excludes file.
-    s.push_str("Files ignored by the repository's .gitignore are never touched. Folders stay; only files move.\n\n");
+    // The repository's ignore rules and the user's global ignore file both apply (`git::user_data_args`).
+    s.push_str("Ignored files (the repository's .gitignore and your global ignore file) are never touched. Folders stay; only files move.\n\n");
     for p in plan.restore.iter().chain(plan.trash.iter()).take(12) {
         s.push_str(&format!("  {}\n", line(p, 80)));
     }
@@ -2413,6 +2447,59 @@ mod tests {
         assert_eq!(code(log(&bare, 0, 5)), "not_a_repo");
         assert_eq!(code(branches(&bare)), "not_a_repo");
         let _ = fs::remove_dir_all(&wt);
+    }
+
+    #[test]
+    fn a_commit_says_which_hooks_and_signing_it_skipped() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("commit-skips");
+        fs::write(r.join("a.txt"), "1\n").unwrap();
+        stage(&r, &["a.txt".into()], true).unwrap();
+        assert!(commit(&r, "plain", &home("cs-plain", true)).unwrap().skipped.is_empty(), "nothing set up, nothing to report");
+
+        // A pre-commit hook (a secret scanner, a linter) that would have refused this commit: it is not run, and the
+        // result says so.
+        let hook = r.join(".git/hooks/pre-commit");
+        fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let signer = scratch("cs-sign");
+        fs::write(signer.join(".gitconfig"), "[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n[commit]\n\tgpgsign = true\n").unwrap();
+        fs::write(r.join("a.txt"), "2\n").unwrap();
+        stage(&r, &["a.txt".into()], true).unwrap();
+        let res = commit(&r, "with a hook", &Some(signer)).unwrap();
+        assert_eq!(res.skipped, vec!["hooks", "signing"]);
+    }
+
+    #[test]
+    fn a_commit_is_refused_in_the_middle_of_a_cherry_pick() {
+        if !have_git() {
+            return;
+        }
+        let r = repo("commit-mid-pick");
+        fs::write(r.join("a.txt"), "base\n").unwrap();
+        g(&r, &["add", "a.txt"]);
+        g(&r, &["commit", "-q", "-m", "base"]);
+        g(&r, &["switch", "-q", "-c", "other"]);
+        fs::write(r.join("a.txt"), "theirs\n").unwrap();
+        g(&r, &["commit", "-q", "-am", "theirs", "--author", "Someone Else <else@example.com>"]);
+        g(&r, &["switch", "-q", "-"]);
+        fs::write(r.join("a.txt"), "ours\n").unwrap();
+        g(&r, &["commit", "-q", "-am", "ours"]);
+        // The pick stops on a conflict; the user resolves and stages it, then presses Commit in the app.
+        let _ = Command::new("git").args(["-c", "user.name=t", "-c", "user.email=t@t", "cherry-pick", "other"]).current_dir(&r)
+            .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" }).env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
+        fs::write(r.join("a.txt"), "resolved\n").unwrap();
+        g(&r, &["add", "a.txt"]);
+        let err = commit(&r, "resolved", &home("cmp", true)).unwrap_err();
+        assert_eq!(err.code, "in_progress");
+        assert!(err.message.contains("cherry-pick") && err.message.contains("original author"), "{}", err.message);
     }
 
     #[test]
@@ -3822,7 +3909,7 @@ mod merge_amend_discard_tests {
         let text = seen.borrow().clone();
         assert!(text.contains("1 file(s) will be reset to HEAD"), "{text}");
         assert!(text.contains("1 untracked item(s) will be moved to the Trash"), "{text}");
-        assert!(text.contains("ignored by the repository's .gitignore are never touched"), "{text}");
+        assert!(text.contains("Ignored files (the repository's .gitignore and your global ignore file) are never touched"), "{text}");
         let _ = discard_all_with(&r, false, &ask, &FakeTrash::refusing());
         assert!(seen.borrow().contains("Untracked files are not touched"));
     }
