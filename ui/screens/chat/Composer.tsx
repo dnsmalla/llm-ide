@@ -120,9 +120,10 @@ export function isDictationShortcut(e: { key: string; metaKey: boolean; ctrlKey:
 export const dictationShortcutLabel = (mac = isMacPlatform()): string => (mac ? "Cmd+M" : "Ctrl+M");
 
 /** The window-level shortcut is enabled only while this surface is on screen. */
-/** Which voice input the mic uses: the web view's speech engine, else the Mac host's system Dictation, else none. Pure. */
+/** Which voice input the mic uses: the Mac host's system Dictation, else the web speech engine, else none. Pure.
+ *  The Mac web view does expose webkitSpeechRecognition, but WebKit refuses it: the app declares no mic/speech usage. */
 export function dictationMode(webSpeech: boolean, host: boolean, mac: boolean): "web" | "system" | null {
-  return webSpeech ? "web" : host && mac ? "system" : null;
+  return host && mac ? "system" : webSpeech ? "web" : null;
 }
 
 export const dictationEnabled = (active: boolean, voice: unknown): boolean => active && voice !== null && voice !== undefined;
@@ -152,9 +153,7 @@ export function Composer(p: ComposerProps) {
     rec.onerror = (e) => {
       speech.current = null; setListening(false);
       if (e.error === "no-speech" || e.error === "aborted") return;
-      // The web engine was refused or is unavailable: on the Mac app fall back to system Dictation, else say why.
-      if (isHostAvailable() && isMacPlatform()) startSystemDictation();
-      else setDictError(`Dictation failed (${e.error ?? "unknown error"}). Allow the microphone and speech recognition for this app.`);
+      setDictError(`Dictation failed (${e.error ?? "unknown error"}). Allow the microphone and speech recognition for this page.`);
     };
     rec.onend = () => { speech.current = null; setListening(false); };
     speech.current = rec;
@@ -166,17 +165,16 @@ export function Composer(p: ComposerProps) {
   // handler runs first and preventDefaults, so this listener does not toggle twice.
   const toggleRef = useRef(toggleVoice);
   toggleRef.current = toggleVoice;
-  // No web speech engine (the macOS web view has none for apps): the desktop host starts the system's own Dictation
-  // in the focused message box instead, so the mic always works on the Mac app.
+  // On the Mac app the desktop host starts the system's own Dictation in the focused message box (dictationMode).
   const form = useRef<HTMLFormElement | null>(null);
   const [dictError, setDictError] = useState<string | null>(null);
-  const systemDictation = dictationMode(voice !== null, isHostAvailable(), isMacPlatform()) === "system";
+  const mode = dictationMode(voice !== null, isHostAvailable(), isMacPlatform());
   const startSystemDictation = () => {
     form.current?.querySelector("textarea")?.focus();
     setDictError(null);
     invokeHost<void>("start_system_dictation").catch(() => setDictError("Dictation could not start. Turn it on in System Settings → Keyboard → Dictation."));
   };
-  const dictate = voice ? toggleVoice : systemDictation ? startSystemDictation : null;
+  const dictate = mode === "system" ? startSystemDictation : mode === "web" ? toggleVoice : null;
   toggleRef.current = dictate ?? toggleVoice;
   useEffect(() => {
     if (!dictationEnabled(p.active === true, dictate)) return undefined;
@@ -269,7 +267,7 @@ export function Composer(p: ComposerProps) {
         {p.meter}
         <KeyHint />
         {dictate
-          ? <button type="button" className="chat-icon-btn chat-mic" aria-pressed={listening} onClick={dictate} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`${listening ? "Stop dictation" : voice ? "Dictate" : "Dictate with macOS Dictation"} (${isMacPlatform() ? "⌘M" : "Ctrl+M"})`}>{MIC_ICON}</button>
+          ? <button type="button" className="chat-icon-btn chat-mic" aria-pressed={listening} onClick={dictate} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`${listening ? "Stop dictation" : mode === "web" ? "Dictate" : "Dictate with macOS Dictation"} (${isMacPlatform() ? "⌘M" : "Ctrl+M"})`}>{MIC_ICON}</button>
           : <button type="button" className="chat-icon-btn chat-mic" disabled aria-label="Dictate a message" title="Speech recognition is not available here">{MIC_ICON}</button>}
         {p.busy && <button type="button" className="chat-btn chat-danger chat-stop" onClick={p.onStop} disabled={p.aborting} aria-label="Stop the running turn" title="Stop the running reply (Esc)">{STOP_ICON}{p.aborting ? "Stopping…" : "Stop"}</button>}
         <button type="submit" className="chat-btn chat-primary chat-send" disabled={!canSend} title={p.busy ? "Queue this message: it sends when the current reply ends (↵)" : "Send (↵ · ⇧↵ for a new line)"}>{p.busy ? "Queue" : "Send"}{SEND_ICON}</button>
