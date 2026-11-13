@@ -73,8 +73,8 @@ enum Consent {
     Denied,
 }
 
-/// How long one approval lasts. After that the next spawn asks again and typing into already
-/// open terminals is refused until the user approves a new one.
+/// How long one approval lasts for OPENING terminals. After that the next spawn asks again; a shell that was
+/// spawned under a valid approval keeps accepting input until it ends (see `Gate::session_epoch`).
 pub const GRANT_TTL_MS: u64 = 30 * 60 * 1000;
 
 struct Inner {
@@ -156,6 +156,17 @@ impl Gate {
         Ok(())
     }
 
+    /// The current page-load epoch. A session stores the value it was spawned under; consent was given for
+    /// that session, so it stays writable after `GRANT_TTL_MS` and is cut off only by `reset`.
+    pub fn session_epoch(&self) -> u64 {
+        lock(&self.state).epoch
+    }
+
+    /// Whether a session spawned under `epoch` may still receive input (no page reload since).
+    pub fn session_may_write(&self, epoch: u64) -> bool {
+        lock(&self.state).epoch == epoch
+    }
+
     pub fn granted(&self) -> bool {
         self.granted_at(crate::confirm::now_ms())
     }
@@ -211,22 +222,25 @@ pub fn reset_consent() {
 
 /// Terminal feature on AND user consent (native dialog on first use per page load).
 /// Runs on a blocking thread: the dialog blocks until answered.
-pub fn authorize() -> Result<(), String> {
+/// Returns the consent epoch the new session is bound to.
+pub fn authorize() -> Result<u64, String> {
     if !terminal_enabled() {
         return Err("the Terminal feature is disabled".into());
     }
+    // Read BEFORE asking: a reset during the dialog then yields a stale epoch, which only ever refuses input.
+    let epoch = GATE.session_epoch();
     // Cancel-first (the default button, Return key): only an explicit click on "Allow terminal" counts.
     let allowed = GATE.check(|| {
         crate::confirm::ask(
             "Allow terminal access?",
             "LLM-IDE wants to open a terminal: a real shell that runs with all of your user permissions. \
-             The approval lasts 30 minutes. Only allow this if you just asked for a terminal.",
+             The approval lets new terminals open for 30 minutes. Only allow this if you just asked for a terminal.",
             TERMINAL_ACCEPT,
             true,
         )
     });
     if allowed {
-        Ok(())
+        Ok(epoch)
     } else {
         Err("terminal access was not approved".into())
     }
@@ -368,6 +382,8 @@ struct Session {
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
     flow: Arc<Flow>,
+    /// Consent epoch this shell was spawned under; see `Gate::session_epoch`.
+    consent_epoch: u64,
 }
 
 type Shared = Arc<Session>;
@@ -462,7 +478,7 @@ fn get(id: u32) -> Result<Shared, String> {
 /// Starts `$SHELL -l` in a new pty and returns its id and name. Output is sent to
 /// `on_data` as raw bytes (see `Response`): one message per batch.
 pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<serde_json::Value>) -> Result<Spawned, String> {
-    authorize()?;
+    let consent_epoch = authorize()?;
     if lock_table().len() >= MAX_SESSIONS {
         return Err(format!("too many terminals (max {MAX_SESSIONS})"));
     }
@@ -513,6 +529,7 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<
         writer: Mutex::new(writer),
         child: Mutex::new(child),
         flow: Arc::new(Flow::new()),
+        consent_epoch,
     });
     let flow = Arc::clone(&session.flow);
 
@@ -682,10 +699,15 @@ pub fn ack(id: u32, bytes: u64) {
 
 /// Writes input bytes to the shell. Runs off the main thread (async command).
 pub fn write(id: u32, data: &str) -> Result<(), String> {
-    if !terminal_enabled() || !GATE.granted() {
+    if !terminal_enabled() {
         return Err("terminal access was not approved".into());
     }
     let session = get(id)?;
+    // Consent was given for this running session; the 30-minute TTL only gates NEW spawns, so a shell in the
+    // middle of vim or a REPL must not go deaf. A page reload (epoch bump) still revokes it.
+    if !GATE.session_may_write(session.consent_epoch) {
+        return Err("terminal access was not approved".into());
+    }
     let mut writer = lock(&session.writer);
     writer
         .write_all(data.as_bytes())
@@ -822,6 +844,22 @@ mod tests {
         let mut asked = 0;
         assert!(g.check_at(1_000 + GRANT_TTL_MS, || { asked += 1; true }), "re-asked after expiry");
         assert_eq!(asked, 1);
+    }
+
+    #[test]
+    fn an_old_session_keeps_input_after_the_grant_expired_but_a_new_spawn_asks() {
+        let g = Gate::new();
+        let before = g.session_epoch();
+        assert!(g.check_at(1_000, || true));
+        let session_epoch = before;
+        let later = 1_000 + GRANT_TTL_MS + 5;
+        assert!(!g.granted_at(later), "the grant itself expired");
+        assert!(g.session_may_write(session_epoch), "the running session still accepts input");
+        let mut asked = 0;
+        assert!(g.check_at(later, || { asked += 1; true }), "a new spawn asks again");
+        assert_eq!(asked, 1);
+        g.reset();
+        assert!(!g.session_may_write(session_epoch), "a page reload revokes the old session");
     }
 
     #[test]
