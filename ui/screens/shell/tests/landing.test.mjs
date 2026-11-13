@@ -203,7 +203,7 @@ test("project store: a project change asks before it calls the host when section
   assert.deepEqual(store.getSnapshot().leave, { labels: ["2 unsaved files in Explorer"] });
   assert.deepEqual(opened, [], "the host is not called while the question is open");
   store.cancelLeave();
-  await stay;
+  assert.equal(await stay, false, "Stay resolves false, so Welcome does not navigate as if a project had opened");
   assert.equal(store.getSnapshot().leave, null);
   assert.equal(store.getSnapshot().project.root, "/a");
   assert.deepEqual(opened, []);
@@ -211,7 +211,7 @@ test("project store: a project change asks before it calls the host when section
   // Discard and leave: the switch runs once.
   const go = store.openRecent(1);
   store.confirmLeave();
-  await go;
+  assert.equal(await go, true);
   assert.deepEqual(opened, [1]);
   assert.equal(store.getSnapshot().project.root, "/b");
 
@@ -271,4 +271,39 @@ test("the sections that hold unsaved work report it to the shell, and the shell 
   }
   const shell = read("shell/Shell.tsx");
   assert.match(shell, /\{leave \? <LeaveProjectDialog labels=\{leave\.labels\} onStay=\{cancelLeave\} onLeave=\{confirmLeave\} \/> : null\}/);
+});
+
+test("project store: the recent list changing while the question is open still opens the project that was clicked", async () => {
+  const { h, st } = fakeHost();
+  st.recent = [{ name: "A", root: "/a" }, { name: "B", root: "/b" }, { name: "C", root: "/c" }];
+  st.active = st.recent[0];
+  const opened = [];
+  const store = createProjectStore({ ...h, projectOpenRecent: async (i) => { opened.push(st.recent[i].root); st.active = st.recent[i]; return st.active; } }, () => ["An unsaved note in Library"]);
+  await store.refresh();
+  const go = store.openRecent(1); // B, at position 1
+  st.recent = [st.recent[2], st.recent[0], st.recent[1]]; // the list is reordered while the dialog is open
+  await store.refresh();
+  store.confirmLeave();
+  await go;
+  assert.deepEqual(opened, ["/b"], "B is opened at its new position, not whatever now sits at position 1");
+
+  // A project that left the list meanwhile is not replaced by another one.
+  const gone = store.openRecent(0); // C
+  st.recent = st.recent.filter((p) => p.root !== "/c");
+  await store.refresh();
+  store.confirmLeave();
+  await gone;
+  assert.deepEqual(opened, ["/b"]);
+  assert.match(store.getSnapshot().error, /no longer in the recent list/);
+});
+
+test("a hidden chat surface follows the project store, and the Loop and Auto Task screens report a run in progress", async () => {
+  const { readFileSync } = await import("node:fs");
+  const read = (rel) => readFileSync(new URL(`../../${rel}`, import.meta.url), "utf8");
+  const surface = read("chat/surface.tsx");
+  const sub = surface.slice(surface.indexOf("projectStore.subscribe(() => {"), surface.indexOf("runtimes.set(surface, runtime);"));
+  assert.match(sub, /root\.current = next;\s*runtime\.noteProject\(next\);/);
+  assert.match(sub, /if \(!snap\.loaded\) return;/, "the first load is not mistaken for a project change");
+  assert.match(read("loop/native/NativeLoopScreen.tsx"), /unsavedWork\.register\(\(\) => \(runningRef\.current \?/);
+  assert.match(read("autotasks/native/NativeAutoTasksScreen.tsx"), /unsavedWork\.register\(\(\) => \(runningRef\.current \|\| customRunningRef\.current \?/);
 });

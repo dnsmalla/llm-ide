@@ -11,10 +11,11 @@ export { GuideDialog };
 /** What the Welcome page needs from the shell. Every function is host- or core-backed in the app and a fake in tests. */
 export interface WelcomeActions {
   createProject(name: string): Promise<ProjectInfo | null>;
-  openFolder(): Promise<void>;
-  openRecent(openIndex: number): Promise<void>;
+  /** Both resolve false when the user chose to stay in the open project (unsaved work): Welcome then stays put. */
+  openFolder(): Promise<boolean | void>;
+  openRecent(openIndex: number): Promise<boolean | void>;
   forgetRecent(entry: RecentEntry): Promise<void>;
-  closeProject(): Promise<void>;
+  closeProject(): Promise<unknown>;
   /** Switch to the project home after a project was opened or created. */
   goHome(): void;
 }
@@ -156,7 +157,7 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
           <section className="wc-card" aria-labelledby="wc-open-title">
             <h2 id="wc-open-title" className="wc-h2">Open existing project</h2>
             <p className="wc-text wc-muted">Resume an LLM-IDE project, or adopt a folder you have already, such as a cloned repository.</p>
-            <button type="button" className="sh-button sh-button-primary" disabled={disabled} onClick={() => void run("open", async () => { await actions.openFolder(); return true; })}>
+            <button type="button" className="sh-button sh-button-primary" disabled={disabled} onClick={() => void run("open", async () => (await actions.openFolder()) !== false)}>
               {busy === "open" ? "Opening…" : "Open folder…"}
             </button>
           </section>
@@ -178,7 +179,7 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
             <ul className="wc-recent-list">
               {recent.entries.map((e) => (
                 <RecentRow key={`${e.storedIndex}:${e.root}`} entry={e} busy={disabled}
-                  onOpen={() => e.openIndex !== null && void run("open", async () => { await actions.openRecent(e.openIndex!); return true; })}
+                  onOpen={() => e.openIndex !== null && void run("open", async () => (await actions.openRecent(e.openIndex!)) !== false)}
                   onForget={() => void actions.forgetRecent(e).catch((err: unknown) => setLocalError(safeText(err instanceof Error ? err.message : String(err), 240)))} />
               ))}
             </ul>

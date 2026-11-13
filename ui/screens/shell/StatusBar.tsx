@@ -14,9 +14,9 @@ import { isSectionEnabled } from "./features";
 import { safeText } from "./safe-text";
 
 export interface ProjectMenuActions {
-  openRecent(index: number): Promise<void>;
-  openFolder(): Promise<void>;
-  closeProject(): Promise<void>;
+  openRecent(index: number): Promise<unknown>;
+  openFolder(): Promise<unknown>;
+  closeProject(): Promise<unknown>;
   reveal(): void;
 }
 

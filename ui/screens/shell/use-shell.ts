@@ -33,12 +33,12 @@ export interface ActiveProject {
   /** One-off message after an action (shown by the shell until dismissed). */
   notice: string | null;
   /** Native folder dialog (host-owned); a cancel changes nothing. */
-  openFolder(): Promise<void>;
-  openRecent(index: number): Promise<void>;
+  openFolder(): Promise<boolean>;
+  openRecent(index: number): Promise<boolean>;
   /** Host folder dialog for the parent, then create + scaffold; `after` registers it with the core. */
   createProject(name: string, after?: AfterCreate): Promise<ProjectInfo | null>;
   /** Back to no project. Never deletes anything. */
-  closeProject(): Promise<void>;
+  closeProject(): Promise<boolean>;
   forgetRecent(entry: RecentEntry): Promise<void>;
   dismissNotice(): void;
   refresh(): Promise<void>;

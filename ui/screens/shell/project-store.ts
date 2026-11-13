@@ -35,12 +35,13 @@ export interface ProjectStore {
   getSnapshot(): ProjectState;
   subscribe(l: () => void): () => void;
   refresh(): Promise<void>;
-  openFolder(): Promise<void>;
-  openRecent(index: number): Promise<void>;
+  /** These three resolve true when the action ran, false when the user chose to stay (see `leave`). */
+  openFolder(): Promise<boolean>;
+  openRecent(index: number): Promise<boolean>;
   /** Native "choose where" dialog, then create + scaffold. Resolves the new project, or null on cancel/failure (see `error`). */
   createProject(name: string, after?: AfterCreate): Promise<ProjectInfo | null>;
   /** Back to "no project". The recent list is kept; nothing is deleted. */
-  closeProject(): Promise<void>;
+  closeProject(): Promise<boolean>;
   /** Drop one entry from the recent list only. */
   forgetRecent(entry: RecentEntry): Promise<void>;
   dismissNotice(): void;
@@ -111,29 +112,42 @@ export function createProjectStore(h: ProjectHost = defaultHost, unsaved: () => 
     refresh,
     confirmLeave: () => answerLeave(true),
     cancelLeave: () => answerLeave(false),
-    openFolder: () => leaving(undefined, async () => {
+    openFolder: () => leaving(false, async () => {
       try {
         const p = await h.projectOpen();
         if (p) set({ project: p, error: null });
       } catch (e) {
         set({ error: msg(e) });
-        return;
+        return true;
       }
       await refresh();
+      return true;
     }),
     openRecent(index) {
       // Re-opening the project that is already open remounts nothing, so there is nothing to ask about.
       const target = state.recentAll.entries.find((e) => e.openIndex === index);
       const open = async () => {
+        // The host opens by list position. The question can stay open while the list changes, so the position is
+        // looked up again by root: "Discard and leave" must open the project that was clicked, or nothing.
+        let at = index;
+        if (target) {
+          const now = state.recentAll.entries.find((e) => e.root === target.root);
+          if (!now || now.openIndex === null) {
+            set({ error: `"${target.name}" is no longer in the recent list.` });
+            return true;
+          }
+          at = now.openIndex;
+        }
         try {
-          set({ project: await h.projectOpenRecent(index), error: null });
+          set({ project: await h.projectOpenRecent(at), error: null });
         } catch (e) {
           set({ error: msg(e) });
-          return;
+          return true;
         }
         await refresh();
+        return true;
       };
-      return target && target.root === state.project?.root ? open() : leaving(undefined, open);
+      return target && target.root === state.project?.root ? open() : leaving(false, open);
     },
     createProject: (name, after) => leaving(null, async () => {
       if (!h.projectCreate) {
@@ -159,15 +173,16 @@ export function createProjectStore(h: ProjectHost = defaultHost, unsaved: () => 
       await refresh();
       return created;
     }),
-    closeProject: () => leaving(undefined, async () => {
+    closeProject: () => leaving(false, async () => {
       try {
         await h.projectClose?.();
         set({ project: null, error: null });
       } catch (e) {
         set({ error: msg(e) });
-        return;
+        return true;
       }
       await refresh();
+      return true;
     }),
     async forgetRecent(entry) {
       try {
