@@ -80,6 +80,9 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const [projectFile, setProjectFile] = useState<string | null>(null);
   const [projectFileDirty, setProjectFileDirty] = useState(false);
+  // Read by the store's select guard, which outlives a render.
+  const projectFileDirtyRef = useRef(false);
+  projectFileDirtyRef.current = projectFileDirty;
   // Unsaved changes ask through the in-app discard dialog: the desktop webview shows no window.confirm.
   const selectProjectFile = (path: string | null) => {
     const open = () => { setProjectFileDirty(false); setProjectFile(path); if (path !== null) setExtensionId(null); };
@@ -113,12 +116,13 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
     // While a note has unsaved changes, selecting another note (or section) asks first.
     store.selectGuard = write
       ? (_next, proceed) => {
-          if (!dirtyRef.current) return true;
+          // A Code/Data file being edited is closed by a note selection too, so its edits ask the same question.
+          if (!dirtyRef.current && !projectFileDirtyRef.current) return true;
           setPendingNav({ proceed });
           return false;
         }
       : null;
-    store.hasUnsaved = write ? () => dirtyRef.current : null;
+    store.hasUnsaved = write ? () => dirtyRef.current || projectFileDirtyRef.current : null;
     return () => {
       store.selectGuard = null;
       store.hasUnsaved = null;
@@ -126,7 +130,9 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   }, [store, write]);
 
   useEffect(() => {
+    // The file view is gone, so nothing is unsaved in it any more (a stale flag would ask "discard?" for nothing).
     setProjectFile(null);
+    setProjectFileDirty(false);
   }, [state.selectedRel]);
 
   useEffect(() => {
@@ -244,9 +250,15 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                 connections={connections}
                 projectNav={files ? <ProjectFilesNav deps={files} selected={projectFile} onSelect={(path) => selectProjectFile(path)} active={active} /> : undefined}
                 onSection={(id) => {
-                  setProjectFile(null);
-                  setExtensionId(null);
-                  store.setSection(state.sectionId === id ? null : id);
+                  const open = () => {
+                    setProjectFileDirty(false);
+                    setProjectFile(null);
+                    setExtensionId(null);
+                    store.setSection(state.sectionId === id ? null : id);
+                  };
+                  // A section click closes the Code/Data file view: ask before its unsaved edits go.
+                  if (projectFileDirty) setPendingNav({ proceed: open });
+                  else open();
                 }}
                 onExtension={(id) => {
                   const open = () => { setProjectFile(null); setProjectFileDirty(false); setExtensionId(id); };
@@ -348,6 +360,8 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
             setPendingNav(null);
             dirtyRef.current = false;
             setDirty(false);
+            projectFileDirtyRef.current = false;
+            setProjectFileDirty(false);
             setExtensionId(null);
             proceed();
           }}

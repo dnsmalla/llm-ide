@@ -29,3 +29,17 @@ test("save keeps the read hash, encoding, BOM and EOL", () => {
   const b = decodeProjectFile({ status: "ok", text: "a\r\nb", size: 4, hash: "h", encoding: "utf-8", bom: true, eol: "crlf", read_only: false })!;
   assert.deepEqual(projectSaveRequest(b, "a\nb\n"), { text: "a\r\nb\r\n", expected_hash: "h", encoding: "utf-8", bom: true, force: false });
 });
+
+test("unsaved Code/Data edits ask before a note or section click closes the file view", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../LibraryScreen.tsx", import.meta.url), "utf8");
+  // The store's select guard (note clicks, setSection) sees the file editor's unsaved state, not only the note's.
+  assert.match(src, /if \(!dirtyRef\.current && !projectFileDirtyRef\.current\) return true;/);
+  assert.match(src, /store\.hasUnsaved = write \? \(\) => dirtyRef\.current \|\| projectFileDirtyRef\.current : null;/);
+  // A section click no longer clears the file view before asking.
+  const onSection = src.slice(src.indexOf("onSection={(id) => {"), src.indexOf("onExtension={(id) => {"));
+  assert.match(onSection, /if \(projectFileDirty\) setPendingNav\(\{ proceed: open \}\);/);
+  assert.ok(onSection.indexOf("setProjectFile(null)") > onSection.indexOf("const open = () => {"), "the view closes only inside the guarded action");
+  // Closing the view clears the flag, so a later click does not ask about edits that no longer exist.
+  assert.match(src, /setProjectFile\(null\);\n    setProjectFileDirty\(false\);\n  \}, \[state\.selectedRel\]\);/);
+});
