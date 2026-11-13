@@ -1005,7 +1005,56 @@ pub struct CopyReq {
     pub to: String,
 }
 
+/// Walks the source BEFORE anything is created and names the first entry `copy_tree` would refuse (a
+/// symlink, a hard-linked file, a special file). A folder such as `node_modules` holds `.bin` symlinks; failing
+/// on the first one mid-copy used to leave a half-built destination behind.
+fn prescan_copy(root_src: &Path, src: &Path) -> std::io::Result<()> {
+    let shown = || src.strip_prefix(root_src).ok().filter(|p| !p.as_os_str().is_empty()).unwrap_or(src).display().to_string();
+    let meta = std::fs::symlink_metadata(src)?;
+    if meta.file_type().is_symlink() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("symlinks are not copied: {}", shown())));
+    }
+    if meta.is_file() {
+        let input = std::fs::File::open(src)?;
+        if nlink(&input, &input.metadata()?) > 1 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("file has several hard links; refusing to copy it: {}", shown()),
+            ));
+        }
+        return Ok(());
+    }
+    if !meta.is_dir() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("not a file or folder: {}", shown())));
+    }
+    for entry in std::fs::read_dir(src)? {
+        prescan_copy(root_src, &entry?.path())?;
+    }
+    Ok(())
+}
+
+/// Copies `src` to `dst`. Pre-scans first; if a failure still happens mid-copy, removes what THIS call created
+/// (`dst` is only ever removed once this call has created it, so an entry that appeared meanwhile is never touched).
 fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    prescan_copy(src, src)?;
+    copy_cleaning_up(src, dst)
+}
+
+/// The copy itself, without the pre-scan (a tree can still change after it ran).
+fn copy_cleaning_up(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let created = std::cell::Cell::new(false);
+    let result = copy_node(src, dst, &created, true);
+    if result.is_err() && created.get() {
+        let _ = match std::fs::symlink_metadata(dst) {
+            Ok(m) if m.is_dir() => std::fs::remove_dir_all(dst),
+            Ok(_) => std::fs::remove_file(dst),
+            Err(_) => Ok(()),
+        };
+    }
+    result
+}
+
+fn copy_node(src: &Path, dst: &Path, created: &std::cell::Cell<bool>, is_top: bool) -> std::io::Result<()> {
     let meta = std::fs::symlink_metadata(src)?;
     if meta.file_type().is_symlink() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "symlinks are not copied"));
@@ -1019,6 +1068,9 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "file has several hard links; refusing to copy it"));
         }
         let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(dst)?;
+        if is_top {
+            created.set(true);
+        }
         std::io::copy(&mut input, &mut out)?;
         out.set_permissions(meta.permissions())?; // fs::copy kept the mode bits; io::copy does not
         return Ok(());
@@ -1027,9 +1079,12 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a file or folder"));
     }
     std::fs::create_dir(dst)?;
+    if is_top {
+        created.set(true);
+    }
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
-        copy_tree(&entry.path(), &dst.join(entry.file_name()))?;
+        copy_node(&entry.path(), &dst.join(entry.file_name()), created, false)?;
     }
     Ok(())
 }
@@ -1242,6 +1297,51 @@ mod tests {
         assert!(!target.exists(), "nothing was written outside the root");
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copying_a_folder_with_a_symlink_is_refused_up_front_and_names_the_entry() {
+        let root = scratch("copy-prescan");
+        fs::create_dir_all(root.join("pkg/node_modules/.bin")).unwrap();
+        fs::write(root.join("pkg/a.txt"), "a").unwrap();
+        fs::write(root.join("pkg/node_modules/real.js"), "r").unwrap();
+        std::os::unix::fs::symlink("../real.js", root.join("pkg/node_modules/.bin/tool")).unwrap();
+        let e = copy(&root, &CopyReq { from: "pkg".into(), to: "pkg copy".into() }).unwrap_err();
+        assert!(e.message.contains("node_modules/.bin/tool"), "names the offending entry: {}", e.message);
+        assert!(fs::symlink_metadata(root.join("pkg copy")).is_err(), "nothing was created");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn copying_a_folder_with_a_hard_linked_file_is_refused_before_creating_anything() {
+        let root = scratch("copy-prescan-hl");
+        fs::create_dir_all(root.join("d")).unwrap();
+        fs::write(root.join("d/one.txt"), "1").unwrap();
+        fs::hard_link(root.join("d/one.txt"), root.join("two.txt")).unwrap();
+        let e = copy(&root, &CopyReq { from: "d".into(), to: "d2".into() }).unwrap_err();
+        assert!(e.message.contains("one.txt"), "{}", e.message);
+        assert!(fs::symlink_metadata(root.join("d2")).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The pre-scan cannot see a change made after it ran; a failure mid-copy removes what this call made.
+    #[cfg(unix)]
+    #[test]
+    fn a_mid_copy_failure_removes_the_partial_destination_it_created() {
+        let root = scratch("copy-cleanup");
+        fs::create_dir_all(root.join("src/sub")).unwrap();
+        fs::write(root.join("src/a.txt"), "a").unwrap();
+        std::os::unix::fs::symlink("a.txt", root.join("src/sub/zz")).unwrap();
+        let dst = root.join("dst");
+        assert!(copy_cleaning_up(&root.join("src"), &dst).is_err());
+        assert!(fs::symlink_metadata(&dst).is_err(), "the half-built copy is gone");
+        // An entry this call did NOT create is never removed.
+        fs::create_dir(root.join("taken")).unwrap();
+        fs::write(root.join("taken/keep.txt"), "k").unwrap();
+        assert!(copy_cleaning_up(&root.join("src"), &root.join("taken")).is_err());
+        assert!(root.join("taken/keep.txt").exists(), "a pre-existing destination is untouched");
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn lr(path: &str) -> ListReq {
