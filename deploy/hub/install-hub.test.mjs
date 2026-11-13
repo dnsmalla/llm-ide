@@ -74,3 +74,18 @@ test("the hub env serves Host API read but never compose or tool approvals", () 
   assert.match(deploy, /\|LLMIDE_HOST_API_READ\|/, "the env allowlist accepts READ");
   assert.doesNotMatch(deploy, /LLMIDE_HOST_API_(COMPOSE|TOOL_APPROVALS)/);
 });
+
+test("the nginx vhost is embedded in the root helper and cannot be uploaded", () => {
+  const helper = read("llmide-deploy");
+  const template = read("llm-ide-hub.nginx.template");
+  assert.ok(helper.includes(template), "the helper embeds llm-ide-hub.nginx.template verbatim");
+  assert.doesNotMatch(helper, /\|llm-ide-hub\.nginx\|/, "the upload allowlist has no vhost");
+  assert.doesNotMatch(helper, /"\$STAGING\/llm-ide-hub\.nginx"\s*>/, "no staged vhost is installed");
+  assert.match(helper, /echo "helper=6"/);
+  assert.doesNotMatch(read("install-hub.sh"), /upload llm-ide-hub\.nginx/);
+});
+
+test("the helper is POSIX-shell clean", { skip }, () => {
+  const r = spawnSync("sh", ["-n", join(HUB, "llmide-deploy")], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+});

@@ -65,7 +65,7 @@ case "$stage" in
     [ -r "$CONF" ] || { echo "llmide-deploy: check: no env file yet" >&2; }
     systemctl is-active --quiet llmide-core 2>/dev/null && echo "service=active" || echo "service=inactive"
     printf 'version=%s\n' "$(cat /opt/llmide/current/VERSION 2>/dev/null || true)"
-    echo "helper=5"
+    echo "helper=6"
     echo "ok"
     ;;
 
@@ -73,7 +73,7 @@ case "$stage" in
     staging
     IFS= read -r name || exit 2
     case "$name" in
-      bundle.tar.gz|bundle.sha256|VERSION|llm-ide-hub.nginx|setup.html) ;;
+      bundle.tar.gz|bundle.sha256|VERSION|setup.html) ;;
       *) die "that file is not uploadable" ;;
     esac
     cat > "$STAGING/$name"
@@ -346,7 +346,117 @@ HOOK
       backup="/var/lib/llmide-deploy/llm-ide-hub.bak.$$"
       cp -p "$SITE" "$backup"
     fi
-    sed "s/__DOMAIN__/$DOMAIN/g" "$STAGING/llm-ide-hub.nginx" > "$SITE"
+    # The vhost is embedded in this root-owned helper (like the unit file), never read from staging: nginx opens its
+    # log files as root, so an uploaded vhost with `access_log /etc/cron.d/x` would turn this helper into root.
+    # The domain was validated by conf(); keep this text identical to deploy/hub/llm-ide-hub.nginx.template.
+    rm -f "$STAGING/llm-ide-hub.nginx"
+    sed "s/__DOMAIN__/$DOMAIN/g" > "$SITE" <<'LLMIDE_VHOST'
+# LLM-IDE hub vhost. __DOMAIN__ is replaced by the deploy; nothing else is templated.
+server {
+    listen 80;
+    server_name __DOMAIN__;
+    root /var/www/llmide-web;
+    location /.well-known/acme-challenge/ { try_files $uri =404; }
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name __DOMAIN__;
+
+    ssl_certificate     /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;
+    client_max_body_size 8m;
+
+    location = /host-api/v1 {
+        proxy_pass http://127.0.0.1:3016;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 3600s;
+        access_log off;
+    }
+
+    location /agent/v2/ {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
+    location = /setup {
+        root /var/www/llmide-web;
+        try_files /setup.html =404;
+        access_log off;
+        add_header Cache-Control "no-store" always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+    location /app/ {
+        alias /var/www/llmide-web/;
+        try_files $uri $uri/ /app/index.html;
+    }
+    location = /metrics { return 404; }
+    # R-034 #5: the desktop proxy forwards to this same vhost, so the team console's member and
+    # invite routes must reach the core here. ONLY these three shapes pass — the core gates them by
+    # JWT and team role (`/admin/*` is the `admin` action class). Every other /admin path stays 404
+    # at the edge, including the bare /admin and /admin/ itself.
+    location = /admin { return 404; }
+    location = /admin/members {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+    location /admin/members/ {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+    location = /admin/invites {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+    location /admin/invites/ {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+    location /admin/ { return 404; }
+
+    location / {
+        proxy_pass http://127.0.0.1:3457;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+}
+LLMIDE_VHOST
     chmod 0644 "$SITE"; chown root:root "$SITE"
     if ! nginx -t; then
       if [ -n "$backup" ]; then

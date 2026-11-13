@@ -39,13 +39,14 @@ pub const UNIT: &str = include_str!("../../../deploy/hub/llmide-core.service");
 pub const HELPER: &str = include_str!("../../../deploy/hub/llmide-deploy");
 #[cfg(test)]
 pub const BACKUP_TIMER: &str = include_str!("../../../deploy/hub/llmide-backup.timer");
+#[cfg(test)]
 pub const VHOST_TEMPLATE: &str = include_str!("../../../deploy/hub/llm-ide-hub.nginx.template");
 pub const SETUP_HTML: &str = include_str!("../../../deploy/hub/setup.html");
 
 pub const MIN_DISK_MB: u64 = 2048;
 /// Bumped when the helper's stage set/semantics changes; a mismatch reinstalls it.
 
-pub const HELPER_VERSION: &str = "5";
+pub const HELPER_VERSION: &str = "6";
 const MAX_DOMAIN: usize = 253;
 const PLAN_TTL_MS: u64 = 30 * 60 * 1000;
 
@@ -534,12 +535,9 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
                 }
             }
             "nginx" => {
-                let vhost = VHOST_TEMPLATE.replace("__DOMAIN__", &plan.domain);
-                match upload_staging(runner, target, "llm-ide-hub.nginx", vhost.as_bytes()) {
-                    Ok(()) => match upload_staging(runner, target, "setup.html", SETUP_HTML.as_bytes()) {
-                        Ok(()) => runner.run(target, &cmd, None),
-                        Err(e) => Err(e),
-                    },
+                // The vhost is embedded in the root-owned helper: an uploaded one would be installed as root.
+                match upload_staging(runner, target, "setup.html", SETUP_HTML.as_bytes()) {
+                    Ok(()) => runner.run(target, &cmd, None),
                     Err(e) => Err(e),
                 }
             }
@@ -866,6 +864,14 @@ mod tests {
         }
     }
     fn target() -> PreparedTarget { PreparedTarget { host: "hub.example.com".into(), port: 22, user: "deploy".into(), key_path: "/k".into() } }
+
+    #[test]
+    fn the_vhost_lives_in_the_root_helper_and_is_never_uploaded() {
+        let template = VHOST_TEMPLATE.replace("\r\n", "\n");
+        assert!(HELPER.replace("\r\n", "\n").contains(&template), "the helper must embed the vhost template verbatim");
+        assert!(!HELPER.contains("\"$STAGING/llm-ide-hub.nginx\" >"), "the helper must not install a staged vhost");
+        assert!(!HELPER.contains("bundle.sha256|VERSION|llm-ide-hub.nginx"), "the vhost is not an uploadable file");
+    }
 
     #[test]
     fn r034_a_keyscan_line_is_kept_only_when_it_matches_the_confirmed_fingerprint() {

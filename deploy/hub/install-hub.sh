@@ -24,7 +24,6 @@ umask 077
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 HELPER="$SCRIPT_DIR/llmide-deploy"
-VHOST="$SCRIPT_DIR/llm-ide-hub.nginx.template"
 SETUP="$SCRIPT_DIR/setup.html"
 
 DOMAIN=""
@@ -108,7 +107,7 @@ case "$VERSION" in
   *) die "cannot determine the bundle version; pass --version x.y.z" ;;
 esac
 
-for f in "$HELPER" "$VHOST" "$SETUP"; do
+for f in "$HELPER" "$SETUP"; do
   [ -f "$f" ] || die "missing installer asset: $f (run this script from the repo's deploy/hub folder)"
 done
 
@@ -245,7 +244,6 @@ printf '%s\n' "$VERSION" > "$TMP/VERSION"
 upload bundle.tar.gz "$BUNDLE"
 upload bundle.sha256 "$TMP/bundle.sha256"
 upload VERSION "$TMP/VERSION"
-upload llm-ide-hub.nginx "$VHOST"
 upload setup.html "$SETUP"
 
 say "install-hub: checking the certificate and switching the release"
