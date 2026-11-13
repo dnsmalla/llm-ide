@@ -113,3 +113,7 @@
 .loop-diff-line[data-kind="add"] { background: color-mix(in srgb, var(--tok-color-accent3) 16%, transparent); }
 .loop-diff-line[data-kind="del"] { background: color-mix(in srgb, var(--tok-color-danger) 16%, transparent); }
 .loop-diff-line[data-kind="hunk"] { color: var(--tok-color-text-muted); }
+
+/* Unsaved Loop: the Save action sits with Run so it is always in view. */
+.loop-save-btn[data-dirty="true"] { background: var(--tok-color-danger); border-color: var(--tok-color-danger); color: var(--tok-color-body); }
+.loop-save-btn[data-dirty="true"]:hover:not(:disabled) { background: var(--tok-color-danger); border-color: var(--tok-color-danger); filter: brightness(1.08); }
