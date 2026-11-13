@@ -4,3 +4,6 @@
 [submodule "mac/LocalPackages/graph-kit"]
 	path = graph-kit
 	url = https://github.com/dnsmalla/graph-kit.git
+[submodule "system-tests"]
+	path = system-tests
+	url = https://github.com/dnsmalla/llm-ide_test.git
