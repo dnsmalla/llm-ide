@@ -1,7 +1,7 @@
 // Native Auto Tasks screen. Task settings are per project (tasks/store.ts); the schedule runs in the one desktop scheduler
 // (tasks/scheduler-host.ts, started by the shell), so it fires while any section is open. This page runs tasks on demand.
 import { notifyTask } from "../../shell/notify/notify";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { SectionProps } from "@llmide/screens/shell";
 import { shellBus } from "../../shell/bus";
 import { core } from "../../shell/runtime";
@@ -22,6 +22,7 @@ import { loadTaskState, saveTaskState, takeTaskNotices, type TaskConfig, type Ta
 import { appendTaskRun, readTaskRuns, runLabel, TASK_RUNS_EVENT, type TaskRunRecord } from "../../tasks/run-history.ts";
 import { SKIP_CODES } from "../../tasks/schedule.ts";
 import { releaseAutoTask, tryAcquireAutoTask } from "./lock.ts";
+import { getScheduledRun, stopScheduledRun, subscribeScheduledRun } from "./scheduled-run.ts";
 import { appendCustomRun, CUSTOM_RUNS_EVENT, readCustomRuns, type CustomTaskRun } from "./custom-schedule.ts";
 import "./native-autotasks.css";
 
@@ -69,6 +70,8 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
   const runAbortRef = useRef<AbortController | null>(null);
   const [customDeleteOpen, setCustomDeleteOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  // A cron-fired task holds the shared lock without any state on this page; show it and let the user stop it.
+  const scheduledRun = useSyncExternalStore(subscribeScheduledRun, getScheduledRun, getScheduledRun);
   const runningRef = useRef(false);
   const runAllRef = useRef(false);
   const [log, setLog] = useState<string[]>([]);
@@ -364,6 +367,7 @@ export function NativeAutoTasksScreen({ projectRoot }: SectionProps): ReactNode 
         </header>
         <div className="atn-stars" aria-label="Task rating">★ ★ ★ ★ ☆</div>
         <div className="atn-subtitle"><span className="atn-hint" role="status">◷ {scheduleStatusLine(state.masterEnabled, config, selected, new Date(), taskEnv)}{desktopRunnable(selected, taskEnv) && config.scheduleActive && config.enabled && state.masterEnabled ? ` (${describeCron(config.cron)})` : ""}</span><span className="atn-spacer" /><label className="atn-inline"><input type="checkbox" checked={config.enabled} disabled={!desktopRunnable(selected, taskEnv)} onChange={(e) => update({ enabled: e.target.checked })} /> Active</label>{isSchedulable(selected) ? <button type="button" className="atn-btn" onClick={() => { setCronDraft(config.cron); setScheduleActiveDraft(config.scheduleActive); setScheduleError(false); setScheduleOpen(true); }}>Edit</button> : null}</div>
+        {scheduledRun ? <p className="atn-notice" role="status">Scheduled task running: {scheduledRun.label} <button type="button" className="atn-btn" onClick={() => { stopScheduledRun(); setNotice("Stopping the scheduled task…"); }}>■ Stop</button></p> : null}
         {notice ? <p className="atn-notice" role="status">{notice}</p> : null}
 
         {!desktopRunnable(selected, taskEnv) ? (

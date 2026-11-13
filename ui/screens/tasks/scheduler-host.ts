@@ -8,6 +8,7 @@ import { createHostFs } from "../explorer/fs";
 import { notifyTask } from "../shell/notify/notify";
 import { tryAcquireAutoTask, releaseAutoTask } from "../autotasks/native/lock.ts";
 import { runCustomTask } from "../autotasks/native/run-custom.ts";
+import { beginScheduledRun, endScheduledRun } from "../autotasks/native/scheduled-run.ts";
 import { appendCustomRun } from "../autotasks/native/custom-schedule.ts";
 import { normaliseProjectRoot, type CustomAutoTask } from "../autotasks/native/custom.ts";
 import { liveRuns } from "../loop/native/run-manager.ts";
@@ -17,8 +18,9 @@ import { hasLinkedRepo, runRegisteredTask } from "./run-registered.ts";
 import { appendTaskRun } from "./run-history.ts";
 import { startTaskScheduler, type ScheduledItem, type ScheduledOutcome, type ScheduledRecord } from "./schedule.ts";
 
-async function runCustom(task: CustomAutoTask, root: string): Promise<ScheduledOutcome> {
+async function runCustom(task: CustomAutoTask, root: string, signal: AbortSignal): Promise<ScheduledOutcome> {
   const result = await runCustomTask(task, {
+    signal,
     request: (path, init) => core.request(path, init as never),
     workRoot: () => invokeHost<string>("loop_work_root"),
     // A scheduled task can outlive a project switch: both calls name the project it started in, and the host refuses
@@ -44,8 +46,8 @@ function record(rec: ScheduledRecord): void {
   if (rec.status !== "skipped") void notifyTask("autotask", ok);
 }
 
-async function run(item: ScheduledItem, root: string): Promise<ScheduledOutcome> {
-  if (item.kind === "custom") return runCustom(item.task, root);
+async function runItem(item: ScheduledItem, root: string, signal: AbortSignal): Promise<ScheduledOutcome> {
+  if (item.kind === "custom") return runCustom(item.task, root, signal);
   const config = loadTaskState(root).configs[item.id];
   return runRegisteredTask(item.id, {
     projectRoot: root,
@@ -53,8 +55,16 @@ async function run(item: ScheduledItem, root: string): Promise<ScheduledOutcome>
     scheduled: true,
     core,
     fs: createHostFs(),
+    signal,
     log: () => undefined,
   });
+}
+
+/** Publishes the run to the Auto Tasks page (what is running, and Stop) for as long as it holds the shared lock. */
+async function run(item: ScheduledItem, root: string): Promise<ScheduledOutcome> {
+  const label = item.kind === "custom" ? item.task.name : taskById(item.id)?.label ?? item.id;
+  const abort = beginScheduledRun(label);
+  try { return await runItem(item, root, abort.signal); } finally { endScheduledRun(abort); }
 }
 
 /** Starts the scheduler for `projectRoot`; the returned function stops it. */
