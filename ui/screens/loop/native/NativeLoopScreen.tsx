@@ -122,6 +122,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [checkingEnv, setCheckingEnv] = useState(false);
   const [envVersions, setEnvVersions] = useState<{ python: string | null; node: string | null; git: string | null } | null>(null);
   const [runLog, setRunLog] = useState<string[]>([]);
+  // The live log follows new lines while the reader is at its bottom; scrolling up to read stops the follow.
+  const logRef = useRef<HTMLPreElement | null>(null);
+  const followLogRef = useRef(true);
+  useEffect(() => {
+    if (runLog.length === 0) followLogRef.current = true; // a cleared log starts following again
+    const el = logRef.current;
+    if (el && followLogRef.current) el.scrollTop = el.scrollHeight;
+  }, [runLog]);
   const [runningStage, setRunningStage] = useState(false);
   const runningStageRef = useRef(false);
   runningStageRef.current = runningStage;
@@ -163,6 +171,13 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
   const [workRoot, setWorkRoot] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
+  // Back from a past run, the live log is mounted again at its top: show its end and follow it.
+  useEffect(() => {
+    if (selectedRun !== null) return;
+    followLogRef.current = true;
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [selectedRun]);
   const [runRecord, setRunRecord] = useState<Record<string, unknown> | null>(null);
   const [runRecordLoaded, setRunRecordLoaded] = useState(false);
   /** The run whose worktree is open in the Review and Ship panel. */
@@ -1133,7 +1148,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       <aside className="loop-log" aria-label="Run log">
         <div className="loop-pane-head"><span>Run log</span><span className="loop-spacer" /><button type="button" className="loop-native-hint loop-clear" onClick={() => { const text = runLog.join("\n"); if (text) void navigator.clipboard?.writeText(text).then(() => setNotice("Run log copied.")).catch(() => setNotice("Could not copy the run log.")); }}>Copy</button><button type="button" className="loop-native-hint loop-clear" onClick={() => setRunLog([])}>Clear</button></div>
         {selectedRun ? (
-          <div className="loop-past-run">
+          <div className="loop-past-run loop-log-body" tabIndex={0} aria-label="Past run details">
             <div className="loop-inline"><h3>{selectedRun.loopName}</h3><span className="loop-spacer" />{runRecord ? <button type="button" className="loop-btn" onClick={() => revealRunRecord(selectedRun)}>Reveal JSON</button> : null}<button type="button" className="loop-btn" onClick={closeRun}>Back</button></div>
             <p className="loop-native-hint">{selectedRun.statusCode} · {new Date(selectedRun.startedAt).toLocaleString()} · {selectedRun.iterationsUsed} iteration{selectedRun.iterationsUsed === 1 ? "" : "s"}</p>
             <p>{selectedRun.statusSummary}</p>
@@ -1157,7 +1172,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
               ) : null}
             </>}
           </div>
-        ) : runLog.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <pre className="loop-run-log">{runLog.join("\n")}</pre>}
+        ) : runLog.length === 0 ? <p className="loop-native-hint">No runs yet.</p> : <pre ref={logRef} className="loop-run-log loop-log-body" tabIndex={0} aria-label="Run log output" onScroll={(e) => { const el = e.currentTarget; followLogRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }}>{runLog.join("\n")}</pre>}
       </aside>
     </div>
   );

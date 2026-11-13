@@ -13,6 +13,10 @@
 .loop-pane, .loop-log { display: flex; flex-direction: column; min-height: 0; border-right: var(--lp-hair); background: var(--tok-color-surface); }
 .loop-log { border-right: 0; border-left: var(--lp-hair); padding: 0 12px; }
 .loop-log .loop-pane-head { margin: 0 -12px; }
+/* The log body (live output or a past run) fills the panel and scrolls on its own; the panel head stays put. */
+.loop-log { overflow: hidden; }
+.loop-log .loop-log-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.loop-log .loop-log-body:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: -2px; }
 .loop-pane-head { display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0 14px; border-bottom: var(--lp-hair); font-size: var(--lp-fs-ui); font-weight: 700; color: var(--tok-color-text); }
 .loop-pane-sub { margin-left: auto; max-width: 60%; font-weight: 500; font-size: var(--lp-fs-small); color: var(--tok-color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .loop-plus { margin-left: auto; font-size: 14px; }
