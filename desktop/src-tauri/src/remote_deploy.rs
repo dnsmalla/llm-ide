@@ -608,6 +608,9 @@ pub async fn remote_deploy_bootstrap(target: SshTarget) -> Result<Bootstrap, FsE
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         require_confirmed_host_key(&prepared)?;
+        if !crate::confirm::ask("Prepare the server for the hub?", &format!("Install the deploy helper and a sudoers entry on {} as root?", target.host), "Prepare server", true) {
+            return Err(herr("cancelled", "the server preparation was cancelled at the host confirmation"));
+        }
         bootstrap_with(&SystemDeploy, &prepared)
     }).await.map_err(|e| herr("internal", format!("the bootstrap did not finish: {e}")))?
 }
@@ -766,6 +769,9 @@ pub async fn remote_deploy_rollback(target: SshTarget) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         require_confirmed_host_key(&prepared)?;
+        if !crate::confirm::ask("Roll back the LLM-IDE hub?", &format!("Switch {} back to its previous release?", target.host), "Roll back", true) {
+            return Err(herr("cancelled", "the rollback was cancelled at the host confirmation"));
+        }
         let out = SystemDeploy.run(&prepared, &stage_command("rollback").unwrap(), None)?;
         if out.code != Some(0) { return Err(herr("rollback_failed", "there is no previous release to restore")); }
         Ok(())
