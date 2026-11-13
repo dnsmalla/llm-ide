@@ -1210,10 +1210,10 @@ pub async fn fs_open_pdf(path: String) -> R<()> {
         if p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("pdf")) != Some(true) {
             return err("invalid_path", "only PDF files can be opened in the system viewer");
         }
-        let mut cmd = if cfg!(target_os = "macos") { std::process::Command::new("open") }
-            else if cfg!(windows) { std::process::Command::new("explorer.exe") }
-            else { std::process::Command::new("xdg-open") };
-        cmd.arg(&p).spawn().map_err(|e| io_err("cannot open the PDF", e))?;
+        // os_open::spawn scrubs the environment (the host holds secrets) and reaps the child; a bare
+        // Command::spawn did neither. `p` is canonical and absolute, so it cannot read as an option.
+        let inv = crate::os_open::open_url_invocation(crate::fsutil::current_os(), &p.to_string_lossy());
+        crate::os_open::spawn(&inv).map_err(|e| FsError { code: e.code, message: e.message })?;
         Ok(())
     }).await
 }

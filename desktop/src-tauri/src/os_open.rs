@@ -250,7 +250,7 @@ pub fn reveal_invocation(os: Os, abs: &Path, is_root: bool) -> Result<Invocation
 
 /// Starts the opener detached: scrubbed environment, no stdio, reaped on a thread. A failed
 /// spawn is an error; the opener's own exit status is not awaited.
-fn spawn(inv: &Invocation) -> Result<(), FsError> {
+pub(crate) fn spawn(inv: &Invocation) -> Result<(), FsError> {
     let mut c = Command::new(&inv.program);
     c.env_clear().envs(crate::pty::scrubbed_env(std::env::vars())).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(windows)]
