@@ -8,10 +8,11 @@ import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { guardedAgentCall, type AgentWrites, type GuardedCallOutcome } from "./agent-call.ts";
 import { evaluateArtifact } from "./artifact.ts";
 import { runCodeGraph } from "./codegraph.ts";
-import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, agentRunBody, guardedPaths, isFactoryLoop, reviewDiffSection } from "./factory.ts";
+import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, REFACTOR_MOVE_SKILLS, agentRunBody, guardedPaths, isFactoryLoop, reviewDiffSection } from "./factory.ts";
+import { importOnlyFiles } from "./import-only.ts";
 import { registrySource, stagePromptText } from "./default-stage.ts";
 import type { LoopDefinition, LoopStage } from "./model.ts";
-import { checkWrites } from "./protected.ts";
+import { checkWrites, isTestFileName } from "./protected.ts";
 import { runRegression } from "./regression.ts";
 import type { RunnerDeps, StageOutcome, StageRunResult } from "./runner.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
@@ -71,6 +72,54 @@ function guardProtected(ctx: StageExecContext, paths: readonly string[], target:
     async (p, c) => { await ctx.host("loop_revert_paths", { paths: p, created: c, ...changedPathArgs(ctx.runId, ctx.projectRoot) }); },
     (line) => ctx.log(line),
   );
+}
+
+/**
+ * The `- Files:` entries of the batch a stage works on. Refactor Apply works on the first `(status: todo)` batch; Conform
+ * runs after Apply marked that batch done, so it works on the last `(status: done)` one (batches are applied in plan order,
+ * so a later todo batch is never Conform's). A missing or unreadable plan names none.
+ */
+async function batchFileList(ctx: StageExecContext, which: "todo" | "done"): Promise<string[]> {
+  const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
+  const planPath = prefix ? `${prefix}/llm-doc/loop/refactor/REFACTOR.md` : "llm-doc/loop/refactor/REFACTOR.md";
+  let text: string | null;
+  try {
+    text = (await ctx.fs.read(planPath, 8_000_000)).text;
+  } catch {
+    return [];
+  }
+  if (typeof text !== "string") return [];
+  const lines = text.split("\n");
+  const heads = lines.flatMap((l, i) => (/^### R\d+\b/.test(l) ? [i] : []));
+  const at = which === "todo"
+    ? heads.find((i) => /\(status:\s*todo\)/.test(lines[i]))
+    : heads.filter((i) => /\(status:\s*done\)/.test(lines[i])).pop();
+  if (at === undefined) return [];
+  let end = at + 1;
+  while (end < lines.length && !lines[end].startsWith("### ")) end++;
+  return lines.slice(at + 1, end).flatMap((l) => {
+    const m = /^\s*-\s*Files:\s*(.*)$/.exec(l);
+    return m ? m[1].replace(/`/g, "").split(/[\s,]+/).filter((f) => f !== "") : [];
+  });
+}
+
+/**
+ * Existing test files a refactor move changed only by import lines, read from the worktree diff. Worktree runs only; any
+ * error or a truncated diff keeps none of them, so the guard judges (and reverts) them as before.
+ */
+async function importOnlyTests(ctx: StageExecContext, target: LoopDefinition, s: LoopStage, paths: readonly string[], created: readonly string[], allowed: readonly string[]): Promise<string[]> {
+  if (ctx.runId === null || isFactoryLoop(target) || !s.skillId || !REFACTOR_MOVE_SKILLS.has(s.skillId)) return [];
+  const candidates = paths.filter((p) => !created.includes(p) && isTestFileName(p));
+  if (candidates.length === 0) return [];
+  try {
+    const d = await ctx.host<{ text?: unknown; truncated?: unknown }>("loop_worktree_diff", { runId: ctx.runId });
+    if (d.truncated === true || typeof d.text !== "string") return [];
+    const kept = importOnlyFiles(d.text, candidates, allowed);
+    if (kept.length) ctx.log(`kept import-only test edits: ${kept.join(", ")}`);
+    return kept;
+  } catch {
+    return [];
+  }
 }
 
 /** The reason the run must stop after one agent call, or null when its writes were acceptable. */
@@ -159,6 +208,10 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
     }
   }
   const before = await dirtyBefore(ctx);
+  // The batch's file list as planned, read BEFORE the agent runs: apply edits the plan itself (it marks the batch done),
+  // so a list read afterwards could name a module the agent added to it.
+  const moves = ctx.runId !== null && !isFactoryLoop(target) && s.skillId !== null && REFACTOR_MOVE_SKILLS.has(s.skillId);
+  const plannedFiles = moves ? await batchFileList(ctx, s.skillId === "skills/refactor-apply" ? "todo" : "done") : [];
   // Only Intake also reads the project's llm-doc/ (a split layout keeps it outside the run's worktree).
   const llmDocExists = s.skillId === FACTORY_INTAKE_SKILL && ctx.projectRoot ? await ctx.fs.list("llm-doc").then(() => true, () => false) : false;
   const g = await guardedAgentCall<AgentRunReply>({
@@ -168,7 +221,7 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
       signal: ctx.signal,
     }),
     changedNow: () => changedPathsNow(ctx),
-    check: (paths, b, created) => guardProtected(ctx, guardedPaths(target, s, paths), target, b, created),
+    check: async (paths, b, created) => guardProtected(ctx, guardedPaths(target, s, paths, created, await importOnlyTests(ctx, target, s, paths, created, plannedFiles)), target, b, created),
   });
   const stop = stopReason(g);
   if (g.result === null || stop !== null) return haltOn(ctx, halt, g.violation, stop);
@@ -189,7 +242,8 @@ async function runLedger(ctx: StageExecContext, prior: Prior, prefix: string): P
   const lastTest = [...prior].reverse().find((o) => o.stage.kind === "shellCommand" && /test/i.test(o.stage.name));
   if (!lastTest) return { ok: false, output: "the ledger stage needs a Test stage output earlier in this run" };
   const parsed = parseTestResults(lastTest.output);
-  if (parsed.failing.length === 0 && parsed.passing.length === 0) return { ok: false, output: "no test results could be parsed from the Test stage output" };
+  // Unparseable output is not a failing test run: the Test stage decides pass/fail, and a ledger with nothing in it would mislead.
+  if (parsed.failing.length === 0 && parsed.passing.length === 0) return { ok: true, output: "no per-test results in the Test output (the Test stage itself decides pass/fail); the ledger was not updated" };
   const path = `${prefix ? `${prefix}/` : ""}system/loop/test/ledger.json`;
   const previous = await readLedger(ctx.fs, path);
   const diff = ledgerDiff(previous, parsed, lastTest.ok);
@@ -206,7 +260,7 @@ async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string): 
     return { ok: structure.status === "ok", output: [`${structure.roots.length} test root(s)`, ...structure.roots.map((r) => `${r.packageDir || "."}: ${r.runner} · ${r.command}`), ...structure.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
   }
   // graph_generate("code") writes this file; a missing or non-graph file falls back to file matching.
-  const map = await buildTestMap(ctx.fs, prefix, structure, "system/graph/graph-code.json");
+  const map = await buildTestMap(ctx.fs, prefix, structure, graphPathFor(ctx.runId));
   const writes = await writeTestMap(ctx.fs, prefix, map);
   return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
 }
@@ -218,11 +272,15 @@ async function runTestPruneStage(ctx: StageExecContext, prefix: string): Promise
   return { ok: true, output: `${findings.length} finding(s); report only at ${path}` };
 }
 
+/** A worktree run's graph folder, so its graph never touches the project's main graph or the MR diff; null = the project's. */
+const runGraphOut = (runId: string | null): string | null => (runId !== null ? `system/loop-runs/${runId}/graph` : null);
+/** The code graph a stage reads: the run's own snapshot in a worktree run, else the project's. */
+const graphPathFor = (runId: string | null): string => `${runGraphOut(runId) ?? "system/graph"}/graph-code.json`;
+
 async function runGraph(ctx: StageExecContext, s: LoopStage, prefix: string): Promise<StageRunResult> {
   if (s.graphOp !== "snapshot" && s.graphOp !== "verify") return { ok: false, output: "this graph stage has no operation chosen" };
-  // A worktree run keeps its graph in its own system/loop-runs folder: the project's main graph and the MR diff stay untouched.
-  const out = ctx.runId !== null ? `system/loop-runs/${ctx.runId}/graph` : null;
-  const graphPath = out ? `${out}/graph-code.json` : "system/graph/graph-code.json";
+  const out = runGraphOut(ctx.runId);
+  const graphPath = graphPathFor(ctx.runId);
   const before = out ? `${out}/before.json` : `${prefix ? `${prefix}/` : ""}system/loop/refactor/graph/before.json`;
   const r = await runCodeGraph(ctx.fs, s.graphOp, graphPath, before, async () => {
     await ctx.host("graph_generate", { mode: "code", target: prefix || undefined, ...(out ? { out } : {}) });
@@ -232,7 +290,9 @@ async function runGraph(ctx: StageExecContext, s: LoopStage, prefix: string): Pr
 
 async function runArtifact(ctx: StageExecContext, s: LoopStage, target: LoopDefinition, prefix: string): Promise<StageRunResult> {
   if (!s.check) return { ok: false, output: "This artifact stage has no check configuration." };
-  const r = await evaluateArtifact(ctx.fs, s.check, target.config.stages, { repoPrefix: prefix, projectPrefix: "" });
+  // A worktree run must not accept a stale file from the main tree, so the project-root fallback is off there.
+  const check = ctx.runId !== null ? { ...s.check, projectRootFallback: false } : s.check;
+  const r = await evaluateArtifact(ctx.fs, check, target.config.stages, { repoPrefix: prefix, projectPrefix: "" });
   return { ok: r.passed, output: r.passed ? "Artifact check passed." : r.failures.join("\n") };
 }
 
@@ -259,12 +319,12 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
   const g: GuardedCallOutcome<AgentRunReply> = await guardedAgentCall<AgentRunReply>({
     before,
     call: () => ctx.core.request<AgentRunReply>("/kb/loop/agent-run", {
-      method: "POST", body: { message: message.join("\n\n"), repoRoot: ctx.runRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined, ...(isFactoryLoop(target) ? { denyWrite: ".factory" as const } : {}) },
+      method: "POST", body: { message: message.join("\n\n"), skills: [], repoRoot: ctx.runRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined, ...(isFactoryLoop(target) ? { denyWrite: ".factory" as const } : {}) },
       signal: ctx.signal,
     }),
     changedNow: () => changedPathsNow(ctx),
     // A repair gets no Implement exemption (stage = null): it can never edit the verifier.
-    check: (paths, b, created) => guardProtected(ctx, guardedPaths(target, null, paths), target, b, created),
+    check: (paths, b, created) => guardProtected(ctx, guardedPaths(target, null, paths, created), target, b, created),
   });
   const r: AgentRunReply = g.result ?? {};
   for (const line of [`↻ repair ${s.name}`, r.reply ?? (g.error !== null ? `(agent call failed: ${g.error})` : "(no reply)"), ...(g.writes.length ? [`changed: ${g.writes.join(", ")}`] : []), ""]) ctx.log(line);
@@ -278,7 +338,15 @@ export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pi
   const halt: HaltState = { reason: null, isError: false };
   return {
     async runStage(s, prior) {
-      const r = await runOneStage(ctx, s, loop, prior, halt);
+      let r: StageRunResult;
+      try {
+        r = await runOneStage(ctx, s, loop, prior, halt);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        r = { ok: false, output: `${s.name} failed: ${message}` };
+        // An infrastructure throw is not a verdict on the code: end the run as an error, before any repair agent is paid.
+        if (!halt.reason) { halt.reason = `${s.name} failed: ${message}; the run stopped`; halt.isError = true; }
+      }
       ctx.log(`$ ${s.name}`);
       ctx.log(r.output);
       ctx.log("");

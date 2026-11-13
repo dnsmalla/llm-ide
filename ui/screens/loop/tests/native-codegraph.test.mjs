@@ -75,3 +75,16 @@ test("cycleCount counts SCCs and self-loops", async () => {
   assert.equal(cycleCount([{ from: "a", to: "a" }]), 1);
   assert.equal(cycleCount([{ from: "a", to: "b" }, { from: "b", to: "c" }]), 0);
 });
+
+test("F1: a later run replaces the old baseline in the main tree instead of failing", async () => {
+  const files = { [G]: kit(["a.py"], []) };
+  const store = {
+    ...mem(files),
+    async read(path) { if (!(path in files)) throw Object.assign(new Error("not found"), { code: "not_found" }); return { status: "ok", text: files[path] }; },
+    async write(path, text, opts) { if (path in files && !opts.force) throw Object.assign(new Error("the file already exists"), { code: "exists" }); files[path] = text; },
+  };
+  assert.equal((await runCodeGraph(store, "snapshot", G, B)).passed, true);
+  files[G] = kit(["a.py", "b.py"], []);
+  assert.equal((await runCodeGraph(store, "snapshot", G, B)).passed, true);
+  assert.equal(files[B], files[G]);
+});

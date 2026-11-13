@@ -85,10 +85,12 @@ export async function runRegression(fs: RegressionFs, faultsRoot: string, deps: 
 /** Marks a fixed fault open again after a run exhausted repair. Keeps the notes body untouched. */
 export async function reopenFault(fs: RegressionFs & { write: FsApi["write"] }, rel: string): Promise<boolean> {
   let text: string;
-  try { const r = await fs.read(rel, 2_000_000); if (r.status !== "ok" || !r.text) return false; text = r.text; } catch { return false; }
+  let hash: string | null;
+  try { const r = await fs.read(rel, 2_000_000); if (r.status !== "ok" || !r.text) return false; text = r.text; hash = r.hash; } catch { return false; }
   if (!/^status:\s*fixed\s*$/m.test(text)) return false;
   const next = text.replace(/^status:\s*fixed\s*$/m, "status: open");
-  try { await fs.write(rel, next, { expected_hash: null }); return true; } catch { return false; }
+  // The host refuses a write over a file edited since this read, so a changed fault is never clobbered.
+  try { await fs.write(rel, next, { expected_hash: hash }); return true; } catch { return false; }
 }
 
 /** The fault paths a failed sweep names (`system/faults/a.md: verify failed`), each once, in output order. */

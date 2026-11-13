@@ -117,3 +117,34 @@ test("a verdict path that trims to nothing fails", async () => {
     assert.equal(r.passed, false, p);
   }
 });
+
+/** The host's read and list rules: a read over maxBytes is `too_large` (no text), a missing path throws `not_found`. */
+function hostFs(files) {
+  const base = mem(files);
+  return {
+    async read(path, maxBytes) {
+      if (!(path in files)) throw Object.assign(new Error(`not found: ${path}`), { code: "not_found" });
+      if (Buffer.byteLength(files[path]) > maxBytes) return { status: "too_large", text: null };
+      return { status: "ok", text: files[path] };
+    },
+    list: base.list,
+  };
+}
+
+test("F3: a real file larger than the 1-byte probe still satisfies required paths", async () => {
+  const fs = hostFs({ "docs/a.md": "# Plan\n" + "x".repeat(200) });
+  assert.deepEqual((await evaluateArtifact(fs, { requiredPaths: ["docs/a.md"] }, [], ROOTS)).failures, []);
+  assert.deepEqual((await evaluateArtifact(fs, { requiredPaths: ["docs/none.md"] }, [], ROOTS)).failures, ["missing: docs/none.md"]);
+});
+
+test("F3: a cited path in a large report resolves through the same existence probe", async () => {
+  const report = { "docs/a.md": "see `src/app.ts:1`\n" + "x".repeat(200) };
+  assert.deepEqual((await evaluateArtifact(hostFs({ ...report, "src/app.ts": "x" }), { citationGlobs: ["docs/**/*.md"] }, [], ROOTS)).failures, []);
+  const bad = await evaluateArtifact(hostFs(report), { citationGlobs: ["docs/**/*.md"] }, [], ROOTS);
+  assert.deepEqual(bad.failures, ["docs/a.md: citation does not resolve: `src/app.ts:1`"]);
+});
+
+test("F3: a binary file counts as present", async () => {
+  const fs = { async read(path) { if (path !== "img/logo.png") throw Object.assign(new Error("not found"), { code: "not_found" }); return { status: "binary", text: null }; }, async list() { return { entries: [] }; } };
+  assert.deepEqual((await evaluateArtifact(fs, { requiredPaths: ["img/logo.png"] }, [], ROOTS)).failures, []);
+});

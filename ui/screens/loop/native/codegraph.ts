@@ -81,7 +81,7 @@ export async function runCodeGraph(fs: CodeGraphFs, op: "snapshot" | "verify", g
     const raw = await fs.read(graphPath, 20_000_000);
     if (raw.status !== "ok" || !raw.text) return { passed: false, output: "the graph file could not be read" };
     await ensureDir(fs, beforePath);
-    await fs.write(beforePath, raw.text, { expected_hash: null });
+    await fs.write(beforePath, raw.text, { expected_hash: null, force: true });
     return { passed: true, output: `snapshot · ${current.files} file(s), ${current.nodes} node(s), ${current.edges} edge(s), ${current.cycles} cycle(s), ${current.over500} over 500 lines → ${beforePath}` };
   }
   const before = await readShape(fs, beforePath);

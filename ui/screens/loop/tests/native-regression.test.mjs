@@ -41,3 +41,34 @@ test("a failed sweep's fault paths are read from its output, one per fault", () 
   assert.deepEqual(faultPathsFromOutput(output), ["system/faults/a.md", "system/faults/b.md"]);
   assert.deepEqual(faultPathsFromOutput(""), []);
 });
+
+// The host's hash is the file's text length here; a write whose expected_hash is not the current one is a conflict.
+const hashOf = (t) => `h${t.length}`;
+const faultFs = (files, { editAfterRead = null } = {}) => ({
+  async read(path) {
+    if (!(path in files)) throw Object.assign(new Error("not found"), { code: "not_found" });
+    const r = { status: "ok", text: files[path], hash: hashOf(files[path]) };
+    if (editAfterRead) files[path] += editAfterRead;
+    return r;
+  },
+  async write(path, text, opts) {
+    if (opts.expected_hash !== hashOf(files[path])) throw Object.assign(new Error("the file changed on disk since it was opened"), { code: "conflict" });
+    files[path] = text;
+  },
+});
+
+test("F1: reopening a fixed fault writes over the version it read, with that read's hash", async () => {
+  const original = '---\nprompt: "Why?"\nresponse: "Because."\nstatus: fixed\n---\nnotes\n';
+  const files = { "system/faults/a.md": original };
+  assert.equal(await reopenFault(faultFs(files), "system/faults/a.md"), true);
+  assert.match(files["system/faults/a.md"], /^status: open$/m);
+  assert.match(files["system/faults/a.md"], /notes/);
+  assert.equal(await reopenFault(faultFs(files), "system/faults/a.md"), false, "an open fault is not reopened again");
+});
+
+test("F1: a fault edited between the read and the write is not clobbered", async () => {
+  const files = { "system/faults/a.md": '---\nprompt: "Why?"\nresponse: "Because."\nstatus: fixed\n---\nnotes\n' };
+  assert.equal(await reopenFault(faultFs(files, { editAfterRead: "a colleague's note\n" }), "system/faults/a.md"), false);
+  assert.match(files["system/faults/a.md"], /status: fixed/);
+  assert.match(files["system/faults/a.md"], /a colleague's note/);
+});

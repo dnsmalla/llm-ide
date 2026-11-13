@@ -83,3 +83,95 @@ test("test map reads canonical GraphKit files/functions", async () => {
   assert.equal(map.testedFunctions, 1);
   assert.equal(map.entries[0].fanIn, 1);
 });
+
+/** A fake fs with the host's write and read rules: create-only unless `force`, a too-large read is a status, a missing read throws. */
+function hostFs(files = {}) {
+  return {
+    files,
+    async read(path, maxBytes) {
+      if (!(path in files)) throw Object.assign(new Error(`not found: ${path}`), { code: "not_found" });
+      if (Buffer.byteLength(files[path]) > maxBytes) return { status: "too_large", text: null };
+      return { status: "ok", text: files[path], hash: "h" };
+    },
+    async write(path, text, opts) {
+      if (path in files && !opts.force) throw Object.assign(new Error("the file already exists"), { code: "exists" });
+      files[path] = text;
+      return { path, size: text.length, mtime_ms: 0, hash: "h" };
+    },
+    async create() {},
+    async list() { return { entries: [] }; },
+  };
+}
+
+test("F1: regenerated TEST-STRUCTURE, TEST-MAP and ledger overwrite the previous run's files", async () => {
+  const fs = hostFs();
+  const structure = { generatedAt: "", status: "missing", notes: [], roots: [] };
+  await m.writeTestStructure(fs, "", structure);
+  await m.writeTestStructure(fs, "", { ...structure, notes: ["second"] });
+  assert.match(fs.files["system/loop/test/TEST-STRUCTURE.json"], /second/);
+  const map = { generatedAt: "", source: "files", entries: [], untestedFunctions: 0, testedFunctions: 0, untestedFiles: 0 };
+  await m.writeTestMap(fs, "", map);
+  await m.writeTestMap(fs, "", { ...map, untestedFiles: 2 });
+  assert.match(fs.files["system/loop/test/TEST-MAP.json"], /"untestedFiles": 2/);
+  await m.writeLedger(fs, "system/loop/test/ledger.json", { runId: "a", recordedAt: "", failing: [], passing: [] });
+  await m.writeLedger(fs, "system/loop/test/ledger.json", { runId: "b", recordedAt: "", failing: ["x"], passing: [] });
+  assert.match(fs.files["system/loop/test/ledger.json"], /"runId": "b"/);
+});
+
+test("F8: pytest -rA and -v lines and node:test spec lines are parsed", () => {
+  const rA = "PASSED tests/a.py::test_add\nFAILED tests/a.py::test_sub - assert 1 == 2\nFAILED tests/a.py::test_div[0] [ 50%]\n";
+  const parsedA = m.parseTestResults(rA);
+  assert.deepEqual(parsedA.passing, ["tests/a.py::test_add"]);
+  assert.deepEqual(parsedA.failing, ["tests/a.py::test_div[0]", "tests/a.py::test_sub"]);
+  const verbose = "tests/b.py::test_one PASSED                    [ 33%]\ntests/b.py::test_two FAILED                    [ 66%]\n";
+  const parsedV = m.parseTestResults(verbose);
+  assert.deepEqual(parsedV.passing, ["tests/b.py::test_one"]);
+  assert.deepEqual(parsedV.failing, ["tests/b.py::test_two"]);
+  const spec = "✔ adds numbers (1.2ms)\n✖ subtracts numbers (0.4ms)\n✖ divides (3ms)\n";
+  const parsedS = m.parseTestResults(spec);
+  assert.deepEqual(parsedS.passing, ["adds numbers"]);
+  assert.deepEqual(parsedS.failing, ["divides", "subtracts numbers"]);
+  assert.deepEqual(m.parseTestResults("no results here\n"), { failing: [], passing: [] });
+});
+
+test("R4: pytest ERROR lines and jest ● failure headers count as failing, not passing", () => {
+  const shortSummary = "ERROR tests/a.py::test_setup - fixture 'db' not found\nFAILED tests/a.py::test_sub - assert 1 == 2\n";
+  assert.deepEqual(m.parseTestResults(shortSummary), { failing: ["tests/a.py::test_setup", "tests/a.py::test_sub"], passing: [] });
+  const verbose = "tests/b.py::test_one PASSED                    [ 33%]\ntests/b.py::test_two ERROR                   [ 66%]\n";
+  assert.deepEqual(m.parseTestResults(verbose), { failing: ["tests/b.py::test_two"], passing: ["tests/b.py::test_one"] });
+  const jest = "  ✓ adds numbers (2 ms)\n  ● math › divides by zero\n";
+  assert.deepEqual(m.parseTestResults(jest), { failing: ["math › divides by zero"], passing: ["adds numbers"] });
+});
+
+test("F9: pytest default progress lines record one result per file, with per-test names winning", () => {
+  const out = [
+    "============================= test session starts ==============================",
+    "collected 3 items",
+    "",
+    "tests/test_golden.py ..                                                  [ 66%]",
+    "tests/test_tax.py F                                                      [100%]",
+    "=================================== FAILURES ===================================",
+    "=========================== short test summary info ============================",
+    "FAILED tests/test_tax.py::test_jp_tax_is_ten_percent - assert 0.12 == 0.1",
+    "========================= 1 failed, 2 passed in 0.03s ==========================",
+  ].join("\n");
+  const parsed = m.parseTestResults(out);
+  assert.ok(parsed.failing.includes("tests/test_tax.py::test_jp_tax_is_ten_percent"));
+  assert.ok(parsed.passing.includes("tests/test_golden.py"));
+  assert.ok(!parsed.passing.includes("tests/test_tax.py"));
+  assert.ok(!parsed.failing.includes("tests/test_tax.py"));
+});
+
+test("F9: an all-pass progress line records the file as passing", () => {
+  assert.deepEqual(m.parseTestResults("tests/test_golden.py ..  [100%]\n"), { failing: [], passing: ["tests/test_golden.py"] });
+});
+
+test("F9: a file with only skip marks records nothing", () => {
+  assert.deepEqual(m.parseTestResults("tests/test_skip.py ssx  [100%]\n"), { failing: [], passing: [] });
+});
+
+test("F9: pytest -q output (bare dots, no file) records only the summary's named failures", () => {
+  const out = "..F.                                                                 [100%]\nFAILED tests/test_tax.py::test_rate - assert 1 == 2\n1 failed, 3 passed in 0.02s\n";
+  assert.deepEqual(m.parseTestResults(out), { failing: ["tests/test_tax.py::test_rate"], passing: [] });
+  assert.deepEqual(m.parseTestResults("...F  [100%]\n"), { failing: [], passing: [] });
+});

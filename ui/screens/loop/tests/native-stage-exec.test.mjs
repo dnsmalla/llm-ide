@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createStageDeps } from "../native/stage-exec.ts";
+import { runNativeLoop } from "../native/runner.ts";
 
 const stage = (over = {}) => ({
   id: "s1", name: "Stage", kind: "shellCommand", command: "npm test", order: 0, skillId: null, targetPath: null,
@@ -308,4 +309,178 @@ test("a Graph snapshot in a main-tree run sends no out and snapshots the project
   const args = calls.find(([c]) => c === "graph_generate")[1];
   assert.equal("out" in args, false, "the legacy run sends no out folder");
   assert.deepEqual(writes, [["system/loop/refactor/graph/before.json", graph]]);
+});
+
+test("R3: a stage that throws fails with its message, halts the run as an error, and no repair agent runs", async () => {
+  const { ctx, log } = ctxOf();
+  const odd = stage({ id: "x1", name: "Odd", kind: "unknownKind" });
+  const deps = createStageDeps(ctx, loopOf([odd]));
+  const r = await deps.runStage(odd, []);
+  assert.equal(r.ok, false);
+  assert.match(r.output, /^Odd failed: .*unknownKind/);
+  assert.deepEqual(log.slice(0, 1), ["$ Odd"]);
+  assert.match(deps.halt(), /^Odd failed: .*unknownKind stage.*; the run stopped$/);
+  assert.equal(deps.haltIsError(), true);
+  const loop = loopOf([odd]);
+  let repairs = 0;
+  const out = await runNativeLoop(loop.config, { ...createStageDeps(ctx, loop), repair: async () => { repairs += 1; return { ok: true, output: "" }; }, log() {} });
+  assert.equal(repairs, 0, "an infrastructure error is not sent to the repair agent");
+  assert.equal(out.errored, true);
+  assert.equal(out.blocked, undefined);
+});
+
+test("R2: a test writer keeps a new test file, but an edited test or build config is reverted", async () => {
+  const { host, calls } = fakeHost();
+  const { core } = fakeCore({ reply: "wrote", resultSubtype: "success", changedPaths: ["tests/test_new.py", "tests/test_golden.py", "pyproject.toml"], createdPaths: ["tests/test_new.py"] });
+  const { ctx } = ctxOf({ host, core });
+  const loop = { ...loopOf([stage()]), defaultKey: "regression" };
+  const writer = stage({ id: "g1", name: "Refactor Test Write", kind: "skill", command: null, skillId: "skills/test-gap-writer" });
+  const deps = createStageDeps(ctx, loop);
+  const r = await deps.runStage(writer, []);
+  assert.equal(r.ok, false);
+  assert.match(r.output, /tests\/test_golden\.py/);
+  assert.deepEqual(calls.find(([c]) => c === "loop_revert_paths")[1].paths.sort(), ["pyproject.toml", "tests/test_golden.py"]);
+  assert.equal(calls.find(([c]) => c === "loop_revert_paths")[1].paths.includes("tests/test_new.py"), false, "the new test file stays");
+});
+
+test("F4: a worktree run's test map reads its own graph snapshot, not the project's", async () => {
+  const graph = JSON.stringify({ files: [{ path: "src/a.ts", name: "a.ts", loc: 2, functions: [{ name: "run", line: 1 }] }], calls: [] });
+  const { fs, writes } = fakeWritableFs({ "system/loop-runs/r1/graph/graph-code.json": graph });
+  const { ctx } = ctxOf({ fs });
+  const s = stage({ id: "t1", name: "Test map", kind: "testMap", command: null, testOp: "map" });
+  const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
+  assert.match(r.output, /^1 function\(s\)/, "the run's own graph supplies the function");
+  assert.deepEqual(writes.map(([p]) => p), ["system/loop-worktrees/r1/llm-doc/loop/test/TEST-MAP.md", "system/loop-worktrees/r1/system/loop/test/TEST-MAP.json"]);
+});
+
+test("F5: a worktree run's artifact check does not accept a file that only exists in the main tree", async () => {
+  const gate = stage({ id: "p1", name: "Refactor plan check", kind: "artifactCheck", command: null, allowsRepair: false, check: { requiredPaths: ["llm-doc/loop/refactor/REFACTOR.md"], projectRootFallback: true } });
+  const mainOnly = fakeFs({ "llm-doc/loop/refactor/REFACTOR.md": "stale plan" });
+  const { ctx } = ctxOf({ fs: mainOnly.fs });
+  const r = await createStageDeps(ctx, loopOf([gate])).runStage(gate, []);
+  assert.equal(r.ok, false);
+  assert.match(r.output, /missing: llm-doc\/loop\/refactor\/REFACTOR\.md/);
+  const inRun = fakeFs({ "system/loop-worktrees/r1/llm-doc/loop/refactor/REFACTOR.md": "plan" });
+  const { ctx: ctx2 } = ctxOf({ fs: inRun.fs });
+  assert.equal((await createStageDeps(ctx2, loopOf([gate])).runStage(gate, [])).ok, true);
+});
+
+test("F6: a non-factory test-writing stage keeps its own test files, but a repair is still judged on them", async () => {
+  const { host, calls } = fakeHost();
+  const { core } = fakeCore({ reply: "wrote the tests", resultSubtype: "success", changedPaths: ["tests/test_tax.py", "src/tax.py"], createdPaths: ["tests/test_tax.py"] });
+  const { ctx } = ctxOf({ host, core });
+  const loop = { ...loopOf([stage()]), defaultKey: "regression" };
+  const gaps = stage({ id: "g1", name: "Test gaps", kind: "skill", command: null, skillId: "skills/test-gap-writer" });
+  const deps = createStageDeps(ctx, loop);
+  assert.equal((await deps.runStage(gaps, [])).ok, true);
+  assert.equal(calls.some(([c]) => c === "loop_revert_paths"), false, "tests the stage wrote are its job, not a protected-path violation");
+  assert.equal(deps.halt(), null);
+  const r = await deps.repair(stage(), "1 failing", 1);
+  assert.equal(r.ok, false, "a repair is judged on every path");
+  assert.deepEqual(calls.find(([c]) => c === "loop_revert_paths"), ["loop_revert_paths", { paths: ["tests/test_tax.py"], created: ["tests/test_tax.py"], runId: "r1" }]);
+});
+
+test("F6: a test-writing stage may not touch CI files or the Loop's own data", async () => {
+  const { host, calls } = fakeHost();
+  const { core } = fakeCore({ reply: "edited", resultSubtype: "success", changedPaths: [".github/workflows/ci.yml", "system/loop.json"], createdPaths: [] });
+  const { ctx } = ctxOf({ host, core });
+  const loop = { ...loopOf([stage()]), defaultKey: "regression" };
+  const refactor = stage({ id: "r1", name: "Refactor apply", kind: "skill", command: null, skillId: "skills/refactor-apply" });
+  const deps = createStageDeps(ctx, loop);
+  const r = await deps.runStage(refactor, []);
+  assert.equal(r.ok, false);
+  const reverted = calls.find(([c]) => c === "loop_revert_paths")[1].paths;
+  assert.deepEqual(reverted.sort(), [".github/workflows/ci.yml", "system/loop.json"]);
+});
+
+test("the ledger stage passes without writing when the Test output has no per-test lines", async () => {
+  const { host } = fakeHost();
+  const { ctx } = ctxOf({ host, runId: null, runRoot: "/p" });
+  const writes = [];
+  ctx.fs = { ...fakeFs({}).fs, async write(path, text) { writes.push(path); }, async create() {} };
+  const test = stage({ id: "t1", name: "Test", kind: "shellCommand", command: "pytest" });
+  const ledger = stage({ id: "l1", name: "Ledger", kind: "testMap", command: null, testOp: "ledger" });
+  const deps = createStageDeps(ctx, loopOf([test, ledger]));
+  const r = await deps.runStage(ledger, [{ stage: test, ok: true, output: "3 tests, nothing to parse" }]);
+  assert.equal(r.ok, true);
+  assert.match(r.output, /no per-test results in the Test output/);
+  assert.deepEqual(writes, []);
+});
+
+// A worktree refactor move may keep an existing test whose whole change is import lines (the worktree diff decides).
+const importDiff = (path) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-from old import a\n+from new import a\n`;
+const bodyDiff = (path) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,2 @@\n-from old import a\n+from new import a\n-assert a() == 1\n+assert a() == 2\n`;
+const moveRun = (over = {}) => {
+  const loop = { ...loopOf([stage()]), defaultKey: "regression" };
+  const apply = stage({ id: "r1", name: "Refactor apply", kind: "skill", command: null, skillId: "skills/refactor-apply" });
+  const reply = { reply: "moved", resultSubtype: "success", changedPaths: ["tests/test_golden.py", "src/mod.py"], createdPaths: [] };
+  return { loop, apply, reply, ...over };
+};
+
+// The worktree's plan, as the refactor-apply stage reads it: one batch in progress that names `files`.
+const planFs = (files) => fakeFs({ "system/loop-worktrees/r1/llm-doc/loop/refactor/REFACTOR.md": `# Plan\n\n### R1 Move golden (status: todo)\n- Files: ${files}\n- Intent: move\n` }).fs;
+
+test("an import move to a module the batch's plan does not name is reverted", async () => {
+  const { loop, apply, reply } = moveRun();
+  const { host, calls } = fakeHost({ loop_worktree_diff: { text: importDiff("tests/test_golden.py"), truncated: false } });
+  const { ctx } = ctxOf({ host, core: fakeCore(reply).core, fs: planFs("`src/other.py`") });
+  const r = await createStageDeps(ctx, loop).runStage(apply, []);
+  assert.equal(r.ok, false);
+  assert.ok(calls.find(([c]) => c === "loop_revert_paths")[1].paths.includes("tests/test_golden.py"));
+});
+
+test("a worktree refactor move keeps an existing test changed only by its import lines, and judges the rest", async () => {
+  const { loop, apply, reply } = moveRun();
+  const { host, calls } = fakeHost({ loop_worktree_diff: { text: importDiff("tests/test_golden.py"), truncated: false } });
+  const { core } = fakeCore(reply);
+  const { ctx, log } = ctxOf({ host, core, fs: planFs("`new.py`, `tests/test_golden.py`") });
+  const deps = createStageDeps(ctx, loop);
+  assert.equal((await deps.runStage(apply, [])).ok, true);
+  assert.equal(calls.some(([c]) => c === "loop_revert_paths"), false, "the import-only test is not reverted");
+  assert.deepEqual(calls.find(([c]) => c === "loop_worktree_diff")[1], { runId: "r1" });
+  assert.ok(log.includes("kept import-only test edits: tests/test_golden.py"));
+});
+
+test("a worktree refactor move still reverts an existing test whose body changed", async () => {
+  const { loop, apply, reply } = moveRun();
+  const { host, calls } = fakeHost({ loop_worktree_diff: { text: bodyDiff("tests/test_golden.py"), truncated: false } });
+  const { ctx } = ctxOf({ host, core: fakeCore(reply).core });
+  const r = await createStageDeps(ctx, loop).runStage(apply, []);
+  assert.equal(r.ok, false);
+  assert.deepEqual(calls.find(([c]) => c === "loop_revert_paths")[1].paths, ["tests/test_golden.py"]);
+});
+
+test("a truncated worktree diff, or a host that throws reading it, keeps no test: the guard judges and reverts it", async () => {
+  for (const diffAnswer of [{ text: importDiff("tests/test_golden.py"), truncated: true }, () => { throw new Error("diff gone"); }]) {
+    const { loop, apply, reply } = moveRun();
+    const { host, calls } = fakeHost({ loop_worktree_diff: diffAnswer });
+    const { ctx } = ctxOf({ host, core: fakeCore(reply).core });
+    const r = await createStageDeps(ctx, loop).runStage(apply, []);
+    assert.equal(r.ok, false);
+    assert.ok(calls.find(([c]) => c === "loop_revert_paths")[1].paths.includes("tests/test_golden.py"));
+  }
+});
+
+test("a main-tree refactor move never reads the worktree diff and judges every test", async () => {
+  const { loop, apply, reply } = moveRun();
+  const { host, calls } = fakeHost({ loop_worktree_diff: { text: importDiff("tests/test_golden.py"), truncated: false } });
+  const { ctx } = ctxOf({ host, core: fakeCore(reply).core, runId: null });
+  const r = await createStageDeps(ctx, loop).runStage(apply, []);
+  assert.equal(r.ok, false);
+  assert.equal(calls.some(([c]) => c === "loop_worktree_diff"), false);
+  assert.ok(calls.find(([c]) => c === "loop_revert_paths")[1].paths.includes("tests/test_golden.py"));
+});
+
+test("an apply agent that adds its own module to the plan's Files during the run still has the import move reverted", async () => {
+  const { loop, apply, reply } = moveRun();
+  const { host, calls } = fakeHost({ loop_worktree_diff: { text: importDiff("tests/test_golden.py"), truncated: false } });
+  const planPath = "system/loop-worktrees/r1/llm-doc/loop/refactor/REFACTOR.md";
+  let plan = "# Plan\n\n### R1 Move golden (status: todo)\n- Files: `src/other.py`\n- Intent: move\n";
+  const fs = { ...planFs("`src/other.py`"), async read(p) { if (p !== planPath) throw Object.assign(new Error("missing"), { code: "not_found" }); return { status: "ok", text: plan }; } };
+  // During its call the agent rewrites the plan: it names the module its test now imports and marks the batch done.
+  const core = { async request() { plan = plan.replace("`src/other.py`", "`new.py`").replace("(status: todo)", "(status: done)"); return reply; } };
+  const { ctx } = ctxOf({ host, core, fs });
+  const r = await createStageDeps(ctx, loop).runStage(apply, []);
+  assert.equal(r.ok, false, "the plan as it stood before the call decides");
+  assert.ok(calls.find(([c]) => c === "loop_revert_paths")[1].paths.includes("tests/test_golden.py"));
 });

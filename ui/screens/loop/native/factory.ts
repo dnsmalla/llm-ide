@@ -5,7 +5,7 @@ import type { FsApi } from "../../explorer/fs";
 import { repoKeyOf, type RepoConfig } from "../../settings/repo-config.ts";
 import { DETECTED_STRUCTURE, DETECTED_TEST } from "./environment.ts";
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
-import { isCiHookPath } from "./protected.ts";
+import { isCiHookPath, isTestFileName } from "./protected.ts";
 import type { LoopRunOutcome } from "./runner.ts";
 import type { LoopTemplate } from "./templates.ts";
 import { PROMPTS } from "../../tasks/prompts.generated.ts";
@@ -164,15 +164,29 @@ export function agentRunBody(a: {
   };
 }
 
+/** Refactor skills that move code and may rewrite test imports and build paths along with it. */
+export const REFACTOR_MOVE_SKILLS: ReadonlySet<string> = new Set(["skills/refactor-apply", "skills/refactor-conform"]);
+
+// `importOnly`: existing test files whose whole change is import lines (from the worktree diff, import-only.ts). A refactor move
+// skill may keep those; a test writer and every other stage keep the rule above.
 /**
  * The written paths the protected-path/scope guard judges. `.factory/` (the run's own reports) is never judged. In a
  * Factory loop the Implement stage writes tests and code by design (Verify and Review judge it), so it is exempt from
  * the test and build-config globs; CI and hook files still apply to it. Its repairs do not get that exemption
  * (`stage` is null for a repair call).
+ * Outside Factory, a test-writing or refactor-move stage is judged on every path except a test file it newly created
+ * (`created`): an existing test or build config it edits is still a violation. Every other stage and every repair is
+ * judged on all paths.
  */
-export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind" | "skillId"> | null, paths: readonly string[]): string[] {
-  if (!isFactoryLoop(loop)) return [...paths];
-  if (stage && stage.kind === "skill" && stage.skillId !== null && TEST_WRITING_SKILLS.has(stage.skillId)) {
+export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind" | "skillId"> | null, paths: readonly string[], created: readonly string[] = [], importOnly: readonly string[] = []): string[] {
+  const skill = stage && stage.kind === "skill" ? stage.skillId : null;
+  if (!isFactoryLoop(loop)) {
+    if (skill === null || !(TEST_WRITING_SKILLS.has(skill) || REFACTOR_MOVE_SKILLS.has(skill))) return [...paths];
+    // Only a NEW file named like a test is exempt: a new conftest.py or helper in tests/ can skip every test.
+    const kept = REFACTOR_MOVE_SKILLS.has(skill) ? new Set(importOnly.filter((p) => isTestFileName(p))) : new Set<string>();
+    return paths.filter((p) => !(created.includes(p) && isTestFileName(p)) && !kept.has(p));
+  }
+  if (skill !== null && TEST_WRITING_SKILLS.has(skill)) {
     return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/") && isCiHookPath(p));
   }
   return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/"));

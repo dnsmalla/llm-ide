@@ -175,3 +175,38 @@ test("onProgress reports iteration, stage start/result and repair", async () => 
   ]);
   assert.ok(events.some(([t, , id]) => t === "stage-start" && id === "b"));
 });
+
+test("R1: a snapshot stage and an apply skill stage run once across two iterations, while the failed Test is repaired and re-run", async () => {
+  const calls = [];
+  let tests = 0;
+  const snapshot = stage("snap", "Snapshot", { kind: "codeGraph", graphOp: "snapshot" });
+  const apply = stage("apply", "Apply", { kind: "skill", skillId: "skills/refactor-apply" });
+  const unitTest = stage("t", "Test");
+  const out = await runNativeLoop(cfg([snapshot, apply, unitTest]), {
+    async runStage(s) {
+      calls.push(s.name);
+      if (s.id !== "t") return { ok: true, output: "" };
+      tests += 1;
+      return { ok: tests > 1, output: tests > 1 ? "" : "boom" };
+    },
+    async repair(s) { calls.push(`repair ${s.name}`); return { ok: true, output: "fixed" }; }, log() {},
+  });
+  assert.deepEqual(calls, ["Snapshot", "Apply", "Test", "repair Test", "Test"]);
+  assert.equal(out.passed, true);
+  assert.equal(out.iterationsUsed, 2);
+});
+
+test("R6: a stage with no allowsRepair field is repairable; only an explicit false disables repair", async () => {
+  const { allowsRepair, ...bare } = stage("a", "A");
+  let runs = 0, repairs = 0;
+  const out = await runNativeLoop({ ...cfg([stage("x", "X")]), stages: [bare] }, {
+    async runStage() { runs += 1; return { ok: runs > 1, output: runs > 1 ? "" : "boom" }; },
+    async repair() { repairs += 1; return { ok: true, output: "fixed" }; }, log() {},
+  });
+  assert.equal(out.passed, true);
+  assert.equal(repairs, 1, "an in-memory template stage is repaired");
+  const disabled = await runNativeLoop({ ...cfg([stage("x", "X")]), stages: [stage("a", "A", { allowsRepair: false })] }, {
+    async runStage() { return { ok: false, output: "boom" }; }, async repair() { throw new Error("no repair"); }, log() {},
+  });
+  assert.match(disabled.statusSummary, /repair is disabled/);
+});

@@ -52,3 +52,23 @@ test("a path dirty before the agent call (the user's edit, or inside an untracke
   assert.equal(wasDirtyBefore("src/agent.ts", before), false);
   assert.equal(wasDirtyBefore("scratchy.md", before), false);
 });
+
+test("R2: a directory entry (git's untracked folder, 'dir/') is protected when a protected glob lies under it", () => {
+  assert.equal(isProtectedPath(".github/"), true);
+  assert.equal(isProtectedPath("sub/.github/"), true);
+  assert.equal(isProtectedPath("tests/"), true);
+  assert.equal(isProtectedPath("src/"), false);
+  assert.equal(isProtectedPath("docs/"), false);
+});
+
+test("R2: isTestPath matches the test globs only, and the default list is built from them", async () => {
+  const { isTestPath, TEST_FILE_GLOBS, DEFAULT_PROTECTED_GLOBS } = await import("../native/protected.ts");
+  for (const p of ["tests/test_tax.py", "src/a.test.ts", "pkg/__tests__/b.js", "Tests/A.swift", "x_test.go"]) assert.equal(isTestPath(p), true, p);
+  for (const p of ["src/app.ts", "pyproject.toml", "package.json", "docs/testing.md"]) assert.equal(isTestPath(p), false, p);
+  assert.ok(TEST_FILE_GLOBS.every((g) => DEFAULT_PROTECTED_GLOBS.includes(g)), "the default list is built from the test globs");
+});
+
+test("a new untracked CI folder is a CI/hook path, so even Factory Implement cannot add a pipeline", () => {
+  for (const p of [".github/", "sub/.github/", ".husky/", ".github/workflows/ci.yml"]) assert.equal(isCiHookPath(p), true, p);
+  for (const p of ["src/", "tests/", "docs/ci.md"]) assert.equal(isCiHookPath(p), false, p);
+});

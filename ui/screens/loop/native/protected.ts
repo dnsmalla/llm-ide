@@ -12,10 +12,21 @@ export const CI_HOOK_PROTECTED_GLOBS = [
   ".pre-commit-config.yaml", "**/.pre-commit-config.yaml",
 ];
 
-export const DEFAULT_PROTECTED_GLOBS = [
-  "**/Tests/**", "**/tests/**", "**/test/**", "**/__tests__/**",
+/** Test files and test folders: what a test writer may create, and what it may not change once it exists. */
+/** Test files recognised by name. Only these may be created by a test-writing stage without being judged. */
+export const TEST_NAME_GLOBS = [
   "**/*Tests.swift", "**/*Test.swift", "**/*.test.mjs", "**/*.test.ts", "**/*.test.js", "**/*.test.tsx",
   "**/*_test.go", "**/test_*.py", "**/*_test.py", "**/*.spec.ts", "**/*.spec.js",
+];
+
+/** Everything in a test folder, which also holds harness files (conftest.py, helpers) that change how tests run. */
+export const TEST_FILE_GLOBS = [
+  "**/Tests/**", "**/tests/**", "**/test/**", "**/__tests__/**",
+  ...TEST_NAME_GLOBS,
+];
+
+export const DEFAULT_PROTECTED_GLOBS = [
+  ...TEST_FILE_GLOBS,
   "Makefile", "**/Makefile", "**/Package.swift", "**/package.json", "pytest.ini", "**/pytest.ini",
   "**/pyproject.toml", "**/setup.cfg", ".githooks/**", "**/.githooks/**", "**/jest.config.js", "**/vitest.config.ts",
   ...CI_HOOK_PROTECTED_GLOBS,
@@ -47,21 +58,41 @@ function globRe(glob: string): RegExp {
   return new RegExp(`^${out}$`);
 }
 
+// An untracked folder ("dir/") is protected when a protected glob lies under it, by path or by its own name.
+function protectedMatch(glob: string, path: string): boolean {
+  if (!path.endsWith("/")) return globMatch(glob, path);
+  const dir = path.toLowerCase();
+  const name = dir.slice(0, -1).split("/").pop() ?? "";
+  const under = glob.toLowerCase().replace(/^(\*\*\/)+/, "");
+  return under.startsWith(dir) || under.startsWith(`${name}/`);
+}
+
 export function isProtectedPath(path: string, extra: readonly string[] = []): boolean {
   const globs = [...DEFAULT_PROTECTED_GLOBS, ...extra];
   let hit = false;
   for (const glob of globs) {
     if (glob.startsWith("!")) {
       const pattern = glob.slice(1).trim();
-      if (pattern && globMatch(pattern, path)) return false;
-    } else if (!hit && globMatch(glob, path)) hit = true;
+      if (pattern && protectedMatch(pattern, path)) return false;
+    } else if (!hit && protectedMatch(glob, path)) hit = true;
   }
   return hit;
 }
 
+/** True when `path` is named like a test file (TEST_NAME_GLOBS); a conftest.py or helper in tests/ is not. */
+export function isTestFileName(path: string): boolean {
+  return TEST_NAME_GLOBS.some((glob) => globMatch(glob, path));
+}
+
+/** True when `path` is a test file or sits in a test folder (the globs in TEST_FILE_GLOBS). */
+export function isTestPath(path: string): boolean {
+  return TEST_FILE_GLOBS.some((glob) => globMatch(glob, path));
+}
+
 /** True when `path` is a CI pipeline or hook file (protected even for the Implement stage). */
 export function isCiHookPath(path: string): boolean {
-  return CI_HOOK_PROTECTED_GLOBS.some((glob) => globMatch(glob, path));
+  // protectedMatch also catches a new untracked folder git reports as a directory entry (`.github/`).
+  return CI_HOOK_PROTECTED_GLOBS.some((glob) => protectedMatch(glob, path));
 }
 
 /** The changed files the Ship panel lists as sensitive (build config, CI, hooks), in diff order. */

@@ -1,9 +1,15 @@
 // Native Loop iteration/repair orchestrator, ported from LoopEngineRunner's outer loop: every iteration re-runs all
 // enabled stages from the top, except a runOnce stage that already passed in this run; an advisory failure is recorded but does not gate; a blocking failure may be repaired
 // up to maxRepairsPerStage; the run ends at a repair budget, the consecutive non-improving stop, or maxIterations.
+// A stage that runs once per run (runsOncePerRun) is skipped in later iterations once it has passed.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
 
 export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
+
+/** A stage that runs once per run, not once per iteration: a passed one is skipped, so a repair never re-plans or re-applies. */
+export function runsOncePerRun(stage: LoopStage): boolean {
+  return stage.runOnce || (stage.kind === "codeGraph" && stage.graphOp === "snapshot") || (stage.kind === "skill" && ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform"].includes(stage.skillId ?? ""));
+}
 export type ProgressEvent =
   | { type: "iteration"; iteration: number }
   | { type: "stage-start"; stage: LoopStage; index: number; count: number; iteration: number }
@@ -95,7 +101,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
     for (const stage of stages) {
-      if (stage.runOnce && passedOnce.has(stage.id)) {
+      if (runsOncePerRun(stage) && passedOnce.has(stage.id)) {
         deps.log(`↷ ${stage.name}: passed earlier in this run`);
         deps.onProgress?.({ type: "stage-skipped", stage, index: stages.indexOf(stage) + 1, count: stages.length, iteration });
         continue;
@@ -115,7 +121,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       iterationOutcomes.push(outcome);
       deps.onProgress?.({ type: "stage-result", stage, ok: result.ok, iteration });
       deps.log(`${result.ok ? "✓" : "✗"} ${stage.name}: ${result.ok ? "passed" : "failed"}`);
-      if (result.ok && stage.runOnce) passedOnce.add(stage.id);
+      if (result.ok && runsOncePerRun(stage)) passedOnce.add(stage.id);
       if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {
         return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: stage, statusSummary: `cost ceiling reached ($${spentUsd.toFixed(2)} of $${config.maxCostUsd})`, costUsd: spentUsd };
       }
@@ -132,7 +138,8 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     if (haltAfterFailure) { iterations.push({ index: iteration, stages: iterationOutcomes, repair: null }); return haltAfterFailure; }
     if (deps.isCancelled?.()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
     const used = repairs.get(failed.stage.id) ?? 0;
-    if (!failed.stage.allowsRepair) {
+    // Only an explicit false disables repair: an in-memory template stage carries no allowsRepair at all.
+    if (failed.stage.allowsRepair === false) {
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
       return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed; repair is disabled for this stage` };
     }

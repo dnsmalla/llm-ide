@@ -63,8 +63,9 @@ async function expand(fs: ArtifactFs, base: string, glob: string, limit = 2000):
   return out;
 }
 
+/** A 1-byte read still proves the file exists: the host answers `too_large` (not an error) for any real file. */
 async function exists(fs: ArtifactFs, path: string): Promise<boolean> {
-  try { return (await fs.read(path, 1)).status === "ok"; } catch { return false; }
+  try { return ["ok", "too_large", "binary"].includes((await fs.read(path, 1)).status); } catch { return false; }
 }
 
 async function lineCount(fs: ArtifactFs, path: string): Promise<number> {

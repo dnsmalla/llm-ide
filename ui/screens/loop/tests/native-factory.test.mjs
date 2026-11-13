@@ -149,7 +149,23 @@ test("factory loops are recognised by defaultKey and guard paths exclude .factor
   assert.equal(f.isFactoryLoop(other), false);
   assert.equal(f.isFactoryLoop({ defaultKey: "regression" }), false);
   const paths = [".factory/REVIEW.md", "src/a.ts", "tests/a.test.ts"];
-  assert.deepEqual(f.guardedPaths(other, s[4], paths), paths, "non-factory loops are unchanged");
+  // R2: outside Factory a test-writing stage is judged on every path except a test file it newly created.
+  assert.deepEqual(f.guardedPaths(other, s[6], paths), paths, "non-factory loops judge every path for a non-test stage");
+  assert.deepEqual(f.guardedPaths(other, s[4], paths), paths, "a non-factory test writer may not edit existing tests");
+  assert.deepEqual(f.guardedPaths(other, s[4], paths, ["tests/a.test.ts"]), [".factory/REVIEW.md", "src/a.ts"], "a test file it newly created is its job");
+  assert.deepEqual(f.guardedPaths(other, s[4], ["tests/a.py", "pyproject.toml", "package.json"], ["pyproject.toml"]), ["tests/a.py", "pyproject.toml", "package.json"], "a created non-test file is still judged");
+  const applyStage = { kind: "skill", skillId: "skills/refactor-apply" };
+  assert.deepEqual(f.guardedPaths(other, applyStage, ["tests/test_golden.py", "tests/test_new.py", "Makefile"], ["tests/test_new.py"]), ["tests/test_golden.py", "Makefile"], "refactor-apply may not change existing tests or build config");
+  // The worktree diff shows an existing test changed only by imports: a refactor move may keep it, nothing else.
+  const refactorConform = { kind: "skill", skillId: "skills/refactor-conform" };
+  const importOnly = ["tests/test_golden.py", "tests/test_new.py", "src/a.ts"];
+  assert.deepEqual(f.guardedPaths(other, applyStage, ["tests/test_golden.py", "tests/test_new.py", "Makefile"], ["tests/test_new.py"], importOnly), ["Makefile"], "an import-only existing test is kept for refactor-apply");
+  assert.deepEqual(f.guardedPaths(other, refactorConform, ["tests/test_golden.py", "src/a.ts"], [], importOnly), ["src/a.ts"], "refactor-conform keeps the same exemption");
+  assert.deepEqual(f.guardedPaths(other, applyStage, ["tests/test_golden.py", "tests/a.test.ts"], [], ["tests/a.test.ts"]), ["tests/test_golden.py"], "only the listed import-only test is dropped; another test is still judged");
+  assert.deepEqual(f.guardedPaths(other, applyStage, ["Makefile"], [], ["Makefile"]), ["Makefile"], "only test paths can be exempt, never build config");
+  const writerStage = { kind: "skill", skillId: "skills/test-gap-writer" };
+  assert.deepEqual(f.guardedPaths(other, writerStage, ["tests/test_golden.py"], [], importOnly), ["tests/test_golden.py"], "a test writer ignores the import-only list");
+  assert.deepEqual(f.guardedPaths(factory, applyStage, ["tests/test_golden.py", "src/a.ts"], [], importOnly), ["tests/test_golden.py", "src/a.ts"], "Factory is unchanged by the import-only list");
   assert.deepEqual(f.guardedPaths(factory, null, paths), ["src/a.ts", "tests/a.test.ts"], "repairs: only .factory is exempt");
   assert.deepEqual(f.guardedPaths(factory, s[6], paths), ["src/a.ts", "tests/a.test.ts"]);
   assert.deepEqual(f.guardedPaths(factory, s[4], paths), [], "Implement writes tests by design");
@@ -387,4 +403,11 @@ test("sendBack and check keep the blocking custom checks (Structure verify) and 
   assert.deepEqual(configFor("check", base).stages.map((s) => s.name), ["Structure verify", "Verify", "Review", "Review gate"]);
   const advisory = { ...base, stages: base.stages.map((s) => (s.name === "Structure verify" ? { ...s, severity: "advisory" } : s)) };
   assert.deepEqual(configFor("check", advisory).stages.map((s) => s.name), ["Verify", "Review", "Review gate"], "an advisory custom check is skipped");
+});
+
+test("a test writer may create a new test file, but not a new conftest.py or helper in tests/", () => {
+  const loop = { defaultKey: "test", config: { stages: [] } };
+  const writer = { kind: "skill", skillId: "skills/test-gap-writer" };
+  const created = ["tests/test_tax.py", "tests/conftest.py", "tests/helpers.py", "src/app.test.ts"];
+  assert.deepEqual(f.guardedPaths(loop, writer, created, created), ["tests/conftest.py", "tests/helpers.py"]);
 });

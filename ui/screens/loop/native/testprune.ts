@@ -71,6 +71,6 @@ export async function writeTestPrune(fs: PruneFs, repoPrefix: string, findings: 
   const path = `${prefix}llm-doc/loop/test/TEST-PRUNE.md`;
   let at = "";
   for (const seg of path.split("/").slice(0, -1)) { at = at ? `${at}/${seg}` : seg; try { await fs.create(at, "dir"); } catch (e) { if ((e as { code?: string })?.code !== "exists") throw e; } }
-  await fs.write(path, renderTestPrune(findings), { expected_hash: null });
+  await fs.write(path, renderTestPrune(findings), { expected_hash: null, force: true });
   return path;
 }

@@ -87,8 +87,8 @@ export async function writeTestStructure(fs: TestMapFs, repoPrefix: string, s: T
   const json = `${prefix}system/loop/test/TEST-STRUCTURE.json`;
   await ensureDir(fs, md.split("/").slice(0, -1).join("/"));
   await ensureDir(fs, json.split("/").slice(0, -1).join("/"));
-  await fs.write(md, renderMarkdown(s), { expected_hash: null });
-  await fs.write(json, JSON.stringify(s, null, 2) + "\n", { expected_hash: null });
+  await fs.write(md, renderMarkdown(s), { expected_hash: null, force: true });
+  await fs.write(json, JSON.stringify(s, null, 2) + "\n", { expected_hash: null, force: true });
   return { md, json };
 }
 
@@ -102,6 +102,8 @@ export async function walkFiles(fs: TestMapFs, dir: string, out: string[] = [], 
   for (const e of entries) {
     if (out.length >= limit) return out;
     if (e.name.startsWith(".") || SKIP.has(e.name)) continue;
+    // Other runs' worktrees are not this repo's files (a main-tree walk from the project root would reach them).
+    if (e.kind === "dir" && /(^|\/)system\/loop-worktrees$/.test(e.path)) continue;
     if (e.kind === "dir") await walkFiles(fs, e.path, out, limit);
     else if (e.kind === "file") out.push(e.path);
   }
@@ -183,8 +185,8 @@ export async function writeTestMap(fs: TestMapFs, repoPrefix: string, m: TestMap
   const json = `${prefix}system/loop/test/TEST-MAP.json`;
   await ensureDir(fs, md.split("/").slice(0, -1).join("/"));
   await ensureDir(fs, json.split("/").slice(0, -1).join("/"));
-  await fs.write(md, renderTestMap(m), { expected_hash: null });
-  await fs.write(json, JSON.stringify(m, null, 2) + "\n", { expected_hash: null });
+  await fs.write(md, renderTestMap(m), { expected_hash: null, force: true });
+  await fs.write(json, JSON.stringify(m, null, 2) + "\n", { expected_hash: null, force: true });
   return { md, json };
 }
 
@@ -193,13 +195,30 @@ export interface LedgerDiff { newFailures: string[]; stillFailing: string[]; fix
 
 export function parseTestResults(output: string): { failing: string[]; passing: string[] } {
   const failing = new Set<string>(); const passing = new Set<string>();
+  const fileMarks = new Map<string, string>(); // pytest progress lines: file -> concatenated marks
   for (const line of output.split("\n")) {
     let m = /Test Case '-\[([^\]]+)\]'\s+(passed|failed)/.exec(line);
     if (m) { (m[2] === "passed" ? passing : failing).add(m[1]); continue; }
     m = /(?:✔|✓|✕|✗|×)\s+(?:Test\s+)?"([^"]+)"\s+(passed|failed)/i.exec(line);
     if (m) { (m[2].toLowerCase() === "passed" ? passing : failing).add(m[1]); continue; }
-    m = /^\s*(?:✓|✕|●)\s+(.+?)(?:\s+\(\d+(?:\.\d+)?\s*m?s\))?$/.exec(line);
-    if (m) { (line.includes("✕") ? failing : passing).add(m[1].trim()); }
+    // Jest marks a failed test with ● (its failure header), not ✓ or ✕.
+    m = /^\s*(✓|✔|✕|✖|●)\s+(.+?)(?:\s+\(\d+(?:\.\d+)?\s*m?s\))?$/.exec(line);
+    if (m) { (m[1] === "✓" || m[1] === "✔" ? passing : failing).add(m[2].trim()); continue; }
+    // pytest -rA/-rE ("PASSED path::name - reason", "ERROR path::name - reason") and -v ("path::name PASSED [ 50%]") forms.
+    const t = line.trim();
+    m = /^(PASSED|FAILED|ERROR) (\S+::\S+?)(?: - .*| \[\s*\d+%\])?$/.exec(t);
+    if (m) { (m[1] === "PASSED" ? passing : failing).add(m[2]); continue; }
+    m = /^(\S+::\S+?)\s+(PASSED|FAILED|ERROR)(?:\s+\[\s*\d+%\])?$/.exec(t);
+    if (m) (m[2] === "PASSED" ? passing : failing).add(m[1]);
+    // pytest default progress line ("tests/test_x.py ..F  [100%]"): one result per file.
+    m = /^(\S+\.py) ([.FEsxX]+)\s*(\[\s*\d+%\])?$/.exec(t);
+    if (m) fileMarks.set(m[1], (fileMarks.get(m[1]) ?? "") + m[2]);
+  }
+  // Per-test names win: a file with per-test entries in a list gets no file-level entry there.
+  const hasTest = (set: Set<string>, file: string) => [...set].some((n) => n.startsWith(`${file}::`));
+  for (const [file, marks] of fileMarks) {
+    if (/[FE]/.test(marks)) { if (!hasTest(failing, file)) failing.add(file); }
+    else if (marks.includes(".") && !hasTest(passing, file) && !hasTest(failing, file)) passing.add(file);
   }
   return { failing: [...failing].sort(), passing: [...passing].sort() };
 }
@@ -225,5 +244,5 @@ export async function readLedger(fs: TestMapFs, path: string): Promise<TestLedge
 
 export async function writeLedger(fs: TestMapFs, path: string, ledger: TestLedger): Promise<void> {
   await ensureDir(fs, path.split("/").slice(0, -1).join("/"));
-  await fs.write(path, JSON.stringify(ledger, null, 2) + "\n", { expected_hash: null });
+  await fs.write(path, JSON.stringify(ledger, null, 2) + "\n", { expected_hash: null, force: true });
 }
