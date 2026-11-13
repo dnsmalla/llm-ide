@@ -45,7 +45,7 @@ export function SignOutDialog({ onCancel, onConfirm, onForget, onDisconnect, bus
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
   return (
-    <div className="sh-modal" role="alertdialog" aria-modal="true" aria-labelledby="sh-signout-title" aria-describedby="sh-signout-body" onKeyDown={(e) => e.key === "Escape" && onCancel()}>
+    <div className="sh-modal" role="alertdialog" aria-modal="true" aria-labelledby="sh-signout-title" aria-describedby="sh-signout-body" onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}>
       <div className="sh-modal-card">
         <h2 id="sh-signout-title" className="sh-panel-title">{title}</h2>
         <p id="sh-signout-body" className="sh-panel-text sh-muted">{body}</p>
@@ -79,7 +79,7 @@ export function DisconnectDialogView({ plan, busy, step, failed, notice, onCance
       ? "No GitHub or GitLab token and no saved repositories are stored on this computer, so nothing is removed."
       : `This removes: ${describePlan(plan)}.`;
   return (
-    <div className="sh-modal" role="alertdialog" aria-modal="true" aria-labelledby="sh-disconnect-title" aria-describedby="sh-disconnect-body" onKeyDown={(e) => e.key === "Escape" && !busy && onCancel()}>
+    <div className="sh-modal" role="alertdialog" aria-modal="true" aria-labelledby="sh-disconnect-title" aria-describedby="sh-disconnect-body" onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.preventDefault(); onCancel(); } }}>
       <div className="sh-modal-card">
         <h2 id="sh-disconnect-title" className="sh-panel-title">Sign out and disconnect all accounts?</h2>
         <p id="sh-disconnect-body" className="sh-panel-text">{what}</p>

@@ -154,7 +154,7 @@ export function GuideDialog({ onClose, onNavigate, initialTopic }: { onClose: ()
   const [activeId, setActiveId] = useState(initialTopic && byId.has(initialTopic) ? initialTopic : HOME);
   useEffect(() => {
     close.current?.focus();
-    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);

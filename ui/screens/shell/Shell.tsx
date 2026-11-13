@@ -495,7 +495,7 @@ export function LeaveProjectDialog({ labels, onStay, onLeave }: { labels: readon
 function QuickSwitchDialog({ recent, activeRoot, onOpen, onClose }: { recent: readonly import("./host").RecentEntry[]; activeRoot: string | null; onOpen: (index: number) => void; onClose: () => void }): ReactNode {
   const [q, setQ] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  useEffect(() => { input.current?.focus(); const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onClose]);
+  useEffect(() => { input.current?.focus(); const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onClose]);
   const shown = quickSwitchRows(recent, activeRoot, q).map(({ entry, index }) => ({ r: entry, index }));
   return (
     <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-quick-title">

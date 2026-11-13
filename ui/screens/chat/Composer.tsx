@@ -55,12 +55,52 @@ export function KeyHint() {
   return <span className="chat-muted" role="img" aria-label={KEY_HINT} title={KEY_HINT}>{"\u21B5"}</span>;
 }
 
+/** The slice of a DOM node the key-scope helpers need (kept structural so they stay pure and testable). */
+export interface KeyNodeLike {
+  tagName?: string;
+  isContentEditable?: boolean;
+  closest?(selector: string): KeyNodeLike | null;
+  contains?(other: unknown): boolean;
+}
+
+const MODAL_SELECTOR = '[aria-modal="true"],[role="dialog"],[role="alertdialog"]';
+
+const insideNode = (root: KeyNodeLike | null | undefined, node: unknown): boolean => !!root && !!node && (root === node || root.contains?.(node) === true);
+
+function isEditableNode(n: KeyNodeLike | null | undefined): boolean {
+  if (!n) return false;
+  return n.isContentEditable === true || n.tagName === "INPUT" || n.tagName === "TEXTAREA" || n.tagName === "SELECT";
+}
+
+/**
+ * Whether a window-level Escape came from a place this chat surface does not own: a dialog that is not part of the
+ * surface, or a text field outside it (Settings, the Explorer filter, another chat). Pure.
+ */
+export function escapeIsForeign(target: KeyNodeLike | null | undefined, root: KeyNodeLike | null | undefined): boolean {
+  if (!target) return false;
+  const modal = target.closest?.(MODAL_SELECTOR) ?? null;
+  if (modal && !insideNode(root, modal) && !insideNode(modal, root)) return true;
+  return !!root && isEditableNode(target) && !insideNode(root, target);
+}
+
 /**
  * Esc stops a running turn from anywhere on the chat surface (the Mac's Stop button is the window's cancel action).
- * A key a popover, the textarea or an input method already handled is left alone. Pure.
+ * A key a popover, the textarea or an input method already handled is left alone, and so is one aimed at an
+ * unrelated dialog or field (scope). Pure.
  */
-export function stopsOnEscape(e: { key: string; defaultPrevented: boolean; isComposing?: boolean }, active: boolean, busy: boolean): boolean {
-  return active && busy && e.key === "Escape" && !e.defaultPrevented && e.isComposing !== true;
+export function stopsOnEscape(e: { key: string; defaultPrevented: boolean; isComposing?: boolean; target?: unknown }, active: boolean, busy: boolean, root?: KeyNodeLike | null): boolean {
+  if (!(active && busy && e.key === "Escape" && !e.defaultPrevented && e.isComposing !== true)) return false;
+  return !escapeIsForeign((e.target ?? null) as KeyNodeLike | null, root);
+}
+
+/**
+ * Whether the window-level dictation shortcut belongs to this surface: focus is inside it, or nothing is focused
+ * (the body) and this is the Chat section itself rather than a popup or dock. Pure.
+ */
+export function ownsDictationShortcut(target: KeyNodeLike | null | undefined, root: KeyNodeLike | null | undefined, isChatSection: boolean): boolean {
+  if (insideNode(root, target)) return true;
+  const nothingFocused = !target || target.tagName === "BODY" || target.tagName === "HTML";
+  return nothingFocused && isChatSection;
 }
 
 /**
@@ -138,6 +178,8 @@ export function isGlobalDictationShortcut(e: { key: string; metaKey: boolean; ct
 
 export function Composer(p: ComposerProps) {
   const speech = useRef<SpeechRecognitionLike | null>(null);
+  const draftRef = useRef(p.draft);
+  draftRef.current = p.draft;
   const [listening, setListening] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const voice = speechCtor();
@@ -151,7 +193,9 @@ export function Composer(p: ComposerProps) {
     rec.onresult = (e) => {
       let text = "";
       for (let i = 0; i < e.results.length; i++) text += e.results[i][0]?.transcript ?? "";
-      if (text.trim()) p.onDraft(`${p.draft}${p.draft.trim() ? " " : ""}${text.trim()}`);
+      // Read the draft now, not the one captured when dictation started: the user may have typed meanwhile.
+      const draft = draftRef.current;
+      if (text.trim()) p.onDraft(`${draft}${draft.trim() ? " " : ""}${text.trim()}`);
     };
     rec.onerror = (e) => {
       speech.current = null; setListening(false);
@@ -221,6 +265,9 @@ export function Composer(p: ComposerProps) {
     if (!dictationEnabled(p.active === true, dictate)) return undefined;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (!isGlobalDictationShortcut(e)) return;
+      // Several chat surfaces can be mounted at once (main, popup, dock): only the one the user is in answers.
+      const root = form.current?.closest(".chat-screen") ?? null;
+      if (!ownsDictationShortcut(e.target as KeyNodeLike | null, root, root !== null && !root.hasAttribute("data-dock"))) return;
       e.preventDefault();
       toggleRef.current();
     };
@@ -232,7 +279,7 @@ export function Composer(p: ComposerProps) {
   stopRef.current = p.onStop;
   useEffect(() => {
     if (!p.active || !p.busy) return undefined;
-    const onKey = (e: globalThis.KeyboardEvent) => { if (stopsOnEscape(e, true, true)) { e.preventDefault(); stopRef.current(); } };
+    const onKey = (e: globalThis.KeyboardEvent) => { if (stopsOnEscape(e, true, true, form.current?.closest(".chat-screen") ?? null)) { e.preventDefault(); stopRef.current(); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [p.active, p.busy]);
