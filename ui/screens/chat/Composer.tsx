@@ -269,7 +269,9 @@ export function Composer(p: ComposerProps) {
         {/* Mic, Stop and Send/Queue stay one compact group, so a narrow dock never splits them across rows. */}
         <span className="chat-composer-actions">
         {dictate
-          ? <button type="button" className="chat-icon-btn chat-mic" aria-pressed={listening} onClick={dictate} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`${listening ? "Stop dictation" : mode === "web" ? "Dictate" : "Dictate with macOS Dictation"} (${isMacPlatform() ? "⌘M" : "Ctrl+M"})`}>{MIC_ICON}</button>
+          // mousedown is cancelled so the click never takes focus from the message box: macOS Dictation types only
+          // into the element that holds focus (see desktop/src-tauri/src/dictation.rs).
+          ? <button type="button" className="chat-icon-btn chat-mic" aria-pressed={listening} onMouseDown={(e) => e.preventDefault()} onClick={dictate} aria-label={listening ? "Stop dictation" : "Dictate a message"} title={`${listening ? "Stop dictation" : mode === "web" ? "Dictate" : "Dictate with macOS Dictation"} (${isMacPlatform() ? "⌘M" : "Ctrl+M"})`}>{MIC_ICON}</button>
           : <button type="button" className="chat-icon-btn chat-mic" disabled aria-label="Dictate a message" title="Speech recognition is not available here">{MIC_ICON}</button>}
         {p.busy && <button type="button" className="chat-btn chat-danger chat-stop" onClick={p.onStop} disabled={p.aborting} aria-label="Stop the running turn" title="Stop the running reply (Esc)">{STOP_ICON}{p.aborting ? "Stopping…" : "Stop"}</button>}
         <button type="submit" className="chat-btn chat-primary chat-send" disabled={!canSend} title={p.busy ? "Queue this message: it sends when the current reply ends (↵)" : "Send (↵ · ⇧↵ for a new line)"}>{p.busy ? "Queue" : "Send"}{SEND_ICON}</button>
