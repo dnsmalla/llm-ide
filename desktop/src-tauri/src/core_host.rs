@@ -65,6 +65,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Per-probe timeout on the spawned port (kept short so readiness isn't quantized).
 const SPAWN_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 const READY_DEADLINE: Duration = Duration::from_secs(20);
+/// A core that still accepts TCP connections but has not answered `/health` for this long is declared hung.
+const HEALTH_BUSY_BUDGET: Duration = Duration::from_secs(180);
+const PORT_OPEN_TIMEOUT: Duration = Duration::from_millis(500);
 const TERM_GRACE: Duration = Duration::from_secs(3);
 const LOG_TAIL_LINES: usize = 200;
 const ERROR_TAIL_LINES: usize = 40;
@@ -92,8 +95,12 @@ pub struct Tuning {
     pub term_grace: Duration,
     pub health_interval: Duration,
     pub health_timeout: Duration,
-    /// Consecutive failed health probes after which a running core counts as hung.
+    /// Consecutive failed health probes after which a core whose port REFUSES connections counts as dead.
     pub health_fails: u32,
+    /// How long a core that is alive and listening but not answering `/health` in time (a long synchronous
+    /// database call, swap pressure) is waited for before it counts as hung. Killing it sooner would take its
+    /// in-flight Loop and agent work with it.
+    pub health_busy_budget: Duration,
     pub max_crashes: usize,
     pub crash_window: Duration,
     pub backoff_base: Duration,
@@ -117,6 +124,7 @@ impl Default for Tuning {
             health_interval: Duration::from_secs(5),
             health_timeout: Duration::from_secs(2),
             health_fails: 3,
+            health_busy_budget: HEALTH_BUSY_BUDGET,
             max_crashes: 5,
             crash_window: Duration::from_secs(5 * 60),
             backoff_base: Duration::from_secs(1),
@@ -679,12 +687,26 @@ impl CoreHost {
 
         let mut policy = RestartPolicy::new(t);
         let mut first = true;
+        // One automatic retry for a first start that was merely slow (first launch scanning by Gatekeeper, a
+        // boot migration, a swapping machine): the core was alive, so a second spawn is not a retry loop.
+        let mut retried = false;
         // The port our last core held: a restart waits briefly for it rather than moving off :3456.
         let mut held: Option<u16> = None;
         loop {
-            let began = if first { started } else { Instant::now() };
+            let began = if first && !retried { started } else { Instant::now() };
             match self.start_once(&data_dir, began, held) {
                 Started::Closed => return,
+                Started::TimedOut { .. } if first && !retried => {
+                    retried = true;
+                    eprintln!("core: first start timed out waiting for /health; retrying once");
+                    continue;
+                }
+                Started::TimedOut { url, error } => {
+                    self.set_failed(url, error);
+                    if first {
+                        return;
+                    }
+                }
                 // A first start that fails is reported as-is (no retry: a broken install or
                 // missing secret would only fail again). After a crash, a failed restart
                 // counts as another crash and goes through the same bounded policy.
@@ -799,6 +821,7 @@ impl CoreHost {
                 Attempt::Ready => return Started::Ready { port, nonce },
                 Attempt::Closed => return Started::Closed,
                 Attempt::Failed => return Started::Failed,
+                Attempt::TimedOut { url, error } => return Started::TimedOut { url, error },
                 Attempt::Retry(why) => last = why,
             }
         }
@@ -845,7 +868,9 @@ impl CoreHost {
                 return Attempt::Failed;
             }
         }
-        let deadline = started + self.inner.tuning.ready_deadline;
+        // Measured from this spawn, not from the start of the whole startup: probing and an earlier port's
+        // failed attempt must not eat into the time this core gets to boot.
+        let deadline = Instant::now() + self.inner.tuning.ready_deadline;
         loop {
             // Child exited early, or was taken by shutdown.
             let exit = {
@@ -895,8 +920,7 @@ impl CoreHost {
             if Instant::now() >= deadline {
                 let msg = format!("no /health on :{port} after {}s", self.inner.tuning.ready_deadline.as_secs());
                 self.kill_child();
-                self.set_failed(url, self.failure(msg));
-                return Attempt::Failed;
+                return Attempt::TimedOut { url, error: self.failure(msg) };
             }
             thread::sleep(POLL_INTERVAL);
         }
@@ -907,7 +931,7 @@ impl CoreHost {
         let t = &self.inner.tuning;
         let mut last_health = Instant::now();
         let mut last_claude = Instant::now();
-        let mut fails = 0u32;
+        let mut watch = HealthWatch::default();
         loop {
             thread::sleep(Duration::from_millis(50));
             if self.is_closing() {
@@ -926,11 +950,20 @@ impl CoreHost {
             }
             if last_health.elapsed() >= t.health_interval {
                 last_health = Instant::now();
-                match probe(port, t.health_timeout) {
-                    Probe::Healthy { nonce: got } if got.as_deref().is_some_and(|g| ct_eq(g, nonce)) => fails = 0,
-                    _ => fails += 1,
+                let outcome = match probe(port, t.health_timeout) {
+                    Probe::Healthy { nonce: got } if got.as_deref().is_some_and(|g| ct_eq(g, nonce)) => HealthOutcome::Healthy,
+                    // Something else answered with a 200: not our core, never "busy".
+                    Probe::Healthy { .. } => HealthOutcome::Dead,
+                    // No answer in time: dead if the port refuses, busy if the process still listens.
+                    Probe::Down if port_accepts(port, PORT_OPEN_TIMEOUT) => HealthOutcome::Busy,
+                    Probe::Down => HealthOutcome::Dead,
+                };
+                let was_degraded = watch.degraded_since.is_some();
+                let hung = watch.record(outcome, Instant::now(), t);
+                if !was_degraded && watch.degraded_since.is_some() {
+                    eprintln!("core: /health is slow but the core still listens; waiting up to {}s before treating it as hung", t.health_busy_budget.as_secs());
                 }
-                if fails >= t.health_fails {
+                if hung {
                     self.kill_child();
                     return if self.is_closing() { Ended::Closing } else { Ended::Crashed("health check failed".into()) };
                 }
@@ -1109,12 +1142,63 @@ enum Attempt {
     Failed,
     /// This port did not work out; try the next.
     Retry(String),
+    /// The child was alive but never answered /health within its own deadline (killed; status NOT yet set).
+    TimedOut { url: String, error: String },
 }
 
 enum Started {
     Ready { port: u16, nonce: String },
     Closed,
     Failed,
+    /// A spawned core stayed alive but never answered /health in time; the failure is not recorded yet so the
+    /// caller may retry once.
+    TimedOut { url: String, error: String },
+}
+
+/// What one `/health` probe of the running core means.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HealthOutcome {
+    Healthy,
+    /// No usable answer and the port refuses connections (or another process answers): the core is gone.
+    Dead,
+    /// No answer in time but the port still accepts connections: the process is alive and busy.
+    Busy,
+}
+
+/// Tells a dead core from a busy one: refused/foreign answers count toward `health_fails`; a core that keeps
+/// listening is only given up on after `health_busy_budget` of continuous silence.
+#[derive(Default)]
+struct HealthWatch {
+    fails: u32,
+    degraded_since: Option<Instant>,
+}
+
+impl HealthWatch {
+    /// True when the core should be killed as hung.
+    fn record(&mut self, outcome: HealthOutcome, now: Instant, t: &Tuning) -> bool {
+        match outcome {
+            HealthOutcome::Healthy => {
+                self.fails = 0;
+                self.degraded_since = None;
+                false
+            }
+            HealthOutcome::Dead => {
+                self.fails += 1;
+                self.fails >= t.health_fails
+            }
+            HealthOutcome::Busy => {
+                self.fails = 0;
+                let since = *self.degraded_since.get_or_insert(now);
+                now.duration_since(since) >= t.health_busy_budget
+            }
+        }
+    }
+}
+
+/// True when something accepts a TCP connection on `port` (a listening process, however slow its handlers).
+fn port_accepts(port: u16, timeout: Duration) -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    std::net::TcpStream::connect_timeout(&addr, timeout).is_ok()
 }
 
 enum Ended {
@@ -1924,6 +2008,7 @@ mod tests {
             health_interval: Duration::from_millis(100),
             health_timeout: Duration::from_millis(300),
             health_fails: 2,
+            health_busy_budget: Duration::from_millis(1500),
             max_crashes: 3,
             crash_window: Duration::from_secs(60),
             backoff_base: Duration::from_millis(50),
@@ -1972,6 +2057,8 @@ mod tests {
     /// `sleep` (pid in `<dir>/child-<run>.pid`), and misbehaves per MODE:
     /// `ok`, `crash:K` (exit 1 shortly after ready on the first K runs), `always-crash`,
     /// `hang:K` (stop answering after ready on the first K runs), `slow` (listen after 3 s),
+    /// `slowfirst:MS` (listen after MS ms on the first run only),
+    /// `busy:MS` (stop answering for MS ms after ready on the first run, but keep listening),
     /// `linger:K` (on the first K runs, crash while a detached process keeps the port for 1.5 s).
     const FAKE_SERVER: &str = r#"
 const http = require('http'), fs = require('fs'), cp = require('child_process'), path = require('path');
@@ -1990,6 +2077,8 @@ const srv = http.createServer((req, res) => {
 const go = () => srv.listen(Number(process.env.LLMIDE_PORT), '127.0.0.1', () => {
   if (kind === 'always-crash' || (kind === 'crash' && runs < k)) setTimeout(() => process.exit(1), 400);
   if (kind === 'hang' && runs < k) setTimeout(() => { hung = true; }, 300);
+  // busy:K — on the first run only, stop answering for K ms but keep listening (a long synchronous call).
+  if (kind === 'busy' && runs < 1) { setTimeout(() => { hung = true; }, 300); setTimeout(() => { hung = false; }, 300 + k); }
   if (kind === 'linger' && runs < k) setTimeout(linger, 400);
 });
 function linger() {
@@ -2002,7 +2091,7 @@ function linger() {
     const t = setInterval(() => { if (fs.existsSync(bound)) { clearInterval(t); process.exit(1); } }, 10);
   });
 }
-if (kind === 'slow') setTimeout(go, 3000); else go();
+if (kind === 'slow') setTimeout(go, 3000); else if (kind === 'slowfirst' && runs < 1) setTimeout(go, k); else go();
 process.on('SIGTERM', () => process.exit(0));
 "#;
 
@@ -2399,6 +2488,65 @@ process.on('SIGTERM', () => process.exit(0));
         let runs = f.runs();
         assert_eq!(runs.len(), 2);
         assert!(all_dead(&runs[..1]), "the hung core must be killed, not leaked");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_core_that_is_alive_but_briefly_unresponsive_is_not_killed() {
+        // Needs a local port: cannot run inside the command sandbox.
+        let Some(f) = Fake::new("busy", "busy:1000", tuning_fast(free_ports(3))) else { return };
+        f.wait_for("ready", 15, |s| s.state == Phase::Ready);
+        // Silent for ~1 s: far over health_fails * health_interval (200 ms), under the 1.5 s busy budget.
+        thread::sleep(Duration::from_millis(2500));
+        let s = f.host.status();
+        assert_eq!((s.state, s.restarts), (Phase::Ready, 0), "a busy core must not be restarted: {s:?}");
+        assert_eq!(f.runs().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_slow_first_start_is_retried_once_and_then_ready() {
+        // Needs a local port: cannot run inside the command sandbox.
+        let t = Tuning { ready_deadline: Duration::from_millis(1500), ..tuning_fast(free_ports(3)) };
+        let Some(f) = Fake::new("slowfirst", "slowfirst:2500", t) else { return };
+        let s = f.wait_for("ready after the retry", 20, |s| s.state == Phase::Ready);
+        assert_eq!(s.restarts, 0, "the retry is part of the first start, not a crash restart");
+        assert_eq!(f.runs().len(), 2);
+        assert!(all_dead(&f.runs()[..1]), "the timed-out core must be killed before the retry");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_first_start_that_times_out_twice_fails_after_exactly_two_spawns() {
+        // Needs a local port: cannot run inside the command sandbox.
+        let t = Tuning { ready_deadline: Duration::from_millis(800), ..tuning_fast(free_ports(3)) };
+        let Some(f) = Fake::new("slowtwice", "slow", t) else { return };
+        let s = f.wait_for("failed", 20, |s| s.state == Phase::Failed);
+        assert!(s.error.as_deref().unwrap_or("").contains("no /health"), "{s:?}");
+        thread::sleep(Duration::from_millis(500));
+        assert_eq!(f.runs().len(), 2, "one retry, not a loop");
+    }
+
+    #[test]
+    fn health_watch_waits_out_a_busy_core_but_not_a_dead_one() {
+        let t = tuning_fast(vec![1]);
+        let t0 = Instant::now();
+        let mut w = HealthWatch::default();
+        // Dead (port refuses): killed after health_fails consecutive failures.
+        assert!(!w.record(HealthOutcome::Dead, t0, &t));
+        assert!(w.record(HealthOutcome::Dead, t0, &t));
+        // Busy: not killed inside the budget, killed once it is exhausted.
+        let mut w = HealthWatch::default();
+        for i in 0..50u64 {
+            assert!(!w.record(HealthOutcome::Busy, t0 + Duration::from_millis(i * 20), &t));
+        }
+        assert!(w.record(HealthOutcome::Busy, t0 + t.health_busy_budget, &t));
+        // A healthy answer resets the budget.
+        let mut w = HealthWatch::default();
+        assert!(!w.record(HealthOutcome::Busy, t0, &t));
+        assert!(!w.record(HealthOutcome::Healthy, t0 + Duration::from_millis(900), &t));
+        assert!(!w.record(HealthOutcome::Busy, t0 + t.health_busy_budget, &t));
+        assert!(Tuning::default().health_busy_budget >= Duration::from_secs(60));
     }
 
     #[cfg(unix)]
