@@ -35,7 +35,7 @@ const { grant } = await import('./helpers/grant.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { _setPinnedFetchForTests } = await import('../server/pinned-fetch.mjs');
 const { busHostProof } = await import('../core/host-approval.mjs');
-const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutraliseMentions, stagedAddArgs, stagedDiffArgs, stagedPatchId } = await import('../agents/factory-ship.mjs');
+const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutraliseMentions, STAGED_PATCH_EXCLUDES, stagedAddArgs, stagedDiffArgs, stagedPatchId } = await import('../agents/factory-ship.mjs');
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 
 function git(args, cwd) {
@@ -460,6 +460,30 @@ test('ship neither stages nor commits .factory at the top or at any depth, in an
     fs.rmSync(path.join(WT, 'deep', '.FACTORY'), { recursive: true, force: true });
     fs.rmSync(path.join(WT, 'pkg'), { recursive: true, force: true });
     fs.rmSync(path.join(WT, 'deep'), { recursive: true, force: true });
+  }
+});
+
+test('ship neither commits nor patches the Loop machine data, but commits the refactor plan', async () => {
+  const machine = ['system/loop/TEST-MAP.json', 'llm-doc/loop/test/TEST-MAP.md'];
+  const plan = 'llm-doc/loop/refactor/REFACTOR.md';
+  try {
+    for (const f of [...machine, plan]) {
+      fs.mkdirSync(path.dirname(path.join(WT, f)), { recursive: true });
+      fs.writeFileSync(path.join(WT, f), 'generated\n');
+    }
+    const patchId = await stagedPatchId(WT, BASE); // stages the worktree first, as Ship does
+    const shown = git(['diff', '--cached', '--name-only', BASE, '--', '.', ...STAGED_PATCH_EXCLUDES], WT).split('\n').filter(Boolean);
+    assert.ok(shown.includes(plan), `the refactor plan is in the patch: ${shown}`);
+    for (const f of machine) assert.equal(shown.includes(f), false, `${f} is not in the patch`);
+    const out = await commitAndPush({ worktree: WT, branch: BRANCH, message: 'refactor plan', patchId });
+    const files = git(['show', '--name-only', '--format=', out.commit], WT).split('\n').filter(Boolean);
+    assert.ok(files.includes(plan), `the plan is committed: ${files}`);
+    for (const f of machine) assert.equal(files.includes(f), false, `${f} is not committed: ${files}`);
+    assert.equal(git(['diff', '--cached', '--name-only'], WT), '', 'nothing machine-generated is staged');
+    assert.ok(fs.existsSync(path.join(WT, machine[0])), 'the machine data stays on disk');
+  } finally {
+    fs.rmSync(path.join(WT, 'system', 'loop'), { recursive: true, force: true });
+    fs.rmSync(path.join(WT, 'llm-doc', 'loop', 'test'), { recursive: true, force: true });
   }
 });
 

@@ -31,13 +31,27 @@ const DIFF_TEXT_MAX: usize = 2 * 1024 * 1024;
 const MAX_DIFF_FILES: usize = 1000;
 const MAX_LISTED: usize = 500;
 /// Never part of the diff, so never part of what Ship commits: the run's work item and reports. The top-level
-/// `.factory` plus `.factory` at ANY depth (`pkg/.factory/x`), both case-insensitively (R-036 A8).
-const EXCLUDES: &[&str] = &[":(exclude,icase).factory", ":(exclude,icase,glob)**/.factory/**"];
+/// `.factory` plus `.factory` at ANY depth (`pkg/.factory/x`), both case-insensitively (R-036 A8). Also the Loop's
+/// generated machine data (`system/loop/`, `llm-doc/loop/test/`), root-anchored; `llm-doc/loop/refactor/` is NOT
+/// excluded, its plan and rule review document the change. Mirrored in factory-ship.mjs (STAGED_PATCH_EXCLUDES).
+const EXCLUDES: &[&str] = &[
+    ":(exclude,icase).factory",
+    ":(exclude,icase,glob)**/.factory/**",
+    ":(exclude)system/loop",
+    ":(exclude)llm-doc/loop/test",
+];
 
-/// True when any path segment is `.factory`, in any case: the one predicate the status count and the Ship paths
-/// filter use, so a nested report can never be counted, committed or scanned.
-fn is_factory_rel(p: &str) -> bool {
+/// True when `p` is excluded from the run's diff and status: any `.factory` segment in any case, or a path under one
+/// of the root-anchored `EXCLUDES` folders. The one predicate the status count and the Ship paths filter use.
+fn is_excluded_rel(p: &str) -> bool {
     p.split('/').any(|seg| seg.eq_ignore_ascii_case(FACTORY_DIR))
+        || under(p, "system/loop")
+        || under(p, "llm-doc/loop/test")
+}
+
+/// `p` is `dir` or a path under it (whole path segments only, so `system/loopback` is not under `system/loop`).
+fn under(p: &str, dir: &str) -> bool {
+    p == dir || p.strip_prefix(dir).is_some_and(|rest| rest.starts_with('/'))
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -474,6 +488,49 @@ pub fn diff_in(info: &RunInfo) -> Result<WorktreeDiff, String> {
     Ok(WorktreeDiff { text: text_out, truncated, patch_id: sha256_hex(&patch), files, additions, deletions })
 }
 
+/// True when `tree` is a git object id (SHA-1 or SHA-256 hex), so it is safe to hand to git as a plain argument.
+fn valid_tree(tree: &str) -> Result<(), String> {
+    if (tree.len() == 40 || tree.len() == 64) && tree.bytes().all(|c| c.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err("not a git tree id".into())
+    }
+}
+
+/// A per-batch restore point: stages the worktree exactly as the diff does (same excludes) and writes the index as
+/// a tree. No commit, no ref, so Ship and the diff are unaffected. Serialised with the diff per run.
+pub fn checkpoint_in(info: &RunInfo) -> Result<String, String> {
+    let lock = diff_lock(&info.run_id);
+    let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
+    let wt = PathBuf::from(&info.worktree);
+    git_owned(&wt, &staged_add_args())?;
+    let tree = text(git(&wt, &["write-tree"])?);
+    valid_tree(&tree)?;
+    Ok(tree)
+}
+
+/// Returns the worktree to a tree from `checkpoint_in`: tracked and new files alike, so a file created after the
+/// checkpoint is removed and a deleted one comes back. Excluded paths (`.factory/`, `system/loop/`, ...) are never
+/// staged and never touched. Files git ignores (e.g. `__pycache__`) are not part of a checkpoint and are left in place.
+/// An id that is not a tree in this repo (a commit, or unknown) is refused before anything changes.
+pub fn restore_in(info: &RunInfo, tree: &str) -> Result<(), String> {
+    valid_tree(tree)?;
+    let lock = diff_lock(&info.run_id);
+    let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
+    let wt = PathBuf::from(&info.worktree);
+    // `<id>^{tree}` of a tree is the tree itself; of a commit it is a different id, so only a real tree id passes.
+    let resolved = git(&wt, &["rev-parse", "--verify", "--quiet", &format!("{tree}^{{tree}}")])
+        .map(text)
+        .map_err(|_| "unknown checkpoint".to_string())?;
+    if !resolved.eq_ignore_ascii_case(tree) {
+        return Err("unknown checkpoint".into());
+    }
+    // Staging first puts files created since the checkpoint in the index, so read-tree removes them.
+    git_owned(&wt, &staged_add_args())?;
+    git(&wt, &["read-tree", "--reset", "-u", &resolved])?;
+    Ok(())
+}
+
 /// True when `rel` is a plain path under the literal `.factory/` folder (no absolute path, no `..`, no root/prefix).
 fn is_factory_output_rel(rel: &str) -> bool {
     if !rel.starts_with(".factory/") || rel.contains('\\') {
@@ -547,7 +604,7 @@ pub fn status_in(info: &RunInfo) -> Result<WorktreeStatus, String> {
     let base = diff_base(info);
     let changed = crate::loop_runner::changed_paths_in(&wt)?
         .into_iter()
-        .filter(|p| !is_factory_rel(p.trim_end_matches('/')))
+        .filter(|p| !is_excluded_rel(p.trim_end_matches('/')))
         .count();
     let remote_ref = format!("refs/remotes/origin/{}", info.branch);
     let remote = git(&wt, &["rev-parse", "--verify", "--quiet", &remote_ref]).ok().map(|b| text(b)).filter(|s| !s.is_empty());
@@ -565,6 +622,16 @@ pub fn status_in(info: &RunInfo) -> Result<WorktreeStatus, String> {
 #[tauri::command]
 pub async fn loop_worktree_status(run_id: String) -> Result<WorktreeStatus, String> {
     blocking(move || status_in(&resolve(&run_id)?)).await
+}
+
+#[tauri::command]
+pub async fn loop_worktree_checkpoint(run_id: String) -> Result<String, String> {
+    blocking(move || checkpoint_in(&resolve(&run_id)?)).await
+}
+
+#[tauri::command]
+pub async fn loop_worktree_restore(run_id: String, tree: String) -> Result<(), String> {
+    blocking(move || restore_in(&resolve(&run_id)?, &tree)).await
 }
 
 /// The branch the run's repo has checked out (what its worktree was cut from), or None for a detached HEAD. The draft
@@ -1167,6 +1234,80 @@ mod tests {
         let d = diff_in(&info).unwrap();
         assert_eq!(d.files, vec!["real.txt".to_string()], "nested .factory/ paths are excluded at any depth: {:?}", d.files);
         assert!(!d.text.to_lowercase().contains(".factory"), "{}", d.text);
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checkpoint_and_restore_return_the_worktree_to_the_checkpoint() {
+        let p = project_repo("checkpoint");
+        let info = prepare_in(&p, &p, "ck1", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(wt.join("a.txt"), "edited\n").unwrap();
+        std::fs::create_dir_all(wt.join("made")).unwrap();
+        std::fs::write(wt.join("made/new.txt"), "new\n").unwrap();
+        let tree = checkpoint_in(&info).unwrap();
+        assert!(valid_tree(&tree).is_ok() && tree.len() == 40, "{tree}");
+        let listed = sh_git(&p, &["ls-tree", "-r", "--name-only", &tree]);
+        assert!(listed.contains("made/new.txt") && !listed.contains(".factory"), "{listed}");
+        let at_checkpoint = diff_in(&info).unwrap();
+        // Later batch: edit, create, delete (tracked and untracked).
+        std::fs::write(wt.join("a.txt"), "later\n").unwrap();
+        std::fs::remove_file(wt.join("made/new.txt")).unwrap();
+        std::fs::create_dir_all(wt.join("later")).unwrap();
+        std::fs::write(wt.join("later/x.txt"), "x\n").unwrap();
+        std::fs::write(wt.join("after.txt"), "after\n").unwrap();
+        std::fs::create_dir_all(wt.join(".factory")).unwrap();
+        std::fs::write(wt.join(".factory/x"), "report\n").unwrap();
+        std::fs::create_dir_all(wt.join("system/loop")).unwrap();
+        std::fs::write(wt.join("system/loop/ledger.json"), "{}\n").unwrap();
+        restore_in(&info, &tree).unwrap();
+        assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "edited\n", "edited content is back");
+        assert_eq!(std::fs::read_to_string(wt.join("made/new.txt")).unwrap(), "new\n", "a file deleted after the checkpoint is back");
+        assert!(!wt.join("later").exists(), "a folder created after the checkpoint is gone");
+        assert!(!wt.join("after.txt").exists(), "a file created after the checkpoint is gone");
+        assert_eq!(std::fs::read_to_string(wt.join(".factory/x")).unwrap(), "report\n", ".factory is untouched");
+        assert_eq!(std::fs::read_to_string(wt.join("system/loop/ledger.json")).unwrap(), "{}\n", "loop data is untouched");
+        assert_eq!(checkpoint_in(&info).unwrap(), tree, "the restored tree is the checkpoint");
+        assert_eq!(diff_in(&info).unwrap(), at_checkpoint, "the diff is the one taken at the checkpoint");
+        assert!(restore_in(&info, "not-a-tree").is_err(), "a non-tree id is refused");
+        assert_eq!(sh_git(&p, &["status", "--porcelain"]).trim(), "", "the main tree is untouched");
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_refuses_a_commit_or_an_unknown_id_and_changes_nothing() {
+        let p = project_repo("restore-refuse");
+        let info = prepare_in(&p, &p, "rr1", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(wt.join("a.txt"), "edited\n").unwrap();
+        // A commit id names a different object than its tree, so it is not a checkpoint.
+        let commit = sh_git(&p, &["rev-parse", "HEAD"]).trim().to_string();
+        assert_eq!(restore_in(&info, &commit).unwrap_err(), "unknown checkpoint", "a commit id is refused");
+        let missing = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(restore_in(&info, missing).unwrap_err(), "unknown checkpoint", "an unknown id is refused");
+        assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "edited\n", "the worktree is unchanged");
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diff_and_status_leave_out_the_loop_machine_data() {
+        let p = project_repo("loop-data");
+        let info = prepare_in(&p, &p, "ld1", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        for (dir, file) in [("system/loop", "TEST-MAP.json"), ("llm-doc/loop/test", "TEST-MAP.md"), ("llm-doc/loop/refactor", "REFACTOR.md"), ("system/loopback", "keep.txt")] {
+            std::fs::create_dir_all(wt.join(dir)).unwrap();
+            std::fs::write(wt.join(dir).join(file), "x\n").unwrap();
+        }
+        let d = diff_in(&info).unwrap();
+        assert_eq!(d.files, vec!["llm-doc/loop/refactor/REFACTOR.md".to_string(), "system/loopback/keep.txt".to_string()], "{:?}", d.files);
+        assert!(!d.text.contains("TEST-MAP"), "{}", d.text);
+        assert_eq!(status_in(&info).unwrap().changed_files, 2, "status counts the same paths");
         remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&p);
     }

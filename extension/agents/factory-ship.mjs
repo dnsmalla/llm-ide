@@ -3,7 +3,7 @@
 // POST /kb/loop/ship (routes/loop-agent.mjs) after a user click; the agent never pushes.
 //
 // `.factory/` (TASK.md, PLAN.md, REVIEW.md, READINESS.md) is the run's own scratch space and
-// is never committed. Provider calls go to fixed hosts with no redirects, and a provider's
+// is never committed; so is the Loop's generated machine data (`system/loop/`, `llm-doc/loop/test/`). Provider calls go to fixed hosts with no redirects, and a provider's
 // own answer text never reaches an error message (it can echo token fragments).
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -16,10 +16,12 @@ import { scanForSecretsDetailed, scanForSecretsHits } from './github-pr.mjs';
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const FACTORY_BRANCH_RE = /^factory\/[A-Za-z0-9_-]{1,64}$/;
 const FACTORY_DIR = '.factory';
-// `.factory/` is never committed or reviewed: the run's own reports. The list is mirrored by
-// desktop/src-tauri/src/loop_worktree.rs::EXCLUDES and pinned by schema/factory/staged-patch.json.
-export const STAGED_PATCH_EXCLUDES = Object.freeze([':(exclude,icase).factory', ':(exclude,icase,glob)**/.factory/**']);
-const EXCLUDE_FACTORY = STAGED_PATCH_EXCLUDES[0];
+// `.factory/` is never committed or reviewed: the run's own reports. `system/loop/` and `llm-doc/loop/test/` are
+// generated machine data (test map, ledger, prune report), not part of the change. `llm-doc/loop/refactor/` stays in.
+// The list is mirrored by desktop/src-tauri/src/loop_worktree.rs::EXCLUDES and pinned by schema/factory/staged-patch.json.
+export const STAGED_PATCH_EXCLUDES = Object.freeze([
+  ':(exclude,icase).factory', ':(exclude,icase,glob)**/.factory/**', ':(exclude)system/loop', ':(exclude)llm-doc/loop/test',
+]);
 const PUSH_TIMEOUT_MS = 120_000;
 const PROVIDER_TIMEOUT_MS = 15_000;
 const MAX_PROVIDER_BYTES = 1024 * 1024;
@@ -253,19 +255,21 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
       throw shipError('diff_changed', 'The changes changed since you opened this review. Read the new diff, then ship again.');
     }
   }
-  const names = await runGit(worktree, ['diff', '--cached', '--name-only', '--no-renames', '-z', '--', '.', EXCLUDE_FACTORY]);
+  const names = await runGit(worktree, ['diff', '--cached', '--name-only', '--no-renames', '-z', '--', '.', ...STAGED_PATCH_EXCLUDES]);
   // --text: a binary file's bytes are scanned as text too, so a token inside one is not skipped. --no-textconv: a
   // repo-configured textconv driver must not rewrite (and hide) what the scan sees.
-  const diff = await runGit(worktree, ['diff', '--cached', '--text', '--no-textconv', '--unified=0', '--no-color', '--no-ext-diff', '--', '.', EXCLUDE_FACTORY]);
+  const diff = await runGit(worktree, ['diff', '--cached', '--text', '--no-textconv', '--unified=0', '--no-color', '--no-ext-diff', '--', '.', ...STAGED_PATCH_EXCLUDES]);
   if (names.code !== 0 || diff.code !== 0) {
     // Fail closed: a diff that cannot be read cannot be scanned.
     await runGit(worktree, ['reset', '-q']);
     throw shipError('commit_failed', 'The changes could not be scanned for secrets.');
   }
-  // `:(exclude,icase)` covers any case; the `glob` exclude covers `.factory` at any depth. Filter again in JS,
-  // case-insensitively at any depth, so a path the pathspec somehow lists is still never committed or scanned.
-  const isFactoryPath = (p) => p.split('/').some((seg) => seg.toLowerCase() === FACTORY_DIR);
-  const paths = names.stdout.split('\0').filter((p) => p && !isFactoryPath(p));
+  // `:(exclude,icase)` covers any case; the `glob` exclude covers `.factory` at any depth. Filter again in JS, the same
+  // rules as the host's is_excluded_rel, so a path the pathspec somehow lists is still never committed or scanned.
+  const isExcludedPath = (p) => p.split('/').some((seg) => seg.toLowerCase() === FACTORY_DIR)
+    || p === 'system/loop' || p.startsWith('system/loop/')
+    || p === 'llm-doc/loop/test' || p.startsWith('llm-doc/loop/test/');
+  const paths = names.stdout.split('\0').filter((p) => p && !isExcludedPath(p));
   let secretOverride = null;
   if (paths.length > 0) {
     const found = scanForSecretsHits(diff.stdout, 20);

@@ -45,6 +45,8 @@
     "allow-loop-worktree-remove",
     "allow-loop-worktree-list",
     "allow-loop-worktree-status",
+    "allow-loop-worktree-checkpoint",
+    "allow-loop-worktree-restore",
     "allow-loop-repo-branch",
     "allow-loop-clear-factory-output",
     "allow-repo-clone",

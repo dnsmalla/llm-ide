@@ -1,12 +1,14 @@
 {
-  "description": "The exact git invocations that compute a Factory run's patch id (sha256 of the --binary staged patch against the run's base commit, .factory/ excluded). Mirrored by extension/agents/factory-ship.mjs (STAGED_PATCH_*) and desktop/src-tauri/src/loop_worktree.rs (staged_patch_args); both test suites compare their builders to this file so a change on one side alone fails.",
+  "description": "The exact git invocations that compute a Factory run's patch id (sha256 of the --binary staged patch against the run's base commit, .factory/, system/loop/ and llm-doc/loop/test/ excluded). Mirrored by extension/agents/factory-ship.mjs (STAGED_PATCH_EXCLUDES) and desktop/src-tauri/src/loop_worktree.rs (EXCLUDES, staged_add_args, staged_diff_args); both test suites compare their builders to this file so a change on one side alone fails.",
   "add": [
     "add",
     "-A",
     "--",
     ".",
     ":(exclude,icase).factory",
-    ":(exclude,icase,glob)**/.factory/**"
+    ":(exclude,icase,glob)**/.factory/**",
+    ":(exclude)system/loop",
+    ":(exclude)llm-doc/loop/test"
   ],
   "diff": [
     "diff",
@@ -18,7 +20,9 @@
     "--",
     ".",
     ":(exclude,icase).factory",
-    ":(exclude,icase,glob)**/.factory/**"
+    ":(exclude,icase,glob)**/.factory/**",
+    ":(exclude)system/loop",
+    ":(exclude)llm-doc/loop/test"
   ],
   "hash": "sha256 of the diff stdout bytes"
 }
