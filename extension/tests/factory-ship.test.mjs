@@ -39,7 +39,9 @@ const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutra
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 
 function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env } }).trim();
+  // Never inherit a hook's GIT_DIR/GIT_WORK_TREE: they would point these commands at the real repository.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|PREFIX|NAMESPACE)$/.test(k)));
+  return execFileSync('git', args, { cwd, encoding: 'utf8', env }).trim();
 }
 
 // <project>/code/repo with a bare origin; the Factory worktree <project>/system/loop-worktrees/run1.

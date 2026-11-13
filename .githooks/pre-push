@@ -24,6 +24,10 @@
 # Enable once per clone:  make hooks
 # Bypass for one push:    git push --no-verify
 set -uo pipefail
+# Git runs this hook with GIT_DIR (and friends) pointing at THIS repository. A test that runs `git init` / `git config`
+# in its own temp folder would then write into this repo's .git/config (a leaked `core.bare = true` and a test author
+# broke the checkout on 2026-11-13). Every git command below finds the repo from the working directory instead.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX GIT_NAMESPACE
 
 inventory_note() {
     local top
