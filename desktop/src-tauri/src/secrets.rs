@@ -55,7 +55,7 @@ impl fmt::Display for SecretError {
                  refusing to replace it automatically because that would make the vault \
                  unreadable. Remove the '{SERVICE}' entry in your OS credential manager to reset."
             ),
-            Self::BadBackend(v) => write!(f, "{BACKEND_ENV}={v:?} is not supported (only \"memory\" or unset)"),
+            Self::BadBackend(v) => write!(f, "{BACKEND_ENV}={v:?} is not supported (unset uses the OS keychain; \"memory\" works in debug builds only)"),
             Self::Random(why) => write!(f, "cannot generate a random secret: {why}"),
         }
     }
@@ -113,11 +113,17 @@ impl SecretBackend for OsBackend {
     }
 }
 
-/// `memory` selects the in-process store; unset or empty selects the OS store.
+/// `memory` selects the in-process store (debug builds and tests only); unset or empty selects the OS store.
 pub fn backend_from_env(value: Option<&str>) -> Result<Box<dyn SecretBackend>, SecretError> {
+    backend_from_env_with(value, cfg!(debug_assertions))
+}
+
+/// `allow_memory` is false in release builds: the in-process store forgets everything at exit, so honouring the env
+/// var there would silently give the core fresh secrets (and an unreadable vault) on every launch.
+fn backend_from_env_with(value: Option<&str>, allow_memory: bool) -> Result<Box<dyn SecretBackend>, SecretError> {
     match value.map(str::trim).filter(|v| !v.is_empty()) {
         None => Ok(Box::new(OsBackend)),
-        Some("memory") => Ok(Box::new(MemoryBackend::default())),
+        Some("memory") if allow_memory => Ok(Box::new(MemoryBackend::default())),
         Some(other) => Err(SecretError::BadBackend(other.into())),
     }
 }
@@ -299,6 +305,8 @@ mod tests {
     #[test]
     fn backend_selection_from_env_value() {
         assert_eq!(backend_from_env(Some("memory")).unwrap().name(), "memory");
+        assert!(matches!(backend_from_env_with(Some("memory"), false), Err(SecretError::BadBackend(_))), "release builds refuse memory");
+        assert_eq!(backend_from_env_with(None, false).unwrap().name(), "os");
         assert_eq!(backend_from_env(Some(" memory ")).unwrap().name(), "memory");
         assert_eq!(backend_from_env(None).unwrap().name(), "os");
         assert_eq!(backend_from_env(Some("")).unwrap().name(), "os");
