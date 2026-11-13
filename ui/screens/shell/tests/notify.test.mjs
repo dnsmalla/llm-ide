@@ -180,6 +180,13 @@ test("the approval count sums every chat of every chat surface, mounted or not",
   assert.equal(chatApprovalStore.peekReveal("explorer").chatId, "e1");
   assert.equal(chatApprovalStore.takeReveal("explorer").chatId, "e1");
   assert.equal(chatApprovalStore.takeReveal("explorer"), null, "consumed once");
+  // The chat list may take the request before the screen around it has peeked (mount order decides): a peek just
+  // after the take still sees it, so Factory can show its Review tab; later it is gone.
+  chatApprovalStore.requestReveal({ surface: "review", chatId: "r1", count: 1 }, 5_000);
+  assert.equal(chatApprovalStore.takeReveal("review", 5_000).chatId, "r1");
+  assert.equal(chatApprovalStore.peekReveal("review", 5_500).chatId, "r1");
+  assert.equal(chatApprovalStore.takeReveal("review", 5_500), null, "still consumed only once");
+  assert.equal(chatApprovalStore.peekReveal("review", 8_000), null);
   // A request nobody could show (the dock did not fit, the section is off) does not fire long afterwards.
   chatApprovalStore.requestReveal(chatApprovalStore.first(), 1_000);
   assert.equal(chatApprovalStore.peekReveal("explorer", 1_000 + REVEAL_TTL_MS).chatId, "e1");

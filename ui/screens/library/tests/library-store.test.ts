@@ -234,6 +234,20 @@ test("full-text search shows only notes of the open folder, and a different fold
   s.submitSearch();
   await new Promise((r) => setTimeout(r, 10));
   assert.deepEqual(s.getSnapshot().search.hits.map((h) => h.rel), ["source/meetings/2026-10-01-plan.md", "source/meetings/2026-10-02-just-ended.md"]);
+  // Trashed from the Library before any rescan listed it: the hit goes with the note.
+  host.files.delete("source/meetings/2026-10-02-just-ended.md");
+  s.noteRemoved(["source/meetings/2026-10-02-just-ended.md"]);
+  assert.deepEqual(s.getSnapshot().search.hits.map((h) => h.rel), ["source/meetings/2026-10-01-plan.md"]);
+  // Found on disk again, then deleted outside the app: a Refresh drops it.
+  host.add("source/meetings/2026-10-02-just-ended.md", "# Just ended");
+  s.setSearchQuery("plan  ");
+  s.submitSearch();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(s.getSnapshot().search.hits.length, 2);
+  host.files.delete("source/meetings/2026-10-02-just-ended.md");
+  await s.scan();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(s.getSnapshot().search.hits.map((h) => h.rel), ["source/meetings/2026-10-01-plan.md"]);
   answer.pop();
 
   // The user opens another project: its folder has neither note, and the old query must not linger.

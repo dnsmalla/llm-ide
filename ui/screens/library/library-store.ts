@@ -300,6 +300,8 @@ export class LibraryStore {
     this.publish(loaded, { listingDone: true, selectedGone });
     // Now the folder's notes are known: drop search hits that belong to another project (see `ownHits`).
     this.listedOnce = true;
+    // A fresh listing is the truth again: what was found on disk earlier is either listed now or gone.
+    this.onDisk.clear();
     this.refilterHits();
     void this.checkUnlisted(this.rawHits);
   }
@@ -354,6 +356,10 @@ export class LibraryStore {
 
   /** Notes left the folder (moved to the Trash). */
   noteRemoved(rels: readonly string[]): void {
+    // A note opened from a search hit may never have been in the list: its hit goes with it all the same.
+    let wasOnDisk = false;
+    for (const rel of rels) wasOnDisk = this.onDisk.delete(rel) || wasOnDisk;
+    if (wasOnDisk) this.refilterHits();
     if (this.disposed) return;
     let any = false;
     for (const rel of rels) any = this.byRel.delete(rel) || any;

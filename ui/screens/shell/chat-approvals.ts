@@ -14,6 +14,10 @@ const bySurface = new Map<string, readonly WaitingChat[]>();
 let total = 0;
 const listeners = new Set<() => void>();
 let reveal: (WaitingChat & { at: number }) | null = null;
+// The request just consumed. The chat list takes the request while the screens around it only peek, and which of
+// them runs first depends on mount order: a peek shortly after the take must still see what was asked for.
+let taken: (WaitingChat & { at: number }) | null = null;
+const TAKEN_GRACE_MS = 2_000;
 const revealListeners = new Set<() => void>();
 /** A reveal nobody could show (its dock does not fit, its section is off) must not fire minutes later. */
 export const REVEAL_TTL_MS = 15_000;
@@ -51,14 +55,19 @@ export const chatApprovalStore = {
   /** Asks the owning surface to open its dock (if it has one) and select the chat. */
   requestReveal(target: WaitingChat, now = Date.now()): void {
     reveal = { ...target, at: now };
+    taken = null;
     for (const l of [...revealListeners]) l();
   },
   /** The pending request for `surface`, left in place (a screen opens its dock on it; the chat list consumes it). */
-  peekReveal(surface: string, now = Date.now()): WaitingChat | null { return liveReveal(surface, now); },
+  peekReveal(surface: string, now = Date.now()): WaitingChat | null {
+    const live = liveReveal(surface, now);
+    if (live) return live;
+    return taken && taken.surface === surface && now - taken.at <= TAKEN_GRACE_MS ? { surface: taken.surface, chatId: taken.chatId, count: taken.count } : null;
+  },
   /** The pending request for `surface`, consumed: the caller selects the chat. */
   takeReveal(surface: string, now = Date.now()): WaitingChat | null {
     const r = liveReveal(surface, now);
-    if (r) reveal = null;
+    if (r) { reveal = null; taken = { ...r, at: now }; }
     return r;
   },
   subscribeReveal(fn: () => void): () => void { revealListeners.add(fn); return () => revealListeners.delete(fn); },
