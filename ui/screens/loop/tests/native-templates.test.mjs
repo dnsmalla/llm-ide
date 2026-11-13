@@ -48,6 +48,16 @@ test("missing Loop config seeds the Mac starter loops with the detected test com
   assert.ok(noTest.loops.find((l) => l.name === "Plan").config.stages.some((s) => s.kind === "skill"));
 });
 
+test("new AI loops get the $10 default cap; a loop without AI stages gets none", () => {
+  const store = t.initialProjectStore("python3 -m pytest");
+  for (const key of ["refactor", "test"]) {
+    assert.equal(store.loops.find((l) => l.defaultKey === key).config.maxCostUsd, 10, `${key} is capped by default`);
+  }
+  const noAi = t.BUILT_IN_TEMPLATES.find((x) => x.id === "test");
+  assert.ok(noAi.config.stages.every((st) => st.kind !== "skill"));
+  assert.equal(noAi.config.maxCostUsd, null, "no AI stage, no default cap");
+});
+
 test("the Mac loop recipes are available as templates", () => {
   for (const id of ["plan-director", "refactoring", "doc-optimization", "test-growth"]) {
     const t0 = t.BUILT_IN_TEMPLATES.find((x) => x.id === id);

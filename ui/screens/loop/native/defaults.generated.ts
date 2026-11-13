@@ -193,7 +193,8 @@ export const DEFAULT_LOOP_SPECS = [
       "useWorktreesForConcurrentRuns": false,
       "alwaysUseWorktree": false,
       "openMergeRequest": true,
-      "refactorBatchesPerRun": null
+      "refactorBatchesPerRun": null,
+      "maxCostUsd": 10
     }
   },
   {
@@ -289,7 +290,8 @@ export const DEFAULT_LOOP_SPECS = [
       "useWorktreesForConcurrentRuns": false,
       "alwaysUseWorktree": false,
       "openMergeRequest": true,
-      "refactorBatchesPerRun": null
+      "refactorBatchesPerRun": null,
+      "maxCostUsd": 10
     }
   },
   {
@@ -406,9 +408,9 @@ export const DEFAULT_LOOP_SPECS = [
           "severity": "blocking",
           "skillId": "skills/refactor-planner",
           "targetPath": ".",
-          "prompt": "Write or update the refactor plan at the Output path for the code under the Input, driven by the code-graph snapshot, the test map and the rules digest (RULES.md) the loop wrote beside it (read all three first). Classify the Input as a file, a folder or a repo; for a folder or repo with more than one top-level area, give each batch an `- Area:` line. Rank batches by measured structure — cycles, files over 500 lines, high fan-in files mixing roles — then naming and docs; a RULES.md violation found in the Input is itself a batch candidate. Every batch carries a stable ID, a status, its files, the symbols it moves, which of its files still lack tests, its intent, its risk, an Expect line naming the graph counter it will reduce, and a `- Rules:` line naming the rule sources it touches or fixes (or `none found`). Write each batch as a heading `### R<n> <title> (status: todo)`, and no other headings may start with `### R`; mark a batch the runner could not finish safely `(status: blocked)` with a `- Blocked:` line under it — never retry a blocked batch as-is, instead append smaller batch(es) that first remove the blocker, each carrying `- Replaces: R<n>`. Under each heading give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack them), `- Intent:`, `- Risk:`, `- Expect:` and `- Rules:` lines, plus `- Area:` when classified above. If an existing `done`, `skipped` or `blocked` batch lacks `- Rules:`, add `- Rules: none found` to it — this is the only edit ever allowed to a non-todo batch's content. Keep batches small and behaviour-preserving, ordered by value then by fewest dependants first (GRAPH.md `usedBy`) — safest first. When the plan nears 250 lines, move its done, skipped and blocked batches to REFACTOR-DONE.md beside it, keeping IDs unique across both files. Never edit code.",
+          "prompt": "Write or update the refactor plan at the Output path for the code under the Input, driven by the code-graph digest (GRAPH.md), the test map and the rules digest (RULES.md) the loop wrote beside it (read all three first). Classify the Input as a file, a folder or a repo; for a folder or repo with more than one top-level area, give each batch an `- Area:` line. Rank batches by measured structure — cycles, files over 500 lines, high fan-in files mixing roles — then naming and docs; a RULES.md violation found in the Input is itself a batch candidate. Every batch carries a stable ID, a status, its files, the symbols it moves, which of its files still lack tests, its intent, its risk, an Expect line naming the graph counter it will reduce, and a `- Rules:` line naming the rule sources it touches or fixes (or `none found`). Write each batch as a heading `### R<n> <title> (status: todo)`, and no other headings may start with `### R`; mark a batch the runner could not finish safely `(status: blocked)` with a `- Blocked:` line under it — never retry a blocked batch as-is, instead append smaller batch(es) that first remove the blocker, each carrying `- Replaces: R<n>`. Under each heading give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack them), `- Intent:`, `- Risk:`, `- Expect:` and `- Rules:` lines, plus `- Area:` when classified above. If an existing `done`, `skipped` or `blocked` batch lacks `- Rules:`, add `- Rules: none found` to it — this is the only edit ever allowed to a non-todo batch's content. Keep batches small and behaviour-preserving, ordered by value then by fewest dependants first (GRAPH.md's imported-by counts) — safest first. When the plan nears 250 lines, move its done, skipped and blocked batches to REFACTOR-DONE.md beside it, keeping IDs unique across both files. Never edit code.",
           "promptRef": "loop.refactor_planner",
-          "promptHash": "3f01b3ca6fe917820028ad627553dfcbe55e71b8d045170f606995d6a7457050"
+          "promptHash": "b698d420392b8fa77f43e9e48d2b188333f7a143811f2d1fa68e490f6a6c1cbb"
         },
         {
           "check": {
@@ -491,9 +493,9 @@ export const DEFAULT_LOOP_SPECS = [
           "severity": "blocking",
           "skillId": "skills/refactor-apply",
           "targetPath": "llm-doc/loop/refactor/REFACTOR.md",
-          "prompt": "Apply exactly the FIRST todo batch of the plan at the Input to the code under the Output path, using the graph snapshot beside the plan to find every dependant of the files you move or split. Read the rules digest (RULES.md) beside the plan before editing: the result must satisfy it for every file the batch touches. Preserve every listed symbol, update every import, reference and build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never touch more than that batch, never commit. End with `Applied: R<n>`.",
+          "prompt": "Apply exactly the FIRST todo batch of the plan at the Input to the code under the Output path, using the code-graph digest (GRAPH.md) beside the plan to find every dependant of the files you move or split. Read the rules digest (RULES.md) beside the plan before editing: the result must satisfy it for every file the batch touches. Preserve every listed symbol, update every import, reference and build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never touch more than that batch, never commit. End with `Applied: R<n>`.",
           "promptRef": "loop.refactor_apply",
-          "promptHash": "ea584195d007675744fbe713a32562df8f483620f6d6f6060b397a2b6fabb2df"
+          "promptHash": "2017f2ffbf098ece013603e94b101bc77e25f238a51b4e0601bdc03c7d6ca83b"
         },
         {
           "defaultKey": "refactor-conform",
@@ -562,7 +564,8 @@ export const DEFAULT_LOOP_SPECS = [
       "useWorktreesForConcurrentRuns": false,
       "alwaysUseWorktree": false,
       "openMergeRequest": true,
-      "refactorBatchesPerRun": null
+      "refactorBatchesPerRun": null,
+      "maxCostUsd": 10
     }
   },
   {
@@ -660,7 +663,8 @@ export const DEFAULT_LOOP_SPECS = [
       "useWorktreesForConcurrentRuns": false,
       "alwaysUseWorktree": false,
       "openMergeRequest": true,
-      "refactorBatchesPerRun": null
+      "refactorBatchesPerRun": null,
+      "maxCostUsd": 10
     }
   }
 ] as unknown as Array<Omit<LoopDefinition, "id" | "config"> & { config: LoopDefinition["config"] }>;

@@ -188,7 +188,8 @@
         "useWorktreesForConcurrentRuns": false,
         "alwaysUseWorktree": false,
         "openMergeRequest": true,
-        "refactorBatchesPerRun": null
+        "refactorBatchesPerRun": null,
+        "maxCostUsd": 10
       }
     },
     {
@@ -280,7 +281,8 @@
         "useWorktreesForConcurrentRuns": false,
         "alwaysUseWorktree": false,
         "openMergeRequest": true,
-        "refactorBatchesPerRun": null
+        "refactorBatchesPerRun": null,
+        "maxCostUsd": 10
       }
     },
     {
@@ -543,7 +545,8 @@
         "useWorktreesForConcurrentRuns": false,
         "alwaysUseWorktree": false,
         "openMergeRequest": true,
-        "refactorBatchesPerRun": null
+        "refactorBatchesPerRun": null,
+        "maxCostUsd": 10
       }
     },
     {
@@ -637,7 +640,8 @@
         "useWorktreesForConcurrentRuns": false,
         "alwaysUseWorktree": false,
         "openMergeRequest": true,
-        "refactorBatchesPerRun": null
+        "refactorBatchesPerRun": null,
+        "maxCostUsd": 10
       }
     }
   ],
@@ -710,7 +714,8 @@
       "name": "Skill Loop",
       "summary": "Run a chosen skill as a generate step, gated by tests and the fault sweep.",
       "config": {
-        "maxIterations": 6
+        "maxIterations": 6,
+        "maxCostUsd": 10
       },
       "stages": [
         {
@@ -734,7 +739,8 @@
       "summary": "Regenerate documentation with a skill, then run the project docs check.",
       "config": {
         "maxIterations": 4,
-        "maxRepairsPerStage": 2
+        "maxRepairsPerStage": 2,
+        "maxCostUsd": 10
       },
       "stages": [
         {
