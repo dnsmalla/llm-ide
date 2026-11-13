@@ -13,6 +13,7 @@ const FIRED_KEY = "llmide.tasks.v2.fired";
 const MAX_FIRED = 200;
 /** Outcomes recorded as a skipped slot, not a failure: the refusal is the answer, and no engine call was made. */
 export const SKIP_CODES: ReadonlySet<string> = new Set(["USD_CAP", "PAUSED_BY_LIMITS", "NEEDS_APPROVAL", "WRITE_RUN_LIVE"]);
+const BUSY_SUMMARY = "Another Auto Task run was active (busy); this slot was skipped.";
 
 export type ScheduledItem = { kind: "task"; id: string } | { kind: "custom"; task: CustomAutoTask };
 export interface ScheduledOutcome { ok: boolean; summary: string; code?: string }
@@ -90,26 +91,38 @@ async function runOne(item: ScheduledItem, root: string, deps: SchedulerDeps): P
   try { return await deps.run(item, root); } catch (e) { return { ok: false, summary: e instanceof Error ? e.message : "The task could not run." }; }
 }
 
+/** The slots due now for `root`, already marked fired and saved (so a crash or a busy lock never fires one twice). */
+function takeDueItems(root: string, deps: SchedulerDeps): ScheduledItem[] {
+  const storage = deps.storage ?? globalThis.localStorage;
+  const memory = deps.memory ?? moduleMemory;
+  const state = loadTaskState(root, storage);
+  if (!state.masterEnabled) return [];
+  const now = deps.now();
+  const env: TaskEnv = { features: null, coreFeatures: null, hasRepo: deps.hasRepo(), localHost: true, mode: "local" };
+  const fired = loadFired(storage, memory);
+  const items: ScheduledItem[] = [
+    ...dueTasks(state, now, fired, env, root).map((id): ScheduledItem => ({ kind: "task", id })),
+    ...dueCustomTasks(loadCustomTasks(root, storage), state.masterEnabled, now, fired, root).map((task): ScheduledItem => ({ kind: "custom", task })),
+  ];
+  // Marks are saved before anything runs, so a crash mid-run does not fire the same slot again.
+  saveFired(storage, fired, memory);
+  return items;
+}
+
 /** One scheduler pass for `projectRoot`. Returns how many slots were started or recorded as skipped. */
 export async function runDueScheduled(projectRoot: string, deps: SchedulerDeps): Promise<number> {
   const root = normaliseProjectRoot(projectRoot);
   if (!root) return 0;
-  const storage = deps.storage ?? globalThis.localStorage;
-  const memory = deps.memory ?? moduleMemory;
-  if (!deps.acquire()) return 0;
+  // Due slots are computed (and marked) before the lock is tried: due matching is exact to the minute, so a slot
+  // that finds the lock taken would otherwise vanish without a record.
+  const items = takeDueItems(root, deps);
+  if (items.length === 0) return 0;
+  if (!deps.acquire()) {
+    for (const item of items) deps.record({ item, projectRoot: root, at: deps.now().toISOString(), status: "skipped", summary: BUSY_SUMMARY });
+    return items.length;
+  }
   let started = 0;
   try {
-    const state = loadTaskState(root, storage);
-    if (!state.masterEnabled) return 0;
-    const now = deps.now();
-    const env: TaskEnv = { features: null, coreFeatures: null, hasRepo: deps.hasRepo(), localHost: true, mode: "local" };
-    const fired = loadFired(storage, memory);
-    const items: ScheduledItem[] = [
-      ...dueTasks(state, now, fired, env, root).map((id): ScheduledItem => ({ kind: "task", id })),
-      ...dueCustomTasks(loadCustomTasks(root, storage), state.masterEnabled, now, fired, root).map((task): ScheduledItem => ({ kind: "custom", task })),
-    ];
-    // Marks are saved before anything runs, so a crash mid-run does not fire the same slot again.
-    saveFired(storage, fired, memory);
     for (const item of items) {
       if (deps.shouldStop?.()) break;
       const at = deps.now().toISOString();

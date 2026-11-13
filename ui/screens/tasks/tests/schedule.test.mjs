@@ -107,13 +107,27 @@ test("due tasks run one at a time", async () => {
   assert.equal(peak, 1);
 });
 
-test("a busy Auto Task slot starts nothing and marks nothing fired", async () => {
+test("a slot due while another task holds the lock is recorded as skipped (busy), once, and starts nothing", async () => {
   const s = storage();
   armed(ROOT, s, ["review.code"]);
   const busy = deps(s, { acquire: () => false });
+  assert.equal(await runDueScheduled(ROOT, busy), 1, "the skipped slot is counted");
+  assert.equal(busy.runs.length, 0);
+  assert.equal(busy.records.length, 1);
+  assert.equal(busy.records[0].status, "skipped");
+  assert.match(busy.records[0].summary, /busy/);
+  assert.deepEqual(busy.records[0].item, { kind: "task", id: "review.code" });
+  const again = deps(s, { acquire: () => false, memory: busy.memory });
+  assert.equal(await runDueScheduled(ROOT, again), 0, "the next tick in the same minute does not record it twice");
+  assert.equal(again.records.length, 0);
+});
+
+test("nothing due and a busy lock records nothing", async () => {
+  const s = storage();
+  armed(ROOT, s, ["review.code"], { cron: "5 * * * *" });
+  const busy = deps(s, { acquire: () => false });
   assert.equal(await runDueScheduled(ROOT, busy), 0);
-  const free = deps(s, { memory: busy.memory });
-  assert.equal(await runDueScheduled(ROOT, free), 1, "the same minute still runs once the slot is free");
+  assert.equal(busy.records.length, 0);
 });
 
 test("a custom task goes through the same queue and fires once per minute", async () => {
