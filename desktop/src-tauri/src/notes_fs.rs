@@ -262,20 +262,22 @@ pub(crate) fn open_in_root(root: &Path, rel: &str) -> Result<(std::fs::File, std
         return Err(err("outside_root", "path is outside the notes folder"));
     }
     let file = open_nofollow(&canonical)?;
+    let meta = file.metadata().map_err(|e| err("io", e))?;
+    // A hard link may be another name for a file outside the notes folder: its path says nothing about where
+    // the bytes live, so it is never read (same rule as the project file reads). Checked before the descriptor's
+    // path, because for a file with several names the OS may report any of them there, which made the refusal's
+    // reason differ from run to run.
+    if meta.is_file() && crate::fs_ops::nlink(&file, &meta) > 1 {
+        return Err(err("hardlink", "the note has several hard links; refusing to read it"));
+    }
     // Verify what was actually opened, not the path resolved a moment ago.
     // Fails closed: no descriptor path, no read.
     let real = fd_path(&file).ok_or_else(|| err("io", "cannot verify the opened file"))?;
     if !real.starts_with(&root) {
         return Err(err("outside_root", "path is outside the notes folder"));
     }
-    let meta = file.metadata().map_err(|e| err("io", e))?;
     if !meta.is_file() {
         return Err(err("invalid_path", "not a regular file"));
-    }
-    // A hard link may be another name for a file outside the notes folder: its path says nothing about where
-    // the bytes live, so it is never read (same rule as the project file reads).
-    if crate::fs_ops::nlink(&file, &meta) > 1 {
-        return Err(err("hardlink", "the note has several hard links; refusing to read it"));
     }
     if is_dataless(&meta) {
         return Err(err("not_downloaded", "the file is in the cloud and is not downloaded"));

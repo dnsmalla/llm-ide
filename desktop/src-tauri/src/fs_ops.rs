@@ -251,6 +251,13 @@ pub(crate) fn nlink(_f: &File, _m: &Metadata) -> u64 {
 /// Opens `canonical` (already inside the root) and verifies the OPEN descriptor.
 fn open_verified(root: &Path, canonical: &Path) -> R<(File, Metadata)> {
     let f = open_nofollow(canonical, false).map_err(|e| io_err("cannot open file", e))?;
+    let meta = f.metadata().map_err(|e| io_err("cannot stat file", e))?;
+    // Checked before the descriptor's path: for a file with several names the OS may report ANY of them as that path
+    // (macOS F_GETPATH), so a hard link to a file outside the root was refused sometimes as `outside_root` and
+    // sometimes as `hardlink`. It is refused either way; this makes the reason the same every time.
+    if meta.is_file() && nlink(&f, &meta) > 1 {
+        return err("hardlink", "file has several hard links; refusing to follow it");
+    }
     match crate::graph_file::fd_path(&f) {
         Some(real) => {
             if !inside(&real, root) {
@@ -259,12 +266,8 @@ fn open_verified(root: &Path, canonical: &Path) -> R<(File, Metadata)> {
         }
         None => return err("outside_root", "cannot verify the opened file"),
     }
-    let meta = f.metadata().map_err(|e| io_err("cannot stat file", e))?;
     if !meta.is_file() {
         return err("not_regular", "not a regular file");
-    }
-    if nlink(&f, &meta) > 1 {
-        return err("hardlink", "file has several hard links; refusing to follow it");
     }
     Ok((f, meta))
 }
