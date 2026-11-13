@@ -168,7 +168,7 @@ function starterLoop(spec: (typeof DEFAULT_LOOP_SPECS)[number], testCommand: str
   // worktree is its rollback, so the main tree is never left half-refactored.
   const isolation = spec.defaultKey === REFACTOR_KEY ? { alwaysUseWorktree: true } : {};
   return {
-    ...structuredClone(spec), id: crypto.randomUUID(), isPrimary: Boolean(spec.isPrimary),
+    ...structuredClone(spec), id: crypto.randomUUID(), isPrimary: Boolean(spec.isPrimary), inputPath: "",
     config: { ...config, ...isolation, stages },
   };
 }

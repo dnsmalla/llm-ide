@@ -590,7 +590,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     // Any run start (Run, queue, schedule, picker) closes the picker so a stale card cannot linger over it.
     setPickerLoop(null);
     // A missing input folder would leave the stages with nothing to work on, so refuse before any worktree exists.
-    if (target.inputPath !== "") {
+    if (target.inputPath) {
       const repoRel = start ? start.repoRel : workRelative;
       const folder = repoRel ? `${repoRel}/${target.inputPath}` : target.inputPath;
       const isFolder = await fs.list(folder).then(() => true, () => false);
