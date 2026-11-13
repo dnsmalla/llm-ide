@@ -37,7 +37,9 @@ export function ModelPicker({ groups, provider, model, onChange, plainChat, load
   const value = modelPickerValue(route, provider, model);
   const listed = groups.flatMap((g) => g.models);
   if (!loading && listed.length === 0 && onConnectProvider) {
-    return <div className="chat-model-empty"><button type="button" className="chat-btn" onClick={onConnectProvider}>Connect a provider</button><span className="chat-muted">Add a model key in Settings → Providers.</span></div>;
+    // Say why the list is empty (e.g. the Claude CLI could not be started): a bare "connect" hid a working login.
+    const why = groups.map((g) => g.note).filter((n): n is string => !!n);
+    return <div className="chat-model-empty"><button type="button" className="chat-btn" onClick={onConnectProvider}>Connect a provider</button><span className="chat-muted">{why.length ? why.join(" ") : "Add a model key in Settings → Providers."}</span></div>;
   }
   const removable = groups.find((g) => g.provider === provider && (userModels?.[g.id] ?? []).includes(model ?? ""));
   const composerLabel = provider && model ? (listed.find((m) => m.provider === provider && m.model === model)?.label ?? model) : null;

@@ -20,6 +20,7 @@
 import { resolveAnthropicKey, agentSdkHomeFor } from './auth.mjs';
 
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
+import { requireClaudeExecutable } from '../../providers/claude-path.mjs';
 const CACHE_MS = 30 * 60 * 1000;
 // A failure (not logged in, a hung CLI) is remembered briefly, so each picker
 // load does not spawn a fresh CLI and wait out TIMEOUT_MS again before the
@@ -127,7 +128,7 @@ function normalizedId(id) {
  * The account's Claude models, first = the SDK's default. Throws when the SDK
  * cannot answer (not logged in, no binary, timeout) — the caller falls back.
  */
-export async function listSdkModels(userId, { queryFn = null, now = Date.now } = {}) {
+export async function listSdkModels(userId, { queryFn = null, now = Date.now, resolveExe = queryFn ? null : requireClaudeExecutable } = {}) {
   const { key } = resolveAnthropicKey(userId);
   const cacheKey = cacheKeyFor(key, userId);
   const hit = cache.get(cacheKey);
@@ -135,7 +136,7 @@ export async function listSdkModels(userId, { queryFn = null, now = Date.now } =
   if (hit?.error && now() - hit.at < FAILURE_CACHE_MS) throw hit.error;
   const pending = inFlight.get(cacheKey);
   if (pending) return pending;
-  const call = askSdk(userId, key, queryFn)
+  const call = askSdk(userId, key, queryFn, resolveExe)
     .then((models) => { cache.set(cacheKey, { at: now(), models }); return models; })
     .catch((error) => { cache.set(cacheKey, { at: now(), error }); throw error; })
     .finally(() => inFlight.delete(cacheKey));
@@ -162,7 +163,12 @@ export function cachedEffortLevels(userId, modelId) {
   return row ? [...row.effortLevels] : [];
 }
 
-async function askSdk(userId, key, queryFn) {
+async function askSdk(userId, key, queryFn, resolveExe) {
+  // Which `claude` the SDK runs, exactly as a chat turn picks it (engine.mjs sdkQueryFactory): the packaged desktop
+  // app ships without the SDK's bundled binary, so without this the listing failed there while chats worked, and the
+  // picker showed no models at all. Unresolvable throws ClaudeNotFoundError, which the route reports as `detail`.
+  const exe = resolveExe ? resolveExe({ purpose: 'sdk' }) : null;
+  const exePath = exe && exe.source !== 'bundled' ? exe.path : null;
   let release;
   // A streaming-input prompt that never yields a message: the session starts,
   // answers control requests, and sends nothing to the model.
@@ -174,6 +180,7 @@ async function askSdk(userId, key, queryFn) {
     options: {
       settingSources: [],
       tools: [],
+      ...(exePath ? { pathToClaudeCodeExecutable: exePath } : {}),
       // Same isolation as a chat turn (engine.mjs): no claude.ai connectors,
       // the user's own key and home when they have one, ambient login otherwise.
       env: {

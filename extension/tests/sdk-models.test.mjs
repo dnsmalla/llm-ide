@@ -179,3 +179,20 @@ test('cachedEffortLevels: a dotted or -latest spelling finds its row (mirrors th
   assert.deepEqual(cachedEffortLevels('u-norm', 'claude-sonnet-5-5-latest'), ['low', 'medium', 'high']);
   assert.deepEqual(cachedEffortLevels('u-norm', 'claude-sonnet-5'), [], 'a different model is still unlisted');
 });
+
+test('listSdkModels runs the same resolved `claude` as a chat turn (the packaged app has no bundled binary)', async () => {
+  let seen;
+  const queryFn = ({ options }) => { seen = options; return { supportedModels: async () => REAL, close() {} }; };
+  const models = await listSdkModels('u-exe', { queryFn, resolveExe: () => ({ path: '/opt/claude/bin/claude', source: 'path' }) });
+  assert.equal(seen.pathToClaudeCodeExecutable, '/opt/claude/bin/claude');
+  assert.ok(models.length > 0);
+  __clearSdkModelsCacheForTest();
+  await listSdkModels('u-exe', { queryFn, resolveExe: () => ({ path: '/sdk/bundled/claude', source: 'bundled' }) });
+  assert.equal(seen.pathToClaudeCodeExecutable, undefined, 'the SDK keeps its own bundled binary as its default');
+});
+
+test('listSdkModels: no `claude` found is an error the route reports, not an empty success', async () => {
+  const queryFn = () => { throw new Error('must not spawn'); };
+  const resolveExe = () => { throw Object.assign(new Error('Claude Code is not installed'), { code: 'CLAUDE_NOT_FOUND' }); };
+  await assert.rejects(listSdkModels('u-none', { queryFn, resolveExe }), /not installed/);
+});

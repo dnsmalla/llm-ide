@@ -92,3 +92,12 @@ test("no tier config, or a failed tiers call, adds nothing; an abort rethrows", 
   ac.abort();
   await assert.rejects(c.loadTierRouting(fakeCore({ json: { "GET /kb/routing-tiers": TIERS } }), ac.signal), /aborted/);
 });
+
+test("an empty picker says why (the core's reason) next to Connect a provider", async () => {
+  const { h, renderToStaticMarkup } = await import("./helpers.mjs");
+  const groups = [{ id: "anthropic", label: "Claude", catalog: false, provider: "anthropic", models: [], note: "The model list is unavailable: Claude Code is not installed" }];
+  const out = renderToStaticMarkup(h(c.ModelPicker, { groups, provider: null, model: null, route: null, onChange() {}, onConnectProvider() {} }));
+  assert.match(out, /Connect a provider/);
+  assert.match(out, /The model list is unavailable: Claude Code is not installed/);
+  assert.doesNotMatch(out, /Add a model key/);
+});
