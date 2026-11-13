@@ -216,3 +216,14 @@ test("the timer ticks until it is stopped", async () => {
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(d.runs.length, count);
 });
+
+test("a task the user stopped is recorded as skipped, not failed, and the pass starts nothing after it", async () => {
+  const s = storage();
+  armed(ROOT, s, ["review.code", "review.security"]);
+  let stopped = false;
+  const d = deps(s, { run: async (item) => { d.runs.push(item); stopped = true; return { ok: false, code: "STOPPED", summary: "Stopped by the user." }; }, shouldStop: () => stopped });
+  const n = await runDueScheduled(ROOT, d);
+  assert.equal(d.runs.length, 1, "the second due task of the pass does not start");
+  assert.equal(n, 1);
+  assert.equal(d.records[0].status, "skipped");
+});

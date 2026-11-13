@@ -12,7 +12,7 @@ import type { TaskEnv } from "./types.ts";
 const FIRED_KEY = "llmide.tasks.v2.fired";
 const MAX_FIRED = 200;
 /** Outcomes recorded as a skipped slot, not a failure: the refusal is the answer, and no engine call was made. */
-export const SKIP_CODES: ReadonlySet<string> = new Set(["USD_CAP", "PAUSED_BY_LIMITS", "NEEDS_APPROVAL", "WRITE_RUN_LIVE"]);
+export const SKIP_CODES: ReadonlySet<string> = new Set(["USD_CAP", "PAUSED_BY_LIMITS", "NEEDS_APPROVAL", "WRITE_RUN_LIVE", "STOPPED"]);
 const BUSY_SUMMARY = "Another Auto Task run was active (busy) for the whole catch-up time; this slot was skipped.";
 
 export type ScheduledItem = { kind: "task"; id: string } | { kind: "custom"; task: CustomAutoTask };

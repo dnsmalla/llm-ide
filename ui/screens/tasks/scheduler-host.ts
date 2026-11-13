@@ -8,7 +8,7 @@ import { createHostFs } from "../explorer/fs";
 import { notifyTask } from "../shell/notify/notify";
 import { tryAcquireAutoTask, releaseAutoTask } from "../autotasks/native/lock.ts";
 import { runCustomTask } from "../autotasks/native/run-custom.ts";
-import { beginScheduledRun, endScheduledRun } from "../autotasks/native/scheduled-run.ts";
+import { beginScheduledPass, beginScheduledRun, endScheduledRun, scheduledPassStopped } from "../autotasks/native/scheduled-run.ts";
 import { appendCustomRun } from "../autotasks/native/custom-schedule.ts";
 import { normaliseProjectRoot, type CustomAutoTask } from "../autotasks/native/custom.ts";
 import { liveRuns } from "../loop/native/run-manager.ts";
@@ -64,7 +64,11 @@ async function runItem(item: ScheduledItem, root: string, signal: AbortSignal): 
 async function run(item: ScheduledItem, root: string): Promise<ScheduledOutcome> {
   const label = item.kind === "custom" ? item.task.name : taskById(item.id)?.label ?? item.id;
   const abort = beginScheduledRun(label);
-  try { return await runItem(item, root, abort.signal); } finally { endScheduledRun(abort); }
+  try {
+    const outcome = await runItem(item, root, abort.signal);
+    // A run the user stopped is not a failure: no failed-task notification, and the history says what happened.
+    return abort.signal.aborted ? { ok: false, code: "STOPPED", summary: "Stopped by the user." } : outcome;
+  } finally { endScheduledRun(abort); }
 }
 
 /** Starts the scheduler for `projectRoot`; the returned function stops it. */
@@ -75,9 +79,10 @@ export function startDesktopScheduler(projectRoot: string): () => void {
     hasRepo: hasLinkedRepo,
     // A Loop-page run is external to the manager but still writes this project; it counts too.
     writeRunLive: () => liveRuns().some((r) => normaliseProjectRoot(r.projectRoot) === normalised),
-    acquire: tryAcquireAutoTask,
+    acquire: () => { const ok = tryAcquireAutoTask(); if (ok) beginScheduledPass(); return ok; },
     release: releaseAutoTask,
     run,
     record,
+    shouldStop: scheduledPassStopped,
   });
 }

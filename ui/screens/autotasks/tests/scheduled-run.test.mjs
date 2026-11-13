@@ -20,3 +20,19 @@ test("the scheduled run is visible, stoppable through its signal, and cleared wh
   assert.equal(notified, 2);
   off();
 });
+
+test("Stop also holds back the rest of the scheduler pass, until the next pass begins", async () => {
+  const m = await import("../native/scheduled-run.ts");
+  m.beginScheduledPass();
+  assert.equal(m.scheduledPassStopped(), false);
+  const abort = m.beginScheduledRun("Nightly review");
+  assert.equal(m.stopScheduledRun(), true);
+  assert.equal(abort.signal.aborted, true);
+  assert.equal(m.scheduledPassStopped(), true, "the next due task of this pass must not start");
+  m.endScheduledRun(abort);
+  assert.equal(m.scheduledPassStopped(), true, "still this pass");
+  m.beginScheduledPass();
+  assert.equal(m.scheduledPassStopped(), false, "a later pass runs normally");
+  assert.equal(m.stopScheduledRun(), false, "nothing running: nothing to stop, and no pass is held back");
+  assert.equal(m.scheduledPassStopped(), false);
+});

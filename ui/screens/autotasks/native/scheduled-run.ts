@@ -31,9 +31,20 @@ export function endScheduledRun(abort: AbortController): void {
   emit();
 }
 
-/** Aborts the in-flight scheduled run. Returns false when none is running. */
+// Stop means "stop the scheduler's work now", not only the task on screen: the same pass may hold more due tasks,
+// and without this the next one started the moment the first was stopped.
+let passStopped = false;
+
+/** Aborts the in-flight scheduled run and keeps the rest of this scheduler pass from starting. Returns false when none is running. */
 export function stopScheduledRun(): boolean {
   if (!current) return false;
+  passStopped = true;
   current.abort.abort();
   return true;
 }
+
+/** True once Stop was pressed during the current pass. */
+export function scheduledPassStopped(): boolean { return passStopped; }
+
+/** A new pass begins (the scheduler took the lock): an earlier Stop no longer applies. */
+export function beginScheduledPass(): void { passStopped = false; }
