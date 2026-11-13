@@ -16,6 +16,7 @@ import { useEnv } from "../context.tsx";
 import { ErrorText, NeedsHost } from "../ui.tsx";
 import { TOOLBAR_IDS, readHiddenToolbar, writeHiddenToolbar } from "../../shell/toolbar-model";
 import { SECTIONS } from "../../shell/sections";
+import { savedProfileNotice } from "./feature-profile-notice";
 
 const label = (f: AppFeature): string => featureDef(f).label;
 const names = (list: readonly AppFeature[]): string => list.map(label).join(", ");
@@ -51,7 +52,8 @@ export function FeatureProfileSection() {
   if (!host.getFeatureProfile || !host.setFeatureProfile) return <NeedsHost what="The feature profile" />;
   if (!stored || !launch) return <p className="st-hint" role="status">Reading the feature profile...</p>;
 
-  const save = async (next: Set<AppFeature>) => {
+  // `dropped` is shown with the confirmation: setting it separately was overwritten by the "Saved" notice after the await.
+  const save = async (next: Set<AppFeature>, dropped: readonly AppFeature[] = []) => {
     const valid = validateFeatures(next);
     setSaving(true);
     setError(null);
@@ -60,7 +62,7 @@ export function FeatureProfileSection() {
       const p = await host.setFeatureProfile!([...valid]);
       setStored(validateFeatures(p.stored.length ? p.stored : ALL_FEATURES));
       setLaunch(validateFeatures(p.launch.length ? p.launch : ALL_FEATURES));
-      setNotice("Saved. The change applies the next time the app opens.");
+      setNotice(savedProfileNotice(names(dropped)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "The feature profile could not be saved.");
     } finally {
@@ -79,8 +81,7 @@ export function FeatureProfileSection() {
     }
     const valid = validateFeatures(next);
     const dropped = [...next].filter((x) => !valid.has(x));
-    void save(valid);
-    if (dropped.length) setNotice(`Also turned off: ${names(dropped)}.`);
+    void save(valid, dropped);
   };
 
   const applyPreset = (id: string) => {
