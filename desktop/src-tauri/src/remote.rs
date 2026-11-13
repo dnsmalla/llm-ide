@@ -294,6 +294,15 @@ pub fn ssh_args(target: &PreparedTarget) -> Vec<String> {
 pub fn ssh_args_known(target: &PreparedTarget, command: &str, known_hosts: &Path, accept_new: bool) -> Vec<String> {
     vec![
         "-v".to_string(),
+        // Nothing from the user's ssh config may forward an agent, X11, ports or run a local command.
+        "-a".to_string(),
+        "-x".to_string(),
+        "-o".to_string(),
+        "ForwardAgent=no".to_string(),
+        "-o".to_string(),
+        "ClearAllForwardings=yes".to_string(),
+        "-o".to_string(),
+        "PermitLocalCommand=no".to_string(),
         "-o".to_string(),
         "BatchMode=yes".to_string(),
         "-o".to_string(),
@@ -590,6 +599,10 @@ mod tests {
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == "StrictHostKeyChecking=yes"));
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("UserKnownHostsFile=/tmp/llmide-known-hosts-test")));
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("GlobalKnownHostsFile=")));
+        for flag in ["-a", "-x"] { assert!(args.contains(&flag.to_string()), "{flag}"); }
+        for opt in ["ForwardAgent=no", "ClearAllForwardings=yes", "PermitLocalCommand=no"] {
+            assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == opt), "{opt}");
+        }
     }
 
     #[test]
