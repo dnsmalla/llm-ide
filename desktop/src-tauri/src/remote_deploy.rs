@@ -451,6 +451,10 @@ pub fn confirm_plan(id: &str, confirmation: &str, now: u64) -> Result<DeployPlan
         map.remove(id);
         return Err(herr("plan_expired", "this deploy plan expired; run the preflight again"));
     }
+    // The UI hides the button for a blocked plan, but the host must not rely on that.
+    if !plan.blockers.is_empty() {
+        return Err(herr("plan_blocked", format!("this deploy plan has blockers: {}", plan.blockers.join(", "))));
+    }
     if confirmation != plan.confirmation {
         return Err(herr("confirmation_mismatch", "type the domain exactly to confirm the deploy"));
     }
@@ -1041,6 +1045,17 @@ mod tests {
         remember_plan(plan.clone());
         assert_eq!(confirm_plan(&plan.id, "hub.example.com", 2_000_000).unwrap_err().code, "plan_expired");
         let _ = std::fs::remove_file(bundle);
+    }
+
+    #[test]
+    fn a_plan_with_blockers_is_refused_by_the_host() {
+        let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: false, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", "/nonexistent/bundle.tar.gz", 1_000, true);
+        assert!(!plan.blockers.is_empty());
+        remember_plan(plan.clone());
+        let err = confirm_plan(&plan.id, "hub.example.com", 2_000).unwrap_err();
+        assert_eq!(err.code, "plan_blocked");
+        assert!(err.message.contains("sudo_requires_password") && err.message.contains("bundle_missing"));
     }
 
     #[test]
