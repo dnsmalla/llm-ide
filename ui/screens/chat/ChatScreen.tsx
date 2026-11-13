@@ -174,7 +174,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       setMemoryOpen(false);
     } catch { setNotice("Project memory could not be read."); }
   }, [activeId, controller, host, memoryCore]);
-  useControllerVersion(controller); // re-render when any chat's busy flag changes
+  const controllerVersion = useControllerVersion(controller); // re-render when any chat's busy flag changes
 
   // Sessions: first page now, more on demand.
   const sessionsRev = uiState.sessionsRev;
@@ -381,7 +381,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // This chat's total, summed from the loaded replies' own counts (the Mac header's "N tokens").
   const sessionTotal = useMemo(() => chatTotalLabel(state.messages, state.hasMoreOlder), [state.messages, state.hasMoreOlder]);
   const turnCount = useMemo(() => state.messages.filter((m) => m.role === "user").length, [state.messages]);
-  const busyIds = useMemo(() => new Set(controller.busyIds()), [controller, state]);
+  // Keyed on the controller version, not the open chat's state: a background chat finishing must clear its "(running)".
+  const busyIds = useMemo(() => new Set(controller.busyIds()), [controller, controllerVersion]);
   // Re-read on every controller change (useControllerVersion above), so a background chat's approval shows up at once.
   const approvalIds = new Set(controller.approvalChatIds());
   const plain = plainChatReason(current.provider ?? "", current.model ?? "", current.mode, groups, toolsEnabled);

@@ -56,6 +56,20 @@ test("switching chats never touches a running turn (background sessions)", async
   await until(() => ctl.getState("a").phase === "idle");
 });
 
+test("a background chat finishing bumps the controller version the history list keys its busy set on", async () => {
+  const core = fakeCore({ streams: [hangingStream(sse(FX.init), sse({ type: "delta", text: "partial" }))] });
+  const { ctl } = make(core);
+  ctl.send("a", "long task", { mode: "execute" });
+  await until(() => ctl.getState("a").applied >= 2);
+  await ctl.open("b");
+  const before = ctl.getVersion();
+  assert.deepEqual(ctl.busyIds(), ["a"]);
+  ctl.abort("a");
+  await until(() => ctl.getState("a").phase === "idle");
+  assert.deepEqual(ctl.busyIds(), []);
+  assert.notEqual(ctl.getVersion(), before, "an idle background chat must change the version, or the dropdown keeps '(running)'");
+});
+
 test("Stop: client abort + server cancel, idle well inside 2 s, message marked aborted, partial text persisted", async () => {
   const core = fakeCore({ streams: [hangingStream(sse(FX.init), sse({ type: "delta", text: "half an answ" }))], json: { "POST /agent/v2/cancel": { cancelled: true } } });
   const { ctl, store } = make(core);
