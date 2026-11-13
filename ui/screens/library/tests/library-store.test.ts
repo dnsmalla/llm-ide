@@ -212,6 +212,33 @@ test("view state: section, filters, sort, group; rows are memoised per state ver
   assert.equal(s.getSnapshot().selectedRel, "source/meetings/n02.md");
 });
 
+test("full-text search shows only notes of the open folder, and a different folder clears the search", async () => {
+  const host = new FakeHost();
+  host.add("source/meetings/2026-10-01-plan.md", "# Plan");
+  const hit = (rel: string) => ({ rel, title: rel, snippet: "plan", date: "" });
+  // The index is shared by every project: the core also answers with another project's note.
+  const answer = [hit("source/meetings/2026-10-01-plan.md"), hit("source/meetings/2026-09-30-other-project.md")];
+  const s = mk(host, { searchRun: async () => answer, setTimer: (fn: () => void) => { queueMicrotask(fn); return 1; }, clearTimer: () => {} });
+  await s.init();
+  assert.equal(s.getSnapshot().listing.phase, "done");
+  s.setSearchQuery("plan");
+  s.submitSearch();
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(s.getSnapshot().search.hits.map((h) => h.rel), ["source/meetings/2026-10-01-plan.md"], "the other project's note is not offered");
+
+  // The user opens another project: its folder has neither note, and the old query must not linger.
+  host.root = { name: "other", root: "/Users/x/other" };
+  host.files.clear();
+  host.add("source/meetings/2026-09-30-other-project.md", "# Other");
+  await s.init();
+  assert.equal(s.getSnapshot().search.query, "");
+  assert.deepEqual(s.getSnapshot().search.hits, []);
+  s.setSearchQuery("plan");
+  s.submitSearch();
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(s.getSnapshot().search.hits.map((h) => h.rel), ["source/meetings/2026-09-30-other-project.md"]);
+});
+
 test("search is optional: without a run function the store simply has no full-text search", async () => {
   const s = mk(new FakeHost());
   assert.equal(s.searchAvailable, false);

@@ -10,7 +10,7 @@
 
 import { applyHead, buildRows, countBySection, NO_FILTERS, recordFromEntry, sectionsFor, type Filters, type GroupKey, type NoteRecord, type Row, type SectionDef, type SortKey } from "./notes-model.ts";
 import { NotesError, toNotesError, type NotesErrorCode, type NotesHost, type NotesRoot } from "./host.ts";
-import { IDLE_SEARCH, SearchController, type SearchRun, type SearchState } from "./search.ts";
+import { IDLE_SEARCH, SearchController, type SearchHit, type SearchRun, type SearchState } from "./search.ts";
 import { hideRels, isVisible, loadHidden, pruneHidden, saveHidden, unhideRels, type KeyValue } from "./hidden-notes.ts";
 
 export const LIST_PAGE = 2000;
@@ -109,6 +109,8 @@ export class LibraryStore {
   private readonly storage: KeyValue | null;
   /** The folder the hidden list belongs to (its absolute path), or null without a folder. */
   private hiddenRoot: string | null = null;
+  /** The last search answer as the core gave it: filtered again when the listing completes. */
+  private rawHits: readonly SearchHit[] = [];
 
   constructor(deps: StoreDeps) {
     this.host = deps.host;
@@ -119,7 +121,7 @@ export class LibraryStore {
           run: deps.searchRun,
           setTimer: deps.setTimer,
           clearTimer: deps.clearTimer,
-          onChange: (s) => this.patch({ search: s }),
+          onChange: (s) => { this.rawHits = s.hits; this.patch({ search: { ...s, hits: this.ownHits(s.hits) } }); },
         })
       : null;
     const prefs = readPrefs();
@@ -177,7 +179,12 @@ export class LibraryStore {
       }
       // A different folder than the one loaded: its records and selection belong to the old folder, so drop them.
       const rootChanged = this.state.root !== null && this.state.root.root !== root.root;
-      if (rootChanged) this.resetRecords();
+      if (rootChanged) {
+        this.resetRecords();
+        // The query and its hits were for the previous project's folder.
+        this.rawHits = [];
+        this.search?.clear();
+      }
       this.patch({ rootStatus: "ready", root, ...(rootChanged ? { selectedRel: null } : {}) });
       this.loadHiddenFor(root.root);
       await this.scan();
@@ -278,6 +285,19 @@ export class LibraryStore {
     if (pruned.size !== this.state.hidden.size) this.commitHidden(pruned);
     const selectedGone = this.state.selectedRel !== null && !this.byRel.has(this.state.selectedRel) && !this.hasUnsaved?.();
     this.publish(loaded, { listingDone: true, selectedGone });
+    // Now the folder's notes are known: drop search hits that belong to another project (see `ownHits`).
+    const own = this.ownHits(this.rawHits);
+    if (own.length !== this.state.search.hits.length) this.patch({ search: { ...this.state.search, hits: own } });
+  }
+
+  /**
+   * The note index is one space for every project (it is written without a project id), so a search also returns
+   * other projects' notes. A hit is shown only when its note exists in the open notes folder. While the folder is
+   * still being listed that is not known yet, so nothing is hidden until the listing is done.
+   */
+  private ownHits(hits: readonly SearchHit[]): SearchHit[] {
+    if (this.state.listing.phase !== "done") return [...hits];
+    return hits.filter((h) => this.byRel.has(h.rel));
   }
 
   // ---- incremental updates from the write side ------------------------------------------
