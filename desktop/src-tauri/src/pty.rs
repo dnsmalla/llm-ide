@@ -164,7 +164,9 @@ impl Gate {
 
     /// Whether a session spawned under `epoch` may still receive input (no page reload since).
     pub fn session_may_write(&self, epoch: u64) -> bool {
-        lock(&self.state).epoch == epoch
+        // A later Deny in the same page load also cuts off the shells that are already open.
+        let st = lock(&self.state);
+        st.epoch == epoch && st.consent != Consent::Denied
     }
 
     pub fn granted(&self) -> bool {

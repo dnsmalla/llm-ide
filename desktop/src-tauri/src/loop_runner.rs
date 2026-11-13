@@ -611,7 +611,21 @@ fn run_command_at_gated(work: &Path, command: &str, timeout_secs: Option<u64>, s
         match waited {
             Some(s) => {
                 // The stage is over. A background process it left behind (`cmd &`, a daemon) would keep the output
-                // pipes open and keep running in the worktree: stop the rest of the group.
+                // pipes open and keep running in the worktree: stop the rest of the group. The leader is already
+                // reaped, so `terminate` would go straight to SIGKILL; what is left gets a SIGTERM and the grace
+                // period first, so a process that cleans up on exit can.
+                #[cfg(unix)]
+                {
+                    let pgid = child.child_mut().id() as libc::pid_t;
+                    // SAFETY: signals a process group this function created (`process_group(0)` at spawn); a group
+                    // that is already gone is ESRCH.
+                    if unsafe { libc::killpg(pgid, libc::SIGTERM) } == 0 {
+                        let until = Instant::now() + grace;
+                        while Instant::now() < until && unsafe { libc::killpg(pgid, 0) } == 0 {
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                    }
+                }
                 child.terminate(grace);
                 break Some(s);
             }

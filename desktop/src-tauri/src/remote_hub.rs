@@ -197,7 +197,10 @@ fn login_blocking(hub_url: String, email: String, password: String) -> Result<Hu
     }
     // Native consent BEFORE the password leaves: this call moves the whole app to the hub.
     let stored = crate::prefs::stored().remote_server;
-    if login_needs_confirmation(&stored.hub_url, &stored.mode, &canonical)
+    // The mode is the one this app LAUNCHED in, not the stored one: the webview can set the stored mode through
+    // `set_prefs`, and that alone must not be enough to skip the "connect to a hub?" question.
+    let launched_mode = crate::prefs::launch().remote_server.mode;
+    if login_needs_confirmation(&stored.hub_url, &launched_mode, &canonical)
         && !crate::confirm::ask(
             "Connect this app to a hub?",
             &format!("Connect this app to {}? Your notes and projects will then be served by that hub.", hub_host_label(&canonical)),

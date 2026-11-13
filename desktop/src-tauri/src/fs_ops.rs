@@ -1215,7 +1215,8 @@ pub async fn fs_open_pdf(path: String) -> R<()> {
         }
         // os_open::spawn scrubs the environment (the host holds secrets) and reaps the child; a bare
         // Command::spawn did neither. `p` is canonical and absolute, so it cannot read as an option.
-        let inv = crate::os_open::open_url_invocation(crate::fsutil::current_os(), &p.to_string_lossy());
+        // The plain form: a canonical Windows path carries a `\\?\` prefix that the shell's file handler rejects.
+        let inv = crate::os_open::open_url_invocation(crate::fsutil::current_os(), &crate::fsutil::plain_path(&p).to_string_lossy());
         crate::os_open::spawn(&inv).map_err(|e| FsError { code: e.code, message: e.message })?;
         Ok(())
     }).await
