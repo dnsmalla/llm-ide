@@ -177,7 +177,16 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [activeId, controller, host, memoryCore]);
   // Attachments live here, not in the composer: its key changes on Refine / memory / suggestion without a chat switch.
   const attachmentRegistry = useMemo(() => createAttachmentRegistry(), []);
-  useEffect(() => () => attachmentRegistry.disposeAll(), [attachmentRegistry]);
+  // Disposed on a real unmount only. React StrictMode (dev) runs effect, cleanup, effect in one go, and the composer
+  // already holds the manager it was given: disposing at once left the Attach button dead until the chat changed.
+  const attachMounted = useRef(false);
+  useEffect(() => {
+    attachMounted.current = true;
+    return () => {
+      attachMounted.current = false;
+      queueMicrotask(() => { if (!attachMounted.current) attachmentRegistry.disposeAll(); });
+    };
+  }, [attachmentRegistry]);
   const controllerVersion = useControllerVersion(controller); // re-render when any chat's busy flag changes
 
   // Sessions: first page now, more on demand.

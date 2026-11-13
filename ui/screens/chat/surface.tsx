@@ -154,20 +154,26 @@ export function useChatSurface(projectRoot: string | null, active: boolean, init
   // Slash menu, @ mentions, attachments, plan saving: host-backed only inside the desktop app, and the project fs
   // only while a project is open (the host confines every path to its root; the webview never sends an absolute one).
   const hasProject = projectRoot !== null;
-  const compose = useMemo<ComposeServices>(() => {
+  // The host-backed services keep their identity while the project stays the same. They must NOT be rebuilt when
+  // `initialPath` changes (a dock's suggested file follows the editor tab): each chat's attachment manager is tied to
+  // these objects, and new ones would dispose it, dropping the user's attached files on every tab click.
+  const services = useMemo(() => {
     const desktop = shellHost.isAvailable();
     const project = desktop && hasProject ? createHostProjectFs(invokeHost) : null;
+    return { catalog: createCatalogLoader(transport), project, mentions: createMentionSearch({ fs: project, core: transport }), attachHost: desktop ? createHostAttach(invokeHost) : null };
+  }, [transport, hasProject]);
+  const compose = useMemo<ComposeServices>(() => {
     const sections: Record<string, "settings" | "library"> = { settings: "settings", library: "library" };
     return {
-      catalog: createCatalogLoader(transport),
-      project,
-      mentions: createMentionSearch({ fs: project, core: transport }),
-      attachHost: desktop ? createHostAttach(invokeHost) : null,
+      catalog: services.catalog,
+      project: services.project,
+      mentions: services.mentions,
+      attachHost: services.attachHost,
       openSection: (section) => { const target = sections[section]; if (!target) return false; shellBus.publish({ type: "goto-section", section: target }); return true; },
       openLibraryTarget: () => shellBus.publish({ type: "goto-section", section: "library" }),
       initialPath: hasProject ? initialPath : null,
     };
-  }, [transport, hasProject, initialPath]);
+  }, [services, hasProject, initialPath]);
   const host = useMemo<ChatHost>(
     () => ({
       ...BASE_HOST,
