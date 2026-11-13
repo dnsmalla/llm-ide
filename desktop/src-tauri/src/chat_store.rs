@@ -1346,9 +1346,21 @@ impl ChatStore {
             obj.insert("lastUsedAt".into(), Value::from(now_apple()));
         }
         let count = obj.get("messages").and_then(Value::as_array).map_or(0, Vec::len);
-        let body = serde_json::to_vec(&Value::Object(obj.clone())).map_err(|_| StoreError::new("invalid", "session is not encodable"))?;
+        let mut body = serde_json::to_vec(&Value::Object(obj.clone())).map_err(|_| StoreError::new("invalid", "session is not encodable"))?;
         if body.len() > MAX_WRITE_BYTES {
-            return Err(StoreError::new("too_large", "chat exceeds the size limit"));
+            // Without this a chat at the cap could never be saved again. Only the bodies of the largest OLD tool
+            // results are replaced by a marker; no message is removed, so counts, order and seq stay as they were.
+            let added = if matches!(mode, SaveMode::Append { .. }) { count.saturating_sub(expected_count_of(mode)) } else { 0 };
+            let trimmed = obj
+                .get_mut("messages")
+                .and_then(Value::as_array_mut)
+                .is_some_and(|msgs| trim_old_tool_results(msgs, added.max(TRIM_PROTECT_TAIL), body.len() - MAX_WRITE_BYTES) > 0);
+            if trimmed {
+                body = serde_json::to_vec(&Value::Object(obj.clone())).map_err(|_| StoreError::new("invalid", "session is not encodable"))?;
+            }
+            if body.len() > MAX_WRITE_BYTES {
+                return Err(StoreError::new("too_large", "chat exceeds the size limit"));
+            }
         }
         write_atomic(&path, &body)?;
         self.set_high_water(&id, count);
@@ -1772,6 +1784,44 @@ fn is_interrupted_assistant(m: &Value) -> bool {
         || o.get("status").and_then(Value::as_str) == Some("interrupted")
 }
 
+/// Replaces a trimmed tool result's body.
+const TRIM_MARKER: &str = "[trimmed to keep this chat under the size limit]";
+/// The newest messages are never trimmed, so the turn being saved and its immediate context stay intact.
+const TRIM_PROTECT_TAIL: usize = 20;
+
+fn expected_count_of(mode: SaveMode) -> usize {
+    match mode {
+        SaveMode::Append { expected_count } => expected_count,
+        _ => 0,
+    }
+}
+
+/// Shrinks the largest `toolResult` bodies outside the newest `protect_tail` messages to `TRIM_MARKER` until at least
+/// `need` bytes are saved. Only string `content` of role `toolResult` is touched: never a user or assistant message,
+/// never a message count or order. Returns the bytes saved (a lower bound: JSON escaping can only add to them).
+fn trim_old_tool_results(msgs: &mut [Value], protect_tail: usize, need: usize) -> usize {
+    let eligible = msgs.len().saturating_sub(protect_tail);
+    let mut candidates: Vec<(usize, usize)> = msgs[..eligible]
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.get("role").and_then(Value::as_str) == Some("toolResult"))
+        .filter_map(|(i, m)| m.get("content").and_then(Value::as_str).map(|c| (i, c.len())))
+        .filter(|(_, len)| *len > TRIM_MARKER.len())
+        .collect();
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut saved = 0usize;
+    for (i, len) in candidates {
+        if saved >= need {
+            break;
+        }
+        if let Some(obj) = msgs[i].as_object_mut() {
+            obj.insert("content".into(), Value::String(TRIM_MARKER.into()));
+            saved += len - TRIM_MARKER.len();
+        }
+    }
+    saved
+}
+
 fn validate_session(obj: &Map<String, Value>) -> Result<()> {
     let bad = |m: &str| Err(StoreError::new("invalid", m.to_string()));
     match obj.get("scope").and_then(Value::as_str) {
@@ -1823,6 +1873,37 @@ fn parse_many(dir: &Path, todo: &[(String, u128, u64)]) -> Vec<Option<Parsed>> {
         let handles: Vec<_> = todo.chunks(chunk).map(|c| (c.len(), s.spawn(move || c.iter().map(one).collect::<Vec<_>>()))).collect();
         handles.into_iter().flat_map(|(n, h)| h.join().unwrap_or_else(|_| vec![None; n])).collect()
     })
+}
+
+#[cfg(test)]
+mod trim_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn msg(role: &str, len: usize) -> Value {
+        json!({ "role": role, "content": "x".repeat(len) })
+    }
+
+    #[test]
+    fn the_largest_old_tool_results_are_trimmed_and_nothing_else() {
+        let mut msgs = vec![msg("user", 5000), msg("toolResult", 100), msg("toolResult", 9000), msg("assistant", 7000), msg("toolResult", 4000)];
+        // Tail of 1 protects the last tool result; need 8000 bytes: only the 9000-byte one has to go.
+        let saved = trim_old_tool_results(&mut msgs, 1, 8000);
+        assert!(saved >= 8000);
+        assert_eq!(msgs[2]["content"], TRIM_MARKER);
+        assert_eq!(msgs[1]["content"].as_str().map(str::len), Some(100), "a small result is kept when the large one was enough");
+        assert_eq!(msgs[0]["content"].as_str().map(str::len), Some(5000), "user text is never trimmed");
+        assert_eq!(msgs[3]["content"].as_str().map(str::len), Some(7000), "assistant text is never trimmed");
+        assert_eq!(msgs[4]["content"].as_str().map(str::len), Some(4000), "the newest messages are never trimmed");
+        assert_eq!(msgs.len(), 5);
+    }
+
+    #[test]
+    fn nothing_trimmable_saves_nothing_so_the_caller_still_reports_too_large() {
+        let mut msgs = vec![msg("user", 9000), msg("assistant", 9000), msg("toolResult", 9000)];
+        assert_eq!(trim_old_tool_results(&mut msgs, 1, 100), 0);
+        assert!(trim_old_tool_results(&mut msgs, 0, 100) > 0);
+    }
 }
 
 #[cfg(test)]
