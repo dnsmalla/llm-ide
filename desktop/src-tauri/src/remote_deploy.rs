@@ -790,9 +790,14 @@ pub fn redact_logs(text: &str) -> String {
         }
         let mut cleaned = line.to_string();
         for marker in ["Bearer ", "sk-ant-"] {
-            if let Some(pos) = cleaned.find(marker) {
+            // Every occurrence, not just the first: a line can carry several tokens.
+            let mut from = 0;
+            while let Some(found) = cleaned[from..].find(marker) {
+                let pos = from + found;
                 let end = cleaned[pos + marker.len()..].find(char::is_whitespace).map(|i| pos + marker.len() + i).unwrap_or(cleaned.len());
-                cleaned.replace_range(pos..end, &format!("{marker}{REDACTED}"));
+                let replacement = format!("{marker}{REDACTED}");
+                cleaned.replace_range(pos..end, &replacement);
+                from = pos + replacement.len();
             }
         }
         out.push_str(&cleaned); out.push('\n');
@@ -961,6 +966,13 @@ mod tests {
     }
 
     #[test]
+    fn every_token_on_one_line_is_redacted() {
+        let out = redact_logs("a Bearer tok1 b Bearer tok2 c sk-ant-aaa d sk-ant-bbb\n");
+        assert!(!out.contains("tok1") && !out.contains("tok2") && !out.contains("aaa") && !out.contains("bbb"), "{out}");
+        assert_eq!(out.matches("<redacted>").count(), 4);
+    }
+
+    #[test]
     fn a_same_version_update_refusal_never_rolls_back() {
         assert!(!update_switched(Some(1), "llmide-deploy: update: the hub already runs 1.2.3\n"));
         assert!(!update_switched(Some(1), "llmide-deploy: upload: checksum mismatch\n"));
@@ -1038,6 +1050,17 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_with_blockers_is_refused_by_the_host() {
+        let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: false, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", "/nonexistent/bundle.tar.gz", 1_000, true);
+        assert!(!plan.blockers.is_empty());
+        remember_plan(plan.clone());
+        let err = confirm_plan(&plan.id, "hub.example.com", 2_000).unwrap_err();
+        assert_eq!(err.code, "plan_blocked");
+        assert!(err.message.contains("sudo_requires_password") && err.message.contains("bundle_missing"));
+    }
+
+    #[test]
     fn a_changed_or_wrong_confirmation_is_refused() {
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
         let bundle = std::env::temp_dir().join(format!("llmide-bundle-{}.tar.gz", random_hex(4)));
@@ -1051,17 +1074,6 @@ mod tests {
         remember_plan(plan.clone());
         assert_eq!(confirm_plan(&plan.id, "hub.example.com", 2_000_000).unwrap_err().code, "plan_expired");
         let _ = std::fs::remove_file(bundle);
-    }
-
-    #[test]
-    fn a_plan_with_blockers_is_refused_by_the_host() {
-        let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: false, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", "/nonexistent/bundle.tar.gz", 1_000, true);
-        assert!(!plan.blockers.is_empty());
-        remember_plan(plan.clone());
-        let err = confirm_plan(&plan.id, "hub.example.com", 2_000).unwrap_err();
-        assert_eq!(err.code, "plan_blocked");
-        assert!(err.message.contains("sudo_requires_password") && err.message.contains("bundle_missing"));
     }
 
     #[test]
