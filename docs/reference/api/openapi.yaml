@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 146
+  x-api-version: 147
 servers:
   - url: "https://{host}"
     variables:
@@ -12263,6 +12263,12 @@ paths:
                   type: "string"
                 model:
                   type: "string"
+                role:
+                  type: "string"
+                  enum:
+                    - "loop"
+                    - "autoTasks"
+                  description: "API v147: the Settings → Model routing role whose tier runs the step when neither model nor provider is sent (default loop; an unset role takes the standard tier; a tier the Claude engine cannot run falls back to the SDK default). Any other value is 400 invalid_role"
                 provider:
                   type: "string"
                   description: "\"anthropic\" or an Anthropic-compatible \"custom:<id>\" (one with an anthropicBaseURL). Absent = first-party Anthropic"
@@ -15383,8 +15389,11 @@ paths:
                           type: "boolean"
                         reason:
                           type: "string"
-                          description: "set when unusable: a tier reason, cli_untrusted_input, or decision_only"
-                    description: "API v69+. One entry per CONFIGURED feature. `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`."
+                          description: "set when unusable: a tier reason, cli_untrusted_input, decision_only, or (agent roles) not_agent_capable"
+                        tier:
+                          type: "string"
+                          description: "API v147+, agent roles (loop, autoTasks) only: the tier the role runs on; an unset role takes standard"
+                    description: "API v69+. One entry per CONFIGURED feature, plus (API v147+) always one for each agent role (loop, autoTasks), judged against the Claude engine (an unset agent role reports the standard tier). `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`."
         "401":
           description: "Unauthorized"
           content:

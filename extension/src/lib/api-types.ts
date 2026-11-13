@@ -6678,6 +6678,8 @@ export type PostKbLoopAgentRunRequest = {
     extraRoots?: string[];
     language?: string;
     model?: string;
+    /** API v147: the Settings → Model routing role whose tier runs the step when neither model nor provider is sent (default loop; an unset role takes the standard tier; a tier the Claude engine cannot run falls back to the SDK default). Any other value is 400 invalid_role */
+    role?: "loop" | "autoTasks";
     /** "anthropic" or an Anthropic-compatible "custom:<id>" (one with an anthropicBaseURL). Absent = first-party Anthropic */
     provider?: string;
     timeoutMs?: number;
@@ -8572,11 +8574,13 @@ export type GetKbRoutingTiersResponse200 = {
       /** API v68+, only when usable. `key` = runs on an API key (user vault or operator env; custom providers always), `cli` = runs on the provider's logged-in CLI subscription (claude / codex / gemini). A key wins when both exist. */
       via?: "key" | "cli";
     }>;
-  /** API v69+. One entry per CONFIGURED feature. `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`. */
+  /** API v69+. One entry per CONFIGURED feature, plus (API v147+) always one for each agent role (loop, autoTasks), judged against the Claude engine (an unset agent role reports the standard tier). `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`. */
   featureStatus: Record<string, {
       usable: boolean;
-      /** set when unusable: a tier reason, cli_untrusted_input, or decision_only */
+      /** set when unusable: a tier reason, cli_untrusted_input, decision_only, or (agent roles) not_agent_capable */
       reason?: string;
+      /** API v147+, agent roles (loop, autoTasks) only: the tier the role runs on; an unset role takes standard */
+      tier?: string;
     }>;
 };
 

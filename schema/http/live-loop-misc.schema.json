@@ -477,6 +477,15 @@
               "type": "string",
               "x-optional": true
             },
+            "role": {
+              "type": "string",
+              "enum": [
+                "loop",
+                "autoTasks"
+              ],
+              "x-optional": true,
+              "description": "API v147: the Settings → Model routing role whose tier runs the step when neither model nor provider is sent (default loop; an unset role takes the standard tier; a tier the Claude engine cannot run falls back to the SDK default). Any other value is 400 invalid_role"
+            },
             "provider": {
               "type": "string",
               "description": "\"anthropic\" or an Anthropic-compatible \"custom:<id>\" (one with an anthropicBaseURL). Absent = first-party Anthropic"

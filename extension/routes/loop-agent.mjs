@@ -5,7 +5,10 @@
 // metering and the response shape.
 //
 // Request  { message, skills?: [id], repoRoot, extraRoots?: [abs], language?,
-//            model?, provider?, timeoutMs?, writeScope?: ".factory", denyWrite?: ".factory" }
+//            model?, provider?, role?: "loop"|"autoTasks", timeoutMs?, writeScope?: ".factory", denyWrite?: ".factory" }
+//
+// `role` (API v147): with neither model nor provider, the run takes that Settings → Model routing role's tier
+// (default loop; an unset role takes Standard), when it can run on the Claude engine; else the SDK default.
 //
 // `provider` (API v66, the Mac's Loop tier route): "anthropic" or an
 // Anthropic-compatible "custom:<id>" (one with an anthropicBaseURL). Absent =
@@ -29,6 +32,7 @@ import { randomUUID } from 'node:crypto';
 // MAX_LOOP_MESSAGE_CHARS is here too, so validation runs before the Loop engine import.
 import { AGENT_SDK_PROVIDER, MAX_LOOP_MESSAGE_CHARS } from '../llm_agent/sdk/constants.mjs';
 import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
+import { AGENT_FEATURES, resolveAgentRoute } from '../providers/tier-routing.mjs';
 import { getDb, recordToolEvents } from '../kb/db.mjs';
 import { beginAgentRun, runTotals } from '../kb/agent-runs.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
@@ -180,12 +184,21 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   }
   const timeoutMs = resolveTimeoutMs(body.timeoutMs);
   if (timeoutMs == null) return validationError(res, 'timeoutMs must be a positive number of milliseconds');
-  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim().slice(0, 128) : undefined;
+  let model = typeof body.model === 'string' && body.model.trim() ? body.model.trim().slice(0, 128) : undefined;
   const language = typeof body.language === 'string' ? body.language.slice(0, 32) : undefined;
   if (body.provider != null && (typeof body.provider !== 'string' || body.provider.length > MAX_PROVIDER_CHARS)) {
     return validationError(res, `provider must be a string of at most ${MAX_PROVIDER_CHARS} characters`);
   }
-  const provider = body.provider ? body.provider.trim() || undefined : undefined;
+  if (body.role != null && !AGENT_FEATURES.includes(body.role)) {
+    return validationError(res, `role must be one of ${AGENT_FEATURES.join(', ')}`, 'invalid_role');
+  }
+  let provider = body.provider ? body.provider.trim() || undefined : undefined;
+  // Settings → Model routing: a step that names neither model nor provider runs on its role's tier (loop by
+  // default; an unset role takes Standard). An explicit model (a repair model, a usage-cap fallback) still wins.
+  if (!model && !provider) {
+    const route = resolveAgentRoute(userId, body.role ?? 'loop');
+    if (route) { model = route.model; provider = route.provider; }
+  }
   const meteredProvider = provider || AGENT_SDK_PROVIDER;
   // Factory Intake / Review write only their reports (.factory/). Only that literal is accepted.
   if (body.writeScope != null && body.writeScope !== '.factory') {

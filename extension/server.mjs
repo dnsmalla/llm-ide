@@ -463,7 +463,11 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          is idempotent, a wrong token is 409 LEASE_LOST). All four need the desktop class AND the bus host proof
 //          (403 HOST_PROOF_REQUIRED). An expired lease becomes `interrupted` in the minute sweep. `ship` never
 //          ships: a passed run answers { readyToShip: true, shipped: false } and a desktop click is still the only Ship.
-const SERVER_API_VERSION = 146;
+//   v147 — additive (no new route). POST /kb/loop/agent-run accepts `role` ("loop" | "autoTasks"; else 400
+//          invalid_role): a step that sends neither model nor provider runs on that Settings → Model routing role's
+//          tier (default loop; an unset role takes standard) when the Claude engine can run it, else the SDK default.
+//          GET /kb/routing-tiers featureStatus always carries loop and autoTasks, with the `tier` they run on.
+const SERVER_API_VERSION = 147;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

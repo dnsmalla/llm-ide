@@ -217,6 +217,16 @@ export function tierRoutingStatus(userId, db) {
     const reason = featureReason(feature, cfg.tiers[tier], tierStatus.via);
     featureStatus[feature] = reason ? { usable: false, reason } : { usable: true };
   }
+  // Agent roles run on the Claude engine and an unset one takes Standard (resolveAgentRoute): report that.
+  for (const feature of AGENT_FEATURES) {
+    const tier = cfg.features?.[feature] || AGENT_DEFAULT_TIER;
+    const s = status[tier];
+    const prior = featureStatus[feature];
+    if (!s?.usable) featureStatus[feature] = { usable: false, reason: s?.reason || 'unset', tier };
+    else if (prior && !prior.usable) featureStatus[feature] = { ...prior, tier };   // e.g. decision_only stays
+    else if (!s.agentCapable) featureStatus[feature] = { usable: false, reason: s.agentReason || 'not_agent_capable', tier };
+    else featureStatus[feature] = { usable: true, tier };
+  }
   return { tiers: cfg.tiers, features: cfg.features, status, featureStatus };
 }
 
@@ -262,6 +272,35 @@ export function resolveFeatureRoute(userId, feature, db) {
     return null;
   }
   return { provider: hit.route.provider, model: hit.route.model };
+}
+
+// Roles whose work runs on the Agent SDK engine (POST /kb/loop/agent-run). Settings promises "Standard is the
+// default for every role left on it", so an unset one of these takes the Standard tier.
+export const AGENT_FEATURES = Object.freeze(['loop', 'autoTasks']);
+const AGENT_DEFAULT_TIER = 'standard';
+
+/**
+ * The Agent-engine route for an AGENT_FEATURES role: its tier, else Standard. `{ provider, model, tier }`, or null
+ * (→ the engine's own default) when that tier is unset, unusable or cannot run on the Claude engine — warned once
+ * per window, so a silent fall back to the SDK default is visible in the log. Never throws.
+ */
+export function resolveAgentRoute(userId, feature, db) {
+  if (!userId || !AGENT_FEATURES.includes(feature)) return null;
+  try {
+    db ??= getDb();
+    const tier = getTierRoutingConfig(userId, db).features[feature] || AGENT_DEFAULT_TIER;
+    const hit = checkTier(userId, tier, db);
+    if (!hit) return null;
+    const reason = featureReason(feature, hit.route, hit.via) || agentUnusableReason(hit.route, userId, db);
+    if (reason) {
+      warnUnusable(userId, `${tier}:${feature}`, hit.route, reason);
+      return null;
+    }
+    return { provider: hit.route.provider, model: hit.route.model, tier };
+  } catch (err) {
+    log.warn('routing_agent_route_failed', { userId, feature, error: String(err?.message || err) });
+    return null;
+  }
 }
 
 /**

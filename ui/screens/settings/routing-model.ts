@@ -15,7 +15,8 @@ export const TIERS: readonly { id: string; label: string; hint: string }[] = [
 export const ROLES: readonly { id: string; label: string }[] = [
   { id: "subagents", label: "Sub-agents" },
   { id: "internal", label: "Internal tasks" },
-  { id: "loop", label: "Loop" },
+  { id: "loop", label: "Loop and Factory" },
+  { id: "autoTasks", label: "Auto Tasks" },
   { id: "decisions", label: "Decision" },
 ];
 
@@ -57,6 +58,7 @@ const REASONS: Record<string, string> = {
   not_connected: "it is not connected",
   disabled: "it is switched off",
   not_agent_capable: "it cannot run on the Claude engine",
+  unset: "no model is set for it",
   unknown_provider: "the provider is not known",
 };
 
@@ -68,6 +70,11 @@ export function reasonText(reason: string | undefined): string {
 /** One sentence under a tier row: usable, or why it is skipped. */
 export function tierStatusText(s: TierStatus | undefined): string {
   if (!s) return "Not checked yet.";
+  // An agent role (Loop, Auto Tasks) reports the tier it actually runs on, judged against the Claude engine.
+  if (s.tier) {
+    const name = TIERS.find((t) => t.id === s.tier)?.label ?? s.tier;
+    return s.usable ? `Runs on ${name}.` : `${name} cannot run it (${reasonText(s.reason)}); the Claude engine's default model runs instead.`;
+  }
   if (!s.usable) return `Skipped: ${reasonText(s.reason)}. The default runs instead.`;
   if (s.agentCapable === false) return `Usable for chat. Not on the Claude engine: ${reasonText(s.agentReason)}.`;
   return s.via === "cli" ? "Usable through the signed-in Claude CLI." : "Usable.";

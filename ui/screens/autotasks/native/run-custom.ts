@@ -48,7 +48,7 @@ export async function runCustomTask(task: CustomAutoTask, deps: CustomRunDeps): 
     before: snapshot === null ? null : new Set(snapshot),
     call: () => deps.request<CustomAgentReply>("/kb/loop/agent-run", {
       method: "POST",
-      body: { message: customTaskMessage(task), repoRoot: workRoot, model: decision.model, timeoutMs: 30 * 60 * 1000 },
+      body: { message: customTaskMessage(task), repoRoot: workRoot, model: decision.model, role: "autoTasks", timeoutMs: 30 * 60 * 1000 },
       signal: deps.signal,
     }),
     changedNow: deps.changedPaths,

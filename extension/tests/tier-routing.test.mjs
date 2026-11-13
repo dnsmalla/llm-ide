@@ -37,7 +37,7 @@ const {
   syncTierRouting, getTierRoutingConfig, handleTierRoutingSync, _resetTierRoutingCacheForTests,
 } = await import('../server/tier-routing.mjs');
 const {
-  resolveTier, resolveFeatureRoute, routeOpts, tierRoutingStatus, _setCliProbeForTests,
+  resolveTier, resolveFeatureRoute, routeOpts, tierRoutingStatus, resolveAgentRoute, _setCliProbeForTests,
 } = await import('../providers/tier-routing.mjs');
 // Default: no provider CLI installed, so results never depend on this
 // machine's PATH. Tests that need a CLI flip it and restore.
@@ -316,6 +316,9 @@ test('keyless CLI routes never serve untrusted-input features (internal, pipelin
       pipeline: { usable: false, reason: 'cli_untrusted_input' },
       subagents: { usable: true },
       quickChat: { usable: true },
+      // Agent roles are judged against the Claude engine; an unset one takes Standard (keyless gemini CLI here).
+      loop: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
+      autoTasks: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
     });
     // With an API key the same tier is a plain HTTP completion → allowed.
     setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
@@ -342,6 +345,8 @@ test('keyless CLI routes never serve decisions (its state is ticket text / test 
     assert.deepEqual(tierRoutingStatus(userId).featureStatus, {
       decisions: { usable: false, reason: 'cli_untrusted_input' },
       subagents: { usable: true },
+      loop: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
+      autoTasks: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
     });
     setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
     assert.deepEqual(resolveFeatureRoute(userId, 'decisions'), { provider: 'openai', model: 'gpt-5' });
@@ -353,8 +358,9 @@ test('tierRoutingStatus: featureStatus carries the tier\'s own reason for an unu
   const userId = freshUser();
   syncTierRouting({ tiers: { cheap: { provider: 'deepseek', model: 'deepseek-chat' } }, features: { loop: 'cheap', subagents: 'strong' } }, userId);
   assert.deepEqual(tierRoutingStatus(userId).featureStatus, {
-    loop: { usable: false, reason: 'no_key' },
+    loop: { usable: false, reason: 'no_key', tier: 'cheap' },
     subagents: { usable: false, reason: 'unset' },
+    autoTasks: { usable: false, reason: 'unset', tier: 'standard' },
   });
 });
 
@@ -485,6 +491,38 @@ test('tierRoutingStatus: unset tiers, missing custom provider, Anthropic-door cu
   assert.deepEqual(st.status.strong, { usable: false, reason: 'unset', agentCapable: false });
   assert.deepEqual(st.status.standard, { usable: true, agentCapable: true, via: 'key' });
   assert.deepEqual(st.status.cheap, { usable: false, reason: 'not_found', agentCapable: false });
+});
+
+test('resolveAgentRoute: role tier, else Standard, only when the Claude engine can run it', () => {
+  const userId = freshUser();
+  // Standard on an OpenAI-only custom provider (no Anthropic door): usable for chat, not for the agent engine.
+  const openaiOnly = registerCustom(userId, { id: 'ds-1' });
+  syncTierRouting({
+    tiers: {
+      strong: { provider: 'anthropic', model: 'claude-opus-5-5' },
+      standard: { provider: openaiOnly, model: 'glm-4.6' },
+      cheap: { provider: 'anthropic', model: 'claude-haiku-5-5' },
+    },
+  }, userId);
+  // Unset role → Standard, which cannot run on the engine → null (the SDK default).
+  assert.equal(resolveAgentRoute(userId, 'loop'), null);
+  const st = tierRoutingStatus(userId);
+  assert.deepEqual(st.featureStatus.loop, { usable: false, reason: 'not_agent_capable', tier: 'standard' });
+
+  // A role set to a usable Anthropic tier is honoured, per role.
+  syncTierRouting({ ...getTierRoutingConfig(userId), features: { loop: 'strong', autoTasks: 'cheap' } }, userId);
+  assert.deepEqual(resolveAgentRoute(userId, 'loop'), { provider: 'anthropic', model: 'claude-opus-5-5', tier: 'strong' });
+  assert.deepEqual(resolveAgentRoute(userId, 'autoTasks'), { provider: 'anthropic', model: 'claude-haiku-5-5', tier: 'cheap' });
+  assert.deepEqual(tierRoutingStatus(userId).featureStatus.loop, { usable: true, tier: 'strong' });
+
+  // Unset role with an Anthropic Standard → Standard. Non-agent features are refused.
+  syncTierRouting({ tiers: { standard: { provider: 'anthropic', model: 'claude-sonnet-5-5' } } }, userId);
+  assert.deepEqual(resolveAgentRoute(userId, 'autoTasks'), { provider: 'anthropic', model: 'claude-sonnet-5-5', tier: 'standard' });
+  assert.equal(resolveAgentRoute(userId, 'internal'), null);
+  // Nothing configured → null.
+  syncTierRouting({}, userId);
+  assert.equal(resolveAgentRoute(userId, 'loop'), null);
+  assert.deepEqual(tierRoutingStatus(userId).featureStatus.loop, { usable: false, reason: 'unset', tier: 'standard' });
 });
 
 // ── runClaude honours an explicit custom:<uuid> provider ─────────────────
@@ -983,7 +1021,11 @@ test('a jev tier routes ONLY the decisions feature; every other feature reports 
   const st = tierRoutingStatus(userId);
   assert.deepEqual(st.status.cheap, { usable: true, agentCapable: false, agentReason: 'not_agent_capable', via: 'key' });
   assert.deepEqual(st.featureStatus.decisions, { usable: true });
-  for (const f of others) assert.deepEqual(st.featureStatus[f], { usable: false, reason: 'decision_only' }, f);
+  for (const f of others) {
+    // Agent roles also carry the tier they run on.
+    const want = ['loop', 'autoTasks'].includes(f) ? { usable: false, reason: 'decision_only', tier: 'cheap' } : { usable: false, reason: 'decision_only' };
+    assert.deepEqual(st.featureStatus[f], want, f);
+  }
 });
 
 test('a jev tier without a key is unusable (no_key) — there is no CLI mode', () => {
@@ -1006,5 +1048,7 @@ test('the decisions feature may use an ordinary LLM tier (other providers unchan
   assert.deepEqual(resolveFeatureRoute(userId, 'decisions'), { provider: 'anthropic', model: 'claude-opus-5-5' });
   assert.deepEqual(routeOpts(userId, 'decisions'), { provider: 'anthropic', model: 'claude-opus-5-5', routeFallback: {} });
   assert.deepEqual(routeOpts(userId, 'pipeline'), { provider: 'anthropic', model: 'claude-opus-5-5', routeFallback: {} });
-  assert.deepEqual(tierRoutingStatus(userId).featureStatus, { decisions: { usable: true }, pipeline: { usable: true } });
+  assert.deepEqual(tierRoutingStatus(userId).featureStatus, {
+    decisions: { usable: true }, pipeline: { usable: true }, loop: { usable: false, reason: 'unset', tier: 'standard' }, autoTasks: { usable: false, reason: 'unset', tier: 'standard' },
+  });
 });

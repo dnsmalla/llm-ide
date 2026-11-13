@@ -258,6 +258,8 @@ export interface TierStatus {
   agentReason?: string;
   via?: string;
   reason?: string;
+  /** featureStatus of an agent role (loop, autoTasks) only: the tier it runs on (an unset role takes standard). */
+  tier?: string;
 }
 export interface RoutingTiers {
   tiers: Record<string, TierChoice>;
@@ -275,6 +277,8 @@ function decodeStatus(v: unknown, at: string): TierStatus {
   if (agentReason !== undefined) out.agentReason = agentReason;
   if (via !== undefined) out.via = via;
   if (reason !== undefined) out.reason = reason;
+  const tier = optStr(x.tier, `${at}.tier`);
+  if (tier !== undefined) out.tier = tier;
   return out;
 }
 export function decodeRoutingTiers(v: unknown): RoutingTiers {

@@ -37,6 +37,7 @@ const {
   LOOP_FIND_CODE_TOOL, loopFindCode, graphScopeRoot,
 } = await import('../llm_agent/sdk/loop-agent.mjs');
 const { handleLoopAgentRoutes, resolveTimeoutMs } = await import('../routes/loop-agent.mjs');
+const { syncTierRouting } = await import('../server/tier-routing.mjs');
 
 // --- fixtures -----------------------------------------------------------------
 
@@ -417,6 +418,46 @@ test('route: 200 carries the contract fields and the validated root reaches the 
   assert.equal(seen.model, 'm1');
   assert.deepEqual(seen.skills, ['a/b']);
   assert.ok(seen.abortController instanceof AbortController);
+});
+
+test('route: Settings model routing picks the model when the step names none (loop / autoTasks role)', async () => {
+  const ok = { reply: 'done', changedPaths: [], usage: {}, resolvedSkills: [], unresolvedSkills: [], truncatedSkills: [], ran: true, resultSubtype: 'success', denied: [], byModel: [] };
+  const run = async (body) => {
+    let seen = null;
+    const res = makeRes();
+    await handleLoopAgentRoutes(makeReq({ body: { message: 'fix', repoRoot: REPO, timeoutMs: 60_000, ...body }, user }), res, { userId: user.id },
+      { runAgent: async (args) => { seen = args; return ok; } });
+    return { res, seen };
+  };
+  syncTierRouting({
+    tiers: { strong: { provider: 'anthropic', model: 'claude-opus-5-5' }, standard: { provider: 'anthropic', model: 'claude-sonnet-5-5' }, cheap: { provider: 'anthropic', model: 'claude-haiku-5-5' } },
+    features: { loop: 'strong', autoTasks: 'cheap' },
+  }, user.id);
+  try {
+    // No role → loop.
+    let r = await run({});
+    assert.equal(r.res.statusCode, 200);
+    assert.equal(r.seen.model, 'claude-opus-5-5');
+    assert.equal(r.seen.provider, 'anthropic');
+    r = await run({ role: 'autoTasks' });
+    assert.equal(r.seen.model, 'claude-haiku-5-5');
+    // An explicit model (repair model, usage-cap fallback) wins over the role.
+    r = await run({ role: 'autoTasks', model: 'm-explicit' });
+    assert.equal(r.seen.model, 'm-explicit');
+    assert.equal(r.seen.provider, undefined);
+    // An unset role takes Standard.
+    syncTierRouting({ tiers: { standard: { provider: 'anthropic', model: 'claude-sonnet-5-5' } } }, user.id);
+    r = await run({ role: 'autoTasks' });
+    assert.equal(r.seen.model, 'claude-sonnet-5-5');
+    // Nothing configured → no model (the SDK default), exactly as before.
+    syncTierRouting({}, user.id);
+    r = await run({});
+    assert.equal(r.seen.model, undefined);
+    // Any other role is refused before the engine runs.
+    r = await run({ role: 'chat' });
+    assert.equal(r.res.statusCode, 400);
+    assert.equal(r.seen, null);
+  } finally { syncTierRouting({}, user.id); }
 });
 
 test('route: timeoutMs aborts the run and answers 504', async () => {
