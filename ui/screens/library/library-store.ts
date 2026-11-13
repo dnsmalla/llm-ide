@@ -111,6 +111,10 @@ export class LibraryStore {
   private hiddenRoot: string | null = null;
   /** The last search answer as the core gave it: filtered again when the listing completes. */
   private rawHits: readonly SearchHit[] = [];
+  /** A scan of the current folder has completed, so `byRel` says what is in it. */
+  private listedOnce = false;
+  /** Notes found on disk for a search hit although the list has not seen them (written outside the Library). */
+  private readonly onDisk = new Set<string>();
 
   constructor(deps: StoreDeps) {
     this.host = deps.host;
@@ -121,7 +125,11 @@ export class LibraryStore {
           run: deps.searchRun,
           setTimer: deps.setTimer,
           clearTimer: deps.clearTimer,
-          onChange: (s) => { this.rawHits = s.hits; this.patch({ search: { ...s, hits: this.ownHits(s.hits) } }); },
+          onChange: (s) => {
+            this.rawHits = s.hits;
+            this.patch({ search: { ...s, hits: this.ownHits(s.hits) } });
+            void this.checkUnlisted(s.hits);
+          },
         })
       : null;
     const prefs = readPrefs();
@@ -198,6 +206,9 @@ export class LibraryStore {
       const root = await this.host.rootChoose();
       if (this.disposed || !root) return; // cancelled in the dialog
       this.resetRecords();
+      // The query and its hits were for the previous folder.
+      this.rawHits = [];
+      this.search?.clear();
       this.patch({ rootStatus: "ready", root, error: null, selectedRel: null });
       this.loadHiddenFor(root.root);
       await this.scan();
@@ -233,6 +244,8 @@ export class LibraryStore {
   }
 
   private resetRecords(): void {
+    this.listedOnce = false;
+    this.onDisk.clear();
     this.byRel.clear();
     this.stopHeads();
     this.publish(0);
@@ -286,18 +299,42 @@ export class LibraryStore {
     const selectedGone = this.state.selectedRel !== null && !this.byRel.has(this.state.selectedRel) && !this.hasUnsaved?.();
     this.publish(loaded, { listingDone: true, selectedGone });
     // Now the folder's notes are known: drop search hits that belong to another project (see `ownHits`).
-    const own = this.ownHits(this.rawHits);
-    if (own.length !== this.state.search.hits.length) this.patch({ search: { ...this.state.search, hits: own } });
+    this.listedOnce = true;
+    this.refilterHits();
+    void this.checkUnlisted(this.rawHits);
   }
 
   /**
    * The note index is one space for every project (it is written without a project id), so a search also returns
-   * other projects' notes. A hit is shown only when its note exists in the open notes folder. While the folder is
-   * still being listed that is not known yet, so nothing is hidden until the listing is done.
+   * other projects' notes. A hit is shown only when its note exists in the open notes folder: it is in the list, or
+   * (a note written outside the Library since the last scan: a finished meeting, a live capture, an agent) it was
+   * found on disk by `checkUnlisted`. Until the folder has been listed once that is not known, so nothing is hidden.
+   * A same-path note of another project still passes: only a project scope in the index itself can tell those apart.
    */
   private ownHits(hits: readonly SearchHit[]): SearchHit[] {
-    if (this.state.listing.phase !== "done") return [...hits];
-    return hits.filter((h) => this.byRel.has(h.rel));
+    if (!this.listedOnce) return [...hits];
+    return hits.filter((h) => this.byRel.has(h.rel) || this.onDisk.has(h.rel));
+  }
+
+  private refilterHits(): void {
+    const own = this.ownHits(this.rawHits);
+    const cur = this.state.search.hits;
+    if (own.length !== cur.length || own.some((h, i) => h.rel !== cur[i]!.rel)) this.patch({ search: { ...this.state.search, hits: own } });
+  }
+
+  /** Asks the host whether hits the list does not know exist in this folder, and shows the ones that do. */
+  private async checkUnlisted(hits: readonly SearchHit[]): Promise<void> {
+    if (!this.listedOnce) return;
+    const rels = hits.map((h) => h.rel).filter((rel) => !this.byRel.has(rel) && !this.onDisk.has(rel));
+    if (rels.length === 0) return;
+    const root = this.state.root?.root ?? null;
+    let found: string[];
+    try {
+      found = (await this.host.heads(rels, 1)).filter((r) => r.error === null || r.error === "not_downloaded" || r.error === "too_large").map((r) => r.rel);
+    } catch { return; } // the host could not say: the hits stay hidden, as for any note that is not in the list
+    if (this.disposed || (this.state.root?.root ?? null) !== root || found.length === 0) return;
+    for (const rel of found) this.onDisk.add(rel);
+    this.refilterHits();
   }
 
   // ---- incremental updates from the write side ------------------------------------------
@@ -312,6 +349,7 @@ export class LibraryStore {
     if (text !== undefined) rec = applyHead(rec, text.slice(0, HEAD_BYTES));
     this.byRel.set(entry.rel, rec);
     this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done" });
+    this.refilterHits();
   }
 
   /** Notes left the folder (moved to the Trash). */
@@ -326,6 +364,7 @@ export class LibraryStore {
     }
     const sel = this.state.selectedRel;
     this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done", selectedGone: sel !== null && !this.byRel.has(sel) && !this.hasUnsaved?.() });
+    this.refilterHits();
   }
 
   /** A note was renamed or moved; it stays selected under its new path. */
@@ -339,6 +378,7 @@ export class LibraryStore {
     else if (old?.headRead) rec = { ...old, rel: rec.rel, name: rec.name, size: rec.size, mtimeMs: rec.mtimeMs, area: rec.area, typeDir: rec.typeDir };
     this.byRel.set(entry.rel, rec);
     this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done" });
+    this.refilterHits();
     if (wasSelected) this.patch({ selectedRel: entry.rel });
   }
 

@@ -226,6 +226,16 @@ test("full-text search shows only notes of the open folder, and a different fold
   await new Promise((r) => setTimeout(r, 5));
   assert.deepEqual(s.getSnapshot().search.hits.map((h) => h.rel), ["source/meetings/2026-10-01-plan.md"], "the other project's note is not offered");
 
+  // A note written outside the Library since the last scan (a meeting that just ended) is in the folder but not in
+  // the list yet: its hit must still be shown, not hidden as if it belonged to another project.
+  host.add("source/meetings/2026-10-02-just-ended.md", "# Just ended");
+  answer.push(hit("source/meetings/2026-10-02-just-ended.md"));
+  s.setSearchQuery("plan ");
+  s.submitSearch();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(s.getSnapshot().search.hits.map((h) => h.rel), ["source/meetings/2026-10-01-plan.md", "source/meetings/2026-10-02-just-ended.md"]);
+  answer.pop();
+
   // The user opens another project: its folder has neither note, and the old query must not linger.
   host.root = { name: "other", root: "/Users/x/other" };
   host.files.clear();
