@@ -2,9 +2,9 @@
 import { Composer, type ComposerProps } from "../Composer";
 import { useComposerExtras, type ComposeServices, type ExtrasOptions } from "./extras";
 
-export type ExtrasComposerProps = Omit<ComposerProps, "extras"> & { compose: ComposeServices } & Pick<ExtrasOptions, "models" | "setMode" | "setModel" | "clearChat" | "chatId">;
+export type ExtrasComposerProps = Omit<ComposerProps, "extras"> & { compose: ComposeServices } & Pick<ExtrasOptions, "models" | "setMode" | "setModel" | "clearChat" | "chatId" | "registry">;
 
-export function ComposerWithExtras({ compose, models, setMode, setModel, clearChat, chatId, ...rest }: ExtrasComposerProps) {
-  const extras = useComposerExtras({ services: compose, draft: rest.draft, setDraft: rest.onDraft, models, setMode, setModel, clearChat, chatId, busy: rest.busy });
+export function ComposerWithExtras({ compose, models, setMode, setModel, clearChat, chatId, registry, ...rest }: ExtrasComposerProps) {
+  const extras = useComposerExtras({ services: compose, draft: rest.draft, setDraft: rest.onDraft, models, setMode, setModel, clearChat, chatId, registry, busy: rest.busy });
   return <Composer {...rest} extras={extras} />;
 }

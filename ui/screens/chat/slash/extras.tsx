@@ -2,6 +2,7 @@
 // (the chat screen keys the composer by chat id, so switching chats disposes the old one and cancels its reads).
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { AttachmentManager, browserBlobs, type AttachHost, type BlobUrls, type WireAttachment } from "../attach/manager";
+import type { AttachmentRegistry } from "../attach/registry";
 import type { ProjectFs } from "../mentions/project-fs";
 import { ComposerChips } from "../attach/AttachmentChips";
 import { CompletionMenu, optionId } from "./CompletionMenu";
@@ -42,6 +43,8 @@ export interface ExtrasOptions {
   setModel: (provider: string, model: string) => void;
   clearChat: () => void;
   chatId: string;
+  /** Per-chat attachments kept by the screen; absent = this composer owns its own. */
+  registry?: AttachmentRegistry;
   /** A turn is running: messages are queued as plain text, so attachments and skills wait for the turn to end. */
   busy?: boolean;
 }
@@ -65,10 +68,11 @@ export function useComposerExtras(o: ExtrasOptions): ComposerExtras {
   // Fresh refs for callbacks the model calls later, so it never holds a stale closure.
   const live = useRef(o);
   live.current = o;
-  const attachments = useMemo(
-    () => new AttachmentManager({ host: services.attachHost, project: services.project, blobs: services.blobs ?? (typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? browserBlobs : null) }),
-    [services.attachHost, services.project, services.blobs],
-  );
+  const attachments = useMemo(() => {
+    const deps = { host: services.attachHost, project: services.project, blobs: services.blobs ?? (typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? browserBlobs : null) };
+    return o.registry ? o.registry.get(o.chatId, deps) : new AttachmentManager(deps);
+  }, [services.attachHost, services.project, services.blobs, o.registry, o.chatId]);
+  const shared = o.registry !== undefined;
   const model = useMemo(() => {
     const actions: ComposerActions = {
       setDraft: (t) => live.current.setDraft(t),
@@ -76,8 +80,8 @@ export function useComposerExtras(o: ExtrasOptions): ComposerExtras {
       setModel: (p, m) => live.current.setModel(p, m),
       navigate: (t) => services.openLibraryTarget?.(t),
     };
-    return new ComposerModel({ catalog: services.catalog, sources: { modes: () => MODES, models: () => live.current.models }, actions, attachments, mentions: services.mentions });
-  }, [services, attachments, live]);
+    return new ComposerModel({ catalog: services.catalog, sources: { modes: () => MODES, models: () => live.current.models }, actions, attachments, mentions: services.mentions, sharedAttachments: shared });
+  }, [services, attachments, live, shared]);
   useEffect(() => () => model.dispose(), [model]);
 
   const st = useSyncExternalStore(model.subscribe, model.getState, model.getState);
@@ -89,7 +93,7 @@ export function useComposerExtras(o: ExtrasOptions): ComposerExtras {
   // The model reads the draft on every change (draft state is owned by the caller).
   useEffect(() => { model.update(o.draft); }, [model, o.draft]);
   useEffect(() => {
-    if (services.initialPath) void attachments.addProjectFile(services.initialPath);
+    if (services.initialPath) void attachments.seedProjectFile(services.initialPath);
   }, [services.initialPath, attachments]);
 
   const onKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>): boolean => {

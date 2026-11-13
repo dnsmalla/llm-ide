@@ -5,6 +5,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { shellBus } from "../shell/bus";
 import { Composer, type ComposerProps } from "./Composer";
 import { ComposerWithExtras } from "./slash/ComposerWithExtras";
+import { createAttachmentRegistry, type AttachmentRegistry } from "./attach/registry";
 import type { ComposeServices } from "./slash/extras";
 import { PlanController } from "./plan/controller";
 import { PlanArea, refineSeed } from "./plan/PlanArea";
@@ -174,6 +175,9 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       setMemoryOpen(false);
     } catch { setNotice("Project memory could not be read."); }
   }, [activeId, controller, host, memoryCore]);
+  // Attachments live here, not in the composer: its key changes on Refine / memory / suggestion without a chat switch.
+  const attachmentRegistry = useMemo(() => createAttachmentRegistry(), []);
+  useEffect(() => () => attachmentRegistry.disposeAll(), [attachmentRegistry]);
   const controllerVersion = useControllerVersion(controller); // re-render when any chat's busy flag changes
 
   // Sessions: first page now, more on demand.
@@ -539,7 +543,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
             {approvals?.(state)}
             <DraftComposer
               key={`${activeId}:${refineNonce}:${controller.getView(activeId).draftRev}`} controller={controller} id={activeId} active={active} collapsible
-              compose={host.compose} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
+              compose={host.compose} registry={attachmentRegistry} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
               notices={<PromptNotices items={promptNotices} onClose={closeNotice} />}
@@ -574,7 +578,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
 }
 
 /** Owns the draft text locally (typing never re-renders the conversation) and saves it per chat on every change. */
-function DraftComposer({ controller, id, compose, models, mode, setMode, setModel, clearChat, active, ...rest }: { controller: ChatController; id: string; compose?: ComposeServices; models: ModelGroup[]; mode: string; setMode: (id: string) => void; setModel: (provider: string, model: string) => void; clearChat: () => void; active: boolean } & Omit<ComposerProps, "draft" | "onDraft" | "extras" | "active">) {
+function DraftComposer({ controller, id, compose, registry, models, mode, setMode, setModel, clearChat, active, ...rest }: { controller: ChatController; id: string; compose?: ComposeServices; registry: AttachmentRegistry; models: ModelGroup[]; mode: string; setMode: (id: string) => void; setModel: (provider: string, model: string) => void; clearChat: () => void; active: boolean } & Omit<ComposerProps, "draft" | "onDraft" | "extras" | "active">) {
   const [draft, setDraft] = useState(() => controller.getView(id).draft);
   const onDraft = (t: string) => { setDraft(t); controller.setView(id, { draft: t }); };
   const notice = <PlanSwitchNotice draft={draft} mode={mode} onSwitch={() => setMode("plan")} />;
@@ -585,7 +589,7 @@ function DraftComposer({ controller, id, compose, models, mode, setMode, setMode
     [compose, controller, id],
   );
   if (!withReport) return <>{notice}<Composer {...rest} active={active} draft={draft} onDraft={onDraft} /></>;
-  return <>{notice}<ComposerWithExtras {...rest} active={active} draft={draft} onDraft={onDraft} compose={withReport} models={models} setMode={setMode} setModel={setModel} clearChat={clearChat} chatId={id} /></>;
+  return <>{notice}<ComposerWithExtras {...rest} active={active} draft={draft} onDraft={onDraft} compose={withReport} registry={registry} models={models} setMode={setMode} setModel={setModel} clearChat={clearChat} chatId={id} /></>;
 }
 
 /** The plan run's progress bar and counts, above the task list (the Mac's PlanExecutionCard header). */

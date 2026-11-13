@@ -37,6 +37,7 @@ export * from "../slash/extras";
 export * from "../attach/limits";
 export * from "../attach/codec";
 export * from "../attach/manager";
+export * from "../attach/registry";
 export * from "../attach/host";
 export * from "../attach/AttachmentChips";
 export * from "../mentions";

@@ -98,6 +98,13 @@ export class AttachmentManager {
   /** Sending must wait while a read is still running. */
   isBusy(): boolean { return this.entries.some((e) => e.item.status === "reading"); }
   hasAny(): boolean { return this.entries.length > 0; }
+  private seededPaths = new Set<string>();
+  /** Attach an auto-suggested file once per manager: a remounted composer must not add it again. */
+  seedProjectFile(path: string): Promise<void> {
+    if (this.seededPaths.has(path)) return Promise.resolve();
+    this.seededPaths.add(path);
+    return this.addProjectFile(path);
+  }
 
   private emit(): void {
     this.snapshot = this.entries.map((e) => e.item);

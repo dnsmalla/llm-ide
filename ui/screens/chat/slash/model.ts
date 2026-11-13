@@ -50,6 +50,8 @@ export interface ModelDeps {
   sources: ComposerSources;
   actions: ComposerActions;
   attachments: AttachmentManager | null;
+  /** The manager outlives this model (it is kept per chat by the screen): dispose must not tear it down. */
+  sharedAttachments?: boolean;
   mentions: MentionSearch | null;
   debounceMs?: number;
   setTimer?: (fn: () => void, ms: number) => unknown;
@@ -266,7 +268,7 @@ export class ComposerModel {
     this.disposed = true;
     this.cancelMention();
     this.offCatalog?.();
-    this.d.attachments?.dispose();
+    if (!this.d.sharedAttachments) this.d.attachments?.dispose();
     this.subs.clear();
   }
 }

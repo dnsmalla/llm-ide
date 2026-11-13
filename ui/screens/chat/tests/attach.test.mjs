@@ -243,3 +243,33 @@ test("ComposerChips: roles, progress, errors, remove buttons named", async () =>
   assert.match(out, /role="status"/);
   assert.equal(html(h(c.ComposerChips, { skills: [], attachments: [], notices: [], message: null, onRemoveSkill() {}, onRemoveAttachment() {}, onDismissNotices() {} })), "");
 });
+
+test("registry: attachments survive a composer remount, stay per chat, and clear after a send", async () => {
+  const { host } = fakeHost([{ name: "notes.md", bytes: utf8("hello") }]);
+  const reg = c.createAttachmentRegistry();
+  const deps = { host, project: null, blobs: null };
+  const a1 = reg.get("chat-a", deps);
+  await a1.pickFiles();
+  // A remount of the same chat's composer asks again with equivalent services and gets the same manager.
+  const a2 = reg.get("chat-a", { ...deps });
+  assert.equal(a2, a1);
+  assert.equal(a2.getItems().length, 1, "the chip is still there after the remount");
+  assert.equal(reg.get("chat-b", deps).getItems().length, 0, "another chat does not see it");
+  assert.equal(a2.consume().length, 1);
+  assert.equal(reg.get("chat-a", deps).getItems().length, 0, "consumed by the send");
+  // A changed project reader means the old manager's reads are meaningless: rebuilt, old one disposed.
+  const a3 = reg.get("chat-a", { host, project: { readHead: async () => ({ text: "", truncated: false, binary: false }) }, blobs: null });
+  assert.notEqual(a3, a1);
+  reg.disposeAll();
+  assert.equal(reg.get("chat-a", deps).getItems().length, 0);
+});
+
+test("seedProjectFile attaches an auto-suggested file once, even if the composer remounts", async () => {
+  const reads = [];
+  const project = { readHead: async (p) => { reads.push(p); return { text: "x", truncated: false, binary: false }; } };
+  const m = new c.AttachmentManager({ host: null, project, blobs: null });
+  await m.seedProjectFile("src/a.ts");
+  await m.seedProjectFile("src/a.ts");
+  assert.deepEqual(reads, ["src/a.ts"]);
+  assert.equal(m.getItems().length, 1);
+});
