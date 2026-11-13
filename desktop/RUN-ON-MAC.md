@@ -75,8 +75,9 @@ Try these in order. Note anything that differs in the bug-report template at the
    If it fails with a message about Claude Code, run `claude login` in a terminal (or add a provider key in
    Settings > Providers) and use Retry. Try the mode picker and the model picker.
 6. **Approvals.** Switch the permission mode to Ask and ask for "Create a file hello.txt containing hi". An
-   approval card should appear; try Deny once and Allow once once. Choose Bypass once: a native dialog (default
-   button Cancel) must appear first. Cancel it.
+   approval card should appear; try Deny once and Allow once once. Bypass is the default: in a new chat, the first
+   message shows a native dialog (default button Cancel) first. Cancel it: the message goes as Ask and a closable
+   notice on top of the prompt box says so.
 7. **Trust banner.** Make a scratch folder with a `.mcp.json` (for example
    `{"mcpServers":{"demo":{"command":"echo","args":["hi"]}}}`), open it as the project and start a chat.
    A banner says the folder is untrusted and what was not loaded. Choose "Trust this folder...", confirm in the

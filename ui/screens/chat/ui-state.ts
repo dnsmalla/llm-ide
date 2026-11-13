@@ -32,8 +32,9 @@ export interface ChatUiStore {
 /** Remembering picker choices for this many chats is plenty; the oldest entries are forgotten (bounded memory). */
 export const MAX_REMEMBERED_PREFS = 200;
 
-export function createChatUiStore(initialActiveId: string | null = null): ChatUiStore {
-  let state: ChatUiState = { activeId: initialActiveId, prefs: {}, permission: "ask", sessionsRev: 0 };
+/** `permission` = the picker's starting mode: Bypass in the desktop app (each chat still needs the host's approval), Ask elsewhere. */
+export function createChatUiStore(initialActiveId: string | null = null, permission: PermissionMode = "ask"): ChatUiStore {
+  let state: ChatUiState = { activeId: initialActiveId, prefs: {}, permission, sessionsRev: 0 };
   const listeners = new Set<() => void>();
   const set = (next: ChatUiState) => {
     if (next === state) return;

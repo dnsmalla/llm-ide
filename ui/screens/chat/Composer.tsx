@@ -31,6 +31,8 @@ export interface ComposerProps {
   memory?: ReactNode;
   /** Token/cap meter shown at the right of the bottom bar. */
   meter?: ReactNode;
+  /** Notices about the next message, attached to the top of the prompt box (PromptNotices). */
+  notices?: ReactNode;
   /** Dock: keep the advanced controls collapsed until the user opens Options. */
   collapsible?: boolean;
 }
@@ -221,6 +223,7 @@ export function Composer(p: ComposerProps) {
       {p.extras?.chips}
       {p.extras?.menu}
       <div className="chat-input-card" data-busy={p.busy || undefined} data-listening={listening || undefined}>
+      {p.notices}
       <textarea
         {...p.extras?.textareaProps}
         className="chat-textarea" aria-label="Message" rows={3} value={p.draft} placeholder={p.busy ? "Type to queue the next message" : COMPOSER_PLACEHOLDER}

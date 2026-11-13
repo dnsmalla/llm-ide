@@ -262,3 +262,19 @@
 .chat-composer-bar .chat-pick:first-of-type select { max-width: none; }
 .chat-composer-bar .chat-pick select { max-width: 150px; }
 .chat-composer-bar .chat-pick select[aria-label="Model"] { max-width: 240px; }
+
+/* Notices about the next message: a strip attached to the top of the prompt card (like Claude's), each closable. */
+.chat-prompt-notices { display: flex; flex-direction: column; border-radius: 15px 15px 0 0; overflow: hidden; border-bottom: 1px solid var(--tok-color-border); }
+.chat-prompt-notice { --pn: var(--tok-color-accent2); display: flex; align-items: center; gap: 10px; padding: 9px 12px 9px 16px; background: color-mix(in srgb, var(--pn) 12%, var(--tok-color-surface)); color: color-mix(in srgb, var(--pn) 70%, var(--tok-color-text)); font-size: 13px; font-weight: 600; line-height: 1.4; }
+.chat-prompt-notice + .chat-prompt-notice { border-top: 1px solid color-mix(in srgb, var(--tok-color-border) 70%, transparent); }
+.chat-prompt-notice[data-tone="warn"] { --pn: var(--tok-color-accent4); }
+.chat-prompt-notice[data-tone="danger"] { --pn: var(--tok-color-danger); }
+.chat-prompt-notice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.chat-prompt-notice-action { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.chat-prompt-notice-action:hover { color: var(--tok-color-text); }
+.chat-prompt-notice-close { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; opacity: .75; }
+.chat-prompt-notice-close:hover { opacity: 1; background: color-mix(in srgb, var(--pn) 18%, transparent); }
+.chat-prompt-notice-close:focus-visible, .chat-prompt-notice-action:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
+.chat-input-card:has(.chat-prompt-notice[data-tone="warn"]) { border-color: color-mix(in srgb, var(--tok-color-accent4) 45%, var(--tok-color-border)); }
+.chat-input-card:has(.chat-prompt-notice[data-tone="danger"]) { border-color: color-mix(in srgb, var(--tok-color-danger) 45%, var(--tok-color-border)); }
+.chat-input-card:has(.chat-prompt-notices) .chat-textarea { border-radius: 0; }

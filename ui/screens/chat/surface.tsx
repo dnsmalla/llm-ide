@@ -81,7 +81,7 @@ export function chatRuntime(surface = "chat"): ChatRuntime {
     // A message that could not be saved is a bug report for the self-heal channel (debug builds) as well as a notice.
     onPersistError: (_id, err) => reportUiIncident("chat", `could not save a chat message: ${describeError(err).message}`),
   });
-  const ui = createChatUiStore(null);
+  const ui = createChatUiStore(null, bypass ? "bypass" : "ask");
   let noted: string | null | undefined;
   // Sign-out ends every Bypass grant.
   if (bypass) {

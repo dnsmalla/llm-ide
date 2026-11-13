@@ -15,11 +15,12 @@ import { ContextMeter } from "./ContextMeter";
 import { BudgetMeter, budgetPercent } from "./BudgetMeter";
 import { EmptyChat } from "./EmptyChat";
 import { PlanSwitchNotice } from "./plan/PlanSwitchNotice";
-import { EffortPicker, ModePicker, ModelPicker, PendingSwitchNote, PermissionChip } from "./Pickers";
+import { EffortPicker, ModePicker, ModelPicker, PermissionChip } from "./Pickers";
 import { effectiveEffort, effortLevelsFor, effortStore, turnEffort } from "./effort";
-import { enableProviderTools, ModelNotices, modelNotices } from "./model-notices";
+import { enableProviderTools, modelNotices, openModelRouting, ROUTER_NOTICE, TOOLS_NOTICE } from "./model-notices";
+import { noticeKey, PromptNotices, visibleNotices, type PromptNotice } from "./PromptNotices";
 import { addTargetGroup, addUserModel, afterRefusedPin, forgetUserModel, loadUserModels, saveUserModels, withUserModels, type UserModels } from "./custom-models";
-import { ModeBanner } from "./approvals/ModeBanner";
+import { MODE_EXPLANATION } from "./approvals/ModeBanner";
 import { remoteProjectId, subscribeRemoteProject } from "../shell/remote-selection";
 import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./bypass";
 import type { ChatController } from "./controller";
@@ -122,7 +123,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, []);
   // One store for the open chat, picker choices and permission: shared with the other chat surface when given.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const ui = useMemo(() => shared ?? createChatUiStore(initialSessionId), [shared]);
+  const ui = useMemo(() => shared ?? createChatUiStore(initialSessionId, host.bypass ? "bypass" : "ask"), [shared]);
   const uiState = useSyncExternalStore(ui.subscribe, ui.getSnapshot, ui.getSnapshot);
   const { activeId, prefs, permission } = uiState;
   const { setActiveId, setPrefs, setPermission } = ui;
@@ -426,6 +427,34 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     if (r === "approved") setPermission("bypass"); // declined: previous mode, no banner
   };
 
+  // Bypass is the desktop default: the host's approval is asked once per chat, on its first message (then 30 minutes).
+  // Declined, the message goes as Ask (the gate never sends Bypass without a live grant).
+  const ensureBypass = async (): Promise<void> => {
+    if (permission !== "bypass" || !gate || !activeId || gate.live(activeId)) return;
+    const title = sessions.find((s) => s.id === activeId)?.title;
+    const r = await gate.request(activeId, bypassSummary(title, host.projectRoot?.() ?? null));
+    if (r !== "approved") setNotice("Bypass was not approved, so this message was sent as Ask.");
+  };
+
+  // Notices about the next message, attached to the top of the prompt box (closable; a closed one returns when its text changes).
+  const [closedNotices, setClosedNotices] = useState<ReadonlySet<string>>(() => new Set());
+  const budgetWarns = !!state.budget && (budgetPercent(state.budget) >= 80 || state.budget.level === "warning" || state.budget.level === "exceeded");
+  const promptNotices = visibleNotices([
+    modelNotice ? { id: "model-error", tone: "danger", text: modelNotice } : null,
+    groupsLoaded && providerCannotChat(current.provider, groups) ? { id: "provider", tone: "warn", text: PROVIDER_BLOCKED_NOTE } : null,
+    permission === "bypass" && gate
+      ? (bypassLive ? { id: "mode", tone: "danger", text: "Bypass is on: tools run without asking, including commands that change or delete files." }
+        : { id: "mode", tone: "warn", text: "Bypass: you approve it once for this chat when you send (it then lasts 30 minutes)." })
+      : permission === "accept-edits" ? { id: "mode", tone: "info", text: MODE_EXPLANATION["accept-edits"] } : null,
+    budgetWarns && state.budget ? { id: "budget", tone: "warn", text: `You've used ${budgetPercent(state.budget)}% of this chat's token budget · ${state.budget.remaining.toLocaleString("en-US")} left${state.budget.level === "exceeded" ? " · this chat is at its limit" : ""}`, action: { label: "Start a fresh chat", run: () => void newChat() } } : null,
+    ...modelNotices({ plainChat: plain, routerOn: route?.enabled, groups }).map((k): PromptNotice => (k === "tools"
+      ? { id: "tools", tone: "info", text: TOOLS_NOTICE.text, action: { label: TOOLS_NOTICE.label, run: () => void allowProviderTools() } }
+      : { id: "router", tone: "info", text: ROUTER_NOTICE.text, action: { label: "Open Model routing", run: () => openModelRouting() } })),
+    route?.pending ? { id: "pending", tone: "info", text: `Applies to your next message: ${route.pending.model || "Not pinned"}` } : null,
+    notice ? { id: "notice", tone: "info", text: notice, onClose: () => setNotice(null) } : null,
+  ], closedNotices);
+  const closeNotice = (n: PromptNotice) => { n.onClose?.(); setClosedNotices((c) => new Set(c).add(noticeKey(n))); };
+
   const renameSession = (id: string, title: string) => {
     setSessions((cur) => cur.map((s) => (s.id === id ? { ...s, title } : s)));
     store.renameSession(id, title).then(bumpSessions).catch(reportStoreError);
@@ -445,16 +474,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
           onDelete={() => activeId && deleteSession(activeId)} hasMessages={state.messages.length > 0}
           onSetLimit={async (limit) => { if (!activeId) return; const r = await putRoute(core, activeId, { tokenLimit: limit }); setRoute(r); return r; }}
         />
-        {notice && <StatusBanner severity="info" message={notice} onDismiss={() => setNotice(null)} />}
-        {state.budget && (budgetPercent(state.budget) >= 80 || state.budget.level === "warning" || state.budget.level === "exceeded") ? (
-          <div className="chat-budget-warning" role="status">
-            <span>Token budget {budgetPercent(state.budget)}% used · {state.budget.remaining.toLocaleString("en-US")} left. {state.budget.level === "exceeded" ? "This chat is at its limit." : "The next turn may stop at the limit."}</span>
-            <button type="button" className="chat-btn" onClick={() => void newChat()}>Start a fresh chat</button>
-          </div>
-        ) : null}
         {listError && <StatusBanner severity="error" message={listError} onDismiss={() => setListError(null)} />}
         {persistFailure && <StatusBanner severity="error" message={persistFailure} onDismiss={() => controller.dismissPersistFailure()} />}
-        <ModeBanner mode={permission} bypassLive={permission !== "bypass" || !gate || bypassLive} />
         {typeof banner === "function" ? banner(state) : banner}
         {!activeId ? (
           <div className="chat-empty"><p>Start a new chat.</p><button type="button" className="chat-btn chat-primary" onClick={() => void newChat()}>New chat</button></div>
@@ -495,22 +516,17 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                 if (sendBlock || readOnly) return; // the same reason the composer shows (no project, ended chat, no permission)
                 setCurrent({ mode: "execute" });
                 setPlanRunChat(activeId);
-                controller.send(activeId, turn.text, { ...turn.options, model: current.model, provider: current.provider, permissionMode: permission, effort: turnEffort(effortPick, effortLevels) });
+                void (busy ? Promise.resolve() : ensureBypass()).then(() => controller.send(activeId, turn.text, { ...turn.options, model: current.model, provider: current.provider, permissionMode: permission, effort: turnEffort(effortPick, effortLevels) }));
                 touchSession(activeId);
               }}
             />
             {approvals?.(state)}
-            {groupsLoaded && providerCannotChat(current.provider, groups) && <p className="chat-note" role="note">{PROVIDER_BLOCKED_NOTE}</p>}
-            <div className="chat-notes">
-              {modelNotice && <p className="chat-error" role="alert">{modelNotice}</p>}
-              <ModelNotices kinds={modelNotices({ plainChat: plain, routerOn: route?.enabled, groups })} onAllowTools={() => void allowProviderTools()} />
-              <PendingSwitchNote pending={route?.pending} />
-            </div>
             <DraftComposer
               key={`${activeId}:${refineNonce}:${controller.getView(activeId).draftRev}`} controller={controller} id={activeId} active={active} collapsible
               compose={host.compose} models={groups} mode={current.mode} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}
+              notices={<PromptNotices items={promptNotices} onClose={closeNotice} />}
               meter={<><BudgetMeter budget={state.budget} /><ContextMeter usage={state.context} onNewChat={() => void newChat()} onContinueWithRecap={state.messages.length > 0 ? () => void continueWithRecap() : undefined} /></>}
               controls={<>
                 <ModePicker value={current.mode} resolved={state.resolvedMode} onChange={(mode) => setCurrent({ mode })} modes={modeOptions} />
@@ -527,7 +543,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                 {memoryOpen ? <div role="dialog" aria-label="Session memory" className="chat-popover chat-memory-popover" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setMemoryOpen(false); } }}>{state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}<button type="button" className="chat-btn" onClick={() => void addMemoryToDraft()}>Add memory to prompt</button>
                   <button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button></div> : null}
               </>}
-              onSend={(text, extra) => { if (!busy) setPlanRunChat(null); controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments, effort: turnEffort(effortPick, effortLevels) }); touchSession(activeId); }}
+              onSend={(text, extra) => { if (!busy) setPlanRunChat(null); void (busy ? Promise.resolve() : ensureBypass()).then(() => controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments, effort: turnEffort(effortPick, effortLevels) })); touchSession(activeId); }}
               onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={sendBlock}
             />
           </>

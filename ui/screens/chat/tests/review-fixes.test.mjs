@@ -209,5 +209,5 @@ test("the plain-chat notice offers the Mac's one-click Allow tools, with Setting
   assert.match(notices, /onAllowTools \? onAllowTools\(\) : openModelRouting\(\)/);
   const screen = src("ChatScreen.tsx");
   assert.match(screen, /enableProviderTools\(core\)/);
-  assert.match(screen, /<ModelNotices [^>]*onAllowTools=/);
+  assert.match(screen, /label: TOOLS_NOTICE\.label, run: \(\) => void allowProviderTools\(\)/, "Allow tools is the notice's action in the prompt strip");
 });
