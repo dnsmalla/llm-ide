@@ -12,7 +12,7 @@ const TEST = stage("test", { name: "Refactor Test", defaultKey: "refactor-test" 
 const CHECK = stage("check", { kind: "codeGraph", graphOp: "verify", defaultKey: "refactor-graph-check" });
 
 function config(stages, over = {}) {
-  return decodeConfig({ stages, maxIterations: 1, maxRepairsPerStage: 1, consecutiveFailureStop: 3, ...over });
+  return decodeConfig({ stages, maxIterations: 1, maxRepairsPerStage: 1, consecutiveFailureStop: 3, stageDelaySeconds: 0, ...over });
 }
 
 const TODO = (id, text = id) => `### ${id} — ${text} (status: todo)\n\n- Files: a.py\n`;
@@ -191,4 +191,47 @@ test("a run that kept a batch is a pass even when a later batch errored, without
   assert.equal(out.passed, true);
   assert.equal(out.errored, undefined);
   assert.match(out.statusSummary, /R2 rolled back and left todo/);
+});
+
+test("the pause sits between two batches, before the second batch's checkpoint, and not before the first", async () => {
+  const { deps, opts } = fakeRun({ plan: TODO("R1") + "\n" + TODO("R2") });
+  const events = [];
+  const traced = {
+    ...deps,
+    async runStage(s, prior) { events.push(`run:${s.id}`); return deps.runStage(s, prior); },
+    sleep(ms) { events.push(`sleep:${ms}`); return Promise.resolve(); },
+  };
+  const tracedOpts = { ...opts, async checkpoint() { events.push("checkpoint"); return opts.checkpoint(); } };
+  const out = await runRefactorBatches(config(ALL, { stageDelaySeconds: 2 }), traced, tracedOpts);
+  assert.equal(out.passed, true);
+  const [first, second] = events.reduce((acc, e, i) => (e === "checkpoint" ? [...acc, i] : acc), []);
+  assert.equal(events[first - 1], "sleep:2000", "a pause between planning and batch 1");
+  assert.equal(events[second - 1], "sleep:2000", "a pause right before batch 2's checkpoint");
+});
+
+test("a loop with no enabled Apply runs as one plain loop: plan-only never batches", async () => {
+  const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
+  const noApply = config(ALL.map((st) => (st.id === "apply" ? { ...st, enabled: false } : st)));
+  const out = await runRefactorBatches(noApply, deps, opts);
+  assert.equal(out.passed, true, out.statusSummary);
+  assert.equal(state.checkpoints, 0, "no batch checkpoint");
+  const planOnly = config([PLAN, SNAP]);
+  const out2 = await runRefactorBatches(planOnly, fakeRun({ plan: TODO("R1") }).deps, fakeRun({ plan: TODO("R1") }).opts);
+  assert.equal(out2.passed, true, "a planning-only loop no longer throws 'no enabled stages'");
+});
+
+test("a host error during a batch rolls the batch back and ends the run as an error with a summary", async () => {
+  const { state, deps, opts } = fakeRun({ plan: TODO("R1") + "\n" + TODO("R2") });
+  let reads = 0;
+  const flaky = { ...opts, async readPlan() { reads += 1; if (reads === 4) throw new Error("disk gone"); return opts.readPlan(); } };
+  const out = await runRefactorBatches(config(ALL), deps, flaky);
+  assert.equal(out.passed, true, "R1 was verified before the error");
+  assert.match(out.statusSummary, /stopped: disk gone/);
+  const { deps: d2, opts: o2, state: s2 } = fakeRun({ plan: TODO("R1") });
+  const broken = { ...o2, async checkpoint() { throw new Error("git write-tree failed"); } };
+  const out2 = await runRefactorBatches(config(ALL), d2, broken);
+  assert.equal(out2.passed, false);
+  assert.equal(out2.errored, true);
+  assert.match(out2.statusSummary, /stopped: git write-tree failed/);
+  assert.equal(s2.restores.length, 0, "nothing to roll back before the checkpoint existed");
 });

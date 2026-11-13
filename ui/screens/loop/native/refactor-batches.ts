@@ -3,7 +3,7 @@
 // rolled back to that checkpoint and marked blocked in the plan; a batch that passed stays, even when a later one is
 // rolled back. A user Stop is not rolled back: the person is looking at the tree.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
-import { runNativeLoop, type LoopIterationOutcome, type LoopRunOutcome, type RunnerDeps, type StageOutcome } from "./runner.ts";
+import { pauseBetween, runNativeLoop, type LoopIterationOutcome, type LoopRunOutcome, type RunnerDeps, type StageOutcome } from "./runner.ts";
 
 export interface RefactorBatchOpts {
   maxBatches?: number;
@@ -75,6 +75,8 @@ const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerDeps, opts: RefactorBatchOpts): Promise<LoopRunOutcome> {
   const requested = opts.maxBatches ?? config.refactorBatchesPerRun ?? 3;
   const max = Number.isFinite(requested) ? Math.min(10, Math.max(1, Math.trunc(requested))) : 3;
+  // A loop that applies nothing (no test command, or Apply turned off) only plans and checks: run it as one loop.
+  if (!config.stages.some((s) => s.enabled && s.kind === "skill" && s.skillId === "skills/refactor-apply")) return runNativeLoop(config, deps);
   const { planning, batch } = splitRefactorPhases(config.stages);
   const snapshot = planning.filter((s) => s.kind === "codeGraph" && s.graphOp === "snapshot");
 
@@ -102,8 +104,12 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
   const skipped: string[] = [];
   let rolledBack: { id: string; reason: string; leftTodo: boolean } | null = null;
   let failed = false;
+  let hostError = false;
   let note = "";
+  // The checkpoint of the batch in flight, until it passed or was restored: a host error mid-batch restores it.
+  let pending: string | null = null;
 
+  try {
   for (let k = 1; ; k++) {
     const planText = await opts.readPlan();
     if (planText === null) { note = "the plan file is missing after planning"; failed = true; break; }
@@ -114,7 +120,10 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
     const out = exhausted(left);
     if (out) { note = `${out}; ${todo.id} and later batches stay todo`; break; }
     opts.log(`— batch ${todo.id} (${k} of ${max}) —`);
+    // Every batch starts after a stage boundary: batch 1 after planning, a later one after the previous batch.
+    await pauseBetween(deps, config.stageDelaySeconds);
     const tree = await opts.checkpoint();
+    pending = tree;
     // A later batch retakes the baseline from the tree the previous batch left, so its graph check judges only itself.
     const sub = await runNativeLoop({ ...config, ...left, stages: k === 1 ? batch : [...snapshot, ...batch] }, deps);
     stages.push(...sub.stages);
@@ -123,8 +132,9 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
     costUsd += sub.costUsd ?? 0;
     last = sub;
 
-    if (sub.cancelled) { note = sub.statusSummary; break; }
+    if (sub.cancelled) { pending = null; note = sub.statusSummary; break; }
     if (sub.passed) {
+      pending = null;
       const status = batchStatus(await opts.readPlan(), todo.id);
       if (status === "done") { applied.push(todo.id); continue; }
       if (status === "skipped") { skipped.push(todo.id); continue; }
@@ -139,6 +149,7 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
     // A red Test Baseline or a failed agent/transport call says nothing about the batch itself: it is restored and left
     // todo to be retried as-is. Anything else blocks it, so the next plan works around it.
     const leftTodo = sub.errored === true || sub.failedStage?.defaultKey === "refactor-test-baseline" || budgetStop(sub.statusSummary);
+    pending = null;
     try {
       await opts.restore(tree);
     } catch (e) {
@@ -160,6 +171,16 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
     opts.log(`⊘ ${todo.id} rolled back to before the batch: ${stageName} — ${reason}`);
     break;
   }
+  } catch (e) {
+    // A host call (checkpoint, restore, plan read/write) failed: end the run as an error with a record, never bare.
+    failed = true;
+    hostError = true;
+    note = `stopped: ${oneLine(e instanceof Error ? e.message : String(e))}`;
+    if (pending !== null) {
+      try { await opts.restore(pending); note += "; the batch in flight was rolled back"; } catch { note += "; the batch in flight could not be rolled back"; }
+    }
+    opts.log(`✗ ${note}`);
+  }
 
   // At least one verified batch, or nothing failed (an up-to-date plan, or only skipped batches). A Stop never passes.
   const passed = applied.length > 0 || (!failed && !last.cancelled);
@@ -179,6 +200,6 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
     // A run that kept verified batches is a pass; a later batch's halt is told in the summary, not as a run status.
     ...(last.cancelled ? { cancelled: true } : {}),
     ...(!passed && last.blocked ? { blocked: true } : {}),
-    ...(!passed && last.errored ? { errored: true } : {}),
+    ...(!passed && (last.errored || hostError) ? { errored: true } : {}),
   };
 }
