@@ -871,6 +871,8 @@ mod tests {
         assert!(HELPER.replace("\r\n", "\n").contains(&template), "the helper must embed the vhost template verbatim");
         assert!(!HELPER.contains("\"$STAGING/llm-ide-hub.nginx\" >"), "the helper must not install a staged vhost");
         assert!(!HELPER.contains("bundle.sha256|VERSION|llm-ide-hub.nginx"), "the vhost is not an uploadable file");
+        // The nginx stage must not wait for a file that can no longer be uploaded (it would fail every deploy).
+        assert!(!HELPER.contains("llm-ide-hub.nginx is missing"), "the nginx stage needs no staged vhost");
     }
 
     #[test]

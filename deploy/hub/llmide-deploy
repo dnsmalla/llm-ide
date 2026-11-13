@@ -309,7 +309,6 @@ LLMIDE_LOG
   nginx)
     staging
     conf
-    [ -f "$STAGING/llm-ide-hub.nginx" ] || die "llm-ide-hub.nginx is missing"
     cert="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
     renewal="/etc/letsencrypt/renewal/$DOMAIN.conf"
     if [ -f "$renewal" ] && ! grep -Eq '^[[:space:]]*reuse_key[[:space:]]*=[[:space:]]*True' "$renewal"; then

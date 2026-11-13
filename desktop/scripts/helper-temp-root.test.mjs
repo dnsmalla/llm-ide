@@ -165,7 +165,7 @@ test('base/env/bundle/start work in a temp root and preserve secrets', { skip },
     assert.ok(existsSync(h.releaseNode), 'the release has core/node/node');
     assert.notEqual(statSync(h.releaseNode).mode & 0o005, 0, 'node must be executable by the service user');
     assert.ok(existsSync(join(h.root, 'var/www/llmide-web/index.html')), 'the PWA is copied after the release switch');
-    assert.match(h.run('check'), /helper=5/, "check reports the helper version");
+    assert.match(h.run('check'), /helper=6/, "check reports the helper version");
     h.run('upload', 'VERSION\n1.2.4\n');
     assert.notEqual(h.runFail('update').status, 0, 'a same-version update is refused');
 
@@ -304,7 +304,7 @@ test('a rejected first vhost is removed so nginx -t stays healthy', { skip: skip
     mkdirSync(live, { recursive: true });
     execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
       '-subj', '/CN=hub.example.test', '-keyout', join(live, 'privkey.pem'), '-out', join(live, 'fullchain.pem')], { stdio: 'ignore' });
-    h.run('upload', 'llm-ide-hub.nginx\nserver { this_is_not_a_directive; }\n');
+    // The vhost comes from the helper itself now; `nginxFails` makes `nginx -t` reject it.
     const result = h.runFail('nginx');
     assert.notEqual(result.status, 0);
     assert.ok(!existsSync(h.site), 'the rejected vhost must not be left in sites-enabled');
@@ -319,7 +319,6 @@ test('nginx refuses a certificate renewal without reuse_key', { skip }, () => {
     const renewal = join(h.root, 'etc/letsencrypt/renewal/hub.example.test.conf');
     mkdirSync(dirname(renewal), { recursive: true });
     writeFileSync(renewal, '[renewalparams]\nkey_type = ecdsa\n');
-    h.run('upload', 'llm-ide-hub.nginx\nserver { listen 443 ssl; }\n');
     const r = h.runFail('nginx');
     assert.notEqual(r.status, 0, 'a renewing key rotation must be refused');
     assert.match(r.stderr, /reuse-key/);
@@ -335,5 +334,18 @@ test('start fails when systemctl cannot enable the unit', { skip }, () => {
     h.run('bundle');
     const result = h.runFail('start');
     assert.notEqual(result.status, 0, 'a failed enable must not be reported as a started hub');
+  } finally { h.cleanup(); }
+});
+
+// The helper runs as root through sudo. A vhost it installed from an uploaded file let anyone who could run the
+// helper write files as root (nginx opens its logs as root), so the vhost is part of the helper and never uploaded.
+test('upload refuses a vhost: the nginx site only ever comes from the helper', { skip }, () => {
+  const h = harness();
+  try {
+    h.run('base', `${h.stage}\n`);
+    const refused = h.runFail('upload', 'llm-ide-hub.nginx\nserver { access_log /etc/cron.d/x; }\n');
+    assert.notEqual(refused.status, 0);
+    assert.match(String(refused.stderr), /not uploadable/);
+    assert.ok(!existsSync(join(h.stage, 'llm-ide-hub.nginx')), 'nothing was written to staging');
   } finally { h.cleanup(); }
 });
