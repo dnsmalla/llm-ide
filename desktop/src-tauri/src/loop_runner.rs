@@ -683,10 +683,12 @@ pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Res
     Ok(())
 }
 
-/// True when `expected` (the project root the UI was given when the run started) names `active`.
+/// True when `expected` (the project root the UI was given when the run started) names `active`. Separators are
+/// compared as one kind: the Auto Task scheduler sends its root with `\` turned into `/`, and a false mismatch would
+/// refuse every scheduled call on Windows (`\\?\C:\p` against `//?/C:/p`).
 fn same_project_root(active: &Path, expected: &str) -> bool {
-    let trim = |s: &str| s.trim_end_matches(['/', '\\']).to_string();
-    trim(&active.to_string_lossy()) == trim(expected)
+    let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_string();
+    norm(&active.to_string_lossy()) == norm(expected)
 }
 
 /// A main-tree run (no run id) works in whatever project is active at the moment of the call. If the user opened
@@ -1216,6 +1218,11 @@ mod tests {
         let err = check_expected_root(None, Path::new("/projects/b"), Some("/projects/a")).unwrap_err();
         assert!(err.contains("the project changed"), "{err}");
         assert!(check_expected_root(None, Path::new("/projects/ab"), Some("/projects/a")).is_err(), "a prefix is not the same project");
+        // The scheduler's spelling of a Windows root (separators normalised) is still the same project.
+        let win = Path::new(r"\\?\C:\Users\me\proj");
+        assert!(check_expected_root(None, win, Some("//?/C:/Users/me/proj")).is_ok());
+        assert!(check_expected_root(None, win, Some(r"\\?\C:\Users\me\proj\")).is_ok());
+        assert!(check_expected_root(None, win, Some("//?/C:/Users/me/other")).is_err());
         // No expectation given (an older caller): unchanged behaviour.
         assert!(check_expected_root(None, Path::new("/projects/b"), None).is_ok());
         // A worktree run is pinned by its id, whatever project is active.
