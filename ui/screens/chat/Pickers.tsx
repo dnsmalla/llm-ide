@@ -1,6 +1,7 @@
 // Mode picker, model picker, permission chip and the cap chip popover. Native selects keep them keyboard
 // and screen-reader complete; the cap popover is a labelled dialog region.
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Floating } from "../shell/Floating";
 import { EFFORT_AUTO, effortLabel } from "./effort";
 import { validateModelId, type UserModels } from "./custom-models";
 import {
@@ -146,6 +147,7 @@ export function CapChip({ route, onSetLimit, disabled }: CapChipProps) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
   if (!route || !route.enabled) return null;
   const used = route.used.billable;
   const level = capLevel(used, route.tokenLimit);
@@ -155,12 +157,12 @@ export function CapChip({ route, onSetLimit, disabled }: CapChipProps) {
   };
   return (
     <div className="chat-cap" data-level={level}>
-      <button type="button" className="chat-chip-btn" aria-haspopup="dialog" aria-expanded={open} aria-label={`Token limit ${meterText(used, route.tokenLimit)}`}
+      <button ref={btn} type="button" className="chat-chip-btn" aria-haspopup="dialog" aria-expanded={open} aria-label={`Token limit ${meterText(used, route.tokenLimit)}`}
         title="This chat's model and token limit" disabled={disabled} onClick={() => { setText(route.tokenLimit ? String(route.tokenLimit) : ""); setOpen(!open); }}>
         {capChipText(route)}
       </button>
       {open && (
-        <div role="dialog" aria-label="Session token limit" className="chat-popover">
+        <Floating anchor={btn.current} onDismiss={() => setOpen(false)} role="dialog" aria-label="Session token limit" className="chat-popover">
           <CapNotes used={used} tokenLimit={route.tokenLimit} capEnforced={route.capEnforced} />
           <div className="chat-presets" role="group" aria-label="Limit presets">
             {CAP_PRESETS.map((p) => <button key={p} type="button" className="chat-btn" onClick={() => void apply(p)}>{compactTokens(p)}</button>)}
@@ -175,7 +177,7 @@ export function CapChip({ route, onSetLimit, disabled }: CapChipProps) {
           )}
           <p className="chat-muted">{coldSwitchWarning(0)}</p>
           {err && <p role="alert" className="chat-error">{err}</p>}
-        </div>
+        </Floating>
       )}
     </div>
   );

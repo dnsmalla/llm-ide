@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { Floating } from "./Floating";
 
 /** A non-interactive row: a heading (the account's name and email) or a divider. Skipped by arrow-key movement. */
 export interface MenuDecor {
@@ -49,14 +50,12 @@ export function MenuButton({ children, ariaLabel, items, up, end, className, onO
   const button = useRef<HTMLButtonElement>(null);
   const menuId = useId();
 
+  const menu = useRef<HTMLDivElement>(null);
+  // The menu floats above every pane (Floating), so it is not inside `root`: Floating closes it on an outside click.
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    root.current?.querySelector<HTMLElement>('[role^="menuitem"]:not([disabled])')?.focus();
-    return () => document.removeEventListener("mousedown", onDown);
+    const t = setTimeout(() => menu.current?.querySelector<HTMLElement>('[role^="menuitem"]:not([disabled])')?.focus(), 0);
+    return () => clearTimeout(t);
   }, [open]);
 
   const close = (refocus: boolean) => {
@@ -65,7 +64,7 @@ export function MenuButton({ children, ariaLabel, items, up, end, className, onO
   };
 
   const onMenuKey = (e: React.KeyboardEvent) => {
-    const els = [...(root.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not([disabled])') ?? [])];
+    const els = [...(menu.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not([disabled])') ?? [])];
     const i = els.indexOf(document.activeElement as HTMLElement);
     if (e.key === "Escape") {
       e.preventDefault();
@@ -110,7 +109,8 @@ export function MenuButton({ children, ariaLabel, items, up, end, className, onO
         {children}
       </button>
       {open && (
-        <div id={menuId} role="menu" aria-label={ariaLabel} className={`sh-menu${up ? " sh-menu-up" : ""}${end ? " sh-menu-end" : ""}`} onKeyDown={onMenuKey}>
+        <Floating anchor={button.current} onDismiss={() => setOpen(false)} placement={`${up ? "above" : "below"}-${end ? "end" : "start"}`}
+          floatingRef={(el) => { menu.current = el; }} id={menuId} role="menu" aria-label={ariaLabel} className={`sh-menu${up ? " sh-menu-up" : ""}${end ? " sh-menu-end" : ""}`} onKeyDown={onMenuKey}>
           {items.length === 0 && emptyText && <div className="sh-menu-empty">{emptyText}</div>}
           {items.map((it) => {
             if (isDecor(it)) {
@@ -138,7 +138,7 @@ export function MenuButton({ children, ariaLabel, items, up, end, className, onO
               </button>
             );
           })}
-        </div>
+        </Floating>
       )}
     </div>
   );

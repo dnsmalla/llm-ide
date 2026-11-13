@@ -1,6 +1,7 @@
 // Context menu: role="menu", arrow-key navigation, Enter/Space activates, Escape / outside click closes,
 // focus returns to the opener. Position is clamped to the viewport.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Portal } from "../shell/Floating";
 
 export interface MenuItem {
   id: string;
@@ -61,6 +62,7 @@ export function ContextMenu({ x, y, items, label, onPick, onClose }: Props) {
   };
 
   return (
+    <Portal>
     <div
       ref={ref}
       className="ex-menu"
@@ -102,5 +104,6 @@ export function ContextMenu({ x, y, items, label, onPick, onClose }: Props) {
         </div>
       ))}
     </div>
+    </Portal>
   );
 }

@@ -155,7 +155,7 @@
 .chat-composer-bar .chat-pick select { max-width: 190px; text-overflow: ellipsis; }
 .chat-composer-bar .chat-pick:first-of-type select { max-width: 105px; }
 .chat-composer-bar .chat-muted { white-space: nowrap; }
-.chat-memory-popover { top: auto !important; z-index: 60; }
+.chat-memory-popover { z-index: 60; }
 @media (max-width: 1080px) {
   .chat-composer-bar .chat-pick-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .chat-composer-bar { flex-wrap: wrap; }

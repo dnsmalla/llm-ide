@@ -1,4 +1,5 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, useRef, useState, type ReactNode } from "react";
+import { Floating } from "./Floating";
 import { ChatBubbleIcon, ChevronIcon, FolderIcon, Icon, THEMES, type ThemeId } from "@llmide/ui-kit";
 import { ActivityBell } from "./ActivityBell";
 import { BusInbox } from "./approvals/BusInbox";
@@ -115,16 +116,17 @@ const HomePicker = memo(function HomePicker() {
 const CoreChip = memo(function CoreChip() {
   const view = useCoreStatusView();
   const [diag, setDiag] = useState(false);
+  const coreButton = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <button type="button" className="sh-statusbar-core sh-statusbar-item" aria-live="polite" aria-haspopup="dialog" aria-expanded={diag} data-level={view.level} title={view.detail ?? "Show core diagnostics"} onClick={() => setDiag((v) => !v)}>
+      <button ref={coreButton} type="button" className="sh-statusbar-core sh-statusbar-item" aria-live="polite" aria-haspopup="dialog" aria-expanded={diag} data-level={view.level} title={view.detail ?? "Show core diagnostics"} onClick={() => setDiag((v) => !v)}>
         <span className="sh-dot" aria-hidden="true" />
         {view.label}
       </button>
       {diag && (
-        <div style={{ position: "fixed", left: 8, bottom: 32, zIndex: 50 }} onKeyDown={(e) => e.key === "Escape" && setDiag(false)}>
+        <Floating anchor={coreButton.current} placement="above-start" onDismiss={() => setDiag(false)}>
           <DiagnosticsPanel onClose={() => setDiag(false)} />
-        </div>
+        </Floating>
       )}
       {view.hints.map((h) => (
         <button

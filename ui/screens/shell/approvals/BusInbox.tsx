@@ -2,6 +2,7 @@
 // approval, and the scheduled jobs. Shown only while the core sees this UI as the desktop class. All text is rendered as
 // text; the nonce stays in memory and is sent only with Approve.
 import { memo, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { Floating } from "../Floating";
 import { core } from "../runtime";
 import { useCoreSession } from "../use-shell";
 import { busApi, buildScheduleInput, type BusSchedule, type PendingApproval, type ScheduleInput } from "./bus-api";
@@ -122,6 +123,7 @@ export const BusInbox = memo(function BusInbox() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const jobsButton = useRef<HTMLButtonElement>(null);
   const panelId = useId();
 
   useEffect(() => {
@@ -144,12 +146,6 @@ export const BusInbox = memo(function BusInbox() {
     setSchedules(await api.schedules().catch(() => []));
   }, []);
   useEffect(() => { if (open) void reload(); }, [open, reload]);
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (e: MouseEvent) => { if (root.current && !root.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   // Hidden unless the core treats this UI as the desktop class (a 403 TIER_DENIED otherwise).
   if (!signedIn || snap.error === "TIER_DENIED") return null;
@@ -160,12 +156,12 @@ export const BusInbox = memo(function BusInbox() {
   const count = snap.items.length;
   return (
     <div className="sh-menu-root" ref={root}>
-      <button type="button" className="sh-statusbar-item sh-bell" aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined}
+      <button ref={jobsButton} type="button" className="sh-statusbar-item sh-bell" aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined}
         aria-label={count ? `Approvals, ${count} waiting` : "Approvals and scheduled jobs"} title="Approvals and scheduled jobs" onClick={() => setOpen((v) => !v)}>
         Jobs{count ? <span className="sh-bell-badge" aria-hidden="true">{count > 99 ? "99+" : count}</span> : null}
       </button>
       {open && (
-        <div id={panelId} role="dialog" aria-label="Approvals and scheduled jobs" tabIndex={-1} className="sh-menu sh-menu-up sh-menu-end sh-activity sh-inbox"
+        <Floating anchor={jobsButton.current} placement="above-end" onDismiss={() => setOpen(false)} id={panelId} role="dialog" aria-label="Approvals and scheduled jobs" tabIndex={-1} className="sh-menu sh-menu-up sh-menu-end sh-activity sh-inbox"
           onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }}>
           <div className="sh-activity-scroll">
             {error && <p className="sh-activity-note sh-warning" role="status">That did not work ({error}). The list was reloaded.</p>}
@@ -177,7 +173,7 @@ export const BusInbox = memo(function BusInbox() {
             <ScheduleList items={schedules} names={names} nowMs={Date.now()} busy={busy} onDelete={(s) => void act(s.id, () => api.deleteSchedule(s.id))} />
             <ScheduleForm names={names} onCreate={(input) => act("new", () => api.createSchedule(input))} />
           </div>
-        </div>
+        </Floating>
       )}
     </div>
   );

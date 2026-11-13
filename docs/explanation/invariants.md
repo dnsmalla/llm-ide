@@ -256,6 +256,13 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## UI / UX / CSS
 
+- **Popups float above every pane (`ui/screens/shell/Floating.tsx`).** A menu, popover or picker opened from a
+  button (or a right-click point) renders through `Floating`, in the page body, fixed next to its anchor: below or
+  above (the side with room), slid inside the window, closed on Esc or an outside click. A popup rendered in place
+  inside a pane is cut off by the pane's scrolling edge or drawn under the next pane (the Code Assistant's Route
+  history under the Explorer). Pass the popup's own className, role and handlers to `Floating` (it is the popup
+  element); do not wrap an absolutely positioned popup in it. Full-window dialogs stay `position: fixed` scrims.
+
 ### ✅ MUST preserve
 
 - **Responsive layout down to 280 px width.**

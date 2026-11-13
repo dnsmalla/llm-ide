@@ -6,6 +6,7 @@ import { Icon } from "@llmide/ui-kit";
 import { CapChip } from "./Pickers";
 import { DELETE_CHAT_DETAIL, DELETE_CHAT_TITLE, type RouteView } from "./route";
 import type { SessionSummary } from "./store";
+import { Floating } from "../shell/Floating";
 
 /** The history menu lists at most this many chats (the screen loads 100 at a time; a dock needs the recent ones). */
 export const DOCK_HISTORY_MAX = 50;
@@ -61,6 +62,8 @@ export function DockHeader({ sessions, activeId, busyIds, approvalIds = new Set(
   const [historyQuery, setHistoryQuery] = useState("");
   const historyButton = useRef<HTMLButtonElement>(null);
   const [actions, setActions] = useState(false);
+  const actionsButton = useRef<HTMLButtonElement>(null);
+  const deleteButton = useRef<HTMLButtonElement>(null);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
   const [confirm, setConfirm] = useState(false);
@@ -76,7 +79,7 @@ export function DockHeader({ sessions, activeId, busyIds, approvalIds = new Set(
         <span aria-hidden="true">▾</span>
       </button>
       {historyOpen ? (
-        <div className="chat-session-picker" role="dialog" aria-label="Chat history" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setHistoryOpen(false); historyButton.current?.focus(); } }}>
+        <Floating anchor={historyButton.current} placement="below-end" onDismiss={() => setHistoryOpen(false)} className="chat-session-picker" role="dialog" aria-label="Chat history" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setHistoryOpen(false); historyButton.current?.focus(); } }}>
           <input className="chat-input" type="search" autoFocus aria-label="Search chats" placeholder="Search chats" value={historyQuery} onChange={(e) => setHistoryQuery(e.target.value)} />
           <ul className="chat-session-picker-list">
             {options.filter((o) => !historyQuery.trim() || o.text.toLowerCase().includes(historyQuery.trim().toLowerCase())).map((o) => (
@@ -85,11 +88,11 @@ export function DockHeader({ sessions, activeId, busyIds, approvalIds = new Set(
             {options.filter((o) => !historyQuery.trim() || o.text.toLowerCase().includes(historyQuery.trim().toLowerCase())).length === 0 ? <li className="chat-muted">No chats match.</li> : null}
           </ul>
           <button type="button" className="chat-btn chat-primary" onClick={() => { setHistoryOpen(false); setHistoryQuery(""); onNew(); }}>New chat</button>
-        </div>
+        </Floating>
       ) : null}
-      {activeId && (onRename || onDelete) ? <button type="button" className="chat-dock-btn" aria-label="Chat actions" aria-haspopup="menu" aria-expanded={actions} title="Chat actions" onClick={() => setActions((v) => !v)}>⋯</button> : null}
+      {activeId && (onRename || onDelete) ? <button ref={actionsButton} type="button" className="chat-dock-btn" aria-label="Chat actions" aria-haspopup="menu" aria-expanded={actions} title="Chat actions" onClick={() => setActions((v) => !v)}>⋯</button> : null}
       {actions && activeId ? (
-        <div className="chat-dock-menu" role="menu" aria-label="Chat actions">
+        <Floating anchor={actionsButton.current ?? deleteButton.current} placement="below-end" onDismiss={() => { setActions(false); setRenaming(false); setConfirm(false); }} className="chat-dock-menu" role="menu" aria-label="Chat actions">
           {renaming && onRename ? (
             <form onSubmit={(e) => { e.preventDefault(); const t = draft.trim(); if (t) onRename(t); setRenaming(false); setActions(false); }}>
               <input className="chat-input" aria-label="Chat title" autoFocus maxLength={200} value={draft} onChange={(e) => setDraft(e.target.value)} />
@@ -107,10 +110,10 @@ export function DockHeader({ sessions, activeId, busyIds, approvalIds = new Set(
               {onDelete ? <button type="button" role="menuitem" className="chat-link-btn chat-danger" onClick={() => setConfirm(true)}>Delete chat</button> : null}
             </>
           )}
-        </div>
+        </Floating>
       ) : null}
       {activeId && onDelete ? (
-        <button type="button" className="chat-dock-btn" aria-label="Delete current chat" title="Delete current chat"
+        <button ref={deleteButton} type="button" className="chat-dock-btn" aria-label="Delete current chat" title="Delete current chat"
           onClick={() => { if (deleteChatAction(hasMessages) === "delete") onDelete(); else { setRenaming(false); setConfirm(true); setActions(true); } }}>
           <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v5M9.5 6.5v5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>

@@ -21,6 +21,7 @@ import { toWriteError, writeErrorText, type WriteHost } from "./write/write-host
 import { WriteQueue } from "./write/write-queue.ts";
 import { NoFolder, LoadError } from "./States";
 import { useLibraryState } from "./use-library.ts";
+import { Floating } from "../shell/Floating";
 
 /** The write side (S-I). Absent: the Library is read-only, as before. */
 export interface LibraryWriteProps {
@@ -303,7 +304,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
         </main>
       )}
       {noteMenu ? (
-        <div className="lib-context" role="menu" data-lib-menu style={{ left: noteMenu.x, top: noteMenu.y }} onMouseLeave={() => setNoteMenu(null)}>
+        <Floating anchor={{ x: noteMenu.x, y: noteMenu.y }} onDismiss={() => setNoteMenu(null)} className="lib-context" role="menu" data-lib-menu onMouseLeave={() => setNoteMenu(null)}>
           <button type="button" role="menuitem" className="lib-context-close" aria-label="Close menu" onClick={() => setNoteMenu(null)}>×</button>
           <button type="button" role="menuitem" onClick={() => { store.select(noteMenu.rel); setNoteMenu(null); }}>Open</button>
           <button type="button" role="menuitem" onClick={() => { void onCopyPath?.(`llm-doc/${noteMenu.rel}`); setNoteMenu(null); }}>Copy relative path</button>
@@ -314,7 +315,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
           ) : (
             <button type="button" role="menuitem" onClick={() => { const msg = refusedMessage(store.hideNotes([noteMenu.rel]).refused); if (msg) setLinkNotice(msg); setNoteMenu(null); }}>Remove from List</button>
           )}
-        </div>
+        </Floating>
       ) : null}
       {newNote && (
         <NewNoteDialog

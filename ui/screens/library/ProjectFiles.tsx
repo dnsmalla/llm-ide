@@ -10,6 +10,7 @@ import { Dialog } from "./write/Dialog";
 import { MarkdownView } from "./MarkdownView";
 import { PROJECT_ROOTS, decodeProjectEntries, decodeProjectFile, projectSaveRequest, type ProjectEntry } from "./project-files.ts";
 import { addFilesToFolder, addSummary, createFolder, pickReason, planRemove, runRemove, validateEntryName, type Mutations, type RemovePlan } from "./project-ops.ts";
+import { Floating } from "../shell/Floating";
 
 export interface ProjectFilesDeps {
   list: (path: string) => Promise<unknown>;
@@ -203,7 +204,7 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
       })}
       {notice ? <p className="lib-muted lib-project-note" role="status">{notice}</p> : null}
       {menu ? (
-        <div className="lib-context" role="menu" data-lib-menu style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)} onKeyDown={(e) => { if (e.key === "Escape") setMenu(null); }}>
+        <Floating anchor={{ x: menu.x, y: menu.y }} onDismiss={() => setMenu(null)} className="lib-context" role="menu" data-lib-menu onMouseLeave={() => setMenu(null)} onKeyDown={(e) => { if (e.key === "Escape") setMenu(null); }}>
           <button type="button" role="menuitem" className="lib-context-close" aria-label="Close menu" onClick={() => setMenu(null)}>×</button>
           {menu.entry === null ? (
             <>
@@ -216,7 +217,7 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
             <button type="button" role="menuitem" onClick={() => askRemove(menu.entry!)}>Remove…</button>
           )}
           <button type="button" role="menuitem" onClick={() => setMenu(null)}>Close</button>
-        </div>
+        </Floating>
       ) : null}
       {removal ? <RemoveDialog plan={removal} onConfirm={() => void confirmRemove(removal)} onCancel={() => setRemoval(null)} /> : null}
       {newFolderIn !== null && mutate ? (

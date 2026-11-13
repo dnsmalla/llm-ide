@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { MODES } from "../route";
 import type { CoreTransport } from "../transport";
 import { safeLine } from "../slash/sanitize";
+import { Floating } from "../../shell/Floating";
 import type { SubagentSummary } from "./subagents";
 
 /** The mode the turn runs in (picked, or the one the server resolved for Auto). */
@@ -17,14 +18,15 @@ export function ModeBadge({ mode, resolved }: { mode: string; resolved: string |
 
 export function SubagentChip({ summary }: { summary: SubagentSummary }) {
   const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
   if (summary.runs.length === 0) return null;
   return (
     <div className="chat-subagents">
-      <button type="button" className="chat-badge" aria-expanded={open} aria-controls="chat-subagent-list" onClick={() => setOpen(!open)}>{summary.label}</button>
+      <button ref={btn} type="button" className="chat-badge" aria-expanded={open} aria-controls="chat-subagent-list" onClick={() => setOpen(!open)}>{summary.label}</button>
       {open && (
-        <ul id="chat-subagent-list" className="chat-popover" aria-label="Subagents in this turn">
-          {summary.runs.map((r) => <li key={r.id}>{r.name ?? "subagent"} <span className="chat-muted">{r.state}</span></li>)}
-        </ul>
+        <Floating anchor={btn.current} onDismiss={() => setOpen(false)} id="chat-subagent-list" className="chat-popover" role="region" aria-label="Subagents in this turn">
+          <ul className="chat-popover-list">{summary.runs.map((r) => <li key={r.id}>{r.name ?? "subagent"} <span className="chat-muted">{r.state}</span></li>)}</ul>
+        </Floating>
       )}
     </div>
   );
@@ -52,6 +54,7 @@ export function RouteHistory({ core, chatId }: { core: CoreTransport; chatId: st
   const [data, setData] = useState<{ events: RouteEventView[]; degraded: boolean } | null>(null);
   const [error, setError] = useState(false);
   const ac = useRef<AbortController | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!open) return;
     ac.current?.abort();
@@ -65,9 +68,9 @@ export function RouteHistory({ core, chatId }: { core: CoreTransport; chatId: st
   }, [open, core, chatId]);
   return (
     <div className="chat-route-history">
-      <button type="button" className="chat-link-btn" aria-expanded={open} aria-controls="chat-route-history-list" onClick={() => setOpen(!open)}>Route history</button>
+      <button ref={btn} type="button" className="chat-link-btn" aria-expanded={open} aria-controls="chat-route-history-list" onClick={() => setOpen(!open)}>Route history</button>
       {open && (
-        <div id="chat-route-history-list" className="chat-popover" role="region" aria-label="Route history">
+        <Floating anchor={btn.current} onDismiss={() => setOpen(false)} id="chat-route-history-list" className="chat-popover" role="region" aria-label="Route history">
           {error && <p role="alert" className="chat-error">The route history could not be loaded.</p>}
           {!error && !data && <p className="chat-muted" role="status">Loading…</p>}
           {data?.degraded && <p className="chat-muted">The history store is unavailable; this list may be incomplete.</p>}
@@ -75,7 +78,7 @@ export function RouteHistory({ core, chatId }: { core: CoreTransport; chatId: st
           {data && data.events.length > 0 && (
             <ul>{data.events.map((e) => <li key={e.id}><strong>{e.kind}</strong> {e.from && e.to ? `${e.from} → ${e.to}` : e.to || e.from} <span className="chat-muted">{e.at}{e.reason ? `, ${e.reason}` : ""}</span></li>)}</ul>
           )}
-        </div>
+        </Floating>
       )}
     </div>
   );

@@ -24,3 +24,8 @@
 
 /* Light theme: tinted, lighter shadows read as elevation instead of smudges. */
 :root[data-theme="light"] { --ui-shadow: #1a2233; --ui-shadow-k: 0.45; }
+
+/* Popups rendered by the shell's Floating (in the page body, above every pane): the base type they would have had
+   inside a pane. Zero specificity, so each popup's own class still wins. */
+:where([data-floating]) { font-size: 13px; line-height: 1.45; color: var(--tok-color-text); text-align: left; }
+:where([data-floating]) :where(ul) { margin: 0; padding-left: 16px; }

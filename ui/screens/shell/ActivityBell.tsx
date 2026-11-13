@@ -1,6 +1,7 @@
 // The status bar's bell (Mac `ActivityBell`): unread badge, popover with the last 48 hours grouped by day.
 // Polls the core only while mounted and signed in; opening marks everything seen. Server text is rendered as text.
 import { memo, useEffect, useId, useRef, useState } from "react";
+import { Floating } from "./Floating";
 import { BellIcon } from "@llmide/ui-kit";
 import { badgeText, groupByDay, visibleItems } from "./activity-model";
 import { activityStore } from "./runtime";
@@ -79,11 +80,6 @@ export const ActivityBell = memo(function ActivityBell() {
     if (!open) return undefined;
     void activityStore.markSeen();
     panel.current?.focus();
-    const onDown = (e: MouseEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
   if (!signedIn) return null;
@@ -106,9 +102,12 @@ export const ActivityBell = memo(function ActivityBell() {
         {badge && <span className="sh-bell-badge" aria-hidden="true">{badge}</span>}
       </button>
       {open && (
-        <div
+        <Floating
+          anchor={button.current}
+          placement="above-end"
+          onDismiss={() => setOpen(false)}
+          floatingRef={(el) => { panel.current = el; }}
           id={panelId}
-          ref={panel}
           tabIndex={-1}
           role="dialog"
           aria-label="Activity feed"
@@ -127,7 +126,7 @@ export const ActivityBell = memo(function ActivityBell() {
             error={error}
             onOpen={(section) => { setOpen(false); shellBus.publish({ type: "goto-section", section }); }}
           />
-        </div>
+        </Floating>
       )}
     </div>
   );
