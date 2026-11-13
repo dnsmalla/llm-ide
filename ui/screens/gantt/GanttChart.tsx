@@ -70,9 +70,12 @@ export function dayGridBackground(start: number, dayWidth: number): string {
   return `repeating-linear-gradient(to right, ${rule}), repeating-linear-gradient(to right, ${weekend.join(", ")})`;
 }
 
-function monthSpans(range: TimelineRange, dayWidth: number): { label: string; width: number }[] {
+/** UTC, like every other date calculation here: day numbers are UTC midnights, so a local zone west of UTC would label the 1st with the previous month. */
+export const MONTH_LABEL_OPTIONS: Intl.DateTimeFormatOptions = { month: "short", year: "numeric", timeZone: "UTC" };
+
+export function monthSpans(range: TimelineRange, dayWidth: number): { label: string; width: number }[] {
   const out: { label: string; width: number }[] = [];
-  const fmt = new Intl.DateTimeFormat("en", { month: "short", year: "numeric" });
+  const fmt = new Intl.DateTimeFormat("en", MONTH_LABEL_OPTIONS);
   for (let i = 0; i < range.days; i++) {
     const label = fmt.format(new Date((range.start + i) * DAY_MS));
     const last = out[out.length - 1];

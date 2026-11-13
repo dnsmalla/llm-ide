@@ -18,12 +18,12 @@ const req = createRequire(join(DESKTOP, "package.json"));
 const { createElement: h } = req("react");
 const { renderToStaticMarkup } = req("react-dom/server");
 
-let GanttChart;
+let GanttChart, monthSpans, MONTH_LABEL_OPTIONS;
 before(async () => {
   const { build } = req("esbuild");
   const outfile = join(bundleDir("gantt"), "chart.mjs");
   await build({ entryPoints: [join(GANTT, "GanttChart.tsx")], outfile, bundle: true, format: "esm", platform: "node", packages: "external", jsx: "automatic", logLevel: "silent" });
-  ({ GanttChart } = await import(pathToFileURL(outfile).href));
+  ({ GanttChart, monthSpans, MONTH_LABEL_OPTIONS } = await import(pathToFileURL(outfile).href));
 });
 
 const TODAY = dayNumber("2026-04-01");
@@ -172,4 +172,15 @@ test("bars advertise drag only when the chart has a shift handler", () => {
   assert.doesNotMatch(plain, /Drag to move/);
   const draggable = renderToStaticMarkup(h(GanttChart, props(rows, range, { onShift: () => {} })));
   assert.match(draggable, /Drag to move; Alt\+Left\/Right for one day/);
+});
+
+test("month headers are labelled in UTC, so the 1st is never the previous month west of UTC", () => {
+  assert.equal(MONTH_LABEL_OPTIONS.timeZone, "UTC");
+  const range = { start: dayNumber("2026-03-30"), days: 5 };
+  const labels = (zone) => {
+    const was = process.env.TZ;
+    process.env.TZ = zone; // Node re-reads the zone, so the process's own zone cannot hide the bug
+    try { return monthSpans(range, 10).map((s) => `${s.label}:${s.width}`); } finally { if (was === undefined) delete process.env.TZ; else process.env.TZ = was; }
+  };
+  for (const zone of ["America/Los_Angeles", "Asia/Tokyo", "UTC"]) assert.deepEqual(labels(zone), ["Mar 2026:20", "Apr 2026:30"], zone);
 });
