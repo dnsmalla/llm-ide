@@ -728,3 +728,29 @@ test("an import fix outside the input path to a module the batch does not name s
   assert.equal(r.ok, false);
   assert.match(r.output, SCOPE_MSG("src/other/x.py"), r.output);
 });
+
+test("a ledger stage with no Test stage before it passes with a configuration note and writes nothing", async () => {
+  const { host } = fakeHost();
+  const { ctx } = ctxOf({ host, runId: null, runRoot: "/p" });
+  const writes = [];
+  ctx.fs = { ...fakeFs({}).fs, async write(path) { writes.push(path); }, async create() {} };
+  const ledger = stage({ id: "l1", name: "Test Ledger", kind: "testMap", command: null, testOp: "ledger" });
+  const deps = createStageDeps(ctx, loopOf([ledger]));
+  const r = await deps.runStage(ledger, []);
+  assert.equal(r.ok, true);
+  assert.match(r.output, /no Test stage ran before the ledger in this run/);
+  assert.deepEqual(writes, []);
+});
+
+test("a ledger fails when the loop has an enabled Test stage that did not run first, and never records the baseline", async () => {
+  const { host } = fakeHost();
+  const { ctx } = ctxOf({ host, runId: null, runRoot: "/p" });
+  ctx.fs = { ...fakeFs({}).fs, async write() {}, async create() {} };
+  const ledger = stage({ id: "l1", name: "Test Ledger", kind: "testMap", command: null, testOp: "ledger" });
+  const testStage = stage({ id: "t1", name: "Test", kind: "shellCommand", command: "python3 -m pytest" });
+  const baseline = stage({ id: "b1", name: "Test Baseline", kind: "shellCommand", command: "python3 -m pytest" });
+  const deps = createStageDeps(ctx, loopOf([ledger, testStage]));
+  const r = await deps.runStage(ledger, [{ stage: baseline, ok: true, output: "PASSED tests/test_a.py::test_x" }]);
+  assert.equal(r.ok, false, "the baseline's output is not the Test stage's");
+  assert.match(r.output, /Test stage did not run before the ledger/);
+});

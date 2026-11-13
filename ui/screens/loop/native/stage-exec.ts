@@ -16,7 +16,7 @@ import type { LoopDefinition, LoopStage } from "./model.ts";
 import { checkWrites, isTestFileName } from "./protected.ts";
 import { runRegression } from "./regression.ts";
 import type { RunnerDeps, StageOutcome, StageRunResult } from "./runner.ts";
-import { checkSkillResult } from "./step-contract.ts";
+import { checkSkillResult, planFiles } from "./step-contract.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { changedPathArgs, repoPrefixFor, stageHostArgs } from "./worktree-run.ts";
@@ -125,7 +125,7 @@ async function batchFileList(ctx: StageExecContext, which: "todo" | "done"): Pro
   while (end < lines.length && !lines[end].startsWith("### ")) end++;
   return lines.slice(at + 1, end).flatMap((l) => {
     const m = /^\s*-\s*Files:\s*(.*)$/.exec(l);
-    return m ? m[1].replace(/`/g, "").split(/[\s,]+/).filter((f) => f !== "") : [];
+    return m ? planFiles(m[1]) : [];
   });
 }
 
@@ -304,9 +304,19 @@ function skillResult(r: AgentRunReply): StageRunResult {
   return { ok, output: [...why, r.reply ?? "(no reply)", ...(r.changedPaths?.length ? [`changed: ${r.changedPaths.join(", ")}`] : []), ...(r.unresolvedSkills?.length ? [`unresolved skills: ${r.unresolvedSkills.join(", ")}`] : [])].join("\n"), ...(typeof r.usage?.costUsd === "number" ? { usage: { costUsd: r.usage.costUsd } } : {}) };
 }
 
-async function runLedger(ctx: StageExecContext, prior: Prior, prefix: string): Promise<StageRunResult> {
-  const lastTest = [...prior].reverse().find((o) => o.stage.kind === "shellCommand" && /test/i.test(o.stage.name));
-  if (!lastTest) return { ok: false, output: "the ledger stage needs a Test stage output earlier in this run" };
+/** The stage whose output the ledger records: a shell stage named like a test, but not the Refactoring baseline or its pre-check. */
+const isLedgerTest = (st: Pick<LoopStage, "kind" | "name">): boolean => st.kind === "shellCommand" && /test/i.test(st.name) && !/baseline|pre-check/i.test(st.name);
+
+async function runLedger(ctx: StageExecContext, prior: Prior, prefix: string, target: LoopDefinition): Promise<StageRunResult> {
+  const lastTest = [...prior].reverse().find((o) => isLedgerTest(o.stage));
+  if (!lastTest) {
+    // An enabled Test stage that did not run first is a real problem (its order, or it was skipped): say so.
+    if (target.config.stages.some((st) => st.enabled && isLedgerTest(st))) {
+      return { ok: false, output: "the loop's Test stage did not run before the ledger in this run; move the Test stage before the ledger" };
+    }
+    // No Test stage at all is a configuration gap, not a code failure: failing here would send a paid repair agent at it.
+    return { ok: true, output: "no Test stage ran before the ledger in this run, so there was nothing to record; add a Test stage that runs the tests" };
+  }
   const parsed = parseTestResults(lastTest.output);
   // Unparseable output is not a failing test run: the Test stage decides pass/fail, and a ledger with nothing in it would mislead.
   if (parsed.failing.length === 0 && parsed.passing.length === 0) return { ok: true, output: "no per-test results in the Test output (the Test stage itself decides pass/fail); the ledger was not updated" };
@@ -380,7 +390,7 @@ export async function runOneStage(ctx: StageExecContext, s: LoopStage, target: L
   if (s.kind === "shellCommand") return runShell(ctx, s, target);
   if (s.kind === "regressionSweep") return runRegressionStage(ctx, s, prefix);
   if (s.kind === "skill") return runSkill(ctx, s, target, halt);
-  if (s.kind === "testMap" && s.testOp === "ledger") return runLedger(ctx, prior, prefix);
+  if (s.kind === "testMap" && s.testOp === "ledger") return runLedger(ctx, prior, prefix, target);
   if (s.kind === "testMap") return runTestMap(ctx, s, prefix, prior, target);
   if (s.kind === "testPrune") return runTestPruneStage(ctx, prefix);
   if (s.kind === "codeGraph") return runGraph(ctx, s, prefix);

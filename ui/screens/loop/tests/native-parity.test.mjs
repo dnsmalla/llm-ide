@@ -137,3 +137,44 @@ test("a first-created project store applies the host defaults to every default l
     assert.equal(loop.config.protectedPathPolicy, "warn");
   }
 });
+
+/** A store whose loop `defaultKey` lost the stages `keys` (as a project created before its repo was cloned has). */
+const withoutStages = (store, defaultKey, keys) => ({
+  ...store,
+  loops: store.loops.map((l) => l.defaultKey !== defaultKey ? l : { ...l, config: { ...l.config, stages: l.config.stages.filter((st) => !keys.includes(st.defaultKey)).map((st, i) => ({ ...st, order: i })) } }),
+});
+
+test("a saved Test loop without its test stage gets it back in template order, once a command is detected", () => {
+  const full = t.initialProjectStore("python3 -m pytest");
+  const reference = full.loops.find((l) => l.defaultKey === "test");
+  const store = withoutStages(full, "test", ["test"]);
+  const r = t.ensureDefaultLoops(store, "python3 -m pytest");
+  const fixed = r.store.loops.find((l) => l.defaultKey === "test");
+  assert.ok(r.upgraded.includes(reference.name), "the repair is reported once");
+  assert.deepEqual(fixed.config.stages.map((st) => st.defaultKey), reference.config.stages.map((st) => st.defaultKey), "template order");
+  assert.equal(fixed.config.stages.find((st) => st.defaultKey === "test").command, "python3 -m pytest");
+  assert.equal(fixed.config.alwaysUseWorktree, reference.config.alwaysUseWorktree, "only Refactoring gets the worktree");
+  assert.deepEqual(fixed.config.stages.map((st) => st.order), fixed.config.stages.map((_, i) => i));
+  const again = t.ensureDefaultLoops(r.store, "python3 -m pytest");
+  assert.ok(!again.upgraded.includes(reference.name), "repairing twice changes nothing");
+  assert.equal(again.store.loops.find((l) => l.defaultKey === "test"), fixed);
+});
+
+test("a saved Regression loop without its test stage gets it back, and a null command repairs nothing", () => {
+  const full = t.initialProjectStore("npm test");
+  const reference = full.loops.find((l) => l.defaultKey === "regression");
+  const store = withoutStages(full, "regression", ["regression-test"]);
+  const fixed = t.ensureDefaultLoops(store, "npm test").store.loops.find((l) => l.defaultKey === "regression");
+  assert.deepEqual(fixed.config.stages.map((st) => st.defaultKey), reference.config.stages.map((st) => st.defaultKey));
+  assert.equal(fixed.config.stages.find((st) => st.defaultKey === "regression-test").command, "npm test");
+  assert.equal(t.ensureDefaultLoops(store, null).store.loops.find((l) => l.defaultKey === "regression"), store.loops.find((l) => l.defaultKey === "regression"), "no command, no repair");
+  assert.ok(!t.ensureDefaultLoops(store, null).upgraded.includes(reference.name));
+});
+
+test("the Factory loop is never repaired", () => {
+  const store = t.initialProjectStore(null);
+  const before = store.loops.find((l) => l.defaultKey === "factory");
+  const r = t.ensureDefaultLoops(store, "python3 -m pytest");
+  assert.equal(r.store.loops.find((l) => l.defaultKey === "factory"), before);
+  assert.ok(!r.upgraded.includes(before.name));
+});
