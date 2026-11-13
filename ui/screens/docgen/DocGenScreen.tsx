@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { NoProjectCard } from "../shell/NoProjectCard";
+import { unsavedWork } from "../shell/unsaved-work.ts";
 import { HistoryPanel } from "./HistoryPanel";
 import { estimateFit } from "./model.ts";
 import { GENERATED_DIR, normalizeDestination } from "./naming.ts";
@@ -59,6 +60,11 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   const { store } = p;
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const run = useSyncExternalStore(store.run.subscribe, store.run.getSnapshot, store.run.getSnapshot);
+  // A project change resets the run: the shell asks first when that would drop a document or stop a generation.
+  useEffect(() => unsavedWork.register(() => {
+    if (replacesUnsavedDocument(store.run.getSnapshot())) return store.surface === "visual" ? "A generated visual that is not saved" : "A generated document that is not saved";
+    return store.run.busy ? "A document is still being generated" : null;
+  }), [store]);
   const [view, setView] = useState<"result" | "history">(p.initialView ?? "result");
   const [manage, setManage] = useState(p.showManager ?? false);
   const [manageCommands, setManageCommands] = useState(false);

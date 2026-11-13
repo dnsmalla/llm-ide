@@ -42,6 +42,10 @@ export interface ActiveProject {
   forgetRecent(entry: RecentEntry): Promise<void>;
   dismissNotice(): void;
   refresh(): Promise<void>;
+  /** Set while a project change waits for an answer: what it would discard. */
+  leave: { labels: readonly string[] } | null;
+  confirmLeave(): void;
+  cancelLeave(): void;
 }
 
 const PROJECT_ACTIONS = {
@@ -52,6 +56,8 @@ const PROJECT_ACTIONS = {
   forgetRecent: (e: RecentEntry) => projectStore.forgetRecent(e),
   dismissNotice: () => projectStore.dismissNotice(),
   refresh: () => projectStore.refresh(),
+  confirmLeave: () => projectStore.confirmLeave(),
+  cancelLeave: () => projectStore.cancelLeave(),
 };
 
 /** Project state via host commands only (never webview-supplied paths); shared across the shell. */

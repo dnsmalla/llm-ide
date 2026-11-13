@@ -1,6 +1,7 @@
 // The Explorer section: file tree (left), editor tabs and Monaco (right). Wiring only; behaviour lives in
 // `controller.ts` and the pure models, which are tested without a DOM.
 import { shellBus } from "../shell/bus";
+import { unsavedWork } from "../shell/unsaved-work.ts";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Chip, Icon, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
@@ -193,6 +194,12 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
       if (w) setWidth(w);
     });
   }, [controller, projectRoot]);
+
+  // Tells the shell what a project change would lose here, so it can ask first (this screen remounts on a change).
+  useEffect(() => unsavedWork.register(() => {
+    const n = controller.getSnapshot().tabs.tabs.filter((t) => t.dirty).length;
+    return n === 0 ? null : `${n} unsaved file${n === 1 ? "" : "s"} in Explorer`;
+  }), [controller]);
 
   useEffect(() => {
     const flush = () => controller.flushSession();

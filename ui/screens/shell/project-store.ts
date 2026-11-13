@@ -1,6 +1,7 @@
 // Active project + recent list as one shared store (shell, Welcome and status bar read the same state).
 // Paths come from the host only; the webview never supplies one.
 import { host as defaultHost, type ProjectInfo, type RecentEntry, type RecentList } from "./host";
+import { unsavedWork } from "./unsaved-work.ts";
 
 export interface ProjectState {
   project: ProjectInfo | null;
@@ -12,6 +13,8 @@ export interface ProjectState {
   notice: string | null;
   /** True after the first successful or failed load, so screens mount once with the right project. */
   loaded: boolean;
+  /** A project change is waiting for an answer: these are the unsaved things it would discard. */
+  leave: { labels: readonly string[] } | null;
 }
 
 export interface ProjectHost {
@@ -41,13 +44,17 @@ export interface ProjectStore {
   /** Drop one entry from the recent list only. */
   forgetRecent(entry: RecentEntry): Promise<void>;
   dismissNotice(): void;
+  /** Answers the pending `leave` question: go ahead and lose the unsaved work. */
+  confirmLeave(): void;
+  /** Answers the pending `leave` question: stay in this project; nothing changes. */
+  cancelLeave(): void;
 }
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : typeof e === "string" ? e : String(e));
 const EMPTY_RECENT: RecentList = { entries: [], reset: false };
 
-export function createProjectStore(h: ProjectHost = defaultHost): ProjectStore {
-  let state: ProjectState = { project: null, recent: [], recentAll: EMPTY_RECENT, error: null, notice: null, loaded: false };
+export function createProjectStore(h: ProjectHost = defaultHost, unsaved: () => readonly string[] = unsavedWork.list): ProjectStore {
+  let state: ProjectState = { project: null, recent: [], recentAll: EMPTY_RECENT, error: null, notice: null, loaded: false, leave: null };
   const listeners = new Set<() => void>();
   const sameAll = (a: RecentList, b: RecentList) =>
     a.reset === b.reset && a.entries.length === b.entries.length && a.entries.every((e, i) => JSON.stringify(e) === JSON.stringify(b.entries[i]));
@@ -56,7 +63,8 @@ export function createProjectStore(h: ProjectHost = defaultHost): ProjectStore {
     if (patch.recentAll && sameAll(patch.recentAll, state.recentAll)) next.recentAll = state.recentAll;
     if (
       next.project?.root === state.project?.root && next.project?.name === state.project?.name && next.recent === state.recent &&
-      next.recentAll === state.recentAll && next.error === state.error && next.notice === state.notice && next.loaded === state.loaded
+      next.recentAll === state.recentAll && next.error === state.error && next.notice === state.notice && next.loaded === state.loaded &&
+      next.leave === state.leave
     ) return;
     // Keep the old project object when unchanged: selectors by identity stay stable.
     if (next.project && state.project && next.project.root === state.project.root && next.project.name === state.project.name) next.project = state.project;
@@ -74,6 +82,26 @@ export function createProjectStore(h: ProjectHost = defaultHost): ProjectStore {
     }
   };
 
+  // Every action that changes the active project goes through here, BEFORE the host is called: the host switches
+  // its active root first, and the shell then remounts every section, which drops whatever they had not saved.
+  let pending: { run: () => void; cancel: () => void } | null = null;
+  const leaving = <T>(cancelled: T, action: () => Promise<T>): Promise<T> => {
+    const labels = state.project ? unsaved() : [];
+    if (labels.length === 0) return action();
+    pending?.cancel(); // one question at a time: a newer request replaces the one still on screen
+    return new Promise<T>((resolve) => {
+      pending = { run: () => { void action().then(resolve); }, cancel: () => resolve(cancelled) };
+      set({ leave: { labels } });
+    });
+  };
+  const answerLeave = (go: boolean) => {
+    const p = pending;
+    pending = null;
+    set({ leave: null });
+    if (go) p?.run();
+    else p?.cancel();
+  };
+
   return {
     getSnapshot: () => state,
     subscribe(l) {
@@ -81,7 +109,9 @@ export function createProjectStore(h: ProjectHost = defaultHost): ProjectStore {
       return () => listeners.delete(l);
     },
     refresh,
-    async openFolder() {
+    confirmLeave: () => answerLeave(true),
+    cancelLeave: () => answerLeave(false),
+    openFolder: () => leaving(undefined, async () => {
       try {
         const p = await h.projectOpen();
         if (p) set({ project: p, error: null });
@@ -90,17 +120,22 @@ export function createProjectStore(h: ProjectHost = defaultHost): ProjectStore {
         return;
       }
       await refresh();
+    }),
+    openRecent(index) {
+      // Re-opening the project that is already open remounts nothing, so there is nothing to ask about.
+      const target = state.recentAll.entries.find((e) => e.openIndex === index);
+      const open = async () => {
+        try {
+          set({ project: await h.projectOpenRecent(index), error: null });
+        } catch (e) {
+          set({ error: msg(e) });
+          return;
+        }
+        await refresh();
+      };
+      return target && target.root === state.project?.root ? open() : leaving(undefined, open);
     },
-    async openRecent(index) {
-      try {
-        set({ project: await h.projectOpenRecent(index), error: null });
-      } catch (e) {
-        set({ error: msg(e) });
-        return;
-      }
-      await refresh();
-    },
-    async createProject(name, after) {
+    createProject: (name, after) => leaving(null, async () => {
       if (!h.projectCreate) {
         set({ error: "Creating a project needs the desktop app." });
         return null;
@@ -123,8 +158,8 @@ export function createProjectStore(h: ProjectHost = defaultHost): ProjectStore {
       set({ project: created, error: null, notice: warnings.length ? `Project "${created.name}" was created. ${warnings.join(" ")}` : null });
       await refresh();
       return created;
-    },
-    async closeProject() {
+    }),
+    closeProject: () => leaving(undefined, async () => {
       try {
         await h.projectClose?.();
         set({ project: null, error: null });
@@ -133,7 +168,7 @@ export function createProjectStore(h: ProjectHost = defaultHost): ProjectStore {
         return;
       }
       await refresh();
-    },
+    }),
     async forgetRecent(entry) {
       try {
         await h.projectForgetRecent?.(entry.storedIndex, entry.root);

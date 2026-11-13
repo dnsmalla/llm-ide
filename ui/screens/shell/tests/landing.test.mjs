@@ -188,3 +188,87 @@ test("decodeRecentList carries opened_at as openedAt; an old entry without it re
   ] });
   assert.deepEqual(r.entries.map((e) => e.openedAt), ["2026-11-02T10:00:00Z", null, null]);
 });
+
+test("project store: a project change asks before it calls the host when sections hold unsaved work", async () => {
+  const { h, st } = fakeHost();
+  st.recent = [{ name: "A", root: "/a" }, { name: "B", root: "/b" }];
+  st.active = st.recent[0];
+  let unsaved = ["2 unsaved files in Explorer"];
+  const opened = [];
+  const store = createProjectStore({ ...h, projectOpenRecent: async (i) => { opened.push(i); st.active = st.recent[i]; return st.active; } }, () => unsaved);
+  await store.refresh();
+
+  // Stay: the host is never called, the project is unchanged, the action resolves.
+  const stay = store.openRecent(1);
+  assert.deepEqual(store.getSnapshot().leave, { labels: ["2 unsaved files in Explorer"] });
+  assert.deepEqual(opened, [], "the host is not called while the question is open");
+  store.cancelLeave();
+  await stay;
+  assert.equal(store.getSnapshot().leave, null);
+  assert.equal(store.getSnapshot().project.root, "/a");
+  assert.deepEqual(opened, []);
+
+  // Discard and leave: the switch runs once.
+  const go = store.openRecent(1);
+  store.confirmLeave();
+  await go;
+  assert.deepEqual(opened, [1]);
+  assert.equal(store.getSnapshot().project.root, "/b");
+
+  // Re-opening the project that is already open remounts nothing: no question.
+  await store.openRecent(1);
+  assert.equal(store.getSnapshot().leave, null);
+  assert.deepEqual(opened, [1, 1]);
+
+  // Close and Open Folder are guarded the same way; a newer request replaces the one on screen.
+  const close = store.closeProject();
+  assert.ok(store.getSnapshot().leave);
+  const folder = store.openFolder();
+  await close; // the replaced request resolved as "stayed"
+  assert.equal(st.closed, 0);
+  store.cancelLeave();
+  await folder;
+  assert.equal(store.getSnapshot().project.root, "/b");
+
+  // Nothing unsaved: no question at all.
+  unsaved = [];
+  await store.closeProject();
+  assert.equal(st.closed, 1);
+  assert.equal(store.getSnapshot().project, null);
+});
+
+test("project store: creating a project from an open one with unsaved work asks too; Stay creates nothing", async () => {
+  const { h, st } = fakeHost();
+  st.recent = [{ name: "A", root: "/a" }];
+  st.active = st.recent[0];
+  const store = createProjectStore(h, () => ["An unsaved note in Library"]);
+  await store.refresh();
+  const made = store.createProject("New");
+  store.cancelLeave();
+  assert.equal(await made, null);
+  assert.deepEqual(st.created, []);
+});
+
+test("unsaved work registry: sections report, unregister on unmount, and a broken source blocks nothing", async () => {
+  const { unsavedWork } = await load("unsaved-work.ts");
+  assert.deepEqual(unsavedWork.list(), []);
+  let dirty = 0;
+  const offA = unsavedWork.register(() => (dirty ? `${dirty} unsaved files in Explorer` : null));
+  const offB = unsavedWork.register(() => { throw new Error("boom"); });
+  assert.deepEqual(unsavedWork.list(), []);
+  dirty = 2;
+  assert.deepEqual(unsavedWork.list(), ["2 unsaved files in Explorer"]);
+  offA();
+  offB();
+  assert.deepEqual(unsavedWork.list(), []);
+});
+
+test("the sections that hold unsaved work report it to the shell, and the shell renders the question", async () => {
+  const { readFileSync } = await import("node:fs");
+  const read = (rel) => readFileSync(new URL(`../../${rel}`, import.meta.url), "utf8");
+  for (const f of ["explorer/ExplorerScreen.tsx", "library/LibraryScreen.tsx", "docgen/DocGenScreen.tsx"]) {
+    assert.match(read(f), /unsavedWork\.register\(/, `${f} registers its unsaved work`);
+  }
+  const shell = read("shell/Shell.tsx");
+  assert.match(shell, /\{leave \? <LeaveProjectDialog labels=\{leave\.labels\} onStay=\{cancelLeave\} onLeave=\{confirmLeave\} \/> : null\}/);
+});

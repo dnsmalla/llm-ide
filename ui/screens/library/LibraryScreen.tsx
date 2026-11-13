@@ -22,6 +22,7 @@ import { WriteQueue } from "./write/write-queue.ts";
 import { NoFolder, LoadError } from "./States";
 import { useLibraryState } from "./use-library.ts";
 import { Floating } from "../shell/Floating";
+import { unsavedWork } from "../shell/unsaved-work.ts";
 
 /** The write side (S-I). Absent: the Library is read-only, as before. */
 export interface LibraryWriteProps {
@@ -123,7 +124,10 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
         }
       : null;
     store.hasUnsaved = write ? () => dirtyRef.current || projectFileDirtyRef.current : null;
+    // The shell asks before a project change: this screen remounts then and the editors' unsaved text would go.
+    const forget = unsavedWork.register(() => (dirtyRef.current ? "An unsaved note in Library" : projectFileDirtyRef.current ? "An unsaved file in Library" : null));
     return () => {
+      forget();
       store.selectGuard = null;
       store.hasUnsaved = null;
     };

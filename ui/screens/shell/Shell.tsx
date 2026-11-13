@@ -128,7 +128,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const hubError = useSyncExternalStore(subscribeHubError, getHubError, getHubError);
   const hubBanner = remoteBanner(view.down ? "offline" : "online", session.signedIn, hubError);
   const features = useFeatures();
-  const { project, loaded: projectLoaded, notice, dismissNotice, recentAll, openRecent } = useActiveProject();
+  const { project, loaded: projectLoaded, notice, dismissNotice, recentAll, openRecent, leave, confirmLeave, cancelLeave } = useActiveProject();
   // Notifications and the tray (desktop only): counts and sync state to the host, tray actions back to the shell.
   useEffect(() => {
     if (!shellHost.isAvailable()) return undefined;
@@ -438,6 +438,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       /> : null}
       {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} onNavigate={(section, anchor) => { setGuideOpen(false); if (anchor) shellBus.publish({ type: "goto-section", section, anchor }); else onSelect(section); }} /> : null}
       {permissionsOpen ? <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-permissions-title"><div className="sh-modal-card"><h2 id="sh-permissions-title" className="sh-panel-title">Permissions</h2><p className="sh-panel-text">Accessibility, Screen Recording and Microphone permissions belong to the Mac app’s live-capture engine. The desktop has no capture engine, so there is nothing to grant here.</p><div className="sh-form-actions"><button type="button" className="sh-button" onClick={() => setPermissionsOpen(false)}>Close</button></div></div></div> : null}
+      {leave ? <LeaveProjectDialog labels={leave.labels} onStay={cancelLeave} onLeave={confirmLeave} /> : null}
       {quickOpen ? <QuickSwitchDialog recent={recentAll.entries} activeRoot={project?.root ?? null} onOpen={(i) => { setQuickOpen(false); void openRecent(i); }} onClose={() => setQuickOpen(false)} /> : null}
     </div>
   );
@@ -454,6 +455,32 @@ function ApprovalBadge({ onReveal }: { onReveal: () => void }) {
   );
 }
 
+
+/** Asked before a project change that would drop unsaved work (the sections remount and lose it). Stay is the default. */
+export function LeaveProjectDialog({ labels, onStay, onLeave }: { labels: readonly string[]; onStay: () => void; onLeave: () => void }): ReactNode {
+  const stay = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    stay.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); onStay(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onStay]);
+  return (
+    <div className="sh-modal" role="alertdialog" aria-modal="true" aria-labelledby="sh-leave-title" aria-describedby="sh-leave-body">
+      <div className="sh-modal-card">
+        <h2 id="sh-leave-title" className="sh-panel-title">Leave this project with unsaved work?</h2>
+        <div id="sh-leave-body">
+          <p>Changing the project closes everything open in this one. These are not saved and would be lost:</p>
+          <ul>{labels.map((l) => <li key={l}>{safeText(l, 200)}</li>)}</ul>
+        </div>
+        <div className="sh-form-actions">
+          <button ref={stay} type="button" className="sh-button sh-button-primary" onClick={onStay}>Stay and save</button>
+          <button type="button" className="sh-button sh-button-danger" onClick={onLeave}>Discard and leave</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function QuickSwitchDialog({ recent, activeRoot, onOpen, onClose }: { recent: readonly import("./host").RecentEntry[]; activeRoot: string | null; onOpen: (index: number) => void; onClose: () => void }): ReactNode {
   const [q, setQ] = useState("");
