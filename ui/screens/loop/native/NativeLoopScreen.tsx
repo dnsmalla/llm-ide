@@ -31,6 +31,7 @@ import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
 import { decodeWorktreeDiff, type WorktreeDiff } from "./ship-model.ts";
+import { createStartGate } from "./start-gate.ts";
 import "./native-loop.css";
 
 const stageKindLabel: Record<string, string> = {
@@ -118,6 +119,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const activeRunRef = useRef<RunInfo | null>(null);
   /** True while a run is being set up (approval done, worktree being prepared); blocks a double start. */
   const startingRef = useRef(false);
+  const startGateRef = useRef(createStartGate());
+  // True once the gated start reached the point where the run is marked running (see executeLoop).
+  const ranRef = useRef(false);
   /** Set when the screen unmounts, so a finishing run does not start the next queued one in a stale project. */
   const unmountedRef = useRef(false);
   const pausedRef = useRef(false);
@@ -474,7 +478,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     return "ok";
   };
 
-  const executeLoop = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null) => {
+  const executeLoopGated = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null) => {
     if (dirty) return;
     const unsupported = target.config.stages.find((s) => s.enabled && !isNativeRunnable(s));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
@@ -562,6 +566,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     }
     activeRunRef.current = activeRun;
     runningRef.current = true;
+    ranRef.current = true;
     startingRef.current = false;
     cancelledRef.current = false;
     runAbortRef.current = new AbortController();
@@ -669,6 +674,40 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     }
   };
 
+  const enqueueLoop = (target: LoopDefinition, scheduled: boolean) => {
+    if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled });
+    setQueued(queueRef.current.length);
+    persistQueue();
+    setNotice(`Queued “${target.name}”.`);
+  };
+
+  // The only entry to a run. The gate is taken before the first await: `runningRef` is set only after the approval
+  // dialog and worktree setup, so without it two starts in that window ran two loops in one working tree.
+  const executeLoop = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null) => {
+    if (!startGateRef.current.tryAcquire()) {
+      // A picked Factory item cannot wait in the queue (the queue holds loops, not work items).
+      if (start) setNotice("Another run is starting; start this item again when it has begun.");
+      else enqueueLoop(target, scheduled);
+      return;
+    }
+    ranRef.current = false;
+    try {
+      await executeLoopGated(target, scheduled, start);
+    } finally {
+      startGateRef.current.release();
+      // A start that never became a run (approval refused, worktree failed) must not strand what queued behind it;
+      // a real run drains the queue itself when it ends.
+      if (!ranRef.current && !unmountedRef.current) {
+        const next = queueRef.current.shift();
+        if (next) {
+          setQueued(queueRef.current.length);
+          persistQueue();
+          window.setTimeout(() => void executeLoop(next.loop, next.scheduled), 0);
+        }
+      }
+    }
+  };
+
   const runLoop = (target: LoopDefinition | null = loop, scheduled = false) => {
     if (!target) return;
     if (isFactoryLoop(target) && !scheduled) {
@@ -676,11 +715,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       setPickerLoop(target);
       return;
     }
-    if (runningRef.current) {
-      if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled });
-      setQueued(queueRef.current.length);
-      persistQueue();
-      setNotice(`Queued “${target.name}”.`);
+    if (runningRef.current || startGateRef.current.held) {
+      enqueueLoop(target, scheduled);
       return;
     }
     void executeLoop(target, scheduled);
@@ -744,7 +780,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   };
 
   const resumeQueue = () => {
-    if (runningRef.current) return;
+    if (runningRef.current || startGateRef.current.held) return;
     const next = queueRef.current.shift();
     if (!next) return;
     setQueued(queueRef.current.length);
@@ -881,7 +917,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.reviewedPatchId ?? shipRun.diff?.patchId ?? null} requestProvider={shipRun.requestProvider ?? null} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
-        {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
+        {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current || startGateRef.current.held, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <section className="loop-card loop-overview">
           <h2>Overview</h2>
           <label className="loop-field"><span>Name</span><input value={loop.name} onChange={(e) => patchLoop((l) => { l.name = e.target.value; })} /></label>
