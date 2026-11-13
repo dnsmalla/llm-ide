@@ -14,7 +14,8 @@ import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, type LoopTemplate } from "./templates.ts";
 import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
-import { runNativeLoop, runStatusCode } from "./runner.ts";
+import { runNativeLoop, runStatusCode, type RunnerDeps } from "./runner.ts";
+import { runRefactorBatches } from "./refactor-batches.ts";
 import { shellBus } from "../../shell/bus";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
 import { faultPathsFromOutput, reopenFault } from "./regression.ts";
@@ -460,6 +461,27 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     markCancelled: () => { cancelledRef.current = true; },
   });
 
+  /** The Refactoring batch driver's rollback and plan access for one worktree run. */
+  const refactorBatchOpts = (run: RunInfo) => {
+    const prefix = repoPrefixFor(projectRoot ?? "", run.worktree);
+    const planPath = prefix ? `${prefix}/llm-doc/loop/refactor/REFACTOR.md` : "llm-doc/loop/refactor/REFACTOR.md";
+    return {
+      checkpoint: async () => invokeHost<string>("loop_worktree_checkpoint", { runId: run.runId }),
+      restore: async (tree: string) => { await invokeHost("loop_worktree_restore", { runId: run.runId, tree }); },
+      readPlan: async (): Promise<string | null> => {
+        try {
+          const r = await fs.read(planPath, 2_000_000);
+          return r.status === "ok" ? (r.text ?? null) : null;
+        } catch (e) {
+          if (["not_found", "missing"].includes(String((e as { code?: unknown } | null)?.code ?? ""))) return null;
+          throw e;
+        }
+      },
+      writePlan: async (text: string) => { await fs.write(planPath, text, { expected_hash: null, force: true }); },
+      log: (line: string) => setRunLog((l) => [...l, line]),
+    };
+  };
+
   /** Cancels the active run: shell and fault stages through loop_cancel, agent calls through their abort signal. */
   const cancelActiveRun = () => {
     cancelledRef.current = true;
@@ -628,7 +650,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           setRunLog((l) => [...l, `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}`]);
         }
       }
-      const outcome = await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : target.config, {
+      const runDeps: RunnerDeps = {
         ...createStageDeps(stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), target),
         isCancelled() { return cancelledRef.current; },
         log(line) { setRunLog((l) => [...l, line]); },
@@ -636,7 +658,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         onProgress(e) {
           if (trail && e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration }));
         },
-      });
+      };
+      const outcome = target.defaultKey === "refactor" && activeRun
+        ? await runRefactorBatches(target.config, runDeps, refactorBatchOpts(activeRun))
+        : await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : target.config, runDeps);
       const needsDecision = isFactoryLoop(target) ? needsDecisionSummary(outcome) : null;
       if (needsDecision) outcome.statusSummary = needsDecision;
       if (activeRun) setRunLog((l) => [...l, `worktree kept: system/loop-worktrees/${activeRun.runId} (branch ${activeRun.branch}); your main working tree was not touched`]);
