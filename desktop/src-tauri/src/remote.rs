@@ -623,7 +623,9 @@ mod tests {
 
     #[test]
     fn r034_a_confirmed_fingerprint_is_required_and_session_scoped() {
-        let prepared = prepare(&target("example.com", "alice", "/home/alice/.ssh/id_ed25519")).unwrap();
+        // A host no other test uses: the observed and confirmed keys are process-wide, keyed by host:port, and the
+        // tests run in parallel.
+        let prepared = prepare(&target("r034-confirm.example.com", "alice", "/home/alice/.ssh/id_ed25519")).unwrap();
         forget_confirmation(&prepared);
         assert_eq!(require_confirmed_host_key(&prepared).unwrap_err().code, "host_key_unconfirmed");
         assert!(!valid_fingerprint("SHA256:"));
@@ -637,10 +639,10 @@ mod tests {
         let declined = confirm_host_key_with(&prepared, "ssh-ed25519", "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff", |_, _, _| false);
         assert_eq!(declined.unwrap_err().code, "cancelled");
         assert_eq!(require_confirmed_host_key(&prepared).unwrap_err().code, "host_key_unconfirmed", "a declined dialog stores nothing");
-        confirm_host_key_with(&prepared, "ssh-ed25519", "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff", |host, _, _| host == "example.com:22").unwrap();
+        confirm_host_key_with(&prepared, "ssh-ed25519", "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff", |host, _, _| host == "r034-confirm.example.com:22").unwrap();
         assert_eq!(require_confirmed_host_key(&prepared).unwrap().key_type, "ssh-ed25519");
         // Same host on another port is a different key entry.
-        let other = prepare(&SshTarget { port: 2222, ..target("example.com", "alice", "/home/alice/.ssh/id_ed25519") }).unwrap();
+        let other = prepare(&SshTarget { port: 2222, ..target("r034-confirm.example.com", "alice", "/home/alice/.ssh/id_ed25519") }).unwrap();
         assert_eq!(require_confirmed_host_key(&other).unwrap_err().code, "host_key_unconfirmed");
         forget_confirmation(&prepared);
         assert_eq!(require_confirmed_host_key(&prepared).unwrap_err().code, "host_key_unconfirmed");
