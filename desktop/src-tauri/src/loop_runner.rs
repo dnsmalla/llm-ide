@@ -49,15 +49,31 @@ pub(crate) fn request_cancel(key: &str) {
 pub(crate) struct ExitGate {
     exiting: AtomicBool,
     live: std::sync::atomic::AtomicUsize,
+    /// Process ids of the running stage commands (each leads its own process group).
+    groups: Mutex<Vec<u32>>,
 }
 
 impl ExitGate {
     pub(crate) const fn new() -> Self {
-        ExitGate { exiting: AtomicBool::new(false), live: std::sync::atomic::AtomicUsize::new(0) }
+        ExitGate { exiting: AtomicBool::new(false), live: std::sync::atomic::AtomicUsize::new(0), groups: Mutex::new(Vec::new()) }
     }
     fn exiting(&self) -> bool { self.exiting.load(Ordering::SeqCst) }
     /// Asks every running stage to stop without waiting (for a path that must not block, such as the panic hook).
     pub(crate) fn request_stop(&self) { self.exiting.store(true, Ordering::SeqCst); }
+    /// For the panic hook: the process ends as soon as the hook returns, before any stage thread reaches its next
+    /// poll, so the flag alone would leave the stage groups running. They are killed here, at once. `try_lock`: the
+    /// panicking thread may be the one holding the list.
+    pub(crate) fn kill_now(&self) {
+        self.request_stop();
+        #[cfg(unix)]
+        if let Ok(groups) = self.groups.try_lock() {
+            for pid in groups.iter() {
+                // SAFETY: signals a process group this module created (`process_group(0)` at spawn); a group that
+                // is already gone is ESRCH.
+                unsafe { libc::killpg(*pid as libc::pid_t, libc::SIGKILL); }
+            }
+        }
+    }
     /// The exit was called off and the app keeps running (an update whose install failed): stages may run again.
     /// Without this the gate would refuse every Loop and Self-Heal stage as "cancelled" until the next launch.
     pub(crate) fn reopen(&self) { self.exiting.store(false, Ordering::SeqCst); }
@@ -84,7 +100,7 @@ pub(crate) fn stop_all_for_exit() -> usize {
 
 /// Non-blocking form for the panic hook: running stages stop on their own threads' next poll.
 pub(crate) fn request_stop_all_for_exit() {
-    EXIT_GATE.request_stop();
+    EXIT_GATE.kill_now();
 }
 
 /// The app did not exit after all (see `ExitGate::reopen`).
@@ -594,6 +610,14 @@ fn run_command_at_gated(work: &Path, command: &str, timeout_secs: Option<u64>, s
         .stderr(Stdio::piped());
     // Own process group / job, so a timeout or cancel stops the stage's children too, not only the shell.
     let mut child = ManagedChild::spawn(&mut cmd).map_err(|e| format!("cannot start the stage command: {e}"))?;
+    // Listed for as long as the command runs, so a dying app can kill its group without waiting for this thread.
+    struct Listed<'a>(&'a ExitGate, u32);
+    impl Drop for Listed<'_> {
+        fn drop(&mut self) { self.0.groups.lock().unwrap_or_else(|p| p.into_inner()).retain(|p| *p != self.1); }
+    }
+    let pid = child.child_mut().id();
+    gate.groups.lock().unwrap_or_else(|p| p.into_inner()).push(pid);
+    let _listed = Listed(gate, pid);
     let out_rx = child.child_mut().stdout.take().map(|r| read_capped_stream(r, sink.clone(), true));
     let err_rx = child.child_mut().stderr.take().map(|r| read_capped_stream(r, sink.clone(), false));
     let grace = Duration::from_secs(2);
@@ -1420,6 +1444,7 @@ mod tests {
         // Nothing starts once the app is exiting.
         let late = run_command_at_gated(&dir, "printf late", Some(5), None, &|| false, &gate).unwrap();
         assert!(late.cancelled && late.stdout.is_empty());
+        assert!(gate.groups.lock().unwrap().is_empty(), "a finished stage is no longer listed");
         // An exit that was called off (a failed update install) lets stages run again.
         gate.reopen();
         let again = run_command_at_gated(&dir, "printf again", Some(5), None, &|| false, &gate).unwrap();
@@ -1469,6 +1494,28 @@ mod tests {
         let got = seen.lock().unwrap();
         assert_eq!(got.iter().filter(|t| t.starts_with('x')).count(), 4, "four 64 KB chunks reach the cap");
         assert_eq!(got.iter().filter(|t| t.contains("live output is cut here")).count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dying_app_kills_the_running_stage_groups_at_once() {
+        let dir = std::env::temp_dir();
+        let gate = Arc::new(ExitGate::new());
+        let g = gate.clone();
+        let stage = std::thread::spawn(move || run_command_at_gated(&dir, "sleep 300", Some(600), None, &|| false, &g).unwrap());
+        let started = Instant::now();
+        while gate.groups.lock().unwrap().is_empty() {
+            assert!(started.elapsed() < Duration::from_secs(10), "the stage never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid = gate.groups.lock().unwrap()[0] as libc::pid_t;
+        // The panic hook's call: no waiting, no stage-thread poll involved in the kill itself.
+        gate.kill_now();
+        let gone = Instant::now();
+        while unsafe { libc::killpg(pid, 0) } == 0 && gone.elapsed() < Duration::from_secs(3) { std::thread::sleep(Duration::from_millis(10)); }
+        assert_ne!(unsafe { libc::killpg(pid, 0) }, 0, "the stage's process group is gone");
+        // The stage call returns (killed by the signal, so no exit code) instead of running on.
+        assert_eq!(stage.join().unwrap().exit_code, None);
     }
 
     #[test]
