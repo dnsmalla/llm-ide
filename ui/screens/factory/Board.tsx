@@ -264,6 +264,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const elsewhere = otherProjectsNote(live, projectRoot);
   const summary = boardSummary(lanes, live.filter((r) => r.projectRoot === projectRoot).length, LANE_DONE);
 
+  const startingKeys = useRef(new Set<string>());
+  const [startingTick, setStartingTick] = useState(0);
   const act = async (fn: () => Promise<void>) => {
     try {
       await fn();
@@ -367,12 +369,19 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   // An open issue not on the board yet opens a details panel too: its text and Start.
   const selOpen = selectedKey && !byKey.has(selectedKey) ? openIssueItems.get(selectedKey) ?? null : null;
   const selected = selectedKey ? byKey.get(selectedKey) ?? selOpen : null;
-  const startOpenIssue = (open: WorkItemRecord) => void act(async () => {
-    if (!projectRoot) return;
-    await sendToFactory(fs, [open], { runIntake: false, projectRoot, start: startRun });
-    onAction(open, "start");
-    setSelectedKey(open.key);
-  });
+  const startOpenIssue = (open: WorkItemRecord) => {
+    // The add is awaited before the run starts; a second click meanwhile must not add and start the issue again.
+    // The ref guards the card's button (checked synchronously), the state disables the details panel's.
+    if (startingKeys.current.has(open.key)) return;
+    startingKeys.current.add(open.key);
+    setStartingTick((n) => n + 1);
+    void act(async () => {
+      if (!projectRoot) return;
+      await sendToFactory(fs, [open], { runIntake: false, projectRoot, start: startRun });
+      onAction(open, "start");
+      setSelectedKey(open.key);
+    }).finally(() => { startingKeys.current.delete(open.key); setStartingTick((n) => n + 1); });
+  };
   const selFacts = selected ? facts.get(selected.key) ?? null : null;
   const selLive = selFacts?.live ?? null;
   const selRunId = selected?.runIds.at(-1) ?? null;
@@ -504,7 +513,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
               <>
                 <p className="fx-hint">Open issue, not on the board yet. Start adds it and runs the process.</p>
                 {selOpen.body.trim() ? <pre className="fx-log">{selOpen.body.slice(0, 4000)}</pre> : null}
-                <div className="fx-actions"><button type="button" className="fx-btn fx-primary" onClick={() => startOpenIssue(selOpen)}>Start</button></div>
+                <div className="fx-actions"><button type="button" className="fx-btn fx-primary" onClick={() => startOpenIssue(selOpen)} disabled={startingTick >= 0 && startingKeys.current.has(selOpen.key)}>Start</button></div>
               </>
             ) : (
               <p className="fx-hint">No run yet.</p>

@@ -515,3 +515,44 @@ test("LiveRun.progress follows the runner events", async () => {
   await settle();
   assert.equal(rm.liveRuns().find((r) => r.runId === a).progress.repairs, 1);
 });
+
+test("startRun does not start a second live run for the same item, project and mode", async () => {
+  setup();
+  const a = rm.startRun("/p", item(1), "full");
+  assert.equal(rm.startRun("/p", item(1), "full"), a, "a double click returns the existing run");
+  await settle();
+  assert.equal(rm.startRun("/p", item(1), "full"), a, "also while it is running");
+  const other = rm.startRun("/p", item(2), "full");
+  assert.notEqual(other, a);
+  assert.equal(rm.liveRuns().length, 2);
+  await settle();
+  assert.equal(world.hostCalls.filter(([cmd]) => cmd === "loop_worktree_prepare").length, 2, "one worktree per item");
+  await finish(a);
+  const again = rm.startRun("/p", item(1), "full");
+  assert.notEqual(again, a, "an ended run no longer blocks a new one");
+});
+
+test("runs held for another project do not count against the parallel-runs cap", async () => {
+  const gates = [];
+  const twoStages = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: FACTORY_BUILT_IN_STAGES.slice(3, 5).map((s) => ({ ...structuredClone(s), enabled: true })) } };
+  setup({
+    loadFactoryLoop: async () => twoStages,
+    runLoop: runNativeLoop,
+    createStageDeps: () => ({
+      async runStage(s) { if (s.name === "Plan") { const g = deferred(); gates.push(g); await g.promise; } return { ok: true, output: "" }; },
+      async repair() { return { ok: true, output: "" }; },
+      halt: () => null,
+      haltIsError: () => false,
+    }),
+  });
+  rm.startRun("/p", item(1), "full");
+  rm.startRun("/p", item(2), "full");
+  await settle();
+  await switchProject("/q");
+  for (const g of gates) g.resolve();
+  await settle();
+  assert.deepEqual(rm.liveRuns().map((r) => r.state), ["paused", "paused"]);
+  const c = rm.startRun("/q", item(3), "full");
+  await settle();
+  assert.equal(rm.liveRuns().find((r) => r.runId === c).state, "running", "the open project's run is not blocked by the held ones");
+});

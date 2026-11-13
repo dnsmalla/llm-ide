@@ -299,6 +299,13 @@ export function startRun(projectRoot: string, item: RunItem, mode: RunMode, opts
   if ((mode === "continue" || mode === "sendBack" || mode === "check" || mode === "rework") && !opts.runId) throw new Error(`${mode} needs the runId of an existing worktree`);
   const runId = opts.runId ?? newRunId(d.now(), d.rand);
   if (runs.has(runId)) return runId;
+  // A new run for a work item that already has a live run of the same kind would cut a second worktree, branch and
+  // draft MR for it (a double click, or the phone starting an issue whose card is already running).
+  if (opts.runId === undefined) {
+    for (const other of runs.values()) {
+      if (other.live.itemKey === item.key && other.live.projectRoot === projectRoot && other.live.mode === mode && !other.cancelled) return other.live.runId;
+    }
+  }
   runs.set(runId, {
     live: { runId, itemKey: item.key, projectRoot, mode, state: "queued", startedAt: null, note: null, log: [], progress: null },
     item, reuse: opts.runId !== undefined, cancelled: false, abort: new AbortController(),
@@ -312,7 +319,9 @@ export function startRun(projectRoot: string, item: RunItem, mode: RunMode, opts
 /** FIFO, skipping runs whose project is not the open one (they start when it is opened again). */
 function pump(): void {
   const active = deps.activeProject?.() ?? null;
-  let running = [...runs.values()].filter((r) => r.live.state !== "queued").length;
+  // A run held at a stage boundary for a project that is not open takes no slot: it never times out, and counting it
+  // would block every run of the open project until the user reopens the other one.
+  let running = [...runs.values()].filter((r) => r.live.state !== "queued" && !(r.live.state === "paused" && r.live.projectRoot !== active)).length;
   const limit = concurrency();
   let changed = false;
   for (const runId of [...queue]) {
@@ -545,6 +554,7 @@ function holdForProject(d: RunManagerDeps, run: ManagedRun): () => Promise<"ok" 
     run.live.state = "paused";
     run.live.note = "Waiting for its project";
     emit();
+    pump(); // its slot is free now: a queued run of the open project may start
     await new Promise<void>((resolve) => {
       const off = d.subscribeProject(() => {
         if (run.cancelled || d.activeProject() === run.live.projectRoot) { off(); resolve(); }
