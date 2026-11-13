@@ -111,6 +111,24 @@ function confirmCopy(a: ConfirmAction): { title: string; body: ReactNode; button
         danger: false,
       };
     }
+    case "installMany":
+      return {
+        title: `Install ${a.entries.length} items?`,
+        body: (
+          <>
+            <p>Each is added at the commit it has today, one after another. They start switched off and nothing runs at install. This contacts GitHub.</p>
+            <ul className="ext-confirm-list">
+              {a.entries.map((e) => (
+                <li key={`${e.kind}:${e.publisher}/${e.name}`}>
+                  <strong>{e.name}</strong> <span className="lib-muted">from {e.sourceUrl ? repoName(e.sourceUrl) : "its repository"}{e.sourcePath ? ` (folder ${e.sourcePath})` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        ),
+        button: `Install ${a.entries.length}`,
+        danger: false,
+      };
   }
 }
 

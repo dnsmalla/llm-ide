@@ -551,6 +551,19 @@ export interface LegacyState extends LegacyStatus {
   /** The row whose detail pane is open (null: list only). */
   selected: string | null;
   discovery: DiscoveryState | null;
+  /** The list's name filter and the rows ticked for a bulk switch. */
+  filter: string;
+  checked: readonly string[];
+}
+
+/** Rows whose id, name or description matches the filter (case-insensitive). Pure. */
+export function filterRows(rows: readonly LegacyRow[], filter: string): readonly LegacyRow[] {
+  const q = filter.trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((r) => {
+    const o = r as unknown as Record<string, unknown>;
+    return [r.id, o.name, o.displayName, o.description, o.source].some((v) => typeof v === "string" && v.toLowerCase().includes(q));
+  });
 }
 
 /** Status maps are keyed by server-supplied names: no prototype, so "constructor" or "__proto__" never hits. */
@@ -604,6 +617,8 @@ export class LegacyModel {
       sheet: null,
       selected: null,
       discovery: null,
+      filter: "",
+      checked: [],
       statusLoading: false,
       statusError: null,
       pluginUpdates: byId(),
@@ -950,6 +965,47 @@ export class LegacyModel {
         if (e instanceof ExtApiError && e.code === "CONSENT_REQUIRED") await this.load();
         this.fail(e);
       }
+    });
+  }
+
+  // ---- filter and multi-select ----------------------------------------------------------------
+  setFilter(filter: string): void {
+    this.set({ filter });
+  }
+  toggleChecked(id: string): void {
+    const c = this.state.checked;
+    this.set({ checked: c.includes(id) ? c.filter((x) => x !== id) : [...c, id] });
+  }
+  /** Ticks every row the filter shows, or clears them when all are already ticked. */
+  toggleAllShown(): void {
+    const shown = filterRows(this.state.rows, this.state.filter).map((r) => r.id);
+    const all = shown.length > 0 && shown.every((id) => this.state.checked.includes(id));
+    this.set({ checked: all ? this.state.checked.filter((id) => !shown.includes(id)) : [...new Set([...this.state.checked, ...shown])] });
+  }
+  clearChecked(): void {
+    this.set({ checked: [] });
+  }
+  /**
+   * Switches every ticked row on or off, one after another, through the same per-row toggle. An MCP server without
+   * consent is never switched on in bulk: it is named, and its own switch asks for consent.
+   */
+  async bulkSwitch(on: boolean): Promise<void> {
+    if (this.state.sheet) return;
+    const rows = this.state.rows.filter((r) => this.state.checked.includes(r.id) && (r as { enabled: boolean }).enabled !== on);
+    const needConsent = on && this.kind === "mcp-plugins" ? rows.filter((r) => !(r as McpRow).consented) : [];
+    const plain = rows.filter((r) => !needConsent.includes(r));
+    for (const r of plain) {
+      if (this.life.signal.aborted) return;
+      await this.setEnabled(r.id, on);
+    }
+    const changed = plain.filter((r) => (this.row(r.id) as { enabled?: boolean } | undefined)?.enabled === on).length;
+    const verb = on ? "on" : "off";
+    const label = (r: LegacyRow) => (r as { displayName?: string; name?: string }).displayName ?? (r as { name?: string }).name ?? r.id;
+    this.set({
+      checked: [],
+      notice: needConsent.length
+        ? { text: `Switched ${changed} ${verb}. These need your consent first, so switch each on by itself: ${needConsent.slice(0, 5).map(label).join(", ")}${needConsent.length > 5 ? ` and ${needConsent.length - 5} more` : ""}.`, error: false }
+        : { text: rows.length === 0 ? `Everything selected was already ${verb}.` : `Switched ${changed} of ${rows.length} ${verb}.`, error: changed < rows.length },
     });
   }
 

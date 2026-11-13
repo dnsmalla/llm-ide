@@ -84,6 +84,16 @@ export function ExtensionsView({ model, initialHeight, openRepository }: { model
             In chats now: {state.active.skills.toLocaleString()} skills, {state.active.mcpServers.toLocaleString()} MCP servers, {state.active.sdkPlugins.toLocaleString()} plugins.
           </p>
           {activeScopeNote(state.active) && <p className="lib-muted ext-active" role="note">{activeScopeNote(state.active)}</p>}
+          {state.active.excluded.length + state.active.warnings.length > 0 ? (
+            <details className="ext-notloaded">
+              <summary>Not loaded ({(state.active.excluded.length + state.active.warnings.length).toLocaleString()}): switched on but left out of chats, and why</summary>
+              <ul>
+                {state.active.excluded.map((x) => <li key={`${x.kind}:${x.name}`}><strong>{x.name}</strong> <span className="lib-muted">({x.kind}) {x.reason}</span></li>)}
+                {state.active.warnings.map((w) => <li key={w}>{w}</li>)}
+              </ul>
+            </details>
+          ) : null}
+          <p className="lib-muted ext-active" role="note">Plugins and MCP servers are used by chats in Execute and Auto. Ask, Plan, Review and Document chats, and Loop and Factory runs, use skills only.</p>
         </>
       )}
       <Sheets model={model} state={state} initialHeight={initialHeight} />

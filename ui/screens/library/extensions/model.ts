@@ -51,7 +51,8 @@ export type ConfirmAction =
   | { kind: "rollback"; itemId: string; itemName: string; toCommit: string }
   | { kind: "uninstall"; itemId: string; itemName: string; commit: string }
   | { kind: "repair"; itemId: string; itemName: string; commit: string }
-  | { kind: "install"; entry: CatalogEntry };
+  | { kind: "install"; entry: CatalogEntry }
+  | { kind: "installMany"; entries: CatalogEntry[] };
 
 export type Sheet =
   | { kind: "consent"; request: ConsentRequest; ticked: string[] }
@@ -96,6 +97,11 @@ export interface ExtensionsState {
   active: ActiveSummary | null;
   browse: BrowseState;
   install: InstallState;
+  /** Installed tab: the name filter and the rows ticked for a bulk switch. */
+  filter: string;
+  checked: readonly string[];
+  /** Browse tab: entries ticked for "Install selected". */
+  browseChecked: readonly string[];
 }
 
 const MAX_BROWSE_RESULTS = 5000;
@@ -116,7 +122,20 @@ const INITIAL: ExtensionsState = {
   active: null,
   browse: { query: "", kind: null, results: [], total: 0, sources: [], loaded: false, loading: false, loadingMore: false, error: null, refreshing: false },
   install: { url: "", path: "", installing: false, fieldError: null, last: null },
+  filter: "",
+  checked: [],
+  browseChecked: [],
 };
+
+/** Installed items whose name, kind, publisher or source matches the filter (case-insensitive). Pure. */
+export function filterItems(items: readonly InstalledItem[], filter: string): readonly InstalledItem[] {
+  const q = filter.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter((i) => `${i.name} ${i.kind} ${i.publisherId} ${i.sourceUrl ?? ""} ${i.description ?? ""}`.toLowerCase().includes(q));
+}
+
+/** A browse entry's key for ticking (entries have no id of their own). */
+export const entryKey = (e: Pick<CatalogEntry, "kind" | "publisher" | "name">): string => `${e.kind}:${e.publisher}/${e.name}`;
 
 export class ExtensionsModel {
   private state: ExtensionsState = INITIAL;
@@ -472,8 +491,21 @@ export class ExtensionsModel {
     if (a.kind === "install") {
       const url = a.entry.sourceUrl;
       if (!url) return;
-      const ok = await this.runInstall(url, a.entry.sourcePath ?? null);
-      if (ok) this.set({ tab: "install" });
+      // Stays on Browse, so the next item is one click away.
+      await this.runInstall(url, a.entry.sourcePath ?? null);
+      return;
+    }
+    if (a.kind === "installMany") {
+      let done = 0;
+      const failed: string[] = [];
+      for (const e of a.entries) {
+        if (this.signal.aborted) return;
+        if (e.sourceUrl && (await this.runInstall(e.sourceUrl, e.sourcePath ?? null))) done++;
+        else failed.push(e.name);
+      }
+      this.set({ browseChecked: [] });
+      if (failed.length) this.info(`Installed ${done} of ${a.entries.length}. Not installed: ${failed.slice(0, 5).join(", ")}${failed.length > 5 ? ` and ${failed.length - 5} more` : ""}.`);
+      else this.succeed(`Installed ${done} item${done === 1 ? "" : "s"}. They are off until you switch them on.`);
       return;
     }
     const item = this.item(a.itemId);
@@ -637,6 +669,59 @@ export class ExtensionsModel {
   }
 
   // ---- sheets -------------------------------------------------------------------------------
+  // ---- filter and multi-select ----------------------------------------------------------------
+  setFilter(filter: string): void {
+    this.set({ filter });
+  }
+  toggleChecked(id: string): void {
+    const c = new Set(this.state.checked);
+    if (c.has(id)) c.delete(id); else c.add(id);
+    this.set({ checked: this.state.items.filter((i) => c.has(i.id)).map((i) => i.id) });
+  }
+  /** Ticks every row the filter shows, or clears them when all are already ticked. */
+  toggleAllShown(): void {
+    const shown = filterItems(this.state.items, this.state.filter).map((i) => i.id);
+    const all = shown.length > 0 && shown.every((id) => this.state.checked.includes(id));
+    this.set({ checked: all ? this.state.checked.filter((id) => !shown.includes(id)) : [...new Set([...this.state.checked, ...shown])] });
+  }
+  clearChecked(): void {
+    this.set({ checked: [] });
+  }
+  /**
+   * Switches every ticked item on or off, one after another (the per-item busy rule still applies). Switching on never
+   * skips consent: an item that can run code is left for its own consent sheet and named in the summary.
+   */
+  async bulkSwitch(on: boolean): Promise<void> {
+    if (this.state.sheet) return;
+    const targets = this.state.items.filter((i) => this.state.checked.includes(i.id) && i.enabled !== on);
+    const needConsent = on ? targets.filter((i) => i.executableKinds.length > 0) : [];
+    const plain = targets.filter((i) => !needConsent.includes(i));
+    for (const item of plain) {
+      if (this.signal.aborted) return;
+      await this.toggle(item, on, null);
+    }
+    this.set({ checked: [] });
+    const changed = plain.filter((i) => this.item(i.id)?.enabled === on).length;
+    const verb = on ? "on" : "off";
+    if (needConsent.length) this.info(`Switched ${changed} ${verb}. These can run code, so switch each on to review its consent: ${needConsent.map((i) => i.name).slice(0, 5).join(", ")}${needConsent.length > 5 ? ` and ${needConsent.length - 5} more` : ""}.`);
+    else this.succeed(targets.length === 0 ? `Everything selected was already ${verb}.` : `Switched ${changed} of ${targets.length} ${verb}.`);
+  }
+  toggleBrowseChecked(e: CatalogEntry): void {
+    const k = entryKey(e);
+    const c = this.state.browseChecked;
+    this.set({ browseChecked: c.includes(k) ? c.filter((x) => x !== k) : [...c, k] });
+  }
+  clearBrowseChecked(): void {
+    this.set({ browseChecked: [] });
+  }
+  /** Asks once for every ticked, installable entry, naming each repository; then installs them one after another. */
+  requestInstallSelected(): void {
+    if (this.state.sheet) return;
+    const entries = this.state.browse.results.filter((e) => this.state.browseChecked.includes(entryKey(e)) && e.installable && !e.installed && !!e.sourceUrl);
+    if (entries.length === 0) return;
+    this.set({ sheet: { kind: "confirm", action: entries.length === 1 ? { kind: "install", entry: entries[0]! } : { kind: "installMany", entries } } });
+  }
+
   dismissSheet(): void {
     this.set({ sheet: null });
   }

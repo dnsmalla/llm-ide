@@ -387,7 +387,7 @@ test("CATALOG_DISABLED sets the off banner flag", async () => {
   assert.equal(model.getSnapshot().catalogOff, true);
 });
 
-test("Browse install asks first; the tab changes only when the install succeeded", async () => {
+test("Browse install asks first and stays on Browse, so the next item is one click away", async () => {
   let fail = true;
   const { core, model } = setup({ [`POST ${P}/install`]: () => (fail ? err(403, "SOURCE_NOT_ALLOWED") : reply("post-auth-me-extensions-install-200-3")) });
   await model.init();
@@ -402,7 +402,51 @@ test("Browse install asks first; the tab changes only when the install succeeded
   fail = false;
   model.requestBrowseInstall(entry);
   await model.confirmAction();
-  assert.equal(model.getSnapshot().tab, "install");
+  assert.equal(model.getSnapshot().tab, "browse");
+  assert.equal(posts(core, "install").length, 2);
+});
+
+test("Install selected: one confirm names every ticked entry, then they install one after another", async () => {
+  const { core, model } = setup({ [`POST ${P}/install`]: () => reply("post-auth-me-extensions-install-200-3") });
+  await model.init();
+  await model.showTab("browse");
+  const installable = model.getSnapshot().browse.results.filter((e) => e.installable && !e.installed && e.sourceUrl);
+  assert.ok(installable.length >= 1, "the catalog fixture has an installable entry");
+  for (const e of model.getSnapshot().browse.results) model.toggleBrowseChecked(e);
+  model.requestInstallSelected();
+  const sheet = model.getSnapshot().sheet;
+  assert.equal(sheet?.kind, "confirm");
+  const action = sheet?.kind === "confirm" ? sheet.action : null;
+  const named = action?.kind === "installMany" ? action.entries : action?.kind === "install" ? [action.entry] : [];
+  assert.deepEqual(named.map((e) => e.name), installable.map((e) => e.name), "only installable, not-yet-installed entries are offered");
+  assert.equal(posts(core, "install").length, 0, "nothing installs before the confirm");
+  await model.confirmAction();
+  assert.equal(posts(core, "install").length, installable.length);
+  assert.equal(model.getSnapshot().tab, "browse");
+});
+
+test("bulk switch: ticked items switch one by one; an item that can run code is never switched on without its own consent", async () => {
+  const toggled: string[] = [];
+  const { core, model } = setup({ [`POST ${P}/toggle`]: (c) => { const b = c.body as { id: string; enabled: boolean }; toggled.push(`${b.id}:${b.enabled}`); const it = model.item(b.id)!; return ok({ ok: true, item: { ...baseItems().concat(runnerBody()).find((i) => i.id === b.id), state: { enabled: b.enabled, disabledMembers: [] } } }); void it; } });
+  await model.init();
+  model.toggleAllShown();
+  assert.equal(model.getSnapshot().checked.length, 3);
+  await model.bulkSwitch(true);
+  assert.ok(!toggled.some((t) => t.startsWith("plugin:acme/runner:true")), "the code-running plugin was left for its consent sheet");
+  assert.equal(model.getSnapshot().sheet, null, "no consent was implied or opened in bulk");
+  assert.match(model.getSnapshot().notice!.text, /consent/);
+  assert.equal(model.getSnapshot().checked.length, 0);
+  assert.equal(posts(core, "toggle").every((c) => (c.body as { consents?: unknown }).consents === undefined), true);
+});
+
+test("the Installed filter matches name, kind or publisher; select all ticks only what it shows", async () => {
+  const { model } = setup();
+  await model.init();
+  model.setFilter("tidy");
+  model.toggleAllShown();
+  assert.deepEqual(model.getSnapshot().checked, ["skill:acme/tidy"]);
+  model.toggleAllShown();
+  assert.deepEqual(model.getSnapshot().checked, []);
 });
 
 test("browse-only and installed entries cannot be installed", async () => {

@@ -83,3 +83,22 @@
 .ext-remove { margin-top: 12px; color: var(--tok-color-text-muted); }
 .ext-remove > summary { cursor: pointer; font-size: var(--tok-type-caption-size); }
 .ext-remove .lib-btn { margin-top: 6px; }
+
+/* Multi-select: a checkbox on each row, a filter and a bar for the ticked rows. */
+.ext-row-check { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--tok-color-accent); cursor: pointer; }
+span.ext-row-check { display: inline-block; cursor: default; }
+.ext-row { padding-left: 40px; }
+.ext-row > .ext-row-check { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); }
+.ext-entry > .ext-row-check { align-self: center; }
+.ext-selbar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.ext-filter { width: 100%; box-sizing: border-box; min-height: 32px; padding: 0 10px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); color: var(--tok-color-text); font: inherit; }
+.ext-filter:focus { outline: none; border-color: var(--tok-color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tok-color-accent) 16%, transparent); }
+.ext-selbar-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; min-height: 32px; }
+.ext-selall { display: inline-flex; align-items: center; gap: 8px; font-size: var(--tok-type-caption-size); font-weight: 600; cursor: pointer; }
+.ext-selall input { width: 16px; height: 16px; margin: 0; accent-color: var(--tok-color-accent); }
+.ext-selbar-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 4px 4px 10px; border-radius: 999px; background: color-mix(in srgb, var(--tok-color-accent) 10%, var(--tok-color-surface)); }
+.ext-selcount { font-size: var(--tok-type-caption-size); font-weight: 700; color: var(--tok-color-accent); }
+.ext-notloaded { margin: 4px 0; font-size: var(--tok-type-caption-size); }
+.ext-notloaded summary { cursor: pointer; color: var(--tok-color-accent4); font-weight: 600; }
+.ext-notloaded ul, .ext-confirm-list { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.ext-confirm-list { max-height: 240px; overflow: auto; }

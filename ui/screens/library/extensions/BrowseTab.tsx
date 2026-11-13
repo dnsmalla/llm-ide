@@ -4,7 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { RefreshIcon, SearchIcon } from "@llmide/ui-kit";
 import type { CatalogEntry } from "./decoders.ts";
 import { BROWSE_ROW_HEIGHT, browseWindow } from "./list-model.ts";
-import type { ExtensionsModel, ExtensionsState } from "./model.ts";
+import { entryKey, type ExtensionsModel, type ExtensionsState } from "./model.ts";
 import { catalogNeverFetched, entryAction, kindLabel, repoName, sourceStatusText } from "./presentation.ts";
 import { publicHttpsUrl } from "../safe-url.ts";
 import { Badge } from "./ui.tsx";
@@ -18,11 +18,14 @@ const KINDS: { id: string | null; label: string }[] = [
   { id: "llm-source", label: "Skill bundles" },
 ];
 
-function EntryRow({ model, entry, index, total, busy, openRepository }: { model: ExtensionsModel; entry: CatalogEntry; index: number; total: number; busy: boolean; openRepository?: (url: string) => void }): ReactNode {
+function EntryRow({ model, entry, index, total, busy, checked, openRepository }: { model: ExtensionsModel; entry: CatalogEntry; index: number; total: number; busy: boolean; checked: boolean; openRepository?: (url: string) => void }): ReactNode {
   const act = entryAction(entry);
   const repo = !act.installable && openRepository && entry.sourceUrl ? publicHttpsUrl(entry.sourceUrl) : null;
   return (
     <div role="listitem" className="ext-entry" style={{ top: index * BROWSE_ROW_HEIGHT, height: BROWSE_ROW_HEIGHT }} aria-posinset={index + 1} aria-setsize={total}>
+      {act.installable && !entry.installed ? (
+        <input type="checkbox" className="ext-row-check" checked={checked} aria-label={`Select ${entry.name} to install`} onChange={() => model.toggleBrowseChecked(entry)} />
+      ) : <span className="ext-row-check" aria-hidden="true" />}
       <div className="ext-entry-main">
         <span className="ext-row-name">{entry.name}</span>
         <span className="ext-row-meta">
@@ -127,14 +130,25 @@ export function BrowseTab({ model, state, initialHeight, openRepository }: { mod
         </div>
       ) : (
         <>
-          <p className="lib-muted" role="status" aria-live="polite">
-            {b.total.toLocaleString()} {b.total === 1 ? "match" : "matches"}
-            {b.results.length < b.total ? `, ${b.results.length.toLocaleString()} loaded` : ""}
-          </p>
+          <div className="ext-selbar-row">
+            <p className="lib-muted" role="status" aria-live="polite">
+              {b.total.toLocaleString()} {b.total === 1 ? "match" : "matches"}
+              {b.results.length < b.total ? `, ${b.results.length.toLocaleString()} loaded` : ""}
+            </p>
+            {state.browseChecked.length > 0 ? (
+              <span className="ext-selbar-actions" role="group" aria-label={`${state.browseChecked.length} selected`}>
+                <span className="ext-selcount">{state.browseChecked.length} selected</span>
+                <button type="button" className="lib-btn lib-btn-primary" disabled={state.install.installing} onClick={() => model.requestInstallSelected()}>
+                  {state.install.installing ? "Installing…" : "Install selected"}
+                </button>
+                <button type="button" className="lib-btn" onClick={() => model.clearBrowseChecked()}>Clear</button>
+              </span>
+            ) : <span className="lib-muted">Tick several to install them together.</span>}
+          </div>
           <div ref={ref} className="lib-scroll ext-list" role="list" aria-label="Catalog results" tabIndex={0}>
             <div style={{ height: b.results.length * BROWSE_ROW_HEIGHT, position: "relative" }}>
               {b.results.slice(w.start, w.end).map((e, i) => (
-                <EntryRow key={`${e.indexId}|${e.sourcePath ?? ""}|${e.name}`} model={model} entry={e} index={w.start + i} total={b.total} busy={state.install.installing} openRepository={openRepository} />
+                <EntryRow key={`${e.indexId}|${e.sourcePath ?? ""}|${e.name}`} model={model} entry={e} index={w.start + i} total={b.total} busy={state.install.installing} checked={state.browseChecked.includes(entryKey(e))} openRepository={openRepository} />
               ))}
             </div>
             {b.loadingMore && (

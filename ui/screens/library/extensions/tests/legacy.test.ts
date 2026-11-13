@@ -242,3 +242,26 @@ test("plugin git install sends the URL/ref and reloads", async () => {
   assert.equal(await model.installPluginGit("https://github.com/o/r", "main"), true);
   assert.deepEqual(core.calls.find((c) => c.method === "POST" && c.path === "/auth/me/plugins/install-git")!.body, { url: "https://github.com/o/r", ref: "main" });
 });
+
+test("bulk switch: ticked rows switch through the per-row toggle; an MCP server without consent is never switched on in bulk", async () => {
+  const { core, model } = setup("mcp-plugins", { "POST /auth/me/mcp-plugins/toggle": () => ok(hx("post-auth-me-mcp-plugins-toggle-200").response) });
+  await model.load();
+  model.toggleAllShown();
+  assert.equal(model.getSnapshot().checked.length, model.getSnapshot().rows.length);
+  await model.bulkSwitch(true);
+  assert.equal(posts(core, "mcp-plugins/toggle").length, 0, "the unconsented server was not switched on");
+  assert.equal(posts(core, "mcp-plugins/consent").length, 0, "and no consent was implied");
+  assert.equal(model.getSnapshot().sheet, null);
+  assert.match(model.getSnapshot().notice!.text, /consent/);
+});
+
+test("legacy filter: rows match by id, name or description; select all ticks only the shown rows", async () => {
+  const { model } = setup("plugins");
+  await model.load();
+  model.setFilter("no-such-thing");
+  model.toggleAllShown();
+  assert.deepEqual(model.getSnapshot().checked, []);
+  model.setFilter("run");
+  model.toggleAllShown();
+  assert.deepEqual(model.getSnapshot().checked, ["runner"]);
+});

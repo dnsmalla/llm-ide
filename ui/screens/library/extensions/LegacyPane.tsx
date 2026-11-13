@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { ExtCore } from "./api.ts";
-import { createLegacyApi, LegacyModel, RELOAD_BUSY, type ClaudePluginRow, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
+import { createLegacyApi, filterRows, LegacyModel, RELOAD_BUSY, type ClaudePluginRow, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
 import { LegacyDetail } from "./LegacyDetail.tsx";
 import { mcpSourceBadge, type LocationReveal } from "./legacy-labels.ts";
 import { browseWindow, BROWSE_ROW_HEIGHT } from "./list-model.ts";
@@ -45,6 +45,7 @@ function Row({ model, kind, row, state, index, total }: { model: LegacyModel; ki
   const mcpVersion = m ? state.mcpVersions[m.id] : undefined;
   return (
     <div role="listitem" className="ext-entry" data-selected={selected} style={{ top: index * BROWSE_ROW_HEIGHT, height: BROWSE_ROW_HEIGHT }} aria-posinset={index + 1} aria-setsize={total}>
+      <input type="checkbox" className="ext-row-check" checked={state.checked.includes(row.id)} aria-label={`Select ${name}`} onChange={() => model.toggleChecked(row.id)} />
       <div className="ext-entry-main">
         <span className="ext-row-name">{name}</span>
         <span className="ext-row-meta">{rowMeta(kind, row)}</span>
@@ -323,7 +324,8 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
   const ref = useRef<HTMLDivElement>(null);
   const { scrollTop, height } = useScroller(ref, initialHeight ?? 520);
   const t = TITLES[model.kind];
-  const w = browseWindow(state.rows.length, scrollTop, height);
+  const rows = filterRows(state.rows, state.filter);
+  const w = browseWindow(rows.length, scrollTop, height);
   const detail = state.selected !== null;
   const [adding, setAdding] = useState(false);
   const [addingSource, setAddingSource] = useState(false);
@@ -388,10 +390,11 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
       ) : (
         <div className={detail ? "ext-split" : undefined}>
           <div className={detail ? "ext-split-list" : undefined}>
+            <LegacySelectionBar model={model} state={state} shown={rows} />
             <div ref={ref} className="lib-scroll ext-list" role="list" aria-label={t.title} tabIndex={0}>
-              <div style={{ height: state.rows.length * BROWSE_ROW_HEIGHT, position: "relative" }}>
-                {state.rows.slice(w.start, w.end).map((r, i) => (
-                  <Row key={r.id} model={model} kind={model.kind} row={r} state={state} index={w.start + i} total={state.rows.length} />
+              <div style={{ height: rows.length * BROWSE_ROW_HEIGHT, position: "relative" }}>
+                {rows.slice(w.start, w.end).map((r, i) => (
+                  <Row key={r.id} model={model} kind={model.kind} row={r} state={state} index={w.start + i} total={rows.length} />
                 ))}
               </div>
             </div>
@@ -419,3 +422,30 @@ export function LegacyScreen({ api, kind, initialHeight, revealer }: { api: Lega
 
 export { createLegacyApi };
 export type { ExtCore };
+
+/** Above the list: the filter, "select all shown", and the bulk switch for the ticked rows. */
+function LegacySelectionBar({ model, state, shown }: { model: LegacyModel; state: LegacyState; shown: readonly LegacyRow[] }): ReactNode {
+  const n = state.checked.length;
+  const allShown = shown.length > 0 && shown.every((r) => state.checked.includes(r.id));
+  const busy = state.busy.length > 0;
+  return (
+    <div className="ext-selbar">
+      <input type="search" className="ext-filter" value={state.filter} placeholder={`Filter ${state.rows.length.toLocaleString()}…`} aria-label={`Filter ${TITLES[model.kind].title}`} onChange={(e) => model.setFilter(e.target.value)} />
+      <div className="ext-selbar-row">
+        <label className="ext-selall">
+          <input type="checkbox" checked={allShown} disabled={shown.length === 0} onChange={() => model.toggleAllShown()} />
+          {allShown ? "Clear shown" : shown.length !== state.rows.length ? "Select all shown" : "Select all"}
+        </label>
+        {n > 0 ? (
+          <span className="ext-selbar-actions" role="group" aria-label={`${n} selected`}>
+            <span className="ext-selcount">{n} selected</span>
+            <button type="button" className="lib-btn lib-btn-primary" disabled={busy} onClick={() => void model.bulkSwitch(true)}>Switch on</button>
+            <button type="button" className="lib-btn" disabled={busy} onClick={() => void model.bulkSwitch(false)}>Switch off</button>
+            <button type="button" className="lib-btn" onClick={() => model.clearChecked()}>Clear</button>
+          </span>
+        ) : <span className="lib-muted">Tick several to switch them on or off together.</span>}
+      </div>
+      {shown.length === 0 ? <p className="lib-muted" role="status">Nothing matches “{state.filter.trim()}”.</p> : null}
+    </div>
+  );
+}

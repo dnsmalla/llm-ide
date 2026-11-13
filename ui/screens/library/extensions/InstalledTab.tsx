@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { InstalledItem } from "./decoders.ts";
 import { ITEM_ROW_HEIGHT, flattenGroups, offsetsOf, rowIndexOf, stepItem, visibleRows } from "./list-model.ts";
-import type { ExtensionsModel, ExtensionsState } from "./model.ts";
+import { filterItems, type ExtensionsModel, type ExtensionsState } from "./model.ts";
 import { consentTitle, hasUpdate, hasWarnings, kindLabel, repoName, runsCode, trustLabel } from "./presentation.ts";
 import { shortCommit } from "./sanitize.ts";
 import { Badge, FindingList } from "./ui.tsx";
@@ -26,7 +26,7 @@ export function ItemBadges({ item }: { item: InstalledItem }): ReactNode {
   );
 }
 
-function Row({ item, selected, top }: { item: InstalledItem; selected: boolean; top: number }): ReactNode {
+function Row({ item, selected, checked, top, onCheck }: { item: InstalledItem; selected: boolean; checked: boolean; top: number; onCheck: () => void }): ReactNode {
   return (
     <div
       id={`ext-row-${item.id}`}
@@ -38,6 +38,8 @@ function Row({ item, selected, top }: { item: InstalledItem; selected: boolean; 
       onMouseDown={(e) => e.preventDefault()}
       data-item-id={item.id}
     >
+      <input type="checkbox" className="ext-row-check" checked={checked} aria-label={`Select ${item.name}`} tabIndex={-1}
+        onClick={(e) => e.stopPropagation()} onChange={onCheck} />
       <span className="ext-row-name">{item.name}</span>
       <span className="ext-row-meta">
         {kindLabel(item.kind)} · {repoName(item.sourceUrl)} · {shortCommit(item.pinnedCommit)}
@@ -50,7 +52,8 @@ function Row({ item, selected, top }: { item: InstalledItem; selected: boolean; 
 export function InstalledList({ model, state, initialHeight }: { model: ExtensionsModel; state: ExtensionsState; initialHeight?: number }): ReactNode {
   const ref = useRef<HTMLDivElement>(null);
   const { scrollTop, height } = useScroller(ref, initialHeight ?? 560);
-  const rows = useMemo(() => flattenGroups(state.items), [state.items]);
+  const shown = useMemo(() => filterItems(state.items, state.filter), [state.items, state.filter]);
+  const rows = useMemo(() => flattenGroups(shown), [shown]);
   const offsets = useMemo(() => offsetsOf(rows), [rows]);
   const w = visibleRows(offsets, scrollTop, height);
   const selected = state.selectedId;
@@ -67,6 +70,7 @@ export function InstalledList({ model, state, initialHeight }: { model: Extensio
   }, [selected, rows, offsets]);
 
   const onKey = (e: KeyboardEvent): void => {
+    if (e.key === " " && selected) { e.preventDefault(); model.toggleChecked(selected); return; }
     const map: Record<string, 1 | -1 | "first" | "last"> = { ArrowDown: 1, ArrowUp: -1, Home: "first", End: "last" };
     const step = map[e.key];
     if (step === undefined) return;
@@ -99,7 +103,8 @@ export function InstalledList({ model, state, initialHeight }: { model: Extensio
               </div>
             );
           }
-          return <Row key={r.item.id} item={r.item} selected={r.item.id === selected} top={offsets[idx]!} />;
+          const id = r.item.id;
+          return <Row key={id} item={r.item} selected={id === selected} checked={state.checked.includes(id)} top={offsets[idx]!} onCheck={() => model.toggleChecked(id)} />;
         })}
       </div>
     </div>
@@ -277,6 +282,7 @@ export function InstalledTab({ model, state, initialHeight }: { model: Extension
   return (
     <div className="ext-split">
       <div className="ext-split-list">
+        <SelectionBar model={model} state={state} />
         <InstalledList model={model} state={state} initialHeight={initialHeight} />
       </div>
       <div className="ext-split-detail">
@@ -289,6 +295,34 @@ export function InstalledTab({ model, state, initialHeight }: { model: Extension
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Above the list: the filter, "select all shown", and the bulk switch for the ticked rows. */
+function SelectionBar({ model, state }: { model: ExtensionsModel; state: ExtensionsState }): ReactNode {
+  const shown = filterItems(state.items, state.filter);
+  const n = state.checked.length;
+  const allShown = shown.length > 0 && shown.every((i) => state.checked.includes(i.id));
+  const busy = state.busy.length > 0;
+  return (
+    <div className="ext-selbar">
+      <input type="search" className="ext-filter" value={state.filter} placeholder={`Filter ${state.items.length.toLocaleString()} installed…`} aria-label="Filter installed extensions" onChange={(e) => model.setFilter(e.target.value)} />
+      <div className="ext-selbar-row">
+        <label className="ext-selall">
+          <input type="checkbox" checked={allShown} disabled={shown.length === 0} onChange={() => model.toggleAllShown()} />
+          {allShown ? "Clear shown" : `Select all ${shown.length !== state.items.length ? "shown" : ""}`.trim()}
+        </label>
+        {n > 0 ? (
+          <span className="ext-selbar-actions" role="group" aria-label={`${n} selected`}>
+            <span className="ext-selcount">{n} selected</span>
+            <button type="button" className="lib-btn lib-btn-primary" disabled={busy} onClick={() => void model.bulkSwitch(true)}>Switch on</button>
+            <button type="button" className="lib-btn" disabled={busy} onClick={() => void model.bulkSwitch(false)}>Switch off</button>
+            <button type="button" className="lib-btn" onClick={() => model.clearChecked()}>Clear</button>
+          </span>
+        ) : <span className="lib-muted">Tick items to switch several on or off at once.</span>}
+      </div>
+      {shown.length === 0 ? <p className="lib-muted" role="status">Nothing matches “{state.filter.trim()}”.</p> : null}
     </div>
   );
 }
