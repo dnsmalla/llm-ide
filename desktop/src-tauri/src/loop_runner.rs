@@ -455,9 +455,49 @@ fn run_command_at(work: &Path, command: &str, timeout_secs: Option<u64>) -> Resu
     run_command_keyed(work, command, timeout_secs, "")
 }
 
+type OutputSink = Arc<dyn Fn(&str, bool) + Send + Sync>;
+
+/// Where a run's stage output is sent while the stage is still running, keyed like `CANCEL` (a run id, or `""`).
+/// A stage's output used to reach the screen only when the command had finished, so a 20-minute test stage showed
+/// nothing and looked frozen.
+static OUTPUT_SINKS: LazyLock<Mutex<std::collections::HashMap<String, OutputSink>>> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// Registers a live-output sink for `key` until the guard is dropped.
+pub(crate) struct OutputSinkGuard(String);
+
+impl Drop for OutputSinkGuard {
+    fn drop(&mut self) {
+        OUTPUT_SINKS.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.0);
+    }
+}
+
+pub(crate) fn watch_output(key: &str, sink: OutputSink) -> OutputSinkGuard {
+    OUTPUT_SINKS.lock().unwrap_or_else(|p| p.into_inner()).insert(key.to_string(), sink);
+    OutputSinkGuard(key.to_string())
+}
+
+/// Most live output sent to the screen for one stage. The full output (up to `MAX_CAPTURE`) still comes back in the
+/// stage result; this only keeps a very chatty command from flooding the webview with events.
+const MAX_LIVE_BYTES: usize = 256 * 1024;
+
+/// Wraps `send` so it stops after `MAX_LIVE_BYTES`, saying once that the live view was cut.
+pub(crate) fn capped_sink(send: impl Fn(&str, bool) + Send + Sync + 'static) -> OutputSink {
+    let sent = std::sync::atomic::AtomicUsize::new(0);
+    Arc::new(move |text: &str, stdout: bool| {
+        let before = sent.fetch_add(text.len(), Ordering::SeqCst);
+        if before < MAX_LIVE_BYTES {
+            send(text, stdout);
+            if before + text.len() >= MAX_LIVE_BYTES {
+                send("\n[live output is cut here; the full output is shown when the stage ends]\n", stdout);
+            }
+        }
+    })
+}
+
 /// `run_command_at`, stopped only by a cancel for `key` (a run id, or `""` for the legacy run).
 fn run_command_keyed(work: &Path, command: &str, timeout_secs: Option<u64>, key: &str) -> Result<StageRun, String> {
-    run_command_at_cancellable(work, command, timeout_secs, None, &|| is_cancelled(key))
+    let sink = OUTPUT_SINKS.lock().unwrap_or_else(|p| p.into_inner()).get(key).cloned();
+    run_command_at_cancellable(work, command, timeout_secs, sink, &|| is_cancelled(key))
 }
 
 /// The shell a saved stage command runs in: `/bin/sh -lc`, like the Mac app's Loop. Windows has no `/bin/sh`, so
@@ -644,9 +684,15 @@ pub(crate) fn run_loop_gated(root: &Path, loop_id: &str, timeout_secs: Option<u6
 /// Tauri command. The stage id is resolved against the active project's loop.json; no command crosses IPC. A shell
 /// stage must carry the host-minted approval token for its exact command.
 #[tauri::command]
-pub async fn loop_run_stage(stage_id: String, loop_id: Option<String>, approval_token: Option<String>, timeout_secs: Option<u64>, run_id: Option<String>) -> Result<StageRun, String> {
+pub async fn loop_run_stage(app: tauri::AppHandle, stage_id: String, loop_id: Option<String>, approval_token: Option<String>, timeout_secs: Option<u64>, run_id: Option<String>) -> Result<StageRun, String> {
     clear_cancel(run_id.as_deref().unwrap_or(""));
     tauri::async_runtime::spawn_blocking(move || {
+        // Live output for the screen ("loop-stage-output"), tagged with the run so two runs never mix their logs.
+        let (stage, run) = (stage_id.clone(), run_id.clone());
+        let _live = watch_output(run_id.as_deref().unwrap_or(""), capped_sink(move |text, stdout| {
+            use tauri::Emitter;
+            let _ = app.emit("loop-stage-output", serde_json::json!({ "stageId": stage, "runId": run, "stream": if stdout { "stdout" } else { "stderr" }, "text": text }));
+        }));
         let Some(id) = run_id.as_deref() else {
             let root = crate::project::active_root().ok_or_else(|| "open a project before running a Loop stage".to_string())?;
             crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
@@ -1318,6 +1364,47 @@ mod tests {
         gate.request_stop();
         assert_eq!(gate.stop_all(Duration::from_millis(10)), 0);
         let _ = std::fs::remove_file(&pid_file);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_output_reaches_the_runs_own_sink_while_the_stage_is_still_running() {
+        let dir = std::env::temp_dir();
+        let seen: Arc<Mutex<Vec<(String, bool)>>> = Arc::new(Mutex::new(Vec::new()));
+        let s = seen.clone();
+        let guard = watch_output("t-live-a", capped_sink(move |t, out| s.lock().unwrap().push((t.to_string(), out))));
+        // The command prints, then keeps running: the text must arrive before it ends.
+        let stage = std::thread::spawn({
+            let dir = dir.clone();
+            move || run_command_keyed(&dir, "printf early; sleep 2; printf late 1>&2", Some(20), "t-live-a").unwrap()
+        });
+        let started = Instant::now();
+        while !seen.lock().unwrap().iter().any(|(t, out)| t.contains("early") && *out) {
+            assert!(started.elapsed() < Duration::from_millis(1500), "the first output did not arrive while the stage was running");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!stage.is_finished(), "it arrived before the stage ended");
+        let run = stage.join().unwrap();
+        assert_eq!(run.stdout, "early");
+        assert!(seen.lock().unwrap().iter().any(|(t, out)| t.contains("late") && !*out), "stderr is tagged as stderr");
+        // Another run's stage sends nothing to this sink, and nothing is sent once the guard is gone.
+        let before = seen.lock().unwrap().len();
+        run_command_keyed(&dir, "printf other", Some(5), "t-live-b").unwrap();
+        drop(guard);
+        run_command_keyed(&dir, "printf after", Some(5), "t-live-a").unwrap();
+        assert_eq!(seen.lock().unwrap().len(), before);
+    }
+
+    #[test]
+    fn live_output_is_cut_once_so_a_chatty_stage_cannot_flood_the_screen() {
+        let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let s = seen.clone();
+        let sink = capped_sink(move |t, _| s.lock().unwrap().push(t.to_string()));
+        let chunk = "x".repeat(64 * 1024);
+        for _ in 0..10 { sink(&chunk, true); }
+        let got = seen.lock().unwrap();
+        assert_eq!(got.iter().filter(|t| t.starts_with('x')).count(), 4, "four 64 KB chunks reach the cap");
+        assert_eq!(got.iter().filter(|t| t.contains("live output is cut here")).count(), 1);
     }
 
     #[test]
