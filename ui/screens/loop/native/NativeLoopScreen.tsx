@@ -111,6 +111,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [envVersions, setEnvVersions] = useState<{ python: string | null; node: string | null; git: string | null } | null>(null);
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runningStage, setRunningStage] = useState(false);
+  const runningStageRef = useRef(false);
+  runningStageRef.current = runningStage;
   /** Host-side approval state for the selected loop; null when the host cannot answer (browser fallback). */
   const [approvalState, setApprovalState] = useState<LoopApprovalStatus | null>(null);
   const runningRef = useRef(false);
@@ -219,7 +221,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const text = e.payload.text;
       if (!text) return;
       // The host tags each chunk with its run. Factory runs started elsewhere stream too: only this page's run is shown.
-      if (!runningRef.current || (e.payload.runId ?? null) !== (activeRunRef.current?.runId ?? null)) return;
+      // A single "Run stage" has no run id and does not mark the loop as running, but its output is this page's too.
+      const mine = runningRef.current ? (e.payload.runId ?? null) === (activeRunRef.current?.runId ?? null) : runningStageRef.current && (e.payload.runId ?? null) === null;
+      if (!mine) return;
       setRunLog((l) => {
         if (l.length === 0) return [text];
         const copy = [...l];
@@ -782,7 +786,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const saveSchedule = (cron: string) => {
     if (!projectRoot) return;
     setScheduleCron(cron);
-    try { localStorage.setItem(`llmide.loopSchedule.v1.${projectRoot}`, JSON.stringify({ cron: cron.trim(), last: "" })); } catch { /* session only */ }
+    // The minute that already fired is kept while the cron is unchanged: saving it again must not fire it twice.
+    const key = `llmide.loopSchedule.v1.${projectRoot}`;
+    let prev = readSchedule(null);
+    try { prev = readSchedule(localStorage.getItem(key)); } catch { /* session only */ }
+    try { localStorage.setItem(key, JSON.stringify({ cron: cron.trim(), last: prev.cron === cron.trim() ? prev.last : "" })); } catch { /* session only */ }
   };
 
   /** Removes only this loop's queued run; the others keep their place. */
