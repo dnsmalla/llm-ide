@@ -467,8 +467,13 @@ pub fn project_active() -> Option<ProjectInfo> {
 }
 
 #[tauri::command]
-pub fn project_recent(app: tauri::AppHandle) -> Result<Vec<ProjectInfo>, String> {
-    Ok(valid_recent(&data_dir(&app)?).iter().map(|r| info(r)).collect())
+pub async fn project_recent(app: tauri::AppHandle) -> Result<Vec<ProjectInfo>, String> {
+    // Off the main thread: validating a root on a stale network share can block for a long time.
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(valid_recent(&data_dir(&app)?).iter().map(|r| info(r)).collect())
+    })
+    .await
+    .map_err(|e| format!("recent projects task failed: {e}"))?
 }
 
 // ---- new project, close, recent management -------------------------------------------------
@@ -555,8 +560,11 @@ fn deactivate() {
 
 /// Recent projects with a status each, plus whether the stored list had to be ignored.
 #[tauri::command]
-pub fn project_recent_all(app: tauri::AppHandle) -> Result<RecentList, String> {
-    Ok(recent_with_status(&data_dir(&app)?))
+pub async fn project_recent_all(app: tauri::AppHandle) -> Result<RecentList, String> {
+    // Off the main thread: every stored root is canonicalised, and a stale share would beachball the Welcome screen.
+    tauri::async_runtime::spawn_blocking(move || Ok(recent_with_status(&data_dir(&app)?)))
+        .await
+        .map_err(|e| format!("recent projects task failed: {e}"))?
 }
 
 /// Drops one entry from the recent list (never deletes anything on disk). `false` when the list changed meanwhile.
