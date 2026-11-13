@@ -14,6 +14,7 @@ import { basename, join, relative, resolve } from 'node:path';
 import { PIN, fetchNodeRuntime, hostTarget, installNode, pinFor } from './node-runtime.mjs';
 import { removeSdkBinaryPackages, sdkBinaryAllowed, verifyNoSdkBinary } from './sdk-binary.mjs';
 import { isSecretName, makeCopyFilter, verifyStagedCore } from './stage-filter.mjs';
+import { SKIP_FILE, SKIP_TOP, sourceHash } from './stage-hash.mjs';
 
 const DESKTOP = resolve(import.meta.dirname, '..');
 const REPO = resolve(DESKTOP, '..');
@@ -80,10 +81,7 @@ if (nodeBin) {
   }
 }
 
-// Top-level extension entries that the server never loads at runtime.
-const SKIP_TOP = new Set(['node_modules', 'tests', 'src', 'dist', 'docs', 'scripts', 'eslint.config.mjs',
-  'tsconfig.json', 'vite.config.ts', 'CLAUDE.md', 'README.md']);
-const SKIP_FILE = /(\.db(-wal|-shm|-journal)?|\.log(\.old)?|\.DS_Store)$/;
+// SKIP_TOP / SKIP_FILE live in stage-hash.mjs so the staleness fingerprint uses the very same rules.
 // Secrets and local agent state must never ship in the app (see stage-filter.mjs, which also
 // allowlists what may enter kb/ and verifies the finished stage).
 
@@ -111,6 +109,8 @@ function walk(dir, visit) {
   }
 }
 
+// Taken before anything is copied: build.rs compares it with the current source and refuses a stale stage.
+const SOURCE_HASH = sourceHash();
 rmSync(OUT, { recursive: true, force: true });
 const extOut = join(OUT, 'root', 'extension');
 mkdirSync(extOut, { recursive: true });
@@ -229,7 +229,7 @@ const sizes = {
   schema: dirBytes(join(OUT, 'root', 'schema')),
   core_total: dirBytes(OUT),
 };
-writeFileSync(join(OUT, 'STAGE.json'), JSON.stringify({ target: TARGET, node: nodeInfo, sizes, generatedBy: 'scripts/stage-core.mjs' }, null, 2));
+writeFileSync(join(OUT, 'STAGE.json'), JSON.stringify({ target: TARGET, node: nodeInfo, sizes, sourceHash: SOURCE_HASH, generatedBy: 'scripts/stage-core.mjs' }, null, 2));
 for (const [k, v] of Object.entries(sizes)) console.log(`${k.padEnd(28)} ${v}`);
 console.log(`BENCH ${JSON.stringify({ name: 'bundle_bytes', value: sizes.core_total, unit: 'bytes', part: 'core_stage' })}`);
 console.log(`staged ${relative(REPO, OUT)} (dropped ${dropped.length} doc/test/sourcemap entries)`);

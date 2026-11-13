@@ -209,7 +209,57 @@ const COMMANDS: &[&str] = &[
     "rtk_install",
 ];
 
+/// The `sourceHash` stage-core.mjs wrote into STAGE.json (no JSON dependency: the value is one hex string).
+fn staged_hash(stage_json: &str) -> Option<String> {
+    let rest = &stage_json[stage_json.find("\"sourceHash\"")? + "\"sourceHash\"".len()..];
+    let rest = rest[rest.find('"')? + 1..].to_string();
+    Some(rest[..rest.find('"')?].to_string()).filter(|h| !h.is_empty())
+}
+
+/// A release build bundles `resources/core` as it is, and only scripts/build-desktop-mac.sh and the release
+/// workflow stage it first, so a bare `npm run tauri build` used to ship whatever the last stage left behind.
+/// Debug builds (`cargo check`, `cargo test`, `tauri dev`) never look: CI keeps an empty `resources/core` for them.
+/// Escape hatch for a deliberate offline experiment: LLMIDE_SKIP_STAGE_CHECK=1.
+fn check_staged_core() {
+    println!("cargo:rerun-if-env-changed=LLMIDE_SKIP_STAGE_CHECK");
+    if std::env::var("PROFILE").as_deref() != Ok("release") {
+        return;
+    }
+    // Cargo does not track extension/ edits; a path that never exists makes this script run on every release build.
+    println!("cargo:rerun-if-changed=.stage-check-always");
+    if std::env::var("LLMIDE_SKIP_STAGE_CHECK").as_deref() == Ok("1") {
+        println!("cargo:warning=LLMIDE_SKIP_STAGE_CHECK=1: not checking that resources/core is up to date");
+        return;
+    }
+    let fix = "run `node scripts/stage-core.mjs` in desktop/ (or scripts/build-desktop-mac.sh) and build again";
+    let manifest = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into()));
+    let stage_json = manifest.join("..").join("resources").join("core").join("STAGE.json");
+    let Ok(text) = std::fs::read_to_string(&stage_json) else {
+        fail(&format!("resources/core has not been staged (no STAGE.json); {fix}"));
+    };
+    let Some(staged) = staged_hash(&text) else {
+        fail(&format!("resources/core/STAGE.json has no sourceHash (staged by an older script); {fix}"));
+    };
+    let current = std::process::Command::new("node")
+        .arg(manifest.join("..").join("scripts").join("stage-hash.mjs"))
+        .output();
+    let current = match current {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        Ok(o) => fail(&format!("could not fingerprint the source (stage-hash.mjs: {}); {fix}", String::from_utf8_lossy(&o.stderr).trim())),
+        Err(e) => fail(&format!("could not run node to fingerprint the source ({e}); {fix}")),
+    };
+    if current != staged {
+        fail(&format!("resources/core is stale: the extension/schema source changed since it was staged; {fix}"));
+    }
+}
+
+fn fail(message: &str) -> ! {
+    eprintln!("error: {message}");
+    std::process::exit(1);
+}
+
 fn main() {
+    check_staged_core();
     // Without the `spike` cargo feature the spike commands are not registered, and their capability file
     // is not even embedded: only `default.json` is compiled in. (The commands stay in the manifest so
     // `capabilities/spike.json` still validates when the feature is on.)
