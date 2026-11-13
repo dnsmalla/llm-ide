@@ -27,6 +27,8 @@ export interface ShipPanelProps {
   reviewedPatchId?: string | null;
   /** The provider of the open PR/MR the run record knows about, if any: Discard leaves it and the remote branch alone. */
   requestProvider?: "github" | "gitlab" | null;
+  /** The loop name for a non-Factory run (Refactoring); omitted for the Factory. */
+  processName?: string;
   fs: Pick<FsApi, "read" | "gitStatus">;
   /** Project-relative folder of the run's worktree: `system/loop-worktrees/<run id>`. */
   runPrefix: string;
@@ -35,7 +37,7 @@ export interface ShipPanelProps {
   onClose(): void;
 }
 
-export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = null, requestProvider = null, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
+export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = null, requestProvider = null, processName, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
   const [diff, setDiff] = useState<WorktreeDiff | null>(initialDiff ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [review, setReview] = useState("");
@@ -63,9 +65,9 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
 
   useEffect(() => {
     if (!target || diff === null) return;
-    const req = shipRequest(info, item, { provider: target.provider, slug: target.slug, base: base.trim() || "main" }, review, diff.patchId);
+    const req = shipRequest(info, item, { provider: target.provider, slug: target.slug, base: base.trim() || "main" }, review, diff.patchId, processName);
     if (!edited.current) { setTitle(req.title); setBody(req.body); }
-  }, [target, diff, info, item, review, base]);
+  }, [target, diff, info, item, review, base, processName]);
 
   useEffect(() => {
     if (!confirming) { (lastOpener.current ?? opener.current)?.focus(); return; }
@@ -110,7 +112,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
     let result: ShipResult;
     try {
       if (!diff?.patchId) throw Object.assign(new Error("the reviewed diff has no patch id"), { code: "diff_changed" });
-      const baseReq = shipRequest(info, item, repo, review, diff.patchId);
+      const baseReq = shipRequest(info, item, repo, review, diff.patchId, processName);
       if (!title.trim()) { setMessage({ severity: "warning", text: "Enter a title first." }); return; }
       const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown; secretOverride?: unknown }>("/kb/loop/ship", { method: "POST", body: { ...baseReq, title: title.trim(), body, ...(allowSecret ? { allowSecret: true } : {}) }, timeoutMs: 5 * 60_000 });
       const so = r.secretOverride && typeof r.secretOverride === "object" ? r.secretOverride as Record<string, unknown> : null;

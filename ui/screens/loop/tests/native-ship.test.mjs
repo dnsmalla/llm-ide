@@ -33,6 +33,25 @@ test("a board issue id (provider:repo#N) is referenced as #N in the MR", () => {
   assert.doesNotMatch(body.body, /tests and review passed/, "a labelled failing MR must not claim a pass");
 });
 
+test("shipRequest words a non-Factory run as its loop and keeps the Factory default unchanged", () => {
+  const repo = { provider: "github", slug: "acme/web", base: "main" };
+  const factory = m.shipRequest(info, { source: "text", id: null, title: "", body: "", repo: null }, repo, "", PATCH);
+  assert.equal(factory.title, `Factory run ${info.runId}`);
+  assert.equal(factory.body, [
+    "",
+    `Factory run \`${info.runId}\` on \`${info.branch}\`, started from \`0123456789ab\`.`,
+    "Opened as a draft by the LLM-IDE Factory. Review it before merging.",
+    "", "## Review", "", "(no review report)",
+  ].join("\n"));
+  assert.equal(m.shipRequest(info, issue, repo, "", PATCH, "Factory").body, m.shipRequest(info, issue, repo, "", PATCH).body);
+  const refactor = m.shipRequest(info, { source: "text", id: null, title: "", body: "", repo: null }, repo, "", PATCH, "Refactoring");
+  assert.equal(refactor.title, `Refactoring run ${info.runId}`);
+  assert.match(refactor.body, /^Refactoring run `20261109-100000-abc123` on `factory\/20261109-100000-abc123`, started from `0123456789ab`\.$/m);
+  assert.match(refactor.body, /^Opened as a draft by the LLM-IDE Refactoring loop\. Review it before merging\.$/m);
+  assert.match(refactor.body, /\(this loop has no review stage; review the diff\)/);
+  assert.doesNotMatch(refactor.body, /Factory/);
+});
+
 test("shipRequest picks gitlab for a gitlab saved repo", () => {
   const config = decodeRepoConfig({ saved: {
     github: [{ id: "h", url: "https://github.com/acme/other", clonePath: "/p/code/other", active: true }],

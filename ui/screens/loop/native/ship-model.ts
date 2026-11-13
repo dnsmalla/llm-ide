@@ -61,8 +61,9 @@ export function autoShipNote(kind: AutoShipKind, failedStage: string | null): st
   return "";
 }
 
-export function shipRequest(info: RunInfo, item: WorkItem, repo: { provider: "github" | "gitlab"; slug: string; base: string }, review: string, patchId: string): ShipBody {
-  const title = item.title.replace(/\s+/g, " ").trim().slice(0, 200) || `Factory run ${info.runId}`;
+/** `kind` names the loop that ran ("Factory" by default; a non-Factory loop such as Refactoring passes its own name). */
+export function shipRequest(info: RunInfo, item: WorkItem, repo: { provider: "github" | "gitlab"; slug: string; base: string }, review: string, patchId: string, kind = "Factory"): ShipBody {
+  const title = item.title.replace(/\s+/g, " ").trim().slice(0, 200) || `${kind} run ${info.runId}`;
   const lines: string[] = [];
   const issue = item.source === "issue" ? issueNumberOf(item.id) : null;
   if (issue !== null) {
@@ -73,12 +74,12 @@ export function shipRequest(info: RunInfo, item: WorkItem, repo: { provider: "gi
   }
   lines.push(
     "",
-    `Factory run \`${info.runId}\` on \`${info.branch}\`, started from \`${info.baseCommit.slice(0, 12)}\`.`,
-    "Opened as a draft by the LLM-IDE Factory. Review it before merging.",
+    `${kind} run \`${info.runId}\` on \`${info.branch}\`, started from \`${info.baseCommit.slice(0, 12)}\`.`,
+    `Opened as a draft by the LLM-IDE ${kind === "Factory" ? "Factory." : `${kind} loop.`} Review it before merging.`,
     "",
     "## Review",
     "",
-    review.trim() ? review.trim().slice(0, MAX_REVIEW_CHARS) : "(no review report)",
+    review.trim() ? review.trim().slice(0, MAX_REVIEW_CHARS) : kind === "Factory" ? "(no review report)" : "(this loop has no review stage; review the diff)",
   );
   return { worktree: info.worktree, branch: info.branch, provider: repo.provider, repo: repo.slug, base: repo.base, title, body: lines.join("\n"), patchId };
 }
