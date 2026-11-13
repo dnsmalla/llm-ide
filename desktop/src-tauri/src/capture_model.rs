@@ -5,4 +5,4 @@ pub struct AxNode { pub role: String, #[serde(default, skip_serializing_if="Opti
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AxAppTree { pub bundle_id: String, pub windows: Vec<AxNode> }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum AxReadError { PermissionDenied, CannotComplete, Unsupported }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum AxReadError { PermissionDenied, CannotComplete, Unsupported, Truncated }
