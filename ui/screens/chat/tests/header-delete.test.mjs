@@ -26,3 +26,15 @@ test("the trash is a named control only when a chat is open and can be deleted, 
 test("the screen tells the header whether the open chat has messages", () => {
   assert.match(readFileSync(join(CHAT, "ChatScreen.tsx"), "utf8"), /hasMessages=\{state\.messages\.length > 0\}/);
 });
+
+test("a chat whose turn is running cannot be deleted: the turn would run on with no Stop left", () => {
+  assert.equal(c.deleteBlockedWhileRunning("s1", new Set(["s1"])), true);
+  assert.equal(c.deleteBlockedWhileRunning("s1", new Set(["other"])), false);
+  assert.equal(c.deleteBlockedWhileRunning(null, new Set(["s1"])), false);
+  const running = html(h(c.DockHeader, { ...props, busyIds: new Set(["s1"]), onDelete: noop, hasMessages: true }));
+  assert.match(running, /aria-label="Delete current chat"[^>]*disabled=""/);
+  assert.match(running, new RegExp(c.DELETE_WHILE_RUNNING_TITLE));
+  const idle = html(h(c.DockHeader, { ...props, onDelete: noop, hasMessages: true }));
+  assert.doesNotMatch(idle, /aria-label="Delete current chat"[^>]*disabled/);
+  assert.match(readFileSync(join(CHAT, "ChatScreen.tsx"), "utf8"), /if \(controller\.busyIds\(\)\.includes\(id\)\) return;/);
+});

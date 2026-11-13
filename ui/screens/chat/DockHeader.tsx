@@ -54,8 +54,14 @@ export interface DockHeaderProps {
 /** What the header trash does (ChatSessionHeader.clearChatButton): an empty chat has nothing to lose. Pure. */
 export const deleteChatAction = (hasMessages: boolean): "confirm" | "delete" => (hasMessages ? "confirm" : "delete");
 
+export const DELETE_WHILE_RUNNING_TITLE = "Stop the reply before deleting this chat";
+/** True while the open chat has a turn in flight: deleting it then would orphan the turn. */
+export const deleteBlockedWhileRunning = (activeId: string | null, busyIds: ReadonlySet<string>): boolean => activeId !== null && busyIds.has(activeId);
+
 export function DockHeader({ sessions, activeId, busyIds, approvalIds = new Set(), route, routeDisabled, meta, onSelect, onNew, onCollapse, onSetLimit, onRename, onDelete, hasMessages = false }: DockHeaderProps) {
   const options = historyOptions(sessions, activeId, busyIds, approvalIds);
+  // A running turn keeps going on the core after its chat is deleted, with no Stop left to reach it: stop it first.
+  const deleteBlocked = deleteBlockedWhileRunning(activeId, busyIds);
   // A background chat needs an answer: the header says so while the history menu is closed.
   const backgroundApprovals = [...approvalIds].filter((id) => id !== activeId).length;
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -101,19 +107,19 @@ export function DockHeader({ sessions, activeId, busyIds, approvalIds = new Set(
           ) : confirm && onDelete ? (
             <div className="chat-dock-confirm">
               <span>{DELETE_CHAT_TITLE} <span className="chat-muted">{DELETE_CHAT_DETAIL}</span></span>
-              <button type="button" className="chat-btn chat-danger" onClick={() => { onDelete(); setConfirm(false); setActions(false); }}>Delete chat</button>
+              <button type="button" className="chat-btn chat-danger" disabled={deleteBlocked} title={deleteBlocked ? DELETE_WHILE_RUNNING_TITLE : undefined} onClick={() => { onDelete(); setConfirm(false); setActions(false); }}>Delete chat</button>
               <button type="button" className="chat-btn" onClick={() => setConfirm(false)}>Keep</button>
             </div>
           ) : (
             <>
               {onRename ? <button type="button" role="menuitem" className="chat-link-btn" onClick={() => { setDraft(sessions.find((s) => s.id === activeId)?.title ?? ""); setRenaming(true); }}>Rename chat</button> : null}
-              {onDelete ? <button type="button" role="menuitem" className="chat-link-btn chat-danger" onClick={() => setConfirm(true)}>Delete chat</button> : null}
+              {onDelete ? <button type="button" role="menuitem" className="chat-link-btn chat-danger" disabled={deleteBlocked} title={deleteBlocked ? DELETE_WHILE_RUNNING_TITLE : undefined} onClick={() => setConfirm(true)}>Delete chat</button> : null}
             </>
           )}
         </Floating>
       ) : null}
       {activeId && onDelete ? (
-        <button ref={deleteButton} type="button" className="chat-dock-btn" aria-label="Delete current chat" title="Delete current chat"
+        <button ref={deleteButton} type="button" className="chat-dock-btn" aria-label="Delete current chat" title={deleteBlocked ? DELETE_WHILE_RUNNING_TITLE : "Delete current chat"} disabled={deleteBlocked}
           onClick={() => { if (deleteChatAction(hasMessages) === "delete") onDelete(); else { setRenaming(false); setConfirm(true); setActions(true); } }}>
           <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v5M9.5 6.5v5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
