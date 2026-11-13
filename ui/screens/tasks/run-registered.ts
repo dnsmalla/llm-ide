@@ -7,6 +7,7 @@ import { invokeHost } from "../shell/host";
 import { changedPathArgs } from "../loop/native/worktree-run.ts";
 import { shellBus } from "../shell/bus";
 import type { CoreClient } from "../shell/core";
+import { repoForIssue } from "../loop/native/factory.ts";
 import { loadLoops } from "../loop/native/store.ts";
 import { approveStage, approvalStatus } from "../loop/native/approvals.ts";
 import { decideRun, resolvePath, type Resolve } from "../autotasks/native/usage.ts";
@@ -42,6 +43,7 @@ async function changedPathsNow(projectRoot: string): Promise<string[] | null> {
 const taskActions: TaskActions = {
   startFactory: async (ids, root) => (await import("../loop/native/run-manager-host.ts")).startIssueRuns(root, ids),
   factoryItemKeys: async (root) => (await import("../loop/native/run-manager-host.ts")).factoryItemKeys(root),
+  issueRunnableHere: (issue, root) => repoForIssue(issue, readRepoConfig().saved, root) !== null,
   // Opens the pending card on the Factory board (goto-section, as Issues → Send to Factory does); never ships.
   reviewPendingMerge: async () => {
     const [review, anchor] = await Promise.all([import("./ship-review.ts"), import("../factory/anchor.ts")]);

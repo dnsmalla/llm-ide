@@ -37,3 +37,29 @@ test("Implement Issues starts one Factory run, never an agent prompt", async () 
   assert.deepEqual(started, ["1"]);
   assert.deepEqual(out.changedPaths, []);
 });
+
+test("Implement Issues skips issues whose repository is not mapped to a clone in this project", async () => {
+  const mixed = [
+    { ...issues[1], id: "9", number: 1, repo: "other/unmapped" },
+    { ...issues[0], id: "7", number: 7, repo: "o/mapped" },
+  ];
+  let started = null;
+  const ctx = (here) => ({
+    projectRoot: "/p",
+    core: { request: async () => ({ issues: mixed }) },
+    host: async () => null, fs: {}, log: () => {}, approvalToken: async () => null,
+    changedPaths: async () => [], revert: async () => {},
+    actions: {
+      factoryItemKeys: async () => new Set(),
+      issueRunnableHere: here,
+      startFactory: async (ids) => { started = ids; return { runIds: ["r1"] }; },
+    },
+  });
+  const out = await runTask("implementIssues", ctx((i, root) => root === "/p" && i.repo === "o/mapped"));
+  assert.equal(out.ok, true);
+  assert.deepEqual(started, ["7"], "the older but unmapped issue is not taken");
+  started = null;
+  const none = await runTask("implementIssues", ctx(() => false));
+  assert.equal(none.code, "NO_READY_ISSUE");
+  assert.equal(started, null);
+});

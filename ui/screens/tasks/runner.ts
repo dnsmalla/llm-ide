@@ -17,6 +17,8 @@ export interface TaskActions {
   startFactory?(issueIds: readonly string[], projectRoot: string): Promise<{ runIds: string[] }>;
   /** Card keys already on the Factory board; an issue with one is never started twice. */
   factoryItemKeys?(projectRoot: string): Promise<ReadonlySet<string>>;
+  /** Whether Settings → Repositories maps the issue's repository to a clone inside this project (else its run cannot start). */
+  issueRunnableHere?(issue: { provider: string; repo: string }, projectRoot: string): boolean;
   /** Open the pending Factory run (passed, unshipped, on a card) on the board; never ships. null = none waiting. */
   reviewPendingMerge?(projectRoot: string, runId: string | null): Promise<{ runId: string; reviewed: boolean } | null>;
 }
@@ -190,7 +192,11 @@ async function runDesktopAction(task: TaskDef, ctx: TaskRunContext): Promise<Tas
     if (!start) throw new TaskRunError("TASK_NOT_AVAILABLE", "Open a project with the Factory on to start an issue run.");
     const listed = await ctx.core.request<{ issues?: Issue[] }>("/kb/issues?state=open", { method: "GET" });
     const taken = (await ctx.actions.factoryItemKeys?.(ctx.projectRoot)) ?? new Set<string>();
-    const issue = selectNextReadyIssue(listed.issues ?? [], taken);
+    // The core lists the issues of every repository; one that is not mapped to a clone in THIS project would only
+    // add an unrelated card and fail its run.
+    const here = ctx.actions.issueRunnableHere;
+    const candidates = (listed.issues ?? []).filter((i) => !here || here({ provider: i.provider, repo: i.repo }, ctx.projectRoot));
+    const issue = selectNextReadyIssue(candidates, taken);
     if (!issue) {
       return { taskId: task.id, ok: false, runner: "desktop-action", summary: "No ready issue.", output: "", changedPaths: [], warnings: [], code: "NO_READY_ISSUE" };
     }
