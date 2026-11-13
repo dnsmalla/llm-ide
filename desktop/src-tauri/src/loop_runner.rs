@@ -136,23 +136,43 @@ fn clipped(mut s: String) -> String {
     s
 }
 
-fn read_capped_stream<R: Read + Send + 'static>(mut reader: R, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, stdout: bool) -> mpsc::Receiver<String> {
+/// What a reader thread has captured so far. The bytes live in a shared buffer (not sent at EOF) so a stage that
+/// leaves a background process holding the pipe open still returns what it printed.
+struct Capture {
+    buf: Arc<Mutex<Vec<u8>>>,
+    done: mpsc::Receiver<()>,
+}
+
+impl Capture {
+    /// Waits until `deadline` for EOF, then returns whatever was captured either way.
+    fn collect(self, deadline: Instant) -> String {
+        let _ = self.done.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let bytes = self.buf.lock().unwrap_or_else(|p| p.into_inner());
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+}
+
+fn read_capped_stream<R: Read + Send + 'static>(mut reader: R, sink: Option<Arc<dyn Fn(&str, bool) + Send + Sync>>, stdout: bool) -> Capture {
     let (tx, rx) = mpsc::channel();
+    let buf = Arc::new(Mutex::new(Vec::new()));
+    let shared = Arc::clone(&buf);
     std::thread::spawn(move || {
-        let mut kept: Vec<u8> = Vec::new();
-        let mut buf = [0u8; 4096];
+        let mut chunk = [0u8; 4096];
         loop {
-            match reader.read(&mut buf) {
+            match reader.read(&mut chunk) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    if kept.len() < MAX_CAPTURE { let room = (MAX_CAPTURE - kept.len()).min(n); kept.extend_from_slice(&buf[..room]); }
-                    if let Some(cb) = &sink { cb(&String::from_utf8_lossy(&buf[..n]), stdout); }
+                    {
+                        let mut kept = shared.lock().unwrap_or_else(|p| p.into_inner());
+                        if kept.len() < MAX_CAPTURE { let room = (MAX_CAPTURE - kept.len()).min(n); kept.extend_from_slice(&chunk[..room]); }
+                    }
+                    if let Some(cb) = &sink { cb(&String::from_utf8_lossy(&chunk[..n]), stdout); }
                 }
             }
         }
-        let _ = tx.send(String::from_utf8_lossy(&kept).into_owned());
+        let _ = tx.send(());
     });
-    rx
+    Capture { buf, done: rx }
 }
 
 /// The Mac runs a Loop in the project's git root (the first code repo), not necessarily the project root. A
@@ -589,7 +609,12 @@ fn run_command_at_gated(work: &Path, command: &str, timeout_secs: Option<u64>, s
             }
         };
         match waited {
-            Some(s) => break Some(s),
+            Some(s) => {
+                // The stage is over. A background process it left behind (`cmd &`, a daemon) would keep the output
+                // pipes open and keep running in the worktree: stop the rest of the group.
+                child.terminate(grace);
+                break Some(s);
+            }
             None if stop_requested() => {
                 cancelled = true;
                 child.terminate(grace);
@@ -603,8 +628,9 @@ fn run_command_at_gated(work: &Path, command: &str, timeout_secs: Option<u64>, s
             None => std::thread::sleep(Duration::from_millis(60)),
         }
     };
-    let stdout = out_rx.and_then(|rx| rx.recv_timeout(Duration::from_secs(2)).ok()).unwrap_or_default();
-    let stderr = err_rx.and_then(|rx| rx.recv_timeout(Duration::from_secs(2)).ok()).unwrap_or_default();
+    let collect_by = Instant::now() + Duration::from_secs(2);
+    let stdout = out_rx.map(|c| c.collect(collect_by)).unwrap_or_default();
+    let stderr = err_rx.map(|c| c.collect(collect_by)).unwrap_or_default();
     Ok(StageRun {
         exit_code: status.and_then(|s| s.code()),
         stdout: clipped(stdout),
@@ -1286,6 +1312,30 @@ mod tests {
         assert!(!alive(), "grandchild {pid} survived the timeout");
         let _ = std::fs::remove_file(&pidfile);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stage_that_backgrounds_a_process_still_returns_its_output_and_leaves_nothing_running() {
+        let dir = std::env::temp_dir().join(format!("llmide-bg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pidfile = dir.join("bg.pid");
+        let command = format!("sleep 300 & echo $! > '{}'; echo printed; echo warned >&2", pidfile.display());
+        let started = Instant::now();
+        let r = run_command_at_gated(&dir, &command, Some(60), None, &|| false, &ExitGate::new()).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(10), "must not wait for the background process: {:?}", started.elapsed());
+        assert_eq!(r.exit_code, Some(0));
+        assert!(r.stdout.contains("printed"), "stdout lost: {r:?}");
+        assert!(r.stderr.contains("warned"), "stderr lost: {r:?}");
+        let pid: i32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        // SAFETY: signal 0 only probes whether the pid exists.
+        while unsafe { libc::kill(pid, 0) } == 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(unsafe { libc::kill(pid, 0) } != 0, "the leftover background process is still running");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
