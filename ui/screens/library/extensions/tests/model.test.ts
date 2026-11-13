@@ -571,3 +571,34 @@ test("disabling sends no commit", async () => {
   await model.disable(model.item("skill:acme/tidy")!);
   assert.deepEqual(posts(core, "toggle")[0]!.body, { id: "skill:acme/tidy", enabled: false });
 });
+
+test("Install selected: the final summary keeps each failed item's reason, not only its name", async () => {
+  let n = 0;
+  const catalog = structuredClone(fx("get-auth-me-extensions-catalog-200-2").response as { results: Item[] });
+  catalog.results.push({ ...catalog.results[0], name: "docx", source: { url: "https://github.com/anthropics/skills", path: "skills/docx" } });
+  const { model } = setup({
+    [`GET ${P}/catalog`]: () => ok(catalog),
+    [`POST ${P}/install`]: () => (n++ === 0 ? reply("post-auth-me-extensions-install-200-3") : err(502, "FETCH_FAILED")),
+  });
+  await model.init();
+  await model.showTab("browse");
+  const installable = model.getSnapshot().browse.results.filter((e) => e.installable && !e.installed && e.sourceUrl);
+  assert.ok(installable.length >= 2, "the fixture catalog offers two installable entries");
+  for (const e of installable) model.toggleBrowseChecked(e);
+  model.requestInstallSelected();
+  await model.confirmAction();
+  const text = model.getSnapshot().notice!.text;
+  assert.match(text, /Installed 1 of /);
+  assert.match(text, new RegExp(`${installable[1]!.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(.+\\)`), `a reason follows the name: ${text}`);
+});
+
+test("bulk switch: a failed item's reason survives in the summary", async () => {
+  const { model } = setup({ [`POST ${P}/toggle`]: () => err(500, "INTERNAL") });
+  await model.init();
+  model.toggleAllShown();
+  await model.bulkSwitch(true);
+  const text = model.getSnapshot().notice!.text;
+  assert.match(text, /Not switched: /);
+  assert.match(text, /\(.+\)/, `the reason is kept: ${text}`);
+  assert.equal(model.getSnapshot().notice!.error, true);
+});

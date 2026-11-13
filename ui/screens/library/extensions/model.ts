@@ -137,6 +137,14 @@ export function filterItems(items: readonly InstalledItem[], filter: string): re
 /** A browse entry's key for ticking (entries have no id of their own). */
 export const entryKey = (e: Pick<CatalogEntry, "kind" | "publisher" | "name">): string => `${e.kind}:${e.publisher}/${e.name}`;
 
+interface BulkFailure { name: string; reason: string | null }
+
+/** "A (reason), B (reason)": each failed item keeps its own reason in the one summary that replaces the per-item notices. */
+function describeFailures(failed: readonly BulkFailure[]): string {
+  const shown = failed.slice(0, 5).map((f) => (f.reason ? `${f.name} (${f.reason.replace(/\.$/, "")})` : f.name));
+  return `${shown.join(", ")}${failed.length > 5 ? ` and ${failed.length - 5} more` : ""}`;
+}
+
 export class ExtensionsModel {
   private state: ExtensionsState = INITIAL;
   private listeners = new Set<() => void>();
@@ -186,6 +194,11 @@ export class ExtensionsModel {
   }
   private info(text: string, error = true): void {
     this.set({ notice: { text, error, retry: null } });
+  }
+  /** The reason of the error notice the last step set, or null (a step that aborted sets none). */
+  private lastErrorText(): string | null {
+    const n = this.state.notice;
+    return n?.error ? n.text : null;
   }
   private fail(e: unknown, retry: Retry | null = null): void {
     if (e instanceof ExtApiError && e.code === "ABORTED") return;
@@ -497,14 +510,15 @@ export class ExtensionsModel {
     }
     if (a.kind === "installMany") {
       let done = 0;
-      const failed: string[] = [];
+      const failed: BulkFailure[] = [];
       for (const e of a.entries) {
         if (this.signal.aborted) return;
+        this.set({ notice: null });
         if (e.sourceUrl && (await this.runInstall(e.sourceUrl, e.sourcePath ?? null))) done++;
-        else failed.push(e.name);
+        else failed.push({ name: e.name, reason: this.lastErrorText() });
       }
       this.set({ browseChecked: [] });
-      if (failed.length) this.info(`Installed ${done} of ${a.entries.length}. Not installed: ${failed.slice(0, 5).join(", ")}${failed.length > 5 ? ` and ${failed.length - 5} more` : ""}.`);
+      if (failed.length) this.info(`Installed ${done} of ${a.entries.length}. Not installed: ${describeFailures(failed)}.`);
       else this.succeed(`Installed ${done} item${done === 1 ? "" : "s"}. They are off until you switch them on.`);
       return;
     }
@@ -696,14 +710,19 @@ export class ExtensionsModel {
     const targets = this.state.items.filter((i) => this.state.checked.includes(i.id) && i.enabled !== on);
     const needConsent = on ? targets.filter((i) => i.executableKinds.length > 0) : [];
     const plain = targets.filter((i) => !needConsent.includes(i));
+    const failed: BulkFailure[] = [];
     for (const item of plain) {
       if (this.signal.aborted) return;
+      this.set({ notice: null });
       await this.toggle(item, on, null);
+      if (this.item(item.id)?.enabled !== on) failed.push({ name: item.name, reason: this.lastErrorText() });
     }
     this.set({ checked: [] });
     const changed = plain.filter((i) => this.item(i.id)?.enabled === on).length;
+    const failedNote = failed.length ? ` Not switched: ${describeFailures(failed)}.` : "";
     const verb = on ? "on" : "off";
-    if (needConsent.length) this.info(`Switched ${changed} ${verb}. These can run code, so switch each on to review its consent: ${needConsent.map((i) => i.name).slice(0, 5).join(", ")}${needConsent.length > 5 ? ` and ${needConsent.length - 5} more` : ""}.`);
+    if (needConsent.length) this.info(`Switched ${changed} ${verb}. These can run code, so switch each on to review its consent: ${needConsent.map((i) => i.name).slice(0, 5).join(", ")}${needConsent.length > 5 ? ` and ${needConsent.length - 5} more` : ""}.${failedNote}`);
+    else if (failed.length) this.info(`Switched ${changed} of ${targets.length} ${verb}.${failedNote}`);
     else this.succeed(targets.length === 0 ? `Everything selected was already ${verb}.` : `Switched ${changed} of ${targets.length} ${verb}.`);
   }
   toggleBrowseChecked(e: CatalogEntry): void {
