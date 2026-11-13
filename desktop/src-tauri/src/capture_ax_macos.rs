@@ -15,10 +15,15 @@ impl Budget {
         if self.left == 0 || now >= self.deadline { self.truncated = true; return false; }
         self.left -= 1; true
     }
-    /// The read result: a truncated walk is "no snapshot this tick", never a smaller tree.
+    /// The read result. A walk that ran out of budget still returns the part it read: the captions panel is usually in
+    /// it, and dropping the whole tick instead meant a window that grew past the budget (a chat or roster opened
+    /// mid-meeting) captured nothing from then on while the status still said Recording. The cost is the older one:
+    /// rows missing from a cut-short read can be closed and appended again on the next full read.
     pub(crate) fn finish(&self, tree: AxAppTree) -> Result<Option<AxAppTree>, AxReadError> {
-        if self.truncated { Err(AxReadError::Truncated) } else { Ok(Some(tree)) }
+        Ok(Some(tree))
     }
+    #[cfg(test)]
+    pub(crate) fn was_truncated(&self) -> bool { self.truncated }
 }
 
 #[cfg(target_os = "macos")] pub const SUPPORTED: bool = true;
@@ -96,16 +101,18 @@ mod budget_tests {
         assert!(b.take(now) && b.take(now));
         assert!(matches!(b.finish(tree()), Ok(Some(_))));
     }
-    #[test] fn node_limit_is_no_snapshot() {
+    #[test] fn node_limit_still_returns_the_part_that_was_read() {
         let now = Instant::now();
         let mut b = Budget::new(1, now + Duration::from_secs(1));
         assert!(b.take(now) && !b.take(now));
-        assert_eq!(b.finish(tree()).unwrap_err(), AxReadError::Truncated);
+        assert!(b.was_truncated());
+        assert!(matches!(b.finish(tree()), Ok(Some(_))), "a cut-short read is still used: captions are not dropped");
     }
-    #[test] fn deadline_is_no_snapshot() {
+    #[test] fn deadline_still_returns_the_part_that_was_read() {
         let now = Instant::now();
         let mut b = Budget::new(100, now + Duration::from_millis(500));
         assert!(!b.take(now + Duration::from_millis(500)));
-        assert_eq!(b.finish(tree()).unwrap_err(), AxReadError::Truncated);
+        assert!(b.was_truncated());
+        assert!(matches!(b.finish(tree()), Ok(Some(_))), "a cut-short read is still used: captions are not dropped");
     }
 }
