@@ -60,6 +60,8 @@ export interface AssistantMessage {
   costUsd?: number | null;
   /** The mode the server ran this reply in (`mode_set`), shown as the Mac's ModeBadge. Live turns only. */
   mode?: string;
+  /** The model that actually answered (the turn's `init` event; restored from history). */
+  model?: string;
   /** The stream died mid-reply (core restart, engine death); the text is what arrived before it. */
   interrupted?: boolean;
 }
@@ -393,6 +395,7 @@ function applyEvents(state: ChatState, batch: readonly AgentEvent[], malformed: 
     switch (ev.type) {
       case "init":
         if (ev.model) next.model = ev.model;
+        if (ev.model && target) target.model = ev.model;
         if (ev.sessionId) next.sdkSessionId = ev.sessionId;
         break;
       case "mode_set":

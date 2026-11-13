@@ -16,6 +16,12 @@ export function ModeBadge({ mode, resolved }: { mode: string; resolved: string |
   return <span className="chat-badge" data-mode={effective} aria-label={`Mode: ${label}${mode === "auto" ? " (chosen automatically)" : ""}`}>{label}</span>;
 }
 
+/** The model that answered this reply, as the engine reported it (`init.model`). */
+export function ModelBadge({ model }: { model: string }) {
+  const label = safeLine(model, 48);
+  return <span className="chat-badge chat-model-badge" aria-label={`Model: ${label}`} title={`Answered by ${label}`}>{label}</span>;
+}
+
 export function SubagentChip({ summary }: { summary: SubagentSummary }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);

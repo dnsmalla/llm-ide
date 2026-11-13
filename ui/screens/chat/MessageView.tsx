@@ -4,7 +4,7 @@ import { editPreviewFor } from "./plan/EditPreview";
 import { memo, useState } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "./MarkdownView";
-import { ModeBadge } from "./badges/Badges";
+import { ModeBadge, ModelBadge } from "./badges/Badges";
 import { textOf, type AssistantMessage, type Message, type Notice, type TextPart, type ToolPart } from "./state";
 import { billableTokens, compactTokenCount, usageTooltip } from "./usage";
 
@@ -166,6 +166,7 @@ function Assistant({ m, host, collapsed, collapsible, onToggle }: { m: Assistant
     <article className="chat-msg chat-assistant" aria-label={fold ? "Assistant message (collapsed)" : "Assistant message"} aria-busy={live}>
       <span className="chat-role">llm-agent</span>
       {m.mode ? <ModeBadge mode={m.mode} resolved={null} /> : null}
+      {m.model ? <ModelBadge model={m.model} /> : null}
       {host.onCopy && text && !live ? <button type="button" className="chat-copy" onClick={() => host.onCopy!(text)} aria-label="Copy the reply">Copy</button> : null}
       <div className="chat-assistant-body">
         {fold

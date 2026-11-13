@@ -114,7 +114,8 @@ export function fromFileMessage(m: unknown, index: number): StoredMessage {
   const metadata = o.metadata && typeof o.metadata === "object" ? o.metadata as Record<string, unknown> : null;
   const usage = decodeUsage(metadata?.tokenUsage);
   const interrupted = metadata?.interrupted === true || o.status === "interrupted";
-  const meta = { ...(usage ? { tokenUsage: usage } : {}), ...(interrupted ? { interrupted: true } : {}) };
+  const model = role === "assistant" && typeof metadata?.model === "string" && metadata.model ? metadata.model : null;
+  const meta = { ...(usage ? { tokenUsage: usage } : {}), ...(interrupted ? { interrupted: true } : {}), ...(model ? { model } : {}) };
   return { seq: index + 1, role, content: asString(o.content), meta: Object.keys(meta).length ? meta : null, createdAt: typeof o.createdAt === "number" ? toEpoch(o.createdAt) : 0 };
 }
 
@@ -123,6 +124,7 @@ export function toFileMessage(msg: { role: "user" | "assistant"; content: string
   const stopped = msg.meta?.status === "aborted";
   const metadata: Record<string, unknown> = {};
   if (msg.role === "assistant" && typeof msg.meta?.mode === "string" && msg.meta.mode) metadata.mode = msg.meta.mode;
+  if (msg.role === "assistant" && typeof msg.meta?.model === "string" && msg.meta.model) metadata.model = msg.meta.model;
   const usage = decodeUsage(msg.meta?.tokenUsage);
   if (usage) metadata.tokenUsage = usage;
   // A reply whose stream died mid-way: the text is kept, and every surface says "Interrupted".
