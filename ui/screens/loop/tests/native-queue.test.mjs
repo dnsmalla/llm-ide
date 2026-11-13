@@ -43,3 +43,14 @@ test("a start that never ran drains only what queued behind it, and nothing whil
   assert.doesNotMatch(wrapper, /queueRef\.current\.shift\(\)/, "the head of the queue is never taken blindly");
   assert.match(wrapper, /if \(!ranRef\.current && !unmountedRef\.current && !dirtyRef\.current\)/);
 });
+
+test("what is left after a run's drain still waits behind the next start, so a start that fails moves on", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
+  // The run-end drain hands the rest of the queue to waitingRef...
+  assert.match(src, /waitingRef\.current = new Set\(next \? queueRef\.current\.map\(\(x\) => x\.loop\.id\) : \[\]\);/);
+  // ...and the wrapper, which runs after it, does not wipe that when the start was a real run.
+  const wrapper = src.slice(src.indexOf("const executeLoop = async"), src.indexOf("const runLoop ="));
+  assert.match(wrapper, /if \(!ranRef\.current\) waitingRef\.current = new Set\(\);/);
+  assert.doesNotMatch(wrapper, /\n\s*waitingRef\.current = new Set\(\);\n/, "no unconditional reset");
+});

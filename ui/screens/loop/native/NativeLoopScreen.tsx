@@ -679,6 +679,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const next = unmountedRef.current ? undefined : queueRef.current.shift();
       setQueued(queueRef.current.length);
       persistQueue();
+      // A run drains the whole queue. What is left now waits behind `next`: if `next` never becomes a run (no grant,
+      // approval refused), the wrapper must still move on to these instead of leaving them for a manual Resume.
+      waitingRef.current = new Set(next ? queueRef.current.map((x) => x.loop.id) : []);
       if (next) window.setTimeout(() => void executeLoop(next.loop, next.scheduled), 0);
     }
   };
@@ -704,8 +707,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       await executeLoopGated(target, scheduled, start);
     } finally {
       startGateRef.current.release();
-      const waiting = waitingRef.current;
-      waitingRef.current = new Set();
+      // After a real run, `waitingRef` was just set by the run's own drain (above) and must survive for the next start.
+      const waiting = ranRef.current ? new Set<string>() : waitingRef.current;
+      if (!ranRef.current) waitingRef.current = new Set();
       // A start that never became a run (approval refused, worktree failed) must not strand what queued behind it
       // while it held the gate. Nothing else starts by itself: a restored queue waits for Resume, and with unsaved
       // loop edits every start returns at once, which would empty the queue without running anything. A real run
