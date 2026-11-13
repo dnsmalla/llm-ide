@@ -2,6 +2,7 @@
 // `controller.ts` and the pure models, which are tested without a DOM.
 import { shellBus } from "../shell/bus";
 import { unsavedWork } from "../shell/unsaved-work.ts";
+import { chatApprovalStore } from "../shell/chat-approvals";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Chip, Icon, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
@@ -114,6 +115,12 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     return () => window.removeEventListener("resize", onResize);
   }, []);
   const dockWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The approval badge points at a chat in this dock: open the dock (the chat list inside then selects the chat).
+  useEffect(() => {
+    const open = () => { if (chatApprovalStore.peekReveal("explorer")) setChatDock((d) => (d.open ? d : { ...d, open: true })); };
+    open();
+    return chatApprovalStore.subscribeReveal(open);
+  }, []);
   const dockLatest = useRef(chatDock);
   dockLatest.current = chatDock;
   useEffect(() => {

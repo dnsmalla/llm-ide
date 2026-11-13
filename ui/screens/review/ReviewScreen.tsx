@@ -7,6 +7,7 @@ import type { SectionProps } from "../shell/sections";
 import { ChatDockSlot } from "../shell/chat-dock";
 import { ChatDockToggle } from "../shell/ChatDockToggle";
 import { shellBus } from "../shell/bus";
+import { chatApprovalStore } from "../shell/chat-approvals";
 import { Markdown } from "../chat/MarkdownView";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { REVIEW_EMPTY, REVIEW_ROOTS, closeReviewTab, decodeEntries, decodeFile, listTruncation, openFolderChildren, pickLinkedRepo, readChildren, refreshGate, type ReviewEntry } from "./review-model.ts";
@@ -27,6 +28,12 @@ export function ReviewScreen({ active, projectRoot, deps }: SectionProps & { dep
   const [showChat, setShowChat] = useState(() => {
     try { return localStorage.getItem("llmide.review.chat") !== "0"; } catch { return true; }
   });
+  // The approval badge points at a chat in this dock: open the dock (the chat list inside then selects the chat).
+  useEffect(() => {
+    const open = () => { if (chatApprovalStore.peekReveal("review")) setShowChat(true); };
+    open();
+    return chatApprovalStore.subscribeReveal(open);
+  }, []);
   const [chatWidth, setChatWidth] = useState(() => {
     try { const n = Number(localStorage.getItem("llmide.review.chatWidth")); return Number.isFinite(n) && n >= 240 && n <= 640 ? n : 320; } catch { return 320; }
   });

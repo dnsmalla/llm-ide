@@ -144,6 +144,10 @@ export class ChatController {
   busyIds(): string[] { return [...this.runtimes].filter(([, r]) => r.state.phase === "streaming" || r.state.phase === "aborting").map(([id]) => id); }
   /** Chats (of any open state here) waiting for an approval or question answer: a background chat needs attention too. */
   approvalChatIds(): string[] { return [...this.runtimes].filter(([, r]) => r.state.pendingApprovals.length > 0).map(([id]) => id); }
+  /** How many approvals or questions each chat is waiting on (the app-wide badge sums these over every surface). */
+  pendingApprovalCounts(): { chatId: string; count: number }[] {
+    return [...this.runtimes].filter(([, r]) => r.state.pendingApprovals.length > 0).map(([chatId, r]) => ({ chatId, count: r.state.pendingApprovals.length }));
+  }
   getPersistFailure(): string | null { return this.persistFailure; }
   dismissPersistFailure(): void { if (this.persistFailure !== null) { this.persistFailure = null; this.emit(); } }
   isRemoteBusy(id: string): boolean { return this.remoteBusy.has(id) && !this.busyIds().includes(id); }

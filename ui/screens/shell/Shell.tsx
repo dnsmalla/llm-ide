@@ -15,7 +15,7 @@ import { syncLiveRecordingFromHost } from "./live-status";
 import { dismissCrashNotice, loadCrashNotice, type CrashNotice } from "./crash-report";
 import { StatusBar } from "./StatusBar";
 import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
-import { chatApprovalStore } from "./chat-approvals";
+import { chatApprovalStore, sectionForSurface } from "./chat-approvals";
 import { ChatDockSlot } from "./chat-dock";
 import { menuAction } from "./menu-model";
 import { useSyncExternalStore } from "react";
@@ -370,7 +370,14 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
             <Icon name="panel-right" size={16} />
           </button>
         )}
-        <ApprovalBadge onReveal={() => dispatch({ type: "select", id: "chat" })} />
+        <ApprovalBadge onReveal={() => {
+          // Go to the chat that is waiting, on the surface that owns it (it may be a dock or the popup, not Chat).
+          const waiting = chatApprovalStore.first();
+          if (waiting) chatApprovalStore.requestReveal(waiting);
+          const section = sectionForSurface(waiting?.surface ?? "chat");
+          if (section === null) setSideChat(true);
+          else dispatch({ type: "select", id: section });
+        }} />
         <AccountMenu user={session.user} actions={account} mac={platform === "macos"} />
       </header>
       <div className="sh-body">
@@ -449,7 +456,7 @@ function ApprovalBadge({ onReveal }: { onReveal: () => void }) {
   const count = useSyncExternalStore(chatApprovalStore.subscribe, chatApprovalStore.get, chatApprovalStore.get);
   if (count <= 0) return null;
   return (
-    <button type="button" className="sh-approval-badge" aria-label={`${count} pending approval${count === 1 ? "" : "s"}. Open chat`} title="A tool is waiting for your approval in Chat" onClick={onReveal}>
+    <button type="button" className="sh-approval-badge" aria-label={`${count} pending approval${count === 1 ? "" : "s"}. Open chat`} title="A chat is waiting for your approval" onClick={onReveal}>
       {count} approval{count === 1 ? "" : "s"}
     </button>
   );

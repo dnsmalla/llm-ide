@@ -340,10 +340,12 @@ test("a dock closed mid-turn keeps reading: the reply is saved with no view, and
   await tick(10);
   assert.equal(ctl.getState("a").phase, "streaming", "the stream is still being read");
   assert.equal(ctl.getState("a").pendingApprovals.length, 1, "the approval is not dropped with the view");
+  assert.deepEqual(ctl.pendingApprovalCounts(), [{ chatId: "a", count: 1 }], "and it is still reported for the app-wide badge");
   finish();
   await until(() => ctl.getState("a").phase === "idle" && ctl.getState("a").messages.at(-1).status === "done");
   await tick(10);
   assert.deepEqual((await msgs(store, "a")).map((r) => [r.role, r.content]), [["user", "hi"], ["assistant", "Hello world"]], "saved without the view ever coming back");
+  assert.deepEqual(ctl.pendingApprovalCounts(), [], "nothing waits once the turn has ended");
 });
 
 test("fullHistoryNext: a marker, then exactly the next message carries continueMode replay (cleared only after the next message is accepted)", async () => {

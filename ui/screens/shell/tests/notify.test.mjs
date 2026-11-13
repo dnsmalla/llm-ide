@@ -151,3 +151,41 @@ test("an admitted kind the user is away for is pushed with its count and key; no
   assert.equal(n.wantsPush({ push: true }), true);
   for (const v of [null, true, { push: "true" }, { shown: true }]) assert.equal(n.wantsPush(v), false);
 });
+
+test("the approval count sums every chat of every chat surface, mounted or not", async () => {
+  const { chatApprovalStore, sectionForSurface } = await load("chat-approvals.ts");
+  let fired = 0;
+  const off = chatApprovalStore.subscribe(() => { fired += 1; });
+  assert.equal(chatApprovalStore.get(), 0);
+  assert.equal(chatApprovalStore.first(), null);
+
+  // A background chat in the Chat section and a collapsed Explorer dock both count.
+  chatApprovalStore.publish("explorer", [{ chatId: "e1", count: 1 }]);
+  chatApprovalStore.publish("chat", [{ chatId: "c1", count: 2 }, { chatId: "c2", count: 1 }, { chatId: "idle", count: 0 }]);
+  assert.equal(chatApprovalStore.get(), 4);
+  assert.equal(fired, 2);
+  assert.deepEqual(chatApprovalStore.first(), { surface: "chat", chatId: "c1", count: 2 }, "the Chat section's chat is offered first");
+
+  // One surface going quiet (its popup closed, its chat answered) does not zero the others: the old single number did.
+  chatApprovalStore.publish("side", []);
+  assert.equal(fired, 2, "an unchanged report notifies nobody");
+  chatApprovalStore.publish("chat", []);
+  assert.equal(chatApprovalStore.get(), 1);
+  assert.deepEqual(chatApprovalStore.first(), { surface: "explorer", chatId: "e1", count: 1 });
+
+  // Reveal is sticky for the owning surface only: the dock peeks to open itself, the chat list consumes it.
+  chatApprovalStore.requestReveal(chatApprovalStore.first());
+  assert.equal(chatApprovalStore.peekReveal("chat"), null);
+  assert.equal(chatApprovalStore.takeReveal("chat"), null);
+  assert.equal(chatApprovalStore.peekReveal("explorer").chatId, "e1");
+  assert.equal(chatApprovalStore.takeReveal("explorer").chatId, "e1");
+  assert.equal(chatApprovalStore.takeReveal("explorer"), null, "consumed once");
+
+  assert.equal(sectionForSurface("chat"), "chat");
+  assert.equal(sectionForSurface("explorer"), "explorer");
+  assert.equal(sectionForSurface("review"), "conflicts");
+  assert.equal(sectionForSurface("side"), null);
+  chatApprovalStore.publish("explorer", []);
+  assert.equal(chatApprovalStore.get(), 0);
+  off();
+});

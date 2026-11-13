@@ -12,6 +12,7 @@ import { CoreMirrorChatStore } from "./merged-store.ts";
 import { TauriChatStore } from "./tauri-store";
 import { coreStatusStore } from "../shell/runtime";
 import { projectStore } from "../shell/project-store.ts";
+import { chatApprovalStore } from "../shell/chat-approvals";
 import { safeHref } from "./markdown";
 import { ApprovalsPanel, TrustBanner } from "./approvals";
 import type { ChatState } from "./state";
@@ -103,6 +104,9 @@ export function chatRuntime(surface = "chat"): ChatRuntime {
       noted = next;
     },
   };
+  // The app-wide approval badge counts every chat this controller holds, not only the one a mounted screen shows: a
+  // background chat or a collapsed dock waiting for an answer must still reach the badge, the tray and the notification.
+  controller.subscribe(() => chatApprovalStore.publish(surface, controller.pendingApprovalCounts()));
   // A hidden surface keeps reading its turn and sends its queue when the turn ends, but it does not render, so the
   // render-time `root` above would go stale across a project change: a queued message would be sent into the previous
   // project and its Bypass grants would survive. The runtime follows the project store itself.

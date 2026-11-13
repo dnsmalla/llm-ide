@@ -251,10 +251,13 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [activeId, controller, core, coreRestarts]);
 
   const state = useChatState(controller, activeId ?? "");
+  // The approval badge asks for one chat by id (it may be a background chat here): open it. The request is sticky, so
+  // a dock that had to be opened first still finds it when this screen mounts.
   useEffect(() => {
-    chatApprovalStore.set(state.pendingApprovals.length);
-    return () => chatApprovalStore.set(0);
-  }, [state.pendingApprovals.length]);
+    const apply = () => { const r = chatApprovalStore.takeReveal(surface); if (r) setActiveId(r.chatId); };
+    apply();
+    return chatApprovalStore.subscribeReveal(apply);
+  }, [surface, setActiveId]);
   useEffect(() => {
     const last = [...state.messages].reverse().find((m) => m.role === "assistant");
     if (!last || last.role !== "assistant") return;
