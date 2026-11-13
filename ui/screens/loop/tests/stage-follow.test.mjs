@@ -18,3 +18,10 @@ test("non-stage lines and disabled stages do not change the selection", () => {
   assert.equal(stageIdForLogLine(stages, "$ Refactor Apply"), null);
   assert.equal(stageIdForLogLine(stages, "$ Unknown"), null);
 });
+
+test("the stage executor logs through the follow callback", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
+  assert.match(src, /createStageDeps\(\{ \.\.\.stageContext\(/);
+  assert.match(src, /log: followLog \}, target\)/);
+});

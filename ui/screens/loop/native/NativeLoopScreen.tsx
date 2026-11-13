@@ -680,14 +680,16 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           setRunLog((l) => [...l, `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}`]);
         }
       }
+      // Both the runner and the stage executor log through this, so the Process pane follows the live stage.
+      const followLog = (line: string) => {
+        setRunLog((l) => [...l, line]);
+        const stageId = stageIdForLogLine(target.config.stages, line);
+        if (stageId !== null) setSelectedStageId(stageId);
+      };
       const runDeps: RunnerDeps = {
-        ...createStageDeps(stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), target),
+        ...createStageDeps({ ...stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), log: followLog }, target),
         isCancelled() { return cancelledRef.current; },
-        log(line) {
-          setRunLog((l) => [...l, line]);
-          const stageId = stageIdForLogLine(target.config.stages, line);
-          if (stageId !== null) setSelectedStageId(stageId);
-        },
+        log: followLog,
         holdWhilePaused,
         onProgress(e) {
           if (trail && e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration }));
