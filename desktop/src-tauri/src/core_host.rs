@@ -1043,6 +1043,7 @@ impl CoreHost {
             .chain(tail.iter().map(|l| redact_line(l, &literals)))
             .collect::<Vec<_>>()
             .join("\n");
+        let body = fit_log_body(&msg, &body, LOG_FILE_MAX_BYTES);
         let written = lock(&self.inner.data_dir)
             .clone()
             .map(|d| fsutil::write_private_atomic(&d.join(LOG_FILE), body.as_bytes(), LOG_FILE_MAX_BYTES).is_ok())
@@ -1053,6 +1054,27 @@ impl CoreHost {
             msg
         }
     }
+}
+
+/// 40 lines of up to 8 KB can exceed the file cap, and `write_private_atomic` refuses an oversized body, which
+/// would drop exactly the long failures (and the "details are in core.log" pointer). Keep the message line and the
+/// END of the output, where the error is.
+fn fit_log_body(msg: &str, body: &str, max: usize) -> String {
+    if body.len() <= max {
+        return body.to_string();
+    }
+    let marker = "\n[... earlier output truncated ...]\n";
+    let budget = max.saturating_sub(msg.len().min(max / 4) + marker.len());
+    let mut start = body.len() - budget;
+    while !body.is_char_boundary(start) {
+        start += 1;
+    }
+    // Begin on a line boundary when one is near, so the first kept line is whole.
+    if let Some(nl) = body[start..].find('\n').filter(|&i| i < 512) {
+        start += nl + 1;
+    }
+    let head: String = msg.chars().take(max / 4).collect();
+    format!("{head}{marker}{}", &body[start..])
 }
 
 enum Attempt {
@@ -1709,6 +1731,33 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(dir.join("core.log")).unwrap().permissions().mode() & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn a_failure_body_over_the_file_cap_is_truncated_from_the_front_not_dropped() {
+        let host = CoreHost::new();
+        let dir = std::env::temp_dir().join(format!("llmide-core-longfail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dir = fsutil::private_dir(&dir).unwrap();
+        *lock(&host.inner.data_dir) = Some(dir.clone());
+        for i in 0..ERROR_TAIL_LINES {
+            lock(&host.inner.log).push_back(format!("line {i} {}", "x".repeat(8000)));
+        }
+        lock(&host.inner.log).push_back("THE REAL ERROR \u{3042}".into());
+        let msg = host.failure("node exited early (1)".into());
+        assert!(msg.contains("core.log"), "the pointer survives a long failure: {msg}");
+        let body = std::fs::read_to_string(dir.join("core.log")).unwrap();
+        assert!(body.len() <= LOG_FILE_MAX_BYTES);
+        assert!(body.starts_with("node exited early (1)") && body.contains("truncated"));
+        assert!(body.ends_with("THE REAL ERROR \u{3042}"), "the end of the output is kept");
+    }
+
+    #[test]
+    fn fit_log_body_is_a_no_op_under_the_cap_and_char_safe_over_it() {
+        assert_eq!(fit_log_body("m", "m\nshort", 1024), "m\nshort");
+        let body = format!("m\n{}", "\u{3042}".repeat(1000));
+        let fitted = fit_log_body("m", &body, 600);
+        assert!(fitted.len() <= 600, "{}", fitted.len());
     }
 
     #[test]
