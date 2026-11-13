@@ -12,7 +12,8 @@ import { approveLoop } from "./approvals.ts";
 import { factoryRole, repoForIssue } from "./factory.ts";
 import { autoShipKind, decodeWorktreeDiff } from "./ship-model.ts";
 import { setRunRecordAutoShip, setRunRecordShip } from "./history.ts";
-import { postIssueText, postStageComment } from "../../factory/issue-comment-poster.ts";
+import { stageCommentText } from "../../factory/issue-comment-poster.ts";
+import { issueTarget, issueTrail, runSummaryBody, type IssueTrail, type TrailDeps } from "./issue-trail.ts";
 import { autoShipRun } from "../../factory/auto-ship.ts";
 import { readReworkCounts, watchMrsOnce, writeReworkCounts } from "../../factory/mr-watch.ts";
 import { chunkShipRequests, decodeShipResults, decodeWorktreeList } from "../../factory/board-model.ts";
@@ -20,7 +21,31 @@ import type { ShipStatus } from "../../factory/columns.ts";
 import { cancelRun, configureRunManager, concurrency, liveRuns, postRunNotice, projectGuardedFs, startRun } from "./run-manager.ts";
 
 let installed = false;
-const commentChains = new Map<string, Promise<void>>();
+
+/** Each live Factory run's issue trail (null when its item is not a hosted issue), so comments land in order. */
+const trails = new Map<string, IssueTrail | null>();
+
+/** Comments and new issues go through the core; Settings → Repositories decides what is allowed. */
+const trailDeps: TrailDeps = {
+  request: (path, body) => core.requestRaw(path, { method: "POST", body, timeoutMs: 15_000 }),
+  allowed: (provider, op) => readRepoConfig().operations[provider].includes(op),
+};
+
+function trailFor(runId: string, item: Parameters<typeof issueTarget>[0]): IssueTrail | null {
+  if (!trails.has(runId)) {
+    const target = issueTarget(item);
+    trails.set(runId, target ? issueTrail(trailDeps, target) : null);
+  }
+  return trails.get(runId) ?? null;
+}
+
+/** The autoShip log line ("Draft MR: <url>" / "MR not opened: <why>") as the summary's MR fact. */
+function shipLineToMr(line: string): { url: string } | { notOpened: string } | null {
+  if (line.startsWith("Draft MR: ")) return { url: line.slice("Draft MR: ".length) };
+  if (line.startsWith("MR not opened: ")) return { notOpened: line.slice("MR not opened: ".length) };
+  return null;
+}
+
 let busRunnerInstalled = false;
 let busDeps: Parameters<typeof pollOnce>[0] | null = null;
 let polling = false;
@@ -44,25 +69,17 @@ export function installRunManagerHost(): void {
     subscribeProject: (listener) => projectStore.subscribe(listener),
     onStageResult: (e) => {
       const fs = projectGuardedFs(hostFs, e.projectRoot, activeProject);
-      // One chain per run, so a slow lookup (the diff) never lets a later step's comment land first.
-      const prev = commentChains.get(e.runId) ?? Promise.resolve();
-      const next = prev.then(() => postStageComment({
-        request: (path, body) => core.requestRaw(path, { method: "POST", body, timeoutMs: 15_000 }),
+      trailFor(e.runId, e.item)?.post(() => stageCommentText({
         diffFiles: (runId) => invokeHost<unknown>("loop_worktree_diff", { runId }).then((raw) => decodeWorktreeDiff(raw).files),
         readText: (path) => fs.read(path, 200_000).then((r) => (r.status === "ok" ? r.text : null)),
-        allowed: (provider) => readRepoConfig().operations[provider].includes("commentIssue"),
-      }, e)).then(() => undefined, () => undefined);
-      commentChains.set(e.runId, next);
-      void next.then(() => { if (commentChains.get(e.runId) === next) commentChains.delete(e.runId); });
+        allowed: (provider) => trailDeps.allowed(provider, "commentIssue"),
+      }, e));
     },
     autoShip: async (e) => {
       const kind = autoShipKind({ mode: e.mode, statusCode: e.statusCode, needsDecision: e.needsDecision, failedRole: e.failedStage ? factoryRole(e.failedStage) : null });
       if (!kind) return "";
-      // Wait for this run's step comments, so the Ship comment lands after them.
-      await (commentChains.get(e.runId) ?? Promise.resolve());
       const fs = projectGuardedFs(hostFs, e.projectRoot, activeProject);
-      const request = (path: string, body: Record<string, unknown>) => core.requestRaw(path, { method: "POST", body, timeoutMs: 15_000 });
-      const allowed = (provider: "github" | "gitlab") => readRepoConfig().operations[provider].includes("commentIssue");
+      const trail = trailFor(e.runId, e.item);
       const out = await autoShipRun({
         repoConfig: () => readRepoConfig(),
         diff: (runId) => invokeHost<unknown>("loop_worktree_diff", { runId }).then(decodeWorktreeDiff),
@@ -77,13 +94,25 @@ export function installRunManagerHost(): void {
         },
         saveShip: (entry, ship) => setRunRecordShip(fs, entry, ship),
         saveBlocked: (entry, reason) => setRunRecordAutoShip(fs, entry, reason, new Date()),
-        comment: async (text) => { await postIssueText({ request, allowed }, e.item, text); },
+        // Queued behind this run's step comments, so the Ship comment lands after them.
+        comment: async (text) => { trail?.post(text); await trail?.idle(); },
         now: () => new Date(),
       }, { info: e.info, item: e.item, entry: e.entry, kind, failedStage: e.failedStage?.name ?? null, runPrefix: e.runPrefix });
       return "shipped" in out ? `Draft MR: ${out.shipped}` : `MR not opened: ${out.blocked}`;
     },
     // The bus runner reports a finished Factory run to the phone's claimed command (B5).
-    onRunFinished: (info) => noteRunFinished(info.runId, info.statusCode, info.statusSummary),
+    onRunFinished: (info) => {
+      noteRunFinished(info.runId, info.statusCode, info.statusSummary);
+      // The run summary is the trail's last comment; the trail is then dropped.
+      const trail = trailFor(info.runId, info.item);
+      trail?.post(async () => runSummaryBody({
+        process: "Factory", runId: info.runId, statusCode: info.statusCode, statusSummary: info.statusSummary, steps: info.steps,
+        changedFiles: await invokeHost<unknown>("loop_worktree_diff", { runId: info.runId }).then((raw) => decodeWorktreeDiff(raw).files, () => null),
+        durationSeconds: info.durationSeconds, costUsd: info.costUsd,
+        mergeRequest: shipLineToMr(info.shipLine),
+      }));
+      void (trail?.idle() ?? Promise.resolve()).then(() => trails.delete(info.runId));
+    },
   });
   installBusRunner();
   installMrWatch(hostFs, activeProject);

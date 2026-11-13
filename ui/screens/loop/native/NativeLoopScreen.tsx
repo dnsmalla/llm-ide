@@ -30,7 +30,9 @@ import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
-import { decodeWorktreeDiff, type WorktreeDiff } from "./ship-model.ts";
+import { decodeWorktreeDiff, shipTarget, type WorktreeDiff } from "./ship-model.ts";
+import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
+import { readRepoConfig } from "../../settings/repo-config";
 import { createStartGate } from "./start-gate.ts";
 import { readSchedule, scheduleTick } from "./schedule-tick.ts";
 import { unsavedWork } from "../../shell/unsaved-work.ts";
@@ -93,6 +95,12 @@ function ConfirmBar({ ask, run, onDone }: { ask: Ask; /** The action as it is NO
     </div>
   );
 }
+
+/** The issue trail goes through the core; Settings → Repositories decides what is allowed. */
+const loopTrailDeps: TrailDeps = {
+  request: (path, body) => core.requestRaw(path, { method: "POST", body, timeoutMs: 15_000 }),
+  allowed: (provider, op) => readRepoConfig().operations[provider].includes(op),
+};
 
 export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
@@ -600,6 +608,16 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     // card can never be left behind. Loaded on demand, so the Loop screen does not hard-depend on the Factory chunk.
     let releaseBoardRun: (() => void) | null = null;
     try {
+      // The issue trail: a run started from an issue comments there; any other run opens one when the loop asks for it.
+      const trailRunId = activeRun?.runId ?? newRunId(new Date(started), Math.random);
+      const trail = await trailForRun(loopTrailDeps, {
+        item: start ? { ...start.item, provider: start.item.provider ?? null } : null,
+        open: target.config.issueTrail === true,
+        repo: shipTarget({ repo: activeRun?.repo ?? workRoot ?? projectRoot ?? "" }, readRepoConfig()),
+        process: target.name, runId: trailRunId, goal: target.goal, steps: target.config.stages.filter((st) => st.enabled).map((st) => st.name),
+      });
+      if (trail) setRunLog((l) => [...l, `issue trail: ${trail.target.repo}#${trail.target.number}`]);
+      else if (target.config.issueTrail && !start) setRunLog((l) => [...l, "issue trail: no issue was opened (the repository is not in Settings → Repositories, Create issue is not allowed, or the token was refused)"]);
       if (activeRun && isFactoryLoop(target) && start) {
         try {
           const [intake, manager] = await Promise.all([import("../../factory/intake.ts"), import("./run-manager.ts")]);
@@ -615,6 +633,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         isCancelled() { return cancelledRef.current; },
         log(line) { setRunLog((l) => [...l, line]); },
         holdWhilePaused,
+        onProgress(e) {
+          if (trail && e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration }));
+        },
       });
       const needsDecision = isFactoryLoop(target) ? needsDecisionSummary(outcome) : null;
       if (needsDecision) outcome.statusSummary = needsDecision;
@@ -622,6 +643,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       let changedPaths: string[] = [];
       try { changedPaths = await invokeHost<string[]>("loop_changed_paths", changedPathArgs(activeRunRef.current?.runId ?? null, projectRoot)); } catch { changedPaths = []; }
       if (changedPaths.length) setRunLog((l) => [...l, `changed paths: ${changedPaths.join(", ")}`]);
+      trail?.post(runSummaryBody({
+        process: target.name, runId: trailRunId, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary,
+        steps: summarizeSteps(outcome.stages), changedFiles: changedPaths, durationSeconds: (Date.now() - started) / 1000,
+        costUsd: outcome.costUsd ?? null, mergeRequest: null,
+      }));
       setRunLog((l) => [...l, outcome.cancelled ? (cancelledRef.current ? "Loop cancelled." : `Loop aborted: ${outcome.statusSummary}`) : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
       if (!outcome.cancelled && !outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
         const failedRun = [...outcome.stages].reverse().find((o) => o.stage.kind === "regressionSweep" && !o.ok);
@@ -982,6 +1008,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
             <button type="button" className="loop-btn" onClick={() => { void revokeApprovals().then(() => { setApprovalState(null); if (loop) void refreshApproval(loop.id); setNotice("Revoked every host Loop command approval."); }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : "The approvals could not be revoked.")); }}>Revoke command approvals</button>
             <label className="loop-check"><input type="checkbox" checked={loop.config.openMergeRequest} onChange={(e) => patchLoop((l) => { l.config.openMergeRequest = e.target.checked; })} /> Offer Ship after a passed run</label>
+            <label className="loop-check"><input type="checkbox" checked={loop.config.issueTrail === true} onChange={(e) => patchLoop((l) => { l.config.issueTrail = e.target.checked; })} /> Open an issue per run and comment each step on it</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.alwaysUseWorktree || isFactoryLoop(loop)} disabled={isFactoryLoop(loop)} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
           </details>

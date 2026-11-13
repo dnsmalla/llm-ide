@@ -66,6 +66,11 @@ export interface LoopEngineConfig {
   useWorktreesForConcurrentRuns: boolean;
   alwaysUseWorktree: boolean;
   openMergeRequest: boolean;
+  /**
+   * Post each step and a run summary on a GitHub/GitLab issue (loop/native/issue-trail.ts). A run started from an issue
+   * uses that issue; any other run opens one in the run's repository. Off by default: it writes to the hosted repo.
+   */
+  issueTrail?: boolean;
   refactorBatchesPerRun: number | null;
   /** A per-run USD ceiling; null = no ceiling. Factory loops set 10. */
   maxCostUsd: number | null;
@@ -150,6 +155,7 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     useWorktreesForConcurrentRuns: bool(o.useWorktreesForConcurrentRuns, false),
     alwaysUseWorktree: bool(o.alwaysUseWorktree, false),
     openMergeRequest: bool(o.openMergeRequest, true),
+    issueTrail: bool(o.issueTrail, false),
     refactorBatchesPerRun: num(o.refactorBatchesPerRun),
     maxCostUsd: num(o.maxCostUsd),
   };
@@ -240,6 +246,7 @@ function encodeConfig(c: LoopEngineConfig): Record<string, unknown> {
     useWorktreesForConcurrentRuns: c.useWorktreesForConcurrentRuns,
     alwaysUseWorktree: c.alwaysUseWorktree,
     openMergeRequest: c.openMergeRequest,
+    ...(c.issueTrail ? { issueTrail: true } : {}),
     ...(c.repairModel !== null ? { repairModel: c.repairModel } : {}),
     ...(c.refactorBatchesPerRun !== null ? { refactorBatchesPerRun: c.refactorBatchesPerRun } : {}),
     ...(c.maxCostUsd !== null ? { maxCostUsd: c.maxCostUsd } : {}),

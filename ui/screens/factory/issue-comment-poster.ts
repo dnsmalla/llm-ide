@@ -3,6 +3,7 @@
 import { factoryRole } from "../loop/native/factory.ts";
 import type { LoopStage } from "../loop/native/model.ts";
 import { issueTarget, stageCommentBody, verdictLine, type CommentItem } from "./issue-comments.ts";
+import { postIssueComment } from "../loop/native/issue-trail.ts";
 
 export interface PosterDeps {
   request(path: string, body: Record<string, unknown>): Promise<{ status: number; body: unknown }>;
@@ -24,21 +25,24 @@ const quiet = async <T>(p: () => Promise<T>): Promise<T | null> => { try { retur
 /** Posts `text` on the item's issue when it is one and commenting is allowed. True when posted; never throws. */
 export async function postIssueText(d: Pick<PosterDeps, "request" | "allowed">, item: CommentItem, text: string): Promise<boolean> {
   const target = issueTarget(item);
-  if (!target || !d.allowed(target.provider)) return false;
-  const res = await quiet(() => d.request("/kb/issues/comment", { ...target, body: text }));
-  return res !== null && res.status >= 200 && res.status < 300;
+  return target ? postIssueComment({ request: d.request, allowed: (p) => d.allowed(p) }, target, text) : false;
+}
+
+/** The step comment for a finished stage, or null when this stage posts nothing. Never throws. */
+export async function stageCommentText(d: Omit<PosterDeps, "request">, e: StageEvent): Promise<string | null> {
+  const target = issueTarget(e.item);
+  const role = factoryRole(e.stage);
+  if (!target || (role !== null && SILENT.has(role)) || (e.stage.kind === "shellCommand" && e.stage.runOnce) || !d.allowed(target.provider)) return null;
+  const changedFiles = role === "implement" ? await quiet(() => d.diffFiles(e.runId)) : null;
+  const command = role === "verify" && typeof e.stage.command === "string" && !PLACEHOLDER.test(e.stage.command.trim()) ? e.stage.command : null;
+  const report = role === "review" ? "REVIEW.md" : role === "intake" ? "READINESS.md" : null;
+  const text = report ? await quiet(() => d.readText(`${e.runPrefix}/.factory/${report}`)) : null;
+  return stageCommentBody({ stageName: e.stage.name, role, ok: e.ok, runId: e.runId, mode: e.mode, iteration: e.iteration, changedFiles, testCommand: command, verdict: text ? verdictLine(text) : null });
 }
 
 /** True when the comment was posted. */
 export async function postStageComment(d: PosterDeps, e: StageEvent): Promise<boolean> {
   const target = issueTarget(e.item);
-  const role = factoryRole(e.stage);
-  if (!target || (role !== null && SILENT.has(role)) || (e.stage.kind === "shellCommand" && e.stage.runOnce) || !d.allowed(target.provider)) return false;
-  const changedFiles = role === "implement" ? await quiet(() => d.diffFiles(e.runId)) : null;
-  const command = role === "verify" && typeof e.stage.command === "string" && !PLACEHOLDER.test(e.stage.command.trim()) ? e.stage.command : null;
-  const report = role === "review" ? "REVIEW.md" : role === "intake" ? "READINESS.md" : null;
-  const text = report ? await quiet(() => d.readText(`${e.runPrefix}/.factory/${report}`)) : null;
-  const body = stageCommentBody({ stageName: e.stage.name, role, ok: e.ok, runId: e.runId, mode: e.mode, iteration: e.iteration, changedFiles, testCommand: command, verdict: text ? verdictLine(text) : null });
-  const res = await quiet(() => d.request("/kb/issues/comment", { ...target, body }));
-  return res !== null && res.status >= 200 && res.status < 300;
+  const body = target ? await stageCommentText(d, e) : null;
+  return target && body ? postIssueComment({ request: d.request, allowed: (p) => d.allowed(p) }, target, body) : false;
 }

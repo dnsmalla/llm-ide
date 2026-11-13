@@ -233,6 +233,29 @@ two jobs apart. Splitting them gives each its own iteration count, its own
   is idempotent and runs on every load, so this happens once, silently, with no
   action from the user.
 
+### Issue trail
+
+Every runner reports to a GitHub/GitLab issue the same way, through one shared module,
+`ui/screens/loop/native/issue-trail.ts`: one comment per finished step
+(`**<process> · <step>** — passed/failed`, the run id, the attempt, and only safe facts —
+changed file names, a test command with no `=` or `://`, one verdict line), then one **run
+summary** as the last comment (outcome, a table of every step with its result and attempts,
+changed files, time, cost, and the MR link or why none was opened). Comments are posted in
+order, one run at a time, and never fail or slow the run. Names from agents or users sit in
+code spans, so they cannot mention people or render links.
+
+- **Factory** (board and Loop screen): a run started from an issue comments on that issue.
+  Intake, Implement, Verify and Review post; Setup and the two gates stay silent. The Ship
+  comment and the run summary come last.
+- **Any other loop** (Refactoring, Test, a user loop): turn on *Open an issue per run and
+  comment each step on it* in the loop's options. The run then opens one issue in the
+  repository of its run root (it must be in Settings → Repositories), titled
+  `<loop name> run <run id>` and listing the enabled steps, and comments there. It is **off by
+  default** because it writes to the hosted repository.
+
+Settings → Repositories gates both writes: *Comment on issue* for comments and *Create
+issue* for a new issue. The token is the one saved for the provider in Settings → Built-in keys.
+
 ## Stages
 
 A stage is one step of the run (`LoopStage`). Seven kinds are described here; the enum also has `incidentTriage` and `sdkSurfaceDiff`, which this page does not cover:

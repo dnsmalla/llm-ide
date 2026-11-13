@@ -15,6 +15,7 @@ import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
 import { newRunId, repoPrefixFor } from "./worktree-run.ts";
+import { summarizeSteps } from "./issue-trail.ts";
 
 export type { RunMode } from "./factory.ts";
 
@@ -73,8 +74,12 @@ export interface RunManagerDeps {
   onStageResult?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; stage: LoopStage; ok: boolean; iteration: number; runPrefix: string }): void;
   /** The run's record was just written: the Factory opens its draft MR (or records why not). Returns a log line. */
   autoShip?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; info: WorktreeInfo; entry: { id: string; startedAt: string }; statusCode: string; needsDecision: boolean; failedStage: LoopStage | null; runPrefix: string }): Promise<string>;
-  /** A finished run's record was written (or held): the Factory bus runner reports it to the phone. */
-  onRunFinished?(info: { runId: string; itemKey: string; projectRoot: string; mode: RunMode; statusCode: string; statusSummary: string }): void;
+  /**
+   * A finished run's record was written (or held): the Factory bus runner reports it to the phone, and the issue trail
+   * posts the run summary. `steps`, `durationSeconds`, `costUsd` and `shipLine` (the autoShip log line,
+   * "" when none) describe the run for that summary.
+   */
+  onRunFinished?(info: { runId: string; itemKey: string; projectRoot: string; mode: RunMode; statusCode: string; statusSummary: string; item: RunItem; steps: { name: string; ok: boolean; attempts: number }[]; durationSeconds: number; costUsd: number | null; shipLine: string }): void;
 }
 
 /** The host's RunInfo (Phase A Task 4), camelCase on the wire. */
@@ -382,15 +387,22 @@ async function execute(run: ManagedRun): Promise<void> {
     catch (e) { appendLog(run, `run record not written: ${e instanceof Error ? e.message : String(e)}`); }
     // Only a record written now can carry the MR. A held record (project closed) is not auto-shipped: its card keeps
     // the manual Ship. The run stays live meanwhile, so the board hides Ship and cannot ship it twice.
+    let shipLine = "";
     if (entry && d.autoShip) {
       run.live.note = "Opening the MR";
       emit();
       const f = finished;
       const line = await d.autoShip({ runId: run.live.runId, projectRoot: run.live.projectRoot, mode: run.live.mode, item: run.item, info: f.info, entry, statusCode: runStatusCode(f.outcome), needsDecision: needsDecisionSummary(f.outcome) !== null, failedStage: f.outcome.failedStage, runPrefix: repoPrefixFor(run.live.projectRoot, f.info.worktree) }).catch((e: unknown) => `MR not opened: ${e instanceof Error ? e.message : String(e)}`);
       if (line) appendLog(run, line);
+      shipLine = line;
     }
     try {
-      d.onRunFinished?.({ runId: run.live.runId, itemKey: run.item.key, projectRoot: run.live.projectRoot, mode: run.live.mode, statusCode: runStatusCode(finished.outcome), statusSummary: finished.outcome.statusSummary });
+      const o = finished.outcome;
+      d.onRunFinished?.({
+        runId: run.live.runId, itemKey: run.item.key, projectRoot: run.live.projectRoot, mode: run.live.mode, statusCode: runStatusCode(o), statusSummary: o.statusSummary,
+        item: run.item, steps: summarizeSteps(o.stages),
+        durationSeconds: (d.now().getTime() - started.getTime()) / 1000, costUsd: o.costUsd ?? null, shipLine,
+      });
     } catch { /* a listener must never change the run's own outcome */ }
   }
   runs.delete(run.live.runId);
