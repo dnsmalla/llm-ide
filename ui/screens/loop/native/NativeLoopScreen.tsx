@@ -32,6 +32,7 @@ import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
 import { decodeWorktreeDiff, type WorktreeDiff } from "./ship-model.ts";
 import { createStartGate } from "./start-gate.ts";
+import { readSchedule, scheduleTick } from "./schedule-tick.ts";
 import { unsavedWork } from "../../shell/unsaved-work.ts";
 import "./native-loop.css";
 
@@ -214,9 +215,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     // `live` guards the race where the screen unmounts before listen() resolves: the listener is then removed on resolve.
     let live = true;
     let un: (() => void) | null = null;
-    void listen<{ stageId: string; stream: "stdout" | "stderr"; text: string }>("loop-stage-output", (e) => {
+    void listen<{ stageId: string; runId?: string | null; stream: "stdout" | "stderr"; text: string }>("loop-stage-output", (e) => {
       const text = e.payload.text;
       if (!text) return;
+      // The host tags each chunk with its run. Factory runs started elsewhere stream too: only this page's run is shown.
+      if (!runningRef.current || (e.payload.runId ?? null) !== (activeRunRef.current?.runId ?? null)) return;
       setRunLog((l) => {
         if (l.length === 0) return [text];
         const copy = [...l];
@@ -743,22 +746,22 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   runLoopRef.current = runLoop;
 
+  // The loops the scheduler starts are read when it fires, not when its timer was created.
+  const loadRef = useRef(load);
+  loadRef.current = load;
   useEffect(() => {
     if (!projectRoot) return;
     const key = `llmide.loopSchedule.v1.${projectRoot}`;
-    let saved: { cron?: string; last?: string } = {};
-    try { saved = JSON.parse(localStorage.getItem(key) ?? "{}") as typeof saved; } catch { saved = {}; }
-    const cron = (saved.cron ?? "").trim();
-    setScheduleCron(cron);
-    if (!cron || !validateCron(cron)) return;
-    let last = saved.last ?? "";
+    const stored = () => { try { return readSchedule(localStorage.getItem(key)); } catch { return readSchedule(null); } };
+    setScheduleCron(stored().cron);
+    // The timer runs whether or not a schedule exists yet, and reads the saved one on every pass, so typing, changing
+    // or clearing the cron takes effect on the next pass.
     const tick = () => {
-      const now = new Date();
-      const minute = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
-      if (minute === last || !cronMatches(cron, now)) return;
-      last = minute;
-      try { localStorage.setItem(key, JSON.stringify({ cron, last })); } catch { /* session only */ }
-      const scheduled = (load?.kind === "ok" ? load.store.loops : []).filter((l) => l.runsOnSchedule);
+      const { fire, next } = scheduleTick(stored(), new Date(), validateCron, cronMatches);
+      if (next) { try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* session only */ } }
+      if (!fire) return;
+      const now = loadRef.current;
+      const scheduled = (now?.kind === "ok" ? now.store.loops : []).filter((l) => l.runsOnSchedule);
       if (scheduled.length === 0) { setNotice("The schedule fired, but no loop is marked Run on schedule."); return; }
       if (runningRef.current) { setNotice("The schedule fired while a run is active; scheduled loops were skipped."); return; }
       setNotice(`Schedule fired: running ${scheduled.length} loop(s).`);
@@ -767,7 +770,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     tick();
     const timer = window.setInterval(tick, 30_000);
     return () => window.clearInterval(timer);
-  }, [projectRoot, load]);
+  }, [projectRoot]);
 
   const runScheduledNow = () => {
     if (!store) return;

@@ -54,3 +54,32 @@ test("what is left after a run's drain still waits behind the next start, so a s
   assert.match(wrapper, /if \(!ranRef\.current\) waitingRef\.current = new Set\(\);/);
   assert.doesNotMatch(wrapper, /\n\s*waitingRef\.current = new Set\(\);\n/, "no unconditional reset");
 });
+
+test("the Loop schedule is read on every pass: an edit applies, a cleared one stays cleared, a minute fires once", async () => {
+  const { readSchedule, scheduleTick } = await import("../native/schedule-tick.ts");
+  const valid = (c) => /^\d+ \d+ \* \* \*$/.test(c);
+  const matches = (c, now) => { const [m, h] = c.split(" ").map(Number); return now.getMinutes() === m && now.getHours() === h; };
+  const at = (h, m) => new Date(2026, 10, 13, h, m, 5);
+
+  assert.deepEqual(readSchedule(null), { cron: "", last: "" });
+  assert.deepEqual(readSchedule("not json"), { cron: "", last: "" });
+  assert.deepEqual(readSchedule(JSON.stringify({ cron: " 0 2 * * * ", last: "x" })), { cron: "0 2 * * *", last: "x" });
+
+  // Fires at its minute, once.
+  const first = scheduleTick({ cron: "0 2 * * *", last: "" }, at(2, 0), valid, matches);
+  assert.equal(first.fire, true);
+  assert.equal(scheduleTick(first.next, at(2, 0), valid, matches).fire, false, "the second pass in the same minute does not fire again");
+
+  // The user changed 02:00 to 03:00: the old time no longer fires, the new one does.
+  const edited = { cron: "0 3 * * *", last: "" };
+  assert.equal(scheduleTick(edited, at(2, 0), valid, matches).fire, false);
+  assert.equal(scheduleTick(edited, at(3, 0), valid, matches).fire, true);
+
+  // The user cleared the field: nothing fires and nothing is written back (the old code re-saved the old cron here).
+  assert.deepEqual(scheduleTick({ cron: "", last: "" }, at(2, 0), valid, matches), { fire: false, next: null });
+  assert.deepEqual(scheduleTick({ cron: "bogus", last: "" }, at(2, 0), valid, matches), { fire: false, next: null });
+
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
+  assert.match(src, /scheduleTick\(stored\(\), new Date\(\), validateCron, cronMatches\)/, "the page's timer reads the saved schedule on each pass");
+});
