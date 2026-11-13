@@ -56,10 +56,15 @@ impl ExitGate {
         ExitGate { exiting: AtomicBool::new(false), live: std::sync::atomic::AtomicUsize::new(0) }
     }
     fn exiting(&self) -> bool { self.exiting.load(Ordering::SeqCst) }
+    /// Asks every running stage to stop without waiting (for a path that must not block, such as the panic hook).
+    pub(crate) fn request_stop(&self) { self.exiting.store(true, Ordering::SeqCst); }
+    /// The exit was called off and the app keeps running (an update whose install failed): stages may run again.
+    /// Without this the gate would refuse every Loop and Self-Heal stage as "cancelled" until the next launch.
+    pub(crate) fn reopen(&self) { self.exiting.store(false, Ordering::SeqCst); }
     /// Asks every running stage to stop and waits until they have (each is terminated with its process group), up to
     /// `wait`. Returns how many were still running when the wait ended.
     pub(crate) fn stop_all(&self, wait: Duration) -> usize {
-        self.exiting.store(true, Ordering::SeqCst);
+        self.request_stop();
         let until = Instant::now() + wait;
         loop {
             let live = self.live.load(Ordering::SeqCst);
@@ -75,6 +80,16 @@ static EXIT_GATE: ExitGate = ExitGate::new();
 /// it is killed, so the wait covers that and a little more.
 pub(crate) fn stop_all_for_exit() -> usize {
     EXIT_GATE.stop_all(Duration::from_millis(3500))
+}
+
+/// Non-blocking form for the panic hook: running stages stop on their own threads' next poll.
+pub(crate) fn request_stop_all_for_exit() {
+    EXIT_GATE.request_stop();
+}
+
+/// The app did not exit after all (see `ExitGate::reopen`).
+pub(crate) fn resume_after_cancelled_exit() {
+    EXIT_GATE.reopen();
 }
 
 use serde::Serialize;
@@ -525,7 +540,15 @@ fn run_command_at_gated(work: &Path, command: &str, timeout_secs: Option<u64>, s
     let mut timed_out = false;
     let mut cancelled = false;
     let status = loop {
-        match child.try_wait().map_err(|e| format!("cannot wait for the stage: {e}"))? {
+        let waited = match child.try_wait() {
+            Ok(w) => w,
+            Err(e) => {
+                // Never leave the stage's process group running behind an early return.
+                child.terminate(grace);
+                return Err(format!("cannot wait for the stage: {e}"));
+            }
+        };
+        match waited {
             Some(s) => break Some(s),
             None if stop_requested() => {
                 cancelled = true;
@@ -1287,6 +1310,12 @@ mod tests {
         // Nothing starts once the app is exiting.
         let late = run_command_at_gated(&dir, "printf late", Some(5), None, &|| false, &gate).unwrap();
         assert!(late.cancelled && late.stdout.is_empty());
+        // An exit that was called off (a failed update install) lets stages run again.
+        gate.reopen();
+        let again = run_command_at_gated(&dir, "printf again", Some(5), None, &|| false, &gate).unwrap();
+        assert!(!again.cancelled);
+        assert_eq!(again.stdout, "again");
+        gate.request_stop();
         assert_eq!(gate.stop_all(Duration::from_millis(10)), 0);
         let _ = std::fs::remove_file(&pid_file);
     }
