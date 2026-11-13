@@ -62,7 +62,7 @@ export interface LibraryScreenProps {
 export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, loadExtensionCounts, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, onExportFile, initialHeight }: LibraryScreenProps): ReactNode {
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
-  // Reloaded on every pane change, so a count catches up after the user switches items on or off in a pane.
+  // Reloaded when the user opens or leaves a pane (not while a pane stays open), so a toggle shows on the way out.
   const [extensionCounts, setExtensionCounts] = useState<Readonly<Record<string, number | null>>>({});
   useEffect(() => {
     if (!loadExtensionCounts || !active) return undefined;

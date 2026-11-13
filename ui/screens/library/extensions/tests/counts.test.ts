@@ -10,7 +10,7 @@ const rows = (...enabled: boolean[]) => enabled.map((e) => ({ enabled: e }));
 test("counts the switched-on items of every group", async () => {
   const legacy = { plugins: async () => rows(true, false, true), llmSources: async () => rows(false), mcpPlugins: async () => rows(true) } as unknown as LegacyApi;
   const api = { installed: async () => ({ corrupt: false, items: rows(true, true, false, true) }) } as unknown as ExtensionsApi;
-  assert.deepEqual(await loadExtensionCounts(legacy, api), { plugins: 2, "llm-sources": 0, "mcp-plugins": 1, extensions: 3 });
+  assert.deepEqual(await loadExtensionCounts(legacy, api), { plugins: 2, "llm-sources": 0, "mcp-plugins": 0, extensions: 3 }, "an MCP row without consent is not on");
 });
 
 test("a group whose list fails is null (no badge), the others still count", async () => {
@@ -25,4 +25,17 @@ test("an abort rethrows instead of returning stale counts", async () => {
   const legacy = { plugins: async () => rows(), llmSources: async () => rows(), mcpPlugins: async () => rows() } as unknown as LegacyApi;
   const api = { installed: async () => ({ corrupt: false, items: [] }) } as unknown as ExtensionsApi;
   await assert.rejects(loadExtensionCounts(legacy, api, ac.signal));
+});
+
+test("an MCP server counts only when it loads in chats (enabled, consented, effective)", async () => {
+  const mcp = [
+    { enabled: true, consented: true, effective: true },
+    { enabled: true, consented: true },                      // older core: no effective field
+    { enabled: true, consented: false },                     // consent revoked
+    { enabled: true, consented: true, effective: false },    // its plugin is off
+    { enabled: false, consented: true },
+  ];
+  const legacy = { plugins: async () => rows(), llmSources: async () => rows(), mcpPlugins: async () => mcp } as unknown as LegacyApi;
+  const api = { installed: async () => ({ corrupt: false, items: [] }) } as unknown as ExtensionsApi;
+  assert.equal((await loadExtensionCounts(legacy, api))["mcp-plugins"], 2);
 });
