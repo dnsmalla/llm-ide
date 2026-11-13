@@ -977,7 +977,7 @@ export const BUILT_IN_TEMPLATES = [
         },
         {
           "defaultKey": "refactor-plan",
-          "defaultRevision": 4,
+          "defaultRevision": 5,
           "enabled": true,
           "id": "refactor/refactor-plan",
           "isDefault": true,
@@ -1062,7 +1062,7 @@ export const BUILT_IN_TEMPLATES = [
         },
         {
           "defaultKey": "refactor-apply",
-          "defaultRevision": 4,
+          "defaultRevision": 5,
           "enabled": true,
           "id": "refactor/refactor-apply",
           "isDefault": true,

@@ -397,7 +397,7 @@ export const DEFAULT_LOOP_SPECS = [
         },
         {
           "defaultKey": "refactor-plan",
-          "defaultRevision": 4,
+          "defaultRevision": 5,
           "enabled": true,
           "id": "refactor/refactor-plan",
           "isDefault": true,
@@ -482,7 +482,7 @@ export const DEFAULT_LOOP_SPECS = [
         },
         {
           "defaultKey": "refactor-apply",
-          "defaultRevision": 4,
+          "defaultRevision": 5,
           "enabled": true,
           "id": "refactor/refactor-apply",
           "isDefault": true,

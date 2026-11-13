@@ -751,9 +751,10 @@
         "status": "available",
         "reason": null
       },
-      "revision": 4,
+      "revision": 5,
       "knownPromptHashes": [
-        "3f01b3ca6fe917820028ad627553dfcbe55e71b8d045170f606995d6a7457050"
+        "3f01b3ca6fe917820028ad627553dfcbe55e71b8d045170f606995d6a7457050",
+        "b698d420392b8fa77f43e9e48d2b188333f7a143811f2d1fa68e490f6a6c1cbb"
       ]
     },
     {
@@ -830,9 +831,10 @@
         "status": "available",
         "reason": null
       },
-      "revision": 4,
+      "revision": 5,
       "knownPromptHashes": [
-        "ea584195d007675744fbe713a32562df8f483620f6d6f6060b397a2b6fabb2df"
+        "ea584195d007675744fbe713a32562df8f483620f6d6f6060b397a2b6fabb2df",
+        "2017f2ffbf098ece013603e94b101bc77e25f238a51b4e0601bdc03c7d6ca83b"
       ]
     },
     {
