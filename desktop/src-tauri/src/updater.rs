@@ -173,6 +173,9 @@ pub async fn update_install(app: tauri::AppHandle, host: tauri::State<'_, crate:
     if let Err(e) = update.install(bytes) {
         eprintln!("updater: install failed: {}", confirm::sanitize_line(&e.to_string(), 200));
         restore_after_failed_install(was_running, || { let _ = host.start(); }, || chat.rearm_quit_archive());
+        // On Windows the full exit cleanup already ran (above) and closed the gate that refuses new Loop and Self-Heal
+        // stages; the app is staying open after all, so stages must be allowed again. A no-op elsewhere.
+        crate::loop_runner::resume_after_cancelled_exit();
         return Err(herr("install_failed", "The update could not be installed."));
     }
     #[cfg(not(windows))]

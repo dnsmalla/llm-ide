@@ -567,6 +567,9 @@ pub fn run() {
             if let Some(h) = CORE.get() {
                 h.shutdown_from_panic();
             }
+            // Loop and Self-Heal stage commands lead their own process groups and would outlive the app. Non-blocking:
+            // their threads stop them on the next poll.
+            loop_runner::request_stop_all_for_exit();
             pty::kill_all_from_panic();
         }
         // Last-launch notice (the Mac's CrashReportBanner): a small redacted record in the app data dir.
