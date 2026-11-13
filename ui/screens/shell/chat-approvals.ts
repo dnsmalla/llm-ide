@@ -13,8 +13,14 @@ export interface WaitingChat {
 const bySurface = new Map<string, readonly WaitingChat[]>();
 let total = 0;
 const listeners = new Set<() => void>();
-let reveal: WaitingChat | null = null;
+let reveal: (WaitingChat & { at: number }) | null = null;
 const revealListeners = new Set<() => void>();
+/** A reveal nobody could show (its dock does not fit, its section is off) must not fire minutes later. */
+export const REVEAL_TTL_MS = 15_000;
+const liveReveal = (surface: string, now: number): WaitingChat | null => {
+  if (reveal && now - reveal.at > REVEAL_TTL_MS) reveal = null;
+  return reveal && reveal.surface === surface ? { surface: reveal.surface, chatId: reveal.chatId, count: reveal.count } : null;
+};
 
 const sameList = (a: readonly WaitingChat[], b: readonly WaitingChat[]) =>
   a.length === b.length && a.every((x, i) => x.chatId === b[i]!.chatId && x.count === b[i]!.count);
@@ -43,15 +49,15 @@ export const chatApprovalStore = {
 
   // --- reveal: "show me that chat". Sticky, because the owning screen may not be mounted yet when it is asked.
   /** Asks the owning surface to open its dock (if it has one) and select the chat. */
-  requestReveal(target: WaitingChat): void {
-    reveal = target;
+  requestReveal(target: WaitingChat, now = Date.now()): void {
+    reveal = { ...target, at: now };
     for (const l of [...revealListeners]) l();
   },
   /** The pending request for `surface`, left in place (a screen opens its dock on it; the chat list consumes it). */
-  peekReveal(surface: string): WaitingChat | null { return reveal && reveal.surface === surface ? reveal : null; },
+  peekReveal(surface: string, now = Date.now()): WaitingChat | null { return liveReveal(surface, now); },
   /** The pending request for `surface`, consumed: the caller selects the chat. */
-  takeReveal(surface: string): WaitingChat | null {
-    const r = reveal && reveal.surface === surface ? reveal : null;
+  takeReveal(surface: string, now = Date.now()): WaitingChat | null {
+    const r = liveReveal(surface, now);
     if (r) reveal = null;
     return r;
   },

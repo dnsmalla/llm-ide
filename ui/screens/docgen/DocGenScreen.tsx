@@ -62,11 +62,13 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const run = useSyncExternalStore(store.run.subscribe, store.run.getSnapshot, store.run.getSnapshot);
   // The approval badge points at a chat in this dock: open the dock (the chat list inside then selects the chat).
+  // Doc Gen and Visual share the "docgen" chat surface and are both mounted: only the one on screen opens its dock.
   useEffect(() => {
+    if (!p.active) return undefined;
     const open = () => { if (chatApprovalStore.peekReveal("docgen")) setShowChat(true); };
     open();
     return chatApprovalStore.subscribeReveal(open);
-  }, []);
+  }, [p.active]);
   // A project change resets the run: the shell asks first when that would drop a document or stop a generation.
   useEffect(() => unsavedWork.register(() => {
     if (replacesUnsavedDocument(store.run.getSnapshot())) return store.surface === "visual" ? "A generated visual that is not saved" : "A generated document that is not saved";

@@ -532,3 +532,14 @@ test("a question asked again while the history loads is kept; a live copy claims
   assert.equal(count("a", "continue"), 2, "the repeated question is shown after the earlier answered one");
   assert.equal(count("b", "go"), 1, "the saved copy of a live message is not shown twice");
 });
+
+test("a stream that drops with an approval parked leaves nothing counted for the app-wide badge", async () => {
+  // No attach transport (the plain browser): the stream just ends, with no terminal event.
+  const core = fakeCore({ streams: [[sse(FX.init), sse(FX.approval_request_tool)]] });
+  const { ctl } = make(core);
+  ctl.send("a", "hi", { mode: "ask" });
+  await until(() => ctl.getState("a").phase === "error");
+  assert.equal(ctl.getState("a").error.code, "STREAM_ENDED");
+  assert.deepEqual(ctl.getState("a").pendingApprovals, [], "the turn is over: its approval can no longer be answered");
+  assert.deepEqual(ctl.pendingApprovalCounts(), []);
+});

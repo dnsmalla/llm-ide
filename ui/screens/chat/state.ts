@@ -337,8 +337,10 @@ export function reduce(state: ChatState, action: Action): ChatState {
     case "stream_end": {
       // The stream closed. A terminal event (result/error) already set the phase; anything else is a drop.
       if (state.phase !== "streaming") return state;
+      // The turn is over for this client, so its parked approvals can no longer be answered: like every other way a
+      // turn ends, they are dropped. Left in place they would hold the app-wide approval badge above zero for good.
       return {
-        ...state, phase: "error", messages: finishLast(state.messages, "error"),
+        ...state, phase: "error", messages: finishLast(state.messages, "error"), pendingApprovals: [],
         error: { code: "STREAM_ENDED", message: "The stream ended before the turn finished.", retryable: true },
       };
     }

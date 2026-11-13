@@ -375,8 +375,11 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           const waiting = chatApprovalStore.first();
           if (waiting) chatApprovalStore.requestReveal(waiting);
           const section = sectionForSurface(waiting?.surface ?? "chat");
-          if (section === null) setSideChat(true);
-          else dispatch({ type: "select", id: section });
+          const shownIds = visibleSections.map((s) => s.id as string);
+          // Doc Gen and Visual share one chat surface: go to whichever of the two this profile shows.
+          const target = section === "docgen" && !shownIds.includes("docgen") && shownIds.includes("visual") ? "visual" : section;
+          if (target === null) setSideChat(true);
+          else dispatch({ type: "select", id: target as SectionId });
         }} />
         <AccountMenu user={session.user} actions={account} mac={platform === "macos"} />
       </header>

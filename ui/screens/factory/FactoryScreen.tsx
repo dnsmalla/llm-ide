@@ -4,6 +4,7 @@
 import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import type { SectionProps } from "../shell/sections";
 import { useFeatures } from "../shell/use-shell";
+import { chatApprovalStore } from "../shell/chat-approvals";
 import Review from "../review/index.tsx";
 import "./factory.css";
 
@@ -18,6 +19,12 @@ export function FactoryScreen({ active, projectRoot, focus }: SectionProps & { f
   const features = useFeatures();
   const boardUsable = Board !== null && features.usable.has("auto_tasks");
   const [tab, setTab] = useState<FactoryTab>("board");
+  // The approval badge points at a chat in the Review dock, which lives in the "Docs vs code" tab: show that tab.
+  useEffect(() => {
+    const open = () => { if (chatApprovalStore.peekReveal("review")) setTab("docs"); };
+    open();
+    return chatApprovalStore.subscribeReveal(open);
+  }, []);
   const shown: FactoryTab = boardUsable ? tab : "docs";
   // Mounted from the first visit on, so switching tabs keeps unsaved edits.
   const [processSeen, setProcessSeen] = useState(false);

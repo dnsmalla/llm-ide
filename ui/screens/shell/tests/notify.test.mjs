@@ -153,7 +153,7 @@ test("an admitted kind the user is away for is pushed with its count and key; no
 });
 
 test("the approval count sums every chat of every chat surface, mounted or not", async () => {
-  const { chatApprovalStore, sectionForSurface } = await load("chat-approvals.ts");
+  const { chatApprovalStore, sectionForSurface, REVEAL_TTL_MS } = await load("chat-approvals.ts");
   let fired = 0;
   const off = chatApprovalStore.subscribe(() => { fired += 1; });
   assert.equal(chatApprovalStore.get(), 0);
@@ -180,6 +180,11 @@ test("the approval count sums every chat of every chat surface, mounted or not",
   assert.equal(chatApprovalStore.peekReveal("explorer").chatId, "e1");
   assert.equal(chatApprovalStore.takeReveal("explorer").chatId, "e1");
   assert.equal(chatApprovalStore.takeReveal("explorer"), null, "consumed once");
+  // A request nobody could show (the dock did not fit, the section is off) does not fire long afterwards.
+  chatApprovalStore.requestReveal(chatApprovalStore.first(), 1_000);
+  assert.equal(chatApprovalStore.peekReveal("explorer", 1_000 + REVEAL_TTL_MS).chatId, "e1");
+  assert.equal(chatApprovalStore.peekReveal("explorer", 1_001 + REVEAL_TTL_MS), null);
+  assert.equal(chatApprovalStore.takeReveal("explorer", 1_001 + REVEAL_TTL_MS), null);
 
   assert.equal(sectionForSurface("chat"), "chat");
   assert.equal(sectionForSurface("explorer"), "explorer");
