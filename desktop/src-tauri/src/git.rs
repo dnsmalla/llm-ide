@@ -217,7 +217,177 @@ pub(crate) struct Opts<'a> {
     /// Turns OFF the runner's literal-pathspec env for a call that passes no paths. With it on, `git stash push
     /// --include-untracked` reports success and leaves the untracked files in place (checked with git 2.54).
     pub glob_pathspecs: bool,
+    /// With `user_config`: also let git read the SYSTEM config (read-only lookups of plain-data keys only; Git for
+    /// Windows keeps `core.autocrlf=true` there).
+    pub system_config: bool,
+    /// Tests only: apply the user's plain-data settings (see `user_data_args`) using this home. Outside tests they
+    /// are always applied from the real home; in tests they are off unless this is set, so a developer's own global
+    /// ignore file cannot change what a test sees.
+    pub user_data_home: Option<PathBuf>,
 }
+
+/// The git subcommand in `args`, skipping leading `-c <k=v>` pairs and other global options.
+pub(crate) fn subcommand<'a>(args: &[&'a str]) -> &'a str {
+    let mut i = 0;
+    while i < args.len() {
+        match args[i] {
+            "-c" => i += 2,
+            a if a.starts_with('-') => i += 1,
+            a => return a,
+        }
+    }
+    ""
+}
+
+/// A command that rewrites the working tree is never killed after the short default: on a large repository or a slow
+/// disk a branch switch or a stash takes longer than 30 s, and killing it half-way leaves a half-updated tree and a
+/// stale `index.lock` that blocks every later git call.
+const TREE_TIMEOUT: Duration = Duration::from_secs(300);
+
+fn default_timeout(args: &[&str]) -> Duration {
+    match subcommand(args) {
+        "switch" | "checkout" | "stash" | "merge" | "commit" | "restore" | "reset" => TREE_TIMEOUT,
+        _ => TIMEOUT,
+    }
+}
+
+// ---- the user's plain-data settings ---------------------------------------------------------------------------------
+//
+// The runner clears the environment and reads neither the global nor the system config, so that nothing in them can
+// start a program. That also dropped settings that are pure data and that the user's own git honours, with results
+// that damage their work: the global ignore file (so Stage All committed `.env`, `.DS_Store`, ...) and the line-ending
+// settings (so on Windows whole files were committed with CRLF). These few keys are read in a separate, read-only
+// lookup, validated, and handed back to every command as `-c` values. No key that can name a program is ever read.
+
+fn user_lookup(root: &Path, args: &[&str], home: &Option<PathBuf>) -> Option<String> {
+    let out = run_git_opts(root, args, 4096, &Opts { user_config: true, system_config: true, home: home.clone(), ..Opts::default() }).ok()?;
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!v.is_empty() && v.len() <= 1024 && !v.chars().any(|c| c.is_control())).then_some(v)
+}
+
+/// One of the accepted spellings of a plain-data value, lower-cased; anything else is dropped.
+fn one_of(v: Option<String>, accepted: &[&str]) -> Option<String> {
+    let v = v?.to_ascii_lowercase();
+    accepted.contains(&v.as_str()).then_some(v)
+}
+
+fn home_dir(home: &Option<PathBuf>) -> Option<PathBuf> {
+    home.clone().or_else(|| std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from)).filter(|p| p.is_absolute())
+}
+
+/// The user's global ignore file: `core.excludesFile`, else git's default `$XDG_CONFIG_HOME/git/ignore`
+/// (`~/.config/git/ignore`). Only an absolute path to an existing file is used.
+fn excludes_file(root: &Path, home: &Option<PathBuf>) -> Option<PathBuf> {
+    let set = user_lookup(root, &["config", "--type=path", "--get", "core.excludesFile"], home).map(PathBuf::from);
+    let fallback = || {
+        let base = if home.is_some() { None } else { std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()) };
+        Some(base.or_else(|| home_dir(home).map(|h| h.join(".config")))?.join("git").join("ignore"))
+    };
+    set.or_else(fallback).filter(|p| p.is_absolute() && p.is_file())
+}
+
+fn compute_user_data_args(root: &Path, home: &Option<PathBuf>) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(p) = excludes_file(root, home) {
+        out.extend(["-c".to_string(), format!("core.excludesFile={}", crate::fsutil::plain_path(&p).display())]);
+    }
+    for (key, accepted) in [
+        ("core.autocrlf", &["true", "false", "input"][..]),
+        ("core.eol", &["lf", "crlf", "native"][..]),
+        ("core.safecrlf", &["true", "false", "warn"][..]),
+    ] {
+        if let Some(v) = one_of(user_lookup(root, &["config", "--get", key], home), accepted) {
+            out.extend(["-c".to_string(), format!("{key}={v}")]);
+        }
+    }
+    out
+}
+
+const USER_DATA_TTL: Duration = Duration::from_secs(15);
+type UserDataCache = std::sync::Mutex<std::collections::HashMap<PathBuf, (Instant, Vec<String>)>>;
+static USER_DATA: std::sync::LazyLock<UserDataCache> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// `-c` arguments carrying the user's plain-data settings for `root`. Looked up at most every 15 s per repository:
+/// each lookup starts git a few times, and the runner is called for every status refresh.
+pub(crate) fn user_data_args(root: &Path, home: &Option<PathBuf>) -> Vec<String> {
+    if cfg!(test) || home.is_some() {
+        return compute_user_data_args(root, home);
+    }
+    let mut cache = USER_DATA.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, args)) = cache.get(root) {
+        if at.elapsed() < USER_DATA_TTL {
+            return args.clone();
+        }
+    }
+    drop(cache);
+    let args = compute_user_data_args(root, home);
+    cache = USER_DATA.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.len() > 64 { cache.clear(); }
+    cache.insert(root.to_path_buf(), (Instant::now(), args.clone()));
+    args
+}
+
+// ---- Git LFS --------------------------------------------------------------------------------------------------------
+//
+// LFS works through filter programs (`git lfs clean` / `smudge`), which this runner never starts. On a repository that
+// uses LFS that is not a missing feature but a way to damage it: staging stores the whole binary as an ordinary blob,
+// and anything that checks files out writes the LFS pointer text over the real file. Such commands are refused with a
+// message that says so, instead of being run.
+
+/// True when a line of a gitattributes file assigns the LFS filter (comments and other filters do not count).
+pub(crate) fn attributes_use_lfs(text: &str) -> bool {
+    text.lines().map(str::trim).any(|l| !l.starts_with('#') && l.split_whitespace().skip(1).any(|a| a == "filter=lfs"))
+}
+
+fn read_capped(path: &Path) -> String {
+    let Ok(f) = std::fs::File::open(path) else { return String::new() };
+    let mut s = Vec::new();
+    let _ = f.take(256 * 1024).read_to_end(&mut s);
+    String::from_utf8_lossy(&s).into_owned()
+}
+
+fn compute_uses_lfs(root: &Path) -> bool {
+    if attributes_use_lfs(&read_capped(&root.join(".gitattributes"))) || attributes_use_lfs(&read_capped(&root.join(".git").join("info").join("attributes"))) {
+        return true;
+    }
+    // Attribute files in sub-folders (tracked ones are enough: an LFS repository commits them).
+    let Ok(out) = run_git_opts(root, &["ls-files", "-z", "--", ":(glob)**/.gitattributes"], 256 * 1024, &Opts { glob_pathspecs: true, ..Opts::default() }) else { return false };
+    out.stdout.split(|b| *b == 0).filter(|p| !p.is_empty()).take(200).any(|p| attributes_use_lfs(&read_capped(&root.join(String::from_utf8_lossy(p).as_ref()))))
+}
+
+static LFS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, (Instant, bool)>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+pub(crate) fn uses_lfs(root: &Path) -> bool {
+    if cfg!(test) {
+        return compute_uses_lfs(root);
+    }
+    if let Some((at, v)) = LFS.lock().unwrap_or_else(|e| e.into_inner()).get(root) {
+        if at.elapsed() < USER_DATA_TTL {
+            return *v;
+        }
+    }
+    let v = compute_uses_lfs(root);
+    let mut cache = LFS.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.len() > 64 { cache.clear(); }
+    cache.insert(root.to_path_buf(), (Instant::now(), v));
+    v
+}
+
+/// True for a command that would run file content through the filters: staging, or anything that checks files out.
+/// Index-only and read-only forms are left alone (`restore --staged`, `switch -c`, `stash list`, `commit`).
+pub(crate) fn needs_filters(args: &[&str]) -> bool {
+    let has = |x: &str| args.contains(&x);
+    match subcommand(args) {
+        "add" | "apply" | "checkout" | "merge" | "reset" => true,
+        "restore" => !has("--staged") || has("--worktree"),
+        "switch" => !args.iter().skip_while(|a| **a != "switch").any(|a| *a == "-c"),
+        "stash" => has("push") || has("apply") || has("pop"),
+        _ => false,
+    }
+}
+
+pub(crate) const LFS_REFUSED: &str = "This repository uses Git LFS, and LLM-IDE's Source Control does not run the LFS filters. Staging here would store the large files as ordinary git blobs, and switching, discarding, stashing or merging would write LFS pointer text over the real files. Do this step with git in a terminal.";
 
 /// Runs `git <base> args` in `root`. `Err` on spawn failure, timeout or non-zero exit (stderr in the message).
 pub(crate) fn run_git(root: &Path, args: &[&str], cap: usize) -> R<Out> {
@@ -226,13 +396,27 @@ pub(crate) fn run_git(root: &Path, args: &[&str], cap: usize) -> R<Out> {
 
 pub(crate) fn run_git_opts(root: &Path, args: &[&str], cap: usize, opts: &Opts) -> R<Out> {
     check_repo(root)?;
+    if !opts.user_config && needs_filters(args) && uses_lfs(root) {
+        return gerr("lfs_unsupported", LFS_REFUSED);
+    }
     let git = find_git().ok_or(FsError { code: "git_unavailable", message: "git was not found on PATH".into() })?;
+    // The user's ignore file and line-ending settings (plain data). Never for the lookups themselves (`user_config`).
+    let user_data = if opts.user_config {
+        Vec::new()
+    } else if let Some(h) = &opts.user_data_home {
+        user_data_args(root, &Some(h.clone()))
+    } else if cfg!(test) {
+        Vec::new()
+    } else {
+        user_data_args(root, &None)
+    };
     let mut cmd = Command::new(git);
-    cmd.args(base_args()).args(args).current_dir(root).env_clear();
-    cmd.env("PATH", fallback_path())
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_SYSTEM", NULL_DEVICE)
-        .env("GIT_TERMINAL_PROMPT", "0")
+    cmd.args(base_args()).args(user_data).args(args).current_dir(root).env_clear();
+    cmd.env("PATH", fallback_path()).env("GIT_TERMINAL_PROMPT", "0");
+    if !(opts.user_config && opts.system_config) {
+        cmd.env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_CONFIG_SYSTEM", NULL_DEVICE);
+    }
+    cmd
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_LITERAL_PATHSPECS", if opts.glob_pathspecs { "0" } else { "1" })
         .env("GIT_PAGER", "cat")
@@ -302,7 +486,7 @@ pub(crate) fn run_git_opts(root: &Path, args: &[&str], cap: usize, opts: &Opts) 
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break Some(s),
-            Ok(None) if start.elapsed() > opts.timeout.unwrap_or(TIMEOUT) => break None,
+            Ok(None) if start.elapsed() > opts.timeout.unwrap_or_else(|| default_timeout(args)) => break None,
             Ok(None) => std::thread::sleep(Duration::from_millis(5)),
             Err(e) => return gerr("io", format!("git wait failed: {e}")),
         }
@@ -661,6 +845,107 @@ mod tests {
             .output()
             .unwrap();
         assert!(o.status.success(), "{args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+
+    #[test]
+    fn the_subcommand_is_found_behind_global_options() {
+        assert_eq!(subcommand(&["status", "--porcelain"]), "status");
+        assert_eq!(subcommand(&["-c", "commit.gpgsign=false", "stash", "push"]), "stash");
+        assert_eq!(subcommand(&["--no-pager", "show", "x"]), "show");
+        assert_eq!(subcommand(&[]), "");
+    }
+
+    #[test]
+    fn tree_writing_commands_get_the_long_timeout() {
+        for a in [&["switch", "--no-guess", "x"][..], &["-c", "commit.gpgsign=false", "stash", "push"], &["commit", "-F", "-"], &["merge", "x"], &["restore", "--worktree", "--", "a"]] {
+            assert_eq!(default_timeout(a), TREE_TIMEOUT, "{a:?}");
+        }
+        assert_eq!(default_timeout(&["status"]), TIMEOUT);
+        assert_eq!(default_timeout(&["diff", "--no-ext-diff"]), TIMEOUT);
+    }
+
+    #[test]
+    fn lfs_attributes_and_the_commands_that_need_the_filters() {
+        assert!(attributes_use_lfs("*.psd filter=lfs diff=lfs merge=lfs -text\n"));
+        assert!(attributes_use_lfs("# media\n  assets/** filter=lfs\n"));
+        assert!(!attributes_use_lfs("# *.psd filter=lfs\n*.txt text\n*.x filter=other\n"));
+        assert!(!attributes_use_lfs(""));
+        for writes in [&["add", "--", "a"][..], &["apply", "--cached", "-"], &["switch", "--no-guess", "x"], &["restore", "--worktree", "--", "a"], &["restore", "--", "a"], &["-c", "commit.gpgsign=false", "stash", "push"], &["stash", "pop"], &["merge", "x"], &["merge", "--abort"]] {
+            assert!(needs_filters(writes), "{writes:?}");
+        }
+        for safe in [&["status"][..], &["restore", "--staged", "--", "a"], &["switch", "-c", "new"], &["stash", "list", "-z"], &["stash", "drop"], &["commit", "-F", "-"], &["diff"], &["rm", "--cached", "-r", "--", "a"], &["config", "--get", "user.name"]] {
+            assert!(!needs_filters(safe), "{safe:?}");
+        }
+    }
+
+    #[test]
+    fn an_lfs_repository_refuses_staging_and_checkouts_but_still_reads() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("lfs-refuse");
+        g(&r, &["init", "-q"]);
+        fs::write(r.join(".gitattributes"), "*.bin filter=lfs diff=lfs merge=lfs -text\n").unwrap();
+        fs::write(r.join("big.bin"), vec![7u8; 4096]).unwrap();
+        let add = run_git(&r, &["add", "--", "big.bin"], 4096);
+        assert_eq!(add.as_ref().err().map(|e| e.code), Some("lfs_unsupported"), "staging would store the binary as an ordinary blob");
+        assert!(add.err().unwrap().message.contains("Git LFS"));
+        assert_eq!(run_git(&r, &["switch", "--no-guess", "x"], 4096).err().map(|e| e.code), Some("lfs_unsupported"));
+        // Nothing was staged, and reading still works.
+        let st = run_git(&r, &["status", "--porcelain"], 4096).unwrap();
+        assert!(String::from_utf8_lossy(&st.stdout).contains("?? big.bin"));
+        // A sub-folder's attribute file counts once it is tracked.
+        let n = scratch("lfs-nested");
+        g(&n, &["init", "-q"]);
+        fs::create_dir_all(n.join("assets")).unwrap();
+        fs::write(n.join("assets/.gitattributes"), "*.psd filter=lfs\n").unwrap();
+        assert!(!uses_lfs(&n));
+        g(&n, &["add", "assets/.gitattributes"]);
+        assert!(uses_lfs(&n));
+        let _ = fs::remove_dir_all(&r);
+        let _ = fs::remove_dir_all(&n);
+    }
+
+    #[test]
+    fn the_users_global_ignore_file_and_line_ending_settings_reach_every_command() {
+        if !have_git() {
+            return;
+        }
+        let r = scratch("user-data");
+        g(&r, &["init", "-q"]);
+        fs::write(r.join(".env"), "SECRET=1\n").unwrap();
+        fs::write(r.join("app.txt"), "a\n").unwrap();
+        let untracked = |opts: &Opts| String::from_utf8_lossy(&run_git_opts(&r, &["status", "--porcelain"], 4096, opts).unwrap().stdout).into_owned();
+
+        // Before: with the user's settings unread, the secret file is offered for staging (Stage All would commit it).
+        assert!(untracked(&Opts::default()).contains(".env"));
+
+        // The default location, ~/.config/git/ignore.
+        let h1 = scratch("user-data-home1");
+        fs::create_dir_all(h1.join(".config/git")).unwrap();
+        fs::write(h1.join(".config/git/ignore"), ".env\n").unwrap();
+        let with1 = untracked(&Opts { user_data_home: Some(h1.clone()), ..Opts::default() });
+        assert!(!with1.contains(".env") && with1.contains("app.txt"), "{with1}");
+
+        // core.excludesFile in the global config, with `~` expanded, plus the line-ending settings.
+        let h2 = scratch("user-data-home2");
+        fs::write(h2.join("my-ignore"), ".env\n").unwrap();
+        fs::write(h2.join(".gitconfig"), "[core]\n\texcludesFile = ~/my-ignore\n\tautocrlf = input\n\teol = lf\n\tsafecrlf = bogus\n").unwrap();
+        let args = user_data_args(&r, &Some(h2.clone()));
+        assert!(args.iter().any(|a| a.starts_with("core.excludesFile=") && a.ends_with("my-ignore")), "{args:?}");
+        assert!(args.contains(&"core.autocrlf=input".to_string()) && args.contains(&"core.eol=lf".to_string()), "{args:?}");
+        assert!(!args.iter().any(|a| a.starts_with("core.safecrlf=")), "an unknown value is dropped, not passed on: {args:?}");
+        assert!(args.iter().step_by(2).all(|a| a == "-c"), "only -c pairs: {args:?}");
+        assert!(!untracked(&Opts { user_data_home: Some(h2.clone()), ..Opts::default() }).contains(".env"));
+
+        // Nothing that can run a program is ever taken from the user's config.
+        let h3 = scratch("user-data-home3");
+        fs::write(h3.join(".gitconfig"), "[core]\n\tfsmonitor = /bin/false\n\tpager = /bin/false\n\thooksPath = /tmp\n[alias]\n\tstatus = !false\n").unwrap();
+        assert!(user_data_args(&r, &Some(h3.clone())).is_empty());
+        assert!(untracked(&Opts { user_data_home: Some(h3.clone()), ..Opts::default() }).contains(".env"));
+        for d in [&r, &h1, &h2, &h3] {
+            let _ = fs::remove_dir_all(d);
+        }
     }
 
     #[test]
