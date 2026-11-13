@@ -1035,23 +1035,40 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current || startGateRef.current.held, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <section className="loop-card loop-overview">
           <h2>Overview</h2>
+          {loopUsesInputPath(loop) ? (
+            <div className="loop-field">
+              <span>Input path — the folder to refactor</span>
+              <div className="loop-inline">
+                <input aria-label="Input path" value={inputDraft?.loopId === loop.id ? inputDraft.text : loop.inputPath} placeholder="(whole repository)" onChange={(e) => {
+                  const text = e.target.value;
+                  const r = normalizeInputPath(text);
+                  if ("error" in r) { setInputDraft({ loopId: loop.id, text, error: r.error }); return; }
+                  setInputDraft({ loopId: loop.id, text, error: null });
+                  patchLoop((l) => { l.inputPath = r.path; });
+                }} />
+                <button type="button" className="loop-btn" title="Choose the folder to refactor" onClick={() => { void (async () => {
+                  try {
+                    const choice = await invokeHost<{ token: string } | null>("pick_folder", { title: "Choose the folder to refactor" });
+                    if (!choice) return;
+                    const picked = await invokeHost<{ path: string }>("pick_folder_redeem", { token: choice.token });
+                    const root = workRoot ?? projectRoot;
+                    const rel = picked.path === root ? "" : picked.path.startsWith(`${root}/`) ? picked.path.slice(root.length + 1) : null;
+                    if (rel === null) { setInputDraft({ loopId: loop.id, text: '', error: "Choose a folder inside this repository." }); return; }
+                    const r = normalizeInputPath(rel);
+                    if ("error" in r) { setInputDraft({ loopId: loop.id, text: '', error: r.error }); return; }
+                    setInputDraft({ loopId: loop.id, text: r.path, error: null });
+                    patchLoop((l) => { l.inputPath = r.path; });
+                  } catch (e) { setInputDraft({ loopId: loop.id, text: '', error: e instanceof Error ? e.message : String(e) }); }
+                })(); }}>+</button>
+              </div>
+              <span className="loop-native-hint">Choose a folder, or type a repository-relative path. Empty means the whole repository.</span>
+              {inputDraft?.loopId === loop.id && inputDraft.error ? <span className="loop-warn">{inputDraft.error}</span> : null}
+            </div>
+          ) : null}
           <label className="loop-field"><span>Name</span><input value={loop.name} onChange={(e) => patchLoop((l) => { l.name = e.target.value; })} /></label>
           <label className="loop-field"><span>Goal — what is this loop trying to achieve?</span><textarea rows={2} value={loop.goal ?? ""} onChange={(e) => patchLoop((l) => { l.goal = e.target.value || null; })} /></label>
           <label className="loop-field"><span>Acceptance criteria — what observable condition means done?</span><textarea rows={2} value={loop.acceptanceCriteria ?? ""} placeholder="Optional; included in repair/skill prompts." onChange={(e) => patchLoop((l) => { l.acceptanceCriteria = e.target.value || null; })} /></label>
           <label className="loop-field"><span>Scope globs (comma separated)</span><input value={loop.scopeGlobs.join(", ")} placeholder="src/**, tests/**" onChange={(e) => patchLoop((l) => { l.scopeGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
-          {loopUsesInputPath(loop) ? (
-            <label className="loop-field"><span>Input path — the folder to refactor</span>
-              <input value={inputDraft?.loopId === loop.id ? inputDraft.text : loop.inputPath} placeholder="(whole repository)" onChange={(e) => {
-                const text = e.target.value;
-                const r = normalizeInputPath(text);
-                if ("error" in r) { setInputDraft({ loopId: loop.id, text, error: r.error }); return; }
-                setInputDraft({ loopId: loop.id, text, error: null });
-                patchLoop((l) => { l.inputPath = r.path; });
-              }} />
-              <span className="loop-native-hint">Relative to the repository root. Leave empty to work on the whole repository; enter a folder such as src/billing to limit the work to it.</span>
-              {inputDraft?.loopId === loop.id && inputDraft.error ? <span className="loop-warn">{inputDraft.error}</span> : null}
-            </label>
-          ) : null}
           <div className="loop-gates">
             <h3>{enabledGates.length} gating check{enabledGates.length === 1 ? "" : "s"}.</h3>
             <p className="loop-native-hint">Every iteration re-runs all stages from the top until each gating check passes.</p>
