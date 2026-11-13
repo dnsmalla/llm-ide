@@ -55,6 +55,9 @@ fn graph_rel(mode: &str) -> &'static str {
     }
 }
 
+/// The error a cancelled run returns; callers (and the screen) tell it apart from "the generator failed".
+pub const CANCELLED: &str = "graph generation cancelled";
+
 fn run_gk(node: &Path, cli: &Path, args: &[String]) -> Result<(), String> {
     // A bundled CLI sits inside the app bundle. In a checkout build the bundle lives under `desktop/`,
     // whose package.json says `"type": "module"`, so Node treats the CLI's `require` calls as ESM and fails.
@@ -80,7 +83,7 @@ fn run_gk(node: &Path, cli: &Path, args: &[String]) -> Result<(), String> {
         let mut slot = CHILD.lock().map_err(|_| "the graph runner is unavailable")?;
         let Some(running) = slot.as_mut() else {
             let _ = std::fs::remove_file(&temp);
-            return Err("graph generation cancelled".into());
+            return Err(CANCELLED.into());
         };
         match running.try_wait().map_err(|e| format!("cannot wait for the GraphKit generator: {e}"))? {
             Some(status) => {
@@ -270,8 +273,12 @@ pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target:
 #[tauri::command]
 pub fn graph_cancel() -> bool {
     let Ok(mut slot) = CHILD.lock() else { return false };
-    let Some(child) = slot.as_mut() else { return false };
+    // Take the child OUT of the slot: the runner polls the slot, and an empty one is how it learns the run
+    // was cancelled (a killed child left in place was reported as "the generator failed").
+    let Some(mut child) = slot.take() else { return false };
+    drop(slot);
     let _ = child.kill();
+    let _ = child.wait(); // reap it
     true
 }
 
@@ -285,6 +292,27 @@ mod tests {
         assert_eq!(graph_rel("memory"), "system/graph/graph-memory.json");
         assert_eq!(graph_rel("all"), "system/graph/graph-all.json");
         assert!(!Path::new(graph_rel("code")).is_absolute());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_run_reports_cancellation_not_a_generator_failure() {
+        let dir = std::env::temp_dir().join(format!("llmide-gk-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("slow.js");
+        std::fs::write(&script, "sleep 30\n").unwrap();
+        // `sh` stands in for node: it runs the copied script.
+        let runner = std::thread::spawn(move || run_gk(Path::new("/bin/sh"), &script, &[]));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while CHILD.lock().map(|g| g.is_none()).unwrap_or(true) {
+            assert!(Instant::now() < deadline, "the child never started");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(graph_cancel());
+        assert_eq!(runner.join().unwrap().unwrap_err(), CANCELLED);
+        assert!(!graph_cancel(), "nothing left to cancel");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
