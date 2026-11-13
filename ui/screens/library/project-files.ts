@@ -40,6 +40,48 @@ export function decodeProjectEntries(body: unknown): ProjectEntry[] {
   return out.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name, "en") : a.kind === "dir" ? -1 : 1));
 }
 
+/** One `fs_list_dir` page: its entries, the folder's filtered total, and how many entries follow this page. */
+export interface ProjectPage {
+  entries: ProjectEntry[];
+  /** The host's `total` (entries that pass its filters), or null when the answer carries none. */
+  total: number | null;
+  /** The offset to ask for the next page; null on the last page. */
+  nextOffset: number | null;
+  /** Entries after this page, from `total` and `next_offset`; 0 when the page is complete. */
+  remaining: number;
+}
+
+export function decodeProjectPage(body: unknown): ProjectPage {
+  const total = isRecord(body) && typeof body.total === "number" && Number.isFinite(body.total) ? body.total : null;
+  const nextOffset = isRecord(body) && typeof body.next_offset === "number" && Number.isFinite(body.next_offset) ? body.next_offset : null;
+  return { entries: decodeProjectEntries(body), total, nextOffset, remaining: nextOffset !== null && total !== null ? Math.max(0, total - nextOffset) : 0 };
+}
+
+/**
+ * Files under `dir`, following every page of every folder (the host caps a page), up to `cap`. `isStale` is checked
+ * between host calls so a walk that was superseded or unmounted stops listing instead of finishing a dead count.
+ */
+export async function countProjectFiles(
+  list: (path: string, offset: number) => Promise<unknown>,
+  dir: string,
+  isStale: () => boolean,
+  cap = 5000,
+): Promise<number> {
+  let n = 0;
+  let offset: number | null = 0;
+  while (offset !== null) {
+    if (isStale()) return n;
+    let page: ProjectPage;
+    try { page = decodeProjectPage(await list(dir, offset)); } catch { return n; } // unreadable subtree
+    for (const e of page.entries) {
+      if (n >= cap || isStale()) return Math.min(n, cap);
+      if (e.kind === "dir") n += await countProjectFiles(list, e.path, isStale, cap - n); else n += 1;
+    }
+    offset = page.nextOffset !== null && page.nextOffset > offset ? page.nextOffset : null;
+  }
+  return Math.min(n, cap);
+}
+
 /** A text read for the read-only viewer; null for binary/too-large. */
 export interface ProjectFileBody {
   text: string;

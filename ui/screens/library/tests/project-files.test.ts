@@ -43,3 +43,32 @@ test("unsaved Code/Data edits ask before a note or section click closes the file
   // Closing the view clears the flag, so a later click does not ask about edits that no longer exist.
   assert.match(src, /setProjectFile\(null\);\n    setProjectFileDirty\(false\);\n  \}, \[state\.selectedRel\]\);/);
 });
+
+import { countProjectFiles, decodeProjectPage } from "../project-files.ts";
+
+const page = (names: string[], extra: Record<string, unknown> = {}) => ({ entries: names.map((n) => ({ name: n, path: `d/${n}`, kind: "file" })), ...extra });
+
+test("decodeProjectPage keeps the host's total and says how many entries follow", () => {
+  const p = decodeProjectPage(page(["a", "b"], { total: 5, next_offset: 2 }));
+  assert.deepEqual({ total: p.total, nextOffset: p.nextOffset, remaining: p.remaining, n: p.entries.length }, { total: 5, nextOffset: 2, remaining: 3, n: 2 });
+  const last = decodeProjectPage(page(["a"], { total: 1, next_offset: null }));
+  assert.equal(last.remaining, 0);
+  assert.equal(decodeProjectPage(null).remaining, 0);
+});
+
+test("the file count follows every page, so a folder over one page is not cut short", async () => {
+  const all = Array.from({ length: 7 }, (_, i) => `f${i}`);
+  const list = async (_dir: string, offset: number) => {
+    const slice = all.slice(offset, offset + 3);
+    return page(slice, { total: all.length, next_offset: offset + 3 < all.length ? offset + 3 : null });
+  };
+  assert.equal(await countProjectFiles(list, "d", () => false), 7);
+});
+
+test("a count walk that became stale stops listing", async () => {
+  let calls = 0;
+  let stale = false;
+  const list = async (_dir: string, offset: number) => { calls += 1; stale = true; return page(["a", "b"], { total: 100, next_offset: offset + 2 }); };
+  await countProjectFiles(list, "d", () => stale);
+  assert.equal(calls, 1, "no further page is requested once the walk is stale");
+});

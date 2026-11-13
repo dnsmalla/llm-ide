@@ -8,12 +8,13 @@ import { fileKind, fileKindIcon } from "../explorer/file-kind.ts";
 import { shellBus } from "../shell/bus";
 import { Dialog } from "./write/Dialog";
 import { MarkdownView } from "./MarkdownView";
-import { PROJECT_ROOTS, decodeProjectEntries, decodeProjectFile, projectSaveRequest, type ProjectEntry } from "./project-files.ts";
+import { PROJECT_ROOTS, countProjectFiles, decodeProjectFile, decodeProjectPage, projectSaveRequest, type ProjectEntry } from "./project-files.ts";
 import { addFilesToFolder, addSummary, createFolder, pickReason, planRemove, runRemove, validateEntryName, type Mutations, type RemovePlan } from "./project-ops.ts";
 import { Floating } from "../shell/Floating";
 
 export interface ProjectFilesDeps {
-  list: (path: string) => Promise<unknown>;
+  /** One page of a folder; `offset` is the host's `next_offset` of the previous page (0 = the first). */
+  list: (path: string, offset?: number) => Promise<unknown>;
   read: (path: string) => Promise<unknown>;
   /** Add and remove (trash only). Absent: the tree is read-only and "+" opens Explorer. */
   mutate?: Mutations;
@@ -34,6 +35,8 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
   const [roots, setRoots] = useState<Record<string, ProjectEntry[] | "error" | undefined>>({});
   const [counts, setCounts] = useState<Record<string, number | undefined>>({});
   const [children, setChildren] = useState<Map<string, ProjectEntry[]>>(new Map());
+  /** Folders (roots included) with entries after the listed ones: the offset of the next page and how many follow. */
+  const [more, setMore] = useState<Map<string, { next: number; remaining: number }>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [closedRoots, setClosedRoots] = useState<Set<string>>(new Set());
   const [selectedDir, setSelectedDir] = useState<string | null>(null);
@@ -52,32 +55,49 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
   const childrenRef = useRef(children);
   childrenRef.current = children;
   const mutate = deps.mutate;
+  /** Per category: bumped by every new count walk and on unmount; a walk whose token is no longer current stops listing. */
+  const countToken = useRef<Record<string, number>>({});
+  useEffect(() => () => { for (const k of Object.keys(countToken.current)) countToken.current[k]! += 1; }, []);
+  const noteMore = useCallback((path: string, page: { nextOffset: number | null; remaining: number }) => {
+    setMore((m) => {
+      const n = new Map(m);
+      if (page.nextOffset !== null && page.remaining > 0) n.set(path, { next: page.nextOffset, remaining: page.remaining }); else n.delete(path);
+      return n;
+    });
+  }, []);
 
   const loadRoot = useCallback(async (path: string) => {
+    const token = (countToken.current[path] = (countToken.current[path] ?? 0) + 1);
     try {
-      const entries = decodeProjectEntries(await deps.list(path));
-      setRoots((r) => ({ ...r, [path]: entries }));
-      const count = async (dir: string, cap = 5000): Promise<number> => {
-        let n = 0;
-        try {
-          const list = decodeProjectEntries(await deps.list(dir));
-          for (const e of list) {
-            if (n >= cap) return cap;
-            if (e.kind === "dir") n += await count(e.path, cap - n); else n += 1;
-          }
-        } catch { /* unreadable subtree */ }
-        return n;
-      };
-      const total = await count(path);
-      setCounts((c) => ({ ...c, [path]: total }));
+      const page = decodeProjectPage(await deps.list(path, 0));
+      setRoots((r) => ({ ...r, [path]: page.entries }));
+      noteMore(path, page);
+      // The count follows every page, so it matches Explorer instead of stopping at the first page's entries.
+      const total = await countProjectFiles((dir, offset) => deps.list(dir, offset), path, () => countToken.current[path] !== token);
+      if (countToken.current[path] === token) setCounts((c) => ({ ...c, [path]: total }));
     } catch {
       setRoots((r) => ({ ...r, [path]: "error" }));
     }
-  }, [deps]);
+  }, [deps, noteMore]);
 
-  const reload = useCallback(() => {
-    // Children are dropped, so an expanded folder would show an open caret over nothing; collapse them too.
+  /** Lists the next page of a truncated folder and appends it. */
+  const showMore = async (path: string) => {
+    const next = more.get(path);
+    if (!next) return;
+    try {
+      const page = decodeProjectPage(await deps.list(path, next.next));
+      if (path === "code" || path === "data") setRoots((r) => ({ ...r, [path]: [...(Array.isArray(r[path]) ? r[path] as ProjectEntry[] : []), ...page.entries] }));
+      else setChildren((m) => new Map(m).set(path, [...(m.get(path) ?? []), ...page.entries]));
+      noteMore(path, page);
+    } catch {
+      setNotice("The next files could not be listed.");
+    }
+  };
+
+  /** First load and project switch: start from collapsed roots and no open folders (they belong to the old project). */
+  const reset = useCallback(() => {
     setChildren(new Map());
+    setMore(new Map());
     setExpanded(new Set());
     setClosedRoots(new Set(["code", "data"]));
     void loadRoot("code");
@@ -89,17 +109,20 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
     void loadRoot("code");
     void loadRoot("data");
     for (const path of [...childrenRef.current.keys()]) {
-      deps.list(path).then(
-        (body) => setChildren((m) => new Map(m).set(path, decodeProjectEntries(body))),
+      deps.list(path, 0).then(
+        (body) => { const page = decodeProjectPage(body); setChildren((m) => new Map(m).set(path, page.entries)); noteMore(path, page); },
         () => setChildren((m) => { const n = new Map(m); n.delete(path); return n; }),
       );
     }
-  }, [deps, loadRoot]);
+  }, [deps, loadRoot, noteMore]);
 
+  const loadedOnce = useRef(false);
   useEffect(() => {
-    if (active) reload();
-  }, [active, reload]);
-  useEffect(() => shellBus.subscribe("project-changed", () => { if (active) reload(); }), [active, reload]);
+    if (!active) return;
+    // Coming back to the Library re-lists but keeps the open folders; only the first activation starts collapsed.
+    if (loadedOnce.current) refreshTree(); else { loadedOnce.current = true; reset(); }
+  }, [active, reset, refreshTree]);
+  useEffect(() => shellBus.subscribe("project-changed", () => { if (active) reset(); }), [active, reset]);
 
   const toggle = async (path: string) => {
     if (expanded.has(path)) {
@@ -109,8 +132,9 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
     setExpanded((s) => new Set(s).add(path));
     if (children.has(path)) return;
     try {
-      const entries = decodeProjectEntries(await deps.list(path));
-      setChildren((m) => new Map(m).set(path, entries));
+      const page = decodeProjectPage(await deps.list(path, 0));
+      setChildren((m) => new Map(m).set(path, page.entries));
+      noteMore(path, page);
     } catch {
       setChildren((m) => new Map(m).set(path, []));
     }
@@ -194,8 +218,9 @@ export function ProjectFilesNav({ deps, selected, onSelect, active = true }: { d
                 : (
                   <ul className="lib-project-list">
                     {entries.map((e) => (
-                      <ProjectRow key={e.path} entry={e} depth={0} childrenOf={(p) => children.get(p) ?? []} expanded={expanded} onToggle={pickDir} onSelect={onSelect} selected={selected} onMenu={mutate ? (entry, x, y) => setMenu({ entry, target: entry.path, x, y }) : undefined} />
+                      <ProjectRow key={e.path} entry={e} depth={0} childrenOf={(p) => children.get(p) ?? []} moreOf={(p) => more.get(p)?.remaining ?? 0} onMore={(p) => void showMore(p)} expanded={expanded} onToggle={pickDir} onSelect={onSelect} selected={selected} onMenu={mutate ? (entry, x, y) => setMenu({ entry, target: entry.path, x, y }) : undefined} />
                     ))}
+                    {more.has(root.path) ? <li className="lib-muted lib-project-note" role="none"><button type="button" className="lib-link-btn" onClick={() => void showMore(root.path)}>{more.get(root.path)!.remaining.toLocaleString()} more not shown. Show more</button></li> : null}
                   </ul>
                 )
             ) : null}
@@ -283,10 +308,13 @@ export function NewFolderDialog({ folder, onCreate, onCancel }: { folder: string
   );
 }
 
-function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, selected, onMenu }: {
+function ProjectRow({ entry, depth, childrenOf, moreOf, onMore, expanded, onToggle, onSelect, selected, onMenu }: {
   entry: ProjectEntry;
   depth: number;
   childrenOf: (path: string) => ProjectEntry[];
+  /** Entries of a folder that are not listed yet. */
+  moreOf: (path: string) => number;
+  onMore: (path: string) => void;
   expanded: ReadonlySet<string>;
   onToggle: (path: string) => void;
   onSelect: (path: string) => void;
@@ -316,8 +344,9 @@ function ProjectRow({ entry, depth, childrenOf, expanded, onToggle, onSelect, se
       {dir && open ? (
         <ul className="lib-project-list" role="group">
           {childrenOf(entry.path).map((c) => (
-            <ProjectRow key={c.path} entry={c} depth={depth + 1} childrenOf={childrenOf} expanded={expanded} onToggle={onToggle} onSelect={onSelect} selected={selected} onMenu={onMenu} />
+            <ProjectRow key={c.path} entry={c} depth={depth + 1} childrenOf={childrenOf} moreOf={moreOf} onMore={onMore} expanded={expanded} onToggle={onToggle} onSelect={onSelect} selected={selected} onMenu={onMenu} />
           ))}
+          {moreOf(entry.path) > 0 ? <li className="lib-muted lib-project-note" role="none"><button type="button" className="lib-link-btn" onClick={() => onMore(entry.path)}>{moreOf(entry.path).toLocaleString()} more not shown. Show more</button></li> : null}
         </ul>
       ) : null}
     </li>
