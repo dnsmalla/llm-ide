@@ -382,9 +382,11 @@ test("R2: a test writer keeps a new test file, but an edited test or build confi
   const deps = createStageDeps(ctx, loop);
   const r = await deps.runStage(writer, []);
   assert.equal(r.ok, false);
-  assert.match(r.output, /tests\/test_golden\.py/);
-  assert.deepEqual(calls.find(([c]) => c === "loop_revert_paths")[1].paths.sort(), ["pyproject.toml", "tests/test_golden.py"]);
-  assert.equal(calls.find(([c]) => c === "loop_revert_paths")[1].paths.includes("tests/test_new.py"), false, "the new test file stays");
+  assert.match(r.output, /pyproject\.toml/);
+  const reverted = calls.filter(([c]) => c === "loop_revert_paths").flatMap(([, a]) => a.paths);
+  assert.ok(reverted.includes("tests/test_golden.py"), "the existing test is skipped and reverted");
+  assert.ok(reverted.includes("pyproject.toml"), "build config still stops the stage");
+  assert.equal(reverted.includes("tests/test_new.py"), false, "the new test file stays");
 });
 
 test("F4: a worktree run's test map reads its own graph snapshot, not the project's", async () => {

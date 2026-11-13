@@ -306,11 +306,11 @@ test("a batch that breaks the tests is repaired, and iteration 2 neither re-plan
   assert.ok(!fs.existsSync(path.join(worktree, "legacy.py")));
 });
 
-test("a test writer that weakens an existing test is reverted and the stage fails", { skip, timeout: 240_000 }, async () => {
+test("a test writer that weakens an existing test is skipped, reverted, and the stage continues", { skip, timeout: 240_000 }, async () => {
   const p = makeProject();
   const { outcome, worktree } = await runRefactoring(p, "r4", { weakenGolden: true });
   const writer = outcome.stages.find((o) => o.stage.name === "Refactor Test Write");
-  assert.equal(writer.ok, false, "the weakening write is caught");
+  assert.equal(writer.ok, true, "the weakening write is skipped, not a run failure");
   assert.match(writer.output, /tests\/test_golden\.py/);
   assert.equal(fs.readFileSync(path.join(worktree, "tests/test_golden.py"), "utf8"), fs.readFileSync(path.join(p.repo, "tests/test_golden.py"), "utf8"), "the existing test is restored");
 });

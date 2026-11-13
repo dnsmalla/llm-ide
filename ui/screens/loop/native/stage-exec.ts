@@ -272,7 +272,19 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
       signal: ctx.signal,
     }),
     changedNow: () => changedPathsNow(ctx),
-    check: async (paths, b, created) => guardProtected(ctx, guardedPaths(target, s, paths, created, await importOnlyTests(ctx, target, s, paths, created, plannedFiles)), target, b, created),
+    check: async (paths, b, created) => {
+      // The Test loop may add new test files, but it must not rewrite an existing test to make the suite pass.
+      // Skip those edits explicitly (revert them and keep going) instead of failing the whole run.
+      const skipped = s.skillId === "skills/test-gap-writer" && !isFactoryLoop(target)
+        ? paths.filter((p) => isTestFileName(p) && !created.includes(p))
+        : [];
+      if (skipped.length) {
+        await ctx.host("loop_revert_paths", { paths: skipped, created: [], ...changedPathArgs(ctx.runId, ctx.projectRoot) }).catch(() => undefined);
+        ctx.log(`skipped existing test file(s): ${skipped.join(", ")}`);
+      }
+      const judged = skipped.length ? paths.filter((p) => !skipped.includes(p)) : paths;
+      return guardProtected(ctx, guardedPaths(target, s, judged, created, await importOnlyTests(ctx, target, s, judged, created, plannedFiles)), target, b, created);
+    },
   });
   const stop = stopReason(g);
   if (g.result === null || stop !== null) return haltOn(ctx, halt, g.violation, stop);
