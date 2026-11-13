@@ -15,7 +15,7 @@ function memoryStorage(init = {}) {
 const PASSED = { passed: true, iterationsUsed: 1, stages: [], iterations: [], failedStage: null, statusSummary: "passed after 1 iteration" };
 const FACTORY_LOOP = { id: "F", name: "Factory", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: "factory", runsOnSchedule: false, config: structuredClone(FACTORY_TEMPLATE.config) };
 // A process that still has Intake (the default leaves it out; a person can add it back).
-const WITH_INTAKE = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: structuredClone(FACTORY_BUILT_IN_STAGES) } };
+const WITH_INTAKE = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stageDelaySeconds: 0, stages: structuredClone(FACTORY_BUILT_IN_STAGES) } };
 const item = (n) => ({ key: `issue:${n}`, source: "issue", id: String(n), title: `Issue ${n}`, body: "Do it", repo: "", provider: null });
 
 let world;
@@ -289,7 +289,7 @@ test("repoRelFor keeps a project-relative repo and otherwise derives it from the
 test("a running run holds at a stage boundary while another project is open and resumes after switching back", async () => {
   const first = deferred();
   const names = [];
-  const twoStages = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: FACTORY_BUILT_IN_STAGES.slice(3, 5).map((s) => ({ ...structuredClone(s), enabled: true })) } };
+  const twoStages = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stageDelaySeconds: 0, stages: FACTORY_BUILT_IN_STAGES.slice(3, 5).map((s) => ({ ...structuredClone(s), enabled: true })) } };
   setup({
     loadFactoryLoop: async () => twoStages,
     runLoop: runNativeLoop,
@@ -328,7 +328,7 @@ test("an issue's repo is mapped through repoForSlug; an unmapped repo does not s
 });
 
 test("a Factory loop whose Verify has no command does not start and says where to set it", async () => {
-  const noCommand = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: FACTORY_TEMPLATE.config.stages.map((s) => (s.name === "Verify" ? { ...s, command: "" } : s)) } };
+  const noCommand = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stageDelaySeconds: 0, stages: FACTORY_TEMPLATE.config.stages.map((s) => (s.name === "Verify" ? { ...s, command: "" } : s)) } };
   setup({ loadFactoryLoop: async () => noCommand });
   rm.startRun("/p", item(1), "full");
   await settle();
@@ -426,7 +426,7 @@ test("a project whose loop is the unedited previous default moves to the new pro
 test("a run whose Test gaps step writes a test file still passes and reaches its MR (the test is not reverted)", async () => {
   const { createStageDeps } = await import("../native/stage-exec.ts");
   const gaps = structuredClone(FACTORY_TEMPLATE.config.stages.find((s) => s.name === "Test gaps"));
-  const loop = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: [{ ...gaps, order: 0 }] } };
+  const loop = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stageDelaySeconds: 0, stages: [{ ...gaps, order: 0 }] } };
   const shipped = [];
   let agentRan = false;
   setup({
@@ -534,7 +534,7 @@ test("startRun does not start a second live run for the same item, project and m
 
 test("runs held for another project do not count against the parallel-runs cap", async () => {
   const gates = [];
-  const twoStages = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: FACTORY_BUILT_IN_STAGES.slice(3, 5).map((s) => ({ ...structuredClone(s), enabled: true })) } };
+  const twoStages = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), stageDelaySeconds: 0, stages: FACTORY_BUILT_IN_STAGES.slice(3, 5).map((s) => ({ ...structuredClone(s), enabled: true })) } };
   setup({
     loadFactoryLoop: async () => twoStages,
     runLoop: runNativeLoop,

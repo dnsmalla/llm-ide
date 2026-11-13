@@ -100,26 +100,30 @@ function scriptedAgent(workTree, calls, opts = {}) {
   return async (body) => {
     const skill = body.skills[0] ?? "repair";
     calls.push(skill);
+    opts.seen?.push({ skill, message: body.message });
     const before = new Set(changedPaths(workTree));
     let reply;
     if (skill === "skills/refactor-planner") {
-      const r1 = ["### R1 — remove the dead legacy module (status: todo)", "", "- Files: legacy.py", "- Expect: none", "- Tests: tests/test_golden.py", "- Rules: AGENTS.md", ""];
+      const r1 = ["### R1 — remove the dead legacy module (status: todo)", "", `- Files: ${opts.planFiles ?? "legacy.py"}`, "- Expect: none", "- Tests: tests/test_golden.py", "- Rules: AGENTS.md", ""];
       const r2 = ["### R2 — add a money formatter (status: todo)", "", "- Files: fmt.py", "- Expect: none", "- Tests: tests/test_golden.py", "- Rules: AGENTS.md", ""];
       write(PLAN, ["# Refactor plan", "", ...r1, ...(opts.twoBatches ? r2 : [])].join("\n"));
       reply = opts.twoBatches ? "Planned: R1, R2" : "Planned: R1";
+      if (opts.emptyPlan) reply = "";
     } else if (skill === "skills/test-gap-writer") {
       write("tests/test_tax.py", "import shop\n\n\ndef test_jp_tax_is_ten_percent():\n    assert shop.TAX_RATES['JP'] == 0.10\n");
       // A misbehaving writer that also weakens an existing test so it can never fail.
       if (opts.weakenGolden) write("tests/test_golden.py", "def test_the_report_for_the_sample_orders_is_unchanged():\n    assert True\n");
-      reply = "Covered: shop.TAX_RATES";
+      reply = "Covered: tests/test_tax.py — the JP tax rate";
     } else if (skill === "skills/refactor-apply") {
       // Applies the first todo batch: R1 removes legacy.py, R2 adds fmt.py.
       const id = /### (R\d+) .*\(status: todo\)/.exec(fs.readFileSync(path.join(workTree, PLAN), "utf8"))[1];
-      if (id === "R1") fs.rmSync(path.join(workTree, "legacy.py"));
+      if (opts.editOutside) fs.appendFileSync(path.join(workTree, opts.editOutside), "\n# a body change outside the input path\n");
+      else if (id === "R1") fs.rmSync(path.join(workTree, "legacy.py"));
       else write("fmt.py", 'def money(x):\n    return f"{x:.2f}"\n');
       // A buggy batch: the JP tax rate changes, so the golden report test fails until a repair restores it.
       if (opts.applyBreaks || opts.breakBatch === id) write("shop.py", fs.readFileSync(path.join(workTree, "shop.py"), "utf8").replace('"JP": 0.10', '"JP": 0.12').replace("rate = 0.10", "rate = 0.12"));
-      write(PLAN, fs.readFileSync(path.join(workTree, PLAN), "utf8").replace("(status: todo)", "(status: done)"));
+      // `applyLeavesTodo`: an agent that claims the batch but never marks it in the plan.
+      if (!opts.applyLeavesTodo) write(PLAN, fs.readFileSync(path.join(workTree, PLAN), "utf8").replace("(status: todo)", "(status: done)"));
       reply = `Applied: ${id}`;
     } else if (skill === "skills/refactor-conform") {
       write("llm-doc/loop/refactor/RULE-REVIEW.md", "No rule violations in R1.\n");
@@ -173,6 +177,7 @@ async function runRefactoring({ project, repo, loop }, runId, agentOpts = {}, dr
         return { exitCode: r.status, stdout: r.stdout, stderr: r.stderr, timedOut: false };
       }
       case "loop_changed_paths": return changedPaths(worktree);
+      case "loop_worktree_diff": return { text: git(worktree, "diff", "HEAD"), truncated: false };
       case "loop_revert_paths": {
         for (const p of args.paths ?? []) {
           if ((args.created ?? []).includes(p)) fs.rmSync(path.join(worktree, p), { recursive: true, force: true });
@@ -199,7 +204,16 @@ async function runRefactoring({ project, repo, loop }, runId, agentOpts = {}, dr
       default: throw new Error(`the fake host has no ${command}`);
     }
   };
-  const core = { async request(p, o) { if (p !== "/kb/loop/agent-run") throw new Error(`no core route ${p}`); return agent(o.body); } };
+  // The core client's 30 s default would cut every agent call; each call must carry a timeout that covers its body's.
+  const core = {
+    async request(p, o) {
+      if (p !== "/kb/loop/agent-run") throw new Error(`no core route ${p}`);
+      if (!(typeof o.timeoutMs === "number" && typeof o.body?.timeoutMs === "number" && o.timeoutMs >= o.body.timeoutMs)) {
+        throw new Error(`agent-run request timeout ${o.timeoutMs} does not cover its body's ${o.body?.timeoutMs} ms (the core default is 30 s)`);
+      }
+      return agent(o.body);
+    },
+  };
   const fsx = hostFs(project);
   const ctx = {
     projectRoot: project, runId, runRoot: worktree, fs: fsx, host, core,
@@ -251,6 +265,27 @@ test("a full Test loop run passes every stage in the main checkout, and a second
     assert.equal(outcome.passed, true, `round ${round}: ${outcome.statusSummary}\n${summary}`);
   }
   assert.ok(fs.existsSync(path.join(p.repo, "tests/test_tax.py")), "Test Write's test is kept in the main checkout");
+});
+
+test("a Plan agent that returns no reply fails the run, and the Plan stage says so", { skip, timeout: 240_000 }, async () => {
+  const p = makeProject();
+  const { outcome, log, agentCalls } = await runRefactoring(p, "e1", { emptyPlan: true, unrepairable: true });
+  if (DISCOVER) console.log(`--- empty plan: ${outcome.statusSummary}\n--- log ---\n${log.join("\n")}`);
+  assert.equal(outcome.passed, false, outcome.statusSummary);
+  const plan = outcome.stages.find((o) => o.stage.skillId === "skills/refactor-planner");
+  assert.equal(plan.ok, false);
+  assert.match(plan.output, /^the agent returned no reply\n/, plan.output);
+  assert.ok(!agentCalls.includes("skills/refactor-apply"), "nothing is applied after a Plan with no reply");
+});
+
+test("an Apply that says Applied but leaves its batch at todo fails the stage and the run", { skip, timeout: 240_000 }, async () => {
+  const p = makeProject();
+  const { outcome, log } = await runRefactoring(p, "e2", { applyLeavesTodo: true, unrepairable: true });
+  if (DISCOVER) console.log(`--- apply leaves todo: ${outcome.statusSummary}\n--- log ---\n${log.join("\n")}`);
+  assert.equal(outcome.passed, false, outcome.statusSummary);
+  const apply = outcome.stages.find((o) => o.stage.skillId === "skills/refactor-apply");
+  assert.equal(apply.ok, false);
+  assert.match(apply.output, /the plan still shows R1 as todo after Apply/, apply.output);
 });
 
 test("a batch that breaks the tests is repaired, and iteration 2 neither re-plans, re-applies nor retakes the baseline", { skip, timeout: 240_000 }, async () => {
@@ -321,4 +356,40 @@ test("the Test loop's map finds untested functions even when the project has no 
   assert.ok(Number(m[2]) > 0, `some functions are untested (utils.py, legacy.py): ${map.output}`);
   const json = JSON.parse(fs.readFileSync(path.join(p.repo, "system/loop/test/TEST-MAP.json"), "utf8"));
   assert.ok(json.entries.some((e) => e.path === "utils.py" && e.testedBy.length === 0), "utils.py is listed as untested");
+});
+
+test("a Plan that lists a file outside the input path fails the Plan stage, and the message names the batch and file", { skip, timeout: 240_000 }, async () => {
+  const p = makeProject();
+  p.loop.inputPath = "tools";
+  const { outcome, log } = await runRefactoring(p, "s1", { unrepairable: true });
+  if (DISCOVER) console.log(`--- plan outside input path: ${outcome.statusSummary}\n--- log ---\n${log.join("\n")}`);
+  assert.equal(outcome.passed, false, outcome.statusSummary);
+  const plan = outcome.stages.find((o) => o.stage.skillId === "skills/refactor-planner");
+  assert.equal(plan.ok, false);
+  assert.match(plan.output, /batch R1 lists legacy\.py, which is outside the input path tools/, plan.output);
+});
+
+test("a Plan inside the input path passes, and the planner is told the input path", { skip, timeout: 240_000 }, async () => {
+  const p = makeProject();
+  p.loop.inputPath = "tools";
+  const seen = [];
+  const { outcome, log } = await runRefactoring(p, "s2", { planFiles: "tools/measure.py", unrepairable: true, seen });
+  if (DISCOVER) console.log(`--- plan inside input path: ${outcome.statusSummary}\n--- log ---\n${log.join("\n")}`);
+  const plan = outcome.stages.find((o) => o.stage.skillId === "skills/refactor-planner");
+  assert.equal(plan.ok, true, plan.output);
+  const planner = seen.find((c) => c.skill === "skills/refactor-planner");
+  assert.match(planner.message, /^Target path: tools$/m);
+  assert.match(planner.message, /^Input path: tools \(relative to the repository root\)\./m);
+});
+
+test("an Apply that edits a file outside the input path fails with the contract message", { skip, timeout: 240_000 }, async () => {
+  const p = makeProject();
+  p.loop.inputPath = "tools";
+  const { outcome, log, worktree } = await runRefactoring(p, "s3", { planFiles: "tools/measure.py", editOutside: "shop.py", unrepairable: true });
+  if (DISCOVER) console.log(`--- apply outside input path: ${outcome.statusSummary}\n--- log ---\n${log.join("\n")}`);
+  assert.equal(outcome.passed, false, outcome.statusSummary);
+  const apply = outcome.stages.find((o) => o.stage.skillId === "skills/refactor-apply");
+  assert.equal(apply.ok, false);
+  assert.match(apply.output, /Apply changed shop\.py, which is outside the input path tools and is more than an import update/, apply.output);
+  assert.match(fs.readFileSync(path.join(worktree, "shop.py"), "utf8"), /a body change outside the input path/, "the edit is in the worktree, and the contract is what failed it");
 });

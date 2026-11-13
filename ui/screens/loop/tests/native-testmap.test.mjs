@@ -195,3 +195,55 @@ test("without a usable graph, the map lists source files; a file no test names i
   assert.equal(map.untestedFunctions, 1);
   assert.equal(map.testedFunctions, 1);
 });
+
+test("a scoped test map keeps only the graph's functions inside the folder, and its counters follow", async () => {
+  const files = {
+    "src/billing/a.py": "def charge(): pass\n",
+    "src/other/b.py": "def refund(): pass\n",
+    "tests/test_billing.py": "def test_charge():\n    charge()\n",
+    "system/graph/graph.json": JSON.stringify({ files: [
+      { path: "src/billing/a.py", name: "a.py", functions: [{ name: "charge", line: 1 }], usedBy: [], imports: [] },
+      { path: "src/other/b.py", name: "b.py", functions: [{ name: "refund", line: 1 }], usedBy: [], imports: [] },
+    ] }),
+  };
+  const structure = { generatedAt: "", status: "ok", notes: [], roots: [{ packageDir: "", testDir: "tests", runner: "pytest", command: "pytest", languages: ["py"] }] };
+  const now = new Date("2026-01-01T00:00:00Z");
+  const all = await m.buildTestMap(mem(files), "", structure, "system/graph/graph.json", now);
+  assert.equal(all.entries.length, 2);
+  const scoped = await m.buildTestMap(mem(files), "", structure, "system/graph/graph.json", now, "src/billing");
+  assert.deepEqual(scoped.entries.map((e) => e.path), ["src/billing/a.py"]);
+  assert.equal(scoped.entries[0].testedBy[0], "tests/test_billing.py", "a test outside the folder still counts for it");
+  assert.equal(scoped.testedFunctions, 1);
+  assert.equal(scoped.untestedFunctions, 0);
+});
+
+test("a scoped test map of a graph's nodes keeps only the nodes inside the folder", async () => {
+  const files = {
+    "src/billing/a.py": "def charge(): pass\n",
+    "src/other/b.py": "def refund(): pass\n",
+    "system/graph/graph.json": JSON.stringify({ nodes: [
+      { kind: "function", title: "charge", metadata: { path: "src/billing/a.py", line: 1 } },
+      { kind: "function", title: "refund", metadata: { path: "src/other/b.py", line: 1 } },
+    ] }),
+  };
+  const structure = { generatedAt: "", status: "missing", notes: [], roots: [] };
+  const scoped = await m.buildTestMap(mem(files), "", structure, "system/graph/graph.json", new Date("2026-01-01T00:00:00Z"), "src/billing");
+  assert.equal(scoped.source, "graph");
+  assert.deepEqual(scoped.entries.map((e) => e.function), ["charge"]);
+  assert.equal(scoped.untestedFunctions, 1);
+});
+
+test("a scoped test map without a graph lists only the source files inside the folder", async () => {
+  const files = {
+    "src/billing/a.py": "def charge(): pass\n",
+    "src/other/b.py": "def refund(): pass\n",
+    "tests/test_billing.py": "def test_charge():\n    charge()\n",
+  };
+  const structure = { generatedAt: "", status: "ok", notes: [], roots: [{ packageDir: "", testDir: "tests", runner: "pytest", command: "pytest", languages: ["py"] }] };
+  const now = new Date("2026-01-01T00:00:00Z");
+  const scoped = await m.buildTestMap(mem(files), "", structure, "system/graph/none.json", now, "src/billing");
+  assert.equal(scoped.source, "files");
+  assert.deepEqual(scoped.entries.map((e) => e.path), ["src/billing/a.py"]);
+  assert.equal(scoped.untestedFiles, 1);
+  assert.equal(scoped.untestedFunctions, 1);
+});

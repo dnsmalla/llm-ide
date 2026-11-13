@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createStageDeps } from "../native/stage-exec.ts";
 import { runNativeLoop } from "../native/runner.ts";
+import { DEFAULT_LOOP_SPECS } from "../native/defaults.ts";
 
 const stage = (over = {}) => ({
   id: "s1", name: "Stage", kind: "shellCommand", command: "npm test", order: 0, skillId: null, targetPath: null,
@@ -289,7 +290,7 @@ function fakeWritableFs(files) {
 }
 
 test("a Graph snapshot in a worktree run writes its graph and before.json under the run's loop-runs folder", async () => {
-  const graph = JSON.stringify({ nodes: [{ id: "file:a.ts", kind: "file" }], edges: [] });
+  const graph = JSON.stringify({ schemaVersion: 1, nodes: [{ id: "file:a.ts", kind: "file" }], edges: [] });
   const { fs, writes } = fakeWritableFs({ "system/loop-runs/r1/graph/graph-code.json": graph });
   const { host, calls } = fakeHost({ graph_generate: { path: "system/loop-runs/r1/graph/graph-code.json", nodes: 1, edges: 0 } });
   const { ctx } = ctxOf({ host, fs });
@@ -300,7 +301,7 @@ test("a Graph snapshot in a worktree run writes its graph and before.json under 
 });
 
 test("a Graph snapshot in a main-tree run sends no out and snapshots the project graph", async () => {
-  const graph = JSON.stringify({ nodes: [{ id: "file:a.ts", kind: "file" }], edges: [] });
+  const graph = JSON.stringify({ schemaVersion: 1, nodes: [{ id: "file:a.ts", kind: "file" }], edges: [] });
   const { fs, writes } = fakeWritableFs({ "system/graph/graph-code.json": graph });
   const { host, calls } = fakeHost({ graph_generate: { path: "system/graph/graph-code.json", nodes: 1, edges: 0 } });
   const { ctx } = ctxOf({ host, fs, runId: null, runRoot: "/p" });
@@ -525,4 +526,205 @@ test("an apply agent that adds its own module to the plan's Files during the run
   const r = await createStageDeps(ctx, loop).runStage(apply, []);
   assert.equal(r.ok, false, "the plan as it stood before the call decides");
   assert.ok(calls.find(([c]) => c === "loop_revert_paths")[1].paths.includes("tests/test_golden.py"));
+});
+
+test("a skill stage's agent-run request carries a transport timeout past the body's timeoutMs", async () => {
+  const { core, calls } = fakeCore({ reply: "wrote it", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+  const { ctx } = ctxOf({ core });
+  const plan = stage({ id: "s3", name: "Plan", kind: "skill", command: null, skillId: "skills/writing-plans", timeoutSeconds: 120 });
+  assert.equal((await createStageDeps(ctx, loopOf([plan])).runStage(plan, [])).ok, true);
+  const opts = calls[0][1];
+  assert.equal(opts.body.timeoutMs, 120_000);
+  assert.ok(opts.timeoutMs >= opts.body.timeoutMs, `request ${opts.timeoutMs} must cover body ${opts.body.timeoutMs}`);
+  assert.equal(opts.timeoutMs, 180_000, "the 30 s client default would cut a 2-minute stage");
+  const unset = stage({ id: "s4", name: "Plan", kind: "skill", command: null, skillId: "skills/writing-plans", timeoutSeconds: null });
+  await createStageDeps(ctxOf({ core }).ctx, loopOf([unset])).runStage(unset, []);
+  assert.equal(calls[1][1].timeoutMs, 1_800_000 + 60_000, "an unset timeout is the 30 minute default plus grace");
+});
+
+test("a repair's agent-run request carries a transport timeout past its 30 minutes", async () => {
+  const { core, calls } = fakeCore({ reply: "fixed", resultSubtype: "success", changedPaths: ["src/a.ts"], createdPaths: [] });
+  const { ctx } = ctxOf({ core });
+  const s = stage();
+  await createStageDeps(ctx, loopOf([s])).repair(s, "1 failing", 1);
+  const opts = calls[0][1];
+  assert.equal(opts.body.timeoutMs, 30 * 60 * 1000);
+  assert.ok(opts.timeoutMs >= opts.body.timeoutMs, `request ${opts.timeoutMs} must cover body ${opts.body.timeoutMs}`);
+  assert.equal(opts.timeoutMs, 30 * 60 * 1000 + 60_000);
+});
+
+test("deterministic stages (shell, code graph, test map, ledger, test prune, artifact check) never call the model", async () => {
+  const noModel = { calls: 0, core: { async request() { this.calls += 1; throw new Error("the model must not be called by a deterministic stage"); } } };
+  const graph = JSON.stringify({ schemaVersion: 1, nodes: [{ id: "file:a.ts", kind: "file" }], edges: [] });
+  const mapGraph = JSON.stringify({ files: [{ path: "a.py", name: "a.py", loc: 2, functions: [{ name: "run", line: 1 }] }], calls: [] });
+  const structureFiles = { "package.json": JSON.stringify({ scripts: { test: "node --test" } }), "tests/a.test.mjs": "import 'node:test';" };
+  const structureFs = {
+    async read(path) {
+      if (!(path in structureFiles)) throw Object.assign(new Error("not found"), { code: "not_found" });
+      return { status: "ok", text: structureFiles[path], hash: "h" };
+    },
+    async list(path) {
+      if (path === ".") return { entries: [{ name: "tests", kind: "dir", path: "tests" }, { name: "package.json", kind: "file", path: "package.json" }] };
+      if (path === "tests") return { entries: [{ name: "a.test.mjs", kind: "file", path: "tests/a.test.mjs" }] };
+      throw Object.assign(new Error("not found"), { code: "not_found" });
+    },
+    async create() {},
+    async write() {},
+  };
+  const cases = [
+    ["shellCommand", stage({ kind: "shellCommand", command: "npm test" }), ctxOf({}).ctx, []],
+    ["codeGraph snapshot", stage({ id: "g1", name: "Graph", kind: "codeGraph", command: null, graphOp: "snapshot" }), ctxOf({ fs: fakeWritableFs({ "system/loop-runs/r1/graph/graph-code.json": graph }).fs }).ctx, []],
+    ["testMap structure", stage({ id: "t0", name: "Structure", kind: "testMap", command: null, testOp: "structure" }), ctxOf({ fs: structureFs, projectRoot: "/p", runRoot: "/p" }).ctx, []],
+    ["testMap map", stage({ id: "t1", name: "Test Map", kind: "testMap", command: null, testOp: "map" }), ctxOf({ fs: fakeWritableFs({ "system/loop-runs/r1/graph/graph-code.json": mapGraph }).fs }).ctx, []],
+    ["testMap ledger", stage({ id: "l1", name: "Ledger", kind: "testMap", command: null, testOp: "ledger" }), ctxOf({ fs: fakeWritableFs({}).fs }).ctx, [{ stage: stage({ id: "t", name: "Test", kind: "shellCommand" }), ok: true, output: "3 tests, nothing to parse" }]],
+    ["testPrune", stage({ id: "p1", name: "Prune", kind: "testPrune", command: null }), ctxOf({ fs: structureFs, projectRoot: "/p", runRoot: "/p" }).ctx, []],
+    ["artifactCheck", stage({ id: "a1", name: "Gate", kind: "artifactCheck", command: null, allowsRepair: false, check: { requiredPaths: ["llm-doc/loop/refactor/REFACTOR.md"] } }), ctxOf({ fs: fakeFs({ "system/loop-worktrees/r1/llm-doc/loop/refactor/REFACTOR.md": "plan" }).fs }).ctx, []],
+  ];
+  for (const [label, s, baseCtx, prior] of cases) {
+    const host = fakeHost({ loop_run_stage: { exitCode: 0, stdout: "", stderr: "", timedOut: false }, graph_generate: { path: "x", nodes: 1, edges: 0 } }).host;
+    const ctx = { ...baseCtx, core: noModel.core, host };
+    const deps = createStageDeps(ctx, loopOf([s]));
+    const before = noModel.calls;
+    const r = await deps.runStage(s, prior);
+    assert.equal(noModel.calls, before, `${label} called the model`);
+    assert.equal(deps.halt(), null, `${label}: ${r.output}`);
+  }
+  assert.equal(noModel.calls, 0);
+});
+
+const REGISTRY_PLAN_STAGE_SKILL = "skills/refactor-planner";
+/** The built-in stage that runs `skillId`, copied from the registry defaults (its prompt is the registry text). */
+function registryStage(skillId) {
+  for (const spec of DEFAULT_LOOP_SPECS) {
+    const found = spec.config.stages.find((s) => s.skillId === skillId && s.promptRef);
+    if (found) return structuredClone(found);
+  }
+  throw new Error(`no registry stage for ${skillId}`);
+}
+
+test("a built-in Plan stage whose agent returns an empty reply fails with that message", async () => {
+  const planStage = registryStage(REGISTRY_PLAN_STAGE_SKILL);
+  const { core } = fakeCore({ reply: "", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+  const { ctx } = ctxOf({ core });
+  const deps = createStageDeps(ctx, loopOf([planStage]));
+  const r = await deps.runStage(planStage, []);
+  assert.equal(r.ok, false);
+  assert.match(r.output, /^the agent returned no reply\n/);
+});
+
+test("an edited Plan prompt passes on a normal reply: only the empty-reply rule applies to it", async () => {
+  const edited = { ...registryStage(REGISTRY_PLAN_STAGE_SKILL), prompt: "My own plan prompt.", promptHash: null };
+  const { core } = fakeCore({ reply: "Planned: R1", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+  const { ctx } = ctxOf({ core });
+  const r = await createStageDeps(ctx, loopOf([edited])).runStage(edited, []);
+  assert.equal(r.ok, true, r.output);
+});
+
+// Input path (a scoped Loop): the prompt names the folder, and the contract judges the batch and the outside changes.
+test("a Plan stage in a scoped Loop gets the input path as its Target path and the scope paragraph", async () => {
+  const plan = stage({ id: "p", name: "Plan", kind: "skill", command: null, skillId: "skills/refactor-planner", targetPath: "old/target" });
+  const loop = { ...loopOf([plan]), inputPath: "src/billing" };
+  const { core, calls } = fakeCore({ reply: "Planned: R1", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+  const fs = fakeFs({ "system/loop-worktrees/r1/llm-doc/loop/refactor/REFACTOR.md": "# Plan\n\n### R1 move (status: todo)\n- Files: `src/billing/invoice.py`\n" }).fs;
+  const { ctx } = ctxOf({ core, fs });
+  const r = await createStageDeps(ctx, loop).runStage(plan, []);
+  assert.equal(r.ok, true, r.output);
+  const { message } = calls[0][1].body;
+  assert.match(message, /^Target path: src\/billing$/m);
+  assert.doesNotMatch(message, /old\/target/);
+  assert.match(message, /^Input path: src\/billing \(relative to the repository root\)\. Work ONLY on code under this path: every file you plan, cover, move or edit must be inside it\. Code outside it may change only by import or reference updates that a move inside it requires\.$/m);
+});
+
+test("a Plan stage with an empty input path gets neither the input path paragraph nor a changed Target path", async () => {
+  const plan = stage({ id: "p", name: "Plan", kind: "skill", command: null, skillId: "skills/refactor-planner", targetPath: "old/target" });
+  for (const loop of [loopOf([plan]), { ...loopOf([plan]), inputPath: "" }]) {
+    const { core, calls } = fakeCore({ reply: "Planned: R1", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+    const fs = fakeFs({ "system/loop-worktrees/r1/llm-doc/loop/refactor/REFACTOR.md": "# Plan\n\n### R1 move (status: todo)\n- Files: legacy.py\n" }).fs;
+    await createStageDeps(ctxOf({ core, fs }).ctx, loop).runStage(plan, []);
+    const { message } = calls[0][1].body;
+    assert.match(message, /^Target path: old\/target$/m);
+    assert.doesNotMatch(message, /Input path:/);
+  }
+});
+
+test("a Test Write stage in a scoped Loop gets the paragraph, and its Output path line is unchanged", async () => {
+  const writer = stage({ id: "w", name: "Test Write", kind: "skill", command: null, skillId: "skills/test-gap-writer", outputPath: "tests/out.md" });
+  const loop = { ...loopOf([writer]), inputPath: "src/billing" };
+  const { core, calls } = fakeCore({ reply: "Covered: none", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+  const r = await createStageDeps(ctxOf({ core }).ctx, loop).runStage(writer, []);
+  assert.equal(r.ok, true, r.output);
+  const { message } = calls[0][1].body;
+  assert.match(message, /^Output path: tests\/out\.md$/m);
+  assert.match(message, /^Input path: src\/billing \(relative/m);
+});
+
+/** A scoped Apply over a plan whose one batch lists `files`; the agent marks the batch done and reports `changed`. */
+function scopedApply({ files = "`src/billing/new.py`", changed, diff, runId = "r1", hostOver = {} }) {
+  let plan = `# Plan\n\n### R1 Move billing (status: todo)\n- Files: ${files}\n- Intent: move\n`;
+  const fs = { async read(p) { if (!p.endsWith("llm-doc/loop/refactor/REFACTOR.md")) throw Object.assign(new Error("missing"), { code: "not_found" }); return { status: "ok", text: plan }; } };
+  const apply = stage({ id: "a", name: "Refactor apply", kind: "skill", command: null, skillId: "skills/refactor-apply" });
+  const loop = { ...loopOf([apply]), defaultKey: "regression", inputPath: "src/billing" };
+  const core = { async request() {
+    plan = plan.replace("(status: todo)", "(status: done)");
+    return { ran: true, resultSubtype: "success", reply: "Applied: R1", changedPaths: changed, createdPaths: [] };
+  } };
+  const { host, calls } = fakeHost({ loop_worktree_diff: diff, ...hostOver });
+  const { ctx } = ctxOf({ host, core, fs, runId, runRoot: runId ? "/p/system/loop-worktrees/r1" : "/p" });
+  return createStageDeps(ctx, loop).runStage(apply, []).then((r) => ({ r, calls }));
+}
+
+const SCOPE_MSG = (p) => new RegExp(`^Apply changed ${p.replace(/[./]/g, "\\$&")}, which is outside the input path src/billing and is more than an import update`, "m");
+
+test("a scoped Apply that changes a body outside the input path fails with the contract message", async () => {
+  const { r } = await scopedApply({ changed: ["src/billing/new.py", "src/other/x.py"], diff: { text: bodyDiff("src/other/x.py"), truncated: false } });
+  assert.equal(r.ok, false);
+  assert.match(r.output, SCOPE_MSG("src/other/x.py"), r.output);
+});
+
+test("a scoped Apply whose outside test changed only its imports to a batch module passes", async () => {
+  const { r, calls } = await scopedApply({ changed: ["src/billing/new.py", "tests/test_x.py"], diff: { text: importDiff("tests/test_x.py"), truncated: false } });
+  assert.equal(r.ok, true, r.output);
+  assert.equal(calls.some(([c]) => c === "loop_revert_paths"), false);
+});
+
+test("a truncated worktree diff keeps the outside test unjudged as import-only: the guard reverts it", async () => {
+  const { r, calls } = await scopedApply({ changed: ["src/billing/new.py", "tests/test_x.py"], diff: { text: importDiff("tests/test_x.py"), truncated: true } });
+  assert.equal(r.ok, false);
+  assert.ok(calls.find(([c]) => c === "loop_revert_paths")[1].paths.includes("tests/test_x.py"));
+});
+
+test("a host that throws reading the worktree diff fails an outside change closed", async () => {
+  const { r } = await scopedApply({ changed: ["src/billing/new.py", "src/other/x.py"], diff: () => { throw new Error("diff gone"); } });
+  assert.equal(r.ok, false);
+  assert.match(r.output, SCOPE_MSG("src/other/x.py"), r.output);
+});
+
+test("in a main-tree run an outside change fails by the contract and the worktree diff is never read", async () => {
+  const { r, calls } = await scopedApply({ changed: ["src/billing/new.py", "src/other/x.py"], diff: undefined, runId: null });
+  assert.equal(r.ok, false);
+  assert.match(r.output, SCOPE_MSG("src/other/x.py"), r.output);
+  assert.equal(calls.some(([c]) => c === "loop_worktree_diff"), false);
+});
+
+test("with an empty input path an outside change is not judged by the scope rule", async () => {
+  const apply = stage({ id: "a", name: "Refactor apply", kind: "skill", command: null, skillId: "skills/refactor-apply" });
+  const plan = "# Plan\n\n### R1 Move (status: todo)\n- Files: src/billing/new.py\n";
+  const fs = { async read() { return { status: "ok", text: plan.replace("(status: todo)", "(status: done)") }; } };
+  const core = { async request() { return { ran: true, resultSubtype: "success", reply: "Applied: R1", changedPaths: ["src/other/x.py"], createdPaths: [] }; } };
+  const { ctx } = ctxOf({ core, fs, host: fakeHost({ loop_worktree_diff: { text: bodyDiff("src/other/x.py"), truncated: false } }).host });
+  const r = await createStageDeps(ctx, { ...loopOf([apply]), inputPath: "" }).runStage(apply, []);
+  assert.equal(r.ok, true, r.output);
+});
+
+test("a scoped Apply may fix imports in a source file outside the input path when that is all it changed", async () => {
+  // importDiff re-points `from old import a` to `from new import a`; the batch names new.py.
+  const { r, calls } = await scopedApply({ files: "`src/billing/new.py`, `new.py`", changed: ["src/billing/new.py", "src/other/x.py"], diff: { text: importDiff("src/other/x.py"), truncated: false } });
+  assert.equal(r.ok, true, r.output);
+  assert.equal(calls.some(([c]) => c === "loop_revert_paths"), false);
+});
+
+test("an import fix outside the input path to a module the batch does not name still fails", async () => {
+  const { r } = await scopedApply({ files: "`src/billing/other.py`", changed: ["src/billing/other.py", "src/other/x.py"], diff: { text: importDiff("src/other/x.py"), truncated: false } });
+  assert.equal(r.ok, false);
+  assert.match(r.output, SCOPE_MSG("src/other/x.py"), r.output);
 });

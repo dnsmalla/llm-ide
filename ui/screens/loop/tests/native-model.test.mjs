@@ -85,3 +85,37 @@ test("verdict check survives a decode/encode round trip", () => {
   const again = m.decodeProjectStore(JSON.parse(m.encodeProjectStore(store)));
   assert.deepEqual(again.loops[0].config.stages[0].check, check);
 });
+
+test("stageDelaySeconds defaults to 2, clamps to 0..60, rounds, and ignores non-numbers", () => {
+  const seconds = (v) => m.decodeConfig(v === undefined ? {} : { stageDelaySeconds: v }).stageDelaySeconds;
+  assert.equal(seconds(undefined), 2);
+  assert.equal(seconds("5"), 2, "a string is invalid");
+  assert.equal(seconds(Infinity), 2, "a non-finite number is invalid");
+  assert.equal(seconds(-4), 0);
+  assert.equal(seconds(999), 60);
+  assert.equal(seconds(2.6), 3);
+});
+
+test("stageDelaySeconds is written only when it differs from the default 2", () => {
+  const store = (v) => m.decodeProjectStore({ loops: [{ name: "L", config: { stages: [], stageDelaySeconds: v } }] });
+  assert.equal("stageDelaySeconds" in JSON.parse(m.encodeProjectStore(store(2))).loops[0].config, false);
+  assert.equal(JSON.parse(m.encodeProjectStore(store(0))).loops[0].config.stageDelaySeconds, 0);
+  assert.equal(m.decodeProjectStore(JSON.parse(m.encodeProjectStore(store(0)))).loops[0].config.stageDelaySeconds, 0);
+});
+
+test("inputPath decodes a valid folder, normalizes it and drops an invalid one to the whole repository", () => {
+  const path = (v) => m.decodeProjectStore({ loops: [{ name: "L", inputPath: v, config: { stages: [] } }] }).loops[0].inputPath;
+  assert.equal(path("src/billing"), "src/billing");
+  assert.equal(path("./src/"), "src");
+  assert.equal(path("/etc"), "");
+  assert.equal(path("../x"), "");
+  assert.equal(path(42), "");
+  assert.equal(path(undefined), "");
+});
+
+test("inputPath is written only when non-empty", () => {
+  const store = (inputPath) => m.decodeProjectStore({ loops: [{ name: "L", inputPath, config: { stages: [] } }] });
+  assert.equal("inputPath" in JSON.parse(m.encodeProjectStore(store(""))).loops[0], false);
+  assert.equal(JSON.parse(m.encodeProjectStore(store("src/billing"))).loops[0].inputPath, "src/billing");
+  assert.equal(m.decodeProjectStore(JSON.parse(m.encodeProjectStore(store("src/billing")))).loops[0].inputPath, "src/billing");
+});

@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { runNativeLoop } from "../native/runner.ts";
 import { decodeConfig } from "../native/model.ts";
 
-function cfg(stages, over = {}) { return decodeConfig({ stages, maxIterations: 3, maxRepairsPerStage: 2, consecutiveFailureStop: 3, ...over }); }
+// stageDelaySeconds 0 keeps the existing tests off real timers; the pause tests below set it explicitly.
+function cfg(stages, over = {}) { return decodeConfig({ stages, maxIterations: 3, maxRepairsPerStage: 2, consecutiveFailureStop: 3, stageDelaySeconds: 0, ...over }); }
 const stage = (id, name, over = {}) => ({ id, name, kind: "shellCommand", order: 0, enabled: true, severity: "blocking", allowsRepair: true, ...over });
 
 test("native runner passes when every blocking stage passes", async () => {
@@ -209,4 +210,87 @@ test("R6: a stage with no allowsRepair field is repairable; only an explicit fal
     async runStage() { return { ok: false, output: "boom" }; }, async repair() { throw new Error("no repair"); }, log() {},
   });
   assert.match(disabled.statusSummary, /repair is disabled/);
+});
+
+test("the pause sits between stages: a 3-stage passing run sleeps twice, never before the first or after the last", async () => {
+  const sleeps = [];
+  const out = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B"), stage("c", "C")], { stageDelaySeconds: 2 }), {
+    async runStage() { return { ok: true, output: "" }; }, async repair() { throw new Error("no repair"); }, log() {},
+    async sleep(ms) { sleeps.push(ms); },
+  });
+  assert.equal(out.passed, true);
+  assert.deepEqual(sleeps, [2000, 2000]);
+});
+
+test("a zero pause never sleeps", async () => {
+  const sleeps = [];
+  await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")], { stageDelaySeconds: 0 }), {
+    async runStage() { return { ok: true, output: "" }; }, async repair() { throw new Error("no repair"); }, log() {},
+    async sleep(ms) { sleeps.push(ms); },
+  });
+  assert.deepEqual(sleeps, []);
+});
+
+test("a repair runs at once after a failed stage; the re-run from the top waits first", async () => {
+  const events = [];
+  let runs = 0;
+  const out = await runNativeLoop(cfg([stage("a", "A")], { stageDelaySeconds: 2 }), {
+    async runStage(s) { runs += 1; events.push(`run:${s.id}`); return { ok: runs > 1, output: runs > 1 ? "" : "boom" }; },
+    async repair() { events.push("repair"); return { ok: true, output: "fixed" }; }, log() {},
+    async sleep(ms) { events.push(`sleep:${ms}`); },
+  });
+  assert.equal(out.passed, true);
+  assert.deepEqual(events, ["run:a", "repair", "sleep:2000", "run:a"]);
+});
+
+test("a stage skipped by runsOncePerRun adds no pause of its own", async () => {
+  const sleeps = [];
+  let bRuns = 0;
+  const out = await runNativeLoop(cfg([stage("a", "A", { runOnce: true }), stage("b", "B")], { stageDelaySeconds: 2 }), {
+    async runStage(s) { if (s.id !== "b") return { ok: true, output: "" }; bRuns += 1; return { ok: bRuns > 1, output: bRuns > 1 ? "" : "boom" }; },
+    async repair() { return { ok: true, output: "fixed" }; }, log() {},
+    async sleep(ms) { sleeps.push(ms); },
+  });
+  assert.equal(out.passed, true);
+  assert.deepEqual(sleeps, [2000, 2000], "one before b, and one before b's re-run after the repair; a's skip adds none");
+});
+
+test("no pause is taken once the run is cancelled or halted", async () => {
+  const sleeps = [];
+  const cancelled = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")], { stageDelaySeconds: 2 }), {
+    async runStage() { return { ok: true, output: "" }; }, async repair() { throw new Error("no"); }, log() {},
+    isCancelled() { return true; }, async sleep(ms) { sleeps.push(ms); },
+  });
+  assert.equal(cancelled.cancelled, true);
+  let ran = 0;
+  const halted = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")], { stageDelaySeconds: 2 }), {
+    async runStage() { ran += 1; return { ok: true, output: "" }; }, async repair() { throw new Error("no"); }, log() {},
+    halt() { return ran > 0 ? "stopped" : null; }, async sleep(ms) { sleeps.push(ms); },
+  });
+  assert.equal(halted.statusSummary, "stopped");
+  assert.equal(ran, 1);
+  assert.deepEqual(sleeps, []);
+});
+
+test("the default pause returns promptly when Stop arrives during it", async () => {
+  let flag = false;
+  const ran = [];
+  const started = Date.now();
+  const out = await runNativeLoop(cfg([stage("a", "A"), stage("b", "B")], { stageDelaySeconds: 5 }), {
+    async runStage(s) { ran.push(s.id); setTimeout(() => { flag = true; }, 200); return { ok: true, output: "" }; },
+    async repair() { throw new Error("no"); }, log() {}, isCancelled() { return flag; },
+  });
+  const elapsed = Date.now() - started;
+  assert.equal(out.cancelled, true);
+  assert.deepEqual(ran, ["a"]);
+  assert.ok(elapsed < 2000, `the 5 s pause ended after ${elapsed} ms`);
+});
+
+test("a halt raised while the pause is running ends the pause at once", async () => {
+  const { waitUnlessCancelled } = await import("../native/runner.ts");
+  let halted = null;
+  setTimeout(() => { halted = "agent wrote outside its scope"; }, 150);
+  const t0 = Date.now();
+  await waitUnlessCancelled(5000, () => false, () => halted);
+  assert.ok(Date.now() - t0 < 1500, `ended early, took ${Date.now() - t0} ms`);
 });

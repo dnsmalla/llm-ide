@@ -38,7 +38,7 @@ export function applyTemplate(t: LoopTemplate, detected: string | null, keepUnde
  *  loop exists everywhere and a run names the missing command (`factoryVerifyProblem`) instead of skipping the tests. */
 export function factoryLoop(testCommand: string | null, defaults?: LoopDefaults): LoopDefinition {
   return {
-    id: crypto.randomUUID(), name: FACTORY_TEMPLATE.name, isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [],
+    id: crypto.randomUUID(), name: FACTORY_TEMPLATE.name, isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], inputPath: "",
     defaultKey: FACTORY_DEFAULT_KEY, runsOnSchedule: false,
     config: applyLoopDefaults(withSetupCommand(applyTemplate(FACTORY_TEMPLATE, testCommand, true), testCommand), defaults),
   };

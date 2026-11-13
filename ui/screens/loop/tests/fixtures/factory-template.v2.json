@@ -247,6 +247,7 @@
     "useWorktreesForConcurrentRuns": false,
     "alwaysUseWorktree": true,
     "openMergeRequest": true,
+    "stageDelaySeconds": 2,
     "refactorBatchesPerRun": null,
     "maxCostUsd": 10
   },

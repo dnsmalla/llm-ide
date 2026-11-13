@@ -1,3 +1,5 @@
+import { normalizeInputPath } from "./input-path.ts";
+
 // Loop's persisted contract, mirroring the frozen Swift LoopEngineProjectStore/LoopDefinition/LoopStage/
 // LoopEngineConfig. This module is deliberately tolerant: loop.json is committed and older/newer builds must not
 // destroy each other's fields. Every field added after the first schema decodes with a default, and an unknown
@@ -71,6 +73,8 @@ export interface LoopEngineConfig {
    * uses that issue; any other run opens one in the run's repository. Off by default: it writes to the hosted repo.
    */
   issueTrail?: boolean;
+  /** Seconds to hold between one stage finishing and the next starting, so files, git and the core settle. 0 = none. */
+  stageDelaySeconds: number;
   refactorBatchesPerRun: number | null;
   /** A per-run USD ceiling; null = no ceiling. Factory loops set 10. */
   maxCostUsd: number | null;
@@ -83,6 +87,8 @@ export interface LoopDefinition {
   goal: string | null;
   acceptanceCriteria: string | null;
   scopeGlobs: string[];
+  /** The folder of the repository this loop works on; "" = the whole repository (see input-path.ts). */
+  inputPath: string;
   defaultKey: string | null;
   runsOnSchedule: boolean;
   config: LoopEngineConfig;
@@ -97,7 +103,11 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const bool = (v: unknown, d: boolean): boolean => (typeof v === "boolean" ? v : d);
+/** Whole seconds, 0..60; missing or non-numeric falls back to the 2 s default. */
+const stageDelay = (v: unknown): number => { const n = num(v); return n === null ? 2 : Math.min(60, Math.max(0, Math.round(n))); };
 const strArray = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+/** A stored input path that normalizes; anything else (missing, invalid) is the whole repository. */
+const inputPathOf = (v: unknown): string => { const r = typeof v === "string" ? normalizeInputPath(v) : null; return r && "path" in r ? r.path : ""; };
 
 const KINDS = new Set<LoopStageKind>(["regressionSweep", "shellCommand", "skill", "artifactCheck", "testMap", "testPrune", "incidentTriage", "codeGraph", "sdkSurfaceDiff", "unsupported"]);
 
@@ -156,6 +166,7 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     alwaysUseWorktree: bool(o.alwaysUseWorktree, false),
     openMergeRequest: bool(o.openMergeRequest, true),
     issueTrail: bool(o.issueTrail, false),
+    stageDelaySeconds: stageDelay(o.stageDelaySeconds),
     refactorBatchesPerRun: num(o.refactorBatchesPerRun),
     maxCostUsd: num(o.maxCostUsd),
   };
@@ -171,6 +182,7 @@ export function decodeDefinition(v: unknown, version: number): LoopDefinition | 
     goal: str(v.goal),
     acceptanceCriteria: str(v.acceptanceCriteria),
     scopeGlobs: strArray(v.scopeGlobs),
+    inputPath: inputPathOf(v.inputPath),
     defaultKey: str(v.defaultKey),
     runsOnSchedule: runs,
     config: decodeConfig(v.config),
@@ -186,7 +198,7 @@ export function decodeProjectStore(v: unknown): LoopProjectStore | null {
     return { schemaVersion: Math.max(version, 0), loops };
   }
   if (Array.isArray(v.stages)) {
-    return { schemaVersion: LOOP_SCHEMA_VERSION, loops: [{ id: crypto.randomUUID(), name: "Main Loop", isPrimary: true, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: null, runsOnSchedule: true, config: decodeConfig(v) }] };
+    return { schemaVersion: LOOP_SCHEMA_VERSION, loops: [{ id: crypto.randomUUID(), name: "Main Loop", isPrimary: true, goal: null, acceptanceCriteria: null, scopeGlobs: [], inputPath: "", defaultKey: null, runsOnSchedule: true, config: decodeConfig(v) }] };
   }
   return null;
 }
@@ -199,7 +211,7 @@ export function encodeProjectStore(store: LoopProjectStore): string {
       id: l.id, name: l.name, isPrimary: l.isPrimary,
       ...(l.goal !== null ? { goal: l.goal } : {}),
       ...(l.acceptanceCriteria !== null ? { acceptanceCriteria: l.acceptanceCriteria } : {}),
-      scopeGlobs: l.scopeGlobs, defaultKey: l.defaultKey, runsOnSchedule: l.runsOnSchedule,
+      scopeGlobs: l.scopeGlobs, ...(l.inputPath ? { inputPath: l.inputPath } : {}), defaultKey: l.defaultKey, runsOnSchedule: l.runsOnSchedule,
       config: encodeConfig(l.config),
     })),
   }, null, 2) + "\n";
@@ -247,6 +259,7 @@ function encodeConfig(c: LoopEngineConfig): Record<string, unknown> {
     alwaysUseWorktree: c.alwaysUseWorktree,
     openMergeRequest: c.openMergeRequest,
     ...(c.issueTrail ? { issueTrail: true } : {}),
+    ...(c.stageDelaySeconds !== 2 ? { stageDelaySeconds: c.stageDelaySeconds } : {}),
     ...(c.repairModel !== null ? { repairModel: c.repairModel } : {}),
     ...(c.refactorBatchesPerRun !== null ? { refactorBatchesPerRun: c.refactorBatchesPerRun } : {}),
     ...(c.maxCostUsd !== null ? { maxCostUsd: c.maxCostUsd } : {}),

@@ -235,6 +235,27 @@ two jobs apart. Splitting them gives each its own iteration count, its own
   is idempotent and runs on every load, so this happens once, silently, with no
   action from the user.
 
+### Steps are paced and checked
+
+The native Loop (desktop) moves one careful step at a time, and checks each step before the next one starts.
+
+- **Pace.** After a stage finishes, the runner waits **Pause between stages** (`stageDelaySeconds`, default 2 s, 0 turns it off, per loop in the Loop options) before it starts the next one, so files, git and the core settle after an agent wrote something. There is no wait before the first stage, after the last, after a stage that was skipped because it already passed, before a repair, or after a Stop. The Refactoring driver waits the same time between planning and batch 1 and between batches. A Stop ends a wait at once.
+- **A model's answer is checked by code before the next step.** A skill stage that the agent finished must also meet a plain contract (`step-contract.ts`), no second model involved: every skill must return a reply; the planner must leave a plan with at least one `### R<n> … (status: …)` batch and no malformed heading; Test Write must return `Covered:` lines whose named files exist; Apply must say `Applied: R<n>`, the plan must show that batch `done` or `skipped`, and a `done` batch must have changed code; Conform must say `Conformed: R<n>`. A stage with an edited prompt is only held to the first rule. A failed contract fails the stage with the reason and the agent's reply, so a repair sees both.
+- **Time limit.** The request to the core for an agent step waits as long as the step's own limit (30 minutes by default) plus a minute, not the 30 seconds of an ordinary request.
+- **Graph generation is code, not a model.** The graph comes from the graph-kit scanner (`graph-kit/bin/graph-kit.js`, run by the host's `graph_generate`). The graph, test-map, ledger, prune, artifact and shell stages never call the model, and a test fails if one does. A graph is validated before it is used: a `schemaVersion`, unique node ids, and every edge pointing at an existing node. An invalid or empty graph fails the snapshot (it never becomes the baseline), and an invalid saved baseline fails the verify.
+
+### Input path
+
+A loop that plans, applies or tests code (Refactoring, Test, or any loop with a Refactor Plan, Test Write, Refactor Apply or Refactor Conform stage) has an **Input path** in its Overview: the folder of the repository it works on. It is empty by default, which means the whole repository; enter a folder such as `src/billing` to limit the work to it. The path is relative to the repository root, and a path that is absolute, contains `..`, or points into `.git`, `.factory`, `node_modules`, `system/` or `llm-doc/loop/` is refused. A run does not start when the folder does not exist.
+
+With a path set, the stages work on that folder only, and code checks the result:
+
+- Plan, Apply, Conform and Test Write are told to work only under the path (the planner's Target path and the Apply and Conform Output path show it).
+- The plan is rejected when a batch's `- Files:` names a file outside the path.
+- Apply and Conform may change a file outside the path only by import or reference updates that a move inside it needs: the file's whole change must be import lines, with the same imported names, pointing at a module the batch names. Any other change outside the path fails the stage with the file named. This check applies in a worktree run; in a run in the main working tree it fails closed.
+- The test map counts only the functions under the path; tests may live anywhere.
+- The code graph stays whole-repository, so the dependants of a moved file are visible.
+
 ### Issue trail
 
 Every runner reports to a GitHub/GitLab issue the same way, through one shared module,

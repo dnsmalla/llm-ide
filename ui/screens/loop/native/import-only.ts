@@ -232,10 +232,12 @@ function readLine(e: Entry, kind: string, t: string): void {
 }
 
 /**
- * The candidate test files whose whole change is a name-preserving import move (see the header). A candidate must be
- * named like a test (`isTestFileName`); `allowedModules` is the batch's `- Files:` list. Candidates match `b/<path>` exactly.
+ * The candidate files whose whole change is a name-preserving import move (see the header). By default a candidate must
+ * be named like a test (`isTestFileName`): that is what the protected-path exemption may keep. `anyFile` lifts only that
+ * name rule, for the check that code outside a loop's input path changed by import updates alone (the same balanced-names
+ * and known-module rules still apply). `allowedModules` is the batch's `- Files:` list. Candidates match `b/<path>` exactly.
  */
-export function importOnlyFiles(diffText: string, candidates: readonly string[], allowedModules: readonly string[]): string[] {
+export function importOnlyFiles(diffText: string, candidates: readonly string[], allowedModules: readonly string[], opts: { anyFile?: boolean } = {}): string[] {
   const entries = new Map<string, Entry>();
   let cur = entry(false); // before the first header, nothing is a candidate
   let path = "";
@@ -283,7 +285,7 @@ export function importOnlyFiles(diffText: string, candidates: readonly string[],
   }
 
   return candidates.filter((p) => {
-    if (!isTestFileName(p)) return false; // conftest.py, __init__.py and helpers change how every test runs: judged
+    if (opts.anyFile !== true && !isTestFileName(p)) return false; // conftest.py, __init__.py and helpers change how every test runs: judged
     const e = entries.get(p);
     return e !== undefined && eligible(e, allowedModules);
   });

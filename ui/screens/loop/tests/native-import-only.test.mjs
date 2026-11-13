@@ -130,3 +130,12 @@ test("swapping the imported name behind the same alias is a change, not a move",
   const moved = "diff --git a/tests/test_a.py b/tests/test_a.py\n--- a/tests/test_a.py\n+++ b/tests/test_a.py\n@@ -1 +1 @@\n-from a import foo as X\n+from b import foo as X\n";
   assert.deepEqual(importOnlyFiles(moved, ["tests/test_a.py"], ["b.py"]), ["tests/test_a.py"], "moving the same name keeps working");
 });
+
+test("anyFile lifts only the test-name rule: a plain source file qualifies for the outside-scope check, nothing else relaxes", () => {
+  const move = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-from old import a\n+from new import a\n";
+  assert.deepEqual(importOnlyFiles(move, ["src/app.py"], ["new.py"]), [], "not eligible for the test exemption");
+  assert.deepEqual(importOnlyFiles(move, ["src/app.py"], ["new.py"], { anyFile: true }), ["src/app.py"]);
+  assert.deepEqual(importOnlyFiles(move, ["src/app.py"], ["unrelated.py"], { anyFile: true }), [], "the module must still be one the batch names");
+  const swap = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-from old import a\n+from new import b\n";
+  assert.deepEqual(importOnlyFiles(swap, ["src/app.py"], ["new.py"], { anyFile: true }), [], "the names must still be unchanged");
+});

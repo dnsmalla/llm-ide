@@ -2,6 +2,7 @@
 // This slice covers SwiftPM, Node, pytest, Go and Cargo at package depth 0–2. `map` and `ledger` are separate,
 // larger operations and are refused rather than approximated.
 import type { FsApi } from "../../explorer/fs";
+import { pathInside } from "./input-path.ts";
 import { isTestFileName } from "./protected.ts";
 
 export interface TestRoot { packageDir: string; testDir: string; runner: string; command: string; languages: string[] }
@@ -136,7 +137,8 @@ async function sourceFiles(fs: TestMapFs, repoPrefix: string, structure: TestStr
   return out;
 }
 
-export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure: TestStructure, graphPath: string, now = new Date()): Promise<TestMap> {
+/** `scope` keeps only the source entries inside that folder ("" = all). Test files and roots are never filtered: tests may sit outside it. */
+export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure: TestStructure, graphPath: string, now = new Date(), scope = ""): Promise<TestMap> {
   const prefix = repoPrefix ? `${repoPrefix}/` : "";
   const tests: { path: string; tokens: Set<string> }[] = [];
   for (const root of structure.roots) {
@@ -159,7 +161,7 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
       };
       source = "graph";
       for (const f of g.files ?? []) {
-        if (!f.path) continue;
+        if (!f.path || !pathInside(scope, f.path)) continue;
         const base = f.name?.replace(/\.[^.]+$/, "") ?? f.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
         for (const fn of f.functions ?? []) {
           if (!fn.name || fn.name.startsWith("_") || ["init", "deinit", "body", "main", "description"].includes(fn.name)) continue;
@@ -170,7 +172,7 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
       if (entries.length === 0) for (const n of g.nodes ?? []) {
         if (n.kind !== "function" || !n.title) continue;
         const path = n.metadata?.path ?? n.metadata?.source_file;
-        if (!path) continue;
+        if (!path || !pathInside(scope, path)) continue;
         const base = path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
         const testedBy = tests.filter((t) => t.tokens.has(n.title!) || (base !== "" && t.tokens.has(base))).map((t) => t.path).sort();
         entries.push({ path, function: n.title, line: n.metadata?.line ?? 1, fanIn: 0, loc: 0, testedBy });
@@ -181,6 +183,7 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
     // No usable graph: every source file is an entry, "tested" when a test names its base name (the graph path's rule).
     source = "files";
     for (const rel of await sourceFiles(fs, repoPrefix, structure)) {
+      if (!pathInside(scope, rel)) continue;
       const base = rel.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
       const testedBy = tests.filter((t) => t.tokens.has(base)).map((t) => t.path).sort();
       entries.push({ path: rel, function: "*", line: 1, fanIn: 0, loc: 0, testedBy });

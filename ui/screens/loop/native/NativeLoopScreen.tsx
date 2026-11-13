@@ -12,6 +12,7 @@ import { core } from "../../shell/runtime";
 import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
+import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, type LoopTemplate } from "./templates.ts";
 import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode, type RunnerDeps } from "./runner.ts";
@@ -113,6 +114,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** What the input-path field shows while typing; the loop keeps only the last valid value. */
+  const [inputDraft, setInputDraft] = useState<{ loopId: string; text: string; error: string | null } | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [testCommand, setTestCommand] = useState<string | null>(null);
   const [envReason, setEnvReason] = useState("Checking the project environment…");
@@ -400,7 +403,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     const id = crypto.randomUUID();
     mutateStore((s) => {
       s.loops.push({
-        id, name: t.name, isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [],
+        id, name: t.name, isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], inputPath: "",
         defaultKey: null, runsOnSchedule: false, config: applyTemplate(t, testCommand),
       });
     });
@@ -571,6 +574,17 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     startingRef.current = true;
     // Any run start (Run, queue, schedule, picker) closes the picker so a stale card cannot linger over it.
     setPickerLoop(null);
+    // A missing input folder would leave the stages with nothing to work on, so refuse before any worktree exists.
+    if (target.inputPath !== "") {
+      const repoRel = start ? start.repoRel : workRelative;
+      const folder = repoRel ? `${repoRel}/${target.inputPath}` : target.inputPath;
+      const isFolder = await fs.list(folder).then(() => true, () => false);
+      if (!isFolder) {
+        setNotice(`The input path “${target.inputPath}” does not exist in this repository, so the run did not start.`);
+        startingRef.current = false;
+        return;
+      }
+    }
     let prepared: RunInfo | null = null;
     if (useWorktree) {
       const root = projectRoot ?? "";
@@ -1010,6 +1024,19 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <label className="loop-field"><span>Goal — what is this loop trying to achieve?</span><textarea rows={2} value={loop.goal ?? ""} onChange={(e) => patchLoop((l) => { l.goal = e.target.value || null; })} /></label>
           <label className="loop-field"><span>Acceptance criteria — what observable condition means done?</span><textarea rows={2} value={loop.acceptanceCriteria ?? ""} placeholder="Optional; included in repair/skill prompts." onChange={(e) => patchLoop((l) => { l.acceptanceCriteria = e.target.value || null; })} /></label>
           <label className="loop-field"><span>Scope globs (comma separated)</span><input value={loop.scopeGlobs.join(", ")} placeholder="src/**, tests/**" onChange={(e) => patchLoop((l) => { l.scopeGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
+          {loopUsesInputPath(loop) ? (
+            <label className="loop-field"><span>Input path — the folder to refactor</span>
+              <input value={inputDraft?.loopId === loop.id ? inputDraft.text : loop.inputPath} placeholder="(whole repository)" onChange={(e) => {
+                const text = e.target.value;
+                const r = normalizeInputPath(text);
+                if ("error" in r) { setInputDraft({ loopId: loop.id, text, error: r.error }); return; }
+                setInputDraft({ loopId: loop.id, text, error: null });
+                patchLoop((l) => { l.inputPath = r.path; });
+              }} />
+              <span className="loop-native-hint">Relative to the repository root. Leave empty to work on the whole repository; enter a folder such as src/billing to limit the work to it.</span>
+              {inputDraft?.loopId === loop.id && inputDraft.error ? <span className="loop-warn">{inputDraft.error}</span> : null}
+            </label>
+          ) : null}
           <div className="loop-gates">
             <h3>{enabledGates.length} gating check{enabledGates.length === 1 ? "" : "s"}.</h3>
             <p className="loop-native-hint">Every iteration re-runs all stages from the top until each gating check passes.</p>
@@ -1018,6 +1045,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           <dl className="loop-meta">
             <dt>Runs in</dt><dd>{loop.config.alwaysUseWorktree ? "a new worktree under system/loop-worktrees/ for each run (your working tree is not touched)" : workRoot ?? projectRoot}</dd>
             <dt>Project root</dt><dd>{projectRoot}</dd>
+            {loopUsesInputPath(loop) ? <><dt>Working on</dt><dd>{loop.inputPath || "whole repository"}</dd></> : null}
             <dt>Bounded by</dt><dd>{loop.config.maxIterations} iterations · {loop.config.wallClockBudgetSeconds ? `${Math.round(loop.config.wallClockBudgetSeconds / 60)} min time limit` : "no time limit"} · stop after {loop.config.consecutiveFailureStop} non-improving · {loop.config.maxRepairsPerStage} repairs/stage</dd>
             <dt>Scheduled</dt><dd>{loop.runsOnSchedule ? "included in this page's cron schedule" : "no — run it from here"}</dd>
           </dl>
@@ -1027,7 +1055,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
             <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} max={10} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>
             <label className="loop-field"><span>Repairs per stage</span><input type="number" min={1} max={10} value={loop.config.maxRepairsPerStage} onChange={(e) => patchLoop((l) => { l.config.maxRepairsPerStage = Math.max(1, Number(e.target.value) || 1); })} /></label>
             <label className="loop-field"><span>Pause timeout (min)</span><input type="number" min={0} step={15} title="0 = no timeout" value={Math.round(loop.config.pauseTimeoutSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.pauseTimeoutSeconds = Math.max(0, Number(e.target.value) || 0) * 60; })} /></label>
+            <label className="loop-field"><span>Pause between stages (seconds)</span><input type="number" min={0} max={60} step={1} value={loop.config.stageDelaySeconds} onChange={(e) => patchLoop((l) => { l.config.stageDelaySeconds = Math.min(60, Math.max(0, Math.round(Number(e.target.value) || 0))); })} /></label>
           </div>
+          <p className="loop-native-hint">Gives files, git and the core a moment to settle between stages. 0 turns it off.</p>
           <details className="loop-advanced">
             <summary>Advanced budgets and policy</summary>
             <label className="loop-field"><span>Repair model (empty = app default)</span><input value={loop.config.repairModel ?? ""} placeholder="model id" onChange={(e) => patchLoop((l) => { l.config.repairModel = e.target.value || null; })} /></label>

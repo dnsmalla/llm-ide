@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cycleCount, graphShape, runCodeGraph } from "../native/codegraph.ts";
+import { cycleCount, graphShape, runCodeGraph, validateGraphDoc } from "../native/codegraph.ts";
 
 function mem(files) {
   return {
@@ -39,7 +39,7 @@ test("verify fails a new import cycle in graph-kit's file imports, and an empty 
   const cyc = await runCodeGraph(fs, "verify", G, B);
   assert.equal(cyc.passed, false);
   assert.match(cyc.output, /cycles 0 → 1/);
-  files[G] = JSON.stringify({ nodes: [], edges: [] });
+  files[G] = JSON.stringify({ schemaVersion: 1, nodes: [], edges: [] }); // a fixture: a valid, empty graph-kit document
   assert.match((await runCodeGraph(fs, "verify", G, B)).output, /came back empty/);
 });
 
@@ -87,4 +87,92 @@ test("F1: a later run replaces the old baseline in the main tree instead of fail
   files[G] = kit(["a.py", "b.py"], []);
   assert.equal((await runCodeGraph(store, "snapshot", G, B)).passed, true);
   assert.equal(files[B], files[G]);
+});
+
+const valid = { schemaVersion: 1, nodes: [{ id: "file:a.py", kind: "file" }, { id: "file:b.py", kind: "file" }], edges: [{ fromId: "file:a.py", toId: "file:b.py", kind: "imports" }] };
+
+test("validateGraphDoc accepts a valid graph-kit document", () => {
+  assert.equal(validateGraphDoc(valid), null);
+});
+
+test("validateGraphDoc names the first problem in a graph-kit document", () => {
+  assert.equal(validateGraphDoc({ ...valid, schemaVersion: undefined }), "the graph has no numeric schemaVersion");
+  assert.equal(validateGraphDoc({ ...valid, schemaVersion: "1" }), "the graph has no numeric schemaVersion");
+  assert.equal(validateGraphDoc({ ...valid, nodes: [...valid.nodes, { id: "file:a.py", kind: "file" }] }), "2 nodes share the id file:a.py");
+  assert.equal(validateGraphDoc({ ...valid, nodes: [{ kind: "file" }] }), "node 1 has no id");
+  assert.equal(validateGraphDoc({ ...valid, nodes: [{ id: "file:a.py" }] }), "node 1 (file:a.py) has no kind");
+  assert.equal(
+    validateGraphDoc({ ...valid, edges: [...valid.edges, { fromId: "file:a.py", toId: "file:gone.py", kind: "imports" }] }),
+    "1 edges point at a node that does not exist, for example file:a.py -> file:gone.py",
+  );
+  assert.equal(validateGraphDoc({ ...valid, edges: [{ fromId: "file:a.py", toId: "file:b.py" }] }), "edge 1 has no kind");
+  assert.equal(validateGraphDoc({ ...valid, edges: undefined }), "the graph has no edges list");
+});
+
+test("validateGraphDoc checks only that the old Mac shape has list fields", () => {
+  assert.equal(validateGraphDoc({ files: [], calls: [] }), null);
+  assert.equal(validateGraphDoc({ files: [{ path: "a" }], calls: [{ from: "x" }] }), null);
+  assert.equal(validateGraphDoc({ files: "nope", calls: [] }), "the graph's files is not a list");
+  assert.equal(validateGraphDoc({ files: [], calls: {} }), "the graph's calls is not a list");
+  assert.equal(validateGraphDoc({ calls: {} }), "the graph file is not a graph document");
+});
+
+test("validateGraphDoc rejects anything that is neither shape", () => {
+  for (const doc of [null, "text", 3, [], {}, { nodes: "x" }, { schemaVersion: 1 }]) {
+    assert.equal(validateGraphDoc(doc), "the graph file is not a graph document", JSON.stringify(doc));
+  }
+});
+
+test("snapshot of an invalid graph fails and writes no baseline", async () => {
+  const files = { [G]: JSON.stringify({ ...valid, edges: [{ fromId: "file:a.py", toId: "file:gone.py", kind: "imports" }] }) };
+  const fs = mem(files);
+  const r = await runCodeGraph(fs, "snapshot", G, B);
+  assert.equal(r.passed, false);
+  assert.match(r.output, /^graph invalid: 1 edges point at a node that does not exist/);
+  assert.equal(B in files, false);
+});
+
+test("a truncated graph file is an invalid graph, not a baseline", async () => {
+  const files = { [G]: JSON.stringify(valid).slice(0, 40) };
+  const fs = mem(files);
+  const r = await runCodeGraph(fs, "snapshot", G, B);
+  assert.equal(r.passed, false);
+  assert.equal(r.output, "graph invalid: the graph file is not valid JSON");
+  assert.equal(B in files, false);
+});
+
+test("snapshot of an empty graph-kit document fails with the nothing-to-refactor message", async () => {
+  const files = { [G]: JSON.stringify({ schemaVersion: 1, nodes: [], edges: [] }) };
+  const fs = mem(files);
+  const r = await runCodeGraph(fs, "snapshot", G, B);
+  assert.deepEqual(r, { passed: false, output: "the scan found no code, so there is nothing to refactor" });
+  assert.equal(B in files, false);
+});
+
+test("verify with a corrupt baseline fails with the baseline message", async () => {
+  const files = { [G]: kit(["a.py"], []), [B]: JSON.stringify({ schemaVersion: 1, nodes: [{ id: "file:a.py", kind: "file" }], edges: [{ fromId: "file:a.py", toId: "file:x.py", kind: "imports" }] }) };
+  const r = await runCodeGraph(mem(files), "verify", G, B);
+  assert.equal(r.passed, false);
+  assert.match(r.output, /^the baseline snapshot is invalid: 1 edges point at a node that does not exist, for example file:a.py -> file:x.py; run the snapshot stage again$/);
+});
+
+test("verify with a truncated baseline fails with the baseline message", async () => {
+  const files = { [G]: kit(["a.py"], []), [B]: kit(["a.py"], []).slice(0, 30) };
+  const r = await runCodeGraph(mem(files), "verify", G, B);
+  assert.equal(r.output, "the baseline snapshot is invalid: the graph file is not valid JSON; run the snapshot stage again");
+});
+
+test("a rescan is awaited before the graph is read, and only read, write and create are used", async () => {
+  let rescanned = false;
+  const calls = [];
+  const files = { [G]: kit(["a.py"], []) };
+  const fs = {
+    async read(path) { calls.push("read"); assert.equal(rescanned, true, "read before the rescan finished"); return { status: "ok", text: files[path] }; },
+    async write(path, text) { calls.push("write"); files[path] = text; },
+    async create() { calls.push("create"); },
+  };
+  const r = await runCodeGraph(fs, "snapshot", G, B, async () => { await new Promise((res) => setTimeout(res, 5)); rescanned = true; });
+  assert.equal(r.passed, true, r.output);
+  assert.equal(rescanned, true);
+  assert.ok(calls.every((c) => ["read", "write", "create"].includes(c)));
 });

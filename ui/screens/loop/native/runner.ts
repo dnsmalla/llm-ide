@@ -36,6 +36,19 @@ export interface RunnerDeps {
   holdWhilePaused?(timeoutSeconds: number): Promise<"ok" | "timedOut">;
   /** Typed run progress for the board; never parsed out of the log. */
   onProgress?(event: ProgressEvent): void;
+  /** Waits `ms` (the stage pause). Default: a 100 ms-tick wait that ends early once `isCancelled` is true. */
+  sleep?(ms: number): Promise<void>;
+}
+
+/** Waits `ms` in 100 ms ticks, returning early once `isCancelled` is true so Stop is not held up by a pause. */
+export async function waitUnlessCancelled(ms: number, isCancelled?: () => boolean, halted?: () => string | null | undefined): Promise<void> {
+  for (let left = ms; left > 0 && !isCancelled?.() && !halted?.(); left -= 100) await new Promise((r) => setTimeout(r, Math.min(100, left)));
+}
+
+/** The pause before the next stage or batch: none at 0, and none once the run is cancelled or halted. */
+export async function pauseBetween(deps: RunnerDeps, seconds: number): Promise<void> {
+  if (seconds <= 0 || deps.isCancelled?.() || deps.halt?.()) return;
+  await (deps.sleep ? deps.sleep(seconds * 1000) : waitUnlessCancelled(seconds * 1000, deps.isCancelled, deps.halt));
 }
 export interface StageOutcome { stage: LoopStage; ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 export interface LoopIterationOutcome { index: number; stages: StageOutcome[]; repair: { stageId: string; attempt: number; ok: boolean } | null }
@@ -66,6 +79,8 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   const iterations: LoopIterationOutcome[] = [];
   // Ids of runOnce stages that passed in this run; later iterations skip them instead of paying for them again.
   const passedOnce = new Set<string>();
+  // Set once a stage has run: the next stage that starts waits config.stageDelaySeconds first (not before the first one).
+  let stageRan = false;
   const started = Date.now();
   const budgetMs = config.wallClockBudgetSeconds === null ? null : Math.max(0, config.wallClockBudgetSeconds) * 1000;
   // Paused time does not count toward the wall-clock budget (the Mac's pausedSeconds).
@@ -106,6 +121,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
         deps.onProgress?.({ type: "stage-skipped", stage, index: stages.indexOf(stage) + 1, count: stages.length, iteration });
         continue;
       }
+      if (stageRan) await pauseBetween(deps, config.stageDelaySeconds);
       const heldAtStage = await heldOutcome();
       if (heldAtStage) return heldAtStage;
       if (deps.isCancelled?.()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true };
@@ -115,6 +131,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       deps.onProgress?.({ type: "stage-start", stage, index: stages.indexOf(stage) + 1, count: stages.length, iteration });
       const t0 = Date.now();
       const result = await deps.runStage(stage, outcomes);
+      stageRan = true;
       const outcome = { stage, ok: result.ok, output: result.output, durationMs: result.durationMs ?? Date.now() - t0, usage: result.usage };
       spentUsd += result.usage?.costUsd ?? 0;
       outcomes.push(outcome);

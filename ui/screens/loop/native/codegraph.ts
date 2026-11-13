@@ -1,3 +1,4 @@
+// Graph generation is graph-kit code, never a model: the graph is validated (validateGraphDoc) before it is used.
 // Native code-graph stage. It rescans the run's repository, snapshots the graph under system/loop/refactor/graph/, and
 // verifies the batch did not make the structure worse. It reads both graph shapes: graph-kit's canonical document
 // (`nodes` + `edges`, which the desktop writes) and the Mac's older `files` + `calls` report.
@@ -31,11 +32,51 @@ export function graphShape(g: GraphDoc): GraphShape {
   };
 }
 
-async function readShape(fs: CodeGraphFs, path: string): Promise<GraphShape | null> {
+/** The first problem with a parsed graph document, or null when it can be used. */
+export function validateGraphDoc(doc: unknown): string | null {
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) return "the graph file is not a graph document";
+  const d = doc as { schemaVersion?: unknown; nodes?: unknown; edges?: unknown; files?: unknown; calls?: unknown };
+  if (!Array.isArray(d.nodes)) {
+    if (!Array.isArray(d.files) && !Array.isArray(d.calls)) return "the graph file is not a graph document";
+    if (d.files !== undefined && !Array.isArray(d.files)) return "the graph's files is not a list";
+    if (d.calls !== undefined && !Array.isArray(d.calls)) return "the graph's calls is not a list";
+    return null;
+  }
+  if (typeof d.schemaVersion !== "number" || !Number.isFinite(d.schemaVersion)) return "the graph has no numeric schemaVersion";
+  const nodes = d.nodes as Array<{ id?: unknown; kind?: unknown } | null>;
+  const ids = new Map<string, number>();
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (!n || typeof n.id !== "string" || n.id === "") return `node ${i + 1} has no id`;
+    if (typeof n.kind !== "string") return `node ${i + 1} (${n.id}) has no kind`;
+    ids.set(n.id, (ids.get(n.id) ?? 0) + 1);
+  }
+  for (const [id, count] of ids) if (count > 1) return `${count} nodes share the id ${id}`;
+  if (!Array.isArray(d.edges)) return "the graph has no edges list";
+  const edges = d.edges as Array<{ fromId?: unknown; toId?: unknown; kind?: unknown } | null>;
+  for (let i = 0; i < edges.length; i++) {
+    const e = edges[i];
+    if (!e || typeof e.fromId !== "string" || e.fromId === "") return `edge ${i + 1} has no fromId`;
+    if (typeof e.toId !== "string" || e.toId === "") return `edge ${i + 1} has no toId`;
+    if (typeof e.kind !== "string" || e.kind === "") return `edge ${i + 1} has no kind`;
+  }
+  const dangling = (edges as Array<{ fromId: string; toId: string }>).filter((e) => !ids.has(e.fromId) || !ids.has(e.toId));
+  if (dangling.length) return `${dangling.length} edges point at a node that does not exist, for example ${dangling[0].fromId} -> ${dangling[0].toId}`;
+  return null;
+}
+
+/** Parses and validates graph text; the parsed document is what the stage counts, so it is what it trusts. */
+function checkGraph(text: string): { doc: GraphDoc } | { error: string } {
+  let doc: unknown;
+  try { doc = JSON.parse(text); } catch { return { error: "the graph file is not valid JSON" }; }
+  const error = validateGraphDoc(doc);
+  return error ? { error } : { doc: doc as GraphDoc };
+}
+
+async function readText(fs: CodeGraphFs, path: string): Promise<string | null> {
   try {
     const r = await fs.read(path, 20_000_000);
-    if (r.status !== "ok" || !r.text) return null;
-    return graphShape(JSON.parse(r.text) as GraphDoc);
+    return r.status === "ok" && r.text ? r.text : null;
   } catch { return null; }
 }
 
@@ -75,17 +116,23 @@ export async function runCodeGraph(fs: CodeGraphFs, op: "snapshot" | "verify", g
   if (rescan) {
     try { await rescan(); } catch (e) { return { passed: false, output: `graph rescan failed: ${e instanceof Error ? e.message : String(e)}` }; }
   }
-  const current = await readShape(fs, graphPath);
-  if (!current) return { passed: false, output: `no readable graph at ${graphPath}; run the Graph page scan first` };
+  const text = await readText(fs, graphPath);
+  if (text === null) return { passed: false, output: `no readable graph at ${graphPath}; run the Graph page scan first` };
+  const cur = checkGraph(text);
+  if ("error" in cur) return { passed: false, output: `graph invalid: ${cur.error}` };
+  const current = graphShape(cur.doc);
   if (op === "snapshot") {
-    const raw = await fs.read(graphPath, 20_000_000);
-    if (raw.status !== "ok" || !raw.text) return { passed: false, output: "the graph file could not be read" };
+    if (Array.isArray(cur.doc.nodes) && cur.doc.nodes.length === 0) return { passed: false, output: "the scan found no code, so there is nothing to refactor" };
+    // The validated text is what gets saved, so the baseline is exactly the graph that passed.
     await ensureDir(fs, beforePath);
-    await fs.write(beforePath, raw.text, { expected_hash: null, force: true });
+    await fs.write(beforePath, text, { expected_hash: null, force: true });
     return { passed: true, output: `snapshot · ${current.files} file(s), ${current.nodes} node(s), ${current.edges} edge(s), ${current.cycles} cycle(s), ${current.over500} over 500 lines → ${beforePath}` };
   }
-  const before = await readShape(fs, beforePath);
-  if (!before) return { passed: false, output: `no snapshot at ${beforePath}; run the snapshot graph stage first` };
+  const baseText = await readText(fs, beforePath);
+  if (baseText === null) return { passed: false, output: `no snapshot at ${beforePath}; run the snapshot graph stage first` };
+  const base = checkGraph(baseText);
+  if ("error" in base) return { passed: false, output: `the baseline snapshot is invalid: ${base.error}; run the snapshot stage again` };
+  const before = graphShape(base.doc);
   const worse: string[] = [];
   if (current.cycles > before.cycles) worse.push(`cycles ${before.cycles} → ${current.cycles}`);
   if (current.over500 > before.over500) worse.push(`files over 500 lines ${before.over500} → ${current.over500}`);

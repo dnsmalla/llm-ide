@@ -10,14 +10,20 @@ import { evaluateArtifact } from "./artifact.ts";
 import { runCodeGraph } from "./codegraph.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, REFACTOR_MOVE_SKILLS, agentRunBody, guardedPaths, isFactoryLoop, reviewDiffSection } from "./factory.ts";
 import { importOnlyFiles } from "./import-only.ts";
-import { registrySource, stagePromptText } from "./default-stage.ts";
+import { followsRegistry, registrySource, stagePromptText } from "./default-stage.ts";
+import { INPUT_PATH_SKILLS, pathInside } from "./input-path.ts";
 import type { LoopDefinition, LoopStage } from "./model.ts";
 import { checkWrites, isTestFileName } from "./protected.ts";
 import { runRegression } from "./regression.ts";
 import type { RunnerDeps, StageOutcome, StageRunResult } from "./runner.ts";
+import { checkSkillResult } from "./step-contract.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { changedPathArgs, repoPrefixFor, stageHostArgs } from "./worktree-run.ts";
+
+/** The core's default request timeout is 30 s; an agent call runs as long as its body allows, plus this transport grace. */
+const AGENT_TRANSPORT_GRACE_MS = 60_000;
+const REPAIR_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** `invokeHost`'s shape; tests pass a fake. */
 export type HostInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -74,21 +80,41 @@ function guardProtected(ctx: StageExecContext, paths: readonly string[], target:
   );
 }
 
+/** The refactor plan's path under the run's root. */
+function planPathFor(ctx: StageExecContext): string {
+  const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
+  return prefix ? `${prefix}/llm-doc/loop/refactor/REFACTOR.md` : "llm-doc/loop/refactor/REFACTOR.md";
+}
+
+/** The plan's text, or null when it is missing or unreadable. */
+async function readPlanText(ctx: StageExecContext): Promise<string | null> {
+  try {
+    const text = (await ctx.fs.read(planPathFor(ctx), 8_000_000)).text;
+    return typeof text === "string" ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a root-relative path exists. Any read that answers (even too_large or binary) means it exists. */
+async function fileExists(ctx: StageExecContext, rel: string): Promise<boolean> {
+  const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
+  try {
+    await ctx.fs.read(prefix ? `${prefix}/${rel}` : rel, 1);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The `- Files:` entries of the batch a stage works on. Refactor Apply works on the first `(status: todo)` batch; Conform
  * runs after Apply marked that batch done, so it works on the last `(status: done)` one (batches are applied in plan order,
  * so a later todo batch is never Conform's). A missing or unreadable plan names none.
  */
 async function batchFileList(ctx: StageExecContext, which: "todo" | "done"): Promise<string[]> {
-  const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
-  const planPath = prefix ? `${prefix}/llm-doc/loop/refactor/REFACTOR.md` : "llm-doc/loop/refactor/REFACTOR.md";
-  let text: string | null;
-  try {
-    text = (await ctx.fs.read(planPath, 8_000_000)).text;
-  } catch {
-    return [];
-  }
-  if (typeof text !== "string") return [];
+  const text = await readPlanText(ctx);
+  if (text === null) return [];
   const lines = text.split("\n");
   const heads = lines.flatMap((l, i) => (/^### R\d+\b/.test(l) ? [i] : []));
   const at = which === "todo"
@@ -122,6 +148,23 @@ async function importOnlyTests(ctx: StageExecContext, target: LoopDefinition, s:
   }
 }
 
+/**
+ * Changed or created code paths outside the input path, each marked import-only when the worktree diff says so. Any
+ * doubt (a host error, a truncated diff, a main-tree run) marks none, so the contract fails them.
+ */
+async function outsideInputPath(ctx: StageExecContext, inputPath: string, paths: readonly string[], plannedFiles: readonly string[]): Promise<{ path: string; importOnly: boolean }[]> {
+  const candidates = [...new Set(paths.map(normaliseRel))].filter((p) => !pathInside(inputPath, p) && !(p.startsWith("llm-doc/loop/") || p.startsWith("system/") || p.startsWith(".factory/")));
+  if (candidates.length === 0) return [];
+  let importOnly: string[] = [];
+  if (ctx.runId !== null) {
+    try {
+      const d = await ctx.host<{ text?: unknown; truncated?: unknown }>("loop_worktree_diff", { runId: ctx.runId });
+      if (d.truncated !== true && typeof d.text === "string") importOnly = importOnlyFiles(d.text, candidates, plannedFiles, { anyFile: true }); // only a check, not an exemption from the guard
+    } catch { /* fail closed: nothing is import-only */ }
+  }
+  return candidates.map((path) => ({ path, importOnly: importOnly.includes(path) }));
+}
+
 /** The reason the run must stop after one agent call, or null when its writes were acceptable. */
 function stopReason(g: { error: string | null; violation: string | null }): string | null {
   if (g.error !== null) return `the agent call failed (${g.error})${g.violation ? `; ${g.violation}` : ""}`;
@@ -153,12 +196,12 @@ async function runRegressionStage(ctx: StageExecContext, s: LoopStage, prefix: s
       return { ok: !v.timedOut && v.exitCode === 0, output: [v.stdout, v.stderr].filter(Boolean).join("\n") };
     },
     async ask(prompt) {
-      const a = await ctx.core.request<{ reply?: string }>("/kb/complete", { method: "POST", body: { prompt } });
+      const a = await ctx.core.request<{ reply?: string }>("/kb/complete", { method: "POST", body: { prompt }, timeoutMs: 180_000 });
       return a.reply ?? "";
     },
     async judge(saved, fresh) {
       const prompt = ["Compare two answers about a software fault.", "Are they the same meaning for the fault and its fix? Reply with JSON only: {\"same\":true} or {\"same\":false}.", `Saved answer:\n${saved.slice(0, 12_000)}`, `Fresh answer:\n${fresh.slice(0, 12_000)}`].join("\n\n");
-      const j = await ctx.core.request<{ reply?: string }>("/kb/complete", { method: "POST", body: { prompt } });
+      const j = await ctx.core.request<{ reply?: string }>("/kb/complete", { method: "POST", body: { prompt }, timeoutMs: 180_000 });
       const m = /\{[\s\S]*?\}/.exec(j.reply ?? "");
       if (!m) return false;
       try { return (JSON.parse(m[0]) as { same?: unknown }).same === true; } catch { return false; }
@@ -196,8 +239,13 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   const parts = [stagePromptText(s, registrySource(s))?.trim() || `Run the ${s.name} skill for this loop.`];
   if (target.goal) parts.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
-  if (s.targetPath) parts.push(`Target path: ${s.targetPath}`);
-  if (s.outputPath) parts.push(`Output path: ${s.outputPath}`);
+  const inputPath = target.inputPath ?? "";
+  const scoped = inputPath !== "" && INPUT_PATH_SKILLS.has(s.skillId);
+  const targetPath = scoped && s.skillId === "skills/refactor-planner" ? inputPath : s.targetPath;
+  if (targetPath) parts.push(`Target path: ${targetPath}`);
+  const outputPath = scoped && REFACTOR_MOVE_SKILLS.has(s.skillId) ? inputPath : s.outputPath;
+  if (outputPath) parts.push(`Output path: ${outputPath}`);
+  if (scoped) parts.push(`Input path: ${inputPath} (relative to the repository root). Work ONLY on code under this path: every file you plan, cover, move or edit must be inside it. Code outside it may change only by import or reference updates that a move inside it requires.`);
   // The Review stage reviews the worktree diff, which the agent cannot run git to read (Phase A Task 9, 6f).
   if (ctx.runId !== null && s.skillId === FACTORY_REVIEW_SKILL) {
     try {
@@ -214,10 +262,12 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   const plannedFiles = moves ? await batchFileList(ctx, s.skillId === "skills/refactor-apply" ? "todo" : "done") : [];
   // Only Intake also reads the project's llm-doc/ (a split layout keeps it outside the run's worktree).
   const llmDocExists = s.skillId === FACTORY_INTAKE_SKILL && ctx.projectRoot ? await ctx.fs.list("llm-doc").then(() => true, () => false) : false;
+  const timeoutMs = (s.timeoutSeconds ?? 1800) * 1000;
   const g = await guardedAgentCall<AgentRunReply>({
     before,
     call: () => ctx.core.request<AgentRunReply>("/kb/loop/agent-run", {
-      method: "POST", body: agentRunBody({ message: parts.join("\n\n"), stage: s, repoRoot: ctx.runRoot, timeoutMs: (s.timeoutSeconds ?? 1800) * 1000, projectRoot: ctx.projectRoot, llmDocExists }),
+      method: "POST", body: agentRunBody({ message: parts.join("\n\n"), stage: s, repoRoot: ctx.runRoot, timeoutMs, projectRoot: ctx.projectRoot, llmDocExists }),
+      timeoutMs: timeoutMs + AGENT_TRANSPORT_GRACE_MS,
       signal: ctx.signal,
     }),
     changedNow: () => changedPathsNow(ctx),
@@ -229,7 +279,23 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   if (report && !wroteReport(g.result, report)) {
     return { ok: false, output: `the report was not written: ${report}. The stage failed instead of reading an older report.` };
   }
-  return skillResult(g.result);
+  const result = skillResult(g.result);
+  if (!result.ok) return result;
+  const reply = g.result.reply ?? "";
+  const written = [...(g.result.changedPaths ?? []), ...(g.result.createdPaths ?? [])];
+  const outside = inputPath !== "" && REFACTOR_MOVE_SKILLS.has(s.skillId) ? await outsideInputPath(ctx, inputPath, written, plannedFiles) : undefined;
+  const problem = await checkSkillResult({
+    skillId: s.skillId,
+    reply,
+    changedPaths: g.result.changedPaths ?? [],
+    createdPaths: g.result.createdPaths ?? [],
+    structured: followsRegistry(s),
+    readPlan: () => readPlanText(ctx),
+    exists: (rel) => fileExists(ctx, rel),
+    inputPath,
+    outside,
+  });
+  return problem === null ? result : { ...result, ok: false, output: `${problem}\n${reply}` };
 }
 
 function skillResult(r: AgentRunReply): StageRunResult {
@@ -252,7 +318,7 @@ async function runLedger(ctx: StageExecContext, prior: Prior, prefix: string): P
   return { ok: true, output: [`${ledger.failing.length} failing · ${ledger.passing.length} passing`, `new failures: ${diff.newFailures.length ? diff.newFailures.join(", ") : "none"}`, `still failing: ${diff.stillFailing.length ? diff.stillFailing.join(", ") : "none"}`, `fixed: ${diff.fixed.length ? diff.fixed.join(", ") : "none"}`, `wrote ${path}`].join("\n") };
 }
 
-async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, prior: Prior): Promise<StageRunResult> {
+async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, prior: Prior, target: LoopDefinition): Promise<StageRunResult> {
   if (s.testOp !== "structure" && s.testOp !== "map") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
   const structure = await detectTestStructure(ctx.fs, prefix);
   if (s.testOp === "structure") {
@@ -272,7 +338,7 @@ async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, p
       ctx.log(`graph not refreshed: ${e instanceof Error ? e.message : String(e)}; the map uses the last graph or file matching`);
     }
   }
-  const map = await buildTestMap(ctx.fs, prefix, structure, graphPath);
+  const map = await buildTestMap(ctx.fs, prefix, structure, graphPath, new Date(), target.inputPath ?? "");
   const writes = await writeTestMap(ctx.fs, prefix, map);
   return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, `wrote ${writes.md} and ${writes.json}`].join("\n") };
 }
@@ -315,7 +381,7 @@ export async function runOneStage(ctx: StageExecContext, s: LoopStage, target: L
   if (s.kind === "regressionSweep") return runRegressionStage(ctx, s, prefix);
   if (s.kind === "skill") return runSkill(ctx, s, target, halt);
   if (s.kind === "testMap" && s.testOp === "ledger") return runLedger(ctx, prior, prefix);
-  if (s.kind === "testMap") return runTestMap(ctx, s, prefix, prior);
+  if (s.kind === "testMap") return runTestMap(ctx, s, prefix, prior, target);
   if (s.kind === "testPrune") return runTestPruneStage(ctx, prefix);
   if (s.kind === "codeGraph") return runGraph(ctx, s, prefix);
   if (s.kind === "artifactCheck") return runArtifact(ctx, s, target, prefix);
@@ -331,7 +397,8 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
   const g: GuardedCallOutcome<AgentRunReply> = await guardedAgentCall<AgentRunReply>({
     before,
     call: () => ctx.core.request<AgentRunReply>("/kb/loop/agent-run", {
-      method: "POST", body: { message: message.join("\n\n"), skills: [], repoRoot: ctx.runRoot, timeoutMs: 30 * 60 * 1000, model: target.config.repairModel ?? undefined, ...(isFactoryLoop(target) ? { denyWrite: ".factory" as const } : {}) },
+      method: "POST", body: { message: message.join("\n\n"), skills: [], repoRoot: ctx.runRoot, timeoutMs: REPAIR_TIMEOUT_MS, model: target.config.repairModel ?? undefined, ...(isFactoryLoop(target) ? { denyWrite: ".factory" as const } : {}) },
+      timeoutMs: REPAIR_TIMEOUT_MS + AGENT_TRANSPORT_GRACE_MS,
       signal: ctx.signal,
     }),
     changedNow: () => changedPathsNow(ctx),

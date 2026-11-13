@@ -99,6 +99,7 @@ function shellLoop(task: TaskDef, stage: LoopStage): LoopDefinition {
     goal: null,
     acceptanceCriteria: null,
     scopeGlobs: [],
+    inputPath: "",
     defaultKey: null,
     runsOnSchedule: false,
     config: {
@@ -115,6 +116,7 @@ function shellLoop(task: TaskDef, stage: LoopStage): LoopDefinition {
       useWorktreesForConcurrentRuns: false,
       alwaysUseWorktree: false,
       openMergeRequest: false,
+      stageDelaySeconds: 2,
       refactorBatchesPerRun: null, maxCostUsd: null,
     },
   };

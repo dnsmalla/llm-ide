@@ -413,7 +413,7 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
 }
 
 export function defaultFactoryTemplate(): FactoryTemplate {
-  return templateFromLoop({ id: "factory", name: "Factory", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], defaultKey: "factory", runsOnSchedule: false, config: structuredClone(FACTORY_TEMPLATE.config) }).template;
+  return templateFromLoop({ id: "factory", name: "Factory", isPrimary: false, goal: null, acceptanceCriteria: null, scopeGlobs: [], inputPath: "", defaultKey: "factory", runsOnSchedule: false, config: structuredClone(FACTORY_TEMPLATE.config) }).template;
 }
 
 const OLD_DEFAULT_ROLES = ["setup", "intake", "intakeGate", "plan", "implement", "verify", "review", "reviewGate"];
