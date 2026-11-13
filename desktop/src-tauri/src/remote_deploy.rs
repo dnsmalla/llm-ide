@@ -406,6 +406,13 @@ fn upload_staging<R: DeployRunner>(runner: &R, target: &PreparedTarget, name: &s
     Ok(())
 }
 
+/// The helper version a `check` reports, when it is not the one this app ships. `None` when it matches or when the
+/// output names no helper version (no helper installed yet: the stages fail on their own).
+pub fn outdated_helper(check_stdout: &str) -> Option<String> {
+    let found = check_stdout.lines().find_map(|l| l.trim().strip_prefix("helper="))?.trim();
+    (found != HELPER_VERSION).then(|| found.to_string())
+}
+
 pub fn bootstrap_with<R: DeployRunner>(runner: &R, target: &PreparedTarget) -> Result<Bootstrap, FsError> {
     let dir = staging_for(&target.user);
     if let Ok(o) = runner.run(target, "sudo -n /usr/local/sbin/llmide-deploy check", None) {
@@ -486,7 +493,13 @@ fn wait_healthy<H: HealthProbe>(health: &H, url: &str) -> bool {
 pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
     runner: &R, health: &H, target: &PreparedTarget, plan: &DeployPlan, secrets: &DeploySecrets, bundle: &[u8],
 ) -> Result<DeployReport, FsError> {
-    let current_version = runner.run(target, &stage_command("check").unwrap(), None).ok()
+    let check = runner.run(target, &stage_command("check").unwrap(), None).ok();
+    // An older helper on the server still accepts an uploaded vhost and installs it as root, and its nginx stage would
+    // quietly reinstall a stale one. A deploy must not run through it: the helper is reinstalled first.
+    if let Some(found) = check.as_ref().and_then(|o| outdated_helper(&o.stdout)) {
+        return Err(herr("helper_outdated", format!("the deploy helper on the server is version {found}, this app needs {HELPER_VERSION}; run Install helper again, then deploy")));
+    }
+    let current_version = check
         .and_then(|o| o.stdout.lines().find_map(|l| l.trim().strip_prefix("version=")).map(str::to_string));
     let mut switched = false;
     let mut setup_url = None;
@@ -710,6 +723,10 @@ pub async fn remote_update(target: SshTarget, version: String, confirmation: Str
         if !crate::confirm::ask("Update the LLM-IDE hub?", &format!("Update {} to {version}?", target.host), "Update hub", true) {
             return Err(herr("cancelled", "the update was cancelled at the host confirmation"));
         }
+        // Same rule as a deploy: never run an update through an older helper.
+        if let Some(found) = SystemDeploy.run(&prepared, &stage_command("check").unwrap(), None).ok().and_then(|o| outdated_helper(&o.stdout)) {
+            return Err(herr("helper_outdated", format!("the deploy helper on the server is version {found}, this app needs {HELPER_VERSION}; run Install helper again, then update")));
+        }
         let pre = SystemDeploy.run(&prepared, &stage_command("predeploy-backup").unwrap(), None)?;
         if pre.code != Some(0) { return Err(herr("backup_failed", "the pre-update backup failed; nothing was changed")); }
         let Some(bundle) = bundle_path(&version) else { return Err(herr("bundle_missing", "the staged hub bundle is missing; run node desktop/scripts/stage-hub-core.mjs")); };
@@ -832,9 +849,11 @@ mod tests {
     use super::*;
     use std::sync::Mutex as StdMutex;
 
-    struct Fake { calls: StdMutex<Vec<(String, Option<Vec<u8>>)>>, fail: StdMutex<Vec<String>>, check_version: StdMutex<String>, health: Vec<Result<Health, String>> }
+    struct Fake { calls: StdMutex<Vec<(String, Option<Vec<u8>>)>>, fail: StdMutex<Vec<String>>, check_version: StdMutex<String>, helper: StdMutex<String>, health: Vec<Result<Health, String>> }
     impl Fake {
-        fn new() -> Self { Self { calls: StdMutex::new(Vec::new()), fail: StdMutex::new(Vec::new()), check_version: StdMutex::new("1.2.2".into()), health: Vec::new() } }
+        fn new() -> Self { Self { calls: StdMutex::new(Vec::new()), fail: StdMutex::new(Vec::new()), check_version: StdMutex::new("1.2.2".into()), helper: StdMutex::new(HELPER_VERSION.into()), health: Vec::new() } }
+        /// The helper version the server reports (the current one unless a test installs an old helper).
+        fn helper(&self, v: &str) { *self.helper.lock().unwrap() = v.to_string(); }
         fn check_version(&self, v: &str) { *self.check_version.lock().unwrap() = v.to_string(); }
         fn fail(&self, s: &str) { self.fail.lock().unwrap().push(s.to_string()); }
         fn calls(&self) -> Vec<(String, Option<Vec<u8>>)> { self.calls.lock().unwrap().clone() }
@@ -850,7 +869,8 @@ mod tests {
             }
             if command.contains("llmide-deploy check") {
                 let v = self.check_version.lock().unwrap().clone();
-                return Ok(RawOutput { code: Some(0), stdout: format!("version={v}\nhelper=1\nok\n"), stderr: String::new() });
+                let helper = self.helper.lock().unwrap().clone();
+                return Ok(RawOutput { code: Some(0), stdout: format!("version={v}\nhelper={helper}\nok\n"), stderr: String::new() });
             }
             if command.contains("llmide-deploy bundle") {
                 return Ok(RawOutput { code: Some(0), stdout: "LLMIDE_BUNDLE_SWITCHED=1.2.3\nok\n".into(), stderr: String::new() });
@@ -1018,7 +1038,7 @@ mod tests {
     impl DeployRunner for BundlePostSwitchFail {
         fn run(&self, _t: &PreparedTarget, command: &str, _stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
             self.calls.lock().unwrap().push(command.to_string());
-            if command.contains("llmide-deploy check") { return Ok(RawOutput { code: Some(0), stdout: "version=1.2.2\nhelper=1\n".into(), stderr: String::new() }); }
+            if command.contains("llmide-deploy check") { return Ok(RawOutput { code: Some(0), stdout: format!("version=1.2.2\nhelper={HELPER_VERSION}\n"), stderr: String::new() }); }
             if command.contains("llmide-deploy bundle") {
                 return Ok(RawOutput { code: Some(1), stdout: "LLMIDE_BUNDLE_SWITCHED=1.2.3\nllmide-deploy: bundle: web copy failed\n".into(), stderr: String::new() });
             }
@@ -1097,6 +1117,24 @@ mod tests {
     fn a_helper_version_mismatch_forces_a_reinstall() {
         assert!(format!("helper={HELPER_VERSION}\nok\n").contains(&format!("helper={HELPER_VERSION}")));
         assert!(!format!("helper=0\nok\n").contains(&format!("helper={HELPER_VERSION}")));
+        // A deploy refuses to run through an older helper; a matching or absent version is not "outdated".
+        assert_eq!(outdated_helper("service=active\nversion=1.2.4\nhelper=5\nok\n").as_deref(), Some("5"));
+        assert_eq!(outdated_helper(&format!("version=1\nhelper={HELPER_VERSION}\nok\n")), None);
+        assert_eq!(outdated_helper("ok\n"), None);
+        // And the deploy itself stops before any stage runs.
+        struct Old;
+        impl DeployRunner for Old {
+            fn run(&self, _t: &PreparedTarget, command: &str, _stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
+                assert!(command.contains("llmide-deploy check"), "no stage may run through an old helper: {command}");
+                Ok(RawOutput { code: Some(0), stdout: "version=1.2.2\nhelper=5\nok\n".into(), stderr: String::new() })
+            }
+        }
+        let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: Some("1.2.2".into()), domain_resolves: None, claude: true };
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", "/nonexistent.tar.gz", 1, true);
+        let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
+        let err = deploy_run(&Old, &FakeHealth, &target(), &plan, &secrets, b"x").unwrap_err();
+        assert_eq!(err.code, "helper_outdated");
+        assert!(err.message.contains("version 5") && err.message.contains("Install helper"), "{}", err.message);
     }
 
     struct HelperZero { calls: StdMutex<Vec<String>> }
@@ -1121,6 +1159,7 @@ mod tests {
     #[test]
     fn r034_a_sudoers_drop_in_that_does_not_parse_is_never_installed() {
         let fake = Fake::new();
+        fake.helper("1"); // an old helper is on the server, so the bootstrap reinstalls it and its sudoers drop-in
         fake.fail("visudo -cf");
         let err = bootstrap_with(&fake, &target()).unwrap_err();
         assert_eq!(err.code, "sudoers_invalid");
