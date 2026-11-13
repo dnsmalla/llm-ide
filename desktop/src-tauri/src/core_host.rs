@@ -488,11 +488,14 @@ impl CoreHost {
             killed = slot.is_some();
             terminate_child(&mut slot, self.inner.tuning.term_grace);
         }
-        if killed {
-            // The core is gone: core_status must not keep reporting it ready.
-            if let Ok(mut s) = self.inner.status.try_lock() {
+        // `closing` is set, so no supervisor will move the phase again. A phase that still claims Starting or
+        // Restarting (no child existed at this instant) would make the guard in `start()` ignore every later Start.
+        if let Ok(mut s) = self.inner.status.try_lock() {
+            if killed || matches!(s.state, Phase::Starting | Phase::Restarting) {
                 s.state = Phase::Failed;
                 s.pid = None;
+                s.nonce = None;
+                s.restart_at = None;
                 s.error = Some("the core was stopped after an app error".into());
                 s.error_code = None;
             }
@@ -1789,6 +1792,23 @@ mod tests {
         let s = host.status();
         assert_eq!(s.state, Phase::Failed);
         assert!(s.error.is_some() && s.pid.is_none());
+    }
+
+    #[test]
+    fn a_panic_shutdown_never_leaves_a_phase_that_ignores_start() {
+        for phase in [Phase::Starting, Phase::Restarting] {
+            let host = CoreHost::with(tuning_fast(vec![41556]), never_launcher(), no_claude());
+            host.mark_stopped(Some(std::env::temp_dir()));
+            lock(&host.inner.status).state = phase;
+            host.shutdown_from_panic();
+            let s = host.status();
+            assert_eq!(s.state, Phase::Failed, "no child existed, the phase must still end up startable");
+            assert!(s.error.is_some() && s.pid.is_none());
+        }
+        let host = CoreHost::with(tuning_fast(vec![41556]), never_launcher(), no_claude());
+        host.mark_stopped(Some(std::env::temp_dir()));
+        host.shutdown_from_panic();
+        assert_eq!(host.status().state, Phase::Stopped, "a deliberately stopped core stays stopped");
     }
 
     #[test]

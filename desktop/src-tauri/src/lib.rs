@@ -545,6 +545,11 @@ fn show_data_root_error(message: &str) {
         .show();
 }
 
+/// True for the thread whose panic ends the process (the event-loop thread, always named "main").
+fn panic_takes_the_app_down(thread_name: Option<&str>) -> bool {
+    thread_name == Some("main")
+}
+
 pub fn run() {
     let host = CoreHost::new();
     let setup_host = host.clone();
@@ -555,10 +560,15 @@ pub fn run() {
     // from the hook before chaining to the previous hook.
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if let Some(h) = CORE.get() {
-            h.shutdown_from_panic();
+        // The crate does not set `panic = "abort"`: a panic inside an async command or `spawn_blocking` is caught by
+        // tokio and the app lives on, so it must not take the core and every terminal with it. Only the main thread
+        // panicking means the app is really going down.
+        if panic_takes_the_app_down(std::thread::current().name()) {
+            if let Some(h) = CORE.get() {
+                h.shutdown_from_panic();
+            }
+            pty::kill_all_from_panic();
         }
-        pty::kill_all_from_panic();
         // Last-launch notice (the Mac's CrashReportBanner): a small redacted record in the app data dir.
         crash_report::record_panic(info);
         previous_hook(info);
@@ -710,8 +720,16 @@ pub(crate) fn exit_cleanup(app: &tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{navigation_allowed, navigation_allowed_for};
+    use super::{navigation_allowed, navigation_allowed_for, panic_takes_the_app_down};
     use crate::fsutil::Os;
+
+    #[test]
+    fn only_a_main_thread_panic_takes_the_core_and_terminals_down() {
+        assert!(panic_takes_the_app_down(Some("main")));
+        assert!(!panic_takes_the_app_down(Some("tokio-runtime-worker")));
+        assert!(!panic_takes_the_app_down(Some("tokio-runtime-blocking")));
+        assert!(!panic_takes_the_app_down(None));
+    }
 
     fn url(s: &str) -> tauri::Url {
         s.parse().unwrap()
