@@ -408,7 +408,8 @@ impl Prefs {
     }
 }
 
-/// Parses file text; any problem (too big, not JSON, unknown key, wrong type) yields the defaults.
+/// Parses file text; a file that cannot be read at all (too big, not JSON, wrong type) yields the defaults. Unknown
+/// keys are dropped, not fatal: see `try_parse`.
 pub fn parse(text: &str) -> Prefs {
     parse_migrating(text).0
 }
@@ -416,12 +417,31 @@ pub fn parse(text: &str) -> Prefs {
 /// Like `parse`, plus whether the one-time Host API capability migration ran (the caller persists it). A valid file
 /// without `hostApiCapsMigrated` gets read / compose / tool approvals switched on, as the previous build forced them.
 fn parse_migrating(text: &str) -> (Prefs, bool) {
-    if text.len() > MAX_BYTES {
-        return (Prefs::default(), false);
+    try_parse(text).unwrap_or_else(|| (Prefs::default(), false))
+}
+
+/// Drops every key of `value` that `known` (a serialised default) does not have, recursing into nested objects.
+fn prune_unknown_keys(value: &mut serde_json::Value, known: &serde_json::Value) {
+    let (Some(obj), Some(known_obj)) = (value.as_object_mut(), known.as_object()) else { return };
+    obj.retain(|key, _| known_obj.contains_key(key));
+    for (key, child) in obj.iter_mut() {
+        if let Some(known_child) = known_obj.get(key) {
+            prune_unknown_keys(child, known_child);
+        }
     }
-    let Ok(p) = serde_json::from_str::<Prefs>(text) else {
-        return (Prefs::default(), false);
-    };
+}
+
+/// `None` when the text is unusable. Unknown keys are ignored here on purpose: an older build reading a file a newer
+/// build wrote (rollback, branch switch) must not reset every preference. The webview-facing `PrefsPatch` stays strict.
+fn try_parse(text: &str) -> Option<(Prefs, bool)> {
+    if text.len() > MAX_BYTES {
+        return None;
+    }
+    let mut value: serde_json::Value = serde_json::from_str(text).ok()?;
+    if let Ok(known) = serde_json::to_value(Prefs::default()) {
+        prune_unknown_keys(&mut value, &known);
+    }
+    let p: Prefs = serde_json::from_value(value).ok()?;
     let migrate = !p.host_api_caps_migrated;
     let mut out = from_stored(&p);
     if migrate {
@@ -430,7 +450,7 @@ fn parse_migrating(text: &str) -> (Prefs, bool) {
         out.host_api_tool_approvals = true;
     }
     out.host_api_caps_migrated = true;
-    (out, migrate)
+    Some((out, migrate))
 }
 
 fn from_stored(p: &Prefs) -> Prefs {
@@ -458,21 +478,48 @@ fn from_stored(p: &Prefs) -> Prefs {
     }).unwrap_or_default()
 }
 
+/// Copies a file we could not use next to it, so the next `set_prefs` (which writes the defaults over it) cannot
+/// destroy the user's only copy. Best effort: the load itself must not fail.
+fn preserve_unreadable(dir: &Path, path: &Path) {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let aside = dir.join(format!("{FILE_NAME}.unreadable-{stamp}"));
+    if aside.exists() || std::fs::copy(path, &aside).is_err() {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&aside, std::fs::Permissions::from_mode(0o600));
+    }
+    eprintln!("prefs: {} could not be read; kept a copy at {}", path.display(), aside.display());
+}
+
 pub fn load_from(dir: &Path) -> Prefs {
     let path = dir.join(FILE_NAME);
-    match std::fs::metadata(&path) {
-        Ok(m) if m.is_file() && m.len() <= MAX_BYTES as u64 => match std::fs::read_to_string(&path) {
-            Ok(text) => {
-                let (prefs, migrated) = parse_migrating(&text);
-                // Best effort: if the write fails the migration simply runs again on the next load.
-                if migrated {
-                    let _ = save_to(dir, &prefs);
-                }
-                prefs
+    let Ok(meta) = std::fs::metadata(&path) else { return Prefs::default() };
+    if !meta.is_file() {
+        return Prefs::default();
+    }
+    let parsed = if meta.len() <= MAX_BYTES as u64 {
+        std::fs::read_to_string(&path).ok().and_then(|text| try_parse(&text))
+    } else {
+        None
+    };
+    match parsed {
+        Some((prefs, migrated)) => {
+            // Best effort: if the write fails the migration simply runs again on the next load.
+            if migrated {
+                let _ = save_to(dir, &prefs);
             }
-            Err(_) => Prefs::default(),
-        },
-        _ => Prefs::default(),
+            prefs
+        }
+        None => {
+            preserve_unreadable(dir, &path);
+            Prefs::default()
+        }
     }
 }
 
@@ -1012,9 +1059,10 @@ mod tests {
         assert!(fresh.host_api_read && fresh.host_api_caps_migrated);
         assert!(!d.join(FILE_NAME).exists(), "a missing file is not written by load");
         let bad = tmp("caps-bad");
-        std::fs::write(bad.join(FILE_NAME), r#"{"hostApiRead":false,"nope":1}"#).unwrap();
-        assert_eq!(load_from(&bad), Prefs::default());
-        assert!(std::fs::read_to_string(bad.join(FILE_NAME)).unwrap().contains("nope"), "an invalid file is left as it was");
+        std::fs::write(bad.join(FILE_NAME), r#"{"router":true,"nope":1}"#).unwrap();
+        let loaded = load_from(&bad);
+        assert!(loaded.router, "an unknown key no longer resets the known ones");
+        assert!(std::fs::read_to_string(bad.join(FILE_NAME)).unwrap().contains("router"), "the file is only rewritten by the one-time migration");
     }
 
     #[test]
@@ -1038,7 +1086,7 @@ mod tests {
     #[test]
     fn a_hand_edited_file_never_widens_anything() {
         assert_eq!(parse("not json"), Prefs::default());
-        assert_eq!(parse(r#"{"router":true,"extra":1}"#), Prefs::default(), "unknown key: whole file ignored");
+        assert!(parse(r#"{"router":true,"extra":1}"#).router, "an unknown key is ignored, the known ones survive");
         assert_eq!(parse(r#"{"cap":true}"#), Prefs::default(), "cap without router is normalised away");
         assert_eq!(parse(&"x".repeat(MAX_BYTES + 1)), Prefs::default());
         let p = parse(r#"{"router":true,"cap":true,"ltaMode":"shadow","terminal":false,"theme":"light"}"#);
@@ -1090,6 +1138,42 @@ mod tests {
         assert!(!on(Some("agent_chat,terminal"), false), "the pref wins over the env");
         assert!(on(Some("agent_chat,terminal"), true));
         assert!(terminal_enabled(None), "default launch: on");
+    }
+
+    #[test]
+    fn a_newer_file_with_unknown_keys_keeps_every_known_preference() {
+        let d = tmp("newer-file");
+        let text = r#"{"router":true,"theme":"light","backendPort":3999,"futureKey":{"a":1},
+            "remoteServer":{"hubUrl":"https://hub.example.com:8443","futureNested":1},"notifications":{"tasks":false,"later":true}}"#;
+        std::fs::write(d.join(FILE_NAME), text).unwrap();
+        let p = load_from(&d);
+        assert!(p.router && p.theme == Theme::Light && p.backend_port == 3999);
+        assert!(!p.notifications.tasks);
+        assert_eq!(p.remote_server.hub_url, "https://hub.example.com:8443");
+        assert!(!d.read_dir().unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains("unreadable")));
+    }
+
+    #[test]
+    fn an_unparseable_file_is_copied_aside_before_defaults_can_overwrite_it() {
+        let d = tmp("unreadable");
+        let text = r#"{"router":"yes please"}"#;
+        std::fs::write(d.join(FILE_NAME), text).unwrap();
+        assert_eq!(load_from(&d), Prefs::default());
+        let aside: Vec<_> = d.read_dir().unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("prefs.json.unreadable-")).collect();
+        assert_eq!(aside.len(), 1);
+        assert_eq!(std::fs::read_to_string(aside[0].path()).unwrap(), text);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(aside[0].path()).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        apply_to_dir_for_test(&d);
+        assert_eq!(std::fs::read_to_string(aside[0].path()).unwrap(), text, "a later save leaves the copy alone");
+    }
+
+    fn apply_to_dir_for_test(dir: &Path) {
+        save_to(dir, &Prefs::default()).unwrap();
     }
 }
 
@@ -1165,7 +1249,8 @@ mod loop_default_tests {
         assert_eq!(p.notifications, off);
         assert_eq!(parse(&serde_json::to_string(&p).unwrap()).notifications, off);
         assert!(parse(r#"{"ltaMode":"off"}"#).notifications.approvals, "an old file keeps the defaults");
-        assert_eq!(parse(r#"{"notifications":{"approvals":false,"evil":true}}"#), Prefs::default(), "an unknown key refuses the file");
+        assert!(!parse(r#"{"notifications":{"approvals":false,"evil":true}}"#).notifications.approvals, "a nested unknown key is ignored too");
+        assert!(serde_json::from_str::<PrefsPatch>(r#"{"notifications":{"approvals":false,"evil":true}}"#).is_err(), "the webview patch stays strict");
         assert!(serde_json::from_str::<PrefsPatch>(r#"{"notifications":{"approvals":"no"}}"#).is_err());
         assert!(!view(Prefs { notifications: off, ..Prefs::default() }, true).restart_needed, "applies at once");
     }
