@@ -1173,7 +1173,7 @@ mod tests {
         assert!(b.installed);
         let calls = fake.calls();
         assert!(calls.iter().any(|(c, _)| c.contains("llmide-deploy")));
-        assert!(calls.iter().any(|(c, s)| c.contains("sudo -n /usr/local/sbin/llmide-deploy base")));
+        assert!(calls.iter().any(|(c, _)| c.contains("sudo -n /usr/local/sbin/llmide-deploy base")));
         assert!(calls.iter().all(|(c, _)| !c.contains("LLMIDE_VAULT_KEY")));
     }
 

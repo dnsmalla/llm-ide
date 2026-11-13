@@ -169,10 +169,12 @@ impl Gate {
         st.epoch == epoch && st.consent != Consent::Denied
     }
 
+    #[cfg(test)]
     pub fn granted(&self) -> bool {
         self.granted_at(crate::confirm::now_ms())
     }
 
+    #[cfg(test)]
     pub fn granted_at(&self, now: u64) -> bool {
         let mut st = lock(&self.state);
         Self::expire(&mut st, now);

@@ -410,12 +410,14 @@ impl Prefs {
 
 /// Parses file text; a file that cannot be read at all (too big, not JSON, wrong type) yields the defaults. Unknown
 /// keys are dropped, not fatal: see `try_parse`.
+#[cfg(test)]
 pub fn parse(text: &str) -> Prefs {
     parse_migrating(text).0
 }
 
 /// Like `parse`, plus whether the one-time Host API capability migration ran (the caller persists it). A valid file
 /// without `hostApiCapsMigrated` gets read / compose / tool approvals switched on, as the previous build forced them.
+#[cfg(test)]
 fn parse_migrating(text: &str) -> (Prefs, bool) {
     try_parse(text).unwrap_or_else(|| (Prefs::default(), false))
 }
