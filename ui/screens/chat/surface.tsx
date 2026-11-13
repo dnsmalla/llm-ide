@@ -123,9 +123,10 @@ export function useChatSurface(projectRoot: string | null, active: boolean, init
   const { controller, transport, bypass } = rt;
   useEffect(() => rt.noteProject(projectRoot), [rt, projectRoot]);
   useEffect(() => { if (active) void controller.refreshRemoteBusy(); }, [active, controller]);
-  // Unmount: stop reading streams. Turns sent detached keep running on the core and are picked up on the next load.
-  // The controller counts mounts, so the Chat section and the dock can both be mounted. This runs before the re-attach
-  // below: a remount clears the controller's disposed flag, and re-attach does nothing while it is set.
+  // The controller counts mounts, so the Chat section and the dock can both be mounted. An unmount (a collapsed dock,
+  // a closed popup) leaves its streams running: the reply is saved when the turn ends, with or without a view. This
+  // runs before the re-attach below: a mount clears the controller's disposed flag, and re-attach does nothing while
+  // it is set.
   useEffect(() => controller.mount(), [controller]);
   // Webview load/reload and every return to the surface: pick up turns still running on the core (replay re-attach).
   useEffect(() => {

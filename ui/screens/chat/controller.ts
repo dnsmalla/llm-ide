@@ -255,9 +255,13 @@ export class ChatController {
 
   private mounts = 0;
   /**
-   * Marks the controller as shown; returns the unmount function. React StrictMode (dev) runs mount, unmount, mount in
-   * one go: the unmount only disposes when no mount followed it in the same tick, and a mount re-arms a controller
-   * that was disposed, so a double-invoked effect never leaves it dead (no afterTurn, persistence or queue).
+   * Marks the controller as shown; returns the unmount function. A mount re-arms a controller that was disposed.
+   *
+   * An unmount does NOT stop the streams. The controller is one per surface for the whole app, not per view, and the
+   * reply of a desktop chat is saved only by this client when its turn ends (`afterTurn`). A dock that was collapsed
+   * mid-turn used to stop reading; if it stayed closed for longer than the core keeps a finished turn's replay
+   * (60 s), the reply and any approval it was waiting on were lost for good. So a hidden surface keeps reading: the
+   * reply is saved, the queue moves on, and a parked approval is still there when the surface comes back.
    */
   mount(): () => void {
     this.mounts++;
@@ -267,12 +271,12 @@ export class ChatController {
       if (done) return;
       done = true;
       this.mounts--;
-      queueMicrotask(() => { if (this.mounts === 0) this.dispose(); });
     };
   }
 
   /**
-   * Stops reading every stream (unmount). Turns sent detached keep running on the core; nothing is cancelled there.
+   * Stops reading every stream: an explicit teardown, never called for a view unmount (see `mount`). Turns sent
+   * detached keep running on the core; nothing is cancelled there.
    * The half reply shown here is dropped and the runtime goes idle (not "streaming" with a dead reader, which would
    * block re-attach): the next mount re-attaches and replays the turn from its first event into a fresh bubble.
    */

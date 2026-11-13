@@ -300,7 +300,7 @@ test("queued messages run in the project they were typed in", async () => {
   assert.deepEqual(core.calls.filter((x) => x.method === "STREAM").map((x) => x.body.agentContext.workspaceRoot), ["/projA", "/projA"]);
 });
 
-test("StrictMode double effect (mount, unmount, mount) leaves the controller alive; a real unmount disposes", async () => {
+test("StrictMode double effect (mount, unmount, mount) leaves the controller alive; only an explicit dispose stops it", async () => {
   const core = fakeCore({ streams: [turn(), turn(), turn()] });
   const { ctl, store } = make(core);
   // dev StrictMode: effect, cleanup, effect - all synchronous
@@ -315,9 +315,35 @@ test("StrictMode double effect (mount, unmount, mount) leaves the controller ali
   await tick(5);
   ctl.send("a", "third", { mode: "ask" }); // still alive
   assert.equal(ctl.getState("a").phase, "streaming");
-  off2(); // the real unmount
+  off2(); // the real unmount: the turn keeps being read (see the dock test below)
   await tick(5);
+  assert.equal(ctl.getState("a").phase !== "idle" || ctl.getState("a").messages.at(-1).status === "done", true, "the unmount did not drop the turn");
+  ctl.dispose();
   assert.deepEqual(await ctl.reattachRunning(), [], "disposed: no re-attach");
+});
+
+test("a dock closed mid-turn keeps reading: the reply is saved with no view, and a parked approval is kept", async () => {
+  let finish;
+  const done = new Promise((r) => { finish = r; });
+  // A turn that parks an approval, then (once answered, here: released) finishes.
+  const parked = async function* (signal) {
+    for (const ev of [FX.init, { type: "delta", text: "Hello " }, FX.approval_request_tool]) yield JSON.stringify(ev);
+    await Promise.race([done, new Promise((_, rej) => signal.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" }))))]);
+    for (const ev of [{ type: "delta", text: "world" }, FX.usage, FX.result]) yield JSON.stringify(ev);
+  };
+  const core = fakeCore({ streams: [parked] });
+  const { ctl, store } = make(core);
+  const off = ctl.mount();
+  ctl.send("a", "hi", { mode: "ask" });
+  await until(() => ctl.getState("a").pendingApprovals.length === 1);
+  off(); // the dock collapses, or the popup closes, mid-turn
+  await tick(10);
+  assert.equal(ctl.getState("a").phase, "streaming", "the stream is still being read");
+  assert.equal(ctl.getState("a").pendingApprovals.length, 1, "the approval is not dropped with the view");
+  finish();
+  await until(() => ctl.getState("a").phase === "idle" && ctl.getState("a").messages.at(-1).status === "done");
+  await tick(10);
+  assert.deepEqual((await msgs(store, "a")).map((r) => [r.role, r.content]), [["user", "hi"], ["assistant", "Hello world"]], "saved without the view ever coming back");
 });
 
 test("fullHistoryNext: a marker, then exactly the next message carries continueMode replay (cleared only after the next message is accepted)", async () => {

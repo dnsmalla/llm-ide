@@ -227,7 +227,7 @@ test("dispose mid-turn, then remount: no dead reader is left streaming, and the 
   const off = ctl.mount();
   ctl.send("a", "hi", { mode: "ask" });
   await until(() => ctl.getState("a").applied >= 2);
-  off(); // the dock collapses mid-turn
+  off(); ctl.dispose(); // this client stops reading mid-turn (an explicit teardown; a view unmount alone keeps reading)
   await until(() => ctl.getState("a").phase === "idle");
   assert.equal(ctl.getState("a").messages.some((m) => m.role === "assistant" && m.status === "streaming"), false, "the dead bubble is gone");
   ctl.mount(); // the dock comes back
@@ -251,7 +251,7 @@ test("a turn that ended while this client was away is still followed on the next
   const off = ctl.mount();
   ctl.send("a", "hi", { mode: "ask" });
   await until(() => ctl.getState("a").applied >= 2);
-  off();
+  off(); ctl.dispose();
   await until(() => ctl.getState("a").phase === "idle");
   ctl.mount();
   assert.deepEqual(await ctl.reattachRunning(), ["a"]);
@@ -294,7 +294,7 @@ test("a turn that ended and whose buffer expired while detached: the history rel
   const off = ctl.mount();
   ctl.send("a", "question", { mode: "ask" });
   await until(() => ctl.getState("a").applied >= 2);
-  off();
+  off(); ctl.dispose();
   await until(() => ctl.getState("a").phase === "idle");
   ctl.mount();
   await ctl.reattachRunning();
@@ -325,13 +325,13 @@ test("two dispose/remount cycles of a still-running turn: the second replay star
   const off = ctl.mount();
   ctl.send("a", "hi", { mode: "ask" });
   await until(() => ctl.getState("a").applied >= 2);
-  off(); // first dispose: the dock collapses mid-turn
+  off(); ctl.dispose(); // first dispose: this client stops reading mid-turn
   await until(() => ctl.getState("a").phase === "idle");
 
   const remount1 = ctl.mount();
   assert.deepEqual(await ctl.reattachRunning(), ["a"]);
   await until(() => ctl.getState("a").pendingApprovals.length === 1);
-  remount1(); // second dispose: the dock collapses again while the turn still runs
+  remount1(); ctl.dispose(); // second dispose, while the turn still runs
   await until(() => ctl.getState("a").phase === "idle");
 
   ctl.mount();
