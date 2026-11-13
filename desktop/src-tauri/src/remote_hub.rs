@@ -170,6 +170,15 @@ fn fetch_projects(agent: &ureq::Agent, hub: &str, pin: &str, access: &str) -> Re
     }
 }
 
+/// A re-login to the hub the app already uses in Remote mode is silent; anything else moves the app and needs consent.
+fn login_needs_confirmation(stored_hub_url: &str, stored_mode: &ServerMode, canonical: &str) -> bool {
+    !(stored_hub_url == canonical && *stored_mode == ServerMode::Remote)
+}
+
+fn hub_host_label(canonical: &str) -> String {
+    canonical.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_string()
+}
+
 #[tauri::command]
 pub async fn remote_hub_login(hub_url: String, email: String, password: String) -> Result<HubLogin, FsError> {
     tauri::async_runtime::spawn_blocking(move || login_blocking(hub_url, email, password))
@@ -185,6 +194,18 @@ fn login_blocking(hub_url: String, email: String, password: String) -> Result<Hu
     }
     if password.is_empty() || password.len() > MAX_PASSWORD {
         return Err(herr("invalid_password", "Enter the hub password."));
+    }
+    // Native consent BEFORE the password leaves: this call moves the whole app to the hub.
+    let stored = crate::prefs::stored().remote_server;
+    if login_needs_confirmation(&stored.hub_url, &stored.mode, &canonical)
+        && !crate::confirm::ask(
+            "Connect this app to a hub?",
+            &format!("Connect this app to {}? Your notes and projects will then be served by that hub.", hub_host_label(&canonical)),
+            "Connect",
+            true,
+        )
+    {
+        return Err(herr("cancelled", "the connection was not approved"));
     }
     let pin = saved_pin_for(&canonical);
     let agent = hub_agent(&pin)?;
@@ -236,6 +257,16 @@ fn check_blocking(hub_url: String) -> Result<HubCheck, FsError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn login_prompts_unless_it_is_a_relogin_to_the_connected_hub() {
+        let hub = "https://hub.example.com";
+        assert!(!login_needs_confirmation(hub, &ServerMode::Remote, hub));
+        assert!(login_needs_confirmation(hub, &ServerMode::Local, hub), "stored mode not Remote");
+        assert!(login_needs_confirmation(hub, &ServerMode::Remote, "https://other.example.com"));
+        assert!(login_needs_confirmation("", &ServerMode::Local, hub));
+        assert_eq!(hub_host_label("https://hub.example.com:8443/"), "hub.example.com:8443");
+    }
+
     use super::*;
 
     #[test]
