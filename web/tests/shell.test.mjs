@@ -18,10 +18,10 @@ test("hash: sections, sub-pages, aliases and parameters", () => {
 
 test("registry: built-ins are ordered; sections hide when the host lacks the capability; hubs hide local-only ones", () => {
   const ids = (host) => UI.visibleSections(host).map((s) => s.id);
-  assert.deepEqual(ids({ capabilities: caps("chat", "approvals", "tool_approvals", "read", "compose"), hub: false }), ["ask", "execute", "tasks", "loop", "history", "settings"]);
+  assert.deepEqual(ids({ capabilities: caps("chat", "approvals", "tool_approvals", "read", "compose"), hub: false }), ["ask", "execute", "workspace", "tasks", "loop", "history", "settings"]);
   assert.deepEqual(ids({ capabilities: caps("chat"), hub: false }), ["ask", "settings"]);
-  assert.deepEqual(ids({ capabilities: caps("chat", "read"), hub: false }), ["ask", "tasks", "loop", "history", "settings"]);
-  assert.equal(ids({ capabilities: new Set(), hub: false }).length, 6, "unknown capabilities (not connected yet) show everything");
+  assert.deepEqual(ids({ capabilities: caps("chat", "read"), hub: false }), ["ask", "workspace", "tasks", "loop", "history", "settings"]);
+  assert.equal(ids({ capabilities: new Set(), hub: false }).length, 7, "unknown capabilities (not connected yet) show everything");
   UI.registerSection({ id: "zz", label: "ZZ", icon: "plug", order: 95, localOnly: true, component: () => null });
   assert.ok(ids({ capabilities: caps("chat"), hub: false }).includes("zz"));
   assert.ok(!ids({ capabilities: caps("chat"), hub: true }).includes("zz"));
