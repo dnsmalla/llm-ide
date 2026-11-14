@@ -5,10 +5,11 @@
 //   - `..`, absolute paths and empty segments are rejected before touching disk.
 //   - The nearest existing ancestor is realpath'd BEFORE any folder is created,
 //     so a symlinked parent cannot make us create folders outside the project.
-//   - A final symlink is refused (a write must never follow a link out).
-//   - The same denylist as the read side (`isDeniedPath`) refuses `.git`,
-//     `.ssh`, `.gnupg`, `.aws`, `.kube`, `.docker` and secret files.
-//   - Writes are atomic: sibling temp file + rename.
+//   - The denylist runs on both the lexical path and the realpath'd parent, so
+//     an in-project symlink (e.g. `alias -> .git`) cannot smuggle a denied target.
+//   - A final symlink or any non-regular file target is refused.
+//   - Writes are atomic: sibling temp file opened `wx`, then rename; the temp is
+//     unlinked if the rename fails.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -17,43 +18,65 @@ import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 export const MAX_TEXT = 262_144;
 export const hashText = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
 
+const fail = (code, message) => Object.assign(new Error(message), { code });
+const isInside = (p, root) => p === root || p.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
+const notWritable = () => fail('denied', 'That path is not writable.');
+
 function safeRel(rel) {
-  if (typeof rel !== 'string' || rel.length > 4096 || path.isAbsolute(rel)) throw Object.assign(new Error('The path is not valid.'), { code: 'invalid' });
+  if (typeof rel !== 'string' || rel.length > 4096 || path.isAbsolute(rel)) throw fail('invalid', 'The path is not valid.');
   const parts = rel.replaceAll('\\', '/').split('/');
-  if (parts.some((p) => p === '..' || p === '')) throw Object.assign(new Error('The path is not valid.'), { code: 'invalid' });
+  if (parts.some((p) => p === '..' || p === '')) throw fail('invalid', 'The path is not valid.');
   return parts.join(path.sep);
 }
 
 export function writeProjectFile({ root, path: rel, text, expectedHash, mustNotExist = false, create = false }) {
-  if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_TEXT || text.includes('\0')) throw Object.assign(new Error('The text is too large or not text.'), { code: 'invalid' });
-  if (mustNotExist && expectedHash) throw Object.assign(new Error('expectedHash and mustNotExist cannot be combined.'), { code: 'invalid' });
+  if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_TEXT || text.includes('\0')) throw fail('invalid', 'The text is too large or not text.');
+  if (mustNotExist && expectedHash) throw fail('invalid', 'expectedHash and mustNotExist cannot be combined.');
   const realRoot = fs.realpathSync(root);
   const target = path.resolve(realRoot, safeRel(rel));
-  // Deny BEFORE mkdir: refusing `.git/…` must not leave a `.git` folder behind.
-  if (isDeniedPath(target)) throw Object.assign(new Error('That path is not writable.'), { code: 'denied' });
-  // Find the nearest existing ancestor before creating anything, so a symlinked parent cannot create folders outside.
-  let ancestor = path.dirname(target);
-  while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
-  const realAncestor = fs.realpathSync(ancestor);
-  if (realAncestor !== realRoot && !realAncestor.startsWith(realRoot + path.sep)) throw Object.assign(new Error('That path is outside the project.'), { code: 'denied' });
-  if (!fs.existsSync(path.dirname(target))) {
-    if (!create) throw Object.assign(new Error('That folder does not exist.'), { code: 'not_found' });
-    fs.mkdirSync(path.dirname(target), { recursive: true });
+  const parentPath = path.dirname(target);
+  // Deny the lexical path BEFORE mkdir: refusing `.git/…` must not leave a `.git` folder behind.
+  if (isDeniedPath(target)) throw notWritable();
+  if (!fs.existsSync(parentPath)) {
+    if (!create) throw fail('not_found', 'That folder does not exist.');
+    // Find the nearest existing ancestor before creating anything, so a symlinked parent cannot create folders outside.
+    let ancestor = parentPath;
+    while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
+    const realAncestor = fs.realpathSync(ancestor);
+    if (!isInside(realAncestor, realRoot)) throw fail('denied', 'That path is outside the project.');
+    // Project the not-yet-created suffix under the canonical ancestor: a symlinked
+    // parent that resolves into `.git` must be refused before mkdir enters it.
+    if (isDeniedPath(path.join(realAncestor, path.relative(ancestor, parentPath), path.basename(target)))) throw notWritable();
+    fs.mkdirSync(parentPath, { recursive: true });
   }
-  const parent = fs.realpathSync(path.dirname(target));
-  if (parent !== realRoot && !parent.startsWith(realRoot + path.sep)) throw Object.assign(new Error('That path is outside the project.'), { code: 'denied' });
+  // Resolve the parent again and deny on the canonical path too, so an in-project
+  // symlink (e.g. `alias -> .git`) cannot bypass the lexical denylist.
+  const parent = fs.realpathSync(parentPath);
+  if (!isInside(parent, realRoot)) throw fail('denied', 'That path is outside the project.');
+  if (isDeniedPath(path.join(parent, path.basename(target)))) throw notWritable();
   let current = null;
   try {
-    if (fs.lstatSync(target).isSymbolicLink()) throw Object.assign(new Error('That path is a symbolic link.'), { code: 'denied' });
+    const st = fs.lstatSync(target);
+    if (st.isSymbolicLink()) throw fail('denied', 'That path is a symbolic link.');
+    if (!st.isFile()) throw fail('denied', 'That path is not a regular file.');
     current = hashText(fs.readFileSync(target, 'utf8'));
-  } catch (e) { if (e.code === 'denied') throw e; /* missing */ }
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e; // a real read error (or our refusal) is not "missing"
+  }
   if (mustNotExist) {
-    if (current !== null) throw Object.assign(new Error('The file already exists.'), { code: 'conflict' });
-  } else if (expectedHash && current !== expectedHash) {
-    throw Object.assign(new Error('The file changed since you opened it.'), { code: 'conflict' });
+    if (current !== null) throw fail('conflict', 'The file already exists.');
+  } else if (expectedHash) {
+    if (current === null) throw fail('not_found', 'The file does not exist.');
+    if (current !== expectedHash) throw fail('conflict', 'The file changed since you opened it.');
   }
   const tmp = `${target}.llmide-${process.pid}-${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600 });
-  fs.renameSync(tmp, target);
+  let tempWritten = false;
+  try {
+    fs.writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    tempWritten = true;
+    fs.renameSync(tmp, target);
+  } finally {
+    if (tempWritten) { try { fs.unlinkSync(tmp); } catch { /* renamed */ } }
+  }
   return { hash: hashText(text), size: Buffer.byteLength(text, 'utf8') };
 }
