@@ -353,6 +353,8 @@ git commit -m "feat(host-api): add confined project file writer"
 - Modify: `extension/routes/host-api/gateway.mjs`
 - Modify: `extension/routes/host-api/rate.mjs`
 - Modify: `extension/routes/host-api/projects.mjs`
+- Modify: `schema/host-api/v1/envelope.schema.json` (add `conflict`)
+- Regenerate: `extension/routes/host-api/commands.generated.mjs`, `web/src/host-api/types.generated.ts`, three iOS Swift files
 - Test: `extension/tests/host-api-workspace-write.test.mjs`
 - Test: `extension/tests/host-api-scopes.test.mjs`
 

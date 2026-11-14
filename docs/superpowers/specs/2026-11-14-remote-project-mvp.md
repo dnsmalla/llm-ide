@@ -72,6 +72,8 @@ Rules:
 - a NUL byte in `text` is `invalid_payload`.
 - every write is atomic: write a sibling temp file, fsync, rename.
 - the response hash is SHA-256 of the exact bytes written.
+- `files.stat` refuses a file over 262,144 bytes and a file containing NUL.
+- `conflict` is a Host API error code, so a stale hash is a valid error frame rather than `internal`.
 
 ## Permissions
 
