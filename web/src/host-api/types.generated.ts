@@ -25,6 +25,7 @@ export const HOST_API_COMMANDS = {
   "files.write": { capability: "read", idempotent: false },
   "git.commit": { capability: "read", idempotent: false },
   "git.diff": { capability: "read", idempotent: true },
+  "git.push": { capability: "read", idempotent: false },
   "git.status": { capability: "read", idempotent: true },
   "host.auth.pair": { capability: "host", idempotent: false },
   "host.auth.revoke": { capability: "host", idempotent: true },
@@ -67,6 +68,7 @@ export interface HostApiCommandMap {
   "files.write": { request: { create?: boolean; expectedHash?: string; mustNotExist?: boolean; path: string; projectId: string; text: string }; result: { hash: string; size: number } };
   "git.commit": { request: { message: string; paths: Array<string>; projectId: string }; result: { commit: string; summary: string } };
   "git.diff": { request: { path?: string; projectId: string; staged?: boolean }; result: { patch: string; truncated: boolean } };
+  "git.push": { request: { projectId: string }; result: { ok: boolean; output: string } };
   "git.status": { request: { projectId: string }; result: { ahead: number; behind: number; branch: string; clean: boolean; entries: Array<{ from?: string; path: string; status: string; x: string; y: string }> } };
   "host.auth.pair": { request: { pin: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push">; token: string } };
   "host.auth.revoke": { request: { token: string }; result: { revoked: boolean } };

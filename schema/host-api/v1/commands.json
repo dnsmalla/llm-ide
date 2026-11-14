@@ -2222,6 +2222,42 @@
           }
         }
       }
+    },
+    "git.push": {
+      "capability": "read",
+      "v2Tag": null,
+      "direction": "client_to_host",
+      "idempotent": false,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "output"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "output": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      }
     }
   }
 }

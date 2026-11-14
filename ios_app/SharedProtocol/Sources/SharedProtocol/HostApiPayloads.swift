@@ -437,6 +437,24 @@ public struct HostApiGitDiffResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiGitPushRequest: Codable, Equatable, Sendable {
+    public var projectId: String
+
+    public init(projectId: String) {
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiGitPushResult: Codable, Equatable, Sendable {
+    public var ok: Bool
+    public var output: String
+
+    public init(ok: Bool, output: String) {
+        self.ok = ok
+        self.output = output
+    }
+}
+
 public struct HostApiGitStatusRequest: Codable, Equatable, Sendable {
     public var projectId: String
 

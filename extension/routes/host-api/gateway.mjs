@@ -27,6 +27,7 @@ import { scopedProjectRoot } from '../bus/project-scope.mjs';
 import { MAX_TEXT, hashBytes, writeProjectFile } from './workspace-write.mjs';
 import { gitDiff, gitStatus } from './git-read.mjs';
 import { gitCommit } from './git-commit.mjs';
+import { gitPush } from './git-push.mjs';
 import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -93,6 +94,7 @@ export const COMMAND_CLASS = Object.freeze({
   'git.status': 'self.read',
   'git.diff': 'self.read',
   'git.commit': 'self.write',
+  'git.push': 'self.write',
   'tasks.list': 'self.read',
   'tasks.run': 'self.write',
   'tasks.status': 'self.read',
@@ -862,6 +864,17 @@ export function createGateway(overrides) {
         } catch (e) {
           const code = e.code === 'invalid' ? 'invalid_payload' : e.code === 'nothing_to_commit' ? 'invalid_payload' : 'internal';
           return fail(s, id, code, String(e.message || e));
+        }
+      }
+      case 'git.push': {
+        const wait = rate.write(entry.state.deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        try {
+          const out = gitPush(scopedProjectRoot(userId, p.projectId));
+          audit('git_push', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: p.projectId });
+          return respond(s, id, command, out);
+        } catch (e) {
+          return fail(s, id, 'internal', String(e.message || e));
         }
       }
       case 'tasks.list': {

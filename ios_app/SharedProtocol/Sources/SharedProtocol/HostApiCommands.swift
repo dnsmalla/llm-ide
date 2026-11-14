@@ -31,6 +31,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
     case filesWrite = "files.write"
     case gitCommit = "git.commit"
     case gitDiff = "git.diff"
+    case gitPush = "git.push"
     case gitStatus = "git.status"
     case hostAuthPair = "host.auth.pair"
     case hostAuthRevoke = "host.auth.revoke"
@@ -73,6 +74,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .filesWrite: return "read"
         case .gitCommit: return "read"
         case .gitDiff: return "read"
+        case .gitPush: return "read"
         case .gitStatus: return "read"
         case .hostAuthPair: return "host"
         case .hostAuthRevoke: return "host"
@@ -117,6 +119,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .filesWrite: return false
         case .gitCommit: return false
         case .gitDiff: return true
+        case .gitPush: return false
         case .gitStatus: return true
         case .hostAuthPair: return false
         case .hostAuthRevoke: return true
@@ -164,6 +167,7 @@ public enum HostApi {
         "files.write": .filesWrite,
         "git.commit": .gitCommit,
         "git.diff": .gitDiff,
+        "git.push": .gitPush,
         "git.status": .gitStatus,
         "host.auth.pair": .hostAuthPair,
         "host.auth.revoke": .hostAuthRevoke,
