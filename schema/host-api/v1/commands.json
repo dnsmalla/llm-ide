@@ -1630,7 +1630,7 @@
         }
       }
     },
-        "files.stat": {
+    "files.stat": {
       "capability": "read",
       "v2Tag": null,
       "direction": "client_to_host",
@@ -1676,8 +1676,8 @@
           }
         }
       }
-        },
-        "files.write": {
+    },
+    "files.write": {
       "capability": "read",
       "v2Tag": null,
       "direction": "client_to_host",
@@ -1733,7 +1733,7 @@
           }
         }
       }
-        },
+    },
     "loop.issues": {
       "capability": "read",
       "direction": "client_to_host",
@@ -2040,6 +2040,132 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "git.status": {
+      "capability": "read",
+      "v2Tag": null,
+      "direction": "client_to_host",
+      "idempotent": true,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "branch",
+          "ahead",
+          "behind",
+          "clean",
+          "entries"
+        ],
+        "properties": {
+          "branch": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "ahead": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "behind": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "clean": {
+            "type": "boolean"
+          },
+          "entries": {
+            "type": "array",
+            "maxItems": 5000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "x",
+                "y",
+                "status"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "x": {
+                  "type": "string",
+                  "maxLength": 2
+                },
+                "y": {
+                  "type": "string",
+                  "maxLength": 2
+                },
+                "status": {
+                  "type": "string",
+                  "maxLength": 3
+                },
+                "from": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "git.diff": {
+      "capability": "read",
+      "v2Tag": null,
+      "direction": "client_to_host",
+      "idempotent": true,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "staged": {
+            "type": "boolean"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "patch",
+          "truncated"
+        ],
+        "properties": {
+          "patch": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "truncated": {
+            "type": "boolean"
           }
         }
       }

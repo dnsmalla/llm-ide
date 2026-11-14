@@ -35,7 +35,7 @@ as `minLenght` fails the gate instead of being silently ignored.
 
 ## Commands
 
-All 36 commands are listed below.
+All 38 commands are listed below.
 
 | Command | Capability | Idempotent | v2 tag |
 |---|---|---|---|
@@ -65,6 +65,8 @@ All 36 commands are listed below.
 | `files.read` | read | yes | — |
 | `files.stat` | read | yes | — |
 | `files.write` | read | no | — |
+| `git.status` | read | yes | — |
+| `git.diff` | read | yes | — |
 | `tasks.list` | read | yes | — |
 | `tasks.run` | compose | no | — |
 | `tasks.status` | compose | yes | — |

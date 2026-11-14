@@ -26,6 +26,8 @@ export const PROJECT_FRAME_CLASS = Object.freeze({
   'loop.start': 'model.exec',
   'files.stat': 'self.read',
   'files.write': 'self.write',
+  'git.status': 'self.read',
+  'git.diff': 'self.read',
 });
 
 /** The `projects.list` result: id, name, the caller's effective role/mode/cap and permissions. */

@@ -393,6 +393,68 @@ public struct HostApiFilesWriteResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiGitDiffRequest: Codable, Equatable, Sendable {
+    public var path: String?
+    public var projectId: String
+    public var staged: Bool?
+
+    public init(path: String? = nil, projectId: String, staged: Bool? = nil) {
+        self.path = path
+        self.projectId = projectId
+        self.staged = staged
+    }
+}
+
+public struct HostApiGitDiffResult: Codable, Equatable, Sendable {
+    public var patch: String
+    public var truncated: Bool
+
+    public init(patch: String, truncated: Bool) {
+        self.patch = patch
+        self.truncated = truncated
+    }
+}
+
+public struct HostApiGitStatusRequest: Codable, Equatable, Sendable {
+    public var projectId: String
+
+    public init(projectId: String) {
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiGitStatusResultEntriesItem: Codable, Equatable, Sendable {
+    public var from: String?
+    public var path: String
+    public var status: String
+    public var x: String
+    public var y: String
+
+    public init(from: String? = nil, path: String, status: String, x: String, y: String) {
+        self.from = from
+        self.path = path
+        self.status = status
+        self.x = x
+        self.y = y
+    }
+}
+
+public struct HostApiGitStatusResult: Codable, Equatable, Sendable {
+    public var ahead: Int
+    public var behind: Int
+    public var branch: String
+    public var clean: Bool
+    public var entries: [HostApiGitStatusResultEntriesItem]
+
+    public init(ahead: Int, behind: Int, branch: String, clean: Bool, entries: [HostApiGitStatusResultEntriesItem]) {
+        self.ahead = ahead
+        self.behind = behind
+        self.branch = branch
+        self.clean = clean
+        self.entries = entries
+    }
+}
+
 public struct HostApiHostAuthPairRequest: Codable, Equatable, Sendable {
     public var pin: String
 

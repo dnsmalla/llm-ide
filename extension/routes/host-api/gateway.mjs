@@ -25,6 +25,7 @@ import { handleTaskRoutes } from '../tasks.mjs';
 import { TASKS } from '../../core/task-registry.generated.mjs';
 import { scopedProjectRoot } from '../bus/project-scope.mjs';
 import { MAX_TEXT, hashBytes, writeProjectFile } from './workspace-write.mjs';
+import { gitDiff, gitStatus } from './git-read.mjs';
 import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -88,6 +89,8 @@ export const COMMAND_CLASS = Object.freeze({
   'files.read': 'self.read',
   'files.stat': 'self.read',
   'files.write': 'self.write',
+  'git.status': 'self.read',
+  'git.diff': 'self.read',
   'tasks.list': 'self.read',
   'tasks.run': 'self.write',
   'tasks.status': 'self.read',
@@ -836,6 +839,16 @@ export function createGateway(overrides) {
           const code = e.code === 'conflict' ? 'conflict' : e.code === 'not_found' ? 'not_found' : e.code === 'invalid' ? 'invalid_payload' : 'denied';
           return fail(s, id, code, String(e.message || e));
         }
+      }
+      case 'git.status': {
+        if (readRefused(s, entry, id)) return;
+        try { return respond(s, id, command, gitStatus(scopedProjectRoot(userId, p.projectId))); }
+        catch (e) { return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'internal', String(e.message || e)); }
+      }
+      case 'git.diff': {
+        if (readRefused(s, entry, id)) return;
+        try { return respond(s, id, command, gitDiff(scopedProjectRoot(userId, p.projectId), { path: p.path, staged: p.staged === true })); }
+        catch (e) { return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'internal', String(e.message || e)); }
       }
       case 'tasks.list': {
         if (readRefused(s, entry, id)) return;
