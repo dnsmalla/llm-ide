@@ -168,7 +168,10 @@ export async function postIssueComment(d: TrailDeps, target: IssueTarget, text: 
 export async function openTrailIssue(d: TrailDeps, req: { provider: IssueProvider; repo: string; title: string; body: string; idem: string }): Promise<IssueTarget | null> {
   if (!d.allowed(req.provider, "createIssue")) return null;
   const res = await quiet(() => d.request("/kb/issues/create", { provider: req.provider, repo: req.repo, title: displayLine(req.title).slice(0, 255), body: req.body.slice(0, 20_000), idem: req.idem }));
-  if (!res || res.status < 200 || res.status >= 300) return null;
+  if (!res || res.status < 200 || res.status >= 300) {
+    d.onError?.(`issue trail: create failed (${res ? `HTTP ${res.status}` : "no response"}) for ${req.repo}`);
+    return null;
+  }
   const number = issueNumberFromUrl((res.body as { url?: unknown } | null)?.url);
   return number === null ? null : { provider: req.provider, repo: req.repo, number };
 }
@@ -203,6 +206,10 @@ export async function trailForRun(d: TrailDeps, o: {
   const existing = o.item ? issueTarget(o.item) : null;
   if (existing) return issueTrail(d, existing);
   if (!o.open || !o.repo) return null;
+  if (!d.allowed(o.repo.provider, "createIssue")) {
+    d.onError?.("issue trail: Create issue is not allowed for " + o.repo.provider + " in Settings → Repositories");
+    return null;
+  }
   const opened = await openTrailIssue(d, {
     provider: o.repo.provider, repo: o.repo.slug, title: `${o.process} run ${o.runId}`,
     // The core accepts 16 to 64 letters, digits, _ or -.

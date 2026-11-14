@@ -134,3 +134,15 @@ test("a skipped runOnce stage says skipped, not passed", async () => {
   assert.match(body, /— skipped/);
   assert.doesNotMatch(body, /— passed/);
 });
+
+test("a missing create permission or a refused create explains itself", async () => {
+  const lines = [];
+  const base = { item: null, process: "Test", runId: "r1", goal: null, steps: [] };
+  const noCreate = fakeCore({ allow: ["commentIssue"] });
+  assert.equal(await trailForRun({ ...noCreate.deps, onError: (l) => lines.push(l) }, { ...base, open: true, repo: { provider: "github", slug: "o/r" } }), null);
+  assert.match(lines.join("\n"), /Create issue is not allowed/);
+  const refused = fakeCore({ createStatus: 403 });
+  lines.length = 0;
+  assert.equal(await trailForRun({ ...refused.deps, onError: (l) => lines.push(l) }, { ...base, open: true, repo: { provider: "github", slug: "o/r" } }), null);
+  assert.match(lines.join("\n"), /create failed \(HTTP 403\)/);
+});

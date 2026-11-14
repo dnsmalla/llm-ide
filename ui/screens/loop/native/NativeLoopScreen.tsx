@@ -671,15 +671,17 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     try {
       // The issue trail: a run started from an issue comments there; any other run opens one when the loop asks for it.
       const trailRunId = activeRun?.runId ?? newRunId(new Date(started), Math.random);
+      const trailRepo = shipTarget({ repo: activeRun?.repo ?? workRoot ?? projectRoot ?? "" }, readRepoConfig());
       const trail = await trailForRun({ ...loopTrailDeps, onError: (line) => setRunLog((l) => [...l, line]) }, {
         item: start ? { ...start.item, provider: start.item.provider ?? null } : null,
         // Every loop keeps an issue trail: one comment per completed stage and one run summary.
         open: true,
-        repo: shipTarget({ repo: activeRun?.repo ?? workRoot ?? projectRoot ?? "" }, readRepoConfig()),
+        repo: trailRepo,
         process: target.name, runId: trailRunId, goal: target.goal, steps: target.config.stages.filter((st) => st.enabled).map((st) => st.name),
       });
       if (trail) setRunLog((l) => [...l, `issue trail: ${trail.target.repo}#${trail.target.number}`]);
-      else if (target.config.issueTrail && !start) setRunLog((l) => [...l, "issue trail: no issue was opened (the repository is not in Settings → Repositories, Create issue is not allowed, or the token was refused)"]);
+      else if (!trailRepo) setRunLog((l) => [...l, `issue trail: no issue — ${activeRun?.repo ?? workRoot ?? projectRoot ?? "(no project)"} is not mapped in Settings → Repositories`]);
+      else setRunLog((l) => [...l, `issue trail: no issue — ${trailRepo.provider} ${trailRepo.slug} could not be opened (see the line above)`]);
       if (activeRun && isFactoryLoop(target) && start) {
         try {
           const [intake, manager] = await Promise.all([import("../../factory/intake.ts"), import("./run-manager.ts")]);
