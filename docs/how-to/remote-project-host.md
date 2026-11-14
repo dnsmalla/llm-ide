@@ -56,7 +56,19 @@ available.
 A save sends `expectedHash` from the last stat. If another writer changed the file, the host answers
 `conflict` and the client says to reload.
 
-## 5. Acceptance checklist
+## 5. Review changes
+
+Open **Workspace → Changes**. The host returns:
+
+```text
+git.status  branch, ahead/behind, changed files
+git.diff    the selected file's unified diff, capped at 256 KiB
+```
+
+Both are read-only. There is no commit, push, checkout, reset or hook in this phase. Click **Open** on a changed file to edit
+it, then Save.
+
+## 6. Acceptance checklist
 
 Run each on the server and record the result:
 
@@ -69,11 +81,16 @@ Run each on the server and record the result:
 - [ ] binary file → not opened as text
 - [ ] audit row `file_write` has project, path and size, and no file text
 - [ ] no repository clone or sync is created on the client
+- [ ] clean repo → Changes says "No changes"
+- [ ] edit a file → it appears with M and the diff shows the line
+- [ ] a diff over 262,144 bytes is truncated
+- [ ] a viewer can read Changes; no write command is offered
 
 ## Limits
 
 - Text files only; no binary, rename, delete or mkdir UI.
-- No git commit, terminal or Loop on the host yet.
+- Git is read-only: status and diff, no commit/push.
+- No terminal or Loop on the host yet.
 - Desktop and iPhone are later phases; the web client is the first remote client.
 - The model provider still receives the code sent to it; for licensed code use a self-hosted model or a no-training
   enterprise agreement.
