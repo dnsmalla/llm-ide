@@ -35,6 +35,7 @@ import { handleRunBash, resolveBashCwd } from './handlers/run-bash.mjs';
 import { handleProjectMemory } from './handlers/project-memory.mjs';
 import { handleLoadSkill } from './handlers/load-skill.mjs';
 import { handleDecide } from './handlers/decide.mjs';
+import { handleIssueCreate, handleIssueComment } from './handlers/issues.mjs';
 import { runBashGate, autoGate, bashNeedsPerCallApproval } from './gates.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { isAllowedByRule, suggestRule, addRule } from '../../kb/tool-permissions.mjs';
@@ -160,6 +161,19 @@ const ENTRIES = [
   // hand-off matters most.
   { name: 'load-skill', kind: 'read', execute: (args, ctx) => handleLoadSkill(args, { userId: ctx.userId }) },
   { name: 'task-list', kind: 'read', execute: (args, ctx) => ({ tasks: tasks.listTasks(ctx.userId, ctx.sessionId) }) },
+  {
+    name: 'issue-create',
+    kind: 'act',
+    gate: () => 'prompt',
+    execute: (args, ctx) => handleIssueCreate(args, ctx),
+  },
+  {
+    name: 'issue-comment',
+    kind: 'act',
+    gate: () => 'prompt',
+    execute: (args, ctx) => handleIssueComment(args, ctx),
+  },
+
   {
     name: 'task-create',
     kind: 'act',
