@@ -62,9 +62,10 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         .accelerator("CmdOrCtrl+Shift+L")
         .build(app)?;
     let main_window = MenuItemBuilder::with_id("menu_window_main", "Main Window").build(app)?;
+    let remote = MenuItemBuilder::with_id("menu_remote_workspace", "Remote Workspace in Browser…").build(app)?;
     let window_list = SubmenuBuilder::new(app, "LLM-IDE").items(&[&main_window]).build()?;
     let window = SubmenuBuilder::new(app, "Window")
-        .items(&[&minimize, &zoom, &sep(app)?, &front, &quick, &chat, &sep(app)?, &window_list])
+        .items(&[&minimize, &zoom, &sep(app)?, &front, &quick, &chat, &remote, &sep(app)?, &window_list])
         .build()?;
 
     let help = MenuItemBuilder::with_id("menu_help", "LLM-IDE Help").build(app)?;
@@ -78,6 +79,11 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         match event.id().as_ref() {
             "menu_quick_switch" | "menu_chat" | "menu_help" => {
                 let _ = app.emit("app-menu", event.id().as_ref());
+            }
+            "menu_remote_workspace" => {
+                let _ = std::process::Command::new("open")
+                    .arg("https://llm-ide.com/app/")
+                    .spawn();
             }
             "menu_minimize" => {
                 if let Some(window) = app.get_webview_window("main") {

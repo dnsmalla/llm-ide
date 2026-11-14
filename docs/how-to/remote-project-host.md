@@ -140,3 +140,9 @@ Run each on the server and record the result:
 - Desktop and iPhone are later phases; the web client is the first remote client.
 - The model provider still receives the code sent to it; for licensed code use a self-hosted model or a no-training
   enterprise agreement.
+
+## Desktop access
+
+The desktop app's **Window → Remote Workspace in Browser…** opens `https://llm-ide.com/app/` in the system browser. The
+desktop does not embed the remote app: its `frame-ancestors 'none'` policy blocks embedding, and a native Host API client
+inside the desktop is still a separate phase. Use the browser window as the desktop remote client until then.
