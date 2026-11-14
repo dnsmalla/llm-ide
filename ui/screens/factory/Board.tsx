@@ -396,7 +396,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const selInfo = selRunId ? worktrees.get(selRunId) ?? null : null;
 
   if (scope !== "Factory" && projectRoot) {
-    return <LoopRuns projectRoot={projectRoot} scope={scope} />;
+    return <LoopRuns projectRoot={projectRoot} scope={scope} active={active} />;
   }
   return (
     <div className="fx-board-root">

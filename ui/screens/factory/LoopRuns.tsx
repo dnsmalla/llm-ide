@@ -9,6 +9,7 @@ import { loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/n
 export interface LoopRunsProps {
   projectRoot: string;
   scope: string;
+  active: boolean;
 }
 
 const DONE = "Done";
@@ -42,7 +43,7 @@ function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, 
   return { lane: name, note: run.statusSummary };
 }
 
-export function LoopRuns({ projectRoot, scope }: LoopRunsProps): ReactNode {
+export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
   const [steps, setSteps] = useState<string[]>([]);
   const [cards, setCards] = useState<RunCard[]>([]);
@@ -50,6 +51,7 @@ export function LoopRuns({ projectRoot, scope }: LoopRunsProps): ReactNode {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
+    if (!active) return;
     let live = true;
     setError(null);
     void Promise.all([
@@ -67,8 +69,9 @@ export function LoopRuns({ projectRoot, scope }: LoopRunsProps): ReactNode {
         return { run, lane: at.lane, note: at.note, failed: run.statusCode !== "success" };
       }));
     }, (e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { live = false; };
-  }, [fs, projectRoot, scope, tick]);
+    const timer = window.setInterval(() => setTick((n) => n + 1), 5_000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [fs, projectRoot, scope, tick, active]);
 
   const lanes = useMemo(() => {
     const out = [...steps];
