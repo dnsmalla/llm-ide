@@ -79,13 +79,15 @@ export interface StepFacts {
   verdict?: string | null;
   durationSeconds?: number | null;
   costUsd?: number | null;
+  /** A runOnce stage that already passed is reported without pretending it ran again. */
+  skipped?: boolean;
   /** The word before "verdict:" ("Review", "Readiness"); default "Review". */
   verdictLabel?: string;
 }
 
 /** One step's comment. */
 export function stepCommentBody(f: StepFacts): string {
-  const head = `**${displayLine(f.process).replace(/[*`]/g, "").slice(0, 60)} · ${code(f.stageName, 80)}** — ${f.ok ? "passed" : "failed"}`;
+  const head = `**${displayLine(f.process).replace(/[*`]/g, "").slice(0, 60)} · ${code(f.stageName, 80)}** — ${f.skipped ? "skipped" : f.ok ? "passed" : "failed"}`;
   const lines = [head, "", `Run ${code(f.runId, 80)} (${displayLine(String(f.mode)).slice(0, 20)})${f.iteration > 1 ? `, attempt ${f.iteration}` : ""}`];
   if (f.changedFiles && f.changedFiles.length > 0) lines.push(changedLine(f.changedFiles));
   const command = safeTestCommand(f.testCommand);
@@ -109,6 +111,8 @@ export interface SummaryFacts {
   changedFiles?: readonly string[] | null;
   durationSeconds?: number | null;
   costUsd?: number | null;
+  /** A runOnce stage that already passed is reported without pretending it ran again. */
+  skipped?: boolean;
   /** The MR/PR this run opened, or the reason none was opened. */
   mergeRequest?: { url: string } | { notOpened: string } | null;
 }

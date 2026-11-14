@@ -128,3 +128,9 @@ test("a step comment carries its own duration and cost", async () => {
   assert.match(body, /time 65 s/);
   assert.match(body, /cost \$0\.12/);
 });
+
+test("a skipped runOnce stage says skipped, not passed", async () => {
+  const body = (await import("../native/issue-trail.ts")).stepCommentBody({ process: "Test", stageName: "Test Structure", ok: true, skipped: true, runId: "r1", mode: "loop", iteration: 2 });
+  assert.match(body, /— skipped/);
+  assert.doesNotMatch(body, /— passed/);
+});

@@ -703,7 +703,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         log: followLog,
         holdWhilePaused,
         onProgress(e) {
-          if (trail && e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration, durationSeconds: e.durationMs / 1000, costUsd: e.costUsd }));
+          if (!trail) return;
+          if (e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration, durationSeconds: e.durationMs / 1000, costUsd: e.costUsd }));
+          else if (e.type === "stage-skipped") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: true, skipped: true, runId: trailRunId, mode: "loop", iteration: e.iteration }));
         },
       };
       const outcome = target.defaultKey === "refactor" && activeRun
