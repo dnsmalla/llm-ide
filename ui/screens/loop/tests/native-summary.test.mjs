@@ -35,3 +35,16 @@ test("every run gets a folder with run.md, timings, log and the plan", async () 
   assert.match(files.get(`${dir}/run.md`), /\$ Test\nfailed/);
   assert.equal(files.get(`${dir}/REFACTOR.md`), "# Plan\n");
 });
+
+test("an existing archive folder still receives run.md", async () => {
+  const at = new Date("2026-11-02T01:30:00Z");
+  const files = new Map();
+  const fs = {
+    async create() { throw { code: "io", message: "exists" }; },
+    async write(p, text) { files.set(p, text); },
+    async read() { return { status: "missing", text: null }; },
+  };
+  const dir = await writeRunArchive(fs, loop, outcome, ["log"], at);
+  assert.equal(dir, archiveDir(loop, at));
+  assert.ok(files.has(`${dir}/run.md`));
+});
