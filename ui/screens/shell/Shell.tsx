@@ -399,7 +399,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           {nav.active === "loop" || nav.active === "conflicts" ? (
             <div className="sh-loop-tabs" role="tablist" aria-label="Loop views">
               <button type="button" role="tab" aria-selected={nav.active === "loop"} className="sh-loop-tab" data-on={nav.active === "loop" || undefined} onClick={() => dispatch({ type: "select", id: "loop" })}>Editor</button>
-              <button type="button" role="tab" aria-selected={nav.active === "conflicts"} className="sh-loop-tab" data-on={nav.active === "conflicts" || undefined} onClick={() => dispatch({ type: "select", id: "conflicts" })}>Factory</button>
+              <button type="button" role="tab" aria-selected={nav.active === "conflicts"} className="sh-loop-tab" data-on={nav.active === "conflicts" || undefined} onClick={() => dispatch({ type: "select", id: "conflicts" })}>Board</button>
             </div>
           ) : null}
           {remoteMode ? <div className="sh-row"><RemoteProjectBar /></div> : null}

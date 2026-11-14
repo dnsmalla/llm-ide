@@ -183,10 +183,10 @@ test("the server-out-of-date chip carries the /health sentence and opens Server 
   assert.match(out, /aria-label="Server out of date\. The core reports API 109, but this app expects API 110\. Open Server settings\."/);
 });
 
-test("Loop owns Editor and Factory tabs instead of a Factory toolbar item", () => {
+test("Loop owns Editor and Board tabs instead of a Factory toolbar item", () => {
   const out = html(h(Shell, { initialSection: "loop", spike: () => null }));
   assert.match(out, /role="tablist"[^>]*aria-label="Loop views"/);
   assert.match(out, />Editor</);
-  assert.match(out, />Factory</);
+  assert.match(out, />Board</);
   assert.doesNotMatch(out, /data-tb-id="conflicts"/);
 });

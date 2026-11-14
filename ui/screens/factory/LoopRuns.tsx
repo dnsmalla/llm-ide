@@ -1,8 +1,9 @@
-// Run cards for the non-Factory loops (Test, Refactoring, …). The Factory board stays item/worktree based; these loops
-// are run-based, so their cards come from the run index under system/loop-runs.
+// A board for every non-Factory loop: the loop's stages are the lanes, each run is a card placed at the stage it
+// reached (or Done). Facts come from system/loop-runs; nothing here can start or change a run.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { shellBus } from "../shell/bus";
 import { createHostFs } from "../explorer/fs";
+import { loadLoops } from "../loop/native/store.ts";
 import { loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
 
 export interface LoopRunsProps {
@@ -12,6 +13,7 @@ export interface LoopRunsProps {
   onScope(name: string): void;
 }
 
+const DONE = "Done";
 const when = (iso: string): string => {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return iso;
@@ -21,40 +23,77 @@ const when = (iso: string): string => {
   const h = Math.round(mins / 60);
   return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 };
+const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code === "aborted" ? "cancelled" : "failed";
 
-const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code === "aborted" ? "cancelled" : code === "running" ? "running" : "failed";
+interface RunCard { run: LoopRunIndexEntry; lane: string; note: string; failed: boolean }
+
+/** The lane a run belongs to: Done on success, else its last executed or failed stage. */
+function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, steps: readonly string[]): { lane: string; note: string } {
+  if (run.statusCode === "success") return { lane: DONE, note: run.statusSummary };
+  const rows = Array.isArray(record?.stages) ? record.stages : [];
+  let last: string | null = null;
+  let failed: string | null = null;
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null) continue;
+    const name = (row as { stageName?: unknown }).stageName;
+    if (typeof name === "string" && name.trim()) last = name.trim();
+    const exit = ((row as { run?: { exitCode?: unknown } }).run?.exitCode);
+    if (typeof exit === "number" && exit !== 0) failed = last;
+  }
+  const name = failed ?? last ?? steps[0] ?? DONE;
+  return { lane: name, note: run.statusSummary };
+}
 
 export function LoopRuns({ projectRoot, scope, loops, onScope }: LoopRunsProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
-  const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
+  const [steps, setSteps] = useState<string[]>([]);
+  const [cards, setCards] = useState<RunCard[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [opening, setOpening] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let live = true;
     setError(null);
-    void readRecentRuns(fs, 100).then((rows) => { if (live) setRuns(rows); }, (e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
+    void Promise.all([
+      readRecentRuns(fs, 100),
+      loadLoops(fs).then((r) => r.kind === "ok" ? r.store.loops.find((l) => l.name === scope) ?? null : null, () => null),
+    ]).then(async ([rows, loop]) => {
+      if (!live) return;
+      const names = loop ? loop.config.stages.filter((s) => s.enabled).map((s) => s.name) : [];
+      setSteps(names);
+      const shown = rows.filter((r) => r.loopName === scope).slice(0, 40);
+      const loaded = await Promise.all(shown.map((r) => loadRunRecord(fs, r.id, r.startedAt).catch(() => null)));
+      if (!live) return;
+      setCards(shown.map((run, i) => {
+        const at = laneOf(run, loaded[i], names);
+        return { run, lane: at.lane, note: at.note, failed: run.statusCode !== "success" };
+      }));
+    }, (e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
-  }, [fs, projectRoot, scope]);
+  }, [fs, projectRoot, scope, tick]);
 
-  const shown = runs.filter((r) => r.loopName === scope);
+  const lanes = useMemo(() => {
+    const out = [...steps];
+    for (const c of cards) if (!out.includes(c.lane)) out.push(c.lane);
+    if (cards.some((c) => c.lane === DONE) && !out.includes(DONE)) out.push(DONE);
+    return out.length ? out : [DONE];
+  }, [steps, cards]);
+
   const openRun = async (id: string, startedAt: string) => {
-    setOpening(id);
     try {
       const rec = await loadRunRecord(fs, id, startedAt);
       const path = rec?.summaryPath;
       if (typeof path === "string" && path) shellBus.publish({ type: "open-file", path });
       else setError("This run has no archived run.md yet; it was recorded before run archives existed.");
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setOpening(null); }
   };
 
   return (
     <div className="fx-board-root">
       <header className="fx-head">
         <div className="fx-head-title">
-          <h2>Loop runs</h2>
-          <p className="fx-summary">{shown.length} run{shown.length === 1 ? "" : "s"} · {scope}</p>
+          <h2>{scope} board</h2>
+          <p className="fx-summary">{cards.length} run{cards.length === 1 ? "" : "s"}</p>
         </div>
         <span className="fx-spacer" />
         <label className="fx-field fx-field-inline">
@@ -64,25 +103,29 @@ export function LoopRuns({ projectRoot, scope, loops, onScope }: LoopRunsProps):
             {loops.filter((n) => n !== "Factory").map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </label>
-        <button type="button" className="fx-btn" onClick={() => void readRecentRuns(fs, 100).then(setRuns, (e) => setError(e instanceof Error ? e.message : String(e)))}>Refresh</button>
+        <button type="button" className="fx-btn" onClick={() => setTick((n) => n + 1)}>Refresh</button>
       </header>
       {error ? <p className="fx-error" role="status">{error}</p> : null}
-      <div className="fx-runs" role="list" aria-label={`${scope} runs`}>
-        {shown.length === 0 ? <p className="fx-empty">No {scope} runs yet. Start one from the Loop editor.</p> : null}
-        {shown.map((r) => (
-          <article key={r.id} className="fx-run" role="listitem" data-status={r.statusCode}>
-            <header className="fx-run-head">
-              <strong>{r.loopName}</strong>
-              <span className="fx-run-status">{statusWord(r.statusCode)}</span>
-              <span className="fx-run-time">{when(r.startedAt)}</span>
-            </header>
-            <p className="fx-run-summary">{r.statusSummary}</p>
-            <p className="fx-run-meta">{r.durationSeconds ? `${r.durationSeconds}s` : "—"} · {r.iterationsUsed} iteration{r.iterationsUsed === 1 ? "" : "s"} · {r.trigger}</p>
-            <div className="fx-actions">
-              <button type="button" className="fx-btn" disabled={opening === r.id} onClick={() => void openRun(r.id, r.startedAt)}>{opening === r.id ? "Opening…" : "Open run log & plan"}</button>
-            </div>
-          </article>
-        ))}
+      <div className="fx-lanes" role="list" aria-label={`${scope} board`}>
+        {lanes.map((lane) => {
+          const inLane = cards.filter((c) => c.lane === lane);
+          return (
+            <section className="fx-lane" key={lane} role="listitem" aria-label={`${lane} runs`}>
+              <header className="fx-lane-head"><h3>{lane}</h3><span>{inLane.length}</span></header>
+              <div className="fx-lane-cards">
+                {inLane.length === 0 ? <p className="fx-empty">No runs.</p> : null}
+                {inLane.map(({ run, note, failed }) => (
+                  <article key={run.id} className="fx-run" data-status={failed ? "failed" : "success"}>
+                    <header className="fx-run-head"><strong>{run.loopName}</strong><span className="fx-run-status">{statusWord(run.statusCode)}</span><span className="fx-run-time">{when(run.startedAt)}</span></header>
+                    <p className="fx-run-summary">{note}</p>
+                    <p className="fx-run-meta">{run.durationSeconds ? `${run.durationSeconds}s` : "—"} · {run.iterationsUsed} iteration{run.iterationsUsed === 1 ? "" : "s"}</p>
+                    <div className="fx-actions"><button type="button" className="fx-btn" onClick={() => void openRun(run.id, run.startedAt)}>Open run log & plan</button></div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          );
+        })}
       </div>
     </div>
   );
