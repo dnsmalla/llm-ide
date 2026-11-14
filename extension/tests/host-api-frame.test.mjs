@@ -61,3 +61,11 @@ test('clamp cuts on code-point boundaries within the UTF-16 cap', () => {
 test('fixture directories are all exercised', () => {
   assert.ok(readdirSync(join(DIR, 'invalid/commands')).length > 0);
 });
+
+test('every envelope error code round-trips through errorFrame', () => {
+  for (const code of defs.ErrorCode.enum) {
+    const frame = JSON.parse(errorFrame({ replyTo: 'c-1', code, message: 'x', retryable: false, rev: 1 }));
+    assert.equal(frame.error.code, code, code);
+    assert.deepEqual(validate(defs.ErrorFrame, frame, { defs }), []);
+  }
+});

@@ -24,7 +24,7 @@ import { busHostProof } from '../../core/host-approval.mjs';
 import { handleTaskRoutes } from '../tasks.mjs';
 import { TASKS } from '../../core/task-registry.generated.mjs';
 import { scopedProjectRoot } from '../bus/project-scope.mjs';
-import { hashText, writeProjectFile } from './workspace-write.mjs';
+import { MAX_TEXT, hashBytes, writeProjectFile } from './workspace-write.mjs';
 import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -818,8 +818,10 @@ export function createGateway(overrides) {
         if (readRefused(s, entry, id)) return;
         try {
           const { real, st } = projectFile(userId, p.projectId, p.path);
-          const hash = hashText(fs.readFileSync(real, 'utf8'));
-          return respond(s, id, command, { hash, size: st.size, mtimeMs: st.mtimeMs });
+          if (st.size > MAX_TEXT) return fail(s, id, 'invalid_payload', 'The file is too large to edit.');
+          const buf = fs.readFileSync(real);
+          if (buf.includes(0)) return fail(s, id, 'invalid_payload', 'That file is not text.');
+          return respond(s, id, command, { hash: hashBytes(buf), size: st.size, mtimeMs: st.mtimeMs });
         } catch (e) { return fail(s, id, e.code === 'not_found' ? 'not_found' : e.code === 'invalid' ? 'invalid_payload' : 'denied', String(e.message || e)); }
       }
       case 'files.write': {

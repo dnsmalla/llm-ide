@@ -16,7 +16,8 @@ import { createHash } from 'node:crypto';
 import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 
 export const MAX_TEXT = 262_144;
-export const hashText = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
+export const hashBytes = (buf) => createHash('sha256').update(buf).digest('hex');
+export const hashText = (text) => hashBytes(Buffer.from(text, 'utf8'));
 
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const isInside = (p, root) => p === root || p.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
