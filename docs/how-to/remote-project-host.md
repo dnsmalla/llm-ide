@@ -71,7 +71,10 @@ Click **Open** on a changed file to edit it, then Save.
 
 In **Changes**, tick the files to include, write a message and press **Commit**. The host stages exactly those paths,
 runs the normal git hooks and commits exactly those paths. A failing hook fails the commit and leaves the working tree
-intact. Push is not part of this phase.
+intact.
+
+When the branch is ahead, **Push ↑N** pushes the current branch to its already-configured upstream. There is no force,
+no remote/ref argument and no terminal prompt.
 
 ## 6. Acceptance checklist
 
@@ -94,11 +97,13 @@ Run each on the server and record the result:
 - [ ] leave another modified file unticked → it stays uncommitted
 - [ ] empty message / empty selection → Commit disabled
 - [ ] a failing hook → commit refused, changes kept
+- [ ] a committed branch shows Push ↑1 and pushes to its upstream
+- [ ] no upstream → push fails with a clear message
 
 ## Limits
 
 - Text files only; no binary, rename, delete or mkdir UI.
-- Git commit is available for explicitly selected paths; push is not.
+- Git commit and push are available; both use the host repository's configured identity and upstream.
 - No terminal or Loop on the host yet.
 - Desktop and iPhone are later phases; the web client is the first remote client.
 - The model provider still receives the code sent to it; for licensed code use a self-hosted model or a no-training
