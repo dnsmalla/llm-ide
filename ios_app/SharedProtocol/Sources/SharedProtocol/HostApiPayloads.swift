@@ -393,6 +393,28 @@ public struct HostApiFilesWriteResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiGitCommitRequest: Codable, Equatable, Sendable {
+    public var message: String
+    public var paths: [String]
+    public var projectId: String
+
+    public init(message: String, paths: [String], projectId: String) {
+        self.message = message
+        self.paths = paths
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiGitCommitResult: Codable, Equatable, Sendable {
+    public var commit: String
+    public var summary: String
+
+    public init(commit: String, summary: String) {
+        self.commit = commit
+        self.summary = summary
+    }
+}
+
 public struct HostApiGitDiffRequest: Codable, Equatable, Sendable {
     public var path: String?
     public var projectId: String

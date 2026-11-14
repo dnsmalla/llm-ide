@@ -26,6 +26,7 @@ import { TASKS } from '../../core/task-registry.generated.mjs';
 import { scopedProjectRoot } from '../bus/project-scope.mjs';
 import { MAX_TEXT, hashBytes, writeProjectFile } from './workspace-write.mjs';
 import { gitDiff, gitStatus } from './git-read.mjs';
+import { gitCommit } from './git-commit.mjs';
 import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -91,6 +92,7 @@ export const COMMAND_CLASS = Object.freeze({
   'files.write': 'self.write',
   'git.status': 'self.read',
   'git.diff': 'self.read',
+  'git.commit': 'self.write',
   'tasks.list': 'self.read',
   'tasks.run': 'self.write',
   'tasks.status': 'self.read',
@@ -849,6 +851,18 @@ export function createGateway(overrides) {
         if (readRefused(s, entry, id)) return;
         try { return respond(s, id, command, gitDiff(scopedProjectRoot(userId, p.projectId), { path: p.path, staged: p.staged === true })); }
         catch (e) { return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'internal', String(e.message || e)); }
+      }
+      case 'git.commit': {
+        const wait = rate.write(entry.state.deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        try {
+          const out = gitCommit(scopedProjectRoot(userId, p.projectId), { message: p.message, paths: p.paths });
+          audit('git_commit', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `${p.projectId}:${p.paths.length}:${out.commit}` });
+          return respond(s, id, command, out);
+        } catch (e) {
+          const code = e.code === 'invalid' ? 'invalid_payload' : e.code === 'nothing_to_commit' ? 'invalid_payload' : 'internal';
+          return fail(s, id, code, String(e.message || e));
+        }
       }
       case 'tasks.list': {
         if (readRefused(s, entry, id)) return;
