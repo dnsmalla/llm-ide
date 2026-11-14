@@ -27,3 +27,6 @@ export const pushBranch = (link: HostLink, projectId: string) =>
 
 export const terminalExec = (link: HostLink, projectId: string, argv: string[]) =>
   link.send("terminal.exec", { projectId, argv }).done;
+
+export const shellExec = (link: HostLink, projectId: string, command: string) =>
+  link.send("terminal.shell", { projectId, command, confirm: true }).done;

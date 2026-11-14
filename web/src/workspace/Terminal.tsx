@@ -1,7 +1,7 @@
 // Allowlisted remote commands. The host refuses anything outside its list; this view only sends argv.
 import { useState } from "react";
 import type { HostLink } from "../host-api/connection.ts";
-import { terminalExec } from "./api.ts";
+import { shellExec, terminalExec } from "./api.ts";
 import { parseArgv, terminalReady } from "./model.ts";
 import "./terminal.css";
 
@@ -16,13 +16,17 @@ export function Terminal({ link, projectId, onClose }: { link: HostLink; project
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shell, setShell] = useState(false);
   const argv = parseArgv(text);
 
   const run = async () => {
-    if (!terminalReady(argv, busy)) return;
+    if (busy) return;
+    if (shell && !text.trim()) return;
+    if (!shell && !terminalReady(argv, busy)) return;
+    if (shell && !window.confirm(`Run this shell command on the host?\n\n${text}`)) return;
     setBusy(true); setError(null); setOutput(""); setExitCode(null);
     try {
-      const out = await terminalExec(link, projectId, argv);
+      const out = shell ? await shellExec(link, projectId, text) : await terminalExec(link, projectId, argv);
       setOutput([out.stdout, out.stderr].filter(Boolean).join("\n"));
       setExitCode(out.exitCode);
       if (out.truncated) setError("Output was truncated at 256 KiB.");
@@ -41,9 +45,10 @@ export function Terminal({ link, projectId, onClose }: { link: HostLink; project
       <div className="term-presets">
         {PRESETS.map((p) => <button key={p.join(" ")} type="button" onClick={() => setText(p.join(" "))}>{p[0]} {p[1]}</button>)}
       </div>
+      <label className="term-shell"><input type="checkbox" checked={shell} onChange={(e) => setShell(e.target.checked)} /> Full shell (host must enable LLMIDE_ALLOW_REMOTE_SHELL=1)</label>
       <div className="term-row">
         <input value={text} spellCheck={false} aria-label="Command" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void run(); }} />
-        <button type="button" disabled={!terminalReady(argv, busy)} onClick={() => void run()}>{busy ? "Running…" : "Run"}</button>
+        <button type="button" disabled={busy || (shell ? !text.trim() : !terminalReady(argv, busy))} onClick={() => void run()}>{busy ? "Running…" : "Run"}</button>
       </div>
       {error ? <p className="ws-error" role="alert">{error}</p> : null}
       <pre className="term-out" aria-live="polite">{output || (exitCode === null ? "" : "(no output)")}</pre>
