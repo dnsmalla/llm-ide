@@ -461,7 +461,7 @@ git commit -m "feat(host-api): handle files.stat and files.write"
 **Files:**
 - Create: `web/src/workspace/api.ts`
 - Create: `web/src/workspace/model.ts`
-- Test: `web/src/workspace/model.test.mjs`
+- Test: `web/tests/workspace-model.test.mjs`
 
 **Interfaces:**
 - Produces: `statFile(link, projectId, path)`, `writeFile(link, projectId, path, text, expectedHash, mustNotExist, create)`, `dirtyOf(buffer, saved)`, `conflictText(error)`.
@@ -485,7 +485,7 @@ test('a conflict explains how to recover', () => {
 
 - [ ] **Step 2: Run to fail**
 
-Run: `cd web && node --test src/workspace/model.test.mjs`
+Run: `cd web && node --test --experimental-strip-types tests/workspace-model.test.mjs`
 Expected: FAIL, module not found.
 
 - [ ] **Step 3: Implement the model and session methods**
@@ -510,13 +510,13 @@ export const writeFile = (link: HostLink, projectId: string, path: string, text:
 
 - [ ] **Step 4: Run the model test**
 
-Run: `cd web && node --test src/workspace/model.test.mjs`
+Run: `cd web && node --test --experimental-strip-types tests/workspace-model.test.mjs`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add web/src/workspace/api.ts web/src/workspace/model.ts web/src/workspace/model.test.mjs
+git add web/src/workspace/api.ts web/src/workspace/model.ts web/tests/workspace-model.test.mjs
 git commit -m "feat(web): add file stat/write client"
 ```
 
@@ -528,7 +528,7 @@ git commit -m "feat(web): add file stat/write client"
 - Create: `web/src/workspace/Workspace.tsx`
 - Create: `web/src/workspace/workspace.css`
 - Modify: `web/src/App.tsx`
-- Test: `web/src/workspace/workspace.test.mjs` (pure helpers only)
+- Test: `web/tests/workspace-ui.test.mjs` (pure helpers only)
 
 **Interfaces:**
 - Consumes: `files.list`, `files.read`, `files.stat`, `files.write`, the selected project.
@@ -539,7 +539,7 @@ git commit -m "feat(web): add file stat/write client"
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { saveAllowed } from './model.ts';
+import { saveAllowed } from '../src/workspace/model.ts';
 
 test('Save is enabled only for a dirty buffer', () => {
   assert.equal(saveAllowed({ dirty: false, saving: false }), false);
@@ -549,7 +549,7 @@ test('Save is enabled only for a dirty buffer', () => {
 
 - [ ] **Step 2: Run to fail**
 
-Run: `cd web && node --test src/workspace/workspace.test.mjs`
+Run: `cd web && node --test --experimental-strip-types tests/workspace-ui.test.mjs`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement the screen**
@@ -578,13 +578,13 @@ In `web/src/App.tsx`, add a **Workspace** tab that appears only when a project i
 
 - [ ] **Step 5: Run the web tests and typecheck**
 
-Run: `cd web && node --test src/workspace/*.test.mjs && npx tsc --noEmit`
+Run: `cd web && node --test --experimental-strip-types tests/workspace-*.test.mjs && npx tsc --noEmit`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add web/src/workspace web/src/App.tsx
+git add web/src/workspace web/src/App.tsx web/tests/workspace-ui.test.mjs
 git commit -m "feat(web): add a remote workspace editor"
 ```
 
