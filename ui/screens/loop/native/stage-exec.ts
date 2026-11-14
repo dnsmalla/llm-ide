@@ -18,7 +18,7 @@ import { checkWrites, isTestFileName } from "./protected.ts";
 import { runRegression } from "./regression.ts";
 import type { RunnerDeps, StageOutcome, StageRunResult } from "./runner.ts";
 import { checkSkillResult, planFiles } from "./step-contract.ts";
-import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure } from "./testmap.ts";
+import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure, type TestStructure } from "./testmap.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { changedPathArgs, repoPrefixFor, stageHostArgs } from "./worktree-run.ts";
 
@@ -341,9 +341,25 @@ async function runLedger(ctx: StageExecContext, prior: Prior, prefix: string, ta
   return { ok: true, output: [`${ledger.failing.length} failing · ${ledger.passing.length} passing`, `new failures: ${diff.newFailures.length ? diff.newFailures.join(", ") : "none"}`, `still failing: ${diff.stillFailing.length ? diff.stillFailing.join(", ") : "none"}`, `fixed: ${diff.fixed.length ? diff.fixed.join(", ") : "none"}`, `wrote ${path}`].join("\n") };
 }
 
+/** Re-root a structure detected inside `inputPath` so the plan lives at the repository root and commands run there. */
+export function scopeStructure(structure: TestStructure, inputPath: string): TestStructure {
+  if (!inputPath) return structure;
+  return {
+    ...structure,
+    roots: structure.roots.map((r) => {
+      const packageDir = r.packageDir ? `${inputPath}/${r.packageDir}` : inputPath;
+      const bare = r.command.replace(/^cd [^&]+&&\s*/, "");
+      return { ...r, packageDir, testDir: `${inputPath}/${r.testDir}`, command: `cd ${packageDir} && ${bare}` };
+    }),
+  };
+}
+
 async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, prior: Prior, target: LoopDefinition): Promise<StageRunResult> {
   if (s.testOp !== "structure" && s.testOp !== "map") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
-  const structure = await detectTestStructure(ctx.fs, prefix);
+  // The Test loop points at the project that owns its tests; Refactoring's input path is only a code scope, so its
+  // test root stays at the repository root.
+  const inputPath = target.defaultKey === "test" ? target.inputPath ?? "" : "";
+  const structure = scopeStructure(await detectTestStructure(ctx.fs, inputPath ? `${prefix ? `${prefix}/` : ""}${inputPath}` : prefix), inputPath);
   if (s.testOp === "structure") {
     const writes = await writeTestStructure(ctx.fs, prefix, structure);
     return { ok: structure.status === "ok", output: [`${structure.roots.length} test root(s)`, ...structure.roots.map((r) => `${r.packageDir || "."}: ${r.runner} · ${r.command}`), ...structure.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
@@ -366,8 +382,11 @@ async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, p
   return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, ...map.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
 }
 
-async function runTestPruneStage(ctx: StageExecContext, prefix: string): Promise<StageRunResult> {
-  const structure = await detectTestStructure(ctx.fs, prefix);
+async function runTestPruneStage(ctx: StageExecContext, prefix: string, target: LoopDefinition): Promise<StageRunResult> {
+  // The Test loop points at the project that owns its tests; Refactoring's input path is only a code scope, so its
+  // test root stays at the repository root.
+  const inputPath = target.defaultKey === "test" ? target.inputPath ?? "" : "";
+  const structure = scopeStructure(await detectTestStructure(ctx.fs, inputPath ? `${prefix ? `${prefix}/` : ""}${inputPath}` : prefix), inputPath);
   const notes: string[] = [];
   const findings = await scanTestPrune(ctx.fs, prefix, structure, notes);
   const path = await writeTestPrune(ctx.fs, prefix, findings);
@@ -434,7 +453,7 @@ export async function runOneStage(ctx: StageExecContext, s: LoopStage, target: L
   if (s.kind === "skill") return runSkill(ctx, s, target, halt);
   if (s.kind === "testMap" && s.testOp === "ledger") return runLedger(ctx, prior, prefix, target);
   if (s.kind === "testMap") return runTestMap(ctx, s, prefix, prior, target);
-  if (s.kind === "testPrune") return runTestPruneStage(ctx, prefix);
+  if (s.kind === "testPrune") return runTestPruneStage(ctx, prefix, target);
   if (s.kind === "codeGraph") return runGraph(ctx, s, prefix, target);
   if (s.kind === "artifactCheck") return runArtifact(ctx, s, target, prefix);
   throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
