@@ -30,7 +30,7 @@ test("Shell renders landmarks, skip link, top toolbar and a visible starting sta
   assert.match(out, /aria-label="Home"/, "Home button");
   assert.doesNotMatch(out, /aria-label="Toggle Code Assistant"/, "the Code Assistant button belongs to Explorer, not every section");
   assert.match(html(h(Shell, { initialSection: "explorer", spike: () => null })), /aria-label="Toggle Code Assistant"[^>]*aria-controls="ex-chat-dock"[^>]*aria-expanded="false"/, "Code Assistant is reachable from Explorer's top right and announces its state");
-  for (const l of ["Explorer", "Graph", "Auto Tasks", "Factory", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library"]) assert.match(out, new RegExp(`>${l}<`));
+  for (const l of ["Explorer", "Graph", "Auto Tasks", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library"]) assert.match(out, new RegExp(`>${l}<`));
   for (const l of ["Chat", "Settings"]) assert.doesNotMatch(out, new RegExp(`class="sh-tool-label">${l}<`), `${l} is not a toolbar item (Mac: status bar / account menu)`);
   assert.doesNotMatch(out, />Spike</, "the developer-only item is hidden by default");
   assert.match(out, /aria-current="page"/);
@@ -181,4 +181,12 @@ test("the server-out-of-date chip carries the /health sentence and opens Server 
   assert.match(out, /Server out of date/);
   assert.match(out, /title="The core reports API 109, but this app expects API 110\."/);
   assert.match(out, /aria-label="Server out of date\. The core reports API 109, but this app expects API 110\. Open Server settings\."/);
+});
+
+test("Loop owns Editor and Factory tabs instead of a Factory toolbar item", () => {
+  const out = html(h(Shell, { initialSection: "loop", spike: () => null }));
+  assert.match(out, /role="tablist"[^>]*aria-label="Loop views"/);
+  assert.match(out, />Editor</);
+  assert.match(out, />Factory</);
+  assert.doesNotMatch(out, /data-tb-id="conflicts"/);
 });

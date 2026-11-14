@@ -171,3 +171,9 @@
 .sh-side-chat { position: fixed; right: 16px; bottom: 40px; z-index: 50; max-width: calc(100vw - 32px); display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--tok-color-border); border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,.35); overflow: hidden; background: var(--tok-color-surface); }
 .sh-side-chat-resize { position: absolute; top: 0; left: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 2; touch-action: none; }
 .sh-side-chat > * { min-height: 0; flex: 1 1 auto; }
+
+/* Loop owns its two views: the editor and the Factory board. */
+.sh-loop-tabs { display: flex; gap: 6px; align-items: center; padding: 0 18px; border-bottom: 1px solid var(--tok-color-border); margin-bottom: 12px; }
+.sh-loop-tab { appearance: none; border: 0; background: transparent; color: var(--tok-color-text-muted); font: inherit; font-size: 13px; font-weight: 600; padding: 9px 12px; border-bottom: 2px solid transparent; cursor: pointer; }
+.sh-loop-tab:hover { color: var(--tok-color-text); }
+.sh-loop-tab[data-on="true"] { color: var(--tok-color-text); border-bottom-color: var(--tok-color-accent); }

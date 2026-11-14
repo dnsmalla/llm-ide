@@ -136,7 +136,7 @@ test("toolbar markup: role=toolbar, aria-current on the active item, disabled it
   assert.match(out, /role="toolbar"[^>]*aria-label="Sections"[^>]*aria-orientation="horizontal"/);
   assert.match(out, /data-tauri-drag-region/);
   const labels = [...out.matchAll(/<span class="sh-tool-label">([^<]*)<\/span>/g)].map((m) => m[1]);
-  assert.deepEqual(labels, ["Explorer", "Graph", "Auto Tasks", "Factory", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Live"]);
+  assert.deepEqual(labels, ["Explorer", "Graph", "Auto Tasks", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Live"]);
   assert.equal((out.match(/aria-current="page"/g) ?? []).length, 1);
   assert.match(out, /aria-current="page"[^>]*data-tb-id="library"|data-tb-id="library"[^>]*aria-current="page"/);
   assert.equal((out.match(/tabindex="0"/g) ?? []).length, 1, "exactly one tab stop");

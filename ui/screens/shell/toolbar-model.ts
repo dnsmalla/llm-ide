@@ -7,7 +7,7 @@ import { ALL_FEATURES, isSectionEnabled, type AppFeature } from "./features";
  * The toolbar sections in the Mac's `ShellSection.toolbarOrder` (Live mirrors the Mac toolbar order). `tests/toolbar.test.mjs` parses the Swift source and fails
  * when this list drifts from it.
  */
-export const TOOLBAR_IDS: readonly SectionId[] = ["explorer", "graph", "autotasks", "conflicts", "issues", "gantt", "loop", "docgen", "visual", "library", "live"];
+export const TOOLBAR_IDS: readonly SectionId[] = ["explorer", "graph", "autotasks", "issues", "gantt", "loop", "docgen", "visual", "library", "live"];
 
 /** Mac `ShellSection.visibleInToolbar` equivalents, persisted per viewer in the app's storage. */
 const HIDDEN_KEY = "llmide.toolbar.hidden";

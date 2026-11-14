@@ -365,7 +365,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         >
           <HomeIcon />
         </button>
-        <SectionToolbar active={nav.active} onSelect={onSelect} devTools={devToolsEnabled()} mode={remoteMode ? "remote" : "local"} />
+        <SectionToolbar active={nav.active === "conflicts" ? "loop" : nav.active} onSelect={onSelect} devTools={devToolsEnabled()} mode={remoteMode ? "remote" : "local"} />
         {nav.active === "explorer" && (
           <button
             type="button"
@@ -396,6 +396,12 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       <div className="sh-body">
         <div className="sh-section-column">
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={visibleSections.find((s) => s.id === nav.active)?.label}>
+          {nav.active === "loop" || nav.active === "conflicts" ? (
+            <div className="sh-loop-tabs" role="tablist" aria-label="Loop views">
+              <button type="button" role="tab" aria-selected={nav.active === "loop"} className="sh-loop-tab" data-on={nav.active === "loop" || undefined} onClick={() => dispatch({ type: "select", id: "loop" })}>Editor</button>
+              <button type="button" role="tab" aria-selected={nav.active === "conflicts"} className="sh-loop-tab" data-on={nav.active === "conflicts" || undefined} onClick={() => dispatch({ type: "select", id: "conflicts" })}>Factory</button>
+            </div>
+          ) : null}
           {remoteMode ? <div className="sh-row"><RemoteProjectBar /></div> : null}
           {remoteMode && hubBanner ? <StatusBanner severity="warning" message={hubError ? `${hubBanner.title}. ${hubBanner.body}` : hubBanner.title} /> : null}
           <LiveBanner activeSection={nav.active} onOpen={() => dispatch({ type: "select", id: "live" })} />
