@@ -122,3 +122,9 @@ test("the opened issue's body lists the steps and says where the comments go", (
   assert.doesNotMatch(body, /Goal:/);
   assert.match(body, /The last comment is the run summary\./);
 });
+
+test("a step comment carries its own duration and cost", async () => {
+  const body = (await import("../native/issue-trail.ts")).stepCommentBody({ process: "Refactoring", stageName: "Test", ok: true, runId: "r1", mode: "loop", iteration: 1, durationSeconds: 65, costUsd: 0.12 });
+  assert.match(body, /time 65 s/);
+  assert.match(body, /cost \$0\.12/);
+});

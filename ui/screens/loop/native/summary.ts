@@ -35,3 +35,66 @@ export async function writeSummaryNote(fs: SummaryFs, loop: LoopDefinition, outc
   await fs.write(path, renderSummary(loop, outcome, at), { expected_hash: null });
   return path;
 }
+
+export interface RunArchiveFs extends SummaryFs {
+  read(path: string, max?: number): Promise<{ status: string; text: string | null }>;
+}
+
+/** One folder per run under llm-doc/loop/, holding run.md and the plan it produced. */
+export function archiveDir(loop: LoopDefinition, at: Date): string {
+  return summaryPath(loop, at).replace(/\.md$/, "");
+}
+
+const PLAN_CANDIDATES = [
+  "llm-doc/loop/refactor/REFACTOR.md",
+  "llm-doc/loop/test/TEST-MAP.md",
+  "llm-doc/loop/test/TEST-STRUCTURE.md",
+  ".factory/PLAN.md",
+  ".factory/READINESS.md",
+  ".factory/REVIEW.md",
+];
+
+function withTimings(outcome: LoopRunOutcome): string {
+  const lines: string[] = ["## Stage timings", ""];
+  for (const o of outcome.stages) {
+    const seconds = typeof o.durationMs === "number" ? `${Math.round(o.durationMs / 1000)}s` : "—";
+    const cost = o.usage?.costUsd ? ` · $${o.usage.costUsd.toFixed(2)}` : "";
+    lines.push(`- ${o.ok ? "✓" : "✗"} **${o.stage.name}** — ${seconds}${cost}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+/** Persist every run: run.md (summary, per-stage time/cost, full log) plus the plan file(s) it wrote. Never throws. */
+export async function writeRunArchive(fs: RunArchiveFs, loop: LoopDefinition, outcome: LoopRunOutcome, log: readonly string[], at = new Date(), runPrefix = ""): Promise<string | null> {
+  try {
+    const dir = archiveDir(loop, at);
+    let part = "";
+    for (const seg of dir.split("/")) { part = part ? `${part}/${seg}` : seg; try { await fs.create(part, "dir"); } catch (e) { if ((e as { code?: string }).code !== "exists") throw e; } }
+    const fence = "~~~~";
+    const body = [
+      renderSummary(loop, outcome, at).trimEnd(),
+      "",
+      withTimings(outcome),
+      "",
+      "## Run log",
+      "",
+      fence,
+      ...log.map((l) => l.replace(/\r/g, "")),
+      fence,
+      "",
+    ].join("\n");
+    await fs.write(`${dir}/run.md`, body, { expected_hash: null });
+    const copied: string[] = [];
+    for (const rel of PLAN_CANDIDATES) {
+      try {
+        const r = await fs.read(runPrefix ? `${runPrefix}/${rel}` : rel, 4_000_000);
+        if (r.status !== "ok" || typeof r.text !== "string") continue;
+        const name = rel.startsWith(".factory/") ? rel.replace(".factory/", "") : rel.split("/").pop()!;
+        await fs.write(`${dir}/${name}`, r.text, { expected_hash: null });
+        copied.push(name);
+      } catch { /* not produced by this loop */ }
+    }
+    if (copied.length) await fs.write(`${dir}/README.md`, `Run archive for ${loop.name}.\\n\\n- run.md — summary, timings and full log\\n${copied.map((n) => `- ${n}`).join("\\n")}\\n`, { expected_hash: null });
+    return dir;
+  } catch { return null; }
+}

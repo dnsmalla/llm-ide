@@ -20,7 +20,7 @@ import { runRefactorBatches } from "./refactor-batches.ts";
 import { shellBus } from "../../shell/bus";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
 import { faultPathsFromOutput, reopenFault } from "./regression.ts";
-import { writeSummaryNote } from "./summary.ts";
+import { writeRunArchive } from "./summary.ts";
 import { clearQueue, loadQueue, saveQueue } from "./queue.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
@@ -656,6 +656,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setRunLog((l) => [...l, `▶ ${target.name}`, ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`] : []), ""]);
     const started = Date.now();
     let summaryPath: string | null = null;
+    const archiveLog: string[] = [];
     // Shown on the board as Working while it runs; released after the run record is saved (the finally below), so a
     // card can never be left behind. Loaded on demand, so the Loop screen does not hard-depend on the Factory chunk.
     let releaseBoardRun: (() => void) | null = null;
@@ -682,6 +683,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       }
       // Both the runner and the stage executor log through this, so the Process pane follows the live stage.
       const followLog = (line: string) => {
+        archiveLog.push(line);
         setRunLog((l) => [...l, line]);
         const stageId = stageIdForLogLine(target.config.stages, line);
         if (stageId !== null) setSelectedStageId(stageId);
@@ -692,7 +694,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         log: followLog,
         holdWhilePaused,
         onProgress(e) {
-          if (trail && e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration }));
+          if (trail && e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration, durationSeconds: e.durationMs / 1000, costUsd: e.costUsd }));
         },
       };
       const outcome = target.defaultKey === "refactor" && activeRun
@@ -727,10 +729,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           setRunLog((l) => [...l, `readiness copy failed: ${e instanceof Error ? e.message : String(e)}`]);
         }
       }
-      if (target.config.writeSummaryNote) {
-        try { summaryPath = await writeSummaryNote(fs, target, outcome); setRunLog((l) => [...l, `summary note: ${summaryPath}`]); }
-        catch (e) { setRunLog((l) => [...l, `summary note failed: ${e instanceof Error ? e.message : String(e)}`]); }
-      }
+      // Every run is archived under llm-doc/loop/<yyyy>/<MM>/, with its plan and full log.
+      try {
+        const dir = await writeRunArchive(fs, target, outcome, archiveLog, new Date(), activeRun ? repoPrefixFor(projectRoot ?? "", activeRun.worktree) : "");
+        if (dir) {
+          summaryPath = `${dir}/run.md`;
+          setRunLog((l) => [...l, `run archive: ${dir}/run.md`]);
+        } else setRunLog((l) => [...l, "run archive could not be written"]);
+      } catch (e) { setRunLog((l) => [...l, `run archive failed: ${e instanceof Error ? e.message : String(e)}`]); }
       setNotice(outcome.cancelled ? (cancelledRef.current ? "The loop was cancelled." : outcome.statusSummary) : outcome.passed ? "The loop passed." : outcome.statusSummary);
       if (!outcome.cancelled) void notifyTask("loop", outcome.passed);
       const startedAt = new Date(started).toISOString();

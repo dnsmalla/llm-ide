@@ -13,7 +13,7 @@ export function runsOncePerRun(stage: LoopStage): boolean {
 export type ProgressEvent =
   | { type: "iteration"; iteration: number }
   | { type: "stage-start"; stage: LoopStage; index: number; count: number; iteration: number }
-  | { type: "stage-result"; stage: LoopStage; ok: boolean; iteration: number }
+  | { type: "stage-result"; stage: LoopStage; ok: boolean; iteration: number; durationMs: number; costUsd?: number }
   | { type: "stage-skipped"; stage: LoopStage; index: number; count: number; iteration: number }
   | { type: "repair"; stage: LoopStage; attempt: number }
   | { type: "paused"; paused: boolean };
@@ -136,7 +136,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       spentUsd += result.usage?.costUsd ?? 0;
       outcomes.push(outcome);
       iterationOutcomes.push(outcome);
-      deps.onProgress?.({ type: "stage-result", stage, ok: result.ok, iteration });
+      deps.onProgress?.({ type: "stage-result", stage, ok: result.ok, iteration, durationMs: outcome.durationMs ?? 0, costUsd: result.usage?.costUsd });
       deps.log(`${result.ok ? "✓" : "✗"} ${stage.name}: ${result.ok ? "passed" : "failed"}`);
       if (result.ok && runsOncePerRun(stage)) passedOnce.add(stage.id);
       if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {

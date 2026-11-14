@@ -75,6 +75,8 @@ export interface StepFacts {
   changedFiles?: readonly string[] | null;
   testCommand?: string | null;
   verdict?: string | null;
+  durationSeconds?: number | null;
+  costUsd?: number | null;
   /** The word before "verdict:" ("Review", "Readiness"); default "Review". */
   verdictLabel?: string;
 }
@@ -88,6 +90,10 @@ export function stepCommentBody(f: StepFacts): string {
   if (command) lines.push(`Test command: ${code(command)}`);
   // A verdict comes from an agent that read untrusted text: a code span keeps links, images and mentions inert.
   if (f.verdict) lines.push(`${f.verdictLabel ?? "Review"} verdict: ${code(f.verdict, 120)}`);
+  const facts: string[] = [];
+  if (typeof f.durationSeconds === "number" && Number.isFinite(f.durationSeconds)) facts.push(`time ${Math.max(0, Math.round(f.durationSeconds))} s`);
+  if (typeof f.costUsd === "number" && Number.isFinite(f.costUsd) && f.costUsd > 0) facts.push(`cost $${f.costUsd.toFixed(2)}`);
+  if (facts.length) lines.push(facts.join(" · "));
   return lines.join("\n");
 }
 
