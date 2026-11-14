@@ -21,6 +21,11 @@ export function WorkspaceScreen({ ctx }: SectionProps) {
   const [saving, setSaving] = useState(false);
   const dirty = useMemo(() => dirtyOf(buffer, saved), [buffer, saved]);
 
+  // Switching projects must not leave the previous project's path and hash in the editor.
+  useEffect(() => {
+    setDir(""); setEntries([]); setPath(null); setSaved(""); setBuffer(""); setHash(null); setError(null);
+  }, [projectId]);
+
   useEffect(() => {
     if (!projectId || !link.capabilities.has("read")) return;
     let live = true;
