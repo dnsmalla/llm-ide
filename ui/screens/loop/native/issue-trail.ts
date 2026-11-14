@@ -17,6 +17,8 @@ export interface TrailDeps {
   request(path: string, body: Record<string, unknown>): Promise<{ status: number; body: unknown }>;
   /** Settings → Repositories allows this operation for the provider. */
   allowed(provider: IssueProvider, op: "commentIssue" | "createIssue"): boolean;
+  /** A failed comment/create is logged, never thrown into the run. */
+  onError?(line: string): void;
 }
 
 const MAX_FILES = 20;
@@ -212,7 +214,7 @@ export function issueTrail(d: TrailDeps, target: IssueTarget): IssueTrail {
     post(body) {
       chain = chain.then(async () => {
         const text = typeof body === "string" ? body : await quiet(body);
-        if (text) await postIssueComment(d, target, text);
+        if (text && !(await postIssueComment(d, target, text))) d.onError?.(`issue comment failed for ${target.repo}#${target.number}`);
       }).then(() => undefined, () => undefined);
     },
     idle: () => chain,

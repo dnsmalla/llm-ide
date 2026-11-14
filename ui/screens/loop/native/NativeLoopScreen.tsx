@@ -671,9 +671,10 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     try {
       // The issue trail: a run started from an issue comments there; any other run opens one when the loop asks for it.
       const trailRunId = activeRun?.runId ?? newRunId(new Date(started), Math.random);
-      const trail = await trailForRun(loopTrailDeps, {
+      const trail = await trailForRun({ ...loopTrailDeps, onError: (line) => setRunLog((l) => [...l, line]) }, {
         item: start ? { ...start.item, provider: start.item.provider ?? null } : null,
-        open: target.config.issueTrail === true,
+        // Every loop keeps an issue trail: one comment per completed stage and one run summary.
+        open: true,
         repo: shipTarget({ repo: activeRun?.repo ?? workRoot ?? projectRoot ?? "" }, readRepoConfig()),
         process: target.name, runId: trailRunId, goal: target.goal, steps: target.config.stages.filter((st) => st.enabled).map((st) => st.name),
       });
@@ -719,6 +720,8 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         steps: summarizeSteps(outcome.stages), changedFiles: changedPaths, durationSeconds: (Date.now() - started) / 1000,
         costUsd: outcome.costUsd ?? null, mergeRequest: null,
       }));
+      // Do not finish the run before the issue comments are actually posted.
+      await trail?.idle();
       setRunLog((l) => [...l, outcome.cancelled ? (cancelledRef.current ? "Loop cancelled." : `Loop aborted: ${outcome.statusSummary}`) : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
       if (!outcome.cancelled && !outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
         const failedRun = [...outcome.stages].reverse().find((o) => o.stage.kind === "regressionSweep" && !o.ok);
