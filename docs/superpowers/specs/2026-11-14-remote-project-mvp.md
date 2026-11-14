@@ -98,3 +98,9 @@ existing per-frame project authority is reused; no new role model is introduced.
 6. A viewer cannot write.
 7. `web` opens a file, edits it, saves it, and shows a conflict if the host file changed.
 8. The source never leaves the host except the one requested file; no bulk clone or sync is added.
+
+## Verification
+
+Status: **not yet run** against a remote host. The acceptance checklist lives in
+`docs/how-to/remote-project-host.md`. The unit and contract tests cover the Host API writer, permissions and the web
+model; the end-to-end checklist needs a registered server project and two paired browsers.
