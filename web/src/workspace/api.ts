@@ -12,3 +12,9 @@ export const writeFile = (
   ...(expectedHash ? { expectedHash } : {}),
   mustNotExist, create,
 }).done;
+
+export const gitStatus = (link: HostLink, projectId: string) =>
+  link.send("git.status", { projectId }).done;
+
+export const gitDiff = (link: HostLink, projectId: string, path?: string, staged = false) =>
+  link.send("git.diff", { projectId, ...(path ? { path } : {}), staged }).done;

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SectionProps } from "../shell/registry.ts";
 import { statFile, writeFile } from "./api.ts";
+import { Changes } from "./Changes.tsx";
 import { conflictText, dirtyOf, isTextLike, parentOf, saveAllowed } from "./model.ts";
 import "./workspace.css";
 
@@ -20,6 +21,7 @@ export function WorkspaceScreen({ ctx }: SectionProps) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const dirty = useMemo(() => dirtyOf(buffer, saved), [buffer, saved]);
+  const [mode, setMode] = useState<"files" | "changes">("files");
 
   // Switching projects must not leave the previous project's path and hash in the editor.
   useEffect(() => {
@@ -36,18 +38,22 @@ export function WorkspaceScreen({ ctx }: SectionProps) {
     return () => { live = false; };
   }, [link, projectId, dir]);
 
-  const open = async (entry: Entry) => {
+  const openPath = async (file: string) => {
     if (!projectId) return;
-    if (entry.kind === "dir") { setDir(entry.path); return; }
-    if (!isTextLike(entry.path)) { setError("That file is not text. Phase 1 opens text files only."); return; }
+    if (!isTextLike(file)) { setError("That file is not text. Phase 1 opens text files only."); return; }
     setError(null);
     try {
       const [text, stat] = await Promise.all([
-        link.send("files.read", { projectId, path: entry.path, maxBytes: 262144 }).done,
-        statFile(link, projectId, entry.path),
+        link.send("files.read", { projectId, path: file, maxBytes: 262144 }).done,
+        statFile(link, projectId, file),
       ]);
-      setPath(entry.path); setSaved(text.text); setBuffer(text.text); setHash(stat.hash);
+      setPath(file); setSaved(text.text); setBuffer(text.text); setHash(stat.hash);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
+
+  const open = async (entry: Entry) => {
+    if (entry.kind === "dir") { setDir(entry.path); return; }
+    await openPath(entry.path);
   };
 
   const save = async () => {
@@ -65,11 +71,13 @@ export function WorkspaceScreen({ ctx }: SectionProps) {
   if (!projectId) return <div className="web-page ws-empty"><p>Select a project to open its workspace.</p></div>;
 
   return (
-    <div className="ws-root">
+    <div className={`ws-root${mode === "changes" ? " ws-single" : ""}`}>
+      {mode === "changes" ? <Changes link={link} projectId={projectId} onClose={() => setMode("files")} onOpen={(file) => { setMode("files"); void openPath(file); }} /> : <>
       <aside className="ws-files" aria-label="Project files">
         <header className="ws-files-head">
           <button type="button" className="ws-up" disabled={dir === ""} onClick={() => setDir(parentOf(dir))}>Up</button>
           <code>/{dir}</code>
+          <button type="button" onClick={() => setMode("changes")}>Changes</button>
         </header>
         <ul>
           {entries.map((e) => (
@@ -95,6 +103,7 @@ export function WorkspaceScreen({ ctx }: SectionProps) {
         )}
         {path === null && error ? <p className="ws-error" role="alert">{error}</p> : null}
       </section>
+      </>}
     </div>
   );
 }

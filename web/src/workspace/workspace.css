@@ -11,3 +11,5 @@
 .ws-editor textarea { flex: 1; min-height: 0; resize: none; border: 0; padding: 14px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--tok-color-bg); color: var(--tok-color-text); outline: none; }
 .ws-error { color: var(--tok-color-danger); padding: 8px 12px; }
 .ws-hint, .ws-empty { padding: 24px; color: var(--tok-color-text-muted); }
+
+.ws-root.ws-single { grid-template-columns: minmax(0, 1fr); }

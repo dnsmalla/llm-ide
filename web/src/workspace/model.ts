@@ -11,3 +11,13 @@ export const parentOf = (path: string): string => {
 };
 export const joinPath = (dir: string, name: string): string => (dir ? `${dir}/${name}` : name);
 export const isTextLike = (path: string): boolean => !/\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|woff2?|ttf|otf|mp[34]|mov|db|sqlite|wasm)$/i.test(path);
+
+/** Porcelain `XY` -> one short label the Changes list can show. */
+export const statusLabel = (x: string, y: string): string => {
+  if (x === "?" && y === "?") return "U";
+  if (x === "R" || y === "R") return "R";
+  if (x === "C" || y === "C") return "C";
+  if (x === "A" || y === "A") return "A";
+  if (x === "D" || y === "D") return "D";
+  return "M";
+};
