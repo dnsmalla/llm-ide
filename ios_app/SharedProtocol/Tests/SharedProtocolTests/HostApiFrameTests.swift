@@ -21,7 +21,7 @@ struct HostApiFrameTests {
         #expect(HostApiFrame.parseRequest(frame("not json")).failure?.code == "invalid_payload")
         let unknownField = frame(#"{"apiVersion":1,"id":"c-1","type":"request","command":"host.ping","payload":{},"ts":1,"surprise":true}"#)
         #expect(HostApiFrame.parseRequest(unknownField).failure == HostApiRejection(replyTo: "c-1", code: "invalid_payload", message: "The frame does not match the Host API envelope (.surprise)."))
-        let unknown = frame(#"{"apiVersion":1,"id":"c-2","type":"request","command":"files.write","payload":{},"ts":1}"#)
+        let unknown = frame(#"{"apiVersion":1,"id":"c-2","type":"request","command":"files.gone","payload":{},"ts":1}"#)
         #expect(HostApiFrame.parseRequest(unknown).failure?.code == "unknown_command")
         #expect(HostApiFrame.parseRequest(unknown).failure?.replyTo == "c-2")
         let badPayload = frame(#"{"apiVersion":1,"id":"c-3","type":"request","command":"chat.send","payload":{"text":""},"ts":1}"#)

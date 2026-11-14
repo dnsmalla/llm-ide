@@ -22,7 +22,7 @@ test('refusals carry the same codes and message templates as the Mac host', () =
   assert.equal(parseRequest('not json').code, 'invalid_payload');
   const unknownField = parseRequest('{"apiVersion":1,"id":"c-1","type":"request","command":"host.ping","payload":{},"ts":1,"surprise":true}');
   assert.deepEqual(unknownField, { ok: false, replyTo: 'c-1', code: 'invalid_payload', message: 'The frame does not match the Host API envelope (.surprise).' });
-  const unknown = parseRequest('{"apiVersion":1,"id":"c-2","type":"request","command":"files.write","payload":{},"ts":1}');
+  const unknown = parseRequest('{"apiVersion":1,"id":"c-2","type":"request","command":"files.gone","payload":{},"ts":1}');
   assert.equal(unknown.code, 'unknown_command'); assert.equal(unknown.replyTo, 'c-2');
   const bad = parseRequest('{"apiVersion":1,"id":"c-3","type":"request","command":"chat.send","payload":{"text":""},"ts":1}');
   assert.deepEqual(bad, { ok: false, replyTo: 'c-3', code: 'invalid_payload', message: 'The payload does not match chat.send (.text).' });
