@@ -16,3 +16,5 @@
 .fx-run-summary { margin: 0; font-size: 13px; line-height: 1.4; }
 .fx-run-meta { margin: 0; font-size: 11px; color: var(--tok-color-text-muted); }
 .fx-empty { color: var(--tok-color-text-muted); padding: 24px; }
+.fx-run[data-status="running"] { border-left: 3px solid var(--tok-color-accent); box-shadow: 0 0 0 1px var(--tok-color-accent) inset; }
+.fx-run[data-live] .fx-run-status { color: var(--tok-color-accent); }

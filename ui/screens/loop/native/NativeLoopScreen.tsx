@@ -34,6 +34,7 @@ import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
 import { decodeWorktreeDiff, shipTarget, type WorktreeDiff } from "./ship-model.ts";
 import { stageIdForLogLine } from "./stage-follow.ts";
+import { clearLiveCard, setLiveCard, updateLiveStage } from "./live-card.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
 import { readRepoConfig } from "../../settings/repo-config";
 import { createStartGate } from "./start-gate.ts";
@@ -668,9 +669,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     // Shown on the board as Working while it runs; released after the run record is saved (the finally below), so a
     // card can never be left behind. Loaded on demand, so the Loop screen does not hard-depend on the Factory chunk.
     let releaseBoardRun: (() => void) | null = null;
+    let liveRunId: string | null = null;
     try {
       // The issue trail: a run started from an issue comments there; any other run opens one when the loop asks for it.
       const trailRunId = activeRun?.runId ?? newRunId(new Date(started), Math.random);
+      liveRunId = trailRunId;
+      setLiveCard({ loopName: target.name, runId: trailRunId, stageName: target.config.stages.find((st) => st.enabled)?.name ?? "", startedAt: new Date(started).toISOString() });
       const trailRepo = shipTarget({ repo: activeRun?.repo ?? workRoot ?? projectRoot ?? "" }, readRepoConfig());
       const trail = await trailForRun({ ...loopTrailDeps, onError: (line) => setRunLog((l) => [...l, line]) }, {
         item: start ? { ...start.item, provider: start.item.provider ?? null } : null,
@@ -705,6 +709,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         log: followLog,
         holdWhilePaused,
         onProgress(e) {
+          if (e.type === "stage-start") updateLiveStage(trailRunId, e.stage.name);
           if (!trail) return;
           if (e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration, durationSeconds: e.durationMs / 1000, costUsd: e.costUsd }));
           else if (e.type === "stage-skipped") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: true, skipped: true, runId: trailRunId, mode: "loop", iteration: e.iteration }));
@@ -786,6 +791,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       reportUiIncident("loop", e instanceof Error ? e.message : String(e));
       void notifyTask("loop", false);
     } finally {
+      if (liveRunId) clearLiveCard(liveRunId);
       releaseBoardRun?.();
       runningRef.current = false;
       runAbortRef.current = null;

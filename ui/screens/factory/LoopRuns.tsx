@@ -5,6 +5,7 @@ import { shellBus } from "../shell/bus";
 import { createHostFs } from "../explorer/fs";
 import { loadLoops } from "../loop/native/store.ts";
 import { loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
+import { readLiveCard, type LiveLoopCard } from "../loop/native/live-card.ts";
 
 export interface LoopRunsProps {
   projectRoot: string;
@@ -22,9 +23,9 @@ const when = (iso: string): string => {
   const h = Math.round(mins / 60);
   return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 };
-const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code === "aborted" ? "cancelled" : "failed";
+const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code === "aborted" ? "cancelled" : code === "running" ? "running" : "failed";
 
-interface RunCard { run: LoopRunIndexEntry; lane: string; note: string; failed: boolean }
+interface RunCard { run: LoopRunIndexEntry; lane: string; note: string; failed: boolean; live?: boolean }
 
 /** The lane a run belongs to: Done on success, else its last executed or failed stage. */
 function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, steps: readonly string[]): { lane: string; note: string } {
@@ -47,13 +48,15 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
   const fs = useMemo(() => createHostFs(), []);
   const [steps, setSteps] = useState<string[]>([]);
   const [cards, setCards] = useState<RunCard[]>([]);
+  const [live, setLive] = useState<LiveLoopCard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!active) return;
-    let live = true;
+    let alive = true;
     setError(null);
+    setLive(readLiveCard());
     void Promise.all([
       readRecentRuns(fs, 100),
       loadLoops(fs).then((r) => r.kind === "ok" ? r.store.loops.find((l) => l.name === scope) ?? null : null, () => null),
@@ -63,22 +66,42 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
       setSteps(names);
       const shown = rows.filter((r) => r.loopName === scope).slice(0, 40);
       const loaded = await Promise.all(shown.map((r) => loadRunRecord(fs, r.id, r.startedAt).catch(() => null)));
-      if (!live) return;
+      if (!alive) return;
       setCards(shown.map((run, i) => {
         const at = laneOf(run, loaded[i], names);
         return { run, lane: at.lane, note: at.note, failed: run.statusCode !== "success" };
       }));
     }, (e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
     const timer = window.setInterval(() => setTick((n) => n + 1), 5_000);
-    return () => { live = false; window.clearInterval(timer); };
+    return () => { alive = false; window.clearInterval(timer); };
   }, [fs, projectRoot, scope, tick, active]);
+
+  useEffect(() => {
+    const onLive = () => setLive(readLiveCard());
+    window.addEventListener("llmide-loop-live", onLive);
+    return () => window.removeEventListener("llmide-loop-live", onLive);
+  }, []);
+
+  const liveCard: RunCard | null = live && live.loopName === scope ? {
+    lane: live.stageName || steps[0] || "Running",
+    note: "Running now",
+    failed: false,
+    live: true,
+    run: {
+      id: live.runId, loopId: scope, loopName: live.loopName, startedAt: live.startedAt,
+      durationSeconds: Math.max(0, Math.round((Date.now() - Date.parse(live.startedAt)) / 1000)),
+      iterationsUsed: 1, statusCode: "running", statusSummary: "Running now", trigger: "manual",
+    },
+  } : null;
+
+  const allCards = liveCard ? [liveCard, ...cards.filter((c) => c.run.id !== liveCard.run.id)] : cards;
 
   const lanes = useMemo(() => {
     const out = [...steps];
-    for (const c of cards) if (!out.includes(c.lane)) out.push(c.lane);
-    if (cards.some((c) => c.lane === DONE) && !out.includes(DONE)) out.push(DONE);
+    for (const c of allCards) if (!out.includes(c.lane)) out.push(c.lane);
+    if (allCards.some((c) => c.lane === DONE) && !out.includes(DONE)) out.push(DONE);
     return out.length ? out : [DONE];
-  }, [steps, cards]);
+  }, [steps, allCards]);
 
   const openRun = async (id: string, startedAt: string) => {
     try {
@@ -102,18 +125,18 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
       {error ? <p className="fx-error" role="status">{error}</p> : null}
       <div className="fx-lanes" role="list" aria-label={`${scope} board`}>
         {lanes.map((lane) => {
-          const inLane = cards.filter((c) => c.lane === lane);
+          const inLane = allCards.filter((c) => c.lane === lane);
           return (
             <section className="fx-lane" key={lane} role="listitem" aria-label={`${lane} runs`}>
               <header className="fx-lane-head"><h3>{lane}</h3><span>{inLane.length}</span></header>
               <div className="fx-lane-cards">
                 {inLane.length === 0 ? <p className="fx-empty">No runs.</p> : null}
-                {inLane.map(({ run, note, failed }) => (
-                  <article key={run.id} className="fx-run" data-status={failed ? "failed" : "success"}>
+                {inLane.map(({ run, note, failed, live: isLive }) => (
+                  <article key={run.id} className="fx-run" data-status={isLive ? "running" : failed ? "failed" : "success"} data-live={isLive || undefined}>
                     <header className="fx-run-head"><strong>{run.loopName}</strong><span className="fx-run-status">{statusWord(run.statusCode)}</span><span className="fx-run-time">{when(run.startedAt)}</span></header>
                     <p className="fx-run-summary">{note}</p>
                     <p className="fx-run-meta">{run.durationSeconds ? `${run.durationSeconds}s` : "—"} · {run.iterationsUsed} iteration{run.iterationsUsed === 1 ? "" : "s"}</p>
-                    <div className="fx-actions"><button type="button" className="fx-btn" onClick={() => void openRun(run.id, run.startedAt)}>Open run log & plan</button></div>
+                    {isLive ? null : <div className="fx-actions"><button type="button" className="fx-btn" onClick={() => void openRun(run.id, run.startedAt)}>Open run log & plan</button></div>}
                   </article>
                 ))}
               </div>
