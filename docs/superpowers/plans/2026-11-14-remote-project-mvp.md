@@ -257,6 +257,11 @@ test('mustNotExist refuses an existing file', () => {
   assert.throws(() => writeProjectFile({ root, path: 'a.txt', text: 'two', mustNotExist: true }), /exists/);
 });
 
+test('mustNotExist cannot be combined with expectedHash', () => {
+  const root = project();
+  assert.throws(() => writeProjectFile({ root, path: 'a.txt', text: 'x', expectedHash: 'a'.repeat(64), mustNotExist: true }), /expectedHash|mustNotExist/);
+});
+
 test('refuses denied paths such as .git', () => {
   const root = project();
   assert.throws(() => writeProjectFile({ root, path: '.git/config', text: 'x', create: true }), /denied|not writable/);
@@ -296,6 +301,7 @@ function safeRel(rel) {
 
 export function writeProjectFile({ root, path: rel, text, expectedHash, mustNotExist = false, create = false }) {
   if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_TEXT || text.includes('\0')) throw Object.assign(new Error('The text is too large or not text.'), { code: 'invalid' });
+  if (mustNotExist && expectedHash) throw Object.assign(new Error('expectedHash and mustNotExist cannot be combined.'), { code: 'invalid' });
   const realRoot = fs.realpathSync(root);
   const target = path.resolve(realRoot, safeRel(rel));
   // Find the nearest existing ancestor before creating anything, so a symlinked parent cannot create folders outside.
