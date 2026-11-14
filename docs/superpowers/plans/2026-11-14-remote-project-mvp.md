@@ -170,6 +170,11 @@ test('refuses a stale hash', () => {
   assert.equal(first.size, 3);
 });
 
+test('refuses denied paths such as .git', () => {
+  const root = project();
+  assert.throws(() => writeProjectFile({ root, path: '.git/config', text: 'x', create: true }), /denied|not writable/);
+});
+
 test('refuses a path outside the root and a symlink out', () => {
   const root = project();
   assert.throws(() => writeProjectFile({ root, path: '../x', text: 'x', create: true }), /outside|valid/);
@@ -190,6 +195,7 @@ Expected: FAIL with module not found.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 
 export const MAX_TEXT = 262_144;
 export const hashText = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -216,6 +222,7 @@ export function writeProjectFile({ root, path: rel, text, expectedHash, create =
   }
   const parent = fs.realpathSync(path.dirname(target));
   if (parent !== realRoot && !parent.startsWith(realRoot + path.sep)) throw Object.assign(new Error('That path is outside the project.'), { code: 'denied' });
+  if (isDeniedPath(target)) throw Object.assign(new Error('That path is not writable.'), { code: 'denied' });
   let current = null;
   try {
     if (fs.lstatSync(target).isSymbolicLink()) throw Object.assign(new Error('That path is a symbolic link.'), { code: 'denied' });
