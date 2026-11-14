@@ -26,9 +26,19 @@
 
 **Files:**
 - Modify: `schema/host-api/v1/commands.json`
+- Modify: `schema/host-api/v1/README.md`
+- Create: `schema/host-api/v1/fixtures/commands/files.stat.request.json`
+- Create: `schema/host-api/v1/fixtures/commands/files.stat.result.json`
+- Create: `schema/host-api/v1/fixtures/commands/files.write.request.json`
+- Create: `schema/host-api/v1/fixtures/commands/files.write.result.json`
 - Regenerate: `extension/routes/host-api/commands.generated.mjs`
 - Regenerate: `web/src/host-api/types.generated.ts`
-- Test: `extension/tests/host-api-contract.test.mjs`
+- Regenerate: `ios_app/SharedProtocol/Sources/SharedProtocol/HostApiCommands.swift`
+- Regenerate: `ios_app/SharedProtocol/Sources/SharedProtocol/HostApiSchemas.swift`
+- Regenerate: `ios_app/SharedProtocol/Sources/SharedProtocol/HostApiPayloads.swift`
+- Modify: `extension/tests/host-api-contract.test.mjs` (count 34 → 36)
+- Modify: `extension/tests/host-api-ts-types.test.mjs` (count 34 → 36)
+- Modify: `scripts/conformance-host-api.mjs` (count 34 → 36)
 
 **Interfaces:**
 - Produces: commands `files.stat` and `files.write` in `commands.json` with the request/result shapes from the spec.
@@ -59,6 +69,7 @@ Add to `schema/host-api/v1/commands.json`:
 ```json
 "files.stat": {
   "capability": "read",
+  "v2Tag": null,
   "direction": "client_to_host",
   "idempotent": true,
   "request": {
@@ -83,6 +94,7 @@ Add to `schema/host-api/v1/commands.json`:
 },
 "files.write": {
   "capability": "read",
+  "v2Tag": null,
   "direction": "client_to_host",
   "idempotent": false,
   "request": {
@@ -93,7 +105,8 @@ Add to `schema/host-api/v1/commands.json`:
       "projectId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
       "path": { "type": "string", "maxLength": 4096 },
       "text": { "type": "string", "maxLength": 262144 },
-      "expectedHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+      "expectedHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "mustNotExist": { "type": "boolean" },
       "create": { "type": "boolean" }
     }
   },
@@ -109,19 +122,87 @@ Add to `schema/host-api/v1/commands.json`:
 }
 ```
 
-- [ ] **Step 4: Regenerate**
+- [ ] **Step 4: Update counts, README and fixtures**
 
-Run: `node scripts/generate-host-api.mjs` from the repository root.
+Change every command count from 34 to 36:
 
-- [ ] **Step 5: Run the contract test**
+```text
+extension/tests/host-api-contract.test.mjs
+extension/tests/host-api-ts-types.test.mjs
+scripts/conformance-host-api.mjs
+schema/host-api/v1/README.md
+```
 
-Run: `cd extension && node --test tests/host-api-contract.test.mjs`
-Expected: PASS.
+Add both rows to the README command table:
 
-- [ ] **Step 6: Commit**
+```text
+| files.stat | read | yes | — |
+| files.write | read | no | — |
+```
+
+Create the four fixtures with valid values:
+
+`schema/host-api/v1/fixtures/commands/files.stat.request.json`
+
+```json
+{ "projectId": "p1", "path": "README.md" }
+```
+
+`schema/host-api/v1/fixtures/commands/files.stat.result.json`
+
+```json
+{ "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 12, "mtimeMs": 1 }
+```
+
+`schema/host-api/v1/fixtures/commands/files.write.request.json`
+
+```json
+{ "projectId": "p1", "path": "README.md", "text": "hello\n", "expectedHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "create": false }
+```
+
+`schema/host-api/v1/fixtures/commands/files.write.result.json`
+
+```json
+{ "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 6 }
+```
+
+- [ ] **Step 5: Regenerate every output**
+
+Run from the repository root:
 
 ```bash
-git add schema/host-api/v1/commands.json extension/routes/host-api/commands.generated.mjs web/src/host-api/types.generated.ts extension/tests/host-api-contract.test.mjs
+node scripts/generate-host-api.mjs
+```
+
+It writes five files; all five must be staged: the two generated TS/MJS files and the three iOS `SharedProtocol/*.swift` files.
+
+- [ ] **Step 6: Run the contract, TS-types and conformance tests**
+
+```bash
+cd extension
+node --test tests/host-api-contract.test.mjs tests/host-api-ts-types.test.mjs
+node ../scripts/conformance-host-api.mjs
+```
+
+Expected: all pass, 13/13 contract tests, 36 commands.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add schema/host-api/v1/commands.json \
+  schema/host-api/v1/README.md \
+  schema/host-api/v1/fixtures/commands/files.stat.request.json \
+  schema/host-api/v1/fixtures/commands/files.stat.result.json \
+  schema/host-api/v1/fixtures/commands/files.write.request.json \
+  schema/host-api/v1/fixtures/commands/files.write.result.json \
+  extension/routes/host-api/commands.generated.mjs \
+  web/src/host-api/types.generated.ts \
+  ios_app/SharedProtocol/Sources/SharedProtocol/HostApiCommands.swift \
+  ios_app/SharedProtocol/Sources/SharedProtocol/HostApiSchemas.swift \
+  ios_app/SharedProtocol/Sources/SharedProtocol/HostApiPayloads.swift \
+  extension/tests/host-api-contract.test.mjs \
+  extension/tests/host-api-ts-types.test.mjs \
+  scripts/conformance-host-api.mjs
 git commit -m "feat(host-api): add files.stat and files.write commands"
 ```
 
@@ -135,7 +216,7 @@ git commit -m "feat(host-api): add files.stat and files.write commands"
 
 **Interfaces:**
 - Consumes: `scopedProjectRoot(userId, projectId, scope)` and `isDeniedPath(abs)` from `gateway.mjs`.
-- Produces: `hashText(text)`, `writeProjectFile({ root, path: rel, text, expectedHash, create }) -> { hash, size }`.
+- Produces: `hashText(text)`, `writeProjectFile({ root, path: rel, text, expectedHash, mustNotExist, create }) -> { hash, size }`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -168,6 +249,12 @@ test('refuses a stale hash', () => {
   assert.throws(() => writeProjectFile({ root, path: 'a.txt', text: 'two', expectedHash: '0'.repeat(64) }), /changed/);
   assert.equal(fs.readFileSync(path.join(root, 'a.txt'), 'utf8'), 'one');
   assert.equal(first.size, 3);
+});
+
+test('mustNotExist refuses an existing file', () => {
+  const root = project();
+  writeProjectFile({ root, path: 'a.txt', text: 'one', create: true });
+  assert.throws(() => writeProjectFile({ root, path: 'a.txt', text: 'two', mustNotExist: true }), /exists/);
 });
 
 test('refuses denied paths such as .git', () => {
@@ -207,7 +294,7 @@ function safeRel(rel) {
   return parts.join(path.sep);
 }
 
-export function writeProjectFile({ root, path: rel, text, expectedHash, create = false }) {
+export function writeProjectFile({ root, path: rel, text, expectedHash, mustNotExist = false, create = false }) {
   if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_TEXT || text.includes('\0')) throw Object.assign(new Error('The text is too large or not text.'), { code: 'invalid' });
   const realRoot = fs.realpathSync(root);
   const target = path.resolve(realRoot, safeRel(rel));
@@ -228,7 +315,7 @@ export function writeProjectFile({ root, path: rel, text, expectedHash, create =
     if (fs.lstatSync(target).isSymbolicLink()) throw Object.assign(new Error('That path is a symbolic link.'), { code: 'denied' });
     current = hashText(fs.readFileSync(target, 'utf8'));
   } catch (e) { if (e.code === 'denied') throw e; /* missing */ }
-  if (expectedHash === null) {
+  if (mustNotExist) {
     if (current !== null) throw Object.assign(new Error('The file already exists.'), { code: 'conflict' });
   } else if (expectedHash && current !== expectedHash) {
     throw Object.assign(new Error('The file changed since you opened it.'), { code: 'conflict' });
@@ -333,7 +420,7 @@ case 'files.write': {
   if (wait != null) { rateRefused(s, entry, id, wait); return; }
   try {
     const root = scopedProjectRoot(userId, p.projectId);
-    const out = writeProjectFile({ root, path: p.path, text: p.text, expectedHash: p.expectedHash, create: p.create === true });
+    const out = writeProjectFile({ root, path: p.path, text: p.text, expectedHash: p.expectedHash, mustNotExist: p.mustNotExist === true, create: p.create === true });
     audit('file_write', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `${p.projectId}:${p.path}:${out.size}` });
     return respond(s, id, command, out);
   } catch (e) {
@@ -371,7 +458,7 @@ git commit -m "feat(host-api): handle files.stat and files.write"
 - Test: `web/src/workspace/model.test.mjs`
 
 **Interfaces:**
-- Produces: `statFile(link, projectId, path)`, `writeFile(link, projectId, path, text, expectedHash, create)`, `dirtyOf(buffer, saved)`, `conflictText(error)`.
+- Produces: `statFile(link, projectId, path)`, `writeFile(link, projectId, path, text, expectedHash, mustNotExist, create)`, `dirtyOf(buffer, saved)`, `conflictText(error)`.
 
 - [ ] **Step 1: Write the failing model tests**
 
@@ -411,8 +498,8 @@ import type { HostLink } from "../host-api/connection.ts";
 export const statFile = (link: HostLink, projectId: string, path: string) =>
   link.send("files.stat", { projectId, path }).done;
 
-export const writeFile = (link: HostLink, projectId: string, path: string, text: string, expectedHash: string | null, create: boolean) =>
-  link.send("files.write", { projectId, path, text, expectedHash, create }).done;
+export const writeFile = (link: HostLink, projectId: string, path: string, text: string, expectedHash: string | null, mustNotExist: boolean, create: boolean) =>
+  link.send("files.write", { projectId, path, text, expectedHash: expectedHash ?? undefined, mustNotExist, create }).done;
 ```
 
 - [ ] **Step 4: Run the model test**

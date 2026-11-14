@@ -58,7 +58,7 @@ files.stat
   -> { hash, size, mtimeMs } | not_found
 
 files.write
-  { projectId, path, text, expectedHash?, create? }
+  { projectId, path, text, expectedHash?, mustNotExist?, create? }
   -> { hash, size }
 ```
 
@@ -66,9 +66,8 @@ Rules:
 
 - `text` is UTF-8, at most 262,144 bytes.
 - `path` is project-root-relative, POSIX separators, no `..`, no absolute path.
-- `expectedHash` is a lowercase SHA-256 hex string. When supplied:
-  - current hash must match, else `conflict`
-  - `expectedHash: null` means "the file must not exist yet"
+- `expectedHash` is a lowercase SHA-256 hex string. When supplied, the current hash must match, else `conflict`.
+- `mustNotExist: true` means the file must not exist yet; if it exists the write is `conflict`. It cannot be combined with `expectedHash`.
 - `create: true` allows creating missing parent directories; without it a missing parent is `not_found`.
 - a NUL byte in `text` is `invalid_payload`.
 - every write is atomic: write a sibling temp file, fsync, rename.
