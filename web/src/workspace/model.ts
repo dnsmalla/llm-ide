@@ -21,3 +21,6 @@ export const statusLabel = (x: string, y: string): string => {
   if (x === "D" || y === "D") return "D";
   return "M";
 };
+
+export const commitReady = (message: string, paths: readonly string[], busy: boolean): boolean =>
+  !busy && message.trim().length > 0 && paths.length > 0;

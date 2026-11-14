@@ -18,3 +18,6 @@ export const gitStatus = (link: HostLink, projectId: string) =>
 
 export const gitDiff = (link: HostLink, projectId: string, path?: string, staged = false) =>
   link.send("git.diff", { projectId, ...(path ? { path } : {}), staged }).done;
+
+export const commitFiles = (link: HostLink, projectId: string, message: string, paths: string[]) =>
+  link.send("git.commit", { projectId, message, paths }).done;
