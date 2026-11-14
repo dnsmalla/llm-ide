@@ -76,7 +76,23 @@ intact.
 When the branch is ahead, **Push ↑N** pushes the current branch to its already-configured upstream. There is no force,
 no remote/ref argument and no terminal prompt.
 
-## 6. Acceptance checklist
+## 6. Terminal (allowlisted)
+
+**Workspace → Terminal** runs one command at a time from a fixed allowlist:
+
+```text
+git status / diff / log / show / branch / rev-parse / ls-files
+ls, pwd, rg
+pytest, python3 -m pytest
+npm test
+cargo test, go test, swift test
+```
+
+It is not a shell: argv is executed without a shell, shell metacharacters are refused, paths cannot contain `..` or
+start with `/`, and `.git` / `.ssh` / secret paths are refused. The host returns stdout, stderr, exit code, truncation and
+timeout. Arbitrary shell commands are a later phase.
+
+## 7. Acceptance checklist
 
 Run each on the server and record the result:
 
@@ -99,12 +115,16 @@ Run each on the server and record the result:
 - [ ] a failing hook → commit refused, changes kept
 - [ ] a committed branch shows Push ↑1 and pushes to its upstream
 - [ ] no upstream → push fails with a clear message
+- [ ] `git status` in Terminal exits 0
+- [ ] `sh -c id` is refused
+- [ ] `ls ../` is refused
 
 ## Limits
 
 - Text files only; no binary, rename, delete or mkdir UI.
 - Git commit and push are available; both use the host repository's configured identity and upstream.
-- No terminal or Loop on the host yet.
+- Terminal is allowlisted; no arbitrary shell yet.
+- No Loop on the host yet.
 - Desktop and iPhone are later phases; the web client is the first remote client.
 - The model provider still receives the code sent to it; for licensed code use a self-hosted model or a no-training
   enterprise agreement.
