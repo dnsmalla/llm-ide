@@ -157,11 +157,15 @@ function starterStage(s: SpecStage, testCommand: string | null) {
 }
 
 function starterLoop(spec: (typeof DEFAULT_LOOP_SPECS)[number], testCommand: string | null): LoopDefinition {
-  const planOnly = spec.defaultKey === REFACTOR_KEY && !testCommand;
+  const isRefactor = spec.defaultKey === REFACTOR_KEY;
+  // Always show the whole process. A new repository without a test command keeps every stage, with the test-dependent
+  // ones disabled, so the editor does not silently shrink from 14 stages to 7.
   const stages = spec.config.stages.flatMap((s) => {
-    if (s.command === DETECTED_TEST && !testCommand) return [];
-    if (planOnly && s.defaultKey && REFACTOR_NEEDS_TESTS.has(s.defaultKey)) return [];
-    return [starterStage(s, testCommand)];
+    const stage = starterStage(s, testCommand);
+    const needsTest = s.command === DETECTED_TEST || (isRefactor && s.defaultKey !== null && REFACTOR_NEEDS_TESTS.has(s.defaultKey));
+    if (!needsTest || testCommand) return [stage];
+    // Refactoring keeps the whole 14-stage process visible; other loops drop their one test stage as before.
+    return isRefactor ? [{ ...stage, enabled: false, disabledByDetection: true }] : [];
   }).map((s, i) => ({ ...s, order: i }));
   const config = structuredClone(spec.config);
   // The Refactoring loop always runs in an isolated worktree: a batch that fails stays there, and discarding the
@@ -180,22 +184,34 @@ function starterLoop(spec: (typeof DEFAULT_LOOP_SPECS)[number], testCommand: str
  * also switched to an isolated worktree. Null when nothing is missing. The Factory has its own template and is skipped.
  */
 export function repairDefaultLoop(loop: LoopDefinition, testCommand: string | null): LoopDefinition | null {
-  if (!loop.defaultKey || loop.defaultKey === FACTORY_DEFAULT_KEY || !testCommand) return null;
+  if (!loop.defaultKey || loop.defaultKey === FACTORY_DEFAULT_KEY) return null;
   const spec = DEFAULT_LOOP_SPECS.find((sp) => sp.defaultKey === loop.defaultKey);
   if (!spec) return null;
   const isRefactor = loop.defaultKey === REFACTOR_KEY;
   const have = new Set(loop.config.stages.map((s) => s.defaultKey).filter(Boolean));
-  const missing = spec.config.stages.filter((s) => s.defaultKey && !have.has(s.defaultKey)
-    && (s.command === DETECTED_TEST || (isRefactor && REFACTOR_NEEDS_TESTS.has(s.defaultKey))));
-  if (missing.length === 0) return null;
+  const needsTest = (s: (typeof spec.config.stages)[number]) => s.defaultKey !== null
+    && (s.command === DETECTED_TEST || (isRefactor && REFACTOR_NEEDS_TESTS.has(s.defaultKey)));
+  const missing = spec.config.stages.filter((s) => s.defaultKey && !have.has(s.defaultKey) && needsTest(s));
+  // A starter loop now keeps those stages disabled instead of removing them; once a command exists they are enabled.
+  const byKey = new Map(spec.config.stages.map((s) => [s.defaultKey, s]));
+  const toEnable = new Set(testCommand ? loop.config.stages.filter((s) => s.disabledByDetection && s.defaultKey && needsTest(byKey.get(s.defaultKey) ?? { defaultKey: null } as never)).map((s) => s.defaultKey) : []);
+  if (missing.length === 0 && toEnable.size === 0) return null;
+  // Other loops still need a test command; Refactoring can restore its disabled tail immediately.
+  if (!testCommand && !isRefactor) return null;
   const order = spec.config.stages.map((s) => s.defaultKey);
-  const stages = [...loop.config.stages].sort((a, b) => a.order - b.order);
+  let stages = [...loop.config.stages].sort((a, b) => a.order - b.order);
+  if (toEnable.size > 0) stages = stages.map((s) => {
+    if (!s.defaultKey || !toEnable.has(s.defaultKey)) return s;
+    const specStage = byKey.get(s.defaultKey);
+    return { ...s, enabled: true, disabledByDetection: null, ...(specStage?.command === DETECTED_TEST ? { command: testCommand } : {}) };
+  });
   for (const m of missing) {
     // After the nearest earlier template stage this loop has; first when it has none.
     const at = order.indexOf(m.defaultKey);
     let after = -1;
     for (let i = at - 1; i >= 0 && after === -1; i--) after = stages.findIndex((s) => s.defaultKey === order[i]);
-    stages.splice(after + 1, 0, starterStage(m, testCommand));
+    const stage = starterStage(m, testCommand);
+    stages.splice(after + 1, 0, testCommand ? stage : { ...stage, enabled: false, disabledByDetection: true });
   }
   const isolation = isRefactor ? { alwaysUseWorktree: true } : {};
   return { ...loop, config: { ...loop.config, ...isolation, stages: stages.map((s, i) => ({ ...s, order: i })) } };

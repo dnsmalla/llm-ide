@@ -46,13 +46,15 @@ test("batch stages are refused outside a worktree, or with no test stage after t
   assert.match(s.batchRollbackReason(custom), /refactor batches/);
 });
 
-test("without a test command the refactor loop only plans: no test, apply, conform or graph-check stage", () => {
+test("without a test command the refactor loop keeps all 14 stages, with the test-dependent ones disabled", () => {
   const refactor = t.initialProjectStore(null).loops.find((l) => l.defaultKey === "refactor");
   const keys = refactor.config.stages.map((st) => st.defaultKey);
   for (const k of ["refactor-test-write", "refactor-test-baseline", "refactor-apply", "refactor-conform", "refactor-test", "refactor-ledger", "refactor-graph-check"]) {
-    assert.ok(!keys.includes(k), `${k} is omitted`);
+    assert.ok(keys.includes(k), `${k} is shown`);
+    assert.equal(refactor.config.stages.find((st) => st.defaultKey === k).enabled, false, `${k} is disabled`);
   }
   assert.ok(keys.includes("refactor-plan"));
+  assert.equal(keys.length, 14, "the starter shows the whole process");
   assert.equal(s.batchRollbackReason(refactor), null);
   assert.deepEqual(refactor.config.stages.map((st) => st.order), keys.map((_, i) => i));
 });
@@ -76,7 +78,10 @@ test("a refactor loop saved without tests gets its test stages back once the pro
   assert.equal(s.batchRollbackReason(fixed), null);
   const again = t.ensureDefaultLoops(r.store, "pytest");
   assert.ok(!again.upgraded.includes("Refactoring"), "repairing twice changes nothing");
-  assert.equal(t.ensureDefaultLoops(store, null).store.loops.find((l) => l.defaultKey === "refactor"), broken, "no command, no repair");
+  const noCommand = t.ensureDefaultLoops(store, null).store.loops.find((l) => l.defaultKey === "refactor");
+  assert.equal(noCommand.config.stages.length, reference.config.stages.length, "the 14-stage process is restored even before tests exist");
+  assert.equal(noCommand.config.stages.find((st) => st.defaultKey === "refactor-test").enabled, false, "the test-dependent tail stays disabled");
+  assert.equal(noCommand.config.alwaysUseWorktree, true, "Refactoring is still isolated");
 });
 
 test("scheduled runs are journalled as autoTask and manual runs as manual", () => {
