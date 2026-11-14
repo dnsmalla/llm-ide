@@ -48,3 +48,15 @@ test("an existing archive folder still receives run.md", async () => {
   assert.equal(dir, archiveDir(loop, at));
   assert.ok(files.has(`${dir}/run.md`));
 });
+
+test("a nested Test input path copies the plan from the nested llm-doc/loop folder", async () => {
+  const at = new Date("2026-11-02T01:30:00Z");
+  const files = new Map();
+  const fs = {
+    async create() {},
+    async write(p, text) { files.set(p, text); },
+    async read(p) { return p.endsWith("code/llm-ide_test/llm-doc/loop/test/TEST-MAP.md") ? { status: "ok", text: "# Map\n" } : { status: "missing", text: null }; },
+  };
+  const dir = await writeRunArchive(fs, { ...loop, defaultKey: "test", inputPath: "code/llm-ide_test" }, outcome, ["log"], at, "", "code/llm-ide_test");
+  assert.equal(files.get(`${dir}/TEST-MAP.md`), "# Map\n");
+});

@@ -65,7 +65,7 @@ function withTimings(outcome: LoopRunOutcome): string {
 }
 
 /** Persist every run: run.md (summary, per-stage time/cost, full log) plus the plan file(s) it wrote. Never throws. */
-export async function writeRunArchive(fs: RunArchiveFs, loop: LoopDefinition, outcome: LoopRunOutcome, log: readonly string[], at = new Date(), runPrefix = ""): Promise<string | null> {
+export async function writeRunArchive(fs: RunArchiveFs, loop: LoopDefinition, outcome: LoopRunOutcome, log: readonly string[], at = new Date(), runPrefix = "", inputPath = ""): Promise<string | null> {
   try {
     const dir = archiveDir(loop, at);
     let part = "";
@@ -87,10 +87,14 @@ export async function writeRunArchive(fs: RunArchiveFs, loop: LoopDefinition, ou
     const copied: string[] = [];
     for (const rel of PLAN_CANDIDATES) {
       try {
-        const r = await fs.read(runPrefix ? `${runPrefix}/${rel}` : rel, 4_000_000);
-        if (r.status !== "ok" || typeof r.text !== "string") continue;
+        let text: string | null = null;
+        for (const candidate of [rel, ...(inputPath ? [`${inputPath}/${rel}`] : [])]) {
+          const r = await fs.read(runPrefix ? `${runPrefix}/${candidate}` : candidate, 4_000_000);
+          if (r.status === "ok" && typeof r.text === "string") { text = r.text; break; }
+        }
+        if (text === null) continue;
         const name = rel.startsWith(".factory/") ? rel.replace(".factory/", "") : rel.split("/").pop()!;
-        await fs.write(`${dir}/${name}`, r.text, { expected_hash: null });
+        await fs.write(`${dir}/${name}`, text, { expected_hash: null });
         copied.push(name);
       } catch { /* not produced by this loop */ }
     }

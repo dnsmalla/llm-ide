@@ -746,7 +746,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       }
       // Every run is archived under llm-doc/loop/<yyyy>/<MM>/, with its plan and full log.
       try {
-        const dir = await writeRunArchive(fs, target, outcome, archiveLog, new Date(), activeRun ? repoPrefixFor(projectRoot ?? "", activeRun.worktree) : "");
+        const dir = await writeRunArchive(fs, target, outcome, archiveLog, new Date(), activeRun ? repoPrefixFor(projectRoot ?? "", activeRun.worktree) : "", target.defaultKey === "test" ? target.inputPath ?? "" : "");
         if (dir) {
           summaryPath = `${dir}/run.md`;
           setRunLog((l) => [...l, `run archive: ${dir}/run.md`]);
