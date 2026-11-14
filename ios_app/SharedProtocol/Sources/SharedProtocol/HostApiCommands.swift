@@ -53,6 +53,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
     case tasksRun = "tasks.run"
     case tasksStatus = "tasks.status"
     case terminalExec = "terminal.exec"
+    case terminalShell = "terminal.shell"
     case toolApprovalsAnswer = "toolApprovals.answer"
     case usageGet = "usage.get"
 
@@ -97,6 +98,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .tasksRun: return "compose"
         case .tasksStatus: return "compose"
         case .terminalExec: return "read"
+        case .terminalShell: return "read"
         case .toolApprovalsAnswer: return "tool_approvals"
         case .usageGet: return "read"
         }
@@ -143,6 +145,7 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .tasksRun: return false
         case .tasksStatus: return true
         case .terminalExec: return false
+        case .terminalShell: return false
         case .toolApprovalsAnswer: return false
         case .usageGet: return true
         }
@@ -192,6 +195,7 @@ public enum HostApi {
         "tasks.run": .tasksRun,
         "tasks.status": .tasksStatus,
         "terminal.exec": .terminalExec,
+        "terminal.shell": .terminalShell,
         "toolApprovals.answer": .toolApprovalsAnswer,
         "usage.get": .usageGet
     ]

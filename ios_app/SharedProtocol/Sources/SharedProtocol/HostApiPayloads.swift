@@ -981,6 +981,36 @@ public struct HostApiTerminalExecResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiTerminalShellRequest: Codable, Equatable, Sendable {
+    public var command: String
+    public var confirm: Bool
+    public var projectId: String
+    public var timeoutMs: Int?
+
+    public init(command: String, confirm: Bool, projectId: String, timeoutMs: Int? = nil) {
+        self.command = command
+        self.confirm = confirm
+        self.projectId = projectId
+        self.timeoutMs = timeoutMs
+    }
+}
+
+public struct HostApiTerminalShellResult: Codable, Equatable, Sendable {
+    public var exitCode: Int
+    public var stderr: String
+    public var stdout: String
+    public var timedOut: Bool
+    public var truncated: Bool
+
+    public init(exitCode: Int, stderr: String, stdout: String, timedOut: Bool, truncated: Bool) {
+        self.exitCode = exitCode
+        self.stderr = stderr
+        self.stdout = stdout
+        self.timedOut = timedOut
+        self.truncated = truncated
+    }
+}
+
 public struct HostApiToolApprovalsAnswerRequest: Codable, Equatable, Sendable {
     public var commandId: String
     public var decision: String

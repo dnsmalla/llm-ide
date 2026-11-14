@@ -29,6 +29,8 @@ import { gitDiff, gitStatus } from './git-read.mjs';
 import { gitCommit } from './git-commit.mjs';
 import { gitPush } from './git-push.mjs';
 import { terminalExec } from './terminal-exec.mjs';
+import { shellExec } from './shell-exec.mjs';
+import { createHash } from 'node:crypto';
 import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -97,6 +99,7 @@ export const COMMAND_CLASS = Object.freeze({
   'git.commit': 'self.write',
   'git.push': 'self.write',
   'terminal.exec': 'self.write',
+  'terminal.shell': 'self.write',
   'tasks.list': 'self.read',
   'tasks.run': 'self.write',
   'tasks.status': 'self.read',
@@ -887,6 +890,20 @@ export function createGateway(overrides) {
           const fixed = { ...out, exitCode: out.exitCode ?? -1 };
           audit('terminal_exec', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `${p.projectId}:${String(p.argv?.[0] ?? '').slice(0, 40)}:${fixed.exitCode}` });
           return respond(s, id, command, fixed);
+        } catch (e) {
+          return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'internal', String(e.message || e));
+        }
+      }
+      case 'terminal.shell': {
+        if (process.env.LLMIDE_ALLOW_REMOTE_SHELL !== '1') return fail(s, id, 'denied', 'Remote shell is disabled on this host (set LLMIDE_ALLOW_REMOTE_SHELL=1).');
+        if (p.confirm !== true) return fail(s, id, 'invalid_payload', 'The command was not confirmed.');
+        const wait = rate.write(entry.state.deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        try {
+          const out = shellExec(scopedProjectRoot(userId, p.projectId), { command: p.command, timeoutMs: p.timeoutMs });
+          const hash = createHash('sha256').update(String(p.command)).digest('hex').slice(0, 16);
+          audit('terminal_shell', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `${p.projectId}:${hash}:${out.exitCode}` });
+          return respond(s, id, command, out);
         } catch (e) {
           return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'internal', String(e.message || e));
         }

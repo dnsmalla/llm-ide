@@ -31,6 +31,7 @@ export const PROJECT_FRAME_CLASS = Object.freeze({
   'git.commit': 'self.write',
   'git.push': 'self.write',
   'terminal.exec': 'self.write',
+  'terminal.shell': 'self.write',
 });
 
 /** The `projects.list` result: id, name, the caller's effective role/mode/cap and permissions. */

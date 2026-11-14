@@ -2322,6 +2322,70 @@
           }
         }
       }
+    },
+    "terminal.shell": {
+      "capability": "read",
+      "v2Tag": null,
+      "direction": "client_to_host",
+      "idempotent": false,
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectId",
+          "command",
+          "confirm"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 30000
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exitCode",
+          "stdout",
+          "stderr",
+          "truncated",
+          "timedOut"
+        ],
+        "properties": {
+          "exitCode": {
+            "type": "integer"
+          },
+          "stdout": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "stderr": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "timedOut": {
+            "type": "boolean"
+          }
+        }
+      }
     }
   }
 }

@@ -47,6 +47,7 @@ export const HOST_API_COMMANDS = {
   "tasks.run": { capability: "compose", idempotent: false },
   "tasks.status": { capability: "compose", idempotent: true },
   "terminal.exec": { capability: "read", idempotent: false },
+  "terminal.shell": { capability: "read", idempotent: false },
   "toolApprovals.answer": { capability: "tool_approvals", idempotent: false },
   "usage.get": { capability: "read", idempotent: true },
 } as const;
@@ -91,6 +92,7 @@ export interface HostApiCommandMap {
   "tasks.run": { request: { args?: Record<string, string>; projectId?: string; taskId: string }; result: { runId: string } };
   "tasks.status": { request: { runId: string }; result: { error?: string; output?: string; status: "running" | "completed" | "failed" | "cancelled"; summary?: string } };
   "terminal.exec": { request: { argv: Array<string>; projectId: string; timeoutMs?: number }; result: { exitCode: number; stderr: string; stdout: string; timedOut: boolean; truncated: boolean } };
+  "terminal.shell": { request: { command: string; confirm: boolean; projectId: string; timeoutMs?: number }; result: { exitCode: number; stderr: string; stdout: string; timedOut: boolean; truncated: boolean } };
   "toolApprovals.answer": { request: { commandId: string; decision: "allow_once" | "deny"; projectId?: string; requestId: string }; result: { accepted: boolean } };
   "usage.get": { request: Record<string, never>; result: { providers: Array<{ activeModel?: string; models: Array<{ label?: string; limit: number; model: string; pct?: number; resetAt: number; state: "ok" | "warning" | "exhausted"; unit: "runs" | "tokens"; used: number; window: "daily" | "monthly" }>; provider: string; status: "ok" | "degraded" | "paused" | "unconfigured" }> } };
 }
