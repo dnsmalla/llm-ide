@@ -21,3 +21,6 @@ export const gitDiff = (link: HostLink, projectId: string, path?: string, staged
 
 export const commitFiles = (link: HostLink, projectId: string, message: string, paths: string[]) =>
   link.send("git.commit", { projectId, message, paths }).done;
+
+export const pushBranch = (link: HostLink, projectId: string) =>
+  link.send("git.push", { projectId }).done;

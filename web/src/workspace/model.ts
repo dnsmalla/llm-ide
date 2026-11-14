@@ -24,3 +24,5 @@ export const statusLabel = (x: string, y: string): string => {
 
 export const commitReady = (message: string, paths: readonly string[], busy: boolean): boolean =>
   !busy && message.trim().length > 0 && paths.length > 0;
+
+export const pushReady = (ahead: number, busy: boolean): boolean => ahead > 0 && !busy;

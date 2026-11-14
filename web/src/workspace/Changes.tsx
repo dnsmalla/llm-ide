@@ -1,8 +1,8 @@
 // Read-only git changes for the selected host project.
 import { useCallback, useEffect, useState } from "react";
 import type { HostLink } from "../host-api/connection.ts";
-import { commitFiles, gitDiff, gitStatus } from "./api.ts";
-import { commitReady, statusLabel } from "./model.ts";
+import { commitFiles, gitDiff, gitStatus, pushBranch } from "./api.ts";
+import { commitReady, pushReady, statusLabel } from "./model.ts";
 import "./changes.css";
 
 interface Entry { path: string; x: string; y: string; status: string; from?: string }
@@ -19,6 +19,8 @@ export function Changes({ link, projectId, onOpen, onClose }: { link: HostLink; 
   const [message, setMessage] = useState("");
   const [committing, setCommitting] = useState(false);
   const [committed, setCommitted] = useState<string | null>(null);
+  const [pushing, setPushing] = useState(false);
+  const [pushed, setPushed] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -47,6 +49,16 @@ export function Changes({ link, projectId, onOpen, onClose }: { link: HostLink; 
     if (next.has(path)) next.delete(path); else next.add(path);
     return next;
   });
+  const push = async () => {
+    if (!status || !pushReady(status.ahead, pushing)) return;
+    setPushing(true); setError(null); setPushed(null);
+    try {
+      const out = await pushBranch(link, projectId);
+      setPushed(out.output || "Pushed.");
+      setTick((n) => n + 1);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setPushing(false); }
+  };
   const commit = async () => {
     if (!commitReady(message, [...checked], committing)) return;
     setCommitting(true); setError(null); setCommitted(null);
@@ -67,7 +79,9 @@ export function Changes({ link, projectId, onOpen, onClose }: { link: HostLink; 
         {status.ahead > 0 ? <span>↑{status.ahead}</span> : null}
         {status.behind > 0 ? <span>↓{status.behind}</span> : null}
         <button type="button" onClick={onClose}>Files</button>
+        {pushReady(status.ahead, pushing) ? <button type="button" onClick={() => void push()}>{pushing ? "Pushing…" : `Push ↑${status.ahead}`}</button> : null}
         <button type="button" onClick={refresh}>Refresh</button>
+        {pushed ? <span className="chg-done" title={pushed}>pushed</span> : null}
       </header>
       {status.clean ? <p className="ws-hint">No changes.</p> : (
         <>
