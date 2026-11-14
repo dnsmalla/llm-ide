@@ -1,0 +1,13 @@
+.ws-root { display: grid; grid-template-columns: 260px minmax(0, 1fr); height: 100%; min-height: 0; }
+.ws-files { border-right: 1px solid var(--tok-color-border); overflow: auto; }
+.ws-files-head { display: flex; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid var(--tok-color-border); }
+.ws-files-head code { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-files ul { list-style: none; margin: 0; padding: 4px; }
+.ws-files li button { width: 100%; text-align: left; background: none; border: 0; color: var(--tok-color-text); padding: 6px 8px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px; }
+.ws-files li button:hover, .ws-files li button.ws-on { background: var(--tok-color-surface2); }
+.ws-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ws-editor-head { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--tok-color-border); font-size: 12px; }
+.ws-editor-head code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-editor textarea { flex: 1; min-height: 0; resize: none; border: 0; padding: 14px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--tok-color-bg); color: var(--tok-color-text); outline: none; }
+.ws-error { color: var(--tok-color-danger); padding: 8px 12px; }
+.ws-hint, .ws-empty { padding: 24px; color: var(--tok-color-text-muted); }

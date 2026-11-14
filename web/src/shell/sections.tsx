@@ -7,6 +7,7 @@ import { WebChat } from "../screens/WebChat.tsx";
 import { ExecuteSection, OtherTurnHint } from "../screens/ExecuteScreen.tsx";
 import { TasksSection } from "../screens/TasksSection.tsx";
 import { LoopSection } from "../screens/LoopSection.tsx";
+import { WorkspaceScreen } from "../workspace/Workspace.tsx";
 import { registerSection, type SectionProps, type ShellContext } from "./registry.ts";
 
 function AskSection({ ctx }: SectionProps) {
@@ -50,6 +51,7 @@ export function ComingNext({ icon, title, children, ctx }: { icon: Parameters<ty
 
 registerSection({ id: "ask", label: "Ask", icon: "message-square", requires: ["chat"], order: 10, keepAlive: true, layout: "fill", component: AskSection });
 registerSection({ id: "execute", label: "Execute", icon: "terminal", requires: ["chat", "compose"], order: 20, keepAlive: true, layout: "fill", component: ExecuteSection });
+registerSection({ id: "workspace", label: "Workspace", icon: "copy", requires: ["read"], order: 25, layout: "fill", component: WorkspaceScreen });
 registerSection({ id: "tasks", label: "Auto Tasks", shortLabel: "Tasks", icon: "list-checks", requires: ["read"], order: 30, component: TasksSection });
 registerSection({ id: "loop", label: "Loop", icon: "repeat", requires: ["read"], order: 40, component: LoopSection });
 registerSection({ id: "history", label: "History", icon: "rotate-ccw-clock", requires: ["read"], order: 50, component: HistorySection });
