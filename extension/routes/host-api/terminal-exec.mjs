@@ -8,7 +8,7 @@ export const DEFAULT_TIMEOUT = 30_000;
 
 const SAFE = /^[A-Za-z0-9_@%+=:,./-]{1,500}$/;
 const DENY_ARG = /(^|[\\/])(\.git|\.ssh|\.gnupg|\.aws|\.kube|\.docker)([\\/]|$)/i;
-const BAD_ARG = /^(?:-c$|--exec-path|--git-dir|--work-tree|--upload-pack|--receive-pack|--output|--ext-diff|--no-index|-o)$/;
+const BAD_ARG = /^(?:-c$|--exec-path(?:=.*)?|--git-dir(?:=.*)?|--work-tree(?:=.*)?|--upload-pack(?:=.*)?|--receive-pack(?:=.*)?|--output(?:=.*)?|--ext-diff(?:=.*)?|--no-index|-o(?:=.*)?)$/;
 const GIT_SUB = new Set(['status', 'diff', 'log', 'show', 'branch', 'rev-parse', 'ls-files']);
 const NPM_SUB = new Set(['test']);
 const PYTEST_FLAGS = new Set(['-q', '--quiet']);
