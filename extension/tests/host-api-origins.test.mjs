@@ -26,3 +26,9 @@ test('a non-string Origin is refused', () => {
   assert.equal(originRefused({ origin: ['http://localhost:5173'] }, ['http://localhost:5173']), true);
   assert.equal(originRefused({ origin: 5 }, ['http://localhost:5173']), true);
 });
+
+test('the packaged desktop webview origin is accepted without weakening browser origins', async () => {
+  const { originRefused } = await import('../core/host-api-origins.mjs');
+  for (const o of ['tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost']) assert.equal(originRefused({ origin: o }, []), false, o);
+  for (const o of ['https://evil.example', 'tauri://evil', 'http://tauri.localhost.evil.example']) assert.equal(originRefused({ origin: o }, []), true, o);
+});

@@ -29,11 +29,17 @@ export function parseOriginAllowlist(raw, log = () => {}) {
   return Object.freeze(out);
 }
 
-/** No Origin (iOS, CLI) passes; a listed one passes; anything else, including a non-string or a comma-joined
- *  duplicate header (never equal to one entry), is refused. */
+/** The packaged desktop webview is a native client, not a browser page. These three origins are the app's own origin
+ *  on macOS/Linux and Windows; a browser cannot forge them, and the pairing/token check still runs. */
+const NATIVE = new Set(['tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost']);
+
+/** No Origin (iOS, CLI) passes; a listed or native-webview one passes; anything else, including a non-string or a
+ *  comma-joined duplicate header (never equal to one entry), is refused. */
 export function originRefused(headers, allowlist) {
   const origin = headers?.origin;
   if (origin === undefined) return false;
   if (typeof origin !== 'string') return true;
-  return !allowlist.includes(origin.toLowerCase());
+  const o = origin.toLowerCase();
+  if (NATIVE.has(o)) return false;
+  return !allowlist.includes(o);
 }
