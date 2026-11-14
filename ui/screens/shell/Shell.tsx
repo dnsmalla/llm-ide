@@ -16,6 +16,7 @@ import { dismissCrashNotice, loadCrashNotice, type CrashNotice } from "./crash-r
 import { StatusBar } from "./StatusBar";
 import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
 import { chatApprovalStore, sectionForSurface } from "./chat-approvals";
+import { clearLiveCard } from "../loop/native/live-card.ts";
 import { ChatDockSlot } from "./chat-dock";
 import { menuAction } from "./menu-model";
 import { useSyncExternalStore } from "react";
@@ -346,6 +347,9 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     })).then((un) => { if (gone) un(); else off = un; }).catch(() => undefined);
     return () => { gone = true; off?.(); };
   }, []);
+
+  // A process restart cannot have a running loop: any card left by a quit mid-run is stale.
+  useEffect(() => { clearLiveCard(); }, []);
 
   const inert = isInert(gate);
   const overlay = hasOverlayTitlebar(platform, hostAvailable);
