@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SectionProps } from "../shell/registry.ts";
 import { statFile, writeFile } from "./api.ts";
 import { Changes } from "./Changes.tsx";
+import { Terminal } from "./Terminal.tsx";
 import { conflictText, dirtyOf, isTextLike, parentOf, saveAllowed } from "./model.ts";
 import "./workspace.css";
 
@@ -21,7 +22,7 @@ export function WorkspaceScreen({ ctx }: SectionProps) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const dirty = useMemo(() => dirtyOf(buffer, saved), [buffer, saved]);
-  const [mode, setMode] = useState<"files" | "changes">("files");
+  const [mode, setMode] = useState<"files" | "changes" | "terminal">("files");
 
   // Switching projects must not leave the previous project's path and hash in the editor.
   useEffect(() => {
@@ -71,13 +72,14 @@ export function WorkspaceScreen({ ctx }: SectionProps) {
   if (!projectId) return <div className="web-page ws-empty"><p>Select a project to open its workspace.</p></div>;
 
   return (
-    <div className={`ws-root${mode === "changes" ? " ws-single" : ""}`}>
-      {mode === "changes" ? <Changes link={link} projectId={projectId} onClose={() => setMode("files")} onOpen={(file) => { setMode("files"); void openPath(file); }} /> : <>
+    <div className={`ws-root${mode !== "files" ? " ws-single" : ""}`}>
+      {mode === "changes" ? <Changes link={link} projectId={projectId} onClose={() => setMode("files")} onOpen={(file) => { setMode("files"); void openPath(file); }} /> : mode === "terminal" ? <Terminal link={link} projectId={projectId} onClose={() => setMode("files")} /> : <>
       <aside className="ws-files" aria-label="Project files">
         <header className="ws-files-head">
           <button type="button" className="ws-up" disabled={dir === ""} onClick={() => setDir(parentOf(dir))}>Up</button>
           <code>/{dir}</code>
           <button type="button" onClick={() => setMode("changes")}>Changes</button>
+          <button type="button" onClick={() => setMode("terminal")}>Terminal</button>
         </header>
         <ul>
           {entries.map((e) => (

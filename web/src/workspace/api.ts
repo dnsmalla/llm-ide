@@ -24,3 +24,6 @@ export const commitFiles = (link: HostLink, projectId: string, message: string, 
 
 export const pushBranch = (link: HostLink, projectId: string) =>
   link.send("git.push", { projectId }).done;
+
+export const terminalExec = (link: HostLink, projectId: string, argv: string[]) =>
+  link.send("terminal.exec", { projectId, argv }).done;

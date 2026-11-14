@@ -26,3 +26,7 @@ export const commitReady = (message: string, paths: readonly string[], busy: boo
   !busy && message.trim().length > 0 && paths.length > 0;
 
 export const pushReady = (ahead: number, busy: boolean): boolean => ahead > 0 && !busy;
+
+/** Whitespace split; the allowlisted runner takes argv, never a shell string. */
+export const parseArgv = (text: string): string[] => text.trim().split(/\s+/).filter(Boolean).slice(0, 20);
+export const terminalReady = (argv: readonly string[], busy: boolean): boolean => argv.length > 0 && !busy;
