@@ -81,12 +81,6 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [retryAt, setRetryAt] = useState<number | null>(null);
   const [cap, setCap] = useState(() => concurrency());
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!projectRoot || !active) return;
-    let live = true;
-    void loadLoops(fs).then((r) => { if (live && r.kind === "ok") setLoopNames(r.store.loops.map((l) => l.name)); }, () => undefined);
-    return () => { live = false; };
-  }, [fs, projectRoot, active]);
   const [addOpen, setAddOpen] = useState(false);
   // The Factory works from open issues (llm-doc specs become issues first, via Sources → Issue); free text stays for odd jobs.
   const [addKind, setAddKind] = useState<"issue" | "text">("issue");
@@ -112,8 +106,12 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [notice, setNotice] = useState<string | null>(null);
   const [cleanup, setCleanup] = useState<CleanupPlan | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [scope, setScope] = useState("Factory");
-  const [loopNames, setLoopNames] = useState<string[]>([]);
+  useEffect(() => {
+    const onSelect = (e: Event) => { const name = (e as CustomEvent<unknown>).detail; if (typeof name === "string" && name) setScope(name); };
+    window.addEventListener("llmide-loop-selected", onSelect);
+    return () => window.removeEventListener("llmide-loop-selected", onSelect);
+  }, []);
+  const [scope, setScope] = useState(() => { try { return localStorage.getItem("llmide.loopBoardScope") || "Factory"; } catch { return "Factory"; } });
   const panelRef = useRef<HTMLElement | null>(null);
   // Refs so the 5-minute timer reads the latest facts without being re-created on every load.
   const itemsRef = useRef<WorkItemRecord[]>([]);
@@ -397,7 +395,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const selInfo = selRunId ? worktrees.get(selRunId) ?? null : null;
 
   if (scope !== "Factory" && projectRoot) {
-    return <LoopRuns projectRoot={projectRoot} scope={scope} loops={loopNames.length ? loopNames : [scope]} onScope={setScope} />;
+    return <LoopRuns projectRoot={projectRoot} scope={scope} />;
   }
   return (
     <div className="fx-board-root">
@@ -408,13 +406,6 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         </div>
         {elsewhere ? <span className="fx-hint" role="status">{elsewhere}</span> : null}
         <span className="fx-spacer" />
-        <label className="fx-field fx-field-inline">
-          <span>Loop</span>
-          <select value={scope} onChange={(e) => setScope(e.target.value)}>
-            <option value="Factory">Factory</option>
-            {loopNames.filter((n) => n !== "Factory").map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
         <label className="fx-field fx-field-inline">
           <span>Parallel runs</span>
           <select value={cap} onChange={(e) => { setConcurrency(Number(e.target.value)); setCap(concurrency()); }}>

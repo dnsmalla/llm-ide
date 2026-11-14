@@ -377,6 +377,14 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
 
   const store = load?.kind === "ok" ? load.store : null;
   const loop = store?.loops.find((l) => l.id === selectedLoopId) ?? store?.loops[0] ?? null;
+
+  // The Board tab follows the loop selected here. Persist the name (the Board may mount later) and notify it live.
+  useEffect(() => {
+    if (!loop) return;
+    try { localStorage.setItem("llmide.loopBoardScope", loop.name); } catch { /* private mode */ }
+    window.dispatchEvent(new CustomEvent("llmide-loop-selected", { detail: loop.name }));
+  }, [loop?.id, loop?.name]);
+
   const stage = loop?.config.stages.find((s) => s.id === selectedStageId) ?? loop?.config.stages[0] ?? null;
 
   /** Re-read the host's approval state (commands may have changed since the last dialog). */

@@ -9,8 +9,6 @@ import { loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/n
 export interface LoopRunsProps {
   projectRoot: string;
   scope: string;
-  loops: readonly string[];
-  onScope(name: string): void;
 }
 
 const DONE = "Done";
@@ -44,7 +42,7 @@ function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, 
   return { lane: name, note: run.statusSummary };
 }
 
-export function LoopRuns({ projectRoot, scope, loops, onScope }: LoopRunsProps): ReactNode {
+export function LoopRuns({ projectRoot, scope }: LoopRunsProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
   const [steps, setSteps] = useState<string[]>([]);
   const [cards, setCards] = useState<RunCard[]>([]);
@@ -96,13 +94,6 @@ export function LoopRuns({ projectRoot, scope, loops, onScope }: LoopRunsProps):
           <p className="fx-summary">{cards.length} run{cards.length === 1 ? "" : "s"}</p>
         </div>
         <span className="fx-spacer" />
-        <label className="fx-field fx-field-inline">
-          <span>Loop</span>
-          <select value={scope} onChange={(e) => onScope(e.target.value)}>
-            <option value="Factory">Factory</option>
-            {loops.filter((n) => n !== "Factory").map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
         <button type="button" className="fx-btn" onClick={() => setTick((n) => n + 1)}>Refresh</button>
       </header>
       {error ? <p className="fx-error" role="status">{error}</p> : null}
