@@ -38,7 +38,7 @@ export function WorkspaceScreen({ ctx }: SectionProps) {
     setError(null);
     try {
       const [text, stat] = await Promise.all([
-        link.send("files.read", { projectId, path: entry.path }).done,
+        link.send("files.read", { projectId, path: entry.path, maxBytes: 262144 }).done,
         statFile(link, projectId, entry.path),
       ]);
       setPath(entry.path); setSaved(text.text); setBuffer(text.text); setHash(stat.hash);
