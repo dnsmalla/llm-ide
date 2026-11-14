@@ -359,12 +359,12 @@ git commit -m "feat(host-api): handle files.stat and files.write"
 ### Task 4: Web API client
 
 **Files:**
-- Modify: `web/src/host-api/session.ts` (or the module that exposes `read`)
+- Create: `web/src/workspace/api.ts`
 - Create: `web/src/workspace/model.ts`
 - Test: `web/src/workspace/model.test.mjs`
 
 **Interfaces:**
-- Produces: `statFile(projectId, path)`, `writeFile(projectId, path, text, expectedHash, create)`, `dirtyOf(buffer, saved)`, `conflictText(error)`.
+- Produces: `statFile(link, projectId, path)`, `writeFile(link, projectId, path, text, expectedHash, create)`, `dirtyOf(buffer, saved)`, `conflictText(error)`.
 
 - [ ] **Step 1: Write the failing model tests**
 
@@ -396,15 +396,16 @@ export const conflictText = (reason: string): string =>
   `The file changed on the host (${reason}). Reload it before saving again.`;
 ```
 
-Session:
+`api.ts`:
 
 ```ts
-statFile(projectId: string, path: string) {
-  return this.request('files.stat', { projectId, path });
-}
-writeFile(projectId: string, path: string, text: string, expectedHash: string | null, create: boolean) {
-  return this.request('files.write', { projectId, path, text, expectedHash, create });
-}
+import type { HostLink } from "../host-api/connection.ts";
+
+export const statFile = (link: HostLink, projectId: string, path: string) =>
+  link.send("files.stat", { projectId, path }).done;
+
+export const writeFile = (link: HostLink, projectId: string, path: string, text: string, expectedHash: string | null, create: boolean) =>
+  link.send("files.write", { projectId, path, text, expectedHash, create }).done;
 ```
 
 - [ ] **Step 4: Run the model test**
@@ -415,7 +416,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add web/src/host-api/session.ts web/src/workspace/model.ts web/src/workspace/model.test.mjs
+git add web/src/workspace/api.ts web/src/workspace/model.ts web/src/workspace/model.test.mjs
 git commit -m "feat(web): add file stat/write client"
 ```
 
