@@ -19,12 +19,10 @@ export function FactoryScreen({ active, projectRoot, focus }: SectionProps & { f
   const features = useFeatures();
   const boardUsable = Board !== null && features.usable.has("auto_tasks");
   const [tab, setTab] = useState<FactoryTab>("board");
-  // The approval badge points at a chat in the Review dock, which lives in the "Docs vs code" tab: show that tab.
-  useEffect(() => {
-    const open = () => { if (chatApprovalStore.peekReveal("review")) setTab("docs"); };
-    open();
-    return chatApprovalStore.subscribeReveal(open);
-  }, []);
+  // A new approval-badge reveal opens the Review dock; merely mounting must not jump away from Board.
+  useEffect(() => chatApprovalStore.subscribeReveal(() => setTab("docs")), []);
+  // Entering Loop → Board always starts on the board, not on a tab left open last time.
+  useEffect(() => { if (active) setTab("board"); }, [active]);
   const shown: FactoryTab = boardUsable ? tab : "docs";
   // Mounted from the first visit on, so switching tabs keeps unsaved edits.
   const [processSeen, setProcessSeen] = useState(false);
