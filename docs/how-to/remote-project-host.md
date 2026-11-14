@@ -65,8 +65,13 @@ git.status  branch, ahead/behind, changed files
 git.diff    the selected file's unified diff, capped at 256 KiB
 ```
 
-Both are read-only. There is no commit, push, checkout, reset or hook in this phase. Click **Open** on a changed file to edit
-it, then Save.
+Click **Open** on a changed file to edit it, then Save.
+
+### Commit
+
+In **Changes**, tick the files to include, write a message and press **Commit**. The host stages exactly those paths,
+runs the normal git hooks and commits exactly those paths. A failing hook fails the commit and leaves the working tree
+intact. Push is not part of this phase.
 
 ## 6. Acceptance checklist
 
@@ -84,12 +89,16 @@ Run each on the server and record the result:
 - [ ] clean repo → Changes says "No changes"
 - [ ] edit a file → it appears with M and the diff shows the line
 - [ ] a diff over 262,144 bytes is truncated
-- [ ] a viewer can read Changes; no write command is offered
+- [ ] a viewer can read Changes; Commit is refused for a viewer
+- [ ] commit one file → `git log -1` shows only that file
+- [ ] leave another modified file unticked → it stays uncommitted
+- [ ] empty message / empty selection → Commit disabled
+- [ ] a failing hook → commit refused, changes kept
 
 ## Limits
 
 - Text files only; no binary, rename, delete or mkdir UI.
-- Git is read-only: status and diff, no commit/push.
+- Git commit is available for explicitly selected paths; push is not.
 - No terminal or Loop on the host yet.
 - Desktop and iPhone are later phases; the web client is the first remote client.
 - The model provider still receives the code sent to it; for licensed code use a self-hosted model or a no-training
