@@ -38,8 +38,8 @@ test("host-api command registry: host commands have a capability and exact schem
   }
 });
 
-test("host-api command registry: 40 commands and every fixture validates", () => {
-  assert.equal(Object.keys(commands.commands).length, 40);
+test("host-api command registry: 41 commands and every fixture validates", () => {
+  assert.equal(Object.keys(commands.commands).length, 41);
   for (const [name, c] of Object.entries(commands.commands)) {
     for (const [kind, schema] of [["request", c.request], ["result", c.result]]) {
       const value = json(`fixtures/commands/${name}.${kind}.json`);
@@ -99,7 +99,7 @@ test("host-api README lists every command with its metadata", () => {
     const c = commands.commands[name];
     assert.deepEqual(rows.get(name), { capability: c.capability, idempotent: c.idempotent, v2Tag: c.v2Tag }, name);
   }
-  assert.match(readme, /40 commands/);
+  assert.match(readme, /41 commands/);
   assert.match(readme, /seven flat variants/);
   assert.match(readme, /host\.capabilities/);
   assert.match(readme, /envelope `rev`/);

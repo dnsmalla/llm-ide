@@ -28,6 +28,7 @@ import { MAX_TEXT, hashBytes, writeProjectFile } from './workspace-write.mjs';
 import { gitDiff, gitStatus } from './git-read.mjs';
 import { gitCommit } from './git-commit.mjs';
 import { gitPush } from './git-push.mjs';
+import { terminalExec } from './terminal-exec.mjs';
 import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -95,6 +96,7 @@ export const COMMAND_CLASS = Object.freeze({
   'git.diff': 'self.read',
   'git.commit': 'self.write',
   'git.push': 'self.write',
+  'terminal.exec': 'self.write',
   'tasks.list': 'self.read',
   'tasks.run': 'self.write',
   'tasks.status': 'self.read',
@@ -875,6 +877,18 @@ export function createGateway(overrides) {
           return respond(s, id, command, out);
         } catch (e) {
           return fail(s, id, 'internal', String(e.message || e));
+        }
+      }
+      case 'terminal.exec': {
+        const wait = rate.write(entry.state.deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        try {
+          const out = terminalExec(scopedProjectRoot(userId, p.projectId), { argv: p.argv, timeoutMs: p.timeoutMs });
+          const fixed = { ...out, exitCode: out.exitCode ?? -1 };
+          audit('terminal_exec', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `${p.projectId}:${String(p.argv?.[0] ?? '').slice(0, 40)}:${fixed.exitCode}` });
+          return respond(s, id, command, fixed);
+        } catch (e) {
+          return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'internal', String(e.message || e));
         }
       }
       case 'tasks.list': {

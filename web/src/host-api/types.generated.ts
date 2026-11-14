@@ -46,6 +46,7 @@ export const HOST_API_COMMANDS = {
   "tasks.list": { capability: "read", idempotent: true },
   "tasks.run": { capability: "compose", idempotent: false },
   "tasks.status": { capability: "compose", idempotent: true },
+  "terminal.exec": { capability: "read", idempotent: false },
   "toolApprovals.answer": { capability: "tool_approvals", idempotent: false },
   "usage.get": { capability: "read", idempotent: true },
 } as const;
@@ -89,6 +90,7 @@ export interface HostApiCommandMap {
   "tasks.list": { request: Record<string, never>; result: { tasks: Array<{ args?: Array<{ maxItems?: number; maxLength?: number; name: string; type: "string" | "string[]" }>; available: boolean; description: string; group: string; id: string; label: string; requiresRepo?: boolean; scope: "project" | "repo" | "global" }> } };
   "tasks.run": { request: { args?: Record<string, string>; projectId?: string; taskId: string }; result: { runId: string } };
   "tasks.status": { request: { runId: string }; result: { error?: string; output?: string; status: "running" | "completed" | "failed" | "cancelled"; summary?: string } };
+  "terminal.exec": { request: { argv: Array<string>; projectId: string; timeoutMs?: number }; result: { exitCode: number; stderr: string; stdout: string; timedOut: boolean; truncated: boolean } };
   "toolApprovals.answer": { request: { commandId: string; decision: "allow_once" | "deny"; projectId?: string; requestId: string }; result: { accepted: boolean } };
   "usage.get": { request: Record<string, never>; result: { providers: Array<{ activeModel?: string; models: Array<{ label?: string; limit: number; model: string; pct?: number; resetAt: number; state: "ok" | "warning" | "exhausted"; unit: "runs" | "tokens"; used: number; window: "daily" | "monthly" }>; provider: string; status: "ok" | "degraded" | "paused" | "unconfigured" }> } };
 }
