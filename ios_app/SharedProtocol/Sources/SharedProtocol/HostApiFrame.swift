@@ -23,7 +23,7 @@ public struct HostApiRejection: Error, Sendable, Equatable {
 
 public enum HostApiFrame {
     static let errorCodes: Set<String> = ["auth_failed", "capability_unavailable", "unknown_command", "invalid_payload",
-                                          "not_found", "busy", "denied", "desktop_only", "rate_limited",
+                                          "not_found", "conflict", "busy", "denied", "desktop_only", "rate_limited",
                                           "host_unreachable", "internal"]
     private static var defs: [String: Any] { HostApiSchemas.envelope["$defs"] as? [String: Any] ?? [:] }
     private static let idPattern = "^[A-Za-z0-9_-]{1,64}$"

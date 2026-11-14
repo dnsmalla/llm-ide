@@ -24,6 +24,8 @@ export const PROJECT_FRAME_CLASS = Object.freeze({
   'loop.list': 'self.read',
   'loop.history': 'self.read',
   'loop.start': 'model.exec',
+  'files.stat': 'self.read',
+  'files.write': 'self.write',
 });
 
 /** The `projects.list` result: id, name, the caller's effective role/mode/cap and permissions. */

@@ -126,6 +126,15 @@ test('granted but no longer served: capability_unavailable, and the push drops i
   assert.ok(t.last().payload.capabilities.includes('tool_approvals'), 'granted again once served');
 });
 
+test('files.write is a project write and files.stat is a read', async () => {
+  const { COMMAND_CLASS } = await import('../routes/host-api/gateway.mjs');
+  const { PROJECT_FRAME_CLASS } = await import('../routes/host-api/projects.mjs');
+  assert.equal(COMMAND_CLASS['files.write'], 'self.write');
+  assert.equal(COMMAND_CLASS['files.stat'], 'self.read');
+  assert.equal(PROJECT_FRAME_CLASS['files.write'], 'self.write');
+  assert.equal(PROJECT_FRAME_CLASS['files.stat'], 'self.read');
+});
+
 test('store: scopes round-trip through the column; NULL scopes read as the legacy set', () => {
   const u = users.registerUser(kb.getDb(), { email: `scopes-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 'h' }).id;
   const a = dev.issueDeviceToken(u, 'web', Date.now(), ['host', 'chat']);

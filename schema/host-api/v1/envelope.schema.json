@@ -5,7 +5,7 @@
   "$defs": {
     "ErrorCode": {
       "type": "string",
-      "enum": ["auth_failed", "capability_unavailable", "unknown_command", "invalid_payload", "not_found", "busy", "denied", "desktop_only", "rate_limited", "host_unreachable", "internal"]
+      "enum": ["auth_failed", "capability_unavailable", "unknown_command", "invalid_payload", "not_found", "conflict", "busy", "denied", "desktop_only", "rate_limited", "host_unreachable", "internal"]
     },
     "Error": {
       "type": "object",

@@ -7,7 +7,7 @@ import { HOST_API_COMMANDS, HOST_API_ENVELOPE, HOST_API_EVENTS, HOST_API_LIMITS,
 
 const defs = HOST_API_ENVELOPE.$defs;
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const CODES = new Set(['auth_failed', 'capability_unavailable', 'unknown_command', 'invalid_payload', 'not_found', 'busy', 'denied', 'desktop_only', 'rate_limited', 'host_unreachable', 'internal']);
+const CODES = new Set(['auth_failed', 'capability_unavailable', 'unknown_command', 'invalid_payload', 'not_found', 'conflict', 'busy', 'denied', 'desktop_only', 'rate_limited', 'host_unreachable', 'internal']);
 
 export function clamp(s, maxUnits) {
   if (s.length <= maxUnits) return s;

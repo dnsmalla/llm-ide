@@ -24,6 +24,7 @@ import { busHostProof } from '../../core/host-approval.mjs';
 import { handleTaskRoutes } from '../tasks.mjs';
 import { TASKS } from '../../core/task-registry.generated.mjs';
 import { scopedProjectRoot } from '../bus/project-scope.mjs';
+import { hashText, writeProjectFile } from './workspace-write.mjs';
 import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -85,6 +86,8 @@ export const COMMAND_CLASS = Object.freeze({
   'projects.list': 'self.read',
   'files.list': 'self.read',
   'files.read': 'self.read',
+  'files.stat': 'self.read',
+  'files.write': 'self.write',
   'tasks.list': 'self.read',
   'tasks.run': 'self.write',
   'tasks.status': 'self.read',
@@ -810,6 +813,27 @@ export function createGateway(overrides) {
           const truncated = st.size > max;
           return respond(s, id, command, { text: buf.subarray(0, max).toString('utf8'), size: st.size, truncated });
         } catch (e) { return fail(s, id, e.code === 'not_found' ? 'not_found' : e.code === 'invalid' ? 'invalid_payload' : 'denied', String(e.message || e)); }
+      }
+      case 'files.stat': {
+        if (readRefused(s, entry, id)) return;
+        try {
+          const { real, st } = projectFile(userId, p.projectId, p.path);
+          const hash = hashText(fs.readFileSync(real, 'utf8'));
+          return respond(s, id, command, { hash, size: st.size, mtimeMs: st.mtimeMs });
+        } catch (e) { return fail(s, id, e.code === 'not_found' ? 'not_found' : e.code === 'invalid' ? 'invalid_payload' : 'denied', String(e.message || e)); }
+      }
+      case 'files.write': {
+        const wait = rate.write(entry.state.deviceId, deps.now());
+        if (wait != null) return rateRefused(s, entry, id, wait);
+        try {
+          const root = scopedProjectRoot(userId, p.projectId);
+          const out = writeProjectFile({ root, path: p.path, text: p.text, expectedHash: p.expectedHash, mustNotExist: p.mustNotExist === true, create: p.create === true });
+          audit('file_write', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `${p.projectId}:${p.path}:${out.size}` });
+          return respond(s, id, command, out);
+        } catch (e) {
+          const code = e.code === 'conflict' ? 'conflict' : e.code === 'not_found' ? 'not_found' : e.code === 'invalid' ? 'invalid_payload' : 'denied';
+          return fail(s, id, code, String(e.message || e));
+        }
       }
       case 'tasks.list': {
         if (readRefused(s, entry, id)) return;
