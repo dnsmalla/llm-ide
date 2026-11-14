@@ -146,3 +146,15 @@ Run each on the server and record the result:
 The desktop app's **Window → Remote Workspace in Browser…** opens `https://llm-ide.com/app/` in the system browser. The
 desktop does not embed the remote app: its `frame-ancestors 'none'` policy blocks embedding, and a native Host API client
 inside the desktop is still a separate phase. Use the browser window as the desktop remote client until then.
+
+## Native desktop client
+
+The desktop toolbar has **Remote**:
+
+1. enter `wss://llm-ide.com/host-api/v1` (or your host's Host API URL)
+2. enter the host's pairing PIN
+3. choose a remote project
+
+The section reuses the web workspace UI — files, save, Changes, commit/push, allowlisted terminal and gated full shell —
+over a desktop-side Host API WebSocket. The local project and the remote project are separate: the Remote section never
+touches the local core.

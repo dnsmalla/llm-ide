@@ -1,0 +1,8 @@
+.remote-root { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.remote-bar { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--tok-color-border); font-size: 12px; }
+.remote-bar button { margin-left: auto; }
+.remote-connect { max-width: 520px; margin: 48px auto; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+.remote-connect label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.remote-connect input { padding: 8px; }
+.remote-error { color: var(--tok-color-danger); }
+.remote-hint { color: var(--tok-color-text-muted); }

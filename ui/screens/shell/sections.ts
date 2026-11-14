@@ -1,6 +1,6 @@
 // Section registry and navigation state. Pure (no React, no DOM) so it is tested with node.
 
-export type SectionId = "welcome" | "chat" | "explorer" | "library" | "live" | "settings" | "graph" | "issues" | "gantt" | "loop" | "docgen" | "visual" | "autotasks" | "conflicts" | "spike";
+export type SectionId = "welcome" | "chat" | "explorer" | "library" | "live" | "settings" | "graph" | "issues" | "gantt" | "loop" | "remote" | "docgen" | "visual" | "autotasks" | "conflicts" | "spike";
 
 export interface SectionDef {
   id: SectionId;
@@ -29,6 +29,7 @@ export const SECTIONS: readonly SectionDef[] = [
   { id: "issues", label: "Issues", enabled: true },
   { id: "gantt", label: "Gantt", enabled: true },
   { id: "loop", label: "Loop", enabled: true },
+  { id: "remote", label: "Remote", enabled: true },
   { id: "docgen", label: "Doc Gen", enabled: true },
   { id: "visual", label: "Visual", enabled: true },
   { id: "library", label: "Library", enabled: true, shortcut: 3 },

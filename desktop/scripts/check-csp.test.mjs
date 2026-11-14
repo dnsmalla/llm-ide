@@ -26,7 +26,7 @@ test('release CSP locks base/form/object/frame-ancestors and carries no dev orig
   // The webview talks to the core only on the ports the host may spawn it on (SPAWN_PORTS), exact origins, no wildcard.
   const rust = readFileSync(join(import.meta.dirname, '..', 'src-tauri', 'src', 'core_host.rs'), 'utf8');
   const ports = rust.match(/const SPAWN_PORTS: \[u16; \d+\] = \[([\d,\s]+)\]/)[1].split(',').map((p) => p.trim()).filter(Boolean);
-  assert.deepEqual(d['connect-src'], ["'self'", 'ipc:', 'http://ipc.localhost', ...ports.map((p) => `http://127.0.0.1:${p}`)]);
+  assert.deepEqual(d['connect-src'], ["'self'", 'ipc:', 'http://ipc.localhost', ...ports.map((p) => `http://127.0.0.1:${p}`), 'wss://llm-ide.com']);
   assert.ok(!/\*|localhost:\d/.test(csp), 'no wildcard, no named-host port');
   assert.ok(!csp.includes("'unsafe-eval'") && !/script-src[^;]*unsafe-inline/.test(csp));
   // WebAssembly (the Code Graph layout kernel) compiles under 'wasm-unsafe-eval' ONLY.

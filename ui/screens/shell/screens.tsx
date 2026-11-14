@@ -36,6 +36,7 @@ const loaders: Partial<Record<SectionId, Loader>> = {
   live: () => import("../live/index.tsx"),
   settings: () => import("../settings/index.tsx"),
   conflicts: () => import("../factory/index.tsx"),
+  remote: () => import("../remote/index.tsx"),
 };
 if (typeof __FEATURE_FILE_EXPLORER__ === "undefined" || __FEATURE_FILE_EXPLORER__) loaders.explorer = () => import("../explorer/index.tsx");
 if (typeof __FEATURE_CODE_GRAPH_3D__ === "undefined" || __FEATURE_CODE_GRAPH_3D__) loaders.graph = () => import("../graph/index.tsx");
