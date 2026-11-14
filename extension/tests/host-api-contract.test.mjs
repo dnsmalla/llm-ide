@@ -38,8 +38,8 @@ test("host-api command registry: host commands have a capability and exact schem
   }
 });
 
-test("host-api command registry: 34 commands and every fixture validates", () => {
-  assert.equal(Object.keys(commands.commands).length, 34);
+test("host-api command registry: 36 commands and every fixture validates", () => {
+  assert.equal(Object.keys(commands.commands).length, 36);
   for (const [name, c] of Object.entries(commands.commands)) {
     for (const [kind, schema] of [["request", c.request], ["result", c.result]]) {
       const value = json(`fixtures/commands/${name}.${kind}.json`);
@@ -99,7 +99,7 @@ test("host-api README lists every command with its metadata", () => {
     const c = commands.commands[name];
     assert.deepEqual(rows.get(name), { capability: c.capability, idempotent: c.idempotent, v2Tag: c.v2Tag }, name);
   }
-  assert.match(readme, /34 commands/);
+  assert.match(readme, /36 commands/);
   assert.match(readme, /seven flat variants/);
   assert.match(readme, /host\.capabilities/);
   assert.match(readme, /envelope `rev`/);
@@ -153,4 +153,12 @@ test("host-api compose: capability compose, closed shapes, the shared vector mat
   for (const model of vector.models.refused) assert.ok(validate(send, { text: "hi", model }, { defs: envelope.$defs }).length > 0, `model ${JSON.stringify(model)} refused`);
   assert.equal(send.properties.attachments.maxItems, vector.attachments.maxFiles);
   assert.equal(send.properties.attachments.items.properties.name.maxLength, vector.attachments.maxNameChars);
+});
+
+test('workspace write commands are in the contract', async () => {
+  const { HOST_API_COMMANDS } = await import('../routes/host-api/commands.generated.mjs');
+  assert.ok(HOST_API_COMMANDS['files.stat']);
+  assert.ok(HOST_API_COMMANDS['files.write']);
+  assert.equal(HOST_API_COMMANDS['files.write'].capability, 'read');
+  assert.equal(HOST_API_COMMANDS['files.write'].idempotent, false);
 });

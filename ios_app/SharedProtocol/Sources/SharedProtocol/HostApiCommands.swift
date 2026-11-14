@@ -27,6 +27,8 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
     case chatSnapshot = "chat.snapshot"
     case filesList = "files.list"
     case filesRead = "files.read"
+    case filesStat = "files.stat"
+    case filesWrite = "files.write"
     case hostAuthPair = "host.auth.pair"
     case hostAuthRevoke = "host.auth.revoke"
     case hostAuthToken = "host.auth.token"
@@ -64,6 +66,8 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .chatSnapshot: return "chat"
         case .filesList: return "read"
         case .filesRead: return "read"
+        case .filesStat: return "read"
+        case .filesWrite: return "read"
         case .hostAuthPair: return "host"
         case .hostAuthRevoke: return "host"
         case .hostAuthToken: return "host"
@@ -103,6 +107,8 @@ public enum HostApiCommand: String, CaseIterable, Sendable {
         case .chatSnapshot: return true
         case .filesList: return true
         case .filesRead: return true
+        case .filesStat: return true
+        case .filesWrite: return false
         case .hostAuthPair: return false
         case .hostAuthRevoke: return true
         case .hostAuthToken: return true
@@ -145,6 +151,8 @@ public enum HostApi {
         "chat.snapshot": .chatSnapshot,
         "files.list": .filesList,
         "files.read": .filesRead,
+        "files.stat": .filesStat,
+        "files.write": .filesWrite,
         "host.auth.pair": .hostAuthPair,
         "host.auth.revoke": .hostAuthRevoke,
         "host.auth.token": .hostAuthToken,

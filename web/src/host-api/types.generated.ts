@@ -21,6 +21,8 @@ export const HOST_API_COMMANDS = {
   "chat.snapshot": { capability: "chat", idempotent: true },
   "files.list": { capability: "read", idempotent: true },
   "files.read": { capability: "read", idempotent: true },
+  "files.stat": { capability: "read", idempotent: true },
+  "files.write": { capability: "read", idempotent: false },
   "host.auth.pair": { capability: "host", idempotent: false },
   "host.auth.revoke": { capability: "host", idempotent: true },
   "host.auth.token": { capability: "host", idempotent: true },
@@ -58,6 +60,8 @@ export interface HostApiCommandMap {
   "chat.snapshot": { request: { limit?: number; projectId?: string; surface?: "ask" | "execute" }; result: { messages: Array<{ content: string; role: "user" | "assistant" }> } };
   "files.list": { request: { path?: string; projectId: string }; result: { entries: Array<{ kind: "file" | "dir"; name: string; path: string; size?: number }> } };
   "files.read": { request: { maxBytes?: number; path: string; projectId: string }; result: { size: number; text: string; truncated: boolean } };
+  "files.stat": { request: { path: string; projectId: string }; result: { hash: string; mtimeMs: number; size: number } };
+  "files.write": { request: { create?: boolean; expectedHash?: string; mustNotExist?: boolean; path: string; projectId: string; text: string }; result: { hash: string; size: number } };
   "host.auth.pair": { request: { pin: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push">; token: string } };
   "host.auth.revoke": { request: { token: string }; result: { revoked: boolean } };
   "host.auth.token": { request: { token: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push"> } };

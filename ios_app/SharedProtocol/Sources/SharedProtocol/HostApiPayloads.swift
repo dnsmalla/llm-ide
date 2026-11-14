@@ -343,6 +343,56 @@ public struct HostApiFilesReadResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostApiFilesStatRequest: Codable, Equatable, Sendable {
+    public var path: String
+    public var projectId: String
+
+    public init(path: String, projectId: String) {
+        self.path = path
+        self.projectId = projectId
+    }
+}
+
+public struct HostApiFilesStatResult: Codable, Equatable, Sendable {
+    public var hash: String
+    public var mtimeMs: Double
+    public var size: Int
+
+    public init(hash: String, mtimeMs: Double, size: Int) {
+        self.hash = hash
+        self.mtimeMs = mtimeMs
+        self.size = size
+    }
+}
+
+public struct HostApiFilesWriteRequest: Codable, Equatable, Sendable {
+    public var create: Bool?
+    public var expectedHash: String?
+    public var mustNotExist: Bool?
+    public var path: String
+    public var projectId: String
+    public var text: String
+
+    public init(create: Bool? = nil, expectedHash: String? = nil, mustNotExist: Bool? = nil, path: String, projectId: String, text: String) {
+        self.create = create
+        self.expectedHash = expectedHash
+        self.mustNotExist = mustNotExist
+        self.path = path
+        self.projectId = projectId
+        self.text = text
+    }
+}
+
+public struct HostApiFilesWriteResult: Codable, Equatable, Sendable {
+    public var hash: String
+    public var size: Int
+
+    public init(hash: String, size: Int) {
+        self.hash = hash
+        self.size = size
+    }
+}
+
 public struct HostApiHostAuthPairRequest: Codable, Equatable, Sendable {
     public var pin: String
 
