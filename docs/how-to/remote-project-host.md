@@ -90,7 +90,17 @@ cargo test, go test, swift test
 
 It is not a shell: argv is executed without a shell, shell metacharacters are refused, paths cannot contain `..` or
 start with `/`, and `.git` / `.ssh` / secret paths are refused. The host returns stdout, stderr, exit code, truncation and
-timeout. Arbitrary shell commands are a later phase.
+timeout.
+
+**Full shell** is a separate, explicitly dangerous mode:
+
+1. start the host core with `LLMIDE_ALLOW_REMOTE_SHELL=1`
+2. tick **Full shell** in Terminal
+3. confirm the command in the browser dialog
+
+Without the environment flag the host refuses every shell command. The shell runs as `/bin/sh -lc` in the project
+root, with a 30-second timeout and 256 KiB output cap. Audit records a command hash, never the full text. This is
+remote code execution: enable it only for a single-owner host you control.
 
 ## 7. Acceptance checklist
 
@@ -118,12 +128,14 @@ Run each on the server and record the result:
 - [ ] `git status` in Terminal exits 0
 - [ ] `sh -c id` is refused
 - [ ] `ls ../` is refused
+- [ ] full shell without the env flag → denied
+- [ ] full shell with the flag + confirmation → runs
 
 ## Limits
 
 - Text files only; no binary, rename, delete or mkdir UI.
 - Git commit and push are available; both use the host repository's configured identity and upstream.
-- Terminal is allowlisted; no arbitrary shell yet.
+- Terminal is allowlisted by default; full shell requires `LLMIDE_ALLOW_REMOTE_SHELL=1` and per-command confirmation.
 - No Loop on the host yet.
 - Desktop and iPhone are later phases; the web client is the first remote client.
 - The model provider still receives the code sent to it; for licensed code use a self-hosted model or a no-training
