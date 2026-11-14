@@ -31,7 +31,7 @@ export function renderSummary(loop: LoopDefinition, outcome: LoopRunOutcome, at:
 export async function writeSummaryNote(fs: SummaryFs, loop: LoopDefinition, outcome: LoopRunOutcome, at = new Date()): Promise<string> {
   const path = summaryPath(loop, at);
   let atDir = "";
-  for (const seg of path.split("/").slice(0, -1)) { atDir = atDir ? `${atDir}/${seg}` : seg; try { await fs.create(atDir, "dir"); } catch (e) { if ((e as { code?: string })?.code !== "exists") throw e; } }
+  for (const seg of path.split("/").slice(0, -1)) { atDir = atDir ? `${atDir}/${seg}` : seg; try { await fs.create(atDir, "dir"); } catch { /* already exists, or the write below reports the real failure */ } }
   await fs.write(path, renderSummary(loop, outcome, at), { expected_hash: null });
   return path;
 }
@@ -69,7 +69,7 @@ export async function writeRunArchive(fs: RunArchiveFs, loop: LoopDefinition, ou
   try {
     const dir = archiveDir(loop, at);
     let part = "";
-    for (const seg of dir.split("/")) { part = part ? `${part}/${seg}` : seg; try { await fs.create(part, "dir"); } catch (e) { if ((e as { code?: string }).code !== "exists") throw e; } }
+    for (const seg of dir.split("/")) { part = part ? `${part}/${seg}` : seg; try { await fs.create(part, "dir"); } catch { /* already exists, or the write below reports the real failure */ } }
     const fence = "~~~~";
     const body = [
       renderSummary(loop, outcome, at).trimEnd(),
