@@ -13,6 +13,7 @@ import { pushTargetOf } from './push-target.mjs';
 import { HOST_API_COMMANDS, HOST_API_LIMITS } from './commands.generated.mjs';
 import { issueDeviceToken, authenticateDeviceToken, revokeDevice, getQuickChatId, setQuickChatId, LEGACY_SCOPES, MAX_LIFETIME_MS } from '../../kb/host-api-devices.mjs';
 import { getDb } from '../../kb/db.mjs';
+import { effectiveProjectGrant, projectPermissions } from '../../kb/projects.mjs';
 import { deleteChatSession } from '../../kb/chat-sessions.mjs';
 import { config } from '../../core/config.mjs';
 import { getMember, classRefusal } from '../../kb/members.mjs';
@@ -37,6 +38,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
+
+/** A project role that lacks `fs.write` (viewer/read-only) must not write, commit, push or run a terminal. */
+function readOnlyProject(userId, projectId) {
+  const grant = effectiveProjectGrant(getDb(), userId, projectId);
+  return !projectPermissions(grant).includes('fs.write');
+}
 
 // ADR 0021 hub: the cap belongs to ONE member (their phones and browsers), not to the whole install. The
 // global ceiling is hub-sized so a team's members do not shut each other out; it still bounds the core.
@@ -837,6 +844,7 @@ export function createGateway(overrides) {
         } catch (e) { return fail(s, id, e.code === 'not_found' ? 'not_found' : e.code === 'invalid' ? 'invalid_payload' : 'denied', String(e.message || e)); }
       }
       case 'files.write': {
+        if (readOnlyProject(userId, p.projectId)) return fail(s, id, 'denied', 'This account has read-only access to this project.');
         const wait = rate.write(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         try {
@@ -860,6 +868,7 @@ export function createGateway(overrides) {
         catch (e) { return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'internal', String(e.message || e)); }
       }
       case 'git.commit': {
+        if (readOnlyProject(userId, p.projectId)) return fail(s, id, 'denied', 'This account has read-only access to this project.');
         const wait = rate.write(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         try {
@@ -872,6 +881,7 @@ export function createGateway(overrides) {
         }
       }
       case 'git.push': {
+        if (readOnlyProject(userId, p.projectId)) return fail(s, id, 'denied', 'This account has read-only access to this project.');
         const wait = rate.write(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         try {
@@ -883,6 +893,7 @@ export function createGateway(overrides) {
         }
       }
       case 'terminal.exec': {
+        if (readOnlyProject(userId, p.projectId)) return fail(s, id, 'denied', 'This account has read-only access to this project.');
         const wait = rate.write(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         try {
@@ -895,6 +906,7 @@ export function createGateway(overrides) {
         }
       }
       case 'terminal.shell': {
+        if (readOnlyProject(userId, p.projectId)) return fail(s, id, 'denied', 'This account has read-only access to this project.');
         if (process.env.LLMIDE_ALLOW_REMOTE_SHELL !== '1') return fail(s, id, 'denied', 'Remote shell is disabled on this host (set LLMIDE_ALLOW_REMOTE_SHELL=1).');
         if (p.confirm !== true) return fail(s, id, 'invalid_payload', 'The command was not confirmed.');
         const wait = rate.write(entry.state.deviceId, deps.now());
