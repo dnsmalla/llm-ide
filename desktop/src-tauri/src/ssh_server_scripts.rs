@@ -112,9 +112,20 @@ macro_rules! sh_stop_core {
     };
 }
 
+/// The directories the Claude CLI commonly installs to, as `LLMIDE_PATH_PREFIX`. PROBE uses it for the
+/// `claude` lookup and START puts it in front of the core's PATH, so the probe and the core find the same
+/// `claude`. The login PATH of a non-interactive ssh session often misses these directories.
+macro_rules! sh_path_prefix {
+    () => {
+        r##"LLMIDE_PATH_PREFIX="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.claude/local:/usr/local/bin"
+"##
+    };
+}
+
 /// Reports the server's OS, disk, installed releases and Claude CLI. Never fails on a missing
 /// tool: every probe degrades to an empty or zero value so the app can explain what is missing.
-pub const PROBE: &str = r##"set -u
+pub const PROBE: &str = concat!(
+    r##"set -u
 umask 077
 LC_ALL=C
 export LC_ALL
@@ -127,12 +138,14 @@ INSTALLED=$(ls -1 "$HOME/.llmide-server/releases" 2>/dev/null | tr '\n' ' ')
 printf '__LLMIDE_INSTALLED__=%s\n' "${INSTALLED% }"
 CUR=$(readlink "$HOME/.llmide-server/current" 2>/dev/null || true)
 printf '__LLMIDE_CURRENT__=%s\n' "${CUR##*/}"
-# The login PATH often misses the places the Claude CLI installs to, so those are tried first, for
-# this lookup only. The output is filtered because the server controls it: only plain text survives,
-# so it cannot carry a marker.
-CLAUDE_LINE=$(PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.claude/local:/usr/local/bin:$PATH" claude --version 2>/dev/null | head -n 1 | tr -cd 'A-Za-z0-9 ._()-' || true)
+"##,
+    sh_path_prefix!(),
+    r##"# The output is filtered because the server controls it: only plain text survives, so it cannot carry
+# a marker.
+CLAUDE_LINE=$(PATH="$LLMIDE_PATH_PREFIX:$PATH" claude --version 2>/dev/null | head -n 1 | tr -cd 'A-Za-z0-9 ._()-' || true)
 printf '__LLMIDE_CLAUDE__=%s\n' "$CLAUDE_LINE"
-"##;
+"##,
+);
 
 /// Unpacks a release. Stdin is `<version> <sha256>\n` followed by the raw `.tar.gz`.
 ///
@@ -268,16 +281,32 @@ next();') || PORT=""
 case "$PORT" in
   ''|*[!0-9]*) printf '__LLMIDE_START__=no-port\n'; exit 1 ;;
 esac
-mkdir -p "$ROOT/data/addons/plugins"
+"##,
+    sh_path_prefix!(),
+    r##"mkdir -p "$ROOT/data/addons/plugins"
 chmod 700 "$ROOT/data"
+# The local spawn writes the Chrome extension pin into the core's data dir before it starts, and the core
+# reads the pin once at boot. Without the file the core echoes CORS for any chrome-extension:// origin. The
+# bytes are the ones core_env::pin_extension_ids writes (serde_json, no trailing newline). The file is renamed
+# into place, so the core never reads a half-written pin. A failed write stops the start: a core without the
+# pin would accept any extension.
+PIN="$ROOT/data/extension-ids.json"
+printf '%s' '{"ids":["ecojclccfoegmlffpiahbcenmkfhadlk"]}' > "$PIN.tmp" || { printf '__LLMIDE_START__=pin-failed\n'; exit 1; }
+chmod 600 "$PIN.tmp" || { printf '__LLMIDE_START__=pin-failed\n'; exit 1; }
+mv "$PIN.tmp" "$PIN" || { printf '__LLMIDE_START__=pin-failed\n'; exit 1; }
+# The core gets the same PATH the PROBE lookup uses, so the core finds the same `claude`. The local spawn
+# sets the core's CORS allow-list to the webview origins of every desktop OS, because one server core can be
+# reached from any of them. Registration is single-owner: the core refuses a sign-up once an owner exists.
+# The core is started without a parent-pid variable so it outlives this SSH session.
 # A non-interactive shell gives a background job /dev/null as stdin, so the payload is first
 # duplicated onto fd 3 and then handed to the core as its stdin. fd 3 is closed in the core so
-# it does not keep the pipe open. The core is started without a parent-pid variable so it
-# outlives this SSH session.
+# it does not keep the pipe open.
 exec 3<&0
-LLMIDE_SECRETS_STDIN=1 LLMIDE_PORT="$PORT" LLMIDE_CORE_NONCE="$NONCE" \
+PATH="$LLMIDE_PATH_PREFIX:$PATH" LLMIDE_SECRETS_STDIN=1 LLMIDE_PORT="$PORT" LLMIDE_CORE_NONCE="$NONCE" \
   LLMIDE_DATA_DIR="$ROOT/data" LLMIDE_DB_PATH="$ROOT/data/data.db" \
   LLMIDE_PLUGIN_DIR="$ROOT/data/addons/plugins" \
+  LLMIDE_CORS_ORIGINS='tauri://localhost,http://tauri.localhost,https://tauri.localhost' \
+  LLMIDE_REGISTRATION_SINGLE_OWNER=1 \
   setsid nohup "$ROOT/current/core/node/node" "$ROOT/current/core/root/extension/server.mjs" \
   <&3 3<&- >>"$ROOT/core.log" 2>&1 &
 PID=$!
@@ -699,6 +728,8 @@ pub fn install_stdin(version: &str, sha256_hex: &str, tarball: &[u8]) -> Vec<u8>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core_env::{webview_origins, EXTENSION_ID, EXTENSION_IDS_FILE};
+    use crate::fsutil::Os;
 
     const PROBE_OUTPUT: &str = "Welcome to the server\n\
         Last login: Mon Nov 10 09:00:00\n\
@@ -845,6 +876,51 @@ mod tests {
             assert!(!script.contains("<("), "{name} uses process substitution");
         }
         assert!(START.contains("127.0.0.1"));
+    }
+
+    /// The one `PATH` prefix line PROBE and START both include. Changing it here changes both scripts.
+    const PATH_PREFIX_LINE: &str =
+        r#"LLMIDE_PATH_PREFIX="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.claude/local:/usr/local/bin""#;
+    /// `LLMIDE_CORS_ORIGINS` as START exports it: every webview origin, on every desktop OS.
+    const START_CORS_VALUE: &str = "tauri://localhost,http://tauri.localhost,https://tauri.localhost";
+
+    #[test]
+    fn probe_and_start_share_the_path_prefix() {
+        assert!(PROBE.contains(PATH_PREFIX_LINE), "PROBE lacks the shared prefix");
+        assert!(START.contains(PATH_PREFIX_LINE), "START lacks the shared prefix");
+        assert!(START.contains(r#"PATH="$LLMIDE_PATH_PREFIX:$PATH" "#), "START does not use the prefix");
+    }
+
+    #[test]
+    fn start_cors_value_covers_every_webview_origin() {
+        assert!(START.contains(&format!("LLMIDE_CORS_ORIGINS='{START_CORS_VALUE}' ")));
+        for os in [Os::Mac, Os::Linux, Os::Windows] {
+            for origin in webview_origins(os) {
+                assert!(
+                    START_CORS_VALUE.split(',').any(|o| o == *origin),
+                    "START's CORS value lacks the webview origin {origin}"
+                );
+            }
+        }
+        assert!(!START_CORS_VALUE.contains('*'));
+    }
+
+    #[test]
+    fn start_pins_the_extension_origin_like_the_local_spawn() {
+        assert_eq!(EXTENSION_IDS_FILE, "extension-ids.json");
+        assert_eq!(EXTENSION_ID, "ecojclccfoegmlffpiahbcenmkfhadlk");
+        // The local pin writes serde_json of the one ID with no trailing newline; START writes the same bytes.
+        let expected = serde_json::json!({ "ids": [EXTENSION_ID] }).to_string();
+        assert!(START.contains(&format!("printf '%s' '{expected}' > ")), "START writes another pin");
+        assert!(START.contains(&format!("/data/{EXTENSION_IDS_FILE}\"")), "START pins another file name");
+        assert!(START.contains("chmod 600 \"$PIN.tmp\""));
+        assert!(START.contains("mv \"$PIN.tmp\" \"$PIN\""));
+    }
+
+    #[test]
+    fn start_enables_single_owner_registration_only_on_the_core() {
+        assert!(START.contains("LLMIDE_REGISTRATION_SINGLE_OWNER=1 "));
+        assert!(!PROBE.contains("LLMIDE_REGISTRATION_SINGLE_OWNER"));
     }
 
     #[test]
@@ -1269,12 +1345,12 @@ mod tests {
         }
     }
 
-    // ---- Linux-only: the core lifecycle needs /proc and setsid, so these run in CI on Linux ----
+    // ---- Core launch tests (unix). The stop and reuse tests need /proc, so they stay Linux-only ----
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     static LINUX_CORE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     fn find_on_path(name: &str) -> Option<std::path::PathBuf> {
         let paths = std::env::var_os("PATH")?;
         std::env::split_paths(&paths)
@@ -1285,7 +1361,7 @@ mod tests {
     /// A home with one release whose `node` stays alive as a stand-in core. It runs the real node
     /// only for the port probe. A `curl` stub answers `/health`. Returns None when there is no node
     /// to borrow, so the test is skipped rather than failed.
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     fn live_home(tag: &str) -> Option<std::path::PathBuf> {
         use std::os::unix::fs::PermissionsExt;
         let real_node = find_on_path("node")?;
@@ -1297,8 +1373,11 @@ mod tests {
         std::fs::create_dir_all(release.join("core/root/extension")).expect("extension dir");
         std::fs::write(release.join("core/root/extension/server.mjs"), "").expect("server");
         let node = release.join("core/node/node");
+        // The core's own invocation (not the port probe, which is `-e`) records the environment it
+        // was started with, so a test can check what START exported.
         let body = format!(
             "#!/bin/sh\nif [ \"$1\" = \"-e\" ]; then exec '{real}' \"$@\"; fi\n\
+             env > \"$HOME/core-env.tmp\" && mv \"$HOME/core-env.tmp\" \"$HOME/core-env.txt\"\n\
              exec '{real}' -e 'setInterval(function () {{}}, 1000)' \"$@\"\n",
             real = real_node.display()
         );
@@ -1315,10 +1394,10 @@ mod tests {
 
     /// Kills whatever core the home's state.json recorded and removes the temp tree, even when the
     /// test panicked part way through.
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     struct CoreCleanup(std::path::PathBuf);
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     impl Drop for CoreCleanup {
         fn drop(&mut self) {
             let state_path = self.0.join("home/.llmide-server/state.json");
@@ -1333,6 +1412,63 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// Puts a `setsid` stub on the test PATH when the host has none (macOS). The stub only execs its
+    /// arguments, so START's launch line runs unchanged. Linux uses the real `setsid`.
+    #[cfg(unix)]
+    fn ensure_setsid(home: &std::path::Path) {
+        use std::os::unix::fs::PermissionsExt;
+        if find_on_path("setsid").is_some() {
+            return;
+        }
+        let stubs = home.join("stubs");
+        std::fs::create_dir_all(&stubs).expect("stubs");
+        let stub = stubs.join("setsid");
+        std::fs::write(&stub, "#!/bin/sh\nexec \"$@\"\n").expect("setsid stub");
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+
+    /// The core is started with the environment the local spawn gives it, and the extension pin is
+    /// written before the launch. Runs on macOS and Linux.
+    #[cfg(unix)]
+    #[test]
+    fn start_launches_the_core_with_the_local_environment() {
+        let _guard = LINUX_CORE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(home) = live_home("env") else {
+            eprintln!("skipped: no node on PATH to borrow");
+            return;
+        };
+        let _cleanup = CoreCleanup(home.parent().expect("base").to_path_buf());
+        ensure_setsid(&home);
+        let (ok, out) = run_sh(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"));
+        assert!(ok, "{out}");
+
+        // The curl stub answers at once, so START can return before the background stub has run `env`.
+        let env_file = home.join("core-env.txt");
+        let mut waited = 0;
+        while !env_file.exists() && waited < 100 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            waited += 1;
+        }
+        let env_text = std::fs::read_to_string(&env_file).expect("the stub saw the core's environment");
+        let env: std::collections::HashMap<&str, &str> =
+            env_text.lines().filter_map(|line| line.split_once('=')).collect();
+        let home_text = home.display().to_string();
+        let path_head = format!(
+            "{home_text}/.local/bin:{home_text}/.npm-global/bin:{home_text}/.claude/local:/usr/local/bin:"
+        );
+        assert!(env["PATH"].starts_with(&path_head), "PATH was {}", env["PATH"]);
+        assert_eq!(env.get("LLMIDE_CORS_ORIGINS"), Some(&START_CORS_VALUE));
+        assert_eq!(env.get("LLMIDE_REGISTRATION_SINGLE_OWNER"), Some(&"1"));
+        assert!(!env.contains_key("LLMIDE_PARENT_PID"), "the server core must outlive the desktop");
+
+        let data = home.join(".llmide-server/data");
+        let pin = data.join(EXTENSION_IDS_FILE);
+        let expected = serde_json::json!({ "ids": [EXTENSION_ID] }).to_string();
+        assert_eq!(std::fs::read_to_string(&pin).expect("pin file"), expected);
+        assert_eq!(mode_of(&pin), 0o600);
+        assert!(!data.join(format!("{EXTENSION_IDS_FILE}.tmp")).exists(), "no temp file left");
     }
 
     #[cfg(target_os = "linux")]
