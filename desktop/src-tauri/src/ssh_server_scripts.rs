@@ -142,6 +142,13 @@ printf '__LLMIDE_CURRENT__=%s\n' "${CUR##*/}"
 # "glibc 2.31"; musl has no such variable, so the value is empty there. Only digits and dots are kept.
 GLIBC=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $2 }' | tr -cd '0-9.')
 printf '__LLMIDE_GLIBC__=%s\n' "$GLIBC"
+# The sha of the bundle the current release was installed from. The app compares it with the bundle it holds, so
+# a rebuilt bundle with the same version is replaced. Only [0-9a-f] is kept, so the file cannot inject text.
+CUR_SHA=""
+if [ -f "$HOME/.llmide-server/current/BUNDLE_SHA256" ]; then
+  CUR_SHA=$(tr -cd '0-9a-f' < "$HOME/.llmide-server/current/BUNDLE_SHA256" | cut -c1-64)
+fi
+printf '__LLMIDE_CURRENT_SHA__=%s\n' "$CUR_SHA"
 "##,
     sh_path_prefix!(),
     r##"# The output is filtered because the server controls it: only plain text survives, so it cannot carry
@@ -167,6 +174,8 @@ ROOT="${HOME:?}/.llmide-server"
     r##"DONE_MARK=0
 PART=""
 STAGE=""
+REL=""
+SWAP_OLD=""
 mark() {
   DONE_MARK=1
   printf '__LLMIDE_INSTALL__=%s\n' "$1"
@@ -185,13 +194,22 @@ prune_releases() {
   done
   return 0
 }
+# The bundle sha a release was installed from, read from its record and kept to [0-9a-f]. Empty when there is none.
+recorded_sha() {
+  [ -f "$1/BUNDLE_SHA256" ] || return 0
+  tr -cd '0-9a-f' < "$1/BUNDLE_SHA256" | cut -c1-64
+}
 # Any failure removes the partial files. The generic failed marker is printed only when no specific
-# marker was, so a checksum or unpack failure keeps its precise name.
+# marker was, so a checksum or unpack failure keeps its precise name. A replacement that was cut short
+# leaves the old release under SWAP_OLD: it goes back under its name, unless the new release is already there.
 on_exit() {
   rc=$?
   if [ "$rc" -ne 0 ]; then
     if [ -n "$PART" ]; then rm -rf "$PART"; fi
     if [ -n "$STAGE" ]; then rm -rf "$STAGE"; fi
+    if [ -n "$SWAP_OLD" ] && [ -e "$SWAP_OLD" ]; then
+      if [ -e "$REL" ]; then rm -rf "$SWAP_OLD"; else mv "$SWAP_OLD" "$REL" || true; fi
+    fi
     if [ "$DONE_MARK" -eq 0 ]; then printf '__LLMIDE_INSTALL__=failed\n'; fi
   fi
 }
@@ -212,6 +230,12 @@ chmod 700 "$ROOT" "$ROOT/releases" "$ROOT/data"
 REL="$ROOT/releases/$VERSION"
 PART="$ROOT/releases/.$VERSION.part"
 STAGE="$ROOT/releases/.$VERSION.stage"
+SWAP_OLD="$ROOT/releases/.$VERSION.old"
+# A replacement cut short by a lost connection leaves the old release here, so it is restored before anything
+# else is decided: it goes back under its name unless the new release already holds that name.
+if [ -e "$SWAP_OLD" ]; then
+  if [ -e "$REL" ]; then rm -rf "$SWAP_OLD"; else mv "$SWAP_OLD" "$REL"; fi
+fi
 rm -rf "$PART" "$STAGE"
 cat > "$PART" || { rm -f "$PART"; mark disk; exit 1; }
 ACTUAL=$(sha256sum "$PART" | awk '{ print $1 }')
@@ -235,10 +259,27 @@ if [ ! -f "$STAGE/core/node/node" ] || [ ! -f "$STAGE/core/root/extension/server
   exit 1
 fi
 chmod 700 "$STAGE"
-# A release is immutable once installed: a core that is still running may load files from it, so
-# re-installing an existing version keeps the old directory and only repoints current.
-if [ -e "$REL" ]; then
+# The release records the sha of the bundle it came from. PROBE reports it, and the app replaces a release whose
+# record differs, so a rebuilt bundle with the same version is not left unused.
+if ! printf '%s\n' "$SHA" > "$STAGE/BUNDLE_SHA256"; then
+  mark disk
+  exit 1
+fi
+chmod 600 "$STAGE/BUNDLE_SHA256"
+# A release is never edited in place: a core that is still running may load files from it. An identical release
+# is kept (the stage is discarded). A release with another record, or none, is replaced whole: the old one is moved
+# aside, the staged one moved into its name, and only then is the old one removed. The app stops a running core
+# from this release before it sends INSTALL, so nothing reads the folder while it moves.
+if [ -e "$REL" ] && [ "$(recorded_sha "$REL")" = "$SHA" ]; then
   rm -rf "$STAGE"
+elif [ -e "$REL" ]; then
+  mv "$REL" "$SWAP_OLD"
+  if ! mv "$STAGE" "$REL"; then
+    mv "$SWAP_OLD" "$REL" 2>/dev/null || true
+    exit 1
+  fi
+  rm -rf "$SWAP_OLD"
+  SWAP_OLD=""
 else
   mv "$STAGE" "$REL"
 fi
@@ -639,6 +680,10 @@ pub struct Probe {
     pub free_mb: u64,
     pub installed: Vec<String>,
     pub current: Option<String>,
+    /// The bundle sha the `current` release was installed from; `None` for a release installed before this was recorded.
+    pub current_sha: Option<String>,
+    /// The server's glibc version, `None` when it has none to report (musl, or no getconf).
+    pub glibc: Option<String>,
     pub claude: ClaudeState,
 }
 
@@ -719,6 +764,8 @@ pub fn parse_probe(stdout: &str) -> Result<Probe, FsError> {
         free_mb,
         installed,
         current,
+        current_sha: parse_current_sha(stdout),
+        glibc: parse_glibc(stdout),
         claude,
     })
 }
@@ -831,15 +878,34 @@ pub fn parse_add_key(stdout: &str) -> Result<&'static str, FsError> {
 
 /// The START result printed while another START holds the data folder's lock. The script prints it before
 /// it reads any state, so the losing call starts no core.
-#[allow(dead_code)]
-// NOTE: wired by the ssh_session follow-up, which maps it to SSH_START_BUSY.
 pub const START_BUSY: &str = "busy";
+
+/// Parses the `__LLMIDE_CURRENT_SHA__` marker printed by [`PROBE`]: the bundle sha of the installed release.
+/// Returns None for an empty value or anything that is not 64 lowercase hex digits, so a bad value reads as
+/// "no record" and the release is replaced.
+pub fn parse_current_sha(stdout: &str) -> Option<String> {
+    let value = marker(stdout, "CURRENT_SHA")?;
+    let well_formed = value.len() == 64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    well_formed.then(|| value.to_string())
+}
+
+/// The glibc version the standard (non `-compat`) bundle needs, named in the message that refuses an older server.
+pub const STANDARD_GLIBC: &str = "2.34";
+
+/// True when a server glibc version is older than the standard bundle needs. The dotted parts are compared as
+/// numbers, so `2.9` is older than `2.34`. An unknown or malformed version is not treated as old: the upload
+/// then goes ahead, as it did before glibc was reported.
+pub fn glibc_is_below_standard(version: &str) -> bool {
+    let parse = |text: &str| -> Option<Vec<u64>> { text.split('.').map(|part| part.parse::<u64>().ok()).collect() };
+    match (parse(version), parse(STANDARD_GLIBC)) {
+        (Some(have), Some(need)) => have < need,
+        _ => false,
+    }
+}
 
 /// Parses the `__LLMIDE_GLIBC__` marker printed by [`PROBE`]: the server's glibc version (for example
 /// `2.31`). Returns None when the server has no glibc version to report (musl, no getconf) or the value
 /// is not digits and dots.
-#[allow(dead_code)]
-// NOTE: wired by the ssh_session follow-up, which checks it before an upload of the standard bundle.
 pub fn parse_glibc(stdout: &str) -> Option<String> {
     let value = marker(stdout, "GLIBC")?;
     let well_formed = !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit() || b == b'.');
@@ -849,8 +915,6 @@ pub fn parse_glibc(stdout: &str) -> Option<String> {
 /// Parses the `__LLMIDE_INSTALL__` marker printed by [`INSTALL`]. Returns None on success (`ok`). A
 /// failure returns its kind: `checksum`, `unpack`, `layout`, `disk` or `invalid`; any other value, or no
 /// marker at all, returns `failed`.
-#[allow(dead_code)]
-// NOTE: wired by the ssh_session follow-up, which maps each kind to its own message.
 pub fn parse_install_failure(stdout: &str) -> Option<&'static str> {
     match marker(stdout, "INSTALL") {
         Some("ok") => None,
@@ -1255,9 +1319,15 @@ mod tests {
     /// Builds a `.tar.gz` shaped like the real bundle: `VERSION` and `core/` with a stub Node.
     #[cfg(unix)]
     fn make_bundle(base: &std::path::Path, version: &str) -> Vec<u8> {
+        make_bundle_tagged(base, version, "plain")
+    }
+
+    /// As [`make_bundle`], with `tag` written into the core file, so two bundles of one version differ in bytes.
+    #[cfg(unix)]
+    fn make_bundle_tagged(base: &std::path::Path, version: &str, tag: &str) -> Vec<u8> {
         use std::os::unix::fs::PermissionsExt;
         use std::process::Command;
-        let src = base.join(format!("bundle-{version}"));
+        let src = base.join(format!("bundle-{version}-{tag}"));
         let node_dir = src.join("core/node");
         let ext_dir = src.join("core/root/extension");
         std::fs::create_dir_all(&node_dir).expect("node dir");
@@ -1266,8 +1336,8 @@ mod tests {
         let node = node_dir.join("node");
         std::fs::write(&node, "#!/bin/sh\nexit 0\n").expect("node stub");
         std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-        std::fs::write(ext_dir.join("server.mjs"), "// stub core\n").expect("server stub");
-        let tarball = base.join(format!("bundle-{version}.tar.gz"));
+        std::fs::write(ext_dir.join("server.mjs"), format!("// stub core {tag}\n")).expect("server stub");
+        let tarball = base.join(format!("bundle-{version}-{tag}.tar.gz"));
         let status = Command::new("tar")
             .env("COPYFILE_DISABLE", "1")
             .arg("-czf")
@@ -2078,6 +2148,165 @@ http.createServer((req, res) => {
             }
         }
         assert!(hits.is_empty(), "special names assigned:\n{}", hits.join("\n"));
+    }
+
+    #[test]
+    fn parse_current_sha_takes_only_64_lowercase_hex() {
+        let good = "a".repeat(64);
+        assert_eq!(parse_current_sha(&format!("__LLMIDE_CURRENT_SHA__={good}\n")), Some(good.clone()));
+        assert_eq!(parse_current_sha("__LLMIDE_CURRENT_SHA__=\n"), None, "an empty value means no record");
+        assert_eq!(parse_current_sha("noise\n"), None);
+        assert_eq!(parse_current_sha(&format!("__LLMIDE_CURRENT_SHA__={}\n", "A".repeat(64))), None);
+        assert_eq!(parse_current_sha(&format!("__LLMIDE_CURRENT_SHA__={}\n", "a".repeat(63))), None);
+    }
+
+    #[test]
+    fn probe_output_carries_the_current_sha_and_glibc() {
+        let sha = "b".repeat(64);
+        let out = format!("{PROBE_OUTPUT}__LLMIDE_CURRENT_SHA__={sha}\n__LLMIDE_GLIBC__=2.31\n");
+        let probe = parse_probe(&out).expect("probe parses");
+        assert_eq!(probe.current_sha.as_deref(), Some(sha.as_str()));
+        assert_eq!(probe.glibc.as_deref(), Some("2.31"));
+        let bare = parse_probe(PROBE_OUTPUT).expect("probe parses");
+        assert_eq!(bare.current_sha, None, "an older server prints no sha line");
+        assert_eq!(bare.glibc, None);
+    }
+
+    #[test]
+    fn glibc_below_the_standard_compares_each_dotted_part_as_a_number() {
+        assert!(glibc_is_below_standard("2.31"));
+        assert!(glibc_is_below_standard("2.9"), "2.9 is older than 2.34; a text compare would say otherwise");
+        assert!(glibc_is_below_standard("1.99"));
+        assert!(!glibc_is_below_standard("2.34"));
+        assert!(!glibc_is_below_standard("2.35"));
+        assert!(!glibc_is_below_standard("3.0"));
+        assert!(!glibc_is_below_standard("2.34.1"));
+        assert!(!glibc_is_below_standard(""), "an unknown version proceeds");
+        assert!(!glibc_is_below_standard("2..3"), "a malformed version proceeds");
+    }
+
+    #[test]
+    fn probe_prints_the_release_sha_line() {
+        assert!(PROBE.contains("__LLMIDE_CURRENT_SHA__=%s"));
+        assert!(PROBE.contains("current/BUNDLE_SHA256"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_without_a_release_prints_an_empty_sha() {
+        let base = unique_dir("probe-no-sha");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let (ok, out) = run_sh(PROBE, &home, b"");
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_CURRENT_SHA__=\n"), "{out}");
+        assert_eq!(parse_current_sha(&out), None);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    fn hidden_entries(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .expect("releases dir")
+            .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with('.'))
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_records_the_bundle_sha_beside_the_release() {
+        let base = unique_dir("sha-file");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let root = home.join(".llmide-server");
+        let bundle = make_bundle(&base, "4.0.0");
+        let sha = sha_hex(&bundle);
+        let (ok, out) = run_sh(INSTALL, &home, &install_stdin("4.0.0", &sha, &bundle));
+        assert!(ok, "{out}");
+        let record = root.join("releases/4.0.0/BUNDLE_SHA256");
+        assert_eq!(std::fs::read_to_string(&record).expect("sha file"), format!("{sha}\n"));
+        assert_eq!(mode_of(&record), 0o600);
+        let (ok, out) = run_sh(PROBE, &home, b"");
+        assert!(ok, "{out}");
+        assert_eq!(parse_current_sha(&out), Some(sha));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_keeps_a_same_version_release_with_the_same_bundle() {
+        let base = unique_dir("keep-same");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let root = home.join(".llmide-server");
+        let bundle = make_bundle_tagged(&base, "5.0.0", "same");
+        let stdin = install_stdin("5.0.0", &sha_hex(&bundle), &bundle);
+        let (ok, out) = run_sh(INSTALL, &home, &stdin);
+        assert!(ok, "{out}");
+        let release = root.join("releases/5.0.0");
+        std::fs::write(release.join("MARK"), b"kept").expect("mark");
+        let (ok, out) = run_sh(INSTALL, &home, &stdin);
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_INSTALL__=ok"), "{out}");
+        assert!(release.join("MARK").exists(), "an identical release is kept, not replaced");
+        assert!(hidden_entries(&root.join("releases")).is_empty(), "no stage or part folder is left");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_replaces_a_same_version_release_with_a_different_bundle() {
+        let base = unique_dir("replace-same");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let root = home.join(".llmide-server");
+        let first = make_bundle_tagged(&base, "5.0.0", "first");
+        let second = make_bundle_tagged(&base, "5.0.0", "second");
+        assert_ne!(sha_hex(&first), sha_hex(&second));
+        let (ok, out) = run_sh(INSTALL, &home, &install_stdin("5.0.0", &sha_hex(&first), &first));
+        assert!(ok, "{out}");
+        let release = root.join("releases/5.0.0");
+        std::fs::write(release.join("MARK"), b"old").expect("mark");
+        let (ok, out) = run_sh(INSTALL, &home, &install_stdin("5.0.0", &sha_hex(&second), &second));
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_INSTALL__=ok"), "{out}");
+        assert!(!release.join("MARK").exists(), "the old release's files are gone");
+        let server = std::fs::read_to_string(release.join("core/root/extension/server.mjs")).expect("server");
+        assert!(server.contains("second"), "the new bundle's files are in place");
+        assert_eq!(
+            std::fs::read_to_string(release.join("BUNDLE_SHA256")).expect("sha file"),
+            format!("{}\n", sha_hex(&second))
+        );
+        assert_eq!(std::fs::read_link(root.join("current")).expect("current"), release);
+        assert!(hidden_entries(&root.join("releases")).is_empty(), "no stage, part or old folder is left");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_replacement_keeps_the_old_release_whole() {
+        let base = unique_dir("replace-fail");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let root = home.join(".llmide-server");
+        let good = make_bundle_tagged(&base, "6.0.0", "good");
+        let (ok, out) = run_sh(INSTALL, &home, &install_stdin("6.0.0", &sha_hex(&good), &good));
+        assert!(ok, "{out}");
+        let release = root.join("releases/6.0.0");
+        std::fs::write(release.join("MARK"), b"old").expect("mark");
+        // Not a tarball, but its checksum matches the header: the unpack fails before the old release is touched.
+        let garbage = b"not a tarball at all".to_vec();
+        let (ok, out) = run_sh(INSTALL, &home, &install_stdin("6.0.0", &sha_hex(&garbage), &garbage));
+        assert!(!ok);
+        assert!(out.contains("__LLMIDE_INSTALL__=unpack"), "{out}");
+        assert!(release.join("MARK").exists(), "the old release is still whole");
+        assert_eq!(
+            std::fs::read_to_string(release.join("BUNDLE_SHA256")).expect("sha file"),
+            format!("{}\n", sha_hex(&good))
+        );
+        assert!(hidden_entries(&root.join("releases")).is_empty());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     // ---- ADD_KEY: the one public line that switches a password login to a key (unix only) ----

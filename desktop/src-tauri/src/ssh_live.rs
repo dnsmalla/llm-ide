@@ -33,6 +33,7 @@ use crate::remote::temp_ssh_dir;
 use crate::ssh_cmds;
 use crate::ssh_key_install;
 use crate::ssh_service::{self, Deps, SshServerTarget, SshServerTest};
+use crate::ssh_session;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -342,6 +343,7 @@ fn step_confirm_and_test(run: &mut Run) -> Result<Outcome, Failed> {
     println!("  free disk: {} MB", trusted.free_mb.map_or("unknown".to_string(), |mb| mb.to_string()));
     println!("  installed core version: {}", opt(&trusted.installed_version));
     println!("  claude: {}", opt(&trusted.claude));
+    println!("  glibc: {}", opt(&trusted.glibc));
     Ok(Outcome::Done)
 }
 
@@ -353,7 +355,25 @@ fn step_connect(run: &mut Run) -> Result<Outcome, Failed> {
     check_local_url(&status.local_url)?;
     println!("  connected in {:.1} s, forward at {}", took.as_secs_f64(), status.local_url);
     run.local_url = status.local_url;
+    // The server must now run the bundle this build holds, not just a release with the same version number.
+    let local = (run.deps.bundle)().ok_or_else(|| failed("SSH_BUNDLE_MISSING", BUNDLE_HINT))?;
+    let local_sha = ssh_session::bundle_sha256(&local)?;
+    let server_sha = ssh_service::server_bundle_sha(&run.deps, run.live.password())?.unwrap_or_default();
+    println!("  server bundle sha: {} (local {})", short_sha(&server_sha), short_sha(&local_sha));
+    expect(
+        !server_sha.is_empty() && server_sha == local_sha,
+        "BUNDLE_MISMATCH",
+        "the server does not run the bundle this build holds",
+    )?;
     Ok(Outcome::Done)
+}
+
+/// The first 12 hex characters of a bundle sha, enough to tell two bundles apart in a log.
+fn short_sha(sha: &str) -> String {
+    if sha.is_empty() {
+        return "none".to_string();
+    }
+    sha.chars().take(12).collect()
 }
 
 fn step_health(run: &mut Run) -> Result<Outcome, Failed> {

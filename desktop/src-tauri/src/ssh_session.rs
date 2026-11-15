@@ -5,7 +5,7 @@
 //! START returned. Every server command is a constant from `ssh_server_scripts`; no step builds a
 //! shell command from data.
 
-use std::io::Write;
+use std::io::{Read, Write};
 #[cfg(not(test))]
 use std::net::TcpListener;
 use std::path::Path;
@@ -20,8 +20,9 @@ use crate::fs_ops::FsError;
 use crate::remote::RawOutput;
 use crate::ssh_askpass::{grant, AskpassGrant};
 use crate::ssh_server_scripts::{
-    check_probe, install_stdin, parse_core_state, parse_probe, parse_start_failure, parse_stop, start_stdin,
-    valid_version, ClaudeState, CoreState, Probe, INSTALL, PROBE, ROLLBACK, START, STATUS, STOP, UNINSTALL,
+    check_probe, glibc_is_below_standard, install_stdin, parse_core_state, parse_install_failure, parse_probe,
+    parse_start_failure, parse_stop, start_stdin, valid_version, ClaudeState, CoreState, Probe, INSTALL, PROBE,
+    ROLLBACK, START, START_BUSY, STANDARD_GLIBC, STATUS, STOP, UNINSTALL,
 };
 use crate::ssh_transport::{forward_args, exec_args, ForwardChild, SshAuth, SshEndpoint, SshExec};
 
@@ -140,6 +141,8 @@ pub(crate) fn connect_with(
         .known_hosts
         .ok_or_else(|| herr("SSH_HOST_KEY_UNCONFIRMED", "confirm the server's host key before connecting"))?;
     check_inputs(&input)?;
+    // Read locally before any ssh call. Every connect needs it: it decides whether the server's release matches this app.
+    let bundle_sha = bundle_sha256(input.bundle)?;
     // Picked before any ssh call, so a machine with no free port changes nothing on the server.
     let local_port = pick_port()
         .ok_or_else(|| herr("SSH_NO_LOCAL_PORT", "no local port in 3456..=3459 is free for the forward"))?;
@@ -148,7 +151,7 @@ pub(crate) fn connect_with(
     let probe = parse_probe(&link.run(PROBE, None)?.stdout)?;
     check_probe(&probe)?;
     let status = parse_core_state(&link.run(STATUS, None)?.stdout)?;
-    let (core, replacement) = ensure_core(&link, &input, &probe, &status)?;
+    let (core, replacement) = ensure_core(&link, &input, &probe, &status, &bundle_sha)?;
 
     write_session(input.session_file, input.endpoint, &core.nonce)?;
     let (mut forward, _grant) = open_forward(&link, local_port, core.port)?;
@@ -171,43 +174,78 @@ pub(crate) fn connect_with(
     })
 }
 
-/// What a replacement changed on the server. `previous` is the release `current` pointed at before the
-/// install. It is set only when the install switched `current` away from it, which is the only case a
-/// failed start has to undo.
+/// What a replacement changed on the server, and what a failed start has to undo.
 struct Replacement {
+    /// A core this app started is still running and must be stopped before the start.
     was_running: bool,
+    /// The release `current` pointed at before a version change. Set only when the install switched `current` to
+    /// another version, which is the only case a failed start has a release to return to.
     previous: Option<String>,
+    /// A release of the same version was swapped for a rebuilt bundle. It has no previous release to return to, so
+    /// a failed start leaves the core stopped.
+    in_place: bool,
 }
 
-/// Makes the server run `input.version`, installing and restarting only when it does not already. Returns
-/// the core and, when this call started one, what that start replaced.
+/// Makes the server run `input.version` from the bundle this app holds, installing and restarting only when it does
+/// not already. A release counts as current only when its recorded bundle sha matches `bundle_sha`, so a rebuilt
+/// bundle with the same version is installed too. Returns the core and, when this call started one, what that start
+/// replaced.
 fn ensure_core(
     link: &Link<'_>,
     input: &ConnectInput<'_>,
     probe: &Probe,
     status: &CoreState,
+    bundle_sha: &str,
 ) -> Result<(RunningCore, Option<Replacement>), FsError> {
-    let already_running = status.running && status.version.as_deref() == Some(input.version);
+    let version_matches = probe.current.as_deref() == Some(input.version);
+    let release_matches = version_matches && probe.current_sha.as_deref() == Some(bundle_sha);
     if status.running {
         require_ours(status, input.session_file, input.endpoint)?;
     }
-    let previous = install_if_needed(link, input, probe)?;
+    let already_running = status.running && release_matches && status.version.as_deref() == Some(input.version);
     if already_running {
         return Ok((running_core(status)?, None));
     }
-    let replacement = Replacement { was_running: status.running, previous };
+    let install_needed = !release_matches;
+    // Checked before anything is stopped or uploaded, so an old server is refused with its core left alone.
+    if install_needed {
+        check_glibc(input.bundle, probe)?;
+    }
+    let in_place = install_needed && version_matches;
+    let mut was_running = status.running;
+    // A running core loads files from the release folder of its own version, and INSTALL replaces that folder when
+    // the release changes. Such a core is stopped before INSTALL. A core of another version runs from another folder,
+    // so it is stopped later, after the install, as a version change always was.
+    let folder_in_use = status.running && status.version.as_deref() == Some(input.version);
+    if install_needed && folder_in_use {
+        stop_core(link)?;
+        was_running = false;
+    }
+    if install_needed {
+        install_core(link, input.bundle, input.version, bundle_sha)?;
+    }
+    let replacement = Replacement {
+        was_running,
+        previous: if install_needed && !version_matches { probe.current.clone() } else { None },
+        in_place,
+    };
     let core = replace_core(link, input, &replacement)?;
     Ok((core, Some(replacement)))
 }
 
-/// Uploads the release when `current` is another version. Returns the release `current` pointed at before,
-/// which is `None` when nothing was switched away from.
-fn install_if_needed(link: &Link<'_>, input: &ConnectInput<'_>, probe: &Probe) -> Result<Option<String>, FsError> {
-    if probe.current.as_deref() == Some(input.version) {
-        return Ok(None);
+/// Refuses the standard bundle on a server whose glibc is older than the bundle needs, before any upload. The
+/// `-compat` bundle is built for older systems, so it is always allowed. An unknown glibc is not refused.
+fn check_glibc(bundle: &Path, probe: &Probe) -> Result<(), FsError> {
+    let is_compat = bundle.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.contains("-compat"));
+    match &probe.glibc {
+        Some(glibc) if !is_compat && glibc_is_below_standard(glibc) => Err(herr(
+            "SSH_GLIBC_TOO_OLD",
+            format!(
+                "This server's system libraries are too old for the standard server bundle (glibc {glibc}; {STANDARD_GLIBC} needed). Build the compatible bundle and try again."
+            ),
+        )),
+        _ => Ok(()),
     }
-    install_core(link, input.bundle, input.version)?;
-    Ok(probe.current.clone())
 }
 
 /// Only a core that never answered (`SSH_START_FAILED`) is grounds for rolling back. A forward or ssh
@@ -276,7 +314,9 @@ fn replace_core(link: &Link<'_>, input: &ConnectInput<'_>, replacement: &Replace
         stop_core(link)?;
     }
     let started = start_core(link, input, input.version, !replacement.was_running);
-    if matches!(&started, Err(e) if is_start_failure(e)) {
+    // Only a version change has a previous release to return to. An in-place replacement has none, and the failed
+    // start has already stopped its own core, so there is nothing to undo.
+    if matches!(&started, Err(e) if is_start_failure(e)) && replacement.previous.is_some() {
         fail_update(link, input, replacement);
     }
     started
@@ -286,6 +326,11 @@ fn replace_core(link: &Link<'_>, input: &ConnectInput<'_>, replacement: &Replace
 /// running before, start that release again. Best effort, because the caller reports the start failure.
 fn fail_update(link: &Link<'_>, input: &ConnectInput<'_>, replacement: &Replacement) {
     let Some(previous) = replacement.previous.as_deref() else {
+        // An in-place replacement whose core started but never answered: the new release is the broken one and
+        // there is no other to return to, so the core is left stopped rather than running a release that failed.
+        if replacement.in_place {
+            let _ = stop_core(link);
+        }
         return;
     };
     roll_back(link);
@@ -312,6 +357,10 @@ fn start_core(
     let stdin = start_stdin(version, &nonce, input.secrets_payload);
     let output = link.run(START, Some(&stdin))?;
     if let Some((value, log)) = parse_start_failure(&output.stdout) {
+        // Another START holds the data folder's lock. It is not a failed start, so no release is rolled back for it.
+        if value == START_BUSY {
+            return Err(herr("SSH_START_BUSY", "The server is already starting. Try again in a moment."));
+        }
         let detail = log.map(|line| format!(": {line}")).unwrap_or_default();
         return Err(herr("SSH_START_FAILED", format!("the server could not start the core ({value}){detail}")));
     }
@@ -337,21 +386,48 @@ fn running_core(state: &CoreState) -> Result<RunningCore, FsError> {
     }
 }
 
-/// Uploads the release when the server's `current` is another version. INSTALL verifies the checksum
+/// Uploads the bundle as `version`, with `sha256_hex` as the checksum in the header. INSTALL verifies the checksum
 /// on the server, so a corrupted upload is refused there rather than run.
-fn install_core(link: &Link<'_>, bundle: &Path, version: &str) -> Result<(), FsError> {
+fn install_core(link: &Link<'_>, bundle: &Path, version: &str, sha256_hex: &str) -> Result<(), FsError> {
     let tarball = std::fs::read(bundle)
         .map_err(|e| herr("SSH_INSTALL_FAILED", format!("could not read the core bundle: {e}")))?;
-    let stdin = install_stdin(version, &hex_sha256(&tarball), &tarball);
+    let stdin = install_stdin(version, sha256_hex, &tarball);
     let output = link.run(INSTALL, Some(&stdin))?;
     if output.code != Some(0) {
-        return Err(herr("SSH_INSTALL_FAILED", "the server could not install the core"));
+        return Err(install_failure(&output.stdout));
     }
     Ok(())
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+/// Maps the INSTALL script's failure marker to its message. A transport failure never reaches here: it is mapped by
+/// `Link::run` first. Causes the user can act on each get their own text; anything else stays generic.
+fn install_failure(stdout: &str) -> FsError {
+    match parse_install_failure(stdout) {
+        Some("checksum") => herr("SSH_INSTALL_FAILED", "The upload was damaged. Try again."),
+        Some("unpack") => herr("SSH_INSTALL_FAILED", "The server could not unpack the bundle."),
+        Some("disk") => herr(
+            "SSH_DISK_LOW",
+            "The server ran out of disk space during the install. Free space in the home folder, then try again.",
+        ),
+        _ => herr("SSH_INSTALL_FAILED", "the server could not install the core"),
+    }
+}
+
+/// The SHA-256 of the bundle file, read in chunks so a bundle of about 200 MB is not held in memory here.
+/// Computed once per connect and used both for the release comparison and as the INSTALL header.
+pub(crate) fn bundle_sha256(path: &Path) -> Result<String, FsError> {
+    let failed = |e: std::io::Error| herr("SSH_INSTALL_FAILED", format!("could not read the core bundle: {e}"));
+    let mut file = std::fs::File::open(path).map_err(failed)?;
+    let mut hasher = Sha256::new();
+    let mut chunk = vec![0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut chunk).map_err(failed)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&chunk[..read]);
+    }
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Refuses a running core this desktop did not start. The record must name this endpoint and the nonce
@@ -796,7 +872,7 @@ pub(crate) mod tests {
         let scratch = Scratch::new("same");
         let ep = key_endpoint();
         record_running_core(&scratch, &ep, OLD);
-        let fake = FakeExec::new(vec![probe_out("2.0.0"), state_out(3461, OLD, "2.0.0")]);
+        let fake = FakeExec::new(vec![probe_with_release("2.0.0", &bundle_sha()), state_out(3461, OLD, "2.0.0")]);
         let healthy = |_: u16| Some(OLD.to_string());
         let connected = expect_ok(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
 
@@ -1072,6 +1148,251 @@ pub(crate) mod tests {
         assert_eq!(err.code, "SSH_TIMEOUT");
         assert_eq!(err.message, "The server did not answer in time.");
         assert_eq!(fake.names(), vec!["probe"], "nothing runs after a timed-out probe");
+    }
+
+    /// The sha of the scratch bundle's bytes, the one the app sends in the INSTALL header.
+    fn bundle_sha() -> String {
+        Sha256::digest(TARBALL).iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// PROBE output that also reports the release's recorded bundle sha.
+    pub(crate) fn probe_with_release(current: &str, current_sha: &str) -> io::Result<RawOutput> {
+        ok(&format!("{}__LLMIDE_CURRENT_SHA__={current_sha}\n", probe_out(current)?.stdout))
+    }
+
+    /// PROBE output that also reports the server's glibc version.
+    pub(crate) fn probe_with_glibc(current: &str, glibc: &str) -> io::Result<RawOutput> {
+        ok(&format!("{}__LLMIDE_GLIBC__={glibc}\n", probe_out(current)?.stdout))
+    }
+
+    /// A START answer that failed with `value`, as the script prints it (exit 1).
+    fn start_failed(value: &str) -> io::Result<RawOutput> {
+        Ok(RawOutput { code: Some(1), stdout: format!("__LLMIDE_START__={value}\n"), stderr: String::new() })
+    }
+
+    /// An INSTALL answer that failed with `marker`, as the script prints it (exit 1).
+    fn install_failed(marker: &str) -> io::Result<RawOutput> {
+        Ok(RawOutput { code: Some(1), stdout: format!("__LLMIDE_INSTALL__={marker}\n"), stderr: String::new() })
+    }
+
+    #[test]
+    fn same_version_without_a_recorded_sha_is_replaced_when_our_core_runs() {
+        // A release installed before the sha was recorded has no record, so it is never taken as this bundle.
+        let scratch = Scratch::new("no-sha-record");
+        let ep = key_endpoint();
+        record_running_core(&scratch, &ep, OLD);
+        let fake = FakeExec::new(vec![
+            probe_out("2.0.0"),
+            state_out(3461, OLD, "2.0.0"),
+            ok(STOP_OK),
+            ok(INSTALL_OK),
+            started_out(3462, "2.0.0"),
+        ]);
+        let healthy = started_health(&fake);
+        expect_ok(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(fake.names(), vec!["probe", "status", "stop", "install", "start", "forward"]);
+    }
+
+    #[test]
+    fn same_version_with_a_new_bundle_installs_then_starts_when_stopped() {
+        let scratch = Scratch::new("new-sha-stopped");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![
+            probe_with_release("2.0.0", &"0".repeat(64)),
+            ok(STOPPED_STATUS),
+            ok(INSTALL_OK),
+            started_out(3460, "2.0.0"),
+        ]);
+        let healthy = started_health(&fake);
+        expect_ok(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(fake.names(), vec!["probe", "status", "install", "start", "forward"]);
+        let header = format!("2.0.0 {}\n", bundle_sha());
+        assert!(fake.calls()[2].stdin.clone().unwrap().starts_with(header.as_bytes()));
+    }
+
+    #[test]
+    fn same_version_with_a_new_bundle_stops_our_core_before_install_then_starts() {
+        let scratch = Scratch::new("new-sha-running");
+        let ep = key_endpoint();
+        record_running_core(&scratch, &ep, OLD);
+        let fake = FakeExec::new(vec![
+            probe_with_release("2.0.0", &"0".repeat(64)),
+            state_out(3461, OLD, "2.0.0"),
+            ok(STOP_OK),
+            ok(INSTALL_OK),
+            started_out(3462, "2.0.0"),
+        ]);
+        let healthy = started_health(&fake);
+        let connected = expect_ok(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(fake.names(), vec!["probe", "status", "stop", "install", "start", "forward"]);
+        assert_eq!(connected.remote_port, 3462);
+        assert_eq!(connected.nonce, fake.started_nonce());
+    }
+
+    #[test]
+    fn same_version_with_a_new_bundle_refuses_a_foreign_core_before_install() {
+        let scratch = Scratch::new("new-sha-foreign");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![
+            probe_with_release("2.0.0", &"0".repeat(64)),
+            state_out(3460, "foreignnonce0123456", "2.0.0"),
+        ]);
+        let healthy = |_: u16| Some(NEW.to_string());
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_CORE_FOREIGN");
+        assert_eq!(fake.names(), vec!["probe", "status"], "nothing is stopped or uploaded for a foreign core");
+    }
+
+    #[test]
+    fn same_version_replacement_whose_health_never_answers_leaves_the_core_stopped() {
+        let scratch = Scratch::new("new-sha-silent");
+        let ep = key_endpoint();
+        record_running_core(&scratch, &ep, OLD);
+        let fake = FakeExec::new(vec![
+            probe_with_release("2.0.0", &"0".repeat(64)),
+            state_out(3461, OLD, "2.0.0"),
+            ok(STOP_OK),
+            ok(INSTALL_OK),
+            started_out(3462, "2.0.0"),
+            ok(STOP_OK),
+        ]);
+        let silent = |_: u16| None;
+        let err = expect_err(connect_with(&fake, &silent, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_START_FAILED");
+        assert_eq!(
+            fake.names(),
+            vec!["probe", "status", "stop", "install", "start", "forward", "stop"],
+            "no previous release exists, so the failed core is stopped and nothing is rolled back"
+        );
+    }
+
+    #[test]
+    fn a_failed_start_after_a_same_version_replacement_does_not_roll_back() {
+        let scratch = Scratch::new("new-sha-start-fails");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![
+            probe_with_release("2.0.0", &"0".repeat(64)),
+            ok(STOPPED_STATUS),
+            ok(INSTALL_OK),
+            start_failed("timeout"),
+        ]);
+        let healthy = started_health(&fake);
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_START_FAILED");
+        assert_eq!(fake.names(), vec!["probe", "status", "install", "start"]);
+    }
+
+    #[test]
+    fn old_glibc_refuses_the_standard_bundle_before_any_upload() {
+        let scratch = Scratch::new("glibc-old");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![probe_with_glibc("", "2.31"), ok(STOPPED_STATUS)]);
+        let healthy = started_health(&fake);
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_GLIBC_TOO_OLD");
+        assert_eq!(
+            err.message,
+            "This server's system libraries are too old for the standard server bundle (glibc 2.31; 2.34 needed). \
+             Build the compatible bundle and try again."
+        );
+        assert_eq!(fake.names(), vec!["probe", "status"], "no INSTALL, and no byte of the bundle is uploaded");
+    }
+
+    #[test]
+    fn old_glibc_is_checked_before_a_running_core_is_stopped() {
+        let scratch = Scratch::new("glibc-old-running");
+        let ep = key_endpoint();
+        record_running_core(&scratch, &ep, OLD);
+        let fake = FakeExec::new(vec![
+            probe_with_glibc("2.0.0", "2.31"),
+            state_out(3461, OLD, "2.0.0"),
+        ]);
+        let healthy = |_: u16| Some(OLD.to_string());
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_GLIBC_TOO_OLD");
+        assert_eq!(fake.names(), vec!["probe", "status"], "the running core is left alone");
+    }
+
+    #[test]
+    fn old_glibc_with_the_compat_bundle_installs() {
+        let scratch = Scratch::new("glibc-compat");
+        let ep = key_endpoint();
+        let compat = scratch.dir.join("llmide-core-2.0.0-linux-x64-compat.tar.gz");
+        std::fs::write(&compat, TARBALL).unwrap();
+        let mut compat_input = input(&ep, &scratch, None);
+        compat_input.bundle = compat.as_path();
+        let fake = FakeExec::new(vec![
+            probe_with_glibc("", "2.31"),
+            ok(STOPPED_STATUS),
+            ok(INSTALL_OK),
+            started_out(3460, "2.0.0"),
+        ]);
+        let healthy = started_health(&fake);
+        expect_ok(connect_with(&fake, &healthy, compat_input, &|| Some(3456)));
+        assert_eq!(fake.names(), vec!["probe", "status", "install", "start", "forward"]);
+    }
+
+    #[test]
+    fn a_busy_start_is_its_own_code_and_triggers_no_rollback() {
+        let scratch = Scratch::new("busy-fresh");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![probe_out(""), ok(STOPPED_STATUS), ok(INSTALL_OK), start_failed("busy")]);
+        let healthy = started_health(&fake);
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_START_BUSY");
+        assert_eq!(err.message, "The server is already starting. Try again in a moment.");
+        assert_eq!(fake.names(), vec!["probe", "status", "install", "start"]);
+    }
+
+    #[test]
+    fn a_busy_start_during_an_update_does_not_roll_back() {
+        let scratch = Scratch::new("busy-update");
+        let ep = key_endpoint();
+        record_running_core(&scratch, &ep, OLD);
+        let fake = FakeExec::new(vec![
+            probe_out("1.0.0"),
+            state_out(3460, OLD, "1.0.0"),
+            ok(INSTALL_OK),
+            ok(STOP_OK),
+            start_failed("busy"),
+        ]);
+        let healthy = |_: u16| Some(OLD.to_string());
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_START_BUSY");
+        assert_eq!(fake.names(), vec!["probe", "status", "install", "stop", "start"], "no rollback runs");
+    }
+
+    #[test]
+    fn install_failures_name_their_own_cause() {
+        let cases = [
+            ("checksum", "SSH_INSTALL_FAILED", "The upload was damaged. Try again."),
+            ("unpack", "SSH_INSTALL_FAILED", "The server could not unpack the bundle."),
+            (
+                "disk",
+                "SSH_DISK_LOW",
+                "The server ran out of disk space during the install. Free space in the home folder, then try again.",
+            ),
+            ("layout", "SSH_INSTALL_FAILED", "the server could not install the core"),
+            ("failed", "SSH_INSTALL_FAILED", "the server could not install the core"),
+        ];
+        for (marker, code, message) in cases {
+            let scratch = Scratch::new("install-msg");
+            let ep = key_endpoint();
+            let fake = FakeExec::new(vec![probe_out(""), ok(STOPPED_STATUS), install_failed(marker)]);
+            let healthy = started_health(&fake);
+            let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+            assert_eq!((err.code, err.message.as_str()), (code, message), "for marker {marker}");
+        }
+    }
+
+    #[test]
+    fn an_install_transport_failure_keeps_its_own_mapping() {
+        let scratch = Scratch::new("install-transport");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![probe_out(""), ok(STOPPED_STATUS), ssh_error(TIMED_OUT)]);
+        let healthy = started_health(&fake);
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_UNREACHABLE");
     }
 
     #[test]

@@ -89,6 +89,9 @@ pub struct SshServerTest {
     pub installed_version: Option<String>,
     /// `missing` or the installed CLI version text.
     pub claude: Option<String>,
+    /// The server's glibc version (for example `2.31`), when the server reports one. The UI explains an old
+    /// glibc before any upload.
+    pub glibc: Option<String>,
 }
 
 /// The saved server and whether SSH mode serves it. Nothing secret, and no ssh output.
@@ -328,6 +331,21 @@ pub(crate) fn server_core_state(deps: &Deps, password: Option<&str>) -> Result<c
     let pinned = pinned_dir(&endpoint, &pin)?;
     let output = run_pinned(deps, &endpoint, &pinned, password, crate::ssh_server_scripts::STATUS)?;
     crate::ssh_server_scripts::parse_core_state(&output.stdout)
+}
+
+/// The bundle sha the server's current release was installed from, read with the constant PROBE script over the
+/// pinned transport. Test-only, for the live check, which compares it with the bundle this build holds. The
+/// production path reads it inside connect.
+///
+/// Errors:
+///     `SSH_PASSWORD_REQUIRED`, `SSH_HOST_KEY_UNCONFIRMED` and the transport codes of the probe.
+#[cfg(test)]
+pub(crate) fn server_bundle_sha(deps: &Deps, password: Option<&str>) -> Result<Option<String>, FsError> {
+    let endpoint = saved_endpoint(password)?;
+    let pin = require_pin(&endpoint)?;
+    let pinned = pinned_dir(&endpoint, &pin)?;
+    let output = run_pinned(deps, &endpoint, &pinned, password, PROBE)?;
+    Ok(crate::ssh_server_scripts::parse_current_sha(&output.stdout))
 }
 
 /// Stops the forward, then stops the server core named in state.json.
@@ -579,6 +597,7 @@ fn base_result(offered: &Offered, trusted: bool, changed: bool) -> SshServerTest
         free_mb: None,
         installed_version: None,
         claude: None,
+        glibc: None,
     }
 }
 
@@ -599,6 +618,7 @@ fn probe_trusted(
     result.free_mb = Some(probe.free_mb);
     result.installed_version = probe.current;
     result.claude = Some(claude_text(&probe.claude));
+    result.glibc = probe.glibc;
     Ok(result)
 }
 
@@ -667,7 +687,7 @@ pub(crate) mod tests {
     use crate::ssh_server_scripts::{ClaudeState, STOP, UNINSTALL};
     use crate::ssh_session::write_session;
     use crate::ssh_session::tests::{
-        ok, probe_out, ssh_error, started_out, state_out, FakeExec, NEW, PASSWORD, PERMISSION_DENIED,
+        ok, probe_out, probe_with_glibc, ssh_error, started_out, state_out, FakeExec, NEW, PASSWORD, PERMISSION_DENIED,
         STOPPED_STATUS, TIMED_OUT,
     };
     use crate::ssh_session::Connected;
@@ -980,6 +1000,18 @@ pub(crate) mod tests {
         assert_eq!(result.free_mb, Some(5000));
         assert_eq!(result.installed_version.as_deref(), Some("2.0.0"));
         assert_eq!(result.claude.as_deref(), Some("2.1.0 (Claude Code)"));
+    }
+
+    #[test]
+    fn trusted_probe_reports_the_glibc_version() {
+        let fx = Fixture::new("svc-glibc");
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![probe_with_glibc("2.0.0", "2.31")]);
+        let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
+        let result = test(&deps, &target(22, SshAuthKind::Key), None).unwrap();
+        assert_eq!(result.glibc.as_deref(), Some("2.31"));
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["glibc"], "2.31", "the UI reads the glibc field by this name");
     }
 
     #[test]
