@@ -185,13 +185,11 @@ static BYPASS_OPEN: OpenFlag = OpenFlag::new();
 /// The dialog text for a summary. The template is fixed; only the quoted detail varies.
 pub(crate) fn bypass_text(summary: &str) -> String {
     let detail = sanitize_line(summary, SUMMARY_MAX_CHARS);
-    let base = "Bypass permissions lets the assistant edit files and run commands in your \
-                project without asking you first. Only continue if you trust this project \
-                and what you are asking it to do.";
+    let base = "Applies to this chat until you turn Bypass off.";
     if detail.is_empty() {
         base.to_string()
     } else {
-        format!("{base}\n\nRequested for: \u{201C}{detail}\u{201D}")
+        format!("{base}\n\nChat: \u{201C}{detail}\u{201D}")
     }
 }
 
@@ -367,11 +365,11 @@ mod tests {
     #[test]
     fn bypass_text_is_fixed_template_plus_quoted_detail() {
         let base = bypass_text("");
-        assert!(base.starts_with("Bypass permissions lets the assistant"));
-        assert!(!base.contains("Requested for"));
+        assert!(base.starts_with("Applies to this chat"));
+        assert!(!base.contains("Chat:"));
         let t = bypass_text("fix\u{202E} the\nbuild");
         assert!(t.starts_with(&base));
-        assert!(t.ends_with("Requested for: \u{201C}fix the build\u{201D}"));
+        assert!(t.ends_with("Chat: \u{201C}fix the build\u{201D}"));
         assert!(!t.contains('\u{202E}'));
     }
 
