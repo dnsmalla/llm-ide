@@ -197,7 +197,9 @@ Host API.
 - `shellCommand` stages run with the project root as cwd
 - `skill` stages call the core's `/kb/loop/agent-run` with the Claude Agent SDK
 - unsupported stage kinds are recorded as skipped
-- the run record is written to `llm-doc/loop/host/<timestamp>/run.json`
+- a git project runs in `.llmide-loop-worktrees/run-<timestamp>` (a detached worktree from HEAD), not in the live folder
+- the run record is written to `llm-doc/loop/host/<timestamp>/run.json` **inside that worktree**
+- the worktree is left for review; add `.llmide-loop-worktrees/` to the project's `.gitignore`
 
 The desktop Remote workspace exposes **Run loop**: it asks for a loop name (blank = primary), runs this CLI over SSH,
 and prints the result. A skipped blocking stage fails the run (`partial: true`), so a host run cannot claim success for
