@@ -275,6 +275,7 @@ pub fn tray_view(core: Phase, recording: bool, capture_supported: bool, chat: u3
         Phase::Restarting => "Backend restarting",
         Phase::Failed | Phase::Stopped => "Backend stopped",
         Phase::Remote => "Remote hub",
+        Phase::Ssh => "SSH server",
     };
     let status = if recording { format!("{backend} · Recording") } else { backend.to_string() };
     let total = chat.saturating_add(jobs);

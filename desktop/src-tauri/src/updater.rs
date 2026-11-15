@@ -187,7 +187,7 @@ pub async fn update_install(app: tauri::AppHandle, host: tauri::State<'_, crate:
 /// stay stopped when the install fails.
 fn core_was_running(phase: crate::core_host::Phase) -> bool {
     use crate::core_host::Phase;
-    matches!(phase, Phase::Starting | Phase::Ready | Phase::Restarting | Phase::Remote)
+    matches!(phase, Phase::Starting | Phase::Ready | Phase::Restarting | Phase::Remote | Phase::Ssh)
 }
 
 /// Undoes exactly what the pre-install steps changed: the core only if it was running, the quit-archive always.
