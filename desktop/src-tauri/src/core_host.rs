@@ -765,7 +765,9 @@ impl CoreHost {
             if matches!(s.state, Phase::Starting | Phase::Remote) { return Ok(()); }
             drop(s);
             *lock(&self.inner.run_prefs) = Some((self.inner.prefs_source)());
-            self.start_in_background(lock(&self.inner.data_dir).clone());
+            // Bound first: a guard in the argument would stay locked while `start_in_background` locks the same mutex.
+            let data_dir = lock(&self.inner.data_dir).clone();
+            self.start_in_background(data_dir);
             return Ok(());
         }
         let data = lock(&self.inner.data_dir).clone().ok_or_else(|| "the app data folder is not available".to_string())?;
@@ -2694,6 +2696,28 @@ process.on('SIGTERM', () => process.exit(0));
         if s.state == Phase::Failed { assert_eq!(s.error_code, Some("REMOTE_UNAVAILABLE")); }
         assert!(host.verified_url().is_none(), "a remote core is never a locally verified spawn");
         host.shutdown();
+    }
+
+    #[test]
+    fn hub_mode_start_after_stop_returns() {
+        let _mode = mode_guard();
+        // Empty hub URL: the startup then fails fast with REMOTE_NOT_CONFIGURED and never touches the network.
+        let host = CoreHost::with(tuning_fast(vec![free_ports(1)[0]]), never_launcher(), no_claude()).with_prefs_source(Arc::new(|| {
+            crate::prefs::Prefs { remote_server: crate::prefs::RemoteServerPrefs { mode: ServerMode::Remote, ..Default::default() }, ..Default::default() }
+        }));
+        host.set_mode(ServerMode::Remote);
+        host.mark_stopped(Some(std::env::temp_dir()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let starting = host.clone();
+        // On a regression the start thread stays blocked; the test fails here instead of hanging the suite.
+        thread::spawn(move || {
+            let _ = tx.send(starting.start());
+        });
+        let returned = rx.recv_timeout(Duration::from_secs(2));
+        assert!(returned.is_ok(), "hub-mode Start did not return: the data dir lock is held across start_in_background");
+        returned.unwrap().unwrap();
+        host.stop().unwrap();
+        host.set_mode(ServerMode::Local);
     }
 
     // ---- SSH server mode ---------------------------------------------------------------
