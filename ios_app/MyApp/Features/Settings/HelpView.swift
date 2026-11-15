@@ -19,7 +19,7 @@ struct HelpView: View {
                         content: """
                         1. On the desktop: LLM-IDE → Settings → Phone and browser → "Live Chat pairing". It shows a QR code and a PIN.
                         2. On iPhone: tap Scan QR Code and point it at that QR. The QR carries the desktop's address and its security identity, which this iPhone pins.
-                        3. When status shows Live, use the Chat tab. History lists the desktop's chats read-only.
+                        3. When status shows Live, use the Ask tab. History lists the desktop's chats read-only.
                         """
                     )
                     HelpSection(
@@ -27,7 +27,7 @@ struct HelpView: View {
                         content: """
                         • Work → Changes lists the files changed in the desktop's project. Tap a file to see its diff.
                         • Type a commit message and tap Commit all changed files, then Push branch to send the current branch to its upstream. Both ask you to confirm first.
-                        • This needs the desktop switch "Allow remote edits, commit, push and tests" (Settings → Phone and browser → Host API). It is off by default. After you turn it on, restart the core and scan the pairing QR again.
+                        • Viewing changes and diffs works with any pairing. Commit and Push need the desktop switch "Allow remote edits, commit, push and tests" (Settings → Phone and browser → Host API). It is off by default. After you turn it on, restart the core and scan the pairing QR again.
                         """
                     )
                     HelpSection(
@@ -55,7 +55,7 @@ struct HelpView: View {
                         • LLM-IDE must be running on the desktop, on the same Wi‑Fi or Tailscale.
                         • "Security identity changed": the desktop's certificate changed — scan its pairing QR again.
                         • "Removed on the host": this iPhone was unpaired on the desktop — scan the QR again.
-                        • Changes shows an error such as "denied" or "capability unavailable": turn on "Allow remote edits, commit, push and tests" on the desktop, restart the core, then scan the QR again.
+                        • Commit or Push shows an error such as "denied" or "capability unavailable": turn on "Allow remote edits, commit, push and tests" on the desktop, restart the core, then scan the QR again.
                         """
                     )
                 }
