@@ -152,6 +152,10 @@ the server's login `PATH`, and also in `~/.local/bin`, `~/.npm-global/bin`, `~/.
   sign-in is what stops them from using it.
 - **Web and iPhone.** They cannot reach a core in SSH server mode.
 
+The first account created on the server core becomes its owner. After that, further sign-ups are refused
+without an invite, and the sign-in screen stops offering sign-up. An invite from the owner still lets a
+new account in. The server core is started in this single-owner mode (`LLMIDE_REGISTRATION_SINGLE_OWNER=1`).
+
 ## Troubleshooting
 
 Each row starts with the exact sentence the app shows.
