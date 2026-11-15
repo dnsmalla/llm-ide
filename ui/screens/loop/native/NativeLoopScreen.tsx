@@ -678,8 +678,9 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
       const trailRepo = shipTarget({ repo: activeRun?.repo ?? workRoot ?? projectRoot ?? "" }, readRepoConfig());
       const trail = await trailForRun({ ...loopTrailDeps, onError: (line) => setRunLog((l) => [...l, line]) }, {
         item: start ? { ...start.item, provider: start.item.provider ?? null } : null,
-        // Every loop keeps an issue trail: one comment per completed stage and one run summary.
-        open: true,
+        // Only open a fresh repo issue when the loop opted in (config.issueTrail, default off); a run started from an
+        // issue still comments on that issue because the issue is the run's home.
+        open: target.config.issueTrail === true,
         repo: trailRepo,
         process: target.name, runId: trailRunId, goal: target.goal, steps: target.config.stages.filter((st) => st.enabled).map((st) => st.name),
       });

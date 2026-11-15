@@ -146,3 +146,11 @@ test("a missing create permission or a refused create explains itself", async ()
   assert.equal(await trailForRun({ ...refused.deps, onError: (l) => lines.push(l) }, { ...base, open: true, repo: { provider: "github", slug: "o/r" } }), null);
   assert.match(lines.join("\n"), /create failed \(HTTP 403\)/);
 });
+
+test("the Loop screen opens a run issue only when config.issueTrail is on", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
+  const call = src.slice(src.indexOf("trailForRun({"));
+  assert.match(call.slice(0, 600), /open: target\.config\.issueTrail === true/);
+  assert.doesNotMatch(call.slice(0, 600), /open: true/);
+});
