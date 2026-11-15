@@ -60,3 +60,9 @@ test("a nested Test input path copies the plan from the nested llm-doc/loop fold
   const dir = await writeRunArchive(fs, { ...loop, defaultKey: "test", inputPath: "code/llm-ide_test" }, outcome, ["log"], at, "", "code/llm-ide_test");
   assert.equal(files.get(`${dir}/TEST-MAP.md`), "# Map\n");
 });
+
+test("the run archive lives under system/loop-runs/archive, never under llm-doc", () => {
+  const dir = archiveDir(loop, new Date("2026-11-02T01:30:00Z"));
+  assert.match(dir, /^system\/loop-runs\/archive\/2026\/11\//);
+  assert.equal(dir.startsWith("llm-doc/"), false);
+});

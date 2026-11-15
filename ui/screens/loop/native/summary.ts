@@ -40,9 +40,13 @@ export interface RunArchiveFs extends SummaryFs {
   read(path: string, max?: number): Promise<{ status: string; text: string | null }>;
 }
 
-/** One folder per run under llm-doc/loop/, holding run.md and the plan it produced. */
+/**
+ * One folder per run, holding run.md and the plan it produced. It lives under system/loop-runs/ (the Loop's own
+ * ignored, protected journal) rather than llm-doc/: the archive is written into the MAIN tree even for worktree runs,
+ * and under llm-doc/ it dirtied the working tree and broke the "main working tree was not touched" guarantee.
+ */
 export function archiveDir(loop: LoopDefinition, at: Date): string {
-  return summaryPath(loop, at).replace(/\.md$/, "");
+  return summaryPath(loop, at).replace(/^llm-doc\/loop\//, "system/loop-runs/archive/").replace(/\.md$/, "");
 }
 
 const PLAN_CANDIDATES = [
