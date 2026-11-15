@@ -279,6 +279,12 @@ pub fn ssh_args_with(target: &PreparedTarget, command: &str) -> Vec<String> {
         "-v".to_string(),
         "-o".to_string(),
         "BatchMode=yes".to_string(),
+        // Long remote Loop runs sit silent for minutes; keepalives stop NAT/idle timeouts killing them
+        // and let a dead link fail in ~2 minutes instead of hanging.
+        "-o".to_string(),
+        "ServerAliveInterval=30".to_string(),
+        "-o".to_string(),
+        "ServerAliveCountMax=4".to_string(),
         "-o".to_string(),
         format!("ConnectTimeout={CONNECT_TIMEOUT_SECS}"),
         "-o".to_string(),
@@ -484,8 +490,18 @@ pub async fn remote_ssh_test(target: SshTarget) -> Result<SshTestResult, FsError
     .map_err(|e| herr("internal", format!("the SSH test did not finish: {e}")))?
 }
 
-/// R-034 #7: remember the host-key fingerprint the user confirmed after a Test SSH. Deploy, update and
-/// uninstall refuse until this is called for the same host:port in this app session.
+/// Run one fixed remote command over the host-key-pinned transport (the same one deploy uses).
+/// The confirmation is checked FIRST so an unconfirmed host is refused before any connection, and the
+/// runner then pins ONE confirmed key (`StrictHostKeyChecking=yes`) instead of trusting whatever answers.
+pub fn run_pinned(
+    prepared: &PreparedTarget,
+    command: &str,
+    runner: &dyn crate::remote_deploy::DeployRunner,
+) -> Result<RawOutput, FsError> {
+    require_confirmed_host_key(prepared)?;
+    runner.run(prepared, command, None)
+}
+
 /// List, merge or remove host Loop worktrees through the fixed CLI.
 #[tauri::command]
 pub async fn remote_ssh_worktree(target: SshTarget, action: String, path: String, name: String) -> Result<String, FsError> {
@@ -502,12 +518,7 @@ pub async fn remote_ssh_worktree(target: SshTarget, action: String, path: String
         } else {
             format!("/usr/local/bin/llmide-remote-worktree {action} {qpath} {qname}")
         };
-        let dir = temp_ssh_dir("ssh-worktree")?;
-        let known = dir.join("known_hosts");
-        let args = ssh_args_known(&prepared, &command, &known, true);
-        let output = SystemSsh.run(&args).map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")));
-        let _ = std::fs::remove_dir_all(&dir);
-        let output = output?;
+        let output = run_pinned(&prepared, &command, &crate::remote_deploy::SystemDeploy)?;
         if output.code != Some(0) {
             let body = output.stdout.trim();
             if !body.is_empty() { return Ok(body.to_string()); }
@@ -530,12 +541,7 @@ pub async fn remote_ssh_loop(target: SshTarget, path: String, loop_name: String)
         let qpath = format!("'{}'", path.replace('\'', "'\\''"));
         let qloop = format!("'{}'", loop_name.replace('\'', "'\\''"));
         let command = format!("/usr/local/bin/llmide-remote-loop {qpath} {qloop}");
-        let dir = temp_ssh_dir("ssh-loop")?;
-        let known = dir.join("known_hosts");
-        let args = ssh_args_known(&prepared, &command, &known, true);
-        let output = SystemSsh.run(&args).map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")));
-        let _ = std::fs::remove_dir_all(&dir);
-        let output = output?;
+        let output = run_pinned(&prepared, &command, &crate::remote_deploy::SystemDeploy)?;
         // A failed Loop still writes run.json and prints its JSON result; show that instead of a bare exit code.
         if output.code != Some(0) {
             let body = output.stdout.trim();
@@ -559,12 +565,7 @@ pub async fn remote_ssh_project(target: SshTarget, action: String, path: String)
         check_key_file(&prepared.key_path)?;
         let quoted = format!("'{}'", path.replace('\'', "'\\''"));
         let command = format!("/usr/local/bin/llmide-remote-project {action} {quoted}");
-        let dir = temp_ssh_dir("ssh-project")?;
-        let known = dir.join("known_hosts");
-        let args = ssh_args_known(&prepared, &command, &known, true);
-        let output = SystemSsh.run(&args).map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")));
-        let _ = std::fs::remove_dir_all(&dir);
-        let output = output?;
+        let output = run_pinned(&prepared, &command, &crate::remote_deploy::SystemDeploy)?;
         if output.code != Some(0) { return Err(herr("ssh_failed", failure_message(&output))); }
         Ok(output.stdout.trim().to_string())
     })
@@ -572,6 +573,8 @@ pub async fn remote_ssh_project(target: SshTarget, action: String, path: String)
     .map_err(|e| herr("internal", format!("the SSH project command did not finish: {e}")))?
 }
 
+/// R-034 #7: remember the host-key fingerprint the user confirmed after a Test SSH. Deploy, update and
+/// uninstall refuse until this is called for the same host:port in this app session.
 #[tauri::command]
 pub async fn remote_ssh_confirm(target: SshTarget, host_key_type: String, fingerprint: String) -> Result<ConfirmedHostKey, FsError> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -732,6 +735,19 @@ mod tests {
         assert_eq!(require_confirmed_host_key(&other).unwrap_err().code, "host_key_unconfirmed");
         forget_confirmation(&prepared);
         assert_eq!(require_confirmed_host_key(&prepared).unwrap_err().code, "host_key_unconfirmed");
+    }
+
+    #[test]
+    fn pinned_remote_commands_refuse_an_unconfirmed_host() {
+        struct NeverRuns;
+        impl crate::remote_deploy::DeployRunner for NeverRuns {
+            fn run(&self, _: &PreparedTarget, _: &str, _: Option<&[u8]>) -> Result<RawOutput, FsError> {
+                panic!("ssh must not run for an unconfirmed host");
+            }
+        }
+        let prepared = prepare(&target("pinned-unconfirmed.example.com", "alice", "/home/alice/.ssh/id_ed25519")).unwrap();
+        forget_confirmation(&prepared);
+        assert_eq!(run_pinned(&prepared, "x", &NeverRuns).unwrap_err().code, "host_key_unconfirmed");
     }
 
     #[test]
