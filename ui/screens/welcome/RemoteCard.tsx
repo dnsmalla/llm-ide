@@ -2,10 +2,11 @@
 import { useState } from "react";
 import { invokeHost } from "../shell/host";
 import { shellBus } from "../shell/bus";
+import { assertAllowedHostApiUrl } from "../remote/model.ts";
 import { activeHostId, addHost, closeRemote, connectSavedHost, loadHosts, removeHost, type RemoteHost } from "../remote/session.ts";
 
 interface SshResult { uname: string; node: boolean; hostKeyType: string; fingerprint: string }
-const EMPTY = { name: "", sshHost: "", port: "22", user: "root", keyPath: "", api: "wss://llm-ide.com/host-api/v1", projectPath: "" };
+const EMPTY = { name: "", sshHost: "", port: "22", user: "", keyPath: "", api: "wss://llm-ide.com/host-api/v1", projectPath: "" };
 
 export function RemoteCard() {
   const [hosts, setHosts] = useState<RemoteHost[]>(() => loadHosts());
@@ -55,6 +56,7 @@ export function RemoteCard() {
 
   const add = () => {
     if (!form.name.trim() || !form.sshHost.trim() || !form.user.trim() || !form.keyPath.trim() || !form.api.trim()) { setError("Fill the name, SSH host, user, key path and workspace address."); return; }
+    try { assertAllowedHostApiUrl(form.api); } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
     const next = addHost({ name: form.name.trim(), sshHost: form.sshHost.trim(), port: Number(form.port) || 22, user: form.user.trim(), keyPath: form.keyPath.trim(), api: form.api.trim(), projectPath: form.projectPath.trim() });
     setHosts(next); setForm(EMPTY); setAdding(false); setError(null);
   };
@@ -106,9 +108,9 @@ export function RemoteCard() {
         <div className="wc-remote-add">
           <div className="wc-remote-grid">
             <label className="sh-field"><span>Name</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Production" /></label>
-            <label className="sh-field"><span>SSH host</span><input value={form.sshHost} onChange={(e) => setForm({ ...form, sshHost: e.target.value })} placeholder="72.62.76.92" spellCheck={false} /></label>
+            <label className="sh-field"><span>SSH host</span><input value={form.sshHost} onChange={(e) => setForm({ ...form, sshHost: e.target.value })} placeholder="203.0.113.10" spellCheck={false} /></label>
             <label className="sh-field"><span>Port</span><input value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} inputMode="numeric" /></label>
-            <label className="sh-field"><span>User</span><input value={form.user} onChange={(e) => setForm({ ...form, user: e.target.value })} /></label>
+            <label className="sh-field"><span>User</span><input value={form.user} onChange={(e) => setForm({ ...form, user: e.target.value })} placeholder="user" spellCheck={false} /></label>
             <label className="sh-field wc-remote-wide"><span>Key path</span><input value={form.keyPath} onChange={(e) => setForm({ ...form, keyPath: e.target.value })} placeholder="/Users/you/.ssh/id_ed25519" spellCheck={false} /></label>
             <label className="sh-field wc-remote-wide"><span>Workspace Host API</span><input value={form.api} onChange={(e) => setForm({ ...form, api: e.target.value })} spellCheck={false} /></label>
             <label className="sh-field wc-remote-wide"><span>Remote project path</span><input value={form.projectPath} onChange={(e) => setForm({ ...form, projectPath: e.target.value })} placeholder="/srv/llmide/projects/demo" spellCheck={false} /></label>

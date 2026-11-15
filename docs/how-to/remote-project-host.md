@@ -152,7 +152,7 @@ inside the desktop is still a separate phase. Use the browser window as the desk
 The **Welcome** page has a **Remote host** card:
 
 1. add the SSH host, port, user and private-key path, then **Test SSH**
-2. enter `wss://llm-ide.com/host-api/v1` (or your host's Host API URL)
+2. enter `wss://llm-ide.com/host-api/v1`. The workspace socket is opened by the webview, so the app's CSP (`connect-src` in `desktop/src-tauri/tauri.conf.json`) only allows `wss://llm-ide.com`; any other origin is refused with an error in the card. Reaching other hosts would need the socket routed through the Rust host (follow-up)
 3. enter the host's pairing PIN and **Connect workspace**
 4. choose a remote project
 

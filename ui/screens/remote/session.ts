@@ -1,7 +1,7 @@
 // Saved remote hosts and the one active connection. Hosts live in localStorage; a session token is kept per host for
 // this app run only, so reconnecting after a restart asks for the PIN again.
 import { HostConnection } from "../../../web/src/host-api/connection.ts";
-import { normalizeRemoteUrl } from "./model.ts";
+import { assertAllowedHostApiUrl } from "./model.ts";
 
 export interface RemoteProject { id: string; name: string; role: string; maxMode: string }
 export interface RemoteHost {
@@ -65,7 +65,7 @@ export async function connectSavedHost(host: RemoteHost, pin: string): Promise<A
   // Already open: reuse it instead of creating a second socket.
   if (active && active.host.id === host.id) return active;
   closeRemote();
-  const url = normalizeRemoteUrl(host.api);
+  const url = assertAllowedHostApiUrl(host.api);
   tokenUrl = url;
   const conn = new HostConnection({ url, clientName: "LLM-IDE Desktop", clientVersion: "0.0.0", tokens });
   const result = await conn.connect(pin.trim() || undefined);
