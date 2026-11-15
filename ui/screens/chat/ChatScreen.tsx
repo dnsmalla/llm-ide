@@ -438,6 +438,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     const t = setTimeout(() => bumpGate((n) => n + 1), msLeft + 50);
     return () => clearTimeout(t);
   }, [msLeft, activeId]);
+  const bypassLive = !!(gate && activeId && gate.live(activeId));
   const changePermission = async (m: PermissionMode) => {
     if (m !== "bypass") {
       if (activeId) gate?.end(activeId);
@@ -466,7 +467,11 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   const promptNotices = visibleNotices([
     modelNotice ? { id: "model-error", tone: "danger", text: modelNotice } : null,
     groupsLoaded && providerCannotChat(current.provider, groups) ? { id: "provider", tone: "warn", text: PROVIDER_BLOCKED_NOTE } : null,
-    permission === "accept-edits" ? { id: "mode", tone: "info", text: MODE_EXPLANATION["accept-edits"] } : null,
+    // A live, visible notice while Bypass is active: the dialog is shown once, this stays on screen.
+    permission === "bypass" && gate
+      ? (bypassLive ? { id: "mode", tone: "danger", text: "Bypass is on: tools run without asking, including commands that change or delete files." }
+        : { id: "mode", tone: "warn", text: "Bypass: you approve it once for this chat when you send (it then lasts 30 minutes)." })
+      : permission === "accept-edits" ? { id: "mode", tone: "info", text: MODE_EXPLANATION["accept-edits"] } : null,
     budgetWarns && state.budget ? { id: "budget", tone: "warn", text: `You've used ${budgetPercent(state.budget)}% of this chat's token budget · ${state.budget.remaining.toLocaleString("en-US")} left${state.budget.level === "exceeded" ? " · this chat is at its limit" : ""}`, action: { label: "Start a fresh chat", run: () => void newChat() } } : null,
     ...modelNotices({ plainChat: plain, routerOn: route?.enabled, groups }).map((k): PromptNotice => (k === "tools"
       ? { id: "tools", tone: "info", text: TOOLS_NOTICE.text, action: { label: TOOLS_NOTICE.label, run: () => void allowProviderTools() } }

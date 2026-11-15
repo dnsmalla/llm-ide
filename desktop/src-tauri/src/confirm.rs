@@ -185,7 +185,8 @@ static BYPASS_OPEN: OpenFlag = OpenFlag::new();
 /// The dialog text for a summary. The template is fixed; only the quoted detail varies.
 pub(crate) fn bypass_text(summary: &str) -> String {
     let detail = sanitize_line(summary, SUMMARY_MAX_CHARS);
-    let base = "Applies to this chat until you turn Bypass off.";
+    let base = "Bypass lets the assistant edit files and run commands without asking you first. \
+                It applies to this chat for 30 minutes or until you turn Bypass off.";
     if detail.is_empty() {
         base.to_string()
     } else {
@@ -365,8 +366,9 @@ mod tests {
     #[test]
     fn bypass_text_is_fixed_template_plus_quoted_detail() {
         let base = bypass_text("");
-        assert!(base.starts_with("Applies to this chat"));
+        assert!(base.starts_with("Bypass lets the assistant edit files and run commands without asking"));
         assert!(!base.contains("Chat:"));
+        assert!(base.contains("30 minutes"));
         let t = bypass_text("fix\u{202E} the\nbuild");
         assert!(t.starts_with(&base));
         assert!(t.ends_with("Chat: \u{201C}fix the build\u{201D}"));
