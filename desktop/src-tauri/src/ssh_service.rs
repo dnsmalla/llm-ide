@@ -26,7 +26,7 @@ use crate::prefs::{self, ServerMode, SshAuthKind};
 use crate::remote::{temp_ssh_dir, valid_fingerprint, valid_host_key_type, write_known_hosts, PreparedTarget, RawOutput};
 use crate::remote_deploy::{fingerprint_for_key_b64, known_host_name};
 use crate::ssh_link::{supervise, SshLink, SuperviseInput};
-use crate::ssh_server_scripts::{parse_probe, parse_stop, ClaudeState, PROBE, STOP, UNINSTALL};
+use crate::ssh_server_scripts::{parse_probe, parse_stop, parse_uninstall, ClaudeState, PROBE, STOP, UNINSTALL};
 use crate::ssh_session::{connect_with, pick_local_port, ConnectInput, Link};
 use crate::ssh_transport::{prepare_endpoint, SshAuth, SshEndpoint, SshExec};
 
@@ -331,6 +331,7 @@ pub fn uninstall(deps: &Deps, host: &CoreHost, password: Option<&str>, confirm_h
     forget_session();
     let output = run_pinned(deps, &endpoint, &pinned, password, UNINSTALL)?;
     parse_stop(&output.stdout)?;
+    parse_uninstall(&output.stdout)?;
     Ok(build_status(host, Some(stopped_label(host))))
 }
 
@@ -968,6 +969,36 @@ mod tests {
         assert_eq!(status.link, "stopped");
         assert_eq!(exec.calls().len(), 1);
         assert_eq!(exec.calls()[0].args.last().map(String::as_str), Some(UNINSTALL));
+    }
+
+    #[test]
+    fn uninstall_needs_the_removal_marker() {
+        let fx = Fixture::new("svc-uninstall-partial");
+        set_remote_server_for_test(saved_key_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        fx.host.set_mode(ServerMode::Ssh);
+        // The stop ran, but the script never printed its own ok line.
+        let exec = fake(vec![ok("__LLMIDE_STOP__=not_running\n")]);
+        let deps = fx.deps(&exec, "", true, true);
+        let refused = uninstall(&deps, &fx.host, None, "example.com").unwrap_err();
+        assert_eq!(refused.code, "SSH_UNINSTALL_FAILED");
+        assert_eq!(refused.message, "The server files could not be removed.");
+    }
+
+    #[test]
+    fn every_call_is_strict_after_connect_and_stop() {
+        let fx = Fixture::new("svc-strict");
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let connect_exec = fake(connect_outputs());
+        let deps = fx.deps(&connect_exec, "", true, true);
+        connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap();
+        let stop_exec = fake(vec![ok(STOP_OK)]);
+        let deps = fx.deps(&stop_exec, "", true, true);
+        stop_server(&deps, &fx.host, None).unwrap();
+        assert!(!connect_exec.calls().is_empty() && !stop_exec.calls().is_empty());
+        for call in connect_exec.calls().iter().chain(stop_exec.calls().iter()) {
+            assert!(has_option(&call.args, "StrictHostKeyChecking=yes"), "{} is not strict", call.name);
+        }
     }
 
     #[test]

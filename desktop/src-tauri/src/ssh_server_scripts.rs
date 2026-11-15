@@ -576,6 +576,15 @@ pub fn parse_stop(stdout: &str) -> Result<&'static str, FsError> {
     }
 }
 
+/// Parses the `__LLMIDE_UNINSTALL__` marker that UNINSTALL prints only after the releases and `current` were
+/// removed. The caller reads the STOP marker first; this confirms the removal itself ran to the end.
+pub fn parse_uninstall(stdout: &str) -> Result<(), FsError> {
+    match marker(stdout, "UNINSTALL") {
+        Some("ok") => Ok(()),
+        _ => Err(herr("SSH_UNINSTALL_FAILED", "The server files could not be removed.")),
+    }
+}
+
 /// A release name: 1 to 64 of `[A-Za-z0-9._-]`, not starting with `.` or `-`. The same rule is
 /// enforced by the INSTALL and START scripts, so a name cannot escape the releases directory.
 pub fn valid_version(v: &str) -> bool {
@@ -1318,5 +1327,21 @@ mod tests {
         let (ok, status) = run_sh(STATUS, &home, b"");
         assert!(ok, "{status}");
         assert!(!parse_core_state(&status).expect("status parses").running, "{status}");
+    }
+}
+
+#[cfg(test)]
+mod uninstall_marker_tests {
+    use super::*;
+
+    #[test]
+    fn uninstall_needs_its_own_ok_marker() {
+        assert!(parse_uninstall("__LLMIDE_STOP__=not_running\n__LLMIDE_UNINSTALL__=ok\n").is_ok());
+        // The STOP line alone means the core was stopped and the removal never ran.
+        let stop_only = parse_uninstall("__LLMIDE_STOP__=stopped\n").unwrap_err();
+        assert_eq!(stop_only.code, "SSH_UNINSTALL_FAILED");
+        assert_eq!(stop_only.message, "The server files could not be removed.");
+        // A marker must start its line.
+        assert!(parse_uninstall("noise __LLMIDE_UNINSTALL__=ok\n").is_err());
     }
 }

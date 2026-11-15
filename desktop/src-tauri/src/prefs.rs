@@ -103,6 +103,17 @@ impl Default for RemoteServerPrefs {
     }
 }
 
+/// Longest saved SSH host-key pin, in characters. Sized for an 8192-bit RSA key (about 1400 base64 characters)
+/// with room to spare. A longer pin is refused on write and cleared on load; it is never cut short, because a cut
+/// pin could still decode as base64 and would then read as a different key.
+pub(crate) const SSH_HOST_PIN_MAX: usize = 2048;
+
+/// The pin if it fits `SSH_HOST_PIN_MAX`, else `None`. Shared by the load path and the writer so both agree.
+fn bounded_ssh_host_pin(pin: &str) -> Option<String> {
+    let trimmed = pin.trim();
+    (trimmed.chars().count() <= SSH_HOST_PIN_MAX).then(|| trimmed.to_string())
+}
+
 impl RemoteServerPrefs {
     /// Keeps a hand-edited or hostile prefs.json bounded. The host command still validates the exact shapes.
     pub fn normalized(mut self) -> Self {
@@ -113,7 +124,7 @@ impl RemoteServerPrefs {
         self.label = cap(self.label, 80);
         self.hub_url = cap(self.hub_url, 300);
         self.tls_pin = cap(self.tls_pin, 80);
-        self.ssh_host_pin = cap(self.ssh_host_pin, 512);
+        self.ssh_host_pin = bounded_ssh_host_pin(&self.ssh_host_pin).unwrap_or_default();
         // Hand-edited prefs or a webview call must not downgrade the hub to plaintext.
         if crate::remote_tls::validate_hub_url(&self.hub_url, cfg!(debug_assertions)).is_err() { self.hub_url.clear(); }
         // Empty is the normal WebPKI case; a non-empty pin must still have the exact shape.
@@ -811,6 +822,8 @@ pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, s
 /// Host-side writer for the SSH host key the user confirmed. The webview cannot call it; the SSH service calls it
 /// only after a native yes/no dialog. Stores the pin text as given; the service builds it from validated parts.
 pub(crate) fn set_ssh_host_pin(pin: String) -> Result<PrefsView, FsError> {
+    let pin = bounded_ssh_host_pin(&pin)
+        .ok_or_else(|| herr("invalid_host_key", "the saved server host key is too long to store"))?;
     let mut g = state();
     let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
     let mut next = st.stored.clone();
@@ -1084,6 +1097,37 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(patched.remote_server.ssh_host_pin, "example.com:22 ssh-ed25519 AAAA");
+    }
+
+    /// A 4096-bit RSA pin is about 740 characters; it must survive a save and a load unchanged.
+    #[test]
+    fn a_long_rsa_pin_round_trips_through_the_file() {
+        let d = tmp("pin-long");
+        let pin = format!("example.com:22 ssh-rsa {}", (0..740).map(|i| char::from(b'A' + (i % 26) as u8)).collect::<String>());
+        let p = Prefs { remote_server: RemoteServerPrefs { ssh_host_pin: pin.clone(), ..RemoteServerPrefs::default() }, ..Prefs::default() };
+        save_to(&d, &p).unwrap();
+        let back = load_from(&d);
+        assert_eq!(back.remote_server.ssh_host_pin, pin, "a pin longer than 512 characters must not be cut");
+    }
+
+    /// Over the cap the pin is cleared, never truncated: a cut pin could still decode and read as another key.
+    #[test]
+    fn an_over_cap_pin_loads_empty_not_truncated() {
+        let d = tmp("pin-over");
+        let pin = format!("example.com:22 ssh-rsa {}", "A".repeat(SSH_HOST_PIN_MAX));
+        let p = Prefs { remote_server: RemoteServerPrefs { ssh_host_pin: pin, ..RemoteServerPrefs::default() }, ..Prefs::default() };
+        save_to(&d, &p).unwrap();
+        assert_eq!(load_from(&d).remote_server.ssh_host_pin, "");
+    }
+
+    #[test]
+    fn set_ssh_host_pin_refuses_an_over_cap_pin() {
+        let _guard = prefs_guard();
+        let before = stored().remote_server;
+        let too_long = "A".repeat(SSH_HOST_PIN_MAX + 1);
+        let err = set_ssh_host_pin(format!("example.com:22 ssh-rsa {too_long}")).unwrap_err();
+        assert_eq!(err.code, "invalid_host_key");
+        assert_eq!(stored().remote_server.ssh_host_pin, before.ssh_host_pin, "a refused pin stores nothing");
     }
 
     #[test]
