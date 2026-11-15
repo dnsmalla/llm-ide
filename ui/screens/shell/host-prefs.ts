@@ -30,7 +30,11 @@ export function decodeNotifyPrefs(raw: unknown): NotifyPrefs {
   return { approvals: r.approvals !== false, tasks: r.tasks !== false, sync: r.sync !== false, updates: r.updates !== false, core: r.core !== false };
 }
 /** Settings → Server & Backend → Remote server (desktop prefs::RemoteServerPrefs). */
-export type ServerModeValue = "local" | "remote";
+export type ServerModeValue = "local" | "remote" | "ssh";
+/** How the SSH server is logged in to (desktop prefs::SshAuthKind). */
+export type SshAuth = "key" | "password";
+/** Longest saved SSH host-key pin the host keeps (desktop prefs::SSH_HOST_PIN_MAX); a longer one is dropped by the host. */
+const SSH_HOST_PIN_MAX = 2048;
 export interface RemoteServerPrefs {
   mode: ServerModeValue;
   host: string;
@@ -41,8 +45,12 @@ export interface RemoteServerPrefs {
   label: string;
   hubUrl: string;
   tlsPin: string;
+  /** SSH mode login. The host resets it to `key` when a remoteServer block omits it, so every writer sends the stored value. */
+  sshAuth: SshAuth;
+  /** The confirmed SSH host key. The host owns it: a webview-supplied value is ignored on save. */
+  sshHostPin: string;
 }
-export const DEFAULT_REMOTE_SERVER: RemoteServerPrefs = Object.freeze({ mode: "local", host: "", port: 22, user: "", keyPath: "", label: "", hubUrl: "", tlsPin: "" });
+export const DEFAULT_REMOTE_SERVER: RemoteServerPrefs = Object.freeze({ mode: "local", host: "", port: 22, user: "", keyPath: "", label: "", hubUrl: "", tlsPin: "", sshAuth: "key", sshHostPin: "" });
 
 export interface HostPrefs {
   ltaMode: LtaModeValue;
@@ -123,7 +131,7 @@ export function decodeRemoteServer(raw: unknown): RemoteServerPrefs {
   if (!isObj(raw)) return { ...DEFAULT_REMOTE_SERVER };
   const text = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
   return {
-    mode: raw.mode === "remote" ? "remote" : "local",
+    mode: raw.mode === "remote" || raw.mode === "ssh" ? raw.mode : "local",
     host: text(raw.host, 253),
     port: typeof raw.port === "number" && Number.isInteger(raw.port) && raw.port >= 1 && raw.port <= 65535 ? raw.port : 22,
     user: text(raw.user, 64),
@@ -131,6 +139,8 @@ export function decodeRemoteServer(raw: unknown): RemoteServerPrefs {
     label: text(raw.label, 80),
     hubUrl: text(raw.hubUrl, 300),
     tlsPin: text(raw.tlsPin, 80),
+    sshAuth: raw.sshAuth === "password" ? "password" : "key",
+    sshHostPin: typeof raw.sshHostPin === "string" && raw.sshHostPin.length <= SSH_HOST_PIN_MAX ? raw.sshHostPin : "",
   };
 }
 

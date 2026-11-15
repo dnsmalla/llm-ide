@@ -103,10 +103,13 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const hostAvailable = shellHost.isAvailable();
   const view = useCoreStatusView();
   const serverMode = coreStatusStore.getSnapshot().status?.mode;
-  const modeKnown = serverMode === "local" || serverMode === "remote";
+  const modeKnown = serverMode === "local" || serverMode === "remote" || serverMode === "ssh";
+  // The hub-only pieces (hub session, hub banner, project bar) key off `remoteMode`; the section list and toolbar follow
+  // `navMode`, where ssh lists the same screens as a hub because the project lives on the server.
   const remoteMode = serverMode === "remote";
+  const navMode: NavMode = serverMode === "remote" || serverMode === "ssh" ? serverMode : "local";
   // Until the first status poll the mode is unknown: render no section rather than briefly mounting local ones.
-  const visibleSections = modeKnown ? visibleSectionsFor(remoteMode ? "remote" : "local") : [];
+  const visibleSections = modeKnown ? visibleSectionsFor(navMode) : [];
   // Next-launch crash notice (Mac CrashReportBanner): read once; Dismiss deletes the host's records.
   const [crash, setCrash] = useState<CrashNotice | null>(null);
   useEffect(() => {
@@ -168,7 +171,6 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   // Shown only on the section it was left on: navigating anywhere else clears it (declared before the effect that sets it).
   useEffect(() => setSectionNotice((n) => keepSectionNotice(n, nav.active)), [nav.active]);
   // The reducer refuses a local-only section while connected to a hub; say why instead of leaving the click dead.
-  const navMode: NavMode = remoteMode ? "remote" : "local";
   const navRef = useRef({ active: nav.active, mode: navMode });
   navRef.current = { active: nav.active, mode: navMode };
   useEffect(() => { if (modeKnown) rawDispatch({ type: "mode", mode: navMode }); }, [modeKnown, navMode]);
@@ -369,7 +371,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         >
           <HomeIcon />
         </button>
-        <SectionToolbar active={nav.active === "conflicts" ? "loop" : nav.active} onSelect={onSelect} devTools={devToolsEnabled()} mode={remoteMode ? "remote" : "local"} />
+        <SectionToolbar active={nav.active === "conflicts" ? "loop" : nav.active} onSelect={onSelect} devTools={devToolsEnabled()} mode={navMode} />
         {nav.active === "explorer" && (
           <button
             type="button"

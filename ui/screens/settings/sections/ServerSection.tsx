@@ -136,7 +136,7 @@ export default function ServerSection() {
 
       <div className="st-note">
         <span className="st-label">Managed backend</span>
-        {serverMode !== "remote" && host.getBackendConfig && host.setBackendConfig ? <BackendForm host={host} onSaved={load} /> : null}
+        {serverMode !== "remote" && serverMode !== "ssh" && host.getBackendConfig && host.setBackendConfig ? <BackendForm host={host} onSaved={load} /> : null}
         {info?.coreUrl ? (
           <div className="st-row">
             <span className="st-hint">Server URL</span>

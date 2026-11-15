@@ -55,7 +55,8 @@ export function settingsClientFrom(core: Pick<CoreClient, "requestRaw">): Settin
 const mustDecode = (v: UpdateStatusView | null): UpdateStatusView => { if (!v) throw new Error("bad update status from host"); return v; };
 
 export function trustOf(status: CoreStatus | null): CoreTrust {
-  if (status?.trust === "remote_pinned") return "remote-pinned";
+  // An ssh forward is a core on another machine that the host reached and verified by its host key: the remote kind.
+  if (status?.trust === "remote_pinned" || status?.trust === "ssh_forward") return "remote-pinned";
   return status?.trust === "spawned" ? "spawned" : "adopted-unverified";
 }
 
@@ -132,7 +133,10 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         },
         async setRemoteServer(config: RemoteServerConfig) {
           // Only the non-secret fields are sent: mode, host, port, user, key PATH and label. Key contents never leave disk.
-          const v = await writePrefs({ remoteServer: config });
+          // The host resets ssh_auth to key when the block omits it, so the stored SSH login and host pin ride along.
+          const stored = (await readPrefs()).stored.remoteServer;
+          const block = { mode: config.mode, host: config.host, port: config.port, user: config.user, keyPath: config.keyPath, label: config.label, hubUrl: config.hubUrl, tlsPin: config.tlsPin, sshAuth: stored.sshAuth, sshHostPin: stored.sshHostPin };
+          const v = await writePrefs({ remoteServer: block });
           const saved = decodeRemoteServerConfig(v.stored.remoteServer);
           if (!saved) throw new Error("the desktop host returned remote settings this app cannot read");
           return saved;

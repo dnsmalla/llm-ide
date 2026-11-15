@@ -10,6 +10,7 @@ import { ChatController } from "./controller";
 import { HttpChatStore, type ChatStore } from "./store";
 import { CoreMirrorChatStore } from "./merged-store.ts";
 import { TauriChatStore } from "./tauri-store";
+import { isRemoteCoreMode } from "../shell/host";
 import { coreStatusStore } from "../shell/runtime";
 import { projectStore } from "../shell/project-store.ts";
 import { chatApprovalStore } from "../shell/chat-approvals";
@@ -66,7 +67,8 @@ export function chatRuntime(surface = "chat"): ChatRuntime {
   const transport = coreTransportFrom(shellCore);
   // Capability choice: inside the desktop app the chat file store (Mac format, live-then-archive) is the one copy;
   // in a plain browser (vite dev, the extension) the core's own chat routes are.
-  const remote = coreStatusStore.getSnapshot().status?.mode === "remote";
+  // A core on another machine (hub or ssh server) keeps chats on that core, not in this computer's chat archive.
+  const remote = isRemoteCoreMode(coreStatusStore.getSnapshot().status?.mode);
   const store: ChatStore = shellHost.isAvailable() && !remote
     ? new CoreMirrorChatStore(new TauriChatStore({ invoke: invokeHost, ready: () => chatBinding.whenBound() }), transport)
     : new HttpChatStore(transport);

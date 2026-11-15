@@ -64,7 +64,7 @@ export function taskAvailability(task: TaskDef, env: TaskEnv): Availability {
       return { runnable: false, reason: `The core was started without the ${feature} feature.` };
     }
   }
-  if (env.mode === "remote" && task.requiresLocalHost) {
+  if (env.mode !== "local" && task.requiresLocalHost) {
     return { runnable: false, reason: "Runs on this computer; not available from a hub." };
   }
   if (task.requiresRepo && !env.hasRepo) {

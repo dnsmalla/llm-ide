@@ -42,3 +42,9 @@ test("the Cmd+N shortcut only resolves to sections the mode can show", () => {
     assert.equal(sectionForShortcut(key(s.shortcut), "remote"), null);
   }
 });
+
+test("sections: ssh mode lists the same sections as remote mode", () => {
+  assert.deepEqual(visibleSectionsFor("ssh").map((s) => s.id), visibleSectionsFor("remote").map((s) => s.id));
+  assert.equal(isSelectableFor("chat", "ssh"), true);
+  assert.equal(isSelectableFor("explorer", "ssh"), false);
+});

@@ -99,7 +99,7 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
   const hasProject = Boolean(env.host.activeProjectPath?.());
   // Self-Heal shows only after the host said this debug build records (shell/self-heal.ts); never in a release build.
   const devOn = useSyncExternalStore(subscribeSelfHeal, selfHealEnabled, () => false);
-  const hidden = new Set(env.serverMode === "remote" ? REMOTE_GROUP_HIDDEN : []);
+  const hidden = new Set(env.serverMode === "remote" || env.serverMode === "ssh" ? REMOTE_GROUP_HIDDEN : []);
   const dead = new Set(APP_GROUPS.filter((g) => g.status === "mac-only" || (g.status === "dev-only" && !devOn) || hidden.has(g.id)).map((g) => g.id));
   const app = registry.sectionsIn("app").filter((s) => !dead.has(s.id) && matches(s.title, s.id));
   const project = hasProject ? registry.sectionsIn("project").filter((s) => matches(s.title, s.id)) : [];

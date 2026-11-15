@@ -23,7 +23,7 @@ before(async () => {
 
 const LOOP = { maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
 const REMOTE = { mode: "local", host: "", port: 22, user: "", keyPath: "", label: "", hubUrl: "", tlsPin: "" };
-const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, remoteServer: REMOTE, hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false, hostApiWorkspaceWrite: false, hostApiShell: false, hostApiWebOrigins: [], hostApiCapsMigrated: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
+const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, remoteServer: { ...REMOTE, sshAuth: "key", sshHostPin: "" }, hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false, hostApiWorkspaceWrite: false, hostApiShell: false, hostApiWebOrigins: [], hostApiCapsMigrated: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
 function env(over = {}) {
@@ -111,8 +111,10 @@ test("remote server mode round-trips through prefs and tests through the host co
   });
   assert.deepEqual(await host.getRemoteServer(), REMOTE, "an older prefs file reads as Local desktop");
   assert.deepEqual(await host.setRemoteServer(next), next);
-  assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { remoteServer: next } }]);
-  assert.deepEqual(state.stored.remoteServer, next);
+  // The host reads the whole block, and a block without ssh_auth resets SSH to key auth: the stored SSH fields ride along.
+  const block = { ...next, sshAuth: "key", sshHostPin: "" };
+  assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { remoteServer: block } }]);
+  assert.deepEqual(state.stored.remoteServer, block);
   const result = await host.testRemoteSsh(next);
   assert.deepEqual(calls.at(-1), ["remote_ssh_test", { target: { host: "example.com", port: 2222, user: "deploy", keyPath: "/home/deploy/.ssh/id_ed25519" } }],
     "only the non-secret target fields reach the host command; the key contents never do");

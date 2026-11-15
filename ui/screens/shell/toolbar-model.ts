@@ -1,6 +1,6 @@
 // The top toolbar's pure model (Mac `AppShell.shellToolbar` + `ToolbarToolButton`): which sections it lists and in
 // what order, the roving-focus rules, and the overflow partition for narrow windows. No React, no DOM: tested with node.
-import { SECTIONS, devToolsEnabled, REMOTE_SECTIONS, type NavMode, type SectionDef, type SectionId } from "./sections";
+import { SECTIONS, devToolsEnabled, visibleSectionsFor, type NavMode, type SectionDef, type SectionId } from "./sections";
 import { ALL_FEATURES, isSectionEnabled, type AppFeature } from "./features";
 
 /**
@@ -52,7 +52,7 @@ export function toolbarSections(
     const d = BY_ID.get(id);
     // A feature that is off (or not compiled into this build), or a section the user hid, leaves the toolbar.
     // A section a hub cannot serve is not listed in remote mode: selecting it would show an empty main area.
-    if (d && isSectionEnabled(d.id, usable) && !hidden.has(d.id) && (mode === "local" || REMOTE_SECTIONS.includes(d.id))) out.push(d);
+    if (d && isSectionEnabled(d.id, usable) && !hidden.has(d.id) && (mode === "local" || visibleSectionsFor(mode).some((s) => s.id === d.id))) out.push(d);
   }
   const spike = BY_ID.get("spike");
   if (devTools && spike && mode === "local") out.push(spike);

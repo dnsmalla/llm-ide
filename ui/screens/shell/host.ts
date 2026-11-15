@@ -10,15 +10,18 @@
 
 import { decodePrefsView } from "./host-prefs.ts";
 
-export type CoreState = "starting" | "ready" | "restarting" | "failed" | "stopped" | "remote";
-export type CoreTrust = "pending" | "spawned" | "adopted_unverified" | "remote_pinned";
+/** `ssh`: the core runs on a Linux server and is reached through the ssh port forward (see `link`). */
+export type CoreState = "starting" | "ready" | "restarting" | "failed" | "stopped" | "remote" | "ssh";
+export type CoreTrust = "pending" | "spawned" | "adopted_unverified" | "remote_pinned" | "ssh_forward";
+/** Ssh mode only (`null` otherwise): the forward's state. Mirrors the host's SSH link states. */
+export type SshLink = "connecting" | "connected" | "reconnecting" | "needs_password" | "failed" | "stopped";
 export type ClaudeState = "unknown" | "found" | "missing";
 
 /** Mirrors the Rust `CoreStatus` (desktop/src-tauri/src/core_host.rs). Additive fields default when absent. */
 export interface CoreStatus {
   url: string;
-  /** `local` or `remote`; absent on older hosts reads as local. */
-  mode: "local" | "remote";
+  /** `local`, `remote` (hub) or `ssh`; absent on older hosts reads as local. */
+  mode: "local" | "remote" | "ssh";
   adopted: boolean;
   pid: number | null;
   ms_to_healthy: number | null;
@@ -42,6 +45,8 @@ export interface CoreStatus {
   ports_tried: number[];
   /** Additive: the spawned core holds :3456, so the Chrome extension can reach it. */
   extensionReachable: boolean;
+  /** Additive: the ssh forward's state; `null` outside ssh mode. An unknown value reads as `failed`. */
+  link: SshLink | null;
 }
 
 export interface ForeignCore {
@@ -174,7 +179,23 @@ export async function invokeHost<T>(command: string, args?: Record<string, unkno
   return bridge.invoke<T>(command, args);
 }
 
-const STATES: readonly CoreState[] = ["starting", "ready", "restarting", "failed", "stopped", "remote"];
+const STATES: readonly CoreState[] = ["starting", "ready", "restarting", "failed", "stopped", "remote", "ssh"];
+const SSH_LINKS: readonly SshLink[] = ["connecting", "connected", "reconnecting", "needs_password", "failed", "stopped"];
+
+/** True when the core runs on another machine (a hub or the SSH server): local-only commands must not run here. */
+export function isRemoteCoreMode(mode: string | null | undefined): boolean {
+  return mode === "remote" || mode === "ssh";
+}
+
+/**
+ * True when the ssh forward can carry requests and credentials. Shared by the trust gate and the core base URL so
+ * both agree on what "the server is reachable" means; a reconnecting forward still counts because its URL is the
+ * same one the core answers on once the link returns.
+ */
+export function sshForwardReady(s: CoreStatus): boolean {
+  return s.mode === "ssh" && s.state === "ssh" && s.trust === "ssh_forward" && (s.link === "connected" || s.link === "reconnecting") && s.url !== "";
+}
+
 const asStr = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const asNum = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -193,11 +214,13 @@ function normalizeForeign(raw: unknown): ForeignCore | null {
 export function normalizeCoreStatus(raw: unknown): CoreStatus {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const state = STATES.includes(r.state as CoreState) ? (r.state as CoreState) : "failed";
-  const trust: CoreTrust = r.trust === "spawned" || r.trust === "adopted_unverified" || r.trust === "remote_pinned" ? r.trust : "pending";
+  const trust: CoreTrust = r.trust === "spawned" || r.trust === "adopted_unverified" || r.trust === "remote_pinned" || r.trust === "ssh_forward" ? r.trust : "pending";
+  // Outside ssh mode the host sends no link; an unknown value in ssh mode is a state the UI cannot show, so it reads as failed.
+  const link: SshLink | null = r.link === null || r.link === undefined ? null : SSH_LINKS.includes(r.link as SshLink) ? (r.link as SshLink) : "failed";
   const claude: ClaudeState = r.claude === "found" || r.claude === "missing" ? r.claude : "unknown";
   return {
     url: asStr(r.url) ?? "",
-    mode: r.mode === "remote" ? "remote" : "local",
+    mode: r.mode === "remote" || r.mode === "ssh" ? r.mode : "local",
     adopted: r.adopted === true,
     pid: asNum(r.pid),
     ms_to_healthy: asNum(r.ms_to_healthy),
@@ -216,6 +239,7 @@ export function normalizeCoreStatus(raw: unknown): CoreStatus {
     error_code: asStr(r.error_code),
     ports_tried: Array.isArray(r.ports_tried) ? r.ports_tried.map(asPort).filter((p): p is number => p !== null).slice(0, 8) : [],
     extensionReachable: r.extensionReachable === true,
+    link,
   };
 }
 

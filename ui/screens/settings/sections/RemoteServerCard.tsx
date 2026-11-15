@@ -11,6 +11,7 @@ import { decodeMe, type Me } from "../decoders.ts";
 import { useEnv, useModel, useStore } from "../context.tsx";
 import { ErrorText, Field } from "../ui.tsx";
 import { LOCAL_COPY, REMOTE_TEXT, RemoteServerModel, type RemoteServerIo, type RemoteServerState } from "../remote-model.ts";
+import type { ServerMode } from "../host.ts";
 import RemoteDeployCard from "./RemoteDeployCard.tsx";
 
 /** `vite dev`/`tauri dev` only: release builds must use a public domain, never localhost. */
@@ -74,7 +75,7 @@ function TestResult({ m, s }: { m: RemoteServerModel; s: RemoteServerState }): R
   );
 }
 
-function ConnectionState({ s, me, applied }: { s: RemoteServerState; me: Me | null; applied: "local" | "remote" | null }): ReactNode {
+function ConnectionState({ s, me, applied }: { s: RemoteServerState; me: Me | null; applied: ServerMode | null }): ReactNode {
   if (applied !== "remote") return <p className="st-hint" role="status">Using <strong>Local desktop</strong>. Connecting to a hub below switches the backend after a restart.</p>;
   const user = me ? `${me.email} (${me.role})` : s.hubLogin ? `${s.hubLogin.user.email} (${s.hubLogin.role})` : null;
   if (user) return <p className="st-ok" role="status">Connected as {user}. {s.hubLogin ? `${s.hubLogin.projects.length} project${s.hubLogin.projects.length === 1 ? "" : "s"} available.` : ""}</p>;
@@ -103,7 +104,7 @@ export default function RemoteServerCard(): ReactNode {
   const [password, setPassword] = useState("");
   const [me, setMe] = useState<Me | null>(null);
   const [advanced, setAdvanced] = useState(false);
-  const [appliedMode, setAppliedMode] = useState<"local" | "remote" | null>(null);
+  const [appliedMode, setAppliedMode] = useState<ServerMode | null>(null);
   const [confirmLocal, setConfirmLocal] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [tls, setTls] = useState<{ fingerprint: string; webPki: boolean; error: string | null; busy: boolean }>({ fingerprint: "", webPki: false, error: null, busy: false });

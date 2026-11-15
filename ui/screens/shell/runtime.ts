@@ -1,7 +1,7 @@
 // Process-wide singletons the screens share: the core status store and the core client.
 import { createCoreClient } from "./core";
 import { createChatBinding } from "./chat-binding";
-import { host, invokeHost, isHostAvailable, setRemoteModeProvider } from "./host";
+import { host, invokeHost, isHostAvailable, isRemoteCoreMode, setRemoteModeProvider, sshForwardReady } from "./host";
 import { createTrustGate } from "./trust-gate";
 import { createStatusStore } from "./status-store";
 import { createBusProofStore } from "./bus-proof";
@@ -11,7 +11,7 @@ import { createActivityStore } from "./activity-store";
 
 export const coreStatusStore = createStatusStore({ fetchStatus: () => host.coreStatus() });
 // R-034 #12: every host command goes through invokeHost; remote mode allows only its safe subset.
-setRemoteModeProvider(() => coreStatusStore.getSnapshot().status?.mode === "remote");
+setRemoteModeProvider(() => isRemoteCoreMode(coreStatusStore.getSnapshot().status?.mode));
 
 /** Credentials only go to a core the host spawned, or one the user confirmed in the login modal (memory only). */
 export const trustGate = createTrustGate({
@@ -32,7 +32,7 @@ const busProof = createBusProofStore({
 export const core = createCoreClient({
   baseUrl: () => {
     const s = coreStatusStore.getSnapshot().status;
-    return s && s.state === "ready" && s.url ? s.url : null;
+    return s && s.url && (s.state === "ready" || sshForwardReady(s)) ? s.url : null;
   },
   credentialsAllowed: () => trustGate.allowed(),
   hostProof: () => busProof.get(),

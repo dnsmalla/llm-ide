@@ -71,6 +71,27 @@ export function deriveHints(s: CoreStatus | null): StatusHint[] {
 
 const seconds = (ms: number | null): string => (ms === null ? "" : ` in ${Math.max(1, Math.ceil(ms / 1000))} s`);
 
+const STOPPED_DETAIL = "The core was stopped from Settings. Start it there, or use the button below.";
+
+/** The ssh server's own wording; `stopped` reuses the core's stopped presentation, which is what the user sees after Stop. */
+function sshLinkView(s: CoreStatus): Pick<StatusView, "level" | "label" | "detail" | "down"> {
+  switch (s.link) {
+    case "connected":
+      return { level: "ok", label: "SSH server connected", detail: null, down: false };
+    case "connecting":
+      return { level: "busy", label: "Connecting to the SSH server…", detail: null, down: true };
+    case "reconnecting":
+      return { level: "warn", label: "Reconnecting to the SSH server…", detail: s.error, down: true };
+    case "needs_password":
+      return { level: "warn", label: "Enter the server password to connect", detail: null, down: true };
+    case "stopped":
+      return { level: "error", label: "Core stopped", detail: STOPPED_DETAIL, down: true };
+    case "failed":
+    default:
+      return { level: "error", label: "SSH server unreachable", detail: s.error ?? "The SSH connection could not be opened.", down: true };
+  }
+}
+
 export function deriveStatusView(state: StatusState): StatusView {
   const s: CoreStatus | null = state.status;
   const claudeNotice = s?.claude === "missing" ? (s.claude_notice ?? "Claude Code was not found. Install it to use chat.") : null;
@@ -91,6 +112,9 @@ export function deriveStatusView(state: StatusState): StatusView {
   }
   if (state.pollError !== null) {
     return { level: "error", label: "Host not responding", detail: state.pollError, down: true, fatal: false, trustNotice, claudeNotice, hints };
+  }
+  if (s.state === "ssh") {
+    return { ...sshLinkView(s), fatal: false, trustNotice, claudeNotice, hints };
   }
   if (s.mode === "remote" && s.state === "remote") {
     return { level: "ok", label: "Hub connected", detail: null, down: false, fatal: false, trustNotice, claudeNotice, hints };
@@ -127,7 +151,7 @@ export function deriveStatusView(state: StatusState): StatusView {
       return {
         level: "error",
         label: "Core stopped",
-        detail: "The core was stopped from Settings. Start it there, or use the button below.",
+        detail: STOPPED_DETAIL,
         down: true,
         fatal: false,
         trustNotice,

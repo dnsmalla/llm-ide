@@ -4,7 +4,7 @@
 // bound to this core instance (url + restart count + pid), and never persisted: a different or restarted core asks again.
 //
 // Outside the desktop app (no host bridge: `vite dev`, tests) there is nothing to verify; that dev mode is explicit.
-import type { CoreStatus } from "./host";
+import { sshForwardReady, type CoreStatus } from "./host";
 
 export interface TrustView {
   allowed: boolean;
@@ -41,6 +41,9 @@ export function createTrustGate(o: TrustGateOptions): TrustGate {
   const compute = (): TrustView => {
     if (!o.isHost()) return { allowed: true, needsConfirm: false, url: null };
     const s = o.getStatus();
+    // The server's host key was verified by the host itself (Test SSH and the fingerprint dialog), so there is nothing
+    // to confirm here; only a forward that is up may carry credentials.
+    if (s?.mode === "ssh") return { allowed: sshForwardReady(s), needsConfirm: false, url: s.url || null };
     if (!s || (s.state !== "ready" && !(s.mode === "remote" && s.state === "remote")) || !s.url) return { allowed: false, needsConfirm: false, url: s?.url || null };
     if (s.trust === "spawned" || s.trust === "remote_pinned") return { allowed: true, needsConfirm: false, url: s.url };
     if (confirmed === keyOf(s)) return { allowed: true, needsConfirm: false, url: s.url };

@@ -1,0 +1,152 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  SshServerModel,
+  createSshServerIo,
+  decodeSshServerStatus,
+  decodeSshServerTest,
+  sshServerErrorText,
+  type SshServerIo,
+} from "../ssh-server-model.ts";
+import type { SshServerStatus, SshServerTest, SshServerTarget } from "../host.ts";
+
+const trusted: SshServerTest = {
+  hostKeyType: "ssh-ed25519", fingerprint: "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff", trusted: true, changed: false,
+  os: "Linux", arch: "x86_64", freeMb: 20480, installedVersion: null, claude: "missing",
+};
+const unknownKey: SshServerTest = { ...trusted, trusted: false, os: null, arch: null, freeMb: null, claude: null };
+const status: SshServerStatus = { link: "connected", host: "server.example.com", port: 22, user: "deploy", localUrl: "http://127.0.0.1:3456", version: "1.2.3", claude: "2.0.0", error: null };
+
+function fakeIo(over: Partial<SshServerIo> = {}): SshServerIo & { targets: SshServerTarget[] } {
+  const targets: SshServerTarget[] = [];
+  return {
+    targets,
+    async test(target) { targets.push(target); return unknownKey; },
+    async confirm() { return trusted; },
+    async connect(target) { targets.push(target); return status; },
+    async disconnect() { return { ...status, link: "stopped" }; },
+    async status() { return status; },
+    async stop() { return { ...status, link: "stopped" }; },
+    async uninstall() { return { ...status, link: "off" }; },
+    ...over,
+  };
+}
+
+function filled(io: SshServerIo): SshServerModel {
+  const m = new SshServerModel(io);
+  m.setField("host", "server.example.com");
+  m.setField("port", "22");
+  m.setField("user", "deploy");
+  m.setField("keyPath", "/home/deploy/.ssh/id_ed25519");
+  return m;
+}
+
+test('model: password is not in getState() after connect("hunter2")', async () => {
+  const m = filled(fakeIo({ async test() { return trusted; }, async connect() { return status; } }));
+  await m.test();
+  await m.confirmFingerprint();
+  await m.test();
+  const connected = await m.connect("hunter2");
+  assert.equal(connected?.link, "connected");
+  assert.equal(JSON.stringify(m.getState()).includes("hunter2"), false);
+  assert.equal(Object.keys(m.getState()).includes("password"), false);
+});
+
+test("model: key auth with empty keyPath has field error keyPath; password auth with empty keyPath has none", () => {
+  const m = filled(fakeIo());
+  m.setField("keyPath", "");
+  m.setAuth("key");
+  assert.equal(m.validate(), false);
+  assert.ok(m.getState().fieldErrors.keyPath);
+  m.setAuth("password");
+  assert.equal(m.validate(), true);
+  assert.equal(m.getState().fieldErrors.keyPath, undefined);
+});
+
+test("validation: host, port, user are required and the port must be an integer from 1 to 65535", () => {
+  const m = new SshServerModel(fakeIo());
+  m.setAuth("password");
+  m.setField("port", "");
+  assert.equal(m.validate(), false);
+  const errors = m.getState().fieldErrors;
+  assert.ok(errors.host);
+  assert.ok(errors.port);
+  assert.ok(errors.user);
+  m.setField("host", "server.example.com");
+  m.setField("user", "deploy");
+  m.setField("port", "70000");
+  assert.equal(m.validate(), false);
+  m.setField("port", "2222");
+  assert.equal(m.validate(), true);
+});
+
+test("the target sent to the host has exactly the five non-secret fields", async () => {
+  const io = fakeIo();
+  const m = filled(io);
+  m.setAuth("password");
+  await m.test();
+  assert.deepEqual(Object.keys(io.targets[0]).sort(), ["auth", "host", "keyPath", "port", "user"]);
+  assert.equal(io.targets[0].auth, "password");
+});
+
+test('model: SSH_AUTH_FAILED maps to "The server refused this login."', async () => {
+  const m = filled(fakeIo({ async test() { return trusted; }, async connect() { throw { code: "SSH_AUTH_FAILED", message: "raw host text" }; } }));
+  await m.test();
+  await m.connect("wrong");
+  assert.equal(m.getState().error, "The server refused this login.");
+  assert.equal(m.getState().status, null);
+});
+
+test("connect is refused until the host key of the last test is trusted; confirm then test again unlocks it", async () => {
+  let confirmed = false;
+  const m = filled(fakeIo({ async test() { return confirmed ? trusted : unknownKey; }, async confirm() { confirmed = true; return trusted; } }));
+  await m.test();
+  assert.equal(m.getState().test?.trusted, false);
+  assert.equal(await m.connect(), null);
+  assert.match(m.getState().error ?? "", /confirm the server's host key/);
+  await m.confirmFingerprint();
+  assert.equal(m.getState().test?.trusted, true);
+  await m.test();
+  assert.equal((await m.connect())?.link, "connected");
+});
+
+test("changing the host or the port clears the stored test result", async () => {
+  const m = filled(fakeIo({ async test() { return trusted; } }));
+  await m.test();
+  assert.ok(m.getState().test);
+  m.setField("user", "ops");
+  assert.ok(m.getState().test, "a user change keeps the host-key result");
+  m.setField("port", "2222");
+  assert.equal(m.getState().test, null);
+});
+
+test("decoders reject wrong types and read an unknown link as failed", () => {
+  assert.equal(decodeSshServerTest({ ...trusted, trusted: "yes" }), null);
+  assert.equal(decodeSshServerTest({ ...trusted, freeMb: "20" }), null);
+  assert.deepEqual(decodeSshServerTest(unknownKey), unknownKey);
+  assert.equal(decodeSshServerStatus({ ...status, port: "22" }), null);
+  assert.equal(decodeSshServerStatus({ ...status, link: "weird" })?.link, "failed");
+  assert.equal(decodeSshServerStatus({ ...status, link: "off" })?.link, "off");
+});
+
+test("createSshServerIo sends the camelCase arguments and the password only as an argument", async () => {
+  const calls: [string, Record<string, unknown> | undefined][] = [];
+  const io = createSshServerIo(async <T>(command: string, args?: Record<string, unknown>) => {
+    calls.push([command, args]);
+    if (command === "remote_ssh_server_connect") return status as unknown as T;
+    if (command === "remote_ssh_server_confirm") return trusted as unknown as T;
+    return status as unknown as T;
+  });
+  const target: SshServerTarget = { host: "server.example.com", port: 22, user: "deploy", keyPath: "", auth: "password" };
+  await io.connect(target, "hunter2");
+  await io.confirm(target, "ssh-ed25519", trusted.fingerprint);
+  await io.disconnect();
+  assert.deepEqual(calls[0], ["remote_ssh_server_connect", { target, password: "hunter2" }]);
+  assert.deepEqual(calls[1], ["remote_ssh_server_confirm", { target, hostKeyType: "ssh-ed25519", fingerprint: trusted.fingerprint }]);
+  assert.deepEqual(calls[2], ["remote_ssh_server_disconnect", undefined]);
+});
+
+test("error text: fixed sentences for the known codes, the host message otherwise", () => {
+  assert.equal(sshServerErrorText({ code: "SSH_UNREACHABLE", message: "x" }), "Could not reach the server.");
+  assert.equal(sshServerErrorText({ code: "SSH_DISK_LOW", message: "Not enough disk: 120 MB free." }), "Not enough disk: 120 MB free.");
+});

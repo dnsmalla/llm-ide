@@ -53,7 +53,9 @@ export interface StatusStore {
 
 /** Delay before the next poll for a state (exported for tests). */
 export function nextDelay(state: StatusState, iv: PollIntervals, hidden: boolean): number {
-  if (state.pollError !== null || state.status?.state !== "ready") return iv.fast;
+  // A connected ssh forward is as steady as a ready local core; a reconnecting one is polled fast to notice its return.
+  const steady = state.status?.state === "ready" || (state.status?.state === "ssh" && state.status.link === "connected");
+  if (state.pollError !== null || !steady) return iv.fast;
   return hidden ? iv.hidden : iv.slow;
 }
 

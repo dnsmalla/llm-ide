@@ -5,7 +5,7 @@
 // desktop host" placeholder instead of pretending.
 
 import type { CoreClient, CoreResponse } from "./core-api.ts";
-import type { LoopDefaults } from "../shell/host-prefs.ts";
+import type { LoopDefaults, SshAuth } from "../shell/host-prefs.ts";
 import type { UpdateStatusView } from "./updates-model.ts";
 
 export type ThemeChoice = "dark" | "light" | "midnight";
@@ -23,8 +23,8 @@ export interface BackendConfig {
   autoStart: boolean;
 }
 
-/** Settings → Server & Backend → Remote server. Phase 1 stores the choice; deploy lands in phase 2. */
-export type ServerMode = "local" | "remote";
+/** Settings → Server & Backend → Remote server. `ssh`: the core runs on a Linux server behind an ssh forward. */
+export type ServerMode = "local" | "remote" | "ssh";
 
 /** Non-secret remote connection settings. `keyPath` names the user's key file; its contents are never stored. */
 export interface RemoteServerConfig {
@@ -37,6 +37,44 @@ export interface RemoteServerConfig {
   /** `https://<hub>` and its leaf SPKI pin; empty until probed and confirmed. */
   hubUrl: string;
   tlsPin: string;
+}
+
+/** The SSH server target the `remote_ssh_server_*` commands take. Never holds a password (passed per call). */
+export interface SshServerTarget {
+  host: string;
+  port: number;
+  user: string;
+  keyPath: string;
+  auth: SshAuth;
+}
+
+/** `remote_ssh_server_test` / `_confirm`: the host key to confirm, and (once trusted) the server's probe. */
+export interface SshServerTest {
+  hostKeyType: string;
+  fingerprint: string;
+  trusted: boolean;
+  changed: boolean;
+  os: string | null;
+  arch: string | null;
+  freeMb: number | null;
+  installedVersion: string | null;
+  /** `missing` or the Claude Code version text; null until the key is trusted. */
+  claude: string | null;
+}
+
+/** The ssh server link as Settings shows it. `off`: not ssh mode; `restart_required`: saved, applies at the next start. */
+export type SshServerLink = "off" | "restart_required" | "connecting" | "connected" | "reconnecting" | "needs_password" | "failed" | "stopped";
+
+/** `remote_ssh_server_*` status answer. */
+export interface SshServerStatus {
+  link: SshServerLink;
+  host: string;
+  port: number;
+  user: string;
+  localUrl: string;
+  version: string;
+  claude: string;
+  error: string | null;
 }
 
 /** What the host's `remote_ssh_test` reports after a successful connection. */
@@ -285,6 +323,6 @@ export interface SettingsHost {
 export interface SettingsEnv {
   client: CoreClient;
   host: SettingsHost;
-  /** The host's server mode; remote hides the local-only groups. */
-  serverMode?: "local" | "remote";
+  /** The host's server mode; remote and ssh hide the local-only groups. */
+  serverMode?: ServerMode;
 }

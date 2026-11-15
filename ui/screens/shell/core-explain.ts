@@ -5,11 +5,13 @@
 //   catch (e) { setError(describeCoreError(e, "Could not load notes.")); }
 //
 // Plain text only: it names a status word, never a path, URL, token or server text.
-import type { CoreStatus } from "./host";
+import { sshForwardReady, type CoreStatus } from "./host";
 
 /** The status word to show when the core cannot serve requests, or `null` when it can. */
 export function coreNotReadyReason(status: CoreStatus | null): string | null {
   if (!status) return "unknown";
+  // Ssh mode: the link word says why the server is unreachable ("connecting", "failed", ...); a usable forward is ready.
+  if (status.state === "ssh") return sshForwardReady(status) ? null : (status.link ?? "ssh");
   if (status.state !== "ready") return status.state;
   if (status.trust !== "spawned") return status.trust; // `pending` | `adopted_unverified`
   return null;

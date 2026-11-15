@@ -99,7 +99,7 @@ export interface TaskEnv {
   coreFeatures: ReadonlySet<string> | null;
   hasRepo: boolean;
   localHost: boolean;
-  mode: "local" | "remote";
+  mode: "local" | "remote" | "ssh";
 }
 
 export interface Availability {

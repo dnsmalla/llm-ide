@@ -42,3 +42,26 @@ test("a pinned remote core is trusted without asking again", () => {
   assert.equal(g.allowed(), true);
   assert.deepEqual(g.view(), { allowed: true, needsConfirm: false, url: "http://127.0.0.1:3459/tok" });
 });
+
+const sshSt = (o = {}) => ({ url: "http://127.0.0.1:3456", state: "ssh", trust: "ssh_forward", mode: "ssh", link: "connected", restarts: 0, pid: null, ...o });
+
+test("ssh mode: a connected or reconnecting forward may carry credentials, with no confirm prompt", () => {
+  let s = sshSt();
+  const g = createTrustGate({ getStatus: () => s, isHost: () => true });
+  assert.deepEqual(g.view(), { allowed: true, needsConfirm: false, url: "http://127.0.0.1:3456" });
+  s = sshSt({ link: "reconnecting" });
+  assert.equal(g.allowed(), true);
+});
+
+test("ssh mode: any other link, state, trust or an empty url is refused and never asks to confirm", () => {
+  const cases = [{ link: "connecting" }, { link: "needs_password" }, { link: "failed" }, { link: "stopped" }, { link: null }, { state: "stopped" }, { trust: "spawned" }, { url: "" }];
+  for (const over of cases) {
+    const s = sshSt(over);
+    const g = createTrustGate({ getStatus: () => s, isHost: () => true });
+    const label = JSON.stringify(over);
+    assert.equal(g.allowed(), false, label);
+    assert.equal(g.view().needsConfirm, false, label);
+    g.confirm();
+    assert.equal(g.allowed(), false, label);
+  }
+});

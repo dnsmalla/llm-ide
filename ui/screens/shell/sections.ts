@@ -124,7 +124,7 @@ export interface NavState {
   mode?: NavMode;
 }
 
-export type NavMode = "local" | "remote";
+export type NavMode = "local" | "remote" | "ssh";
 
 export type NavAction = { type: "select"; id: string } | { type: "step"; delta: 1 | -1 } | { type: "mode"; mode: NavMode };
 
@@ -158,10 +158,16 @@ export function navReducer(state: NavState, action: NavAction): NavState {
 export const REMOTE_SECTIONS: readonly SectionId[] = ["welcome", "issues", "gantt", "library", "chat", "settings"];
 /** Settings groups that are local-only in remote mode. */
 export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "token-saving", "paths", "repositories", "memory", "code-graph", "doc-gen", "optional-components", "self-heal"];
+/**
+ * Sections the ssh server mode lists: the same screens as a hub, because the project lives on the server and anything
+ * that reads this computer's files, git or terminal is refused. Its own list, so the two can diverge later.
+ */
+export const SSH_SECTIONS: readonly SectionId[] = REMOTE_SECTIONS;
 export const LOCAL_ONLY_NOTICE = "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to a hub.";
 
 export function visibleSectionsFor(mode: NavMode): readonly SectionDef[] {
   if (mode === "remote") return SECTIONS.filter((s) => REMOTE_SECTIONS.includes(s.id));
+  if (mode === "ssh") return SECTIONS.filter((s) => SSH_SECTIONS.includes(s.id));
   return visibleSections();
 }
 export function isSelectableFor(id: string, mode: NavMode): id is SectionId {

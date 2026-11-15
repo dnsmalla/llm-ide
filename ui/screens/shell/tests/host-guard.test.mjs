@@ -26,3 +26,34 @@ test("local mode still calls every command", async () => {
   assert.equal(await invokeHost("fs_read_range"), "fs_read_range");
   setHostBridge(null);
 });
+
+test('host guard: read_file is refused in ssh mode with RemoteModeError', async () => {
+  const { isRemoteCoreMode } = await load("host.ts");
+  setHostBridge({ async invoke(cmd) { return cmd; } });
+  setRemoteModeProvider(() => isRemoteCoreMode("ssh"));
+  try {
+    await assert.rejects(invokeHost("read_file"), (e) => e.code === "remote_mode" && e.command === "read_file");
+    assert.equal(await invokeHost("remote_ssh_server_connect"), "remote_ssh_server_connect");
+  } finally {
+    setRemoteModeProvider(() => false);
+    setHostBridge(null);
+  }
+});
+
+test('status: mode "ssh" + link "reconnecting" decodes; link "weird" decodes to "failed"', async () => {
+  const { normalizeCoreStatus, isRemoteCoreMode, sshForwardReady } = await load("host.ts");
+  const s = normalizeCoreStatus({ state: "ssh", mode: "ssh", trust: "ssh_forward", link: "reconnecting", url: "http://127.0.0.1:3456" });
+  assert.equal(s.mode, "ssh");
+  assert.equal(s.state, "ssh");
+  assert.equal(s.trust, "ssh_forward");
+  assert.equal(s.link, "reconnecting");
+  assert.equal(normalizeCoreStatus({ state: "ssh", mode: "ssh", link: "weird" }).link, "failed");
+  assert.equal(normalizeCoreStatus({ state: "ready" }).link, null);
+  assert.equal(isRemoteCoreMode("ssh"), true);
+  assert.equal(isRemoteCoreMode("remote"), true);
+  assert.equal(isRemoteCoreMode("local"), false);
+  assert.equal(isRemoteCoreMode(undefined), false);
+  assert.equal(sshForwardReady(s), true);
+  assert.equal(sshForwardReady({ ...s, link: "needs_password" }), false);
+  assert.equal(sshForwardReady({ ...s, url: "" }), false);
+});

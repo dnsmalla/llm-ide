@@ -189,7 +189,7 @@ export function validateRemote(config: RemoteServerConfig): RemoteFieldErrors {
 
 export function decodeRemoteServerConfig(raw: unknown): RemoteServerConfig | null {
   if (!isRecord(raw)) return null;
-  const mode: ServerMode = raw.mode === "remote" ? "remote" : raw.mode === "local" ? "local" : "local";
+  const mode: ServerMode = raw.mode === "remote" || raw.mode === "ssh" ? raw.mode : "local";
   const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
   const port = typeof raw.port === "number" && Number.isInteger(raw.port) && raw.port >= 1 && raw.port <= 65535 ? raw.port : 22;
   return { mode, host: str(raw.host, 253), port, user: str(raw.user, 64), keyPath: str(raw.keyPath, 4096), label: str(raw.label, 80), hubUrl: str(raw.hubUrl, 300), tlsPin: str(raw.tlsPin, 80) };
