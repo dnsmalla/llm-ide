@@ -37,6 +37,12 @@ if (action === "prune") {
     const r = run(["worktree", "remove", "--force", d], project);
     if (r.status === 0) removed.push(e.name); else skipped.push({ name: e.name, reason: "git refused" });
   }
+  // meta-<stamp> holds run bookkeeping outside the worktree; once its run-<stamp> worktree is gone it is orphaned.
+  for (const e of fs.readdirSync(base, { withFileTypes: true })) {
+    if (!e.isDirectory() || !e.name.startsWith("meta-")) continue;
+    if (fs.existsSync(path.join(base, `run-${e.name.slice(5)}`))) continue;
+    try { fs.rmSync(path.join(base, e.name), { recursive: true, force: true }); removed.push(e.name); } catch { skipped.push({ name: e.name, reason: "remove failed" }); }
+  }
   console.log(JSON.stringify({ pruned: removed.length, removed, skipped }));
   process.exit(0);
 }
@@ -59,13 +65,15 @@ if (action === "merge") {
     if (commit.status !== 0) fail(`commit failed: ${commit.stderr.trim()}`);
   }
   const branch = `llmide/loop-${name}`;
-  if (run(["rev-parse", "--verify", branch], project).status === 0) fail(`branch already exists: ${branch}`);
-  const co = run(["checkout", "-b", branch], dir);
+  // -B: a retry after an aborted conflict finds the branch left behind; reset it to this worktree's HEAD instead of failing.
+  const co = run(["checkout", "-B", branch], dir);
   if (co.status !== 0) fail(`checkout failed: ${co.stderr.trim()}`);
   const merge = run(["merge", "--no-ff", branch, "-m", `merge ${branch}`], project);
   if (merge.status !== 0) {
     const conflicts = run(["diff", "--name-only", "--diff-filter=U"], project).stdout.trim().split("\n").filter(Boolean);
     run(["merge", "--abort"], project);
+    // No unmerged files means git refused for another reason (e.g. an untracked file would be overwritten); say so.
+    if (conflicts.length === 0) fail(`merge failed and was aborted; the live checkout is unchanged. git said: ${(merge.stderr || merge.stdout || "").trim()}`);
     fail(`merge conflicted and was aborted; the live checkout is unchanged. Conflicting files: ${conflicts.join(", ") || "(unknown)"}`);
   }
   console.log(JSON.stringify({ merged: true, branch, project, worktree: dir }));
