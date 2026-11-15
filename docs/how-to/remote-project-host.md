@@ -196,8 +196,10 @@ Host API.
 
 - `shellCommand` stages run with the project root as cwd
 - `skill` stages call the core's `/kb/loop/agent-run` with the Claude Agent SDK
+- `codeGraph` runs the bundled GraphKit CLI (`/opt/llmide-remote/graph-kit.js`) into `system/loop-runs/host/graph`
 - `testMap` `structure`, `map` and `ledger` reuse the desktop's pure TypeScript logic through `host-testmap.mjs`
-- `codeGraph`, `artifactCheck`, `testPrune` and `regressionSweep` are skipped
+- `map` uses the host graph when present
+- `artifactCheck`, `testPrune` and `regressionSweep` are skipped
 - a git project runs in `.llmide-loop-worktrees/run-<timestamp>` (a detached worktree from HEAD), not in the live folder
 - the run record is written to `llm-doc/loop/host/<timestamp>/run.json` **inside that worktree**
 - the worktree is left for review; add `.llmide-loop-worktrees/` to the project's `.gitignore`

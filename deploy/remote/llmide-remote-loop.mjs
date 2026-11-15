@@ -52,6 +52,14 @@ for (const s of stages) {
     const ok = r.status === 200 && !body.error;
     results.push({ name: s.name, kind: s.kind, ok, status: r.status, reply: String(body.reply ?? "").slice(0, 1000), error: body.error ?? null, at });
     if (!ok && s.severity === "blocking") { passed = false; break; }
+  } else if (s.kind === "codeGraph") {
+    const outDir = path.join(runRoot, "system/loop-runs/host/graph");
+    fs.mkdirSync(outDir, { recursive: true });
+    const outFile = path.join(outDir, "graph-code.json");
+    const r = spawnSync("/opt/llmide-node/bin/node", ["/opt/llmide-remote/graph-kit.js", "code", runRoot, "--out", outFile, "--no-calls"], { encoding: "utf8", timeout: (s.timeoutSeconds || 900) * 1000 });
+    const ok = r.status === 0 && fs.existsSync(outFile);
+    results.push({ name: s.name, kind: s.kind, ok, exitCode: r.status, stdout: String(r.stdout ?? "").slice(0, 2000), stderr: String(r.stderr ?? "").slice(0, 1000), at });
+    if (!ok && s.severity === "blocking") { passed = false; break; }
   } else if (s.kind === "testMap" && s.testOp === "ledger") {
     const last = [...results].reverse().find((r) => r.kind === "shellCommand" && /test/i.test(r.name) && !/baseline|pre-check/i.test(r.name));
     if (!last) { results.push({ name: s.name, kind: s.kind, ok: true, output: "no Test stage ran before the ledger", at }); }
