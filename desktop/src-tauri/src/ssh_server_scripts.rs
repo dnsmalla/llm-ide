@@ -1,0 +1,931 @@
+//! Constant POSIX `sh` scripts that run on the SSH server, and the parsers for what they print.
+//!
+//! Each script is a compile-time constant that `ssh` receives as one command string. Variable data
+//! (release version, checksum, nonce, the tarball, the secrets payload) arrives only on stdin, so no
+//! caller text is ever spliced into a shell command. Scripts print results as
+//! `__LLMIDE_<NAME>__=<value>` lines; the parsers read only those, so login banners and rc-file noise
+//! are harmless.
+
+// NOTE: no production code calls this module yet; a later SSH server mode task wires it in and removes this allow.
+#![allow(dead_code)]
+
+use serde::Deserialize;
+
+use crate::confirm::herr;
+use crate::fs_ops::FsError;
+use crate::remote_deploy::MIN_DISK_MB;
+
+const PROBE_FAILED: &str = "SSH_PROBE_FAILED";
+const STATE_FAILED: &str = "SSH_STATE_FAILED";
+const STATE_INVALID: &str = "SSH_STATE_INVALID";
+const PORT_MIN: u16 = 3460;
+const PORT_MAX: u16 = 3479;
+const CLAUDE_VERSION_MAX_CHARS: usize = 64;
+
+/// Shell helpers shared by the scripts. Validation mirrors [`valid_version`] and friends so the
+/// server rejects the same inputs the app rejects.
+macro_rules! sh_validators {
+    () => {
+        r##"valid_version() {
+  case "$1" in
+    ''|.*|-*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  [ "${#1}" -le 64 ]
+}
+valid_nonce() {
+  case "$1" in
+    ''|*[!A-Za-z0-9]*) return 1 ;;
+  esac
+  [ "${#1}" -ge 16 ] && [ "${#1}" -le 128 ]
+}
+valid_sha() {
+  case "$1" in
+    ''|*[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#1}" -eq 64 ]
+}
+"##
+    };
+}
+
+/// Helpers that read `state.json` and identify the core process. Identification goes through
+/// `/proc/<pid>/cmdline` and the pid recorded by this tool, never a pattern-based kill.
+macro_rules! sh_state_helpers {
+    () => {
+        r##"state_field() {
+  [ -f "$STATE" ] || return 0
+  sed -n "s/.*\"$1\":\([0-9][0-9]*\).*/\1/p" "$STATE" | head -n 1
+}
+is_core() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  # The script's own shell carries this script text (which names server.mjs) in its command
+  # line, so its own pid is excluded explicitly.
+  [ "$1" != "$$" ] || return 1
+  [ -r "/proc/$1/cmdline" ] || return 1
+  tr '\0' ' ' < "/proc/$1/cmdline" | grep -F -q server.mjs
+}
+"##
+    };
+}
+
+/// Stops the core recorded in `state.json`: TERM, up to 5 s grace, then KILL.
+macro_rules! sh_stop_core {
+    () => {
+        r##"stop_core() {
+  PID=$(state_field pid)
+  if is_core "$PID"; then
+    kill -TERM "$PID" 2>/dev/null || true
+    i=0
+    while is_core "$PID" && [ "$i" -lt 5 ]; do
+      sleep 1
+      i=$((i + 1))
+    done
+    if is_core "$PID"; then
+      kill -KILL "$PID" 2>/dev/null || true
+    fi
+    rm -f "$STATE"
+    printf '__LLMIDE_STOP__=stopped\n'
+  else
+    rm -f "$STATE"
+    printf '__LLMIDE_STOP__=not-running\n'
+  fi
+}
+"##
+    };
+}
+
+/// Reports the server's OS, disk, installed releases and Claude CLI. Never fails on a missing
+/// tool: every probe degrades to an empty or zero value so the app can explain what is missing.
+pub const PROBE: &str = r##"set -u
+umask 077
+LC_ALL=C
+export LC_ALL
+printf '__LLMIDE_UNAME__=%s\n' "$(uname -s) $(uname -m)"
+FREE_KB=$(df -Pk "$HOME" 2>/dev/null | awk 'NR == 2 { print $4 }')
+case "$FREE_KB" in ''|*[!0-9]*) FREE_KB=0 ;; esac
+printf '__LLMIDE_FREE_MB__=%s\n' "$((FREE_KB / 1024))"
+INSTALLED=$(ls -1 "$HOME/.llmide-server/releases" 2>/dev/null | tr '\n' ' ')
+printf '__LLMIDE_INSTALLED__=%s\n' "${INSTALLED% }"
+CUR=$(readlink "$HOME/.llmide-server/current" 2>/dev/null || true)
+printf '__LLMIDE_CURRENT__=%s\n' "${CUR##*/}"
+CLAUDE_LINE=$(claude --version 2>/dev/null | head -n 1 || true)
+printf '__LLMIDE_CLAUDE__=%s\n' "$CLAUDE_LINE"
+"##;
+
+/// Unpacks a release. Stdin is `<version> <sha256>\n` followed by the raw `.tar.gz`.
+///
+/// The header is read with the `read` builtin: dash and bash both consume non-seekable input one
+/// byte at a time for `read`, so the tarball after the newline is not swallowed. A read-ahead
+/// tool such as `head` would take tarball bytes with it and fail the checksum.
+pub const INSTALL: &str = concat!(
+    r##"set -eu
+umask 077
+LC_ALL=C
+export LC_ALL
+ROOT="${HOME:?}/.llmide-server"
+"##,
+    sh_validators!(),
+    r##"IFS= read -r HEADER || HEADER=""
+case "$HEADER" in
+  *" "*) ;;
+  *) printf '__LLMIDE_INSTALL__=invalid\n'; exit 1 ;;
+esac
+VERSION=${HEADER%% *}
+SHA=${HEADER#* }
+if ! valid_version "$VERSION" || ! valid_sha "$SHA"; then
+  printf '__LLMIDE_INSTALL__=invalid\n'
+  exit 1
+fi
+mkdir -p "$ROOT/releases" "$ROOT/data"
+chmod 700 "$ROOT" "$ROOT/releases" "$ROOT/data"
+REL="$ROOT/releases/$VERSION"
+PART="$ROOT/releases/.$VERSION.part"
+STAGE="$ROOT/releases/.$VERSION.stage"
+rm -rf "$PART" "$STAGE"
+cat > "$PART"
+ACTUAL=$(sha256sum "$PART" | awk '{ print $1 }')
+if [ "$ACTUAL" != "$SHA" ]; then
+  rm -f "$PART"
+  printf '__LLMIDE_INSTALL__=checksum\n'
+  exit 1
+fi
+mkdir "$STAGE"
+# GNU tar warns about extended headers in bundles built on macOS; the warnings are harmless, so
+# stderr is dropped, but the exit status still decides success.
+if ! tar -xzf "$PART" -C "$STAGE" 2>/dev/null; then
+  rm -rf "$PART" "$STAGE"
+  printf '__LLMIDE_INSTALL__=unpack\n'
+  exit 1
+fi
+rm -f "$PART"
+if [ ! -f "$STAGE/core/node/node" ] || [ ! -f "$STAGE/core/root/extension/server.mjs" ]; then
+  rm -rf "$STAGE"
+  printf '__LLMIDE_INSTALL__=layout\n'
+  exit 1
+fi
+chmod 700 "$STAGE"
+# A release is immutable once installed: a core that is still running may load files from it, so
+# re-installing an existing version keeps the old directory and only repoints current.
+if [ -e "$REL" ]; then
+  rm -rf "$STAGE"
+else
+  mv "$STAGE" "$REL"
+fi
+touch "$REL"
+ln -sfn "$REL" "$ROOT/.current.tmp"
+mv -T "$ROOT/.current.tmp" "$ROOT/current"
+printf '__LLMIDE_INSTALL__=ok\n'
+"##,
+);
+
+/// Starts the core from `current`. Stdin is `<version> <nonce>\n` followed by the secrets payload,
+/// which is handed to the core's stdin untouched.
+pub const START: &str = concat!(
+    r##"set -eu
+umask 077
+LC_ALL=C
+export LC_ALL
+ROOT="${HOME:?}/.llmide-server"
+STATE="$ROOT/state.json"
+"##,
+    sh_validators!(),
+    sh_state_helpers!(),
+    r##"IFS= read -r HEADER || HEADER=""
+case "$HEADER" in
+  *" "*) ;;
+  *) printf '__LLMIDE_START__=invalid\n'; exit 1 ;;
+esac
+VERSION=${HEADER%% *}
+NONCE=${HEADER#* }
+if ! valid_version "$VERSION" || ! valid_nonce "$NONCE"; then
+  printf '__LLMIDE_START__=invalid\n'
+  exit 1
+fi
+if [ -f "$STATE" ]; then
+  OLD_PID=$(state_field pid)
+  if is_core "$OLD_PID"; then
+    printf '__LLMIDE_STATE__=%s\n' "$(tr -d '\n' < "$STATE")"
+    exit 0
+  fi
+  rm -f "$STATE"
+fi
+TARGET=$(readlink "$ROOT/current" 2>/dev/null || true)
+if [ "${TARGET##*/}" != "$VERSION" ] || [ ! -f "$ROOT/current/core/node/node" ]; then
+  printf '__LLMIDE_START__=version-mismatch\n'
+  exit 1
+fi
+# No ss or netstat on minimal servers, and /dev/tcp is bash-only, so the bundled node does the
+# bind test. It is the same node that will run the core, so the check uses the real runtime.
+PORT=$("$ROOT/current/core/node/node" -e 'const net = require("net");
+let port = 3460;
+const next = () => {
+  if (port > 3479) { process.stdout.write("none"); return; }
+  const srv = net.createServer();
+  srv.once("error", () => { port += 1; next(); });
+  srv.listen(port, "127.0.0.1", () => srv.close(() => process.stdout.write(String(port))));
+};
+next();') || PORT=""
+case "$PORT" in
+  ''|*[!0-9]*) printf '__LLMIDE_START__=no-port\n'; exit 1 ;;
+esac
+mkdir -p "$ROOT/data/addons/plugins"
+chmod 700 "$ROOT/data"
+# A non-interactive shell gives a background job /dev/null as stdin, so the payload is first
+# duplicated onto fd 3 and then handed to the core as its stdin. fd 3 is closed in the core so
+# it does not keep the pipe open. The core is started without a parent-pid variable so it
+# outlives this SSH session.
+exec 3<&0
+LLMIDE_SECRETS_STDIN=1 LLMIDE_PORT="$PORT" LLMIDE_CORE_NONCE="$NONCE" \
+  LLMIDE_DATA_DIR="$ROOT/data" LLMIDE_DB_PATH="$ROOT/data/data.db" \
+  LLMIDE_PLUGIN_DIR="$ROOT/data/addons/plugins" \
+  setsid nohup "$ROOT/current/core/node/node" "$ROOT/current/core/root/extension/server.mjs" \
+  <&3 3<&- >>"$ROOT/core.log" 2>&1 &
+PID=$!
+exec 3<&-
+i=0
+until curl -s --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; do
+  i=$((i + 1))
+  if [ "$i" -ge 20 ]; then
+    kill "$PID" 2>/dev/null || true
+    printf '__LLMIDE_START__=timeout\n'
+    exit 1
+  fi
+  sleep 1
+done
+printf '{"running":true,"port":%s,"pid":%s,"nonce":"%s","version":"%s"}\n' "$PORT" "$PID" "$NONCE" "$VERSION" > "$STATE.tmp"
+chmod 600 "$STATE.tmp"
+mv "$STATE.tmp" "$STATE"
+printf '__LLMIDE_STATE__=%s\n' "$(tr -d '\n' < "$STATE")"
+"##,
+);
+
+/// Reports whether the core recorded in `state.json` is alive.
+pub const STATUS: &str = concat!(
+    r##"set -u
+umask 077
+LC_ALL=C
+export LC_ALL
+ROOT="${HOME:?}/.llmide-server"
+STATE="$ROOT/state.json"
+"##,
+    sh_state_helpers!(),
+    r##"if [ ! -f "$STATE" ]; then
+  printf '__LLMIDE_STATE__={"running":false}\n'
+  exit 0
+fi
+if is_core "$(state_field pid)"; then
+  printf '__LLMIDE_STATE__=%s\n' "$(tr -d '\n' < "$STATE")"
+else
+  printf '__LLMIDE_STATE__={"running":false}\n'
+fi
+"##,
+);
+
+/// Stops the core recorded in `state.json`.
+pub const STOP: &str = concat!(
+    r##"set -u
+umask 077
+LC_ALL=C
+export LC_ALL
+ROOT="${HOME:?}/.llmide-server"
+STATE="$ROOT/state.json"
+"##,
+    sh_state_helpers!(),
+    sh_stop_core!(),
+    "stop_core\n",
+);
+
+/// Repoints `current` at the newest release other than the one it points at now.
+pub const ROLLBACK: &str = concat!(
+    r##"set -eu
+umask 077
+LC_ALL=C
+export LC_ALL
+ROOT="${HOME:?}/.llmide-server"
+CUR=$(readlink "$ROOT/current" 2>/dev/null || true)
+CUR=${CUR##*/}
+TARGET=""
+# INSTALL touches each release when it lands, so ls -t orders releases by install time.
+for NAME in $(ls -1t "$ROOT/releases" 2>/dev/null || true); do
+  if [ "$NAME" != "$CUR" ] && [ -d "$ROOT/releases/$NAME" ]; then
+    TARGET=$NAME
+    break
+  fi
+done
+if [ -z "$TARGET" ]; then
+  printf '__LLMIDE_ROLLBACK__=none\n'
+  exit 0
+fi
+ln -sfn "$ROOT/releases/$TARGET" "$ROOT/.current.tmp"
+mv -T "$ROOT/.current.tmp" "$ROOT/current"
+printf '__LLMIDE_ROLLBACK__=%s\n' "$TARGET"
+"##,
+);
+
+/// Stops the core and removes releases and `current`. The `data` directory is kept on purpose: it
+/// holds the user's database and survives a reinstall.
+pub const UNINSTALL: &str = concat!(
+    r##"set -u
+umask 077
+LC_ALL=C
+export LC_ALL
+ROOT="${HOME:?}/.llmide-server"
+STATE="$ROOT/state.json"
+"##,
+    sh_state_helpers!(),
+    sh_stop_core!(),
+    r##"stop_core
+rm -rf "$ROOT/releases" "$ROOT/current"
+printf '__LLMIDE_UNINSTALL__=ok\n'
+"##,
+);
+
+/// The Probe result the app decides on before uploading anything.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Probe {
+    pub os: String,
+    pub arch: String,
+    pub free_mb: u64,
+    pub installed: Vec<String>,
+    pub current: Option<String>,
+    pub claude: ClaudeState,
+}
+
+/// Whether the Claude CLI exists on the server, and its reported version when it does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClaudeState {
+    Missing,
+    Installed { version: String },
+}
+
+/// What `state.json` says about the core, after the pid and the port have been checked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoreState {
+    pub running: bool,
+    pub port: Option<u16>,
+    pub pid: Option<u32>,
+    pub nonce: Option<String>,
+    pub version: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawCoreState {
+    running: bool,
+    port: Option<u16>,
+    pid: Option<u32>,
+    nonce: Option<String>,
+    version: Option<String>,
+}
+
+/// Returns the value of the last `__LLMIDE_<name>__=` marker, so a value printed later wins.
+fn marker<'a>(stdout: &'a str, name: &str) -> Option<&'a str> {
+    let prefix = format!("__LLMIDE_{name}__=");
+    stdout.lines().rev().find_map(|line| {
+        let line = line.trim_end_matches('\r');
+        line.rfind(prefix.as_str()).map(|at| line[at + prefix.len()..].trim())
+    })
+}
+
+fn required<'a>(stdout: &'a str, name: &str, code: &'static str) -> Result<&'a str, FsError> {
+    marker(stdout, name)
+        .ok_or_else(|| herr(code, format!("the server did not print __LLMIDE_{name}__")))
+}
+
+/// Parses the output of [`PROBE`]. Every marker is required, so truncated output is an error.
+pub fn parse_probe(stdout: &str) -> Result<Probe, FsError> {
+    let uname = required(stdout, "UNAME", PROBE_FAILED)?;
+    let mut words = uname.split_whitespace();
+    let (Some(os), Some(arch)) = (words.next(), words.next()) else {
+        return Err(herr(PROBE_FAILED, "the server printed an incomplete uname line"));
+    };
+    let free_mb = required(stdout, "FREE_MB", PROBE_FAILED)?
+        .parse::<u64>()
+        .map_err(|_| herr(PROBE_FAILED, "the server printed a non-numeric free space"))?;
+    let installed = required(stdout, "INSTALLED", PROBE_FAILED)?
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    let current = Some(required(stdout, "CURRENT", PROBE_FAILED)?)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let claude_raw = required(stdout, "CLAUDE", PROBE_FAILED)?;
+    let claude = if claude_raw.is_empty() {
+        ClaudeState::Missing
+    } else {
+        // Control characters are dropped before truncating so a hostile banner cannot inject
+        // escape sequences into the UI.
+        let version: String = claude_raw
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(CLAUDE_VERSION_MAX_CHARS)
+            .collect();
+        ClaudeState::Installed { version }
+    };
+    Ok(Probe {
+        os: os.to_string(),
+        arch: arch.to_string(),
+        free_mb,
+        installed,
+        current,
+        claude,
+    })
+}
+
+/// Refuses a server the desktop cannot install onto: non-Linux, non-x86_64, or short on disk.
+pub fn check_probe(p: &Probe) -> Result<(), FsError> {
+    if p.os != "Linux" {
+        return Err(herr(
+            "SSH_UNSUPPORTED_OS",
+            format!("the server runs {}; only Linux is supported", p.os),
+        ));
+    }
+    if p.arch != "x86_64" {
+        return Err(herr(
+            "SSH_UNSUPPORTED_ARCH",
+            format!("the server is {}; only x86_64 is supported", p.arch),
+        ));
+    }
+    if p.free_mb < MIN_DISK_MB {
+        return Err(herr(
+            "SSH_DISK_LOW",
+            format!(
+                "only {} MB free on the server; at least {} MB are needed",
+                p.free_mb, MIN_DISK_MB
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Parses the `__LLMIDE_STATE__` line printed by [`STATUS`] and [`START`].
+pub fn parse_core_state(stdout: &str) -> Result<CoreState, FsError> {
+    let json = required(stdout, "STATE", STATE_FAILED)?;
+    let raw: RawCoreState = serde_json::from_str(json)
+        .map_err(|_| herr(STATE_INVALID, "the server printed a state that is not valid JSON"))?;
+    if let Some(port) = raw.port {
+        if !(PORT_MIN..=PORT_MAX).contains(&port) {
+            return Err(herr(STATE_INVALID, format!("port {port} is outside 3460..=3479")));
+        }
+    }
+    if raw.pid == Some(0) {
+        return Err(herr(STATE_INVALID, "the recorded pid is 0"));
+    }
+    if raw.running && (raw.port.is_none() || raw.pid.is_none()) {
+        return Err(herr(STATE_INVALID, "a running core must record its port and pid"));
+    }
+    if let Some(nonce) = &raw.nonce {
+        if !valid_nonce(nonce) {
+            return Err(herr(STATE_INVALID, "the recorded nonce has an invalid shape"));
+        }
+    }
+    if let Some(version) = &raw.version {
+        if !valid_version(version) {
+            return Err(herr(STATE_INVALID, "the recorded version has an invalid shape"));
+        }
+    }
+    Ok(CoreState {
+        running: raw.running,
+        port: raw.port,
+        pid: raw.pid,
+        nonce: raw.nonce,
+        version: raw.version,
+    })
+}
+
+/// A release name: 1 to 64 of `[A-Za-z0-9._-]`, not starting with `.` or `-`. The same rule is
+/// enforced by the INSTALL and START scripts, so a name cannot escape the releases directory.
+pub fn valid_version(v: &str) -> bool {
+    (1..=64).contains(&v.len())
+        && !v.starts_with('.')
+        && !v.starts_with('-')
+        && v.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+fn valid_nonce(n: &str) -> bool {
+    (16..=128).contains(&n.len()) && n.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// Stdin for [`START`]: the header line, then the secrets payload exactly as given.
+pub fn start_stdin(version: &str, nonce: &str, secrets_payload: &[u8]) -> Vec<u8> {
+    let mut out = format!("{version} {nonce}\n").into_bytes();
+    out.extend_from_slice(secrets_payload);
+    out
+}
+
+/// Stdin for [`INSTALL`]: the header line, then the raw tarball exactly as given.
+pub fn install_stdin(version: &str, sha256_hex: &str, tarball: &[u8]) -> Vec<u8> {
+    let mut out = format!("{version} {sha256_hex}\n").into_bytes();
+    out.extend_from_slice(tarball);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PROBE_OUTPUT: &str = "Welcome to the server\n\
+        Last login: Mon Nov 10 09:00:00\n\
+        __LLMIDE_UNAME__=Linux x86_64\n\
+        __LLMIDE_FREE_MB__=5000\n\
+        __LLMIDE_INSTALLED__=1.0.0 2.0.0\n\
+        __LLMIDE_CURRENT__=2.0.0\n\
+        __LLMIDE_CLAUDE__=2.1.0 (Claude Code)\n\
+        bye\n";
+
+    const VALID_NONCE: &str = "abcdefgh12345678";
+
+    fn all_scripts() -> [(&'static str, &'static str); 7] {
+        [
+            ("PROBE", PROBE),
+            ("INSTALL", INSTALL),
+            ("START", START),
+            ("STATUS", STATUS),
+            ("STOP", STOP),
+            ("ROLLBACK", ROLLBACK),
+            ("UNINSTALL", UNINSTALL),
+        ]
+    }
+
+    #[test]
+    fn probe_ignores_noise() {
+        let probe = parse_probe(PROBE_OUTPUT).expect("probe parses");
+        assert_eq!(probe.os, "Linux");
+        assert_eq!(probe.arch, "x86_64");
+        assert_eq!(probe.free_mb, 5000);
+        assert_eq!(probe.installed, vec!["1.0.0".to_string(), "2.0.0".to_string()]);
+        assert_eq!(probe.current.as_deref(), Some("2.0.0"));
+        assert_eq!(
+            probe.claude,
+            ClaudeState::Installed { version: "2.1.0 (Claude Code)".to_string() }
+        );
+        assert!(check_probe(&probe).is_ok());
+    }
+
+    #[test]
+    fn marker_takes_last_occurrence() {
+        let out = "__LLMIDE_UNAME__=Darwin arm64\n__LLMIDE_FREE_MB__=1\n\
+                   __LLMIDE_INSTALLED__=\n__LLMIDE_CURRENT__=\n__LLMIDE_CLAUDE__=\n\
+                   __LLMIDE_UNAME__=Linux x86_64\n";
+        let probe = parse_probe(out).expect("probe parses");
+        assert_eq!(probe.os, "Linux");
+        assert_eq!(probe.claude, ClaudeState::Missing);
+        assert_eq!(probe.current, None);
+        assert!(probe.installed.is_empty());
+    }
+
+    #[test]
+    fn probe_rejects_arm() {
+        let out = PROBE_OUTPUT.replace("x86_64", "aarch64");
+        let probe = parse_probe(&out).expect("probe parses");
+        let err = check_probe(&probe).expect_err("arm is refused");
+        assert_eq!(err.code, "SSH_UNSUPPORTED_ARCH");
+    }
+
+    #[test]
+    fn probe_rejects_low_disk() {
+        let out = PROBE_OUTPUT.replace("__LLMIDE_FREE_MB__=5000", "__LLMIDE_FREE_MB__=1500");
+        let probe = parse_probe(&out).expect("probe parses");
+        let err = check_probe(&probe).expect_err("low disk is refused");
+        assert_eq!(err.code, "SSH_DISK_LOW");
+        assert!(err.message.contains("1500"), "{}", err.message);
+        assert!(err.message.contains("2048"), "{}", err.message);
+    }
+
+    #[test]
+    fn probe_rejects_other_os() {
+        let out = PROBE_OUTPUT.replace("Linux x86_64", "Darwin x86_64");
+        let probe = parse_probe(&out).expect("probe parses");
+        let err = check_probe(&probe).expect_err("non-Linux is refused");
+        assert_eq!(err.code, "SSH_UNSUPPORTED_OS");
+    }
+
+    #[test]
+    fn probe_missing_marker() {
+        let out = "motd only\n__LLMIDE_FREE_MB__=5000\n";
+        let err = parse_probe(out).expect_err("no uname marker");
+        assert_eq!(err.code, "SSH_PROBE_FAILED");
+    }
+
+    #[test]
+    fn state_parses() {
+        let out = format!(
+            "noise\n__LLMIDE_STATE__={{\"running\":true,\"port\":3461,\"pid\":77,\"nonce\":\"{VALID_NONCE}\",\"version\":\"1.2.3\",\"extra\":1}}\n"
+        );
+        let state = parse_core_state(&out).expect("state parses");
+        assert_eq!(
+            state,
+            CoreState {
+                running: true,
+                port: Some(3461),
+                pid: Some(77),
+                nonce: Some(VALID_NONCE.to_string()),
+                version: Some("1.2.3".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn state_not_running() {
+        let state = parse_core_state("__LLMIDE_STATE__={\"running\":false}\n").expect("parses");
+        assert!(!state.running);
+        assert_eq!(state.port, None);
+        assert_eq!(state.pid, None);
+    }
+
+    #[test]
+    fn state_rejects_bad_port() {
+        let out = format!(
+            "__LLMIDE_STATE__={{\"running\":true,\"port\":80,\"pid\":77,\"nonce\":\"{VALID_NONCE}\",\"version\":\"1.2.3\"}}\n"
+        );
+        assert!(parse_core_state(&out).is_err());
+    }
+
+    #[test]
+    fn state_rejects_bad_nonce_and_version() {
+        let bad_nonce = "__LLMIDE_STATE__={\"running\":true,\"port\":3461,\"pid\":77,\"nonce\":\"short\",\"version\":\"1.2.3\"}\n";
+        assert!(parse_core_state(bad_nonce).is_err());
+        let bad_version = format!(
+            "__LLMIDE_STATE__={{\"running\":true,\"port\":3461,\"pid\":77,\"nonce\":\"{VALID_NONCE}\",\"version\":\"../x\"}}\n"
+        );
+        assert!(parse_core_state(&bad_version).is_err());
+    }
+
+    #[test]
+    fn state_missing_marker_is_error() {
+        assert!(parse_core_state("nothing here\n").is_err());
+    }
+
+    #[test]
+    fn scripts_are_constant_and_safe() {
+        for (name, script) in all_scripts() {
+            assert!(!script.contains("sudo"), "{name} uses sudo");
+            assert!(!script.contains("LLMIDE_PARENT_PID"), "{name} sets the parent pid");
+            assert!(!script.contains("0.0.0.0"), "{name} binds all interfaces");
+            assert!(!script.contains("pkill"), "{name} uses pkill");
+            assert!(!script.contains("pgrep"), "{name} uses pgrep");
+            assert!(!script.contains("[["), "{name} uses bash-only [[");
+            assert!(!script.contains("<("), "{name} uses process substitution");
+        }
+        assert!(START.contains("127.0.0.1"));
+    }
+
+    #[test]
+    fn install_stdin_header() {
+        let sha = "ab".repeat(32);
+        let out = install_stdin("1.2.3", &sha, b"T");
+        let expected_head = format!("1.2.3 {sha}\n");
+        assert!(out.starts_with(expected_head.as_bytes()));
+        assert!(out.ends_with(b"T"));
+        assert_eq!(out.len(), expected_head.len() + 1);
+    }
+
+    #[test]
+    fn start_stdin_header_then_payload() {
+        let out = start_stdin("1.2.3", VALID_NONCE, b"{\"k\":1}\n");
+        assert_eq!(out, format!("1.2.3 {VALID_NONCE}\n{{\"k\":1}}\n").into_bytes());
+    }
+
+    #[test]
+    fn valid_version_pattern() {
+        assert!(valid_version("1.2.3"));
+        assert!(valid_version("v_2-rc.1"));
+        assert!(valid_version(&"a".repeat(64)));
+        assert!(!valid_version(""));
+        assert!(!valid_version(".hidden"));
+        assert!(!valid_version("-rf"));
+        assert!(!valid_version("a/b"));
+        assert!(!valid_version("a b"));
+        assert!(!valid_version(&"a".repeat(65)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scripts_pass_sh_syntax() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        for (name, script) in all_scripts() {
+            let mut child = Command::new("sh")
+                .arg("-n")
+                .stdin(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn sh");
+            child
+                .stdin
+                .take()
+                .expect("stdin")
+                .write_all(script.as_bytes())
+                .expect("write script");
+            let out = child.wait_with_output().expect("wait sh");
+            assert!(
+                out.status.success(),
+                "{name} fails sh -n: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    // ---- Real script runs against a temporary HOME (unix only) ----
+
+    #[cfg(unix)]
+    fn unique_dir(tag: &str) -> std::path::PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "llmide-server-scripts-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// Runs one script the way ssh does: `sh -c <script>` with the payload on stdin.
+    /// On macOS the BSD `mv` has no `-T`, so a shim maps `mv -T` to `mv -fh`; Linux
+    /// (the real target) uses GNU `mv -T` unchanged.
+    #[cfg(unix)]
+    fn run_sh(script: &str, home: &std::path::Path, stdin: &[u8]) -> (bool, String) {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let path = path_with_shims(home);
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .env("HOME", home)
+            .env("PATH", path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sh");
+        {
+            let mut pipe = child.stdin.take().expect("stdin");
+            // A script that exits early closes the pipe; that is a result, not a test error.
+            let _ = pipe.write_all(stdin);
+        }
+        let out = child.wait_with_output().expect("wait sh");
+        (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    #[cfg(unix)]
+    fn path_with_shims(home: &std::path::Path) -> String {
+        let inherited = std::env::var("PATH").unwrap_or_default();
+        if !cfg!(target_os = "macos") {
+            return inherited;
+        }
+        let shim_dir = home.with_extension("shims");
+        std::fs::create_dir_all(&shim_dir).expect("shim dir");
+        let mv_shim = shim_dir.join("mv");
+        std::fs::write(
+            &mv_shim,
+            "#!/bin/sh\nif [ \"$1\" = \"-T\" ]; then shift; exec /bin/mv -fh \"$@\"; fi\nexec /bin/mv \"$@\"\n",
+        )
+        .expect("write mv shim");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&mv_shim, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod shim");
+        }
+        format!("{}:{inherited}", shim_dir.display())
+    }
+
+    /// Builds a `.tar.gz` shaped like the real bundle: `VERSION` and `core/` with a stub Node.
+    #[cfg(unix)]
+    fn make_bundle(base: &std::path::Path, version: &str) -> Vec<u8> {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+        let src = base.join(format!("bundle-{version}"));
+        let node_dir = src.join("core/node");
+        let ext_dir = src.join("core/root/extension");
+        std::fs::create_dir_all(&node_dir).expect("node dir");
+        std::fs::create_dir_all(&ext_dir).expect("ext dir");
+        std::fs::write(src.join("VERSION"), format!("{version}\n")).expect("VERSION");
+        let node = node_dir.join("node");
+        std::fs::write(&node, "#!/bin/sh\nexit 0\n").expect("node stub");
+        std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        std::fs::write(ext_dir.join("server.mjs"), "// stub core\n").expect("server stub");
+        let tarball = base.join(format!("bundle-{version}.tar.gz"));
+        let status = Command::new("tar")
+            .env("COPYFILE_DISABLE", "1")
+            .arg("-czf")
+            .arg(&tarball)
+            .arg("-C")
+            .arg(&src)
+            .args(["VERSION", "core"])
+            .status()
+            .expect("run tar");
+        assert!(status.success(), "tar failed");
+        std::fs::read(&tarball).expect("read tarball")
+    }
+
+    #[cfg(unix)]
+    fn sha_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[cfg(unix)]
+    fn mode_of(path: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).expect("metadata").permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_then_rollback_in_temp_home() {
+        let base = unique_dir("install");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let root = home.join(".llmide-server");
+        let bundle_v1 = make_bundle(&base, "1.0.0");
+        let bundle_v2 = make_bundle(&base, "2.0.0");
+
+        // A path-like version is refused before anything is written.
+        let (ok, out) =
+            run_sh(INSTALL, &home, &install_stdin("../evil", &sha_hex(&bundle_v1), &bundle_v1));
+        assert!(!ok);
+        assert!(out.contains("__LLMIDE_INSTALL__=invalid"), "{out}");
+
+        // A wrong checksum removes the part file and reports checksum.
+        let (ok, out) =
+            run_sh(INSTALL, &home, &install_stdin("1.0.0", &"0".repeat(64), &bundle_v1));
+        assert!(!ok);
+        assert!(out.contains("__LLMIDE_INSTALL__=checksum"), "{out}");
+        assert!(!root.join("releases/.1.0.0.part").exists());
+
+        for (version, bundle) in [("1.0.0", &bundle_v1), ("2.0.0", &bundle_v2)] {
+            let stdin = install_stdin(version, &sha_hex(bundle), bundle);
+            let (ok, out) = run_sh(INSTALL, &home, &stdin);
+            assert!(ok, "install {version}: {out}");
+            assert!(out.contains("__LLMIDE_INSTALL__=ok"), "{out}");
+        }
+        assert_eq!(
+            std::fs::read_link(root.join("current")).expect("current link"),
+            root.join("releases/2.0.0")
+        );
+        assert!(root.join("releases/2.0.0/core/node/node").is_file());
+        assert_eq!(mode_of(&root), 0o700);
+        assert_eq!(mode_of(&root.join("releases")), 0o700);
+        assert_eq!(mode_of(&root.join("data")), 0o700);
+
+        // PROBE reports both releases and the current one.
+        let (ok, out) = run_sh(PROBE, &home, b"");
+        assert!(ok, "{out}");
+        let probe = parse_probe(&out).expect("real probe output parses");
+        assert_eq!(probe.installed, vec!["1.0.0".to_string(), "2.0.0".to_string()]);
+        assert_eq!(probe.current.as_deref(), Some("2.0.0"));
+
+        // ROLLBACK moves current to the other release.
+        let (ok, out) = run_sh(ROLLBACK, &home, b"");
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_ROLLBACK__=1.0.0"), "{out}");
+        assert_eq!(
+            std::fs::read_link(root.join("current")).expect("current link"),
+            root.join("releases/1.0.0")
+        );
+
+        // STATUS with no state file, and STOP with nothing running.
+        let (ok, out) = run_sh(STATUS, &home, b"");
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_STATE__={\"running\":false}"), "{out}");
+        let (ok, out) = run_sh(STOP, &home, b"");
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_STOP__=not-running"), "{out}");
+
+        // UNINSTALL removes releases and current but keeps data.
+        let (ok, out) = run_sh(UNINSTALL, &home, b"");
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_UNINSTALL__=ok"), "{out}");
+        assert!(!root.join("releases").exists());
+        assert!(std::fs::symlink_metadata(root.join("current")).is_err());
+        assert!(root.join("data").is_dir());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_rejects_bad_header_and_wrong_release() {
+        let base = unique_dir("start");
+        let home = base.join("home");
+        let root = home.join(".llmide-server");
+        std::fs::create_dir_all(root.join("releases/2.0.0/core/node")).expect("release");
+        std::os::unix::fs::symlink(root.join("releases/2.0.0"), root.join("current"))
+            .expect("current link");
+
+        let (ok, out) = run_sh(START, &home, format!("../x {VALID_NONCE}\n").as_bytes());
+        assert!(!ok);
+        assert!(out.contains("__LLMIDE_START__=invalid"), "{out}");
+
+        let (ok, out) = run_sh(START, &home, format!("1.0.0 short\n").as_bytes());
+        assert!(!ok);
+        assert!(out.contains("__LLMIDE_START__=invalid"), "{out}");
+
+        // Asking for 1.0.0 while current points at 2.0.0 must not start anything.
+        let (ok, out) = run_sh(START, &home, format!("1.0.0 {VALID_NONCE}\n").as_bytes());
+        assert!(!ok);
+        assert!(out.contains("__LLMIDE_START__=version-mismatch"), "{out}");
+        assert!(!root.join("state.json").exists());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}
