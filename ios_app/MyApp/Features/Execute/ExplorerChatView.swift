@@ -21,13 +21,14 @@ struct ExplorerChatView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                // Spacing is 0: `ChatBubble` owns its own top gap so same-sender turns can sit closer together.
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if store.llmIdeMessages.isEmpty {
                         EmptyChatState(icon: "hammer", title: "Run a code change",
                                        subtitle: "Describe it; the desktop edits the project and reports back.")
                     }
-                    ForEach(store.llmIdeMessages) { message in
-                        bubble(message)
+                    ForEach(Array(store.llmIdeMessages.enumerated()), id: \.element.id) { index, message in
+                        bubble(message, at: index)
                     }
                     approvalCard
                     Color.clear.frame(height: 1).id("bottom")
@@ -41,15 +42,18 @@ struct ExplorerChatView: View {
         }
     }
 
-    private func bubble(_ message: ChatMessage) -> some View {
+    private func bubble(_ message: ChatMessage, at index: Int) -> some View {
         let streaming = store.isStreaming && message.id == store.llmIdeMessages.last?.id
-        return ChatBubble(message: message, isStreaming: streaming).id(message.id)
+        let group = ChatBubble.grouping(in: store.llmIdeMessages, at: index)
+        return ChatBubble(message: message, isFirstInGroup: group.isFirst, isLastInGroup: group.isLast,
+                          isStreaming: streaming).id(message.id)
     }
 
     @ViewBuilder
     private var approvalCard: some View {
         if let request = store.pendingApproval {
             ApprovalQuestionCard(request: request) { selection in store.submitApproval(selection: selection) }
+                .padding(.top, DesignSystem.Spacing.sm)
         }
     }
 

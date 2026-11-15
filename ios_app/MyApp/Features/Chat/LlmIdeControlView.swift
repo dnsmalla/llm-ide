@@ -25,10 +25,14 @@ struct LlmIdeControlView: View {
     /// Guards the trash action — it also wipes the desktop's shared transcript.
     @State private var showClearConfirm = false
     @State private var showFilePicker = false
+    /// False once the bottom sentinel scrolls out of the lazy stack: drives the jump-to-latest button.
+    @State private var isAtBottom = true
     @FocusState private var isInputFocused: Bool
     /// Composer glyph and its hit area scale with Dynamic Type; 44pt is the HIG minimum tap target.
     @ScaledMetric(relativeTo: .body) private var composerIconSize: CGFloat = 18
     @ScaledMetric(relativeTo: .body) private var composerButtonSize: CGFloat = 44
+
+    private static let bottomID = "chat-bottom"
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
 
@@ -137,7 +141,8 @@ struct LlmIdeControlView: View {
     private var chatTranscript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: DesignSystem.Spacing.sm) {
+                // Spacing is 0: `ChatBubble` owns its own top gap so same-sender turns can sit closer together.
+                LazyVStack(spacing: 0) {
                     if llmIdeStore.llmIdeMessages.isEmpty {
                         EmptyChatState(
                             icon: "bubble.left.and.text.bubble.right",
@@ -145,15 +150,18 @@ struct LlmIdeControlView: View {
                             subtitle: "Type or tap the mic to dictate."
                         )
                     }
-                    ForEach(llmIdeStore.llmIdeMessages) { msg in
-                        ChatBubble(message: msg,
-                                       isStreaming: llmIdeStore.isStreaming && msg.id == llmIdeStore.llmIdeMessages.last?.id)
-                                .id(msg.id)
-                    }
+                    messageRows
                     approvalSlot
+                    // Bottom sentinel: lazily instantiated, so appear/disappear tracks "scrolled to the end".
+                    Color.clear.frame(height: 1).id(Self.bottomID)
+                        .onAppear { isAtBottom = true }
+                        .onDisappear { isAtBottom = false }
                 }
                 .padding(DesignSystem.Spacing.md)
+                .animation(.easeOut(duration: 0.25), value: llmIdeStore.llmIdeMessages.count)
             }
+            .overlay(alignment: .bottomTrailing) { jumpToLatestButton(proxy) }
+            .animation(.easeInOut(duration: 0.2), value: isAtBottom)
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: llmIdeStore.pendingToolApproval?.requestId) { id in
                 guard let id else { return }
@@ -164,9 +172,10 @@ struct LlmIdeControlView: View {
                 withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .bottom) }
             }
             .onChange(of: llmIdeStore.llmIdeMessages.last?.text) { _ in
-                if let last = llmIdeStore.llmIdeMessages.last {
+                if llmIdeStore.llmIdeMessages.last != nil {
+                    // Scroll to the sentinel, not the last bubble, so "at bottom" stays true while following a stream.
                     withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
+                        proxy.scrollTo(Self.bottomID, anchor: .bottom)
                     }
                 }
             }
@@ -184,6 +193,40 @@ struct LlmIdeControlView: View {
         }
     }
 
+    /// Hoisted out of `chatTranscript` to keep its body inside the type-checker's budget (see `approvalSlot`).
+    private var messageRows: some View {
+        ForEach(Array(llmIdeStore.llmIdeMessages.enumerated()), id: \.element.id) { index, msg in
+            let group = ChatBubble.grouping(in: llmIdeStore.llmIdeMessages, at: index)
+            ChatBubble(message: msg,
+                       isFirstInGroup: group.isFirst,
+                       isLastInGroup: group.isLast,
+                       isStreaming: llmIdeStore.isStreaming && msg.id == llmIdeStore.llmIdeMessages.last?.id)
+                .id(msg.id)
+        }
+    }
+
+    /// Floating "jump to latest" control, shown only while the end of the transcript is off screen.
+    @ViewBuilder
+    private func jumpToLatestButton(_ proxy: ScrollViewProxy) -> some View {
+        if !isAtBottom, !llmIdeStore.llmIdeMessages.isEmpty {
+            Button {
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(DesignSystem.Colors.primary)
+                    .frame(width: 44, height: 44)
+                    .background(.regularMaterial, in: Circle())
+                    .overlay(Circle().stroke(DesignSystem.Colors.border, lineWidth: 0.5))
+                    .shadow(color: .black.opacity(DesignSystem.Layout.shadowOpacityRaised),
+                            radius: DesignSystem.Layout.shadowRadius, x: 0, y: 4)
+            }
+            .padding(DesignSystem.Spacing.md)
+            .accessibilityLabel("Scroll to latest message")
+            .transition(.scale.combined(with: .opacity))
+        }
+    }
+
     /// The agent's own question, answerable by tapping — under the transcript
     /// because that is where it was asked, and the turn is parked until it is
     /// answered. Hoisted out of `chatTranscript` because inline it put that
@@ -197,6 +240,7 @@ struct LlmIdeControlView: View {
                 haptic(.light)
             }
             .id(request.requestId)
+            .padding(.top, DesignSystem.Spacing.sm)
             .transition(.opacity)
         } else if let notice = llmIdeStore.approvalNotice, !notice.isEmpty {
             Text(notice)
