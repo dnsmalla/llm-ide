@@ -15,6 +15,7 @@ const trusted: SshServerTest = {
   os: "Linux", arch: "x86_64", freeMb: 20480, installedVersion: null, claude: "missing",
 };
 const unknownKey: SshServerTest = { ...trusted, trusted: false, os: null, arch: null, freeMb: null, claude: null };
+const savedSettings = { host: "saved.example.com", port: 2222, user: "ops", keyPath: "", auth: "password" as const };
 const status: SshServerStatus = { link: "connected", host: "server.example.com", port: 22, user: "deploy", localUrl: "http://127.0.0.1:3456", version: "1.2.3", claude: "2.0.0", error: null };
 
 function fakeIo(over: Partial<SshServerIo> = {}): SshServerIo & { targets: SshServerTarget[] } {
@@ -28,6 +29,8 @@ function fakeIo(over: Partial<SshServerIo> = {}): SshServerIo & { targets: SshSe
     async status() { return status; },
     async stop() { return { ...status, link: "stopped" }; },
     async uninstall() { return { ...status, link: "off" }; },
+    async saved() { return savedSettings; },
+    async installKey() { return status; },
     ...over,
   };
 }
@@ -205,4 +208,100 @@ test("model: a connect answer that arrives after the host changed is dropped", a
   assert.equal(await running, null);
   assert.equal(m.getState().status, null);
   assert.equal(m.getState().busy, null);
+});
+
+const keyPathAfterInstall = "/Users/me/Library/Application Support/llmide/ssh/keys/saved_example_com_2222";
+
+test("installKey: success reloads the saved settings so Key file and the generated key path show, and keeps no password", async () => {
+  const calls: string[] = [];
+  const m = filled(fakeIo({
+    async installKey(password) { calls.push(`installKey:${password}`); return status; },
+    async saved() { calls.push("saved"); return { ...savedSettings, host: "server.example.com", auth: "key", keyPath: keyPathAfterInstall }; },
+  }));
+  m.setAuth("password");
+  const result = await m.installKey("hunter2");
+  assert.equal(result?.link, "connected");
+  assert.deepEqual(calls, ["installKey:hunter2", "saved"]);
+  assert.equal(m.getState().auth, "key");
+  assert.equal(m.getState().keyPath, keyPathAfterInstall);
+  assert.equal(m.getState().error, null);
+  assert.equal(JSON.stringify(m.getState()).includes("hunter2"), false);
+});
+
+test("installKey: a failure keeps the form on password login and shows the fixed sentence", async () => {
+  const m = filled(fakeIo({ async installKey() { throw { code: "SSH_KEY_VERIFY_FAILED", message: "host text" }; } }));
+  m.setAuth("password");
+  assert.equal(await m.installKey("hunter2"), null);
+  assert.equal(m.getState().error, "The server did not accept the new key. Your password login is unchanged.");
+  assert.equal(m.getState().auth, "password");
+});
+
+test("installKey: the key codes read as fixed sentences", () => {
+  assert.equal(sshServerErrorText({ code: "SSH_KEY_NOT_NEEDED", message: "x" }), "This server already uses a key.");
+  assert.equal(sshServerErrorText({ code: "SSH_KEYGEN_FAILED", message: "x" }), "Could not create a key on this computer.");
+  assert.equal(sshServerErrorText({ code: "SSH_KEY_INSTALL_FAILED", message: "x" }), "The key could not be added on the server.");
+  assert.equal(sshServerErrorText({ code: "SSH_KEY_INVALID", message: "x" }), "The new key was not accepted.");
+});
+
+test("installKey: createSshServerIo passes the password only as an argument", async () => {
+  const calls: [string, Record<string, unknown> | undefined][] = [];
+  const io = createSshServerIo(async <T>(command: string, args?: Record<string, unknown>) => {
+    calls.push([command, args]);
+    return status as unknown as T;
+  });
+  await io.installKey("hunter2");
+  assert.deepEqual(calls[0], ["remote_ssh_server_install_key", { password: "hunter2" }]);
+});
+
+test("load: the saved target fills the form, with no test result yet", async () => {
+  const m = new SshServerModel(fakeIo({ async saved() { return { ...savedSettings, auth: "key", keyPath: keyPathAfterInstall }; } }));
+  await m.load();
+  const s = m.getState();
+  assert.equal(s.host, "saved.example.com");
+  assert.equal(s.port, "2222");
+  assert.equal(s.user, "ops");
+  assert.equal(s.keyPath, keyPathAfterInstall);
+  assert.equal(s.auth, "key");
+  assert.equal(s.test, null);
+});
+
+test("load: a saved target that cannot be read leaves the form as it was", async () => {
+  const m = new SshServerModel(fakeIo({ async saved() { throw new Error("no prefs"); } }));
+  await m.load();
+  assert.equal(m.getState().host, "");
+  assert.equal(m.getState().error, null);
+});
+
+test("Trust this key calls confirmFingerprint then tests again", async () => {
+  const order: string[] = [];
+  const m = filled(fakeIo({
+    async test(_target, password) { order.push(`test:${password ?? "-"}`); return order.length === 1 ? unknownKey : trusted; },
+    async confirm(_target, type, fp) { order.push(`confirm:${type}:${fp}`); return trusted; },
+  }));
+  await m.test();
+  await m.trustAndTest("hunter2");
+  assert.deepEqual(order, ["test:-", `confirm:ssh-ed25519:${unknownKey.fingerprint}`, "test:hunter2"]);
+  assert.equal(m.getState().test?.trusted, true);
+});
+
+test("connectWithTest tests first when the last test is missing, then connects only when the key is trusted", async () => {
+  const order: string[] = [];
+  const m = filled(fakeIo({
+    async test() { order.push("test"); return trusted; },
+    async connect(_target, password) { order.push(`connect:${password}`); return status; },
+  }));
+  const result = await m.connectWithTest("hunter2");
+  assert.equal(result?.link, "connected");
+  assert.deepEqual(order, ["test", "connect:hunter2"]);
+});
+
+test("connectWithTest does not connect when the host key is not trusted (for example it changed)", async () => {
+  const order: string[] = [];
+  const m = filled(fakeIo({
+    async test() { order.push("test"); return { ...unknownKey, changed: true }; },
+    async connect() { order.push("connect"); return status; },
+  }));
+  assert.equal(await m.connectWithTest("hunter2"), null);
+  assert.deepEqual(order, ["test"]);
+  assert.equal(m.getState().test?.changed, true);
 });

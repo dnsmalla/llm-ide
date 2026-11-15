@@ -49,7 +49,7 @@ export function HintNote({ hint }: { hint: StatusHint }) {
 }
 
 /** Full-area panel while the core is down. Never blank: always says what is happening. */
-export function CoreDownPanel({ view, onRetry, onStart }: { view: StatusView; onRetry: () => void; onStart?: () => void }) {
+export function CoreDownPanel({ view, onRetry, onStart, onOpenSettings }: { view: StatusView; onRetry: () => void; onStart?: () => void; onOpenSettings?: () => void }) {
   const [busy, setBusy] = useState(false);
   const live = view.level === "error" ? "assertive" : "polite";
   return (
@@ -95,6 +95,8 @@ export function CoreDownPanel({ view, onRetry, onStart }: { view: StatusView; on
             Start core
           </button>
         ) : null}
+        {/* Ssh mode: the server may need its password typed again, and signing in is not required to reach Settings. */}
+        {onOpenSettings ? <button type="button" className="sh-button" onClick={onOpenSettings}>Open Settings</button> : null}
       </div>
     </div>
   );

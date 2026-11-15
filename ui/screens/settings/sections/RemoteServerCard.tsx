@@ -75,15 +75,21 @@ function TestResult({ m, s }: { m: RemoteServerModel; s: RemoteServerState }): R
   );
 }
 
-function ConnectionState({ s, me, applied }: { s: RemoteServerState; me: Me | null; applied: ServerMode | null }): ReactNode {
+/** The hub card's one-line status. Exported for the SSR test; `ssh` is the SSH server card's job, so this line only points there. */
+export function ConnectionState({ s, me, applied }: { s: RemoteServerState; me: Me | null; applied: ServerMode | null }): ReactNode {
+  if (applied === "ssh") return <p className="st-hint" role="status">Using the <strong>SSH server</strong> below. Connecting to a hub here switches the backend after a restart.</p>;
   if (applied !== "remote") return <p className="st-hint" role="status">Using <strong>Local desktop</strong>. Connecting to a hub below switches the backend after a restart.</p>;
   const user = me ? `${me.email} (${me.role})` : s.hubLogin ? `${s.hubLogin.user.email} (${s.hubLogin.role})` : null;
   if (user) return <p className="st-ok" role="status">Connected as {user}. {s.hubLogin ? `${s.hubLogin.projects.length} project${s.hubLogin.projects.length === 1 ? "" : "s"} available.` : ""}</p>;
   return <p className="st-hint" role="status">Remote mode is selected. Sign in below if you are not connected.</p>;
 }
 
-/** The card. Hidden behind a "needs the desktop host" note in a plain browser. */
-export default function RemoteServerCard(): ReactNode {
+/**
+ * The card. Hidden behind a "needs the desktop host" note in a plain browser. It also holds the server-mode choice:
+ * `chosen` / `onChoose` come from Server & Backend, which also shows the SSH server card under the choice. Without them
+ * the choice follows the saved mode. Choosing a mode is a UI change only; nothing restarts or stops the core until the user acts.
+ */
+export default function RemoteServerCard({ chosen, onChoose }: { chosen?: ServerMode; onChoose?: (mode: ServerMode) => void } = {}): ReactNode {
   const { host, client } = useEnv();
   const available = Boolean(host.getRemoteServer && host.setRemoteServer && host.remoteHubCheck && host.remoteHubLogin);
   const io = useMemo<RemoteServerIo>(() => ({
@@ -165,6 +171,7 @@ export default function RemoteServerCard(): ReactNode {
     const ok = await m.switchToLocal();
     if (ok) {
       setAppliedMode("local");
+      onChoose?.("local");
       setNotice("Local mode saved. Restarting the core on this computer…");
     }
   };
@@ -172,6 +179,7 @@ export default function RemoteServerCard(): ReactNode {
   if (!available) return <p className="st-hint">Remote server mode needs the desktop host, which is not connected in this build.</p>;
 
   const busy = s.hubBusy !== null;
+  const shown: ServerMode = chosen ?? s.mode;
   const connected = Boolean(me || s.hubLogin);
   const advancedId = "remote-advanced-panel";
 
@@ -186,19 +194,27 @@ export default function RemoteServerCard(): ReactNode {
             type="radio"
             name="server-mode"
             value="local"
-            checked={s.mode === "local"}
-            onChange={() => { if (appliedMode === "remote") setConfirmLocal(true); else m.setMode("local"); }}
+            checked={shown === "local"}
+            onChange={() => {
+              // Leaving the hub or the SSH server is explicit: it asks first, then restarts the core on this computer.
+              if (appliedMode === "remote" || appliedMode === "ssh") setConfirmLocal(true);
+              else { m.setMode("local"); onChoose?.("local"); }
+            }}
           />
           <span>Local desktop</span>
         </label>
         <label className="st-row">
-          <input type="radio" name="server-mode" value="remote" checked={s.mode === "remote"} onChange={() => { if (s.mode === "local") m.setMode("remote"); }} />
+          <input type="radio" name="server-mode" value="remote" checked={shown === "remote"} onChange={() => { m.setMode("remote"); onChoose?.("remote"); }} />
           <span>Remote server</span>
+        </label>
+        <label className="st-row">
+          <input type="radio" name="server-mode" value="ssh" checked={shown === "ssh"} onChange={() => onChoose?.("ssh")} />
+          <span>SSH server</span>
         </label>
       </div>
 
       <ConnectionState s={s} me={me} applied={appliedMode} />
-      {appliedMode !== "remote" ? <p className="st-hint">{LOCAL_COPY}</p> : null}
+      {appliedMode !== "remote" && appliedMode !== "ssh" ? <p className="st-hint">{LOCAL_COPY}</p> : null}
 
       {confirmLocal ? (
         <div className="st-dialog" role="alertdialog" aria-label="Switch to Local desktop">
@@ -289,10 +305,10 @@ export default function RemoteServerCard(): ReactNode {
         </div>
       ) : null}
 
-      {appliedMode === "remote" ? (
+      {appliedMode === "remote" || appliedMode === "ssh" ? (
         <div className="st-row">
           <button type="button" className="st-btn" data-tone="danger" disabled={busy} onClick={() => setConfirmLocal(true)}>Switch to Local desktop…</button>
-          <span className="st-hint">Explicit: the hub is left behind and the local core restarts.</span>
+          <span className="st-hint">{appliedMode === "ssh" ? "Explicit: the SSH server is left behind and the local core restarts." : "Explicit: the hub is left behind and the local core restarts."}</span>
         </div>
       ) : null}
 

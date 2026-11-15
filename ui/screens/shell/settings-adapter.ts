@@ -19,6 +19,7 @@ import { flushSelfHealNow } from "./self-heal";
 import type { CoreTrust, DiagnosticsInfo, RemoteServerConfig, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
 import { decodeUpdateStatus, type UpdateStatusView } from "../settings/updates-model";
 import { CoreError, type CoreClient } from "./core";
+import { createSshServerIo } from "../settings/ssh-server-model";
 import { decodePickedChoice, decodePickedFolder, decodePrefsView, type HostPrefsPatch, type HostPrefsView } from "./host-prefs";
 import type { CoreStatus } from "./host";
 
@@ -55,8 +56,9 @@ export function settingsClientFrom(core: Pick<CoreClient, "requestRaw">): Settin
 const mustDecode = (v: UpdateStatusView | null): UpdateStatusView => { if (!v) throw new Error("bad update status from host"); return v; };
 
 export function trustOf(status: CoreStatus | null): CoreTrust {
-  // An ssh forward is a core on another machine that the host reached and verified by its host key: the remote kind.
-  if (status?.trust === "remote_pinned" || status?.trust === "ssh_forward") return "remote-pinned";
+  // An ssh forward is a core on another machine that the host reached and verified by its host key: its own label.
+  if (status?.trust === "ssh_forward") return "ssh-pinned";
+  if (status?.trust === "remote_pinned") return "remote-pinned";
   return status?.trust === "spawned" ? "spawned" : "adopted-unverified";
 }
 
@@ -185,6 +187,7 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           if (!l) throw new Error("the desktop host returned a hub session this app cannot read");
           return l;
         },
+        sshServer: createSshServerIo(d.invoke),
         async restartApp() { await d.invoke("app_restart"); },
         async remoteSessionClear() { await d.invoke("remote_session_clear"); },
         async remoteUpdate(target, version, confirmation, hubUrl) { await d.invoke("remote_update", { target, version, confirmation, hubUrl }); },

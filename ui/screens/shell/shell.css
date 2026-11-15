@@ -177,3 +177,6 @@
 .sh-loop-tab { appearance: none; border: 0; background: transparent; color: var(--tok-color-text-muted); font: inherit; font-size: 13px; font-weight: 600; padding: 9px 12px; border-bottom: 2px solid transparent; cursor: pointer; }
 .sh-loop-tab:hover { color: var(--tok-color-text); }
 .sh-loop-tab[data-on="true"] { color: var(--tok-color-text); border-bottom-color: var(--tok-color-accent); }
+.sh-ssh-badge { font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); border: 1px solid var(--tok-color-border); border-radius: 999px; padding: 2px 8px; white-space: nowrap; align-self: center; }
+.sh-ssh-badge[data-level="ok"] { color: var(--tok-color-success); }
+.sh-ssh-badge[data-level="warn"] { color: var(--tok-color-warning); }

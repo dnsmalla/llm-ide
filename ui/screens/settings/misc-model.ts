@@ -91,11 +91,14 @@ export function featureRows(h: Health | null): FeatureRows {
 // ---- Account / About ---------------------------------------------------------------------------
 
 export function coreTrustLabel(t: CoreTrust): string {
-  return t === "spawned" ? "Spawned by this app (identity verified)" : "Adopted (unverified): the app found a core already running and could not verify it started it";
+  if (t === "spawned") return "Spawned by this app (identity verified)";
+  // The ssh forward was verified by its host key (pinned at the first trust), so it is not an unverified adopted core.
+  if (t === "ssh-pinned") return "SSH server (host key pinned)";
+  return "Adopted (unverified): the app found a core already running and could not verify it started it";
 }
 
 export function coreTrustTone(t: CoreTrust): "ok" | "warning" {
-  return t === "spawned" ? "ok" : "warning";
+  return t === "spawned" || t === "ssh-pinned" ? "ok" : "warning";
 }
 
 export const SIGN_OUT_TEXT = {

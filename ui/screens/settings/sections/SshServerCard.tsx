@@ -1,0 +1,66 @@
+// Settings → Server & Backend → SSH server. The core runs on a Linux server and the desktop reaches it through an ssh
+// port forward. A thin shell over SshServerModel: the model owns every host answer; this card owns only what must not
+// live in the model (the typed password, kept in memory while mounted) and which confirmation is open.
+// Awaits: the card sets no state after an await. Model state is unsubscribed on unmount, so a late answer lands nowhere.
+import { useEffect, useState, type ReactNode } from "react";
+import { useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
+import { NeedsHost } from "../ui.tsx";
+import { SshServerModel, type SshServerIo } from "../ssh-server-model.ts";
+import { SshServerView } from "./SshServerView.tsx";
+
+const rejectNoHost = async (): Promise<never> => {
+  throw new Error("The SSH server needs the desktop host, which is not connected in this build.");
+};
+/** Stands in for the host when there is none, so the model exists on every render (hooks cannot be conditional). */
+const NO_HOST: SshServerIo = {
+  saved: rejectNoHost,
+  installKey: rejectNoHost,
+  test: rejectNoHost,
+  confirm: rejectNoHost,
+  connect: rejectNoHost,
+  disconnect: rejectNoHost,
+  status: rejectNoHost,
+  stop: rejectNoHost,
+  uninstall: rejectNoHost,
+};
+
+export default function SshServerCard(): ReactNode {
+  const { host } = useEnv();
+  const available = Boolean(host.sshServer);
+  const m = useModel(() => new SshServerModel(host.sshServer ?? NO_HOST));
+  const s = useStore(m);
+  const [password, setPassword] = useState("");
+  const [stopOpen, setStopOpen] = useState(false);
+  const [uninstallOpen, setUninstallOpen] = useState(false);
+
+  // Load once per mount: the saved target and the live link. A focus refresh reads only the link, so it never
+  // overwrites fields the user is still editing.
+  useEffect(() => {
+    if (available) void m.load();
+  }, [available, m]);
+  useRefreshOnFocus(() => {
+    if (available) void m.refreshStatus();
+  });
+  // A password is for one server: a new host, port or user means the typed one is forgotten.
+  useEffect(() => {
+    setPassword("");
+  }, [s.host, s.port, s.user]);
+
+  if (!available) return <NeedsHost what="The SSH server" />;
+  return (
+    <SshServerView
+      m={m}
+      s={s}
+      password={password}
+      onPassword={setPassword}
+      stopOpen={stopOpen}
+      uninstallOpen={uninstallOpen}
+      onStopOpen={setStopOpen}
+      onUninstallOpen={setUninstallOpen}
+      onRestart={() => {
+        // Restart only when the user asks: a saved change applies at the next start.
+        if (host.restartApp) void host.restartApp();
+      }}
+    />
+  );
+}

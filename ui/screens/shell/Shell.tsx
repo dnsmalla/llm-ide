@@ -14,6 +14,7 @@ import { LiveBanner } from "./LiveBanner";
 import { syncLiveRecordingFromHost } from "./live-status";
 import { dismissCrashNotice, loadCrashNotice, type CrashNotice } from "./crash-report";
 import { StatusBar } from "./StatusBar";
+import { SshBadge } from "./SshBadge";
 import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
 import { chatApprovalStore, sectionForSurface } from "./chat-approvals";
 import { clearLiveCard } from "../loop/native/live-card.ts";
@@ -372,6 +373,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           <HomeIcon />
         </button>
         <SectionToolbar active={nav.active === "conflicts" ? "loop" : nav.active} onSelect={onSelect} devTools={devToolsEnabled()} mode={navMode} />
+        <SshBadge />
         {nav.active === "explorer" && (
           <button
             type="button"
@@ -435,6 +437,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
                 view={view}
                 onRetry={() => void coreStatusStore.refreshNow()}
                 onStart={shellHost.isAvailable() ? () => { void invokeHost<unknown>("core_start").then(() => coreStatusStore.refreshNow()).catch(() => undefined); } : undefined}
+                onOpenSettings={serverMode === "ssh" ? () => shellBus.publish({ type: "goto-section", section: "settings", anchor: "server" }) : undefined}
               />
             </div>
           )}

@@ -10,14 +10,14 @@
 // - the io is injected, so tests exercise every branch with no host and no ssh. `createSshServerIo` is the production
 //   adapter over the host `invoke`.
 
-import type { SshAuth } from "../shell/host-prefs.ts";
+import { decodePrefsView, type SshAuth } from "../shell/host-prefs.ts";
 import type { SshServerLink, SshServerStatus, SshServerTarget, SshServerTest } from "./host.ts";
 import { isValidHost, isValidKeyPath, isValidUser, parseSshPort } from "./remote-model.ts";
 import { Store } from "./store.ts";
 
 export type SshServerField = "host" | "port" | "user" | "keyPath";
 export type SshServerFieldErrors = Partial<Record<SshServerField, string>>;
-export type SshServerBusy = "test" | "confirm" | "connect" | "disconnect" | "status" | "stop" | "uninstall";
+export type SshServerBusy = "test" | "confirm" | "connect" | "disconnect" | "status" | "stop" | "uninstall" | "install_key";
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNullableString = (v: unknown): v is string | null => v === null || typeof v === "string";
@@ -62,6 +62,12 @@ export function sshServerErrorText(e: unknown): string {
     case "SSH_HOST_KEY_CHANGED": return "The server's host key changed. Test the connection again and confirm the new fingerprint.";
     case "SSH_CORE_FOREIGN": return "Another computer started the server on this account. This version supports one desktop per server account.";
     case "SSH_BUNDLE_MISSING": return "This build has no Linux server bundle.";
+    // Key install: the host reports these codes; the sentences say what the user can do next.
+    case "SSH_KEY_NOT_NEEDED": return "This server already uses a key.";
+    case "SSH_KEY_VERIFY_FAILED": return "The server did not accept the new key. Your password login is unchanged.";
+    case "SSH_KEYGEN_FAILED": return "Could not create a key on this computer.";
+    case "SSH_KEY_INSTALL_FAILED": return "The key could not be added on the server.";
+    case "SSH_KEY_INVALID": return "The new key was not accepted.";
     default:
       if (message.length > 0) return message.slice(0, 300);
       return e instanceof Error && e.message ? e.message : "The SSH server request failed.";
@@ -96,7 +102,33 @@ export function validateSshServer(state: { host: string; port: string; user: str
   return errors;
 }
 
+/** The saved SSH target as the host stores it. Never a password; the key path only, never key contents. */
+export interface SshSavedSettings {
+  host: string;
+  port: number;
+  user: string;
+  keyPath: string;
+  auth: SshAuth;
+}
+
+/** Host name typed for Uninstall: trimmed and case-insensitive, the same check the host makes. */
+export function uninstallConfirmed(typed: string, host: string): boolean {
+  const name = host.trim().toLowerCase();
+  return name.length > 0 && typed.trim().toLowerCase() === name;
+}
+
+/** The one line the toolbar and the card show for a live link; null when there is nothing to show for it. */
+export function sshBadgeText(link: string | null, host: string): string | null {
+  const name = host.trim();
+  if (name.length === 0) return null;
+  if (link === "connected") return `SSH: ${name}`;
+  if (link === "reconnecting") return `Reconnecting to ${name}…`;
+  return null;
+}
+
 export interface SshServerIo {
+  saved(): Promise<SshSavedSettings>;
+  installKey(password: string): Promise<SshServerStatus>;
   test(target: SshServerTarget, password?: string): Promise<SshServerTest>;
   confirm(target: SshServerTarget, hostKeyType: string, fingerprint: string): Promise<SshServerTest>;
   connect(target: SshServerTarget, password?: string): Promise<SshServerStatus>;
@@ -138,6 +170,15 @@ export function createSshServerIo(invoke: SshInvoke): SshServerIo {
     },
     async uninstall(password, confirmHost) {
       return decodeOrThrow(await invoke<unknown>("remote_ssh_server_uninstall", withPassword({ confirmHost }, password)), decodeSshServerStatus);
+    },
+    async saved() {
+      const view = decodePrefsView(await invoke<unknown>("get_prefs"));
+      if (!view) throw new Error("the desktop host returned preferences this app cannot read");
+      const r = view.stored.remoteServer;
+      return { host: r.host, port: r.port, user: r.user, keyPath: r.keyPath, auth: r.sshAuth };
+    },
+    async installKey(password) {
+      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_install_key", { password }), decodeSshServerStatus);
     },
   };
 }
@@ -258,6 +299,39 @@ export class SshServerModel extends Store<SshServerState> {
     }
   }
 
+  /** Fill the form from the saved settings and read the live link. Called once when the card mounts. */
+  async load(): Promise<void> {
+    const generation = this.#generation;
+    try {
+      const saved = await this.#io.saved();
+      if (generation === this.#generation && saved.host.length > 0) {
+        this.set({ host: saved.host, port: String(saved.port), user: saved.user, keyPath: saved.keyPath, auth: saved.auth, test: null });
+      }
+    } catch {
+      // Nothing saved, or the host could not read it: the form starts empty and the user enters the server again.
+    }
+    await this.refreshStatus();
+  }
+
+  /** The fingerprint prompt's "Trust this key": confirm the last test's key, then test again so the probe is filled in. */
+  async trustAndTest(password?: string): Promise<void> {
+    await this.confirmFingerprint();
+    if (this.getState().error !== null || this.getState().test?.trusted !== true) return;
+    await this.test(password);
+  }
+
+  /**
+   * Connect for the reconnect prompt. After a restart the last test is gone, so the key is checked again first: a
+   * changed key stops here and is shown, never connected silently.
+   */
+  async connectWithTest(password?: string): Promise<SshServerStatus | null> {
+    if (this.getState().test?.trusted !== true) {
+      await this.test(password);
+      if (this.getState().test?.trusted !== true) return null;
+    }
+    return this.connect(password);
+  }
+
   /** Start the forward. Refused client-side until the last test trusts the host key. */
   async connect(password?: string): Promise<SshServerStatus | null> {
     if (this.getState().busy) return null;
@@ -286,9 +360,28 @@ export class SshServerModel extends Store<SshServerState> {
     return this.run("stop", () => this.#io.stop(password));
   }
 
+  /**
+   * Create a key on this computer, add it to the server and switch the saved login to it. The password is used for
+   * this call only; afterwards the saved settings are read so Key file and the key path show.
+   */
+  async installKey(password: string): Promise<SshServerStatus | null> {
+    const status = await this.run("install_key", () => this.#io.installKey(password));
+    if (status !== null) await this.reloadSaved();
+    return status;
+  }
+
   /** Remove the server install. `confirmHost` must name the host (the host checks it again). */
   uninstall(password: string | undefined, confirmHost: string): Promise<SshServerStatus | null> {
     return this.run("uninstall", () => this.#io.uninstall(password, confirmHost));
+  }
+
+  private async reloadSaved(): Promise<void> {
+    try {
+      const saved = await this.#io.saved();
+      this.set({ auth: saved.auth, keyPath: saved.keyPath });
+    } catch (e) {
+      this.set({ error: sshServerErrorText(e) });
+    }
   }
 
   /** `scoped`: the answer is about the target it was asked for, so a change of target while it runs drops it. */

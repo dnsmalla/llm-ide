@@ -10,6 +10,8 @@ import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { Button, ErrorText } from "../ui.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
 import RemoteServerCard from "./RemoteServerCard.tsx";
+import SshServerCard from "./SshServerCard.tsx";
+import type { ServerMode } from "../host.ts";
 
 /**
  * The Mac's "Server & Backend" group: the core's status, version, identity and log file, plus the log itself
@@ -17,6 +19,8 @@ import RemoteServerCard from "./RemoteServerCard.tsx";
  */
 export default function ServerSection() {
   const { client, host, serverMode } = useEnv();
+  // The server-mode choice shown in the cards. It starts at the live mode; choosing one never restarts or stops the core.
+  const [chosen, setChosen] = useState<ServerMode>(() => (serverMode === "remote" || serverMode === "ssh" ? serverMode : "local"));
   const [info, setInfo] = useState<DiagnosticsInfo | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -164,7 +168,8 @@ export default function ServerSection() {
         {notice ? <p className="st-ok" role="status">{notice}</p> : null}
       </div>
 
-      <RemoteServerCard />
+      <RemoteServerCard chosen={chosen} onChoose={setChosen} />
+      {chosen === "ssh" ? <SshServerCard /> : null}
 
 
       {host.coreLog ? (

@@ -4,7 +4,7 @@
 // 2026-10-31-settings-mirror-map.md (a test keeps the two in step).
 import type { Health } from "./decoders.ts";
 import type { DiagnosticsInfo } from "./host.ts";
-import { coreTrustLabel } from "./misc-model.ts";
+import { coreTrustLabel, coreTrustTone } from "./misc-model.ts";
 
 export type NoticeStatus = "Planned";
 
@@ -56,7 +56,7 @@ export function serverRows(info: DiagnosticsInfo | null, health: Health | null):
   }
   if (info) {
     if (info.coreState === "stopped") rows.push({ label: "Identity", value: "Stopped", tone: "warning" });
-    else rows.push({ label: "Identity", value: coreTrustLabel(info.coreTrust), tone: info.coreTrust === "spawned" ? "ok" : "warning" });
+    else rows.push({ label: "Identity", value: coreTrustLabel(info.coreTrust), tone: coreTrustTone(info.coreTrust) });
     rows.push({ label: "Log file", value: info.coreLogPath ?? "Not available" });
   }
   return rows;

@@ -7,11 +7,12 @@
 import type { CoreClient, CoreResponse } from "./core-api.ts";
 import type { LoopDefaults, SshAuth } from "../shell/host-prefs.ts";
 import type { UpdateStatusView } from "./updates-model.ts";
+import type { SshServerIo } from "./ssh-server-model.ts";
 
 export type ThemeChoice = "dark" | "light" | "midnight";
 
 /** How the shell came to talk to its core. */
-export type CoreTrust = "spawned" | "adopted-unverified" | "remote-pinned";
+export type CoreTrust = "spawned" | "adopted-unverified" | "remote-pinned" | "ssh-pinned";
 
 /** Server & Backend's editable backend settings (source-checkout mode). */
 export interface BackendConfig {
@@ -243,6 +244,8 @@ export interface SettingsHost {
   remoteTlsUnpin?(hubUrl: string): Promise<void>;
   /** Restart the app so a saved mode change takes effect. */
   restartApp?(): Promise<void>;
+  /** Settings → Server & Backend → SSH server: the `remote_ssh_server_*` commands. Absent in a plain browser. */
+  sshServer?: SshServerIo;
   remoteUpdate?(target: { host: string; port: number; user: string; keyPath: string }, version: string, confirmation: string, hubUrl: string): Promise<void>;
   remoteBackupNow?(target: { host: string; port: number; user: string; keyPath: string }): Promise<void>;
   remoteLogs?(target: { host: string; port: number; user: string; keyPath: string }, lines: number): Promise<string>;

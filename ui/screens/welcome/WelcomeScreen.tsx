@@ -6,6 +6,7 @@ import { openedAgo } from "../shell/relative-time";
 import { NAME_MAX, PROJECT_EXPLAINER, validateProjectName } from "./model";
 import { GuideDialog } from "./HelpGuide";
 import { RemoteCard } from "./RemoteCard.tsx";
+import { SshServerEntry } from "./SshServerEntry.tsx";
 
 export { GuideDialog };
 
@@ -167,6 +168,7 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
           </section>
 
           <RemoteCard />
+          <SshServerEntry />
         </div>
 
         <aside className="wc-explainer" aria-label="What is a project">
