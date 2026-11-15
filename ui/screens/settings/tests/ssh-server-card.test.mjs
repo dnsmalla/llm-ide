@@ -26,7 +26,8 @@ before(async () => {
     `export { default as RemoteServerCard, ConnectionState } from ${at("../sections/RemoteServerCard.tsx")};`,
     `export { SshServerView } from ${at("../sections/SshServerView.tsx")};`,
     `export { UninstallConfirm } from ${at("../sections/SshServerParts.tsx")};`,
-    `export { SshServerModel, uninstallConfirmed, sshBadgeText } from ${at("../ssh-server-model.ts")};`,
+    `export { SshServerModel, uninstallConfirmed, sshBadgeText, SSH_LOCAL_CONFIRM } from ${at("../ssh-server-model.ts")};`,
+    `export { REMOTE_TEXT } from ${at("../remote-model.ts")};`,
     `export { coreTrustLabel, coreTrustTone } from ${at("../misc-model.ts")};`,
     `export { SettingsEnvProvider } from ${at("../context.tsx")};`,
   ].join("\n"));
@@ -59,7 +60,7 @@ async function model(over = {}, steps = async () => {}) {
   return model;
 }
 
-const VIEW = (model, extra = {}) => h(m.SshServerView, { m: model, s: model.getState(), password: "", onPassword() {}, stopOpen: false, uninstallOpen: false, onStopOpen() {}, onUninstallOpen() {}, onRestart() {}, ...extra });
+const VIEW = (model, extra = {}) => h(m.SshServerView, { m: model, s: model.getState(), password: "", onPassword() {}, dialog: null, onDialog() {}, onRestart() {}, ...extra });
 const PASSWORD = (model, extra = {}) => VIEW(model, { password: "hunter2", ...extra });
 
 test("renders the three server choices", () => {
@@ -178,4 +179,60 @@ test("toolbar badge texts: connected shows the host, reconnecting says so, other
   assert.equal(m.sshBadgeText("reconnecting", "server.example.com"), "Reconnecting to server.example.com…");
   assert.equal(m.sshBadgeText("needs_password", "server.example.com"), null);
   assert.equal(m.sshBadgeText("connected", "  "), null);
+});
+
+const INSTALLED = { ...TRUSTED, installedVersion: "1.2.3" };
+const BUTTONS = (html) => plain(html);
+
+test("Stop server and Uninstall show only for an installed server or a live link", async () => {
+  const untested = await model();
+  assert.doesNotMatch(BUTTONS(renderToStaticMarkup(VIEW(untested))), /Stop server|Uninstall/);
+  const notInstalled = await model({ test: async () => TRUSTED }, async (x) => { await x.test(); });
+  const hidden = BUTTONS(renderToStaticMarkup(VIEW(notInstalled)));
+  assert.match(hidden, /Server part: not installed yet/);
+  assert.doesNotMatch(hidden, /Stop server|Uninstall/, "a trusted but not installed server offers neither");
+  const installed = await model({ test: async () => INSTALLED }, async (x) => { await x.test(); });
+  assert.match(BUTTONS(renderToStaticMarkup(VIEW(installed))), /Stop server[\s\S]*Uninstall/);
+  const live = await model({ status: async () => status("connected") }, async (x) => { await x.refreshStatus(); });
+  assert.match(BUTTONS(renderToStaticMarkup(VIEW(live))), /Stop server/);
+  const off = await model({ status: async () => status("off") }, async (x) => { await x.refreshStatus(); });
+  assert.doesNotMatch(BUTTONS(renderToStaticMarkup(VIEW(off))), /Stop server|Uninstall/, "an off link is not a live link");
+});
+
+test("Disconnect shows only while the link is up; otherwise Connect", async () => {
+  const up = await model({ status: async () => status("reconnecting") }, async (x) => { await x.refreshStatus(); });
+  const upHtml = plain(renderToStaticMarkup(VIEW(up)));
+  assert.match(upHtml, /Disconnect/);
+  assert.doesNotMatch(renderToStaticMarkup(VIEW(up)), />Connect</);
+  const down = await model({ status: async () => status("failed", { error: "x" }) }, async (x) => { await x.refreshStatus(); });
+  assert.doesNotMatch(plain(renderToStaticMarkup(VIEW(down))), /Disconnect/);
+});
+
+test("a confirmation opened for another host does not show for this one", async () => {
+  const current = await model({ test: async () => INSTALLED }, async (x) => { await x.test(); });
+  const other = plain(renderToStaticMarkup(VIEW(current, { dialog: { kind: "uninstall", host: "old.example.com" } })));
+  assert.doesNotMatch(other, /This removes the server part/);
+  const same = plain(renderToStaticMarkup(VIEW(current, { dialog: { kind: "uninstall", host: "server.example.com" } })));
+  assert.match(same, /This removes the server part from server\.example\.com\./);
+});
+
+test("Use a key from now on explains why it is disabled without a typed password", async () => {
+  const connected = await model({ status: async () => status("connected") }, async (x) => { await x.refreshStatus(); });
+  connected.setAuth("password");
+  const without = plain(renderToStaticMarkup(VIEW(connected)));
+  assert.match(without, /Enter the server password above to use this\./);
+  assert.match(renderToStaticMarkup(VIEW(connected)), /<button[^>]*disabled=""[^>]*>Use a key from now on</);
+  const withPassword = plain(renderToStaticMarkup(PASSWORD(connected)));
+  assert.doesNotMatch(withPassword, /Enter the server password above to use this\./);
+});
+
+test("the login method is a labelled radio group", async () => {
+  const html = renderToStaticMarkup(VIEW(await model()));
+  assert.match(html, /role="radiogroup" aria-label="Sign in with"/);
+  assert.match(plain(html), /<span class="st-label">Sign in with<\/span>/);
+});
+
+test("the SSH to Local switch names the SSH server; the hub text is unchanged", () => {
+  assert.match(m.SSH_LOCAL_CONFIRM, /stops using the SSH server/);
+  assert.equal(m.REMOTE_TEXT.localConfirm, "Switching to Local desktop stops using the hub and restarts the core on this computer.");
 });

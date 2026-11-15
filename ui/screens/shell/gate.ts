@@ -35,3 +35,16 @@ export function shouldMountSections(gate: Gate, everUsable: boolean): boolean {
 export function isInert(gate: Gate): boolean {
   return gate !== "open";
 }
+
+/**
+ * ssh mode with the core down: the Settings section stays mounted and usable, because the password or the server
+ * is changed there. Only this section, only this mode and only the `core` gate; login and the other gates are unchanged.
+ */
+export function settingsReachableOverCoreDown(mode: string | undefined, gate: Gate, active: string): boolean {
+  return mode === "ssh" && gate === "core" && active === "settings";
+}
+
+/** A section is inert under a gate, except Settings while `settingsReachable` holds (the rest of the app stays inert). */
+export function sectionInert(gate: Gate, sectionId: string, settingsReachable: boolean): boolean {
+  return isInert(gate) && !(gate === "core" && settingsReachable && sectionId === "settings");
+}

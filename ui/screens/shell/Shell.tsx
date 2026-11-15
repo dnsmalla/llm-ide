@@ -23,7 +23,7 @@ import { menuAction } from "./menu-model";
 import { useSyncExternalStore } from "react";
 import { TERMINAL_BUILT } from "../explorer/terminal/shared";
 import { setTerminalDockOpen, toggleTerminalDock, useTerminalDockOpen } from "../explorer/terminal/dock-state.ts";
-import { computeGate, isInert, shouldMountSections } from "./gate";
+import { computeGate, sectionInert, settingsReachableOverCoreDown, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { deepLinkSection } from "./deep-link.ts";
 import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, isSelectable, isSelectableFor, localOnlyNotice, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type NavAction, type NavMode, type SectionDef, type SectionId } from "./sections";
@@ -57,7 +57,7 @@ export interface ShellProps {
 }
 
 /** One mounted section: lazy screen inside its own error boundary and Suspense. */
-const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, inert, spike: Spike }: { def: SectionDef; active: boolean; projectRoot: string | null; inert: boolean; spike: ComponentType }) {
+export const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, inert, spike: Spike }: { def: SectionDef; active: boolean; projectRoot: string | null; inert: boolean; spike: ComponentType }) {
   const Screen = def.id === "spike" ? null : screenFor(def.id, def.label);
   return (
     <div className="sh-section" hidden={!active} inert={inert || !active} data-section={def.id}>
@@ -193,7 +193,12 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   }, [view.down]);
   const gate = computeGate({ view, signedIn: session.signedIn, everUsable: everUsable.current, bypass });
   if (gate === "open" && !bypass) everUsable.current = true;
-  const mount = shouldMountSections(gate, everUsable.current) && (projectLoaded || bypass);
+  // ssh mode, core down, Settings open: the user must be able to type the password or change the server, so Settings
+  // is mounted and interactive under a slim notice. `overlayHidden` lets the user bring the core-down panel back.
+  const [overlayHidden, setOverlayHidden] = useState(false);
+  useEffect(() => { setOverlayHidden(false); }, [nav.active]);
+  const settingsReachable = settingsReachableOverCoreDown(serverMode, gate, nav.active) && !overlayHidden;
+  const mount = (shouldMountSections(gate, everUsable.current) || settingsReachable) && (projectLoaded || bypass);
 
   useEffect(() => {
     coreStatusStore.start();
@@ -354,7 +359,6 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   // A process restart cannot have a running loop: any card left by a quit mid-run is stale.
   useEffect(() => { clearLiveCard(); }, []);
 
-  const inert = isInert(gate);
   const overlay = hasOverlayTitlebar(platform, hostAvailable);
   return (
     <div className="sh-app" data-platform={platform} data-overlay-titlebar={overlay ? "" : undefined}>
@@ -429,15 +433,21 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           )}
           {mount &&
             visibleSections.filter((s) => nav.visited.includes(s.id)).map((def) => (
-              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} inert={inert} spike={spike} />
+              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} inert={sectionInert(gate, def.id, settingsReachable)} spike={spike} />
             ))}
-          {gate === "core" && (
+          {gate === "core" && settingsReachable && (
+            <div className="sh-notice" role="status" data-testid="core-down-notice">
+              <p>{safeText(`${view.label}. ${view.detail ?? "The server settings stay open so you can fix the connection."}`, 300)}</p>
+              <button type="button" className="sh-button" onClick={() => setOverlayHidden(true)}>Show core status</button>
+            </div>
+          )}
+          {gate === "core" && !settingsReachable && (
             <div className="sh-overlay">
               <CoreDownPanel
                 view={view}
                 onRetry={() => void coreStatusStore.refreshNow()}
                 onStart={shellHost.isAvailable() ? () => { void invokeHost<unknown>("core_start").then(() => coreStatusStore.refreshNow()).catch(() => undefined); } : undefined}
-                onOpenSettings={serverMode === "ssh" ? () => shellBus.publish({ type: "goto-section", section: "settings", anchor: "server" }) : undefined}
+                onOpenSettings={serverMode === "ssh" ? () => { setOverlayHidden(false); shellBus.publish({ type: "goto-section", section: "settings", anchor: "server" }); } : undefined}
               />
             </div>
           )}

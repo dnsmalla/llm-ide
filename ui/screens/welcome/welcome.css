@@ -190,6 +190,7 @@
 .wc-remote { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
 .wc-remote-head { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .wc-remote-head .sh-button { min-height: 28px; }
+.wc-remote-head > .wc-ssh-set-up { align-self: flex-start; width: auto; }
 .wc-remote-empty { display: flex; flex-direction: column; gap: 12px; margin-top: auto; padding-top: 8px; }
 .wc-remote-empty .sh-button { width: 100%; }
 .wc-remote-list { max-height: 210px; overflow-y: auto; padding-right: 2px; }

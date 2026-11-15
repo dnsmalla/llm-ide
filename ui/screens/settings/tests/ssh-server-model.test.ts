@@ -305,3 +305,21 @@ test("connectWithTest does not connect when the host key is not trusted (for exa
   assert.deepEqual(order, ["test"]);
   assert.equal(m.getState().test?.changed, true);
 });
+
+test("uninstall: a typed name that does not match the target is refused before any host call", async () => {
+  const calls: string[] = [];
+  const m = filled(fakeIo({ async uninstall(_password, confirmHost) { calls.push(`uninstall:${confirmHost}`); return { ...status, link: "off" }; } }));
+  assert.equal(await m.uninstall(undefined, "server"), null);
+  assert.equal(await m.uninstall(undefined, ""), null);
+  assert.deepEqual(calls, []);
+  assert.equal(m.getState().error, "Type the server's host name to uninstall.");
+});
+
+test("uninstall: the typed name matches trimmed and case-insensitive, and the target host is what the host receives", async () => {
+  const calls: string[] = [];
+  const m = filled(fakeIo({ async uninstall(password, confirmHost) { calls.push(`uninstall:${password}:${confirmHost}`); return { ...status, link: "off" }; } }));
+  const result = await m.uninstall("hunter2", "  SERVER.example.COM ");
+  assert.equal(result?.link, "off");
+  assert.deepEqual(calls, ["uninstall:hunter2:server.example.com"]);
+  assert.equal(m.getState().error, null);
+});

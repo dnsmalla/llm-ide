@@ -53,7 +53,7 @@ export function StopConfirm({ host, busy, onConfirm, onCancel }: { host: string;
 }
 
 /** Uninstall: the user types the host name; the action stays disabled until it matches (trimmed, case-insensitive). */
-export function UninstallConfirm({ host, busy, onConfirm, onCancel }: { host: string; busy: boolean; onConfirm: () => void; onCancel: () => void }): ReactNode {
+export function UninstallConfirm({ host, busy, onConfirm, onCancel }: { host: string; busy: boolean; onConfirm: (typed: string) => void; onCancel: () => void }): ReactNode {
   const [typed, setTyped] = useState("");
   const ready = uninstallConfirmed(typed, host);
   return (
@@ -63,7 +63,8 @@ export function UninstallConfirm({ host, busy, onConfirm, onCancel }: { host: st
         <input className="st-input" value={typed} onChange={(e) => setTyped(e.currentTarget.value)} autoComplete="off" spellCheck={false} />
       </Field>
       <div className="st-row">
-        <Button tone="danger" disabled={!ready || busy} onClick={onConfirm}>Uninstall</Button>
+        {/* The guard is in the handler too, not only the disabled attribute: the typed name is what the model checks. */}
+        <Button tone="danger" disabled={!ready || busy} onClick={() => { if (ready) onConfirm(typed); }}>Uninstall</Button>
         <Button disabled={busy} onClick={onCancel}>Cancel</Button>
       </div>
     </div>

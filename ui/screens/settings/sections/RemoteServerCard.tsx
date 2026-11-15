@@ -13,6 +13,7 @@ import { ErrorText, Field } from "../ui.tsx";
 import { LOCAL_COPY, REMOTE_TEXT, RemoteServerModel, type RemoteServerIo, type RemoteServerState } from "../remote-model.ts";
 import type { ServerMode } from "../host.ts";
 import RemoteDeployCard from "./RemoteDeployCard.tsx";
+import { SSH_LOCAL_CONFIRM } from "../ssh-server-model.ts";
 
 /** `vite dev`/`tauri dev` only: release builds must use a public domain, never localhost. */
 const DEV = (() => {
@@ -219,7 +220,7 @@ export default function RemoteServerCard({ chosen, onChoose }: { chosen?: Server
       {confirmLocal ? (
         <div className="st-dialog" role="alertdialog" aria-label="Switch to Local desktop">
           <strong>Switch to Local desktop?</strong>
-          <p>{REMOTE_TEXT.localConfirm}</p>
+          <p>{appliedMode === "ssh" ? SSH_LOCAL_CONFIRM : REMOTE_TEXT.localConfirm}</p>
           <div className="st-row">
             <button type="button" className="st-btn" data-tone="danger" disabled={busy} onClick={() => void switchLocal()}>Switch to Local</button>
             <button type="button" className="st-btn" onClick={() => setConfirmLocal(false)}>Cancel</button>

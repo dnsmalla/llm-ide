@@ -14,7 +14,7 @@ export function SshServerEntry() {
           <h2 id="wc-ssh-title" className="wc-h2">SSH server</h2>
           <p className="wc-text wc-muted">Work on a server you can sign in to with SSH. The app installs its server part in your home folder there. No domain, certificate or administrator access is needed.</p>
         </div>
-        <button type="button" className="sh-button sh-button-primary" onClick={() => shellBus.publish({ type: "goto-section", ...SSH_SETUP_TARGET })}>Set up</button>
+        <button type="button" className="sh-button sh-button-primary wc-ssh-set-up" onClick={() => shellBus.publish({ type: "goto-section", ...SSH_SETUP_TARGET })}>Set up</button>
       </div>
     </section>
   );

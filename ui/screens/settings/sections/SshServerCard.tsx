@@ -6,7 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import { NeedsHost } from "../ui.tsx";
 import { SshServerModel, type SshServerIo } from "../ssh-server-model.ts";
-import { SshServerView } from "./SshServerView.tsx";
+import { SshServerView, type SshDialog } from "./SshServerView.tsx";
 
 const rejectNoHost = async (): Promise<never> => {
   throw new Error("The SSH server needs the desktop host, which is not connected in this build.");
@@ -30,8 +30,7 @@ export default function SshServerCard(): ReactNode {
   const m = useModel(() => new SshServerModel(host.sshServer ?? NO_HOST));
   const s = useStore(m);
   const [password, setPassword] = useState("");
-  const [stopOpen, setStopOpen] = useState(false);
-  const [uninstallOpen, setUninstallOpen] = useState(false);
+  const [dialog, setDialog] = useState<SshDialog | null>(null);
 
   // Load once per mount: the saved target and the live link. A focus refresh reads only the link, so it never
   // overwrites fields the user is still editing.
@@ -41,9 +40,11 @@ export default function SshServerCard(): ReactNode {
   useRefreshOnFocus(() => {
     if (available) void m.refreshStatus();
   });
-  // A password is for one server: a new host, port or user means the typed one is forgotten.
+  // A password is for one server: a new host, port or user means the typed one is forgotten, and an open
+  // confirmation for the old host closes (the view also ignores it by host, so it never shows for another server).
   useEffect(() => {
     setPassword("");
+    setDialog(null);
   }, [s.host, s.port, s.user]);
 
   if (!available) return <NeedsHost what="The SSH server" />;
@@ -53,10 +54,8 @@ export default function SshServerCard(): ReactNode {
       s={s}
       password={password}
       onPassword={setPassword}
-      stopOpen={stopOpen}
-      uninstallOpen={uninstallOpen}
-      onStopOpen={setStopOpen}
-      onUninstallOpen={setUninstallOpen}
+      dialog={dialog}
+      onDialog={(kind) => setDialog(kind === null ? null : { kind, host: s.host.trim() })}
       onRestart={() => {
         // Restart only when the user asks: a saved change applies at the next start.
         if (host.restartApp) void host.restartApp();

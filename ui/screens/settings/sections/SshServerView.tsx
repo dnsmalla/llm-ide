@@ -3,6 +3,9 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { ErrorText, Field, Button } from "../ui.tsx";
 import { sshBadgeText, type SshServerModel, type SshServerState } from "../ssh-server-model.ts";
+
+/** Which confirmation is open, and the host it was opened for (a dialog never follows a host change). */
+export interface SshDialog { kind: "stop" | "uninstall"; host: string }
 import { FingerprintBlock, StopConfirm, TestSummary, UninstallConfirm } from "./SshServerParts.tsx";
 
 const HINT = "Work on a server you can sign in to with SSH. The app installs its server part in your home folder there. No domain, certificate or administrator access is needed.";
@@ -14,10 +17,8 @@ export interface SshServerViewProps {
   /** Memory only: held by the card while it is mounted, never sent to the model's state. */
   password: string;
   onPassword: (value: string) => void;
-  stopOpen: boolean;
-  uninstallOpen: boolean;
-  onStopOpen: (open: boolean) => void;
-  onUninstallOpen: (open: boolean) => void;
+  dialog: SshDialog | null;
+  onDialog: (kind: SshDialog["kind"] | null) => void;
   onRestart: () => void;
 }
 
@@ -75,7 +76,7 @@ function LinkLine({ s, host, onRestart }: { s: SshServerState; host: string; onR
   }
 }
 
-export function SshServerView({ m, s, password, onPassword, stopOpen, uninstallOpen, onStopOpen, onUninstallOpen, onRestart }: SshServerViewProps): ReactNode {
+export function SshServerView({ m, s, password, onPassword, dialog, onDialog, onRestart }: SshServerViewProps): ReactNode {
   const busy = s.busy !== null;
   const pw = password.length > 0 ? password : undefined;
   const link = s.status?.link ?? null;
@@ -83,8 +84,11 @@ export function SshServerView({ m, s, password, onPassword, stopOpen, uninstallO
   const linkUp = link === "connected" || link === "connecting" || link === "reconnecting";
   const needsPassword = link === "needs_password";
   const trusted = s.test?.trusted === true;
-  // Stop and Uninstall need a server the app knows: a trusted key or a live status from the host.
-  const known = trusted || (link !== null && link !== "off");
+  // Stop and Uninstall only for a server that is installed (the last trusted test says so) or that the live link knows.
+  const installed = s.test?.trusted === true && typeof s.test.installedVersion === "string";
+  const serverKnown = installed || (link !== null && link !== "off");
+  // A dialog counts only while it is for the host now in the form.
+  const open = dialog !== null && dialog.host === s.host.trim() ? dialog.kind : null;
   const set = (field: "host" | "port" | "user" | "keyPath") => (e: { currentTarget: HTMLInputElement }) => m.setField(field, e.currentTarget.value);
   const connectBlocked = busy || !(trusted || needsPassword) || (s.auth === "password" && pw === undefined);
 
@@ -106,7 +110,9 @@ export function SshServerView({ m, s, password, onPassword, stopOpen, uninstallO
         <ErrorText text={s.fieldErrors.user ?? null} />
       </Field>
 
-      <div className="st-stack" role="radiogroup" aria-label="Login method">
+      <div className="st-stack">
+      <span className="st-label">Sign in with</span>
+      <div className="st-stack" role="radiogroup" aria-label="Sign in with">
         <label className="st-row">
           <input type="radio" name="ssh-auth" value="key" checked={s.auth === "key"} onChange={() => { onPassword(""); m.setAuth("key"); }} />
           <span>Key file</span>
@@ -124,6 +130,7 @@ export function SshServerView({ m, s, password, onPassword, stopOpen, uninstallO
       ) : (
         <PasswordInput value={password} onChange={onPassword} focus={needsPassword} />
       )}
+      </div>
 
       <LinkLine s={s} host={host} onRestart={onRestart} />
 
@@ -140,32 +147,35 @@ export function SshServerView({ m, s, password, onPassword, stopOpen, uninstallO
       </div>
 
       {s.auth === "password" && link === "connected" ? (
-        <div className="st-row">
-          <Button disabled={busy || pw === undefined} onClick={() => { if (pw !== undefined) void m.installKey(pw); }}>Use a key from now on</Button>
-          <span className="st-hint">{KEY_HINT}</span>
+        <div className="st-note">
+          <div className="st-row">
+            <Button disabled={busy || pw === undefined} onClick={() => { if (pw !== undefined) void m.installKey(pw); }}>Use a key from now on</Button>
+            <span className="st-hint">{KEY_HINT}</span>
+          </div>
+          {pw === undefined ? <p className="st-hint">Enter the server password above to use this.</p> : null}
         </div>
       ) : null}
 
-      {known ? (
+      {serverKnown ? (
         <div className="st-row">
-          <Button disabled={busy} onClick={() => onStopOpen(true)}>Stop server</Button>
-          <Button tone="danger" disabled={busy} onClick={() => onUninstallOpen(true)}>Uninstall…</Button>
+          <Button disabled={busy} onClick={() => onDialog("stop")}>Stop server</Button>
+          <Button tone="danger" disabled={busy} onClick={() => onDialog("uninstall")}>Uninstall…</Button>
         </div>
       ) : null}
-      {stopOpen ? (
+      {open === "stop" ? (
         <StopConfirm
           host={s.host.trim()}
           busy={busy}
-          onCancel={() => onStopOpen(false)}
-          onConfirm={() => { onStopOpen(false); void m.stopServer(pw); }}
+          onCancel={() => onDialog(null)}
+          onConfirm={() => { onDialog(null); void m.stopServer(pw); }}
         />
       ) : null}
-      {uninstallOpen ? (
+      {open === "uninstall" ? (
         <UninstallConfirm
           host={s.host.trim()}
           busy={busy}
-          onCancel={() => onUninstallOpen(false)}
-          onConfirm={() => { onUninstallOpen(false); void m.uninstall(pw, s.host.trim()); }}
+          onCancel={() => onDialog(null)}
+          onConfirm={(typed) => { onDialog(null); void m.uninstall(pw, typed); }}
         />
       ) : null}
 

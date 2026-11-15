@@ -74,7 +74,11 @@ export function sshServerErrorText(e: unknown): string {
   }
 }
 
+/** Shown when the switch from SSH to Local asks first. Same sentence as the hub's text, naming the SSH server. */
+export const SSH_LOCAL_CONFIRM = "Switching to Local desktop stops using the SSH server and restarts the core on this computer.";
+
 export const SSH_TEXT = {
+  uninstallMismatch: "Type the server's host name to uninstall.",
   unconfirmed: "Test the connection and confirm the server's host key first.",
   checkFields: "Check the highlighted fields before continuing.",
   testFirst: "Test the connection first.",
@@ -370,9 +374,17 @@ export class SshServerModel extends Store<SshServerState> {
     return status;
   }
 
-  /** Remove the server install. `confirmHost` must name the host (the host checks it again). */
-  uninstall(password: string | undefined, confirmHost: string): Promise<SshServerStatus | null> {
-    return this.run("uninstall", () => this.#io.uninstall(password, confirmHost));
+  /**
+   * Remove the server install. The typed host name is checked here, against the target, before anything is sent;
+   * a mismatch is refused with an error and no host call. The host checks the saved name again.
+   */
+  uninstall(password: string | undefined, typedHost: string): Promise<SshServerStatus | null> {
+    const target = this.getState().host.trim();
+    if (!uninstallConfirmed(typedHost, target)) {
+      this.set({ error: SSH_TEXT.uninstallMismatch });
+      return Promise.resolve(null);
+    }
+    return this.run("uninstall", () => this.#io.uninstall(password, target));
   }
 
   private async reloadSaved(): Promise<void> {
