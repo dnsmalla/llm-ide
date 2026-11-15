@@ -78,16 +78,16 @@ struct SessionRecord {
 }
 
 /// One remote command at a time, with the ssh arguments and askpass decided in one place.
-struct Link<'a> {
-    exec: &'a dyn SshExec,
-    endpoint: &'a SshEndpoint,
-    known_hosts: &'a Path,
-    password: Option<&'a str>,
+pub(crate) struct Link<'a> {
+    pub(crate) exec: &'a dyn SshExec,
+    pub(crate) endpoint: &'a SshEndpoint,
+    pub(crate) known_hosts: &'a Path,
+    pub(crate) password: Option<&'a str>,
 }
 
 impl Link<'_> {
     /// Runs one fixed remote command with strict host-key checking.
-    fn run(&self, command: &'static str, stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
+    pub(crate) fn run(&self, command: &'static str, stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
         let args = exec_args(self.endpoint, self.known_hosts, true, command);
         let grant = self.askpass()?;
         let output = self
@@ -406,7 +406,7 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), FsError> {
 
 /// Starts the `-L` forward. The returned grant must outlive the password prompt, so the caller holds it
 /// until `/health` answers.
-fn open_forward(
+pub(crate) fn open_forward(
     link: &Link<'_>,
     local_port: u16,
     remote_port: u16,
@@ -422,7 +422,7 @@ fn open_forward(
 
 /// Polls `/health` through the forward until it answers with the started nonce, the forward exits, or
 /// `timeout` passes.
-fn wait_for_core(
+pub(crate) fn wait_for_core(
     forward: &mut dyn ForwardChild,
     health: &dyn Fn(u16) -> Option<String>,
     local_port: u16,
@@ -492,7 +492,7 @@ pub fn bundle_for(version: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::remote::temp_ssh_dir;
     use crate::ssh_server_scripts::{INSTALL, PROBE, ROLLBACK, START, STATUS, STOP};
@@ -504,50 +504,57 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    const KNOWN: &str = "/home/alice/.ssh/llmide_known_hosts";
-    const KEY: &str = "/home/alice/.ssh/id_ed25519";
+    pub(crate) const KNOWN: &str = "/home/alice/.ssh/llmide_known_hosts";
+    pub(crate) const KEY: &str = "/home/alice/.ssh/id_ed25519";
     const OLD: &str = "oldnonce0123456789";
-    const NEW: &str = "newnonce0123456789";
+    pub(crate) const NEW: &str = "newnonce0123456789";
     const RESTORED: &str = "restorednonce012345";
     const PAYLOAD: &[u8] = b"{\"jwtSecret\":\"j\",\"vaultKey\":\"v\",\"hostApprovalKey\":\"a\"}";
     const TARBALL: &[u8] = b"fake-tarball-bytes";
-    const PASSWORD: &str = "hunter2";
-    const PERMISSION_DENIED: &str = "alice@example.com: Permission denied (password).";
-    const TIMED_OUT: &str = "ssh: connect to host example.com port 22: Connection timed out";
-    const STOPPED_STATUS: &str = "__LLMIDE_STATE__={\"running\":false}\n";
+    pub(crate) const PASSWORD: &str = "hunter2";
+    pub(crate) const PERMISSION_DENIED: &str = "alice@example.com: Permission denied (password).";
+    pub(crate) const TIMED_OUT: &str = "ssh: connect to host example.com port 22: Connection timed out";
+    pub(crate) const STOPPED_STATUS: &str = "__LLMIDE_STATE__={\"running\":false}\n";
     const INSTALL_OK: &str = "__LLMIDE_INSTALL__=ok\n";
     const STOP_OK: &str = "__LLMIDE_STOP__=stopped\n";
     const ROLLBACK_OK: &str = "__LLMIDE_ROLLBACK__=1.0.0\n";
 
     #[derive(Clone, Debug)]
-    struct Call {
-        name: &'static str,
-        args: Vec<String>,
-        stdin: Option<Vec<u8>>,
+    pub(crate) struct Call {
+        pub(crate) name: &'static str,
+        pub(crate) args: Vec<String>,
+        pub(crate) stdin: Option<Vec<u8>>,
     }
 
     /// Scripted `SshExec`: each `run` pops the next queued output and records argv and stdin.
     #[derive(Default)]
-    struct FakeExec {
+    pub(crate) struct FakeExec {
         queue: Mutex<VecDeque<io::Result<RawOutput>>>,
         calls: Mutex<Vec<Call>>,
         kills: Arc<AtomicUsize>,
+        /// Forwards handed out by `spawn_forward` before the default never-exiting one.
+        forwards: Mutex<VecDeque<Box<dyn ForwardChild>>>,
     }
 
     impl FakeExec {
-        fn new(outputs: Vec<io::Result<RawOutput>>) -> Self {
+        pub(crate) fn new(outputs: Vec<io::Result<RawOutput>>) -> Self {
             Self { queue: Mutex::new(outputs.into()), ..Default::default() }
         }
 
-        fn calls(&self) -> Vec<Call> {
+        /// Queues the next forward `spawn_forward` returns, so a test can script when it exits.
+        pub(crate) fn queue_forward(&self, forward: Box<dyn ForwardChild>) {
+            self.forwards.lock().unwrap().push_back(forward);
+        }
+
+        pub(crate) fn calls(&self) -> Vec<Call> {
             self.calls.lock().unwrap().clone()
         }
 
-        fn names(&self) -> Vec<&'static str> {
+        pub(crate) fn names(&self) -> Vec<&'static str> {
             self.calls().iter().map(|c| c.name).collect()
         }
 
-        fn kills(&self) -> usize {
+        pub(crate) fn kills(&self) -> usize {
             self.kills.load(Ordering::SeqCst)
         }
     }
@@ -580,7 +587,8 @@ mod tests {
 
         fn spawn_forward(&self, args: &[String], _askpass: Option<&AskpassGrant>) -> io::Result<Box<dyn ForwardChild>> {
             self.calls.lock().unwrap().push(Call { name: "forward", args: args.to_vec(), stdin: None });
-            Ok(Box::new(FakeForward { kills: self.kills.clone() }))
+            let queued = self.forwards.lock().unwrap().pop_front();
+            Ok(queued.unwrap_or_else(|| Box::new(FakeForward { kills: self.kills.clone() })))
         }
     }
 
@@ -622,32 +630,32 @@ mod tests {
         }
     }
 
-    fn ok(stdout: &str) -> io::Result<RawOutput> {
+    pub(crate) fn ok(stdout: &str) -> io::Result<RawOutput> {
         Ok(RawOutput { code: Some(0), stdout: stdout.to_string(), stderr: String::new() })
     }
 
-    fn ssh_error(stderr: &str) -> io::Result<RawOutput> {
+    pub(crate) fn ssh_error(stderr: &str) -> io::Result<RawOutput> {
         Ok(RawOutput { code: Some(255), stdout: String::new(), stderr: stderr.to_string() })
     }
 
-    fn probe_out(current: &str) -> io::Result<RawOutput> {
+    pub(crate) fn probe_out(current: &str) -> io::Result<RawOutput> {
         ok(&format!(
             "__LLMIDE_UNAME__=Linux x86_64\n__LLMIDE_FREE_MB__=5000\n__LLMIDE_INSTALLED__={current}\n\
              __LLMIDE_CURRENT__={current}\n__LLMIDE_CLAUDE__=2.1.0 (Claude Code)\n"
         ))
     }
 
-    fn state_out(port: u16, nonce: &str, version: &str) -> io::Result<RawOutput> {
+    pub(crate) fn state_out(port: u16, nonce: &str, version: &str) -> io::Result<RawOutput> {
         ok(&format!(
             "__LLMIDE_STATE__={{\"running\":true,\"port\":{port},\"pid\":4242,\"nonce\":\"{nonce}\",\"version\":\"{version}\"}}\n"
         ))
     }
 
-    fn key_endpoint() -> SshEndpoint {
+    pub(crate) fn key_endpoint() -> SshEndpoint {
         prepare_endpoint("example.com", 22, "alice", SshAuth::Key { path: KEY.into() }).unwrap()
     }
 
-    fn password_endpoint() -> SshEndpoint {
+    pub(crate) fn password_endpoint() -> SshEndpoint {
         prepare_endpoint("example.com", 22, "alice", SshAuth::Password).unwrap()
     }
 

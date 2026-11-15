@@ -53,6 +53,7 @@ mod project_search;
 mod pty;
 mod remote;
 mod ssh_askpass;
+mod ssh_link;
 mod ssh_server_scripts;
 mod ssh_session;
 mod ssh_transport;
