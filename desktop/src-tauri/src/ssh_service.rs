@@ -19,15 +19,12 @@ use serde::{Deserialize, Serialize};
 use crate::confirm::herr;
 use crate::core_host::CoreHost;
 use crate::fs_ops::FsError;
-use crate::fsutil;
 use crate::prefs::{self, ServerMode, SshAuthKind};
 use crate::remote::{temp_ssh_dir, valid_fingerprint, valid_host_key_type, write_known_hosts, PreparedTarget, RawOutput};
 use crate::remote_deploy::{fingerprint_for_key_b64, known_host_name};
-use crate::ssh_link::{supervise, SshLink, SuperviseInput};
-use crate::ssh_server_scripts::{
-    parse_add_key, parse_probe, parse_stop, parse_uninstall, ClaudeState, ADD_KEY, PROBE, STOP, UNINSTALL,
-};
-use crate::ssh_session::{connect_with, pick_local_port, ConnectInput, Link};
+use crate::ssh_link::{supervise, KnownHostsDir, SshLink, SuperviseInput};
+use crate::ssh_server_scripts::{parse_core_state, parse_probe, parse_stop, parse_uninstall, ClaudeState, PROBE, STATUS, STOP, UNINSTALL};
+use crate::ssh_session::{connect_with, require_ours, ConnectInput, Link};
 use crate::ssh_transport::{prepare_endpoint, SshAuth, SshEndpoint, SshExec};
 
 /// Key types in the order a scan is searched. The first one the server offers is the one pinned.
@@ -51,8 +48,19 @@ static OBSERVED: OnceLock<Mutex<HashMap<String, Offered>>> = OnceLock::new();
 /// The version and Claude state of the last connect that succeeded. Cleared by disconnect, stop and uninstall.
 static REMEMBERED: Mutex<Option<Remembered>> = Mutex::new(None);
 
-/// The known_hosts folder the attached link reads. Replaced on attach; removed on disconnect and stop.
-static LIVE_DIR: Mutex<Option<KnownHostsDir>> = Mutex::new(None);
+/// Serializes the calls that change the server or the link: open (connect and the startup connector), stop,
+/// uninstall and key install. Two of them at once could both see "no core" and both start one, or one could
+/// stop a core the other is still checking. Held for the whole call, including the network waits.
+///
+/// Lock order, outermost first, everywhere in the app:
+///   1. `CoreHost::lifecycle` (its `stop` joins the startup thread while holding it),
+///   2. this operation lock,
+///   3. the `CoreHost` slots (`ssh_link`, then `status`) taken by attach, detach and status reads,
+///   4. the preferences lock and this module's `REMEMBERED` and `OBSERVED` slots.
+/// The startup connector takes the operation lock with no `CoreHost` lock held (`run_ssh_startup` clones the
+/// connector and releases its lock first), so it never runs against the order above. `disconnect` and `status`
+/// do not take this lock, so the UI's reads never wait for a connect.
+static OPERATION: Mutex<()> = Mutex::new(());
 
 /// What the UI sends. No secret field; unknown fields are refused.
 #[derive(Deserialize, Clone, Debug)]
@@ -118,32 +126,16 @@ pub struct Deps {
     pub session_file: PathBuf,
 }
 
-/// A connected, verified link and what `status` remembers about it. `known_hosts` must outlive `link`,
-/// which is why the struct drops `link` first (declaration order).
+/// A connected, verified link and what `status` remembers about it. The link owns the known_hosts folder it reads.
 pub struct OpenedLink {
     pub link: SshLink,
     pub version: String,
     pub claude: String,
-    pub known_hosts: KnownHostsDir,
-}
-
-/// The one-line known_hosts folder for an endpoint. Removed when dropped, so it lives exactly as long as
-/// the link or call that reads it.
-pub struct KnownHostsDir {
-    dir: PathBuf,
-    file: PathBuf,
-}
-
-impl Drop for KnownHostsDir {
-    fn drop(&mut self) {
-        // Best effort: a folder left behind holds only the public pin line.
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
 }
 
 /// The confirmed host key: the type and base64 blob exactly as the server offered them.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Pin {
+pub(crate) struct Pin {
     key_type: String,
     key_b64: String,
 }
@@ -220,12 +212,19 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
 ///     `SSH_PASSWORD_REQUIRED`, `SSH_HOST_KEY_UNCONFIRMED`, `SSH_BUNDLE_MISSING`, plus the codes of
 ///     `ssh_session::connect_with`.
 pub fn open_link(deps: &Deps, target: &SshServerTarget, password: Option<&str>) -> Result<OpenedLink, FsError> {
+    let _operation = operation();
+    open_link_locked(deps, target, password)
+}
+
+/// [`open_link`] without taking the operation lock, for callers that already hold it.
+fn open_link_locked(deps: &Deps, target: &SshServerTarget, password: Option<&str>) -> Result<OpenedLink, FsError> {
     let endpoint = target_endpoint(target, password)?;
     let pin = require_pin(&endpoint)?;
     let bundle = (deps.bundle)().ok_or_else(|| {
         herr("SSH_BUNDLE_MISSING", "This build has no Linux server bundle. Build it with desktop/scripts/stage-hub-core.mjs.")
     })?;
     let secrets = (deps.secrets_payload)()?;
+    // Owned here: if the connect fails, dropping it removes the folder before this function returns.
     let known = pinned_dir(&endpoint, &pin)?;
     let input = ConnectInput {
         endpoint: &endpoint,
@@ -250,17 +249,20 @@ pub fn open_link(deps: &Deps, target: &SshServerTarget, password: Option<&str>) 
         connected,
         endpoint,
         password: link_password,
-        known_hosts: known.file.clone(),
+        known_hosts: known,
         health: deps.health.clone(),
     };
-    Ok(OpenedLink { link: supervise(supervised), version, claude, known_hosts: known })
+    Ok(OpenedLink { link: supervise(supervised), version, claude })
 }
 
 /// Connects, then saves SSH mode and serves the link. Preferences change only after a successful connect.
 ///
+/// The operation lock is held from the connect to the attach, so a Stop or Uninstall cannot run between them.
+///
 /// Errors: the codes of [`open_link`], plus any preference validation error.
 pub fn connect(deps: &Deps, host: &CoreHost, target: &SshServerTarget, password: Option<&str>) -> Result<SshServerStatus, FsError> {
-    let opened = open_link(deps, target, password)?;
+    let _operation = operation();
+    let opened = open_link_locked(deps, target, password)?;
     prefs::set_remote_ssh(
         target.host.clone(),
         target.port,
@@ -275,42 +277,42 @@ pub fn connect(deps: &Deps, host: &CoreHost, target: &SshServerTarget, password:
 /// Makes an opened link the one SSH mode serves. Outside SSH mode the link is stopped again, because the mode
 /// applies only at the next app start; the status then reports `restart_required`.
 pub fn attach_link(host: &CoreHost, opened: OpenedLink) -> SshServerStatus {
-    let OpenedLink { link, version, claude, known_hosts } = opened;
+    let OpenedLink { link, version, claude } = opened;
     *locked(&REMEMBERED) = Some(Remembered { version, claude });
     if host.mode() == ServerMode::Ssh {
-        // Stops the previous link first; its folder is replaced only after that link has stopped reading it.
+        // Stops the previous link first. Each link owns its own known_hosts folder, so the old one's folder goes
+        // with it and no other link can lose its file.
         host.attach_ssh_link(link);
-        *locked(&LIVE_DIR) = Some(known_hosts);
-        build_status(host, None)
+        build_status(host)
     } else {
         drop(link);
-        drop(known_hosts);
-        build_status(host, Some("restart_required"))
+        let mut status = build_status(host);
+        status.link = "restart_required".to_string();
+        status
     }
 }
 
-/// The startup connector's entry. Keeps what [`connect`] keeps (the remembered version and Claude state, and the
-/// known_hosts folder the link reads) and leaves attaching to the core host, which is already starting in SSH mode.
+/// The startup connector's entry. Keeps what [`connect`] keeps (the remembered version and Claude state) and
+/// leaves attaching to the core host, which is already starting in SSH mode. The returned link owns its folder.
 ///
 /// Errors: the codes of [`open_link`].
 pub(crate) fn open_saved_link(deps: &Deps, target: &SshServerTarget) -> Result<SshLink, FsError> {
-    let OpenedLink { link, version, claude, known_hosts } = open_link(deps, target, None)?;
+    let OpenedLink { link, version, claude } = open_link(deps, target, None)?;
     *locked(&REMEMBERED) = Some(Remembered { version, claude });
-    // NOTE: a folder replaced here belonged to a link the startup path is about to stop, so no live ssh reads it.
-    *locked(&LIVE_DIR) = Some(known_hosts);
     Ok(link)
 }
 
-/// Stops the forward. The server core keeps running; no ssh call is made.
+/// Stops the forward. The server core keeps running; no ssh call is made. The core host records the user's
+/// Disconnect, so the status reads `stopped` rather than a failure.
 pub fn disconnect(host: &CoreHost) -> SshServerStatus {
     host.detach_ssh_link();
     forget_session();
-    build_status(host, Some(stopped_label(host)))
+    build_status(host)
 }
 
 /// The saved server and the link state. Not in SSH mode, the link is `off`.
 pub fn status(host: &CoreHost) -> SshServerStatus {
-    build_status(host, None)
+    build_status(host)
 }
 
 /// Reads the server's core state with the constant STATUS script over the pinned transport. Read-only: no
@@ -328,72 +330,44 @@ pub(crate) fn server_core_state(deps: &Deps, password: Option<&str>) -> Result<c
     crate::ssh_server_scripts::parse_core_state(&output.stdout)
 }
 
-/// Creates a dedicated key, adds its public line to the server, checks that the server accepts it, and only
-/// then saves key auth. Until the check passes, nothing in preferences changes.
-///
-/// Preconditions: the saved login is password auth, the host key is pinned, and `password` is non-empty.
-/// Postconditions: on success the key pair lives under `key_dir` and preferences hold key auth with its path.
-/// The running link is left as it is; the key is used from the next connect. On any failure after the key
-/// files were created, both files are removed. The server may keep the public line, which is harmless without
-/// the private key.
-///
-/// Errors:
-///     `SSH_KEY_NOT_NEEDED`, `SSH_PASSWORD_REQUIRED`, `SSH_HOST_KEY_UNCONFIRMED`, `SSH_KEYGEN_FAILED`,
-///     `SSH_KEY_INVALID`, `SSH_KEY_INSTALL_FAILED`, `SSH_KEY_VERIFY_FAILED`, and the transport codes of the
-///     pinned calls.
-pub fn install_key(deps: &Deps, host: &CoreHost, key_dir: &Path, password: &str) -> Result<SshServerStatus, FsError> {
-    let saved = prefs::stored().remote_server;
-    if saved.ssh_auth != SshAuthKind::Password {
-        return Err(herr("SSH_KEY_NOT_NEEDED", "This server already uses a key."));
-    }
-    let target = SshServerTarget {
-        host: saved.host.clone(),
-        port: saved.port,
-        user: saved.user.clone(),
-        key_path: String::new(),
-        auth: SshAuthKind::Password,
-    };
-    let endpoint = target_endpoint(&target, Some(password))?;
-    let pin = require_pin(&endpoint)?;
-    let pinned = pinned_dir(&endpoint, &pin)?;
-    fsutil::private_dir(key_dir).map_err(|_| herr(KEYGEN_FAILED, KEYGEN_MESSAGE))?;
-    let key_path = key_file_path(key_dir, &endpoint.host, endpoint.port);
-    // A file left by an earlier failed attempt must not block the new key.
-    remove_key_files(&key_path);
-
-    let installed = install_and_verify(deps, &endpoint, &pinned, &key_path, password).and_then(|()| {
-        let key_text = path_text(&key_path)?;
-        prefs::set_remote_ssh(saved.host, saved.port, saved.user, key_text, SshAuthKind::Key, saved.mode)
-    });
-    if let Err(error) = installed {
-        remove_key_files(&key_path);
-        return Err(error);
-    }
-    Ok(build_status(host, None))
-}
-
 /// Stops the forward, then stops the server core named in state.json.
 ///
+/// The target must name the saved server: the dialog shows the host the user typed, and the stop must hit that
+/// same server. A core this desktop did not start is refused unless `force` is set, after one STATUS call.
+///
 /// Errors:
-///     `SSH_PASSWORD_REQUIRED`, `SSH_HOST_KEY_UNCONFIRMED`, the transport codes, `SSH_STOP_UNKNOWN` and
-///     `SSH_STOP_FAILED`.
-pub fn stop_server(deps: &Deps, host: &CoreHost, password: Option<&str>) -> Result<SshServerStatus, FsError> {
-    let endpoint = saved_endpoint(password)?;
+///     `confirm_mismatch` when the target is not the saved server (no ssh call), `SSH_CORE_FOREIGN` for a core
+///     another desktop started, then `SSH_PASSWORD_REQUIRED`, `SSH_HOST_KEY_UNCONFIRMED`, the transport codes,
+///     `SSH_STOP_UNKNOWN` and `SSH_STOP_FAILED`.
+pub fn stop_server(
+    deps: &Deps,
+    host: &CoreHost,
+    target: &SshServerTarget,
+    password: Option<&str>,
+    force: bool,
+) -> Result<SshServerStatus, FsError> {
+    let _operation = operation();
+    let endpoint = saved_target_endpoint(target, password)?;
     let pin = require_pin(&endpoint)?;
     let pinned = pinned_dir(&endpoint, &pin)?;
+    let status = read_state(deps, &endpoint, &pinned, password)?;
+    if !force {
+        require_ours(&status, &deps.session_file, &endpoint)?;
+    }
     host.detach_ssh_link();
     forget_session();
     let output = run_pinned(deps, &endpoint, &pinned, password, STOP)?;
     parse_stop(&output.stdout)?;
-    Ok(build_status(host, Some(stopped_label(host))))
+    Ok(build_status(host))
 }
 
 /// Stops the forward and the server core, then removes the releases. Data on the server is kept.
 ///
 /// Errors:
-///     `confirm_mismatch` when `confirm_host` is not the saved host name (no ssh call), then the codes of
-///     [`stop_server`].
-pub fn uninstall(deps: &Deps, host: &CoreHost, password: Option<&str>, confirm_host: &str) -> Result<SshServerStatus, FsError> {
+///     `confirm_mismatch` when `confirm_host` is not the saved host name (no ssh call), `SSH_CORE_FOREIGN` for a
+///     core another desktop started (unless `force`), then the codes of [`stop_server`].
+pub fn uninstall(deps: &Deps, host: &CoreHost, password: Option<&str>, confirm_host: &str, force: bool) -> Result<SshServerStatus, FsError> {
+    let _operation = operation();
     let saved_host = prefs::stored().remote_server.host;
     if !confirm_host.trim().eq_ignore_ascii_case(saved_host.trim()) {
         return Err(herr("confirm_mismatch", "Type the server's host name to uninstall."));
@@ -401,110 +375,46 @@ pub fn uninstall(deps: &Deps, host: &CoreHost, password: Option<&str>, confirm_h
     let endpoint = saved_endpoint(password)?;
     let pin = require_pin(&endpoint)?;
     let pinned = pinned_dir(&endpoint, &pin)?;
+    let status = read_state(deps, &endpoint, &pinned, password)?;
+    if !force {
+        require_ours(&status, &deps.session_file, &endpoint)?;
+    }
     host.detach_ssh_link();
     forget_session();
     let output = run_pinned(deps, &endpoint, &pinned, password, UNINSTALL)?;
     parse_stop(&output.stdout)?;
     parse_uninstall(&output.stdout)?;
-    Ok(build_status(host, Some(stopped_label(host))))
+    Ok(build_status(host))
 }
 
-// ---- helpers ----------------------------------------------------------------------------------------------
-
-/// Codes and text for a key the local ssh-keygen could not create. Shared with the production keygen.
-pub(crate) const KEYGEN_FAILED: &str = "SSH_KEYGEN_FAILED";
-pub(crate) const KEYGEN_MESSAGE: &str = "Could not create a key on this computer.";
-const KEY_VERIFY_MESSAGE: &str = "The server did not accept the new key. Your password login is unchanged.";
-const KEY_REJECTED_MESSAGE: &str = "The new key was not accepted.";
-
-/// The private key file for an endpoint: `<key_dir>/id_llmide_<host>_<port>`. The host is lower-cased and every
-/// character outside `[a-z0-9.-]` becomes `_`, so the name holds no path separator whatever the typed host.
-fn key_file_path(key_dir: &Path, host: &str, port: u16) -> PathBuf {
-    let name: String = host
-        .to_ascii_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-' { c } else { '_' })
-        .collect();
-    key_dir.join(format!("id_llmide_{name}_{port}"))
+/// The operation lock. A poisoned lock still guards nothing that can be half-written, so it is taken anyway.
+pub(crate) fn operation() -> MutexGuard<'static, ()> {
+    locked(&OPERATION)
 }
 
-/// The public half of a key pair: the private path with `.pub` appended, as ssh-keygen names it.
-pub(crate) fn public_key_path(private: &Path) -> PathBuf {
-    let mut name = private.as_os_str().to_owned();
-    name.push(".pub");
-    PathBuf::from(name)
-}
-
-/// The same shape rule the ADD_KEY script enforces: `ssh-ed25519 <base64> <comment>` with exactly two spaces.
-fn valid_public_line(line: &str) -> bool {
-    let Some(rest) = line.strip_prefix("ssh-ed25519 ") else {
-        return false;
-    };
-    let mut parts = rest.split(' ');
-    let (Some(base64), Some(comment), None) = (parts.next(), parts.next(), parts.next()) else {
-        return false;
-    };
-    !base64.is_empty()
-        && !comment.is_empty()
-        && base64.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
-        && comment.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'@' | b'.' | b'_' | b'-'))
-}
-
-fn path_text(path: &Path) -> Result<String, FsError> {
-    path.to_str().map(str::to_string).ok_or_else(|| herr(KEYGEN_FAILED, KEYGEN_MESSAGE))
-}
-
-/// Removes the private and public key files. Best effort: a missing file is the normal case.
-fn remove_key_files(private: &Path) {
-    let _ = std::fs::remove_file(private);
-    let _ = std::fs::remove_file(public_key_path(private));
-}
-
-/// Generates the pair, adds the public line through ADD_KEY (the only call that gets the password), then logs
-/// in with the new key alone. Returns `Ok` only after the server accepted the key.
-fn install_and_verify(
+/// Reads the server's core state with STATUS, for the ownership check before a stop or an uninstall.
+fn read_state(
     deps: &Deps,
     endpoint: &SshEndpoint,
     pinned: &KnownHostsDir,
-    key_path: &Path,
-    password: &str,
-) -> Result<(), FsError> {
-    let public_line = (deps.keygen)(key_path)?;
-    if !valid_public_line(&public_line) {
-        return Err(herr("SSH_KEY_INVALID", KEY_REJECTED_MESSAGE));
-    }
-    set_private_mode(key_path)?;
-
-    let stdin = format!("{public_line}\n");
-    let add = Link { exec: &*deps.exec, endpoint, known_hosts: &pinned.file, password: Some(password) };
-    parse_add_key(&add.run(ADD_KEY, Some(stdin.as_bytes()))?.stdout)?;
-
-    let key_endpoint = prepare_endpoint(
-        &endpoint.host,
-        endpoint.port,
-        &endpoint.user,
-        SshAuth::Key { path: path_text(key_path)? },
-    )?;
-    // No password here: the probe must succeed on the key alone, or the key is not in use.
-    let verify = Link { exec: &*deps.exec, endpoint: &key_endpoint, known_hosts: &pinned.file, password: None };
-    verify
-        .run(PROBE, None)
-        .and_then(|out| parse_probe(&out.stdout))
-        .map_err(|_| herr("SSH_KEY_VERIFY_FAILED", KEY_VERIFY_MESSAGE))?;
-    Ok(())
+    password: Option<&str>,
+) -> Result<crate::ssh_server_scripts::CoreState, FsError> {
+    let output = run_pinned(deps, endpoint, pinned, password, STATUS)?;
+    parse_core_state(&output.stdout)
 }
 
-/// ssh refuses a private key that other users can read, so the file is set to 0600 before it is used.
-fn set_private_mode(path: &Path) -> Result<(), FsError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|_| herr(KEYGEN_FAILED, KEYGEN_MESSAGE))?;
+/// The endpoint a stop or uninstall acts on: the saved one, but only when the target names the same host, port
+/// and user. Checked before any ssh call, so a mismatched form never reaches the server.
+fn saved_target_endpoint(target: &SshServerTarget, password: Option<&str>) -> Result<SshEndpoint, FsError> {
+    let shaped = endpoint_shape(target)?;
+    let saved = prefs::stored().remote_server;
+    let same = shaped.host.eq_ignore_ascii_case(saved.host.trim())
+        && shaped.port == saved.port
+        && shaped.user == saved.user.trim();
+    if !same {
+        return Err(herr("confirm_mismatch", "Those are not the saved server's details."));
     }
-    #[cfg(not(unix))]
-    let _ = path;
-    Ok(())
+    saved_endpoint(password)
 }
 
 /// Locks a process-wide slot. A poisoned lock still holds valid data, so the guard is taken anyway.
@@ -515,9 +425,7 @@ fn locked<T>(slot: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Panic-hook cleanup: drops the known_hosts folder and the remembered state. Only try-locks, because the panicking
 /// thread may hold one of these slots and a blocking lock there would hang the exit.
 pub(crate) fn forget_for_panic() {
-    if let Some(mut slot) = try_locked(&LIVE_DIR) {
-        slot.take();
-    }
+    // The link's known_hosts folder is not here: each link owns it, and `CoreHost::shutdown_from_panic` stops it.
     if let Some(mut slot) = try_locked(&REMEMBERED) {
         *slot = None;
     }
@@ -560,7 +468,7 @@ fn with_password(endpoint: SshEndpoint, password: Option<&str>) -> Result<SshEnd
 /// The loopback port the forward binds. Tests fix one, so they never depend on which ports this machine uses.
 #[cfg(not(test))]
 fn forward_port() -> Option<u16> {
-    pick_local_port()
+    crate::ssh_session::pick_local_port()
 }
 
 #[cfg(test)]
@@ -568,7 +476,7 @@ fn forward_port() -> Option<u16> {
     Some(3456)
 }
 
-fn target_endpoint(target: &SshServerTarget, password: Option<&str>) -> Result<SshEndpoint, FsError> {
+pub(crate) fn target_endpoint(target: &SshServerTarget, password: Option<&str>) -> Result<SshEndpoint, FsError> {
     with_password(endpoint_shape(target)?, password)
 }
 
@@ -629,7 +537,7 @@ fn pin_for(endpoint: &SshEndpoint) -> Option<Pin> {
     Some(Pin { key_type: key_type.to_string(), key_b64: key_b64.to_string() })
 }
 
-fn require_pin(endpoint: &SshEndpoint) -> Result<Pin, FsError> {
+pub(crate) fn require_pin(endpoint: &SshEndpoint) -> Result<Pin, FsError> {
     pin_for(endpoint).ok_or_else(|| herr("SSH_HOST_KEY_UNCONFIRMED", "Test the connection and confirm the server's host key first."))
 }
 
@@ -640,9 +548,15 @@ fn pin_text(endpoint: &SshEndpoint, offered: &Offered) -> String {
 
 /// Writes one known_hosts line for the pin into a fresh folder. The folder is owned by the returned value and
 /// removed when it drops, including when the write fails.
-fn pinned_dir(endpoint: &SshEndpoint, pin: &Pin) -> Result<KnownHostsDir, FsError> {
-    let dir = temp_ssh_dir("ssh-server")?;
-    let held = KnownHostsDir { file: dir.join("known_hosts"), dir };
+pub(crate) fn pinned_dir(endpoint: &SshEndpoint, pin: &Pin) -> Result<KnownHostsDir, FsError> {
+    // Owned from this line on: a failure below drops `held`, which removes the folder.
+    let held = KnownHostsDir::owning(temp_ssh_dir("ssh-server")?);
+    // The path goes into a quoted `UserKnownHostsFile` option, which no quoting can carry if it holds a quote or
+    // a newline. Such a path is refused rather than handed to ssh half-parsed.
+    match held.dir.to_str() {
+        Some(path) if !path.contains(['"', '\n']) => {}
+        _ => return Err(herr("known_hosts_failed", "the temporary folder path cannot be used for host key checks")),
+    }
     let target = PreparedTarget {
         host: endpoint.host.to_ascii_lowercase(),
         port: endpoint.port,
@@ -709,21 +623,16 @@ fn claude_text(state: &ClaudeState) -> String {
 
 fn forget_session() {
     *locked(&REMEMBERED) = None;
-    *locked(&LIVE_DIR) = None;
 }
 
-/// The label for a link that was just stopped by this app. SSH mode reads `stopped`; any other mode has no link.
-fn stopped_label(host: &CoreHost) -> &'static str {
-    if host.mode() == ServerMode::Ssh { "stopped" } else { "off" }
-}
-
-fn build_status(host: &CoreHost, link_override: Option<&'static str>) -> SshServerStatus {
+/// The status the UI reads: the saved server, the core host's link and the remembered version. The link label
+/// comes from the core host, which reports `stopped` after a user Stop or Disconnect. Outside SSH mode it is `off`.
+pub(crate) fn build_status(host: &CoreHost) -> SshServerStatus {
     let saved = prefs::stored().remote_server;
     let core = host.status();
     let in_ssh = host.mode() == ServerMode::Ssh;
-    let link = match (link_override, in_ssh, core.link) {
-        (Some(label), _, _) => label,
-        (None, true, Some(label)) => label,
+    let link = match (in_ssh, core.link) {
+        (true, Some(label)) => label,
         _ => "off",
     };
     let remembered = locked(&REMEMBERED)
@@ -741,12 +650,6 @@ fn build_status(host: &CoreHost, link_override: Option<&'static str>) -> SshServ
     }
 }
 
-/// The folder the live link reads, for tests that check it lives as long as the link.
-#[cfg(test)]
-pub(crate) fn live_known_hosts() -> Option<PathBuf> {
-    locked(&LIVE_DIR).as_ref().map(|held| held.file.clone())
-}
-
 /// Clears the process-wide slots so one test's observed keys and link folder cannot reach the next.
 #[cfg(test)]
 fn reset_for_tests() {
@@ -755,14 +658,17 @@ fn reset_for_tests() {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::core_host::tests::mode_guard;
     use crate::prefs::{prefs_guard, set_remote_server_for_test, set_ssh_host_pin, RemoteServerPrefs};
-    use crate::ssh_link::{supervise, SuperviseInput};
+    use crate::ssh_link::{supervise, KnownHostsDir, SuperviseInput};
+    use crate::ssh_key_install::public_key_path;
     use crate::ssh_server_scripts::{ClaudeState, STOP, UNINSTALL};
+    use crate::ssh_session::write_session;
     use crate::ssh_session::tests::{
-        ok, probe_out, ssh_error, state_out, FakeExec, NEW, PASSWORD, PERMISSION_DENIED, STOPPED_STATUS, TIMED_OUT,
+        ok, probe_out, ssh_error, started_out, state_out, FakeExec, NEW, PASSWORD, PERMISSION_DENIED,
+        STOPPED_STATUS, TIMED_OUT,
     };
     use crate::ssh_session::Connected;
     use crate::ssh_transport::ForwardChild;
@@ -773,53 +679,53 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, MutexGuard};
 
-    const HOST: &str = "example.com";
-    const KEY_PATH: &str = "/home/alice/.ssh/id_ed25519";
-    const PAYLOAD: &str = r#"{"jwtSecret":"j","vaultKey":"v","hostApprovalKey":"a"}"#;
-    const INSTALL_OK: &str = "__LLMIDE_INSTALL__=ok\n";
+    pub(crate) const HOST: &str = "example.com";
+    pub(crate) const KEY_PATH: &str = "/home/alice/.ssh/id_ed25519";
+    pub(crate) const PAYLOAD: &str = r#"{"jwtSecret":"j","vaultKey":"v","hostApprovalKey":"a"}"#;
+    pub(crate) const INSTALL_OK: &str = "__LLMIDE_INSTALL__=ok\n";
     const STOP_OK: &str = "__LLMIDE_STOP__=stopped\n";
     const UNINSTALL_OK: &str = "__LLMIDE_STOP__=not_running\n__LLMIDE_UNINSTALL__=ok\n";
     const BUNDLE_BYTES: &[u8] = b"fake-tarball-bytes";
 
-    fn key_b64(seed: &str) -> String {
+    pub(crate) fn key_b64(seed: &str) -> String {
         base64::engine::general_purpose::STANDARD.encode(seed.as_bytes())
     }
 
     /// One scan line. The host column says something else on purpose: the service must ignore it.
-    fn scan_of(seed: &str) -> String {
+    pub(crate) fn scan_of(seed: &str) -> String {
         format!("attacker.example ssh-ed25519 {}\n", key_b64(seed))
     }
 
-    fn pin_text(port: u16, seed: &str) -> String {
+    pub(crate) fn pin_text(port: u16, seed: &str) -> String {
         format!("{HOST}:{port} ssh-ed25519 {}", key_b64(seed))
     }
 
-    fn fingerprint_of(seed: &str) -> String {
+    pub(crate) fn fingerprint_of(seed: &str) -> String {
         fingerprint_for_key_b64(&key_b64(seed)).unwrap()
     }
 
-    fn target(port: u16, auth: SshAuthKind) -> SshServerTarget {
+    pub(crate) fn target(port: u16, auth: SshAuthKind) -> SshServerTarget {
         SshServerTarget { host: HOST.into(), port, user: "alice".into(), key_path: KEY_PATH.into(), auth }
     }
 
-    fn fake(outputs: Vec<io::Result<RawOutput>>) -> Arc<FakeExec> {
+    pub(crate) fn fake(outputs: Vec<io::Result<RawOutput>>) -> Arc<FakeExec> {
         Arc::new(FakeExec::new(outputs))
     }
 
     /// PROBE, STATUS, INSTALL and START for a fresh server, in the order `ssh_session::connect` runs them.
     fn connect_outputs() -> Vec<io::Result<RawOutput>> {
-        vec![probe_out(""), ok(STOPPED_STATUS), ok(INSTALL_OK), state_out(3460, NEW, "2.0.0")]
+        vec![probe_out(""), ok(STOPPED_STATUS), ok(INSTALL_OK), started_out(3460, "2.0.0")]
     }
 
-    fn has_option(args: &[String], value: &str) -> bool {
+    pub(crate) fn has_option(args: &[String], value: &str) -> bool {
         args.windows(2).any(|w| w[0] == "-o" && w[1] == value)
     }
 
-    fn code<T: std::fmt::Debug>(result: Result<T, FsError>) -> &'static str {
+    pub(crate) fn code<T: std::fmt::Debug>(result: Result<T, FsError>) -> &'static str {
         result.unwrap_err().code
     }
 
-    fn saved_key_block() -> RemoteServerPrefs {
+    pub(crate) fn saved_key_block() -> RemoteServerPrefs {
         RemoteServerPrefs {
             mode: ServerMode::Ssh,
             host: HOST.into(),
@@ -831,22 +737,22 @@ mod tests {
         }
     }
 
-    const ADD_KEY_ADDED: &str = "__LLMIDE_ADDKEY__=added\n";
-    const KEY_VERIFY_MESSAGE: &str = "The server did not accept the new key. Your password login is unchanged.";
+    pub(crate) const ADD_KEY_ADDED: &str = "__LLMIDE_ADDKEY__=added\n";
+    pub(crate) const KEY_VERIFY_MESSAGE: &str = "The server did not accept the new key. Your password login is unchanged.";
 
     /// The public line [`fake_keygen`] produces.
-    fn generated_line() -> String {
+    pub(crate) fn generated_line() -> String {
         format!("ssh-ed25519 {} llmide-desktop", key_b64("generated"))
     }
 
     /// Writes a key pair the way ssh-keygen does and returns the public line. Counted by the Fixture.
-    fn fake_keygen(path: &Path) -> Result<String, FsError> {
+    pub(crate) fn fake_keygen(path: &Path) -> Result<String, FsError> {
         std::fs::write(path, "PRIVATE KEY MATERIAL").unwrap();
         std::fs::write(public_key_path(path), format!("{}\n", generated_line())).unwrap();
         Ok(generated_line())
     }
 
-    fn saved_password_block() -> RemoteServerPrefs {
+    pub(crate) fn saved_password_block() -> RemoteServerPrefs {
         RemoteServerPrefs {
             mode: ServerMode::Ssh,
             host: HOST.into(),
@@ -858,25 +764,31 @@ mod tests {
     }
 
     /// Records, for each ssh run, whether it was handed a one-time password grant, then forwards to the fake.
-    struct GrantSpy {
+    pub(crate) struct GrantSpy {
         inner: Arc<FakeExec>,
         grants: Mutex<Vec<bool>>,
     }
 
     impl GrantSpy {
-        fn new(inner: Arc<FakeExec>) -> Self {
+        pub(crate) fn new(inner: Arc<FakeExec>) -> Self {
             Self { inner, grants: Mutex::new(Vec::new()) }
         }
 
-        fn grants(&self) -> Vec<bool> {
+        pub(crate) fn grants(&self) -> Vec<bool> {
             self.grants.lock().unwrap().clone()
         }
     }
 
     impl SshExec for GrantSpy {
-        fn run(&self, args: &[String], stdin: Option<&[u8]>, askpass: Option<&AskpassGrant>) -> io::Result<RawOutput> {
+        fn run(
+            &self,
+            args: &[String],
+            stdin: Option<&[u8]>,
+            askpass: Option<&AskpassGrant>,
+            deadline: Duration,
+        ) -> io::Result<RawOutput> {
             self.grants.lock().unwrap().push(askpass.is_some());
-            self.inner.run(args, stdin, askpass)
+            self.inner.run(args, stdin, askpass, deadline)
         }
 
         fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> io::Result<Box<dyn ForwardChild>> {
@@ -901,18 +813,18 @@ mod tests {
 
     /// Process-wide state a test may change, held for the whole test. Preferences are taken before the
     /// CoreHost mode, always in that order. Everything is put back on drop.
-    struct Fixture {
-        dir: PathBuf,
-        host: CoreHost,
-        scans: Arc<AtomicUsize>,
-        asks: Arc<AtomicUsize>,
-        keygens: Arc<AtomicUsize>,
-        _prefs: MutexGuard<'static, ()>,
-        _mode: MutexGuard<'static, ()>,
+    pub(crate) struct Fixture {
+        pub(crate) dir: PathBuf,
+        pub(crate) host: CoreHost,
+        pub(crate) scans: Arc<AtomicUsize>,
+        pub(crate) asks: Arc<AtomicUsize>,
+        pub(crate) keygens: Arc<AtomicUsize>,
+        pub(crate) _prefs: MutexGuard<'static, ()>,
+        pub(crate) _mode: MutexGuard<'static, ()>,
     }
 
     impl Fixture {
-        fn new(label: &str) -> Self {
+        pub(crate) fn new(label: &str) -> Self {
             let prefs = prefs_guard();
             let mode = mode_guard();
             let dir = temp_ssh_dir(label).unwrap();
@@ -931,7 +843,7 @@ mod tests {
             }
         }
 
-        fn deps(&self, exec: &Arc<FakeExec>, scan: &str, answer: bool, bundle: bool) -> Deps {
+        pub(crate) fn deps(&self, exec: &Arc<FakeExec>, scan: &str, answer: bool, bundle: bool) -> Deps {
             let bundle_path = self.dir.join("llmide-core-2.0.0-linux-x64.tar.gz");
             if bundle {
                 std::fs::write(&bundle_path, BUNDLE_BYTES).unwrap();
@@ -939,6 +851,7 @@ mod tests {
             let bundle_path = bundle.then_some(bundle_path);
             let scan = scan.to_string();
             let (scans, asks, keygens) = (self.scans.clone(), self.asks.clone(), self.keygens.clone());
+            let echo = exec.clone();
             Deps {
                 exec: exec.clone(),
                 scan: Arc::new(move |_: &SshEndpoint| {
@@ -953,7 +866,7 @@ mod tests {
                     keygens.fetch_add(1, Ordering::SeqCst);
                     fake_keygen(path)
                 }),
-                health: Arc::new(|_: u16| Some(NEW.to_string())),
+                health: Arc::new(move |_: u16| Some(echo.started_nonce())),
                 bundle: Arc::new(move || bundle_path.clone()),
                 version: "2.0.0".into(),
                 secrets_payload: Arc::new(|| Ok(PAYLOAD.to_string())),
@@ -977,7 +890,7 @@ mod tests {
                 connected,
                 endpoint: crate::ssh_session::tests::key_endpoint(),
                 password: None,
-                known_hosts: self.dir.join("known_hosts"),
+                known_hosts: KnownHostsDir::owning(self.dir.join("live-link")),
                 health: Arc::new(|_: u16| Some(NEW.to_string())),
             };
             self.host.set_mode(ServerMode::Ssh);
@@ -1148,11 +1061,11 @@ mod tests {
         fx.host.set_mode(ServerMode::Ssh);
         let status = connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap();
         assert_eq!(status.link, "connected");
-        let known = live_known_hosts().expect("the known_hosts folder lives as long as the link");
+        let known = fx.host.attached_known_hosts().expect("the attached link owns a known_hosts file");
         assert!(known.is_file());
         disconnect(&fx.host);
         assert!(!known.exists(), "disconnect removes the folder");
-        assert!(live_known_hosts().is_none());
+        assert!(fx.host.attached_known_hosts().is_none());
     }
 
     #[test]
@@ -1208,7 +1121,7 @@ mod tests {
         set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, "", true, true);
-        let refused = uninstall(&deps, &fx.host, None, "other").unwrap_err();
+        let refused = uninstall(&deps, &fx.host, None, "other", false).unwrap_err();
         assert_eq!(refused.code, "confirm_mismatch");
         assert_eq!(refused.message, "Type the server's host name to uninstall.");
         assert!(exec.calls().is_empty());
@@ -1220,12 +1133,12 @@ mod tests {
         set_remote_server_for_test(saved_key_block());
         set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
         fx.host.set_mode(ServerMode::Ssh);
-        let exec = fake(vec![ok(UNINSTALL_OK)]);
+        let exec = fake(vec![ok(STOPPED_STATUS), ok(UNINSTALL_OK)]);
         let deps = fx.deps(&exec, "", true, true);
-        let status = uninstall(&deps, &fx.host, None, " EXAMPLE.com ").unwrap();
+        let status = uninstall(&deps, &fx.host, None, " EXAMPLE.com ", false).unwrap();
         assert_eq!(status.link, "stopped");
-        assert_eq!(exec.calls().len(), 1);
-        assert_eq!(exec.calls()[0].args.last().map(String::as_str), Some(UNINSTALL));
+        assert_eq!(exec.names(), vec!["status", "uninstall"]);
+        assert_eq!(exec.calls()[1].args.last().map(String::as_str), Some(UNINSTALL));
     }
 
     #[test]
@@ -1235,9 +1148,9 @@ mod tests {
         set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
         fx.host.set_mode(ServerMode::Ssh);
         // The stop ran, but the script never printed its own ok line.
-        let exec = fake(vec![ok("__LLMIDE_STOP__=not_running\n")]);
+        let exec = fake(vec![ok(STOPPED_STATUS), ok("__LLMIDE_STOP__=not_running\n")]);
         let deps = fx.deps(&exec, "", true, true);
-        let refused = uninstall(&deps, &fx.host, None, "example.com").unwrap_err();
+        let refused = uninstall(&deps, &fx.host, None, "example.com", false).unwrap_err();
         assert_eq!(refused.code, "SSH_UNINSTALL_FAILED");
         assert_eq!(refused.message, "The server files could not be removed.");
     }
@@ -1249,9 +1162,9 @@ mod tests {
         let connect_exec = fake(connect_outputs());
         let deps = fx.deps(&connect_exec, "", true, true);
         connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap();
-        let stop_exec = fake(vec![ok(STOP_OK)]);
+        let stop_exec = fake(vec![ok(STOPPED_STATUS), ok(STOP_OK)]);
         let deps = fx.deps(&stop_exec, "", true, true);
-        stop_server(&deps, &fx.host, None).unwrap();
+        stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, false).unwrap();
         assert!(!connect_exec.calls().is_empty() && !stop_exec.calls().is_empty());
         for call in connect_exec.calls().iter().chain(stop_exec.calls().iter()) {
             assert!(has_option(&call.args, "StrictHostKeyChecking=yes"), "{} is not strict", call.name);
@@ -1264,13 +1177,13 @@ mod tests {
         set_remote_server_for_test(saved_key_block());
         set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
         let kills = Arc::new(AtomicUsize::new(0));
-        let exec = fake(vec![ok(STOP_OK)]);
+        let exec = fake(vec![ok(STOPPED_STATUS), ok(STOP_OK)]);
         fx.attach_live_link(&exec, &kills);
         let deps = fx.deps(&exec, "", true, true);
-        let status = stop_server(&deps, &fx.host, None).unwrap();
+        let status = stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, false).unwrap();
         assert_eq!(kills.load(Ordering::SeqCst), 1, "the forward is killed");
-        assert_eq!(exec.calls().len(), 1);
-        assert_eq!(exec.calls()[0].args.last().map(String::as_str), Some(STOP));
+        assert_eq!(exec.names(), vec!["status", "stop"]);
+        assert_eq!(exec.calls()[1].args.last().map(String::as_str), Some(STOP));
         assert_eq!(status.link, "stopped");
     }
 
@@ -1286,129 +1199,211 @@ mod tests {
         assert_eq!(status.link, "stopped");
     }
 
-    #[test]
-    fn install_key_switches_auth() {
-        let fx = Fixture::new("svc-install-key");
-        set_remote_server_for_test(saved_password_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
-        let exec = fake(vec![ok(ADD_KEY_ADDED), probe_out("")]);
-        let spy = Arc::new(GrantSpy::new(exec.clone()));
-        let mut deps = fx.deps(&exec, "", true, true);
-        deps.exec = spy.clone();
-        let key_dir = fx.dir.join("keys");
-        let status = install_key(&deps, &fx.host, &key_dir, PASSWORD).unwrap();
-        assert_eq!(status.host, HOST);
+    /// Writes the session record for an endpoint with a nonce, as a connect by this desktop would have.
+    fn record_ours(fx: &Fixture, nonce: &str) {
+        let endpoint = crate::ssh_session::tests::key_endpoint();
+        write_session(&fx.dir.join("state").join("ssh-session.json"), &endpoint, nonce).unwrap();
+    }
 
-        let key_path = key_file_path(&key_dir, HOST, 22);
-        let key_text = key_path.display().to_string();
-        let saved = prefs::stored().remote_server;
-        assert_eq!(saved.ssh_auth, SshAuthKind::Key);
-        assert_eq!(saved.key_path, key_text);
-        assert!(key_path.exists() && public_key_path(&key_path).exists(), "the key pair is kept on success");
-
-        let calls = exec.calls();
-        assert_eq!(calls.len(), 2, "one ADD_KEY and one verification probe");
-        assert_eq!(calls[0].args.last().map(String::as_str), Some(ADD_KEY));
-        let expected_stdin = format!("{}\n", generated_line());
-        assert_eq!(calls[0].stdin.as_deref(), Some(expected_stdin.as_bytes()));
-        assert_eq!(calls[1].args.last().map(String::as_str), Some(PROBE));
-        assert!(calls[1].args.windows(2).any(|w| w[0] == "-i" && w[1] == key_text), "probe uses the new key");
-        assert!(has_option(&calls[1].args, "BatchMode=yes"));
-        assert_eq!(spy.grants(), vec![true, false], "only ADD_KEY gets the password grant");
+    fn foreign_status() -> io::Result<RawOutput> {
+        state_out(3460, "foreignnonce0123456", "2.0.0")
     }
 
     #[test]
-    fn install_key_failure_changes_nothing() {
-        let cases = [
-            ("add-failed", vec![ok("__LLMIDE_ADDKEY__=failed\n")], "SSH_KEY_INSTALL_FAILED"),
-            ("probe-refused", vec![ok(ADD_KEY_ADDED), ssh_error(PERMISSION_DENIED)], "SSH_KEY_VERIFY_FAILED"),
-        ];
-        for (label, outputs, expected) in cases {
-            let fx = Fixture::new(label);
-            set_remote_server_for_test(saved_password_block());
-            set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
-            let before = prefs::stored().remote_server;
-            let exec = fake(outputs);
-            let deps = fx.deps(&exec, "", true, true);
-            let key_dir = fx.dir.join("keys");
-            let error = install_key(&deps, &fx.host, &key_dir, PASSWORD).unwrap_err();
-
-            assert_eq!(error.code, expected, "{label}");
-            assert_eq!(prefs::stored().remote_server, before, "{label}: preferences changed");
-            let key_path = key_file_path(&key_dir, HOST, 22);
-            assert!(!key_path.exists(), "{label}: private key left behind");
-            assert!(!public_key_path(&key_path).exists(), "{label}: public key left behind");
-        }
-        // The verification failure has its own fixed text, which the UI shows as-is.
-        let fx = Fixture::new("svc-verify-text");
-        set_remote_server_for_test(saved_password_block());
+    fn stop_refuses_a_core_another_desktop_started() {
+        let fx = Fixture::new("svc-stop-foreign");
+        set_remote_server_for_test(saved_key_block());
         set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
-        let exec = fake(vec![ok(ADD_KEY_ADDED), ssh_error(PERMISSION_DENIED)]);
+        let kills = Arc::new(AtomicUsize::new(0));
+        let exec = fake(vec![foreign_status()]);
+        fx.attach_live_link(&exec, &kills);
         let deps = fx.deps(&exec, "", true, true);
-        let error = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
-        assert_eq!(error.message, KEY_VERIFY_MESSAGE);
+        let refused = stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, false).unwrap_err();
+        assert_eq!(refused.code, "SSH_CORE_FOREIGN");
+        assert_eq!(refused.message, "Another computer started the server on this account.");
+        assert_eq!(exec.names(), vec!["status"], "only STATUS ran; the core was not stopped");
+        assert_eq!(kills.load(Ordering::SeqCst), 0, "the local link is left alone when the stop is refused");
     }
 
     #[test]
-    fn install_key_needs_password_auth() {
-        let fx = Fixture::new("svc-install-key-keyed");
+    fn stop_with_force_stops_a_core_another_desktop_started() {
+        let fx = Fixture::new("svc-stop-force");
+        set_remote_server_for_test(saved_key_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![foreign_status(), ok(STOP_OK)]);
+        let deps = fx.deps(&exec, "", true, true);
+        let status = stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap();
+        assert_eq!(status.link, "off", "the test host is not in SSH mode");
+        assert_eq!(exec.names(), vec!["status", "stop"]);
+    }
+
+    #[test]
+    fn stop_proceeds_for_our_own_core() {
+        let fx = Fixture::new("svc-stop-ours");
+        set_remote_server_for_test(saved_key_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        record_ours(&fx, NEW);
+        let exec = fake(vec![state_out(3460, NEW, "2.0.0"), ok(STOP_OK)]);
+        let deps = fx.deps(&exec, "", true, true);
+        stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, false).unwrap();
+        assert_eq!(exec.names(), vec!["status", "stop"]);
+    }
+
+    #[test]
+    fn stop_on_a_stopped_core_needs_no_force() {
+        let fx = Fixture::new("svc-stop-idle");
+        set_remote_server_for_test(saved_key_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![ok(STOPPED_STATUS), ok(STOP_OK)]);
+        let deps = fx.deps(&exec, "", true, true);
+        stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, false).unwrap();
+        assert_eq!(exec.names(), vec!["status", "stop"]);
+    }
+
+    #[test]
+    fn uninstall_refuses_a_foreign_core_unless_forced() {
+        let fx = Fixture::new("svc-uninstall-foreign");
+        set_remote_server_for_test(saved_key_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![foreign_status()]);
+        let deps = fx.deps(&exec, "", true, true);
+        let refused = uninstall(&deps, &fx.host, None, "example.com", false).unwrap_err();
+        assert_eq!(refused.code, "SSH_CORE_FOREIGN");
+        assert_eq!(exec.names(), vec!["status"]);
+
+        let exec = fake(vec![foreign_status(), ok(UNINSTALL_OK)]);
+        let deps = fx.deps(&exec, "", true, true);
+        uninstall(&deps, &fx.host, None, "example.com", true).unwrap();
+        assert_eq!(exec.names(), vec!["status", "uninstall"]);
+    }
+
+    #[test]
+    fn stop_with_another_host_is_refused_before_any_ssh_call() {
+        let fx = Fixture::new("svc-stop-mismatch");
         set_remote_server_for_test(saved_key_block());
         set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, "", true, true);
-        let refused = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
-        assert_eq!(refused.code, "SSH_KEY_NOT_NEEDED");
-        assert_eq!(refused.message, "This server already uses a key.");
-        assert!(exec.calls().is_empty());
-        assert_eq!(fx.keygens.load(Ordering::SeqCst), 0);
+        let other_host = SshServerTarget { host: "other.example".into(), ..target(22, SshAuthKind::Key) };
+        let refused = stop_server(&deps, &fx.host, &other_host, None, false).unwrap_err();
+        assert_eq!(refused.code, "confirm_mismatch");
+        assert_eq!(refused.message, "Those are not the saved server's details.");
+        let other_port = target(2222, SshAuthKind::Key);
+        assert_eq!(code(stop_server(&deps, &fx.host, &other_port, None, true)), "confirm_mismatch");
+        assert!(exec.calls().is_empty(), "no ssh call for a target that is not the saved server");
     }
 
     #[test]
-    fn install_key_needs_a_pin_and_a_password() {
-        let fx = Fixture::new("svc-install-key-gates");
-        set_remote_server_for_test(saved_password_block());
-        let exec = fake(vec![]);
-        let deps = fx.deps(&exec, "", true, true);
-        let no_pin = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
-        assert_eq!(no_pin.code, "SSH_HOST_KEY_UNCONFIRMED");
+    fn key_login_survives_disconnect_as_stopped_and_reconnects() {
+        let fx = Fixture::new("svc-disconnect-status");
+        set_remote_server_for_test(saved_key_block());
         set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
-        let empty = install_key(&deps, &fx.host, &fx.dir.join("keys"), "").unwrap_err();
-        assert_eq!(empty.code, "SSH_PASSWORD_REQUIRED");
-        assert!(exec.calls().is_empty());
-        assert_eq!(fx.keygens.load(Ordering::SeqCst), 0);
+        fx.host.set_mode(ServerMode::Ssh);
+        let exec = fake(connect_outputs());
+        let deps = fx.deps(&exec, "", true, true);
+        assert_eq!(connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap().link, "connected");
+
+        let after = disconnect(&fx.host);
+        assert_eq!(after.link, "stopped", "a user Disconnect is not a failure");
+        assert_eq!(status(&fx.host).link, "stopped");
+        assert_eq!(fx.host.status().link, Some("stopped"));
+        assert_eq!(fx.host.status().error, None);
+
+        let exec = fake(connect_outputs());
+        let deps = fx.deps(&exec, "", true, true);
+        assert_eq!(connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap().link, "connected");
     }
 
     #[test]
-    fn install_key_never_leaks_the_password() {
-        fn record(seen: &mut Vec<String>, exec: &FakeExec) {
-            for call in exec.calls() {
-                seen.push(call.args.join(" "));
-                seen.push(String::from_utf8_lossy(call.stdin.as_deref().unwrap_or_default()).into_owned());
-            }
+    fn a_timed_out_probe_is_ssh_timeout_from_test() {
+        let fx = Fixture::new("svc-timeout-test");
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![Err(io::Error::new(io::ErrorKind::TimedOut, "deadline"))]);
+        let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
+        let err = test(&deps, &target(22, SshAuthKind::Key), None).unwrap_err();
+        assert_eq!(err.code, "SSH_TIMEOUT");
+    }
+
+    #[test]
+    fn a_timed_out_call_is_ssh_timeout_from_connect_and_stop() {
+        {
+            // Scoped: a Fixture holds process-wide guards, so the second one can only start after this one drops.
+            let fx = Fixture::new("svc-timeout-connect");
+            set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+            let exec = fake(vec![Err(io::Error::new(io::ErrorKind::TimedOut, "deadline"))]);
+            let deps = fx.deps(&exec, "", true, true);
+            assert_eq!(code(connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None)), "SSH_TIMEOUT");
         }
-        let mut seen = Vec::new();
 
-        let fx = Fixture::new("svc-key-leak-ok");
-        set_remote_server_for_test(saved_password_block());
+        let fx = Fixture::new("svc-timeout-stop");
+        set_remote_server_for_test(saved_key_block());
         set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
-        let exec = fake(vec![ok(ADD_KEY_ADDED), probe_out("")]);
+        let exec = fake(vec![Err(io::Error::new(io::ErrorKind::TimedOut, "deadline"))]);
         let deps = fx.deps(&exec, "", true, true);
-        let status = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap();
-        seen.push(serde_json::to_string(&status).unwrap());
-        record(&mut seen, &exec);
-        drop(deps);
-        drop(fx);
+        let err = stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, false).unwrap_err();
+        assert_eq!(err.code, "SSH_TIMEOUT");
+        assert_eq!(err.message, "The server did not answer in time.");
+    }
 
-        let fx = Fixture::new("svc-key-leak-fail");
-        set_remote_server_for_test(saved_password_block());
+    #[test]
+    fn two_open_links_never_interleave_their_ssh_calls() {
+        // Two connects on two threads. Serialized, each call's end comes before the next call starts.
+        let fx = Fixture::new("svc-serial");
         set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
-        let exec = fake(vec![ok("__LLMIDE_ADDKEY__=failed\n")]);
+        let outputs = connect_outputs().into_iter().chain(connect_outputs()).collect();
+        let exec = Arc::new(FakeExec::with_delay(outputs, Duration::from_millis(30)));
         let deps = fx.deps(&exec, "", true, true);
-        let error = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
-        seen.push(format!("{} {}", error.code, error.message));
-        record(&mut seen, &exec);
+        let wanted = target(22, SshAuthKind::Key);
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| open_link(&deps, &wanted, None).is_ok());
+            let second = scope.spawn(|| open_link(&deps, &wanted, None).is_ok());
+            assert!(first.join().unwrap() && second.join().unwrap(), "both connects succeed one after the other");
+        });
+        let events = exec.events();
+        assert_eq!(events.len(), 2 * 2 * 4, "four ssh calls per connect, each with a start and an end");
+        for pair in events.chunks(2) {
+            let (start, end) = (&pair[0], &pair[1]);
+            assert!(start.ends_with(":start") && end == &start.replace(":start", ":end"), "calls overlapped: {events:?}");
+        }
+    }
 
-        let all = seen.join("\n");
-        assert!(!all.contains(PASSWORD), "the password reached an argv, stdin, status or error: {all}");
+    #[test]
+    fn a_failed_open_leaves_no_known_hosts_folder() {
+        let fx = Fixture::new("svc-open-fail");
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![ssh_error(TIMED_OUT)]);
+        let deps = fx.deps(&exec, "", true, true);
+        let err = open_link(&deps, &target(22, SshAuthKind::Key), None).err().expect("the open fails");
+        assert_eq!(err.code, "SSH_UNREACHABLE");
+        let file = known_hosts_arg(&exec.calls()[0].args);
+        assert!(!file.exists() && !file.parent().unwrap().exists(), "the pinned folder outlived the failed open");
+    }
+
+    #[test]
+    fn a_replaced_link_takes_its_folder_with_it() {
+        let fx = Fixture::new("svc-replace");
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        fx.host.set_mode(ServerMode::Ssh);
+        let first = fake(connect_outputs());
+        let deps = fx.deps(&first, "", true, true);
+        connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap();
+        let old_file = known_hosts_arg(&first.calls()[0].args);
+        assert!(old_file.is_file());
+
+        let second = fake(connect_outputs());
+        let deps = fx.deps(&second, "", true, true);
+        connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap();
+        assert!(!old_file.exists(), "the replaced link's folder is removed");
+        assert!(fx.host.attached_known_hosts().is_some_and(|file| file.is_file()), "the new link keeps its own folder");
+    }
+
+    /// The known_hosts file named by the `UserKnownHostsFile` option of one argv.
+    fn known_hosts_arg(args: &[String]) -> PathBuf {
+        let value = args
+            .iter()
+            .find_map(|a| a.strip_prefix("UserKnownHostsFile=\""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .expect("the argv names a quoted known_hosts file");
+        PathBuf::from(value)
     }
 }

@@ -16,6 +16,7 @@ use crate::fsutil;
 use crate::host_approval;
 use crate::prefs::RemoteServerPrefs;
 use crate::secrets;
+use crate::ssh_key_install::{self, KEYGEN_FAILED, KEYGEN_MESSAGE};
 use crate::ssh_service::{self, Deps, SshServerStatus, SshServerTarget, SshServerTest};
 use crate::ssh_session;
 use crate::ssh_transport::{SshEndpoint, SystemSshExec};
@@ -83,12 +84,18 @@ pub async fn remote_ssh_server_status(host: tauri::State<'_, CoreHost>) -> Resul
         .map_err(|_| herr("internal", "the SSH server status did not finish."))
 }
 
+/// Stops the saved server's core. `target` must be the saved server; `force` stops a core another desktop started.
 #[tauri::command]
-pub async fn remote_ssh_server_stop(host: tauri::State<'_, CoreHost>, password: Option<String>) -> Result<SshServerStatus, FsError> {
+pub async fn remote_ssh_server_stop(
+    host: tauri::State<'_, CoreHost>,
+    target: SshServerTarget,
+    password: Option<String>,
+    force: Option<bool>,
+) -> Result<SshServerStatus, FsError> {
     let host = host.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let deps = production_deps()?;
-        ssh_service::stop_server(&deps, &host, password.as_deref())
+        ssh_service::stop_server(&deps, &host, &target, password.as_deref(), force.unwrap_or(false))
     })
     .await
     .map_err(|_| herr("internal", "the SSH server stop did not finish."))?
@@ -101,22 +108,24 @@ pub async fn remote_ssh_server_install_key(host: tauri::State<'_, CoreHost>, pas
     tauri::async_runtime::spawn_blocking(move || {
         let deps = production_deps()?;
         let key_dir = key_dir()?;
-        ssh_service::install_key(&deps, &host, &key_dir, &password)
+        ssh_key_install::install_key(&deps, &host, &key_dir, &password)
     })
     .await
     .map_err(|_| herr("internal", "the SSH key install did not finish."))?
 }
 
+/// Stops the core and removes the server's releases. `force` uninstalls even when another desktop started the core.
 #[tauri::command]
 pub async fn remote_ssh_server_uninstall(
     host: tauri::State<'_, CoreHost>,
     password: Option<String>,
     confirm_host: String,
+    force: Option<bool>,
 ) -> Result<SshServerStatus, FsError> {
     let host = host.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let deps = production_deps()?;
-        ssh_service::uninstall(&deps, &host, password.as_deref(), &confirm_host)
+        ssh_service::uninstall(&deps, &host, password.as_deref(), &confirm_host, force.unwrap_or(false))
     })
     .await
     .map_err(|_| herr("internal", "the SSH server uninstall did not finish."))?
@@ -207,10 +216,10 @@ fn keygen(path: &Path) -> Result<String, FsError> {
         .status();
     match status {
         Ok(done) if done.success() => {}
-        _ => return Err(herr(ssh_service::KEYGEN_FAILED, ssh_service::KEYGEN_MESSAGE)),
+        _ => return Err(herr(KEYGEN_FAILED, KEYGEN_MESSAGE)),
     }
-    let line = std::fs::read_to_string(ssh_service::public_key_path(path))
-        .map_err(|_| herr(ssh_service::KEYGEN_FAILED, ssh_service::KEYGEN_MESSAGE))?;
+    let line = std::fs::read_to_string(ssh_key_install::public_key_path(path))
+        .map_err(|_| herr(KEYGEN_FAILED, KEYGEN_MESSAGE))?;
     Ok(line.trim().to_string())
 }
 

@@ -35,13 +35,24 @@ const MAX_TOKEN_LINE: usize = 256;
 const MAX_SECRET: usize = 4096;
 
 /// A running one-time grant. Dropping it stops the listener and wipes the secret.
-#[derive(Debug)]
 pub struct AskpassGrant {
     addr: String,
     token: String,
     helper: PathBuf,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
+}
+
+/// Written by hand so a `{:?}` in a log or a panic message can never print the one-time token. The address
+/// and helper path carry nothing secret, so they stay visible for debugging.
+impl std::fmt::Debug for AskpassGrant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AskpassGrant")
+            .field("addr", &self.addr)
+            .field("helper", &self.helper)
+            .field("token", &"<redacted>")
+            .finish_non_exhaustive()
+    }
 }
 
 impl AskpassGrant {
@@ -266,8 +277,25 @@ mod tests {
     #[test]
     fn drop_closes() {
         let g = grant("hunter2").unwrap();
-        let (addr, _) = addr_and_token(&g);
+        let (addr, token) = addr_and_token(&g);
         drop(g);
-        assert!(TcpStream::connect(&addr).is_err());
+        // The port may be reused by a concurrent test's grant, so a connection can still succeed. What must
+        // hold is that this grant no longer answers: it never returns its own secret.
+        if let Ok(mut stream) = TcpStream::connect(&addr) {
+            let _ = stream.write_all(format!("{token}\n").as_bytes());
+            let mut out = Vec::new();
+            let _ = stream.read_to_end(&mut out);
+            assert!(!String::from_utf8_lossy(&out).contains("hunter2"), "a dropped grant still released its secret");
+        }
+    }
+
+    #[test]
+    fn debug_never_prints_the_token() {
+        let g = grant("hunter2").unwrap();
+        let (_, token) = addr_and_token(&g);
+        let shown = format!("{g:?}");
+        assert!(!shown.contains(&token), "Debug printed the one-time token: {shown}");
+        assert!(!shown.contains("hunter2"), "Debug printed the secret: {shown}");
+        assert!(shown.contains("redacted"));
     }
 }

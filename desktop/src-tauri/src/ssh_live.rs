@@ -31,6 +31,7 @@ use crate::fsutil;
 use crate::prefs::{self, prefs_guard, set_remote_server_for_test, RemoteServerPrefs, ServerMode, SshAuthKind};
 use crate::remote::temp_ssh_dir;
 use crate::ssh_cmds;
+use crate::ssh_key_install;
 use crate::ssh_service::{self, Deps, SshServerTarget, SshServerTest};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -443,7 +444,7 @@ fn step_install_key(run: &mut Run) -> Result<Outcome, Failed> {
         .map(str::to_string)
         .ok_or_else(|| failed("SSH_PASSWORD_REQUIRED", "the password is needed to install a key"))?;
     let key_dir = run.root.join("keys");
-    ssh_service::install_key(&run.deps, &run.host, &key_dir, &password)?;
+    ssh_key_install::install_key(&run.deps, &run.host, &key_dir, &password)?;
     drop(password);
     let saved = prefs::stored().remote_server;
     expect(saved.ssh_auth == SshAuthKind::Key, "KEY_NOT_SAVED", "the key was not saved as the login")?;
@@ -462,7 +463,7 @@ fn step_install_key(run: &mut Run) -> Result<Outcome, Failed> {
 }
 
 fn step_stop(run: &mut Run) -> Result<Outcome, Failed> {
-    let status = ssh_service::stop_server(&run.deps, &run.host, run.live.password())?;
+    let status = ssh_service::stop_server(&run.deps, &run.host, &run.live.target(), run.live.password(), false)?;
     expect(status.link == "stopped", "STOP_FAILED", format!("the link is {}, not stopped", status.link))?;
     let state = ssh_service::server_core_state(&run.deps, run.live.password())?;
     expect(!state.running, "CORE_STILL_RUNNING", "the server still reports a running core after stop")?;
@@ -475,7 +476,7 @@ fn step_uninstall(run: &mut Run) -> Result<Outcome, Failed> {
         return Ok(Outcome::Skipped(None));
     }
     let host_name = run.live.host.clone();
-    ssh_service::uninstall(&run.deps, &run.host, run.live.password(), &host_name)?;
+    ssh_service::uninstall(&run.deps, &run.host, run.live.password(), &host_name, false)?;
     let probed = ssh_service::test(&run.deps, &run.live.target(), run.live.password())?;
     expect(
         probed.installed_version.is_none(),

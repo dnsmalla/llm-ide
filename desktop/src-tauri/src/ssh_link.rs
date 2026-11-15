@@ -20,6 +20,29 @@ use crate::ssh_server_scripts::{parse_core_state, STATUS};
 use crate::ssh_session::{open_forward, wait_for_core, Connected, Link};
 use crate::ssh_transport::{ForwardChild, SshEndpoint, SshExec};
 
+/// The one-line known_hosts folder of one endpoint. Removed when dropped, so it lives exactly as long as the
+/// link (or the call) that reads it. Only folders this app created may be owned: dropping removes the folder
+/// with everything in it.
+pub struct KnownHostsDir {
+    pub(crate) dir: PathBuf,
+    pub(crate) file: PathBuf,
+}
+
+impl KnownHostsDir {
+    /// Takes ownership of `dir`, a folder this app created, whose `known_hosts` file the callers read.
+    pub(crate) fn owning(dir: PathBuf) -> Self {
+        let file = dir.join("known_hosts");
+        Self { dir, file }
+    }
+}
+
+impl Drop for KnownHostsDir {
+    fn drop(&mut self) {
+        // Best effort: a folder left behind holds only the public pin line.
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 /// How long the forward may take to answer `/health` after a respawn, matching the first connect.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -35,11 +58,18 @@ const WAKE_INTERVAL: Duration = Duration::from_millis(50);
 /// How long [`SshLink::stop`] waits for the supervisor thread to finish before it gives up on it.
 const STOP_WAIT: Duration = Duration::from_secs(1);
 
+/// Consecutive reattach attempts that reached the forward step and failed there, before the link gives up. While
+/// the local port is taken by another program, every attempt fails the same way; retrying forever would leave the
+/// state at `reconnecting` with no way out.
+const MAX_FORWARD_FAILURES: u32 = 5;
+
 const STOPPED_CODE: &str = "SSH_LINK_STOPPED";
 const CORE_STOPPED_CODE: &str = "SSH_CORE_STOPPED";
 const CORE_STOPPED_MESSAGE: &str = "The server core is not running. Connect again to start it.";
 const CORE_FOREIGN_CODE: &str = "SSH_CORE_FOREIGN";
 const CORE_FOREIGN_MESSAGE: &str = "A different core is running on the server now, so it was left alone.";
+const FORWARD_FAILED_CODE: &str = "SSH_FORWARD_FAILED";
+const FORWARD_FAILED_MESSAGE: &str = "The local port for this server is in use. Quit the other program and connect again.";
 
 /// What the link reports to the app. Carries no secret and no ssh output.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,7 +90,8 @@ pub struct SuperviseInput {
     pub connected: Connected,
     pub endpoint: SshEndpoint,
     pub password: Option<String>,
-    pub known_hosts: PathBuf,
+    /// The known_hosts folder the link reads. The link owns it: it is removed when the link stops or drops.
+    pub known_hosts: KnownHostsDir,
     /// Returns the nonce `/health` echoes on a local port, or `None` when nothing answers.
     pub health: Arc<dyn Fn(u16) -> Option<String> + Send + Sync>,
 }
@@ -70,6 +101,9 @@ pub struct SshLink {
     shared: Arc<Shared>,
     url: String,
     worker: Mutex<Option<JoinHandle<()>>>,
+    /// Taken by [`SshLink::stop`] once the supervisor has had its chance to finish, so the folder is removed on
+    /// every path that ends the link: disconnect, replace, shutdown, panic cleanup and a failed open.
+    known_hosts: Mutex<Option<KnownHostsDir>>,
 }
 
 impl SshLink {
@@ -83,11 +117,23 @@ impl SshLink {
         self.url.clone()
     }
 
-    /// Ends supervision and kills the forward. The supervisor thread is given up to a second to finish,
-    /// which it normally does within one wake interval; the server core is left running.
+    /// Ends supervision, kills the forward and removes the known_hosts folder. The supervisor thread is given up
+    /// to a second to finish, which it normally does within one wake interval. A thread still inside an ssh call
+    /// then reads a missing known_hosts, which makes ssh refuse the host (`StrictHostKeyChecking=yes`); the server
+    /// core is left running.
     pub fn stop(&self) {
         self.shared.halt();
         wait_briefly(&self.worker);
+        // Taken out of the lock first, so the folder is removed without holding it.
+        let held = locked(&self.known_hosts).take();
+        drop(held);
+    }
+
+    /// The known_hosts file this link reads, while the link still owns its folder. Tests use it to check the
+    /// folder's lifetime.
+    #[cfg(test)]
+    pub(crate) fn known_hosts_file(&self) -> Option<PathBuf> {
+        locked(&self.known_hosts).as_ref().map(|held| held.file.clone())
     }
 }
 
@@ -106,12 +152,13 @@ pub fn supervise(input: SuperviseInput) -> SshLink {
     let shared = Arc::new(Shared::new(password));
     let url = connected.local_url.clone();
     let worker_shared = shared.clone();
+    let known_file = known_hosts.file.clone();
     let worker = std::thread::spawn(move || {
         let Connected { local_port, nonce, forward, .. } = connected;
         let sup = Supervision {
             exec: &*exec,
             endpoint: &endpoint,
-            known_hosts: &known_hosts,
+            known_hosts: &known_file,
             health: &*health,
             shared: &worker_shared,
             local_port,
@@ -121,7 +168,7 @@ pub fn supervise(input: SuperviseInput) -> SshLink {
         let mut pause = |pause: Pause| sleep_unless_stopped(&worker_shared, pause);
         supervise_loop(&sup, forward, &mut pause);
     });
-    SshLink { shared, url, worker: Mutex::new(Some(worker)) }
+    SshLink { shared, url, worker: Mutex::new(Some(worker)), known_hosts: Mutex::new(Some(known_hosts)) }
 }
 
 /// One wait the loop asks for. The production waits sleep; tests record them.
@@ -213,9 +260,12 @@ struct Supervision<'a> {
     health_timeout: Duration,
 }
 
-/// Why one reconnect attempt did not reattach. `Retry` tries again after the next backoff.
+/// Why one reconnect attempt did not reattach. `Retry` tries again after the next backoff. `ForwardRetry` is the
+/// same, but the server confirmed its core and the local forward or its `/health` check failed; those count
+/// toward [`MAX_FORWARD_FAILURES`].
 enum Attempt {
     Retry,
+    ForwardRetry,
     Halt(LinkState),
 }
 
@@ -253,6 +303,9 @@ fn watch_until_exit(sup: &Supervision<'_>, forward: &mut dyn ForwardChild, pause
 /// reached a state that needs the user; in the second case that state is already recorded.
 fn reconnect(sup: &Supervision<'_>, pause: &mut dyn FnMut(Pause)) -> Option<Box<dyn ForwardChild>> {
     let mut attempt: u32 = 0;
+    // Counts only an unbroken run of forward failures: an attempt that could not reach the server's STATUS
+    // says nothing about the local port, so it starts the count again.
+    let mut forward_failures: u32 = 0;
     loop {
         if sup.shared.is_stopped() {
             return None;
@@ -265,7 +318,17 @@ fn reconnect(sup: &Supervision<'_>, pause: &mut dyn FnMut(Pause)) -> Option<Box<
         }
         match try_reattach(sup) {
             Ok(next) => return Some(next),
-            Err(Attempt::Retry) => {}
+            Err(Attempt::Retry) => forward_failures = 0,
+            Err(Attempt::ForwardRetry) => {
+                forward_failures += 1;
+                if forward_failures >= MAX_FORWARD_FAILURES {
+                    sup.shared.set_state(LinkState::Failed {
+                        code: FORWARD_FAILED_CODE,
+                        message: FORWARD_FAILED_MESSAGE.to_string(),
+                    });
+                    return None;
+                }
+            }
             Err(Attempt::Halt(state)) => {
                 sup.shared.set_state(state);
                 return None;
@@ -290,14 +353,14 @@ fn try_reattach(sup: &Supervision<'_>) -> Result<Box<dyn ForwardChild>, Attempt>
     if sup.shared.is_stopped() {
         return Err(Attempt::Retry);
     }
-    let (mut forward, _grant) = open_forward(&link, sup.local_port, remote_port).map_err(|_| Attempt::Retry)?;
+    let (mut forward, _grant) = open_forward(&link, sup.local_port, remote_port).map_err(|_| Attempt::ForwardRetry)?;
     let mut watched = StopAware { inner: &mut *forward, stop: &sup.shared.stopped };
     let healthy = wait_for_core(&mut watched, sup.health, sup.local_port, sup.nonce, sup.health_timeout);
     match healthy {
         Ok(()) => Ok(forward),
         Err(_) => {
             forward.kill();
-            Err(Attempt::Retry)
+            Err(Attempt::ForwardRetry)
         }
     }
 }
@@ -418,7 +481,7 @@ mod tests {
     use crate::remote::RawOutput;
     use crate::ssh_server_scripts::parse_probe;
     use crate::ssh_session::tests::{
-        key_endpoint, probe_out, ssh_error, state_out, FakeExec, KNOWN, NEW, PASSWORD, PERMISSION_DENIED, TIMED_OUT,
+        key_endpoint, probe_out, ssh_error, state_out, FakeExec, NEW, PASSWORD, PERMISSION_DENIED, TIMED_OUT,
     };
     use crate::ssh_transport::SshAuth;
     use std::sync::atomic::AtomicUsize;
@@ -512,12 +575,18 @@ mod tests {
         mut on_pause: impl FnMut(&SshLink, &mut Observed),
     ) -> (SshLink, Observed) {
         let shared = Arc::new(Shared::new(password.map(str::to_string)));
-        let link = SshLink { shared: shared.clone(), url: LOCAL_URL.to_string(), worker: Mutex::new(None) };
+        let held = scratch_known_hosts();
+        let known_hosts = held.file.clone();
+        let link = SshLink {
+            shared: shared.clone(),
+            url: LOCAL_URL.to_string(),
+            worker: Mutex::new(None),
+            known_hosts: Mutex::new(Some(held)),
+        };
         let endpoint = match password {
             Some(_) => crate::ssh_transport::prepare_endpoint("example.com", 22, "alice", SshAuth::Password).unwrap(),
             None => key_endpoint(),
         };
-        let known_hosts = PathBuf::from(KNOWN);
         let sup = Supervision {
             exec: fake,
             endpoint: &endpoint,
@@ -543,6 +612,14 @@ mod tests {
         };
         supervise_loop(&sup, first, &mut pause);
         (link, observed)
+    }
+
+    /// A known_hosts folder this test owns; the link removes it when it stops.
+    fn scratch_known_hosts() -> KnownHostsDir {
+        let dir = crate::remote::temp_ssh_dir("link-test").unwrap();
+        let held = KnownHostsDir::owning(dir);
+        std::fs::write(&held.file, "pinned line\n").unwrap();
+        held
     }
 
     fn forward_args_for(fake: &FakeExec) -> Vec<Vec<String>> {
@@ -686,6 +763,97 @@ mod tests {
     }
 
     #[test]
+    fn five_failed_reattachments_end_with_forward_failed() {
+        // STATUS confirms the core every time, but the local port never answers with its nonce.
+        let first = Handle::new();
+        let fake = FakeExec::new((0..5).map(|_| state_out(REMOTE_PORT, NEW, "2.0.0")).collect());
+        let silent = |_: u16| None;
+        let (link, observed) = drive(&fake, None, first.forward(), &silent, |_, seen| {
+            if seen.pauses.len() == 1 {
+                first.exited.store(true, Ordering::SeqCst);
+            }
+        });
+        assert_eq!(
+            link.state(),
+            LinkState::Failed {
+                code: "SSH_FORWARD_FAILED",
+                message: "The local port for this server is in use. Quit the other program and connect again.".into(),
+            }
+        );
+        assert_eq!(observed.backoffs().len(), 5, "one backoff per attempt, then no sixth attempt");
+        let expected: Vec<&str> = (0..5).flat_map(|_| ["status", "forward"]).collect();
+        assert_eq!(fake.names(), expected, "no forward is spawned after the fifth failure");
+        assert_eq!(fake.kills(), 5, "each failed forward is killed");
+    }
+
+    #[test]
+    fn four_failed_reattachments_then_success_stays_connected() {
+        let first = Handle::new();
+        let fake = FakeExec::new((0..5).map(|_| state_out(REMOTE_PORT, NEW, "2.0.0")).collect());
+        // `/health` misses four times and answers with the nonce on the fifth attempt.
+        let answers = AtomicUsize::new(0);
+        let late = |_: u16| {
+            if answers.fetch_add(1, Ordering::SeqCst) < 4 {
+                None
+            } else {
+                Some(NEW.to_string())
+            }
+        };
+        let (link, observed) = drive(&fake, None, first.forward(), &late, |link, seen| {
+            if seen.pauses.len() == 1 {
+                first.exited.store(true, Ordering::SeqCst);
+            } else if seen.pauses.len() == 7 {
+                // Poll, five backoffs, then the poll on the reattached forward.
+                link.stop();
+            }
+        });
+        assert_eq!(observed.states[6], LinkState::Connected, "the reattached forward is reported as connected");
+        assert_eq!(observed.backoffs().len(), 5);
+        assert_eq!(fake.names().iter().filter(|n| **n == "forward").count(), 5, "four failures, one success");
+        assert_eq!(link.state(), LinkState::Failed { code: "SSH_LINK_STOPPED", message: "The connection was closed.".into() });
+    }
+
+    #[test]
+    fn stopping_a_link_removes_its_known_hosts_folder() {
+        let handle = Handle::new();
+        let exec: Arc<dyn SshExec> = Arc::new(FakeExec::default());
+        let held = scratch_known_hosts();
+        let (dir, file) = (held.dir.clone(), held.file.clone());
+        let input = SuperviseInput {
+            exec,
+            connected: connected_with(handle.forward()),
+            endpoint: key_endpoint(),
+            password: None,
+            known_hosts: held,
+            health: Arc::new(|_| Some(NEW.to_string())),
+        };
+        let link = supervise(input);
+        assert!(file.is_file(), "the folder exists while the link runs");
+        link.stop();
+        assert!(!dir.exists(), "stop removes the folder");
+        assert!(link.known_hosts_file().is_none());
+    }
+
+    #[test]
+    fn dropping_a_link_removes_its_known_hosts_folder() {
+        let handle = Handle::new();
+        let exec: Arc<dyn SshExec> = Arc::new(FakeExec::default());
+        let held = scratch_known_hosts();
+        let dir = held.dir.clone();
+        let input = SuperviseInput {
+            exec,
+            connected: connected_with(handle.forward()),
+            endpoint: key_endpoint(),
+            password: None,
+            known_hosts: held,
+            health: Arc::new(|_| Some(NEW.to_string())),
+        };
+        drop(supervise(input));
+        assert!(!dir.exists(), "dropping the link removes the folder");
+        assert_eq!(handle.kill_count(), 1);
+    }
+
+    #[test]
     fn stop_on_a_live_supervisor_kills_its_forward_promptly() {
         let handle = Handle::new();
         let exec: Arc<dyn SshExec> = Arc::new(FakeExec::default());
@@ -694,7 +862,7 @@ mod tests {
             connected: connected_with(handle.forward()),
             endpoint: key_endpoint(),
             password: None,
-            known_hosts: PathBuf::from(KNOWN),
+            known_hosts: scratch_known_hosts(),
             health: Arc::new(|_| Some(NEW.to_string())),
         };
         let link = supervise(input);
@@ -715,7 +883,7 @@ mod tests {
             connected: connected_with(handle.forward()),
             endpoint: key_endpoint(),
             password: None,
-            known_hosts: PathBuf::from(KNOWN),
+            known_hosts: scratch_known_hosts(),
             health: Arc::new(|_| Some(NEW.to_string())),
         };
         drop(supervise(input));

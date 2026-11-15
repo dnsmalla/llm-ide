@@ -8,9 +8,11 @@
 //! Password auth carries no secret here: [`SshAuth::Password`] holds no data, so a password can never
 //! reach an argv or an environment variable from this module.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
@@ -93,7 +95,8 @@ pub fn prepare_endpoint(host: &str, port: u16, user: &str, auth: SshAuth) -> Res
 /// Returns:
 ///     The argv, to be passed to `Command::new("ssh").args(...)` with no shell.
 pub fn exec_args(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'static str) -> Vec<String> {
-    let mut args = vec!["-v".to_string(), "-a".to_string(), "-x".to_string()];
+    // No `-v`: nothing reads ssh's debug output, and it would only add noise to a captured stderr.
+    let mut args = vec!["-a".to_string(), "-x".to_string()];
     push_option(&mut args, "ForwardAgent=no");
     push_option(&mut args, "ClearAllForwardings=yes");
     push_option(&mut args, "PermitLocalCommand=no");
@@ -165,9 +168,13 @@ fn push_no_connection_sharing(args: &mut Vec<String>) {
 
 /// Host-key policy and known_hosts files. The global file is neutralised so a system-wide entry cannot
 /// widen what is trusted.
+///
+/// The path is double-quoted because OpenSSH splits a `UserKnownHostsFile` value on whitespace unless it is
+/// quoted; a user name with a space (common on Windows) would otherwise split the path. The caller must not
+/// pass a path containing `"` or a newline, which no quoting can carry; `ssh_service::pinned_dir` refuses one.
 fn push_host_key_options(args: &mut Vec<String>, known_hosts: &Path, strict_value: &str) {
     push_option(args, &format!("StrictHostKeyChecking={strict_value}"));
-    push_option(args, &format!("UserKnownHostsFile={}", known_hosts.display()));
+    push_option(args, &format!("UserKnownHostsFile=\"{}\"", known_hosts.display()));
     push_option(args, &format!("GlobalKnownHostsFile={}", if cfg!(windows) { "NUL" } else { "/dev/null" }));
     push_option(args, &format!("ConnectTimeout={CONNECT_TIMEOUT_SECS}"));
 }
@@ -203,7 +210,15 @@ fn push_endpoint(args: &mut Vec<String>, ep: &SshEndpoint) {
 pub trait SshExec: Send + Sync {
     /// Runs the child to completion and captures its output. `stdin` bytes are written and the pipe is
     /// closed; `None` gives the child a null stdin. `askpass` adds the one-time password helper variables.
-    fn run(&self, args: &[String], stdin: Option<&[u8]>, askpass: Option<&AskpassGrant>) -> std::io::Result<RawOutput>;
+    /// Every call is bounded by `deadline`. When it expires the child is killed and reaped, and the error kind
+    /// is `TimedOut`; a caller maps that to `SSH_TIMEOUT`.
+    fn run(
+        &self,
+        args: &[String],
+        stdin: Option<&[u8]>,
+        askpass: Option<&AskpassGrant>,
+        deadline: Duration,
+    ) -> std::io::Result<RawOutput>;
 
     /// Starts a long-lived child (a port forward) and returns without waiting for it.
     fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn ForwardChild>>;
@@ -222,8 +237,14 @@ pub trait ForwardChild: Send {
 pub struct SystemSshExec;
 
 impl SshExec for SystemSshExec {
-    fn run(&self, args: &[String], stdin: Option<&[u8]>, askpass: Option<&AskpassGrant>) -> std::io::Result<RawOutput> {
-        run_program("ssh", args, stdin, askpass)
+    fn run(
+        &self,
+        args: &[String],
+        stdin: Option<&[u8]>,
+        askpass: Option<&AskpassGrant>,
+        deadline: Duration,
+    ) -> std::io::Result<RawOutput> {
+        run_program("ssh", args, stdin, askpass, deadline)
     }
 
     fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn ForwardChild>> {
@@ -281,7 +302,7 @@ fn exit_code(status: ExitStatus) -> i32 {
 fn child_command(program: &str, args: &[String], askpass: Option<&AskpassGrant>) -> Command {
     let mut command = Command::new(program);
     command.args(args).env_clear();
-    for (key, value) in shell_env(std::env::vars()) {
+    for (key, value) in shell_env(inherited_env()) {
         command.env(key, value);
     }
     if let Some(grant) = askpass {
@@ -292,16 +313,31 @@ fn child_command(program: &str, args: &[String], askpass: Option<&AskpassGrant>)
     command
 }
 
-/// Runs `program` to completion with `args`, capturing stdout and stderr.
+/// The inherited environment as UTF-8 pairs. `std::env::vars()` panics on the first entry that is not UTF-8.
+/// Such an entry cannot be an allowlisted terminal setting anyway, so it is dropped instead.
+fn inherited_env() -> impl Iterator<Item = (String, String)> {
+    std::env::vars_os().filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+}
+
+/// How long `run_program` waits for the child's output pipes after the child has exited. A pipe held open by a
+/// grandchild would otherwise keep a finished call alive.
+const DRAIN_GRACE: Duration = Duration::from_secs(5);
+
+/// Pause between `try_wait` polls while a child runs.
+const WAIT_POLL: Duration = Duration::from_millis(10);
+
+/// Runs `program` to completion with `args`, capturing stdout and stderr, and gives up at `deadline`.
 ///
-/// The stdin bytes are written on a scoped thread while `wait_with_output` drains stdout and stderr, so a
-/// child that echoes a large input cannot deadlock on a full stdout pipe. stderr is captured for the
-/// caller and never logged here.
+/// Why not `wait_with_output`: a child that never reads its stdin, or keeps stdout open after it exits, would
+/// block the caller forever (a stuck remote command holds the ssh channel open). The pipes are drained by
+/// reader threads, the child is polled against the deadline, and on expiry it is killed and reaped, so no ssh
+/// process is left behind. stderr is captured for the caller and never logged here.
 fn run_program(
     program: &str,
     args: &[String],
     stdin: Option<&[u8]>,
     askpass: Option<&AskpassGrant>,
+    deadline: Duration,
 ) -> std::io::Result<RawOutput> {
     let mut command = child_command(program, args, askpass);
     command
@@ -309,21 +345,65 @@ fn run_program(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = command.spawn()?;
-    let stdin_pipe = child.stdin.take();
-    let output = std::thread::scope(|scope| {
-        if let (Some(bytes), Some(mut pipe)) = (stdin, stdin_pipe) {
-            // A write error (the child exited early) is not ours to report; the exit status says what happened.
-            scope.spawn(move || {
-                let _ = pipe.write_all(bytes);
-            });
-        }
-        child.wait_with_output()
-    })?;
+    if let (Some(bytes), Some(mut pipe)) = (stdin, child.stdin.take()) {
+        // Detached on purpose: a write blocked on a child that never reads ends with an error once the child is
+        // killed and its pipe closes. A write error is not ours to report; the exit status says what happened.
+        let payload = bytes.to_vec();
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(&payload);
+        });
+    }
+    let stdout = child.stdout.take().map(drain);
+    let stderr = child.stderr.take().map(drain);
+    let status = wait_until(&mut child, deadline)?;
+    let stdout = collect(stdout)?;
+    let stderr = collect(stderr)?;
     Ok(RawOutput {
-        code: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        code: status.code(),
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
     })
+}
+
+/// Reads one pipe to its end on a detached thread and sends the bytes back. The thread ends when the pipe closes.
+fn drain<R: Read + Send + 'static>(mut pipe: R) -> mpsc::Receiver<Vec<u8>> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = pipe.read_to_end(&mut bytes);
+        let _ = sender.send(bytes);
+    });
+    receiver
+}
+
+/// The bytes of one drained pipe. A pipe that does not close within [`DRAIN_GRACE`] is a timeout.
+fn collect(receiver: Option<mpsc::Receiver<Vec<u8>>>) -> std::io::Result<Vec<u8>> {
+    let Some(receiver) = receiver else {
+        return Ok(Vec::new());
+    };
+    receiver.recv_timeout(DRAIN_GRACE).map_err(|_| timed_out())
+}
+
+/// Polls the child until it exits. At `deadline` the child is killed and reaped, and `TimedOut` is returned.
+fn wait_until(child: &mut Child, deadline: Duration) -> std::io::Result<ExitStatus> {
+    let until = Instant::now() + deadline;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        let now = Instant::now();
+        if now >= until {
+            // The kill fails only when the child has just exited, which is the state wanted here; wait reaps it.
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(timed_out());
+        }
+        std::thread::sleep(WAIT_POLL.min(until - now));
+    }
+}
+
+fn timed_out() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::TimedOut, "the ssh call did not finish before its deadline")
 }
 
 /// Starts `program` without waiting: no stdin, stdout discarded, stderr drained.
@@ -394,7 +474,7 @@ mod tests {
             assert!(has_option(&args, opt), "{opt}");
         }
         assert!(has_option(&args, "GlobalKnownHostsFile=/dev/null"));
-        assert!(has_option(&args, &format!("UserKnownHostsFile={KNOWN}")));
+        assert!(has_option(&args, &format!("UserKnownHostsFile=\"{KNOWN}\"")));
         assert_eq!(args.last().map(String::as_str), Some(COMMAND));
         assert_eq!(args[args.len() - 2], "alice@example.com");
     }
@@ -471,10 +551,83 @@ mod tests {
         assert_eq!(err.unwrap_err().code, "invalid_key_path");
     }
 
+    /// Sets an environment variable for one test and restores the previous value on drop, so no test leaves
+    /// state behind for the others in the same process.
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn no_verbose_flag_in_any_argv() {
+        // `-v` makes ssh write its debug log to stderr; nothing reads it, and it would bloat a captured error.
+        let key = key_endpoint();
+        let password = password_endpoint();
+        for ep in [&key, &password] {
+            let exec = exec_args(ep, Path::new(KNOWN), true, COMMAND);
+            let forward = forward_args(ep, Path::new(KNOWN), 3457, 3460).unwrap();
+            for args in [&exec, &forward] {
+                assert!(!args.iter().any(|a| a == "-v"), "-v found in {args:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn known_hosts_path_with_a_space_is_one_option_value() {
+        // OpenSSH splits an unquoted `UserKnownHostsFile` value on whitespace, so the quotes keep the path whole.
+        let path = Path::new("/tmp/llmide spaced dir/known_hosts");
+        let args = exec_args(&key_endpoint(), path, true, COMMAND);
+        let values: Vec<&String> = args.iter().filter(|a| a.starts_with("UserKnownHostsFile=")).collect();
+        assert_eq!(values.len(), 1, "exactly one UserKnownHostsFile option");
+        assert_eq!(values[0], "UserKnownHostsFile=\"/tmp/llmide spaced dir/known_hosts\"");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ssh_parses_a_quoted_known_hosts_path_with_a_space() {
+        // `ssh -G` prints the parsed configuration without connecting. An unquoted or mis-quoted value fails here.
+        let path = Path::new("/tmp/llmide spaced dir/known_hosts");
+        let mut argv = vec!["-G".to_string()];
+        let args = exec_args(&key_endpoint(), path, true, COMMAND);
+        argv.extend(args[..args.len() - 1].iter().cloned());
+        let Ok(output) = std::process::Command::new("ssh").args(&argv).stdin(Stdio::null()).output() else {
+            eprintln!("ssh is not installed; the parse check is skipped");
+            return;
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "ssh -G rejected the argv: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            stdout.lines().any(|l| l == "userknownhostsfile /tmp/llmide spaced dir/known_hosts"),
+            "ssh did not keep the path whole: {stdout}"
+        );
+    }
+
     #[cfg(unix)]
     mod runner {
         use super::super::{run_program, spawn_program, ForwardChild};
+        use super::EnvGuard;
         use crate::ssh_askpass;
+        use std::os::unix::ffi::OsStrExt;
+        use std::time::{Duration, Instant};
+
+        const LONG: Duration = Duration::from_secs(60);
 
         fn sh(script: &str) -> Vec<String> {
             vec!["-c".to_string(), script.to_string()]
@@ -482,7 +635,7 @@ mod tests {
 
         #[test]
         fn stdin_reaches_child() {
-            let out = run_program("/bin/sh", &sh("cat"), Some(b"abc"), None).unwrap();
+            let out = run_program("/bin/sh", &sh("cat"), Some(b"abc"), None, LONG).unwrap();
             assert_eq!(out.code, Some(0));
             assert_eq!(out.stdout, "abc");
         }
@@ -491,26 +644,70 @@ mod tests {
         fn large_stdin_does_not_deadlock() {
             // The child echoes stdin into a full stdout pipe; writing stdin before reading stdout would hang.
             let payload = vec![b'x'; 512 * 1024];
-            let out = run_program("/bin/sh", &sh("cat"), Some(&payload), None).unwrap();
+            let out = run_program("/bin/sh", &sh("cat"), Some(&payload), None, LONG).unwrap();
             assert_eq!(out.stdout.len(), payload.len());
         }
 
         #[test]
         fn env_is_scrubbed() {
-            std::env::set_var("ANTHROPIC_API_KEY", "sk-test-do-not-leak");
-            let out = run_program("/bin/sh", &sh("env"), None, None).unwrap();
+            let _key = EnvGuard::set("ANTHROPIC_API_KEY", "sk-test-do-not-leak");
+            let out = run_program("/bin/sh", &sh("env"), None, None, LONG).unwrap();
             assert!(!out.stdout.contains("ANTHROPIC_API_KEY"), "the API key reached the ssh child");
             assert!(!out.stdout.contains("sk-test-do-not-leak"));
         }
 
         #[test]
+        fn non_utf8_env_does_not_panic_and_is_not_passed() {
+            // `LC_` names pass the allowlist, so only the UTF-8 check keeps the bad value out of the child.
+            let bad = std::ffi::OsStr::from_bytes(b"\xff\xfe");
+            let _bad = EnvGuard::set("LC_LLMIDE_BAD", bad);
+            let _good = EnvGuard::set("LC_LLMIDE_OK", "yes");
+            let out = run_program("/bin/sh", &sh("env"), None, None, LONG).unwrap();
+            assert!(!out.stdout.contains("LC_LLMIDE_BAD"), "a non-UTF-8 value reached the child");
+            assert!(out.stdout.lines().any(|l| l == "LC_LLMIDE_OK=yes"), "a valid allowlisted value was dropped");
+        }
+
+        #[test]
         fn askpass_env_is_passed() {
             let grant = ssh_askpass::grant("unused-test-secret").unwrap();
-            let out = run_program("/bin/sh", &sh("env"), None, Some(&grant)).unwrap();
+            let out = run_program("/bin/sh", &sh("env"), None, Some(&grant), LONG).unwrap();
             for (name, value) in grant.env() {
                 let line = format!("{name}={value}");
                 assert!(out.stdout.lines().any(|l| l == line), "{name} missing from the child environment");
             }
+        }
+
+        #[test]
+        fn child_that_outlives_its_deadline_is_killed_and_reported_as_timed_out() {
+            // The script records its own pid first; `exec` makes that pid the sleep itself, so the pid tells us
+            // whether the process is still there after the call returns.
+            let dir = crate::remote::temp_ssh_dir("timeout-test").unwrap();
+            let pid_file = dir.join("pid");
+            let script = format!("echo $$ > '{}'; exec sleep 30", pid_file.display());
+            let started = Instant::now();
+            let err = run_program("/bin/sh", &sh(&script), None, None, Duration::from_millis(1500)).unwrap_err();
+            assert!(started.elapsed() < Duration::from_secs(5), "the call did not return at its deadline");
+            assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+            let pid = std::fs::read_to_string(&pid_file).expect("the child wrote its pid before the deadline");
+            let alive = std::process::Command::new("/bin/kill")
+                .args(["-0", pid.trim()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success();
+            assert!(!alive, "the timed-out child is still running");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn stdin_ignored_child_is_bounded_too() {
+            // A child that never reads a large stdin would block a plain write forever.
+            let payload = vec![b'x'; 8 * 1024 * 1024];
+            let started = Instant::now();
+            let err = run_program("/bin/sh", &sh("exec sleep 30"), Some(&payload), None, Duration::from_millis(300))
+                .unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+            assert!(started.elapsed() < Duration::from_secs(5));
         }
 
         #[test]

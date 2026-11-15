@@ -6,6 +6,7 @@
 //! shell command from data.
 
 use std::io::Write;
+#[cfg(not(test))]
 use std::net::TcpListener;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -20,13 +21,36 @@ use crate::remote::RawOutput;
 use crate::ssh_askpass::{grant, AskpassGrant};
 use crate::ssh_server_scripts::{
     check_probe, install_stdin, parse_core_state, parse_probe, parse_start_failure, parse_stop, start_stdin,
-    valid_version, ClaudeState, CoreState, Probe, INSTALL, PROBE, ROLLBACK, START, STATUS, STOP,
+    valid_version, ClaudeState, CoreState, Probe, INSTALL, PROBE, ROLLBACK, START, STATUS, STOP, UNINSTALL,
 };
 use crate::ssh_transport::{forward_args, exec_args, ForwardChild, SshAuth, SshEndpoint, SshExec};
 
 /// The local ports the forward may use. 3456 is the local core's port; the others let a connect proceed
 /// while the local core is running.
+#[cfg(not(test))]
 const LOCAL_PORTS: std::ops::RangeInclusive<u16> = 3456..=3459;
+
+/// The message for a running core that this desktop did not start. Shared with `ssh_service`, which shows it
+/// on Stop and Uninstall, so the wording the user sees is the same in every path.
+pub(crate) const FOREIGN_CORE_CODE: &str = "SSH_CORE_FOREIGN";
+pub(crate) const FOREIGN_CORE_MESSAGE: &str = "Another computer started the server on this account.";
+
+/// Time limit per remote script. Most scripts are quick. START waits for the core's own health check, UNINSTALL
+/// removes releases on a disk that may be slow, and INSTALL uploads a bundle of about 200 MB over a slow link.
+const SCRIPT_DEADLINE: Duration = Duration::from_secs(60);
+const START_DEADLINE: Duration = Duration::from_secs(90);
+const UNINSTALL_DEADLINE: Duration = Duration::from_secs(120);
+const INSTALL_DEADLINE: Duration = Duration::from_secs(30 * 60);
+
+/// The time limit for one remote script, by its constant.
+fn deadline_for(command: &str) -> Duration {
+    match command {
+        INSTALL => INSTALL_DEADLINE,
+        START => START_DEADLINE,
+        UNINSTALL => UNINSTALL_DEADLINE,
+        _ => SCRIPT_DEADLINE,
+    }
+}
 
 /// How often `/health` is polled through the forward while the core starts.
 const HEALTH_POLL: Duration = Duration::from_millis(250);
@@ -83,14 +107,14 @@ pub(crate) struct Link<'a> {
 }
 
 impl Link<'_> {
-    /// Runs one fixed remote command with strict host-key checking.
+    /// Runs one fixed remote command with strict host-key checking, bounded by [`deadline_for`].
     pub(crate) fn run(&self, command: &'static str, stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
         let args = exec_args(self.endpoint, self.known_hosts, true, command);
         let grant = self.askpass()?;
         let output = self
             .exec
-            .run(&args, stdin, grant.as_ref())
-            .map_err(|e| herr("SSH_UNREACHABLE", format!("could not start ssh: {e}")))?;
+            .run(&args, stdin, grant.as_ref(), deadline_for(command))
+            .map_err(transport_error)?;
         transport_check(output)
     }
 
@@ -204,6 +228,16 @@ fn check_inputs(input: &ConnectInput<'_>) -> Result<(), FsError> {
     Ok(())
 }
 
+/// Maps a failure to run ssh: a deadline expiry is its own code, anything else means ssh could not be started or
+/// was cut off.
+fn transport_error(error: std::io::Error) -> FsError {
+    if error.kind() == std::io::ErrorKind::TimedOut {
+        herr("SSH_TIMEOUT", "The server did not answer in time.")
+    } else {
+        herr("SSH_UNREACHABLE", format!("could not start ssh: {error}"))
+    }
+}
+
 /// Maps an ssh transport failure (exit 255, or no exit code) to a fixed error. Other exit codes belong
 /// to the remote script, which the caller reads through its markers.
 fn transport_check(output: RawOutput) -> Result<RawOutput, FsError> {
@@ -230,6 +264,7 @@ fn transport_check(output: RawOutput) -> Result<RawOutput, FsError> {
 
 /// The first free local port in `LOCAL_PORTS`. The probe listener is dropped at once, so the port is
 /// free only as a best guess; the forward's own bind is what decides.
+#[cfg(not(test))]
 pub(crate) fn pick_local_port() -> Option<u16> {
     LOCAL_PORTS.clone().find(|port| TcpListener::bind(("127.0.0.1", *port)).is_ok())
 }
@@ -240,7 +275,7 @@ fn replace_core(link: &Link<'_>, input: &ConnectInput<'_>, replacement: &Replace
     if replacement.was_running {
         stop_core(link)?;
     }
-    let started = start_core(link, input, input.version);
+    let started = start_core(link, input, input.version, !replacement.was_running);
     if matches!(&started, Err(e) if is_start_failure(e)) {
         fail_update(link, input, replacement);
     }
@@ -255,15 +290,24 @@ fn fail_update(link: &Link<'_>, input: &ConnectInput<'_>, replacement: &Replacem
     };
     roll_back(link);
     if replacement.was_running {
-        if let Ok(core) = start_core(link, input, previous) {
+        if let Ok(core) = start_core(link, input, previous, false) {
             let _ = write_session(input.session_file, input.endpoint, &core.nonce);
         }
     }
 }
 
-/// Starts `version` with a fresh nonce. START may hand back a core that was already live, so the nonce,
-/// port and version are taken from what START printed, never from what was sent.
-fn start_core(link: &Link<'_>, input: &ConnectInput<'_>, version: &str) -> Result<RunningCore, FsError> {
+/// Starts `version` with a fresh nonce. START may hand back a core that was already live, so the port and
+/// version are taken from what START printed, never from what was sent.
+///
+/// `expect_our_nonce` is set when the STATUS before this call said no core was running. Then the core START
+/// answers must carry the nonce just sent. A different nonce means another desktop started a core between
+/// STATUS and START, and that core is refused rather than adopted as ours.
+fn start_core(
+    link: &Link<'_>,
+    input: &ConnectInput<'_>,
+    version: &str,
+    expect_our_nonce: bool,
+) -> Result<RunningCore, FsError> {
     let nonce = random_nonce().map_err(|e| herr("SSH_START_FAILED", e))?;
     let stdin = start_stdin(version, &nonce, input.secrets_payload);
     let output = link.run(START, Some(&stdin))?;
@@ -274,7 +318,11 @@ fn start_core(link: &Link<'_>, input: &ConnectInput<'_>, version: &str) -> Resul
     if output.code != Some(0) {
         return Err(herr("SSH_START_FAILED", "the server did not start the core"));
     }
-    running_core(&parse_core_state(&output.stdout)?)
+    let core = running_core(&parse_core_state(&output.stdout)?)?;
+    if expect_our_nonce && !ct_eq(&core.nonce, &nonce) {
+        return Err(herr(FOREIGN_CORE_CODE, FOREIGN_CORE_MESSAGE));
+    }
+    Ok(core)
 }
 
 /// The port, nonce and version of a running core. Anything less is not a core this app can connect to.
@@ -307,8 +355,12 @@ fn hex_sha256(bytes: &[u8]) -> String {
 }
 
 /// Refuses a running core this desktop did not start. The record must name this endpoint and the nonce
-/// STATUS reports; anything else may be someone else's core, and it is left alone.
-fn require_ours(status: &CoreState, session_file: &Path, endpoint: &SshEndpoint) -> Result<(), FsError> {
+/// STATUS reports; anything else may be someone else's core, and it is left alone. A core that is not running
+/// is nobody's, so there is nothing to refuse.
+pub(crate) fn require_ours(status: &CoreState, session_file: &Path, endpoint: &SshEndpoint) -> Result<(), FsError> {
+    if !status.running {
+        return Ok(());
+    }
     let record = read_session(session_file);
     let is_ours = record.is_some_and(|r| {
         r.host.eq_ignore_ascii_case(&endpoint.host)
@@ -319,10 +371,7 @@ fn require_ours(status: &CoreState, session_file: &Path, endpoint: &SshEndpoint)
     if is_ours {
         Ok(())
     } else {
-        Err(herr(
-            "SSH_CORE_FOREIGN",
-            "a core this app did not start is running on the server, so it was left alone",
-        ))
+        Err(herr(FOREIGN_CORE_CODE, FOREIGN_CORE_MESSAGE))
     }
 }
 
@@ -339,7 +388,7 @@ fn roll_back(link: &Link<'_>) {
 
 /// Records the core this desktop started. Written after START so the nonce is the one the core runs
 /// with, and before the forward so a later connect can recognise the core even if this one fails.
-fn write_session(path: &Path, endpoint: &SshEndpoint, nonce: &str) -> Result<(), FsError> {
+pub(crate) fn write_session(path: &Path, endpoint: &SshEndpoint, nonce: &str) -> Result<(), FsError> {
     let record = SessionRecord {
         host: endpoint.host.clone(),
         port: endpoint.port,
@@ -471,9 +520,14 @@ pub(crate) mod tests {
         pub(crate) name: &'static str,
         pub(crate) args: Vec<String>,
         pub(crate) stdin: Option<Vec<u8>>,
+        pub(crate) deadline: Option<Duration>,
     }
 
-    /// Scripted `SshExec`: each `run` pops the next queued output and records argv and stdin.
+    /// Placeholder nonce in a queued state line. `FakeExec::run` replaces it with the nonce START was sent, which
+    /// is what a real core does: it echoes the nonce it was started with.
+    pub(crate) const ECHO_NONCE: &str = "@sent-nonce@";
+
+    /// Scripted `SshExec`: each `run` pops the next queued output and records argv, stdin and deadline.
     #[derive(Default)]
     pub(crate) struct FakeExec {
         queue: Mutex<VecDeque<io::Result<RawOutput>>>,
@@ -481,11 +535,31 @@ pub(crate) mod tests {
         kills: Arc<AtomicUsize>,
         /// Forwards handed out by `spawn_forward` before the default never-exiting one.
         forwards: Mutex<VecDeque<Box<dyn ForwardChild>>>,
+        /// The nonce the last START call sent, read from the first line of its stdin.
+        started: Mutex<String>,
+        /// `name:start` and `name:end` for each run, in order, so a test can see whether calls overlapped.
+        events: Mutex<Vec<String>>,
+        /// How long each run sleeps between its start and end events.
+        delay: Duration,
     }
 
     impl FakeExec {
         pub(crate) fn new(outputs: Vec<io::Result<RawOutput>>) -> Self {
             Self { queue: Mutex::new(outputs.into()), ..Default::default() }
+        }
+
+        /// A fake whose every run takes `delay`, so overlapping calls from two threads show in `events`.
+        pub(crate) fn with_delay(outputs: Vec<io::Result<RawOutput>>, delay: Duration) -> Self {
+            Self { delay, ..Self::new(outputs) }
+        }
+
+        /// The nonce the last START sent, or an empty string when no START has run.
+        pub(crate) fn started_nonce(&self) -> String {
+            self.started.lock().unwrap().clone()
+        }
+
+        pub(crate) fn events(&self) -> Vec<String> {
+            self.events.lock().unwrap().clone()
         }
 
         /// Queues the next forward `spawn_forward` returns, so a test can script when it exits.
@@ -519,21 +593,55 @@ pub(crate) mod tests {
             "stop"
         } else if command == ROLLBACK {
             "rollback"
+        } else if command == UNINSTALL {
+            "uninstall"
         } else {
             "unknown"
         }
     }
 
     impl SshExec for FakeExec {
-        fn run(&self, args: &[String], stdin: Option<&[u8]>, _askpass: Option<&AskpassGrant>) -> io::Result<RawOutput> {
+        fn run(
+            &self,
+            args: &[String],
+            stdin: Option<&[u8]>,
+            _askpass: Option<&AskpassGrant>,
+            deadline: Duration,
+        ) -> io::Result<RawOutput> {
             let name = run_name(args.last().map_or("", String::as_str));
             let stdin = stdin.map(<[u8]>::to_vec);
-            self.calls.lock().unwrap().push(Call { name, args: args.to_vec(), stdin });
-            self.queue.lock().unwrap().pop_front().unwrap_or_else(|| Err(io::Error::other("no scripted output left")))
+            if name == "start" {
+                let line = stdin.as_deref().and_then(|bytes| bytes.split(|b| *b == b'\n').next()).unwrap_or_default();
+                let nonce = String::from_utf8_lossy(line).split_whitespace().nth(1).unwrap_or_default().to_string();
+                *self.started.lock().unwrap() = nonce;
+            }
+            self.calls.lock().unwrap().push(Call {
+                name,
+                args: args.to_vec(),
+                stdin,
+                deadline: Some(deadline),
+            });
+            self.events.lock().unwrap().push(format!("{name}:start"));
+            if !self.delay.is_zero() {
+                std::thread::sleep(self.delay);
+            }
+            self.events.lock().unwrap().push(format!("{name}:end"));
+            let next = self.queue.lock().unwrap().pop_front();
+            match next {
+                Some(Ok(mut output)) => {
+                    if output.stdout.contains(ECHO_NONCE) {
+                        let sent = self.started.lock().unwrap().clone();
+                        output.stdout = output.stdout.replace(ECHO_NONCE, &sent);
+                    }
+                    Ok(output)
+                }
+                Some(Err(error)) => Err(error),
+                None => Err(io::Error::other("no scripted output left")),
+            }
         }
 
         fn spawn_forward(&self, args: &[String], _askpass: Option<&AskpassGrant>) -> io::Result<Box<dyn ForwardChild>> {
-            self.calls.lock().unwrap().push(Call { name: "forward", args: args.to_vec(), stdin: None });
+            self.calls.lock().unwrap().push(Call { name: "forward", args: args.to_vec(), stdin: None, deadline: None });
             let queued = self.forwards.lock().unwrap().pop_front();
             Ok(queued.unwrap_or_else(|| Box::new(FakeForward { kills: self.kills.clone() })))
         }
@@ -598,6 +706,16 @@ pub(crate) mod tests {
         ))
     }
 
+    /// A `/health` answer that echoes the nonce the last START sent, the way a freshly started core does.
+    pub(crate) fn started_health(fake: &FakeExec) -> impl Fn(u16) -> Option<String> + '_ {
+        move |_| Some(fake.started_nonce())
+    }
+
+    /// The START answer of a fresh core: the state line echoes the nonce START was sent.
+    pub(crate) fn started_out(port: u16, version: &str) -> io::Result<RawOutput> {
+        state_out(port, ECHO_NONCE, version)
+    }
+
     pub(crate) fn key_endpoint() -> SshEndpoint {
         prepare_endpoint("example.com", 22, "alice", SshAuth::Key { path: KEY.into() }).unwrap()
     }
@@ -643,11 +761,11 @@ pub(crate) mod tests {
             probe_out(""),
             ok(STOPPED_STATUS),
             ok(INSTALL_OK),
-            state_out(3460, NEW, "2.0.0"),
+            started_out(3460, "2.0.0"),
         ]);
         let scratch = Scratch::new("fresh");
         let ep = key_endpoint();
-        let healthy = |_: u16| Some(NEW.to_string());
+        let healthy = started_health(&fake);
         let connected = expect_ok(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
 
         assert_eq!(fake.names(), vec!["probe", "status", "install", "start", "forward"]);
@@ -664,8 +782,13 @@ pub(crate) mod tests {
         assert_eq!(connected.local_url, "http://127.0.0.1:3456");
         assert_eq!(connected.local_port, 3456);
         assert_eq!(connected.remote_port, 3460);
-        assert_eq!(connected.nonce, NEW, "the nonce comes from the state START returned");
-        assert!(std::fs::read_to_string(&scratch.session).unwrap().contains(NEW), "session record holds the started nonce");
+        let started = fake.started_nonce();
+        assert!(!started.is_empty(), "START was sent a nonce");
+        assert_eq!(connected.nonce, started, "the nonce comes from the state START returned");
+        assert!(
+            std::fs::read_to_string(&scratch.session).unwrap().contains(&started),
+            "session record holds the started nonce"
+        );
     }
 
     #[test]
@@ -740,7 +863,7 @@ pub(crate) mod tests {
             probe_out("1.0.0"),
             ok(STOPPED_STATUS),
             ok(INSTALL_OK),
-            state_out(3462, NEW, "2.0.0"),
+            started_out(3462, "2.0.0"),
             ok(STOP_OK),
             ok(ROLLBACK_OK),
         ]);
@@ -859,9 +982,9 @@ pub(crate) mod tests {
             probe_out(""),
             ok(STOPPED_STATUS),
             ok(INSTALL_OK),
-            state_out(3460, NEW, "2.0.0"),
+            started_out(3460, "2.0.0"),
         ]);
-        let healthy = |_: u16| Some(NEW.to_string());
+        let healthy = started_health(&fake);
         expect_ok(connect_with(&fake, &healthy, input(&ep, &scratch, Some(PASSWORD)), &|| Some(3456)));
         for call in fake.calls() {
             assert!(!call.args.iter().any(|a| a.contains(PASSWORD)), "{} argv holds the password", call.name);
@@ -885,7 +1008,7 @@ pub(crate) mod tests {
             probe_out(""),
             ok(STOPPED_STATUS),
             ok(INSTALL_OK),
-            state_out(3460, NEW, "2.0.0"),
+            started_out(3460, "2.0.0"),
         ]);
         let other = |_: u16| Some("someoneelsesnonce0".to_string());
         let err = expect_err(connect_with(&fake, &other, input(&ep, &scratch, None), &|| Some(3456)));
@@ -904,5 +1027,75 @@ pub(crate) mod tests {
 
         assert_eq!(err.code, "SSH_NO_LOCAL_PORT");
         assert!(fake.calls().is_empty());
+    }
+
+    #[test]
+    fn start_answer_with_a_foreign_nonce_is_refused() {
+        // STATUS said nothing was running, but START answers with a nonce this desktop did not send: another
+        // desktop started a core in between. That core is refused, not adopted, and no forward or record follows.
+        let scratch = Scratch::new("start-foreign");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![
+            probe_out(""),
+            ok(STOPPED_STATUS),
+            ok(INSTALL_OK),
+            state_out(3460, "foreignnonce0123456", "2.0.0"),
+        ]);
+        let healthy = started_health(&fake);
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+
+        assert_eq!(err.code, "SSH_CORE_FOREIGN");
+        assert_eq!(err.message, FOREIGN_CORE_MESSAGE);
+        assert_eq!(fake.names(), vec!["probe", "status", "install", "start"], "no forward after a foreign start");
+        assert!(!scratch.session.exists(), "the foreign core is not recorded as ours");
+    }
+
+    #[test]
+    fn foreign_core_message_is_the_shared_text() {
+        let scratch = Scratch::new("foreign-text");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![probe_out("2.0.0"), state_out(3460, "foreignnonce0123456", "2.0.0")]);
+        let healthy = started_health(&fake);
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_CORE_FOREIGN");
+        assert_eq!(err.message, "Another computer started the server on this account.");
+    }
+
+    #[test]
+    fn a_timed_out_call_is_ssh_timeout() {
+        let scratch = Scratch::new("timeout");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![Err(io::Error::new(io::ErrorKind::TimedOut, "deadline"))]);
+        let healthy = started_health(&fake);
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+
+        assert_eq!(err.code, "SSH_TIMEOUT");
+        assert_eq!(err.message, "The server did not answer in time.");
+        assert_eq!(fake.names(), vec!["probe"], "nothing runs after a timed-out probe");
+    }
+
+    #[test]
+    fn each_script_gets_its_own_deadline() {
+        let scratch = Scratch::new("deadlines");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![
+            probe_out(""),
+            ok(STOPPED_STATUS),
+            ok(INSTALL_OK),
+            started_out(3460, "2.0.0"),
+        ]);
+        let healthy = started_health(&fake);
+        expect_ok(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        let deadlines: Vec<(&str, Option<Duration>)> = fake.calls().iter().map(|c| (c.name, c.deadline)).collect();
+        assert_eq!(
+            deadlines,
+            vec![
+                ("probe", Some(Duration::from_secs(60))),
+                ("status", Some(Duration::from_secs(60))),
+                ("install", Some(Duration::from_secs(30 * 60))),
+                ("start", Some(Duration::from_secs(90))),
+                ("forward", None),
+            ]
+        );
     }
 }

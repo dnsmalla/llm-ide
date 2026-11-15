@@ -293,6 +293,10 @@ fn unwired_ssh_connector() -> SshConnector {
 struct SshSlot {
     link: Option<SshLink>,
     connecting: bool,
+    /// Set when the user ended the link (Disconnect, Stop server, Uninstall, or a stop of the host), so the
+    /// status reads `stopped` instead of the failure a missing link would otherwise show. Cleared when a link is
+    /// attached and when a startup begins.
+    disconnected: bool,
 }
 
 struct Inner {
@@ -415,11 +419,13 @@ struct SshView {
     url: Option<String>,
     state: Option<LinkState>,
     connecting: bool,
+    disconnected: bool,
     password_auth: bool,
 }
 
-/// `url`, `error` and `link` for SSH mode. A live link decides the label. With no link, the connect flag and the
-/// phase decide: a stopped host says `stopped`, not `failed`.
+/// `url`, `error` and `link` for SSH mode. A live link decides the label. With no link, the phase and the
+/// user's last action decide: a stopped host, or one the user disconnected, says `stopped`, not `failed`. That check
+/// comes before the connect flag, so a stop never reads as a connect still in progress.
 fn ssh_fields(view: SshView, phase: Phase, stored_error: Option<String>) -> (String, Option<String>, &'static str) {
     let error = match &view.state {
         Some(LinkState::Failed { message, .. }) => Some(message.clone()),
@@ -427,8 +433,8 @@ fn ssh_fields(view: SshView, phase: Phase, stored_error: Option<String>) -> (Str
     };
     let label = match &view.state {
         Some(state) => live_link_label(state),
+        None if phase == Phase::Stopped || view.disconnected => "stopped",
         None if view.connecting => "connecting",
-        None if phase == Phase::Stopped => "stopped",
         None if view.password_auth => "needs_password",
         // Phase::Starting is the window before the startup thread starts a key-mode connect.
         None if phase == Phase::Starting => "connecting",
@@ -598,12 +604,17 @@ impl CoreHost {
         if mode != ServerMode::Ssh {
             return None;
         }
-        let (url, state, connecting) = {
+        let (url, state, connecting, disconnected) = {
             let slot = lock(&self.inner.ssh_link);
-            (slot.link.as_ref().map(SshLink::url), slot.link.as_ref().map(SshLink::state), slot.connecting)
+            (
+                slot.link.as_ref().map(SshLink::url),
+                slot.link.as_ref().map(SshLink::state),
+                slot.connecting,
+                slot.disconnected,
+            )
         };
         let password_auth = self.run_prefs().remote_server.ssh_auth == SshAuthKind::Password;
-        Some(SshView { url, state, connecting, password_auth })
+        Some(SshView { url, state, connecting, disconnected, password_auth })
     }
 
     /// Makes `link` the one SSH mode serves. The swap is one lock, so two concurrent attaches cannot both see the
@@ -613,6 +624,7 @@ impl CoreHost {
         let previous = {
             let mut slot = lock(&self.inner.ssh_link);
             slot.connecting = false;
+            slot.disconnected = false;
             std::mem::replace(&mut slot.link, Some(link))
         };
         if let Some(previous) = previous {
@@ -624,12 +636,23 @@ impl CoreHost {
         s.error_code = None;
     }
 
-    /// Stops and drops the attached link. The server core keeps running: that is the point of SSH mode.
+    /// Stops and drops the attached link, and records that the user ended it, so the status reads `stopped`. The
+    /// server core keeps running: that is the point of SSH mode.
     pub fn detach_ssh_link(&self) {
-        let link = lock(&self.inner.ssh_link).link.take();
+        let link = {
+            let mut slot = lock(&self.inner.ssh_link);
+            slot.disconnected = true;
+            slot.link.take()
+        };
         if let Some(link) = link {
             link.stop();
         }
+    }
+
+    /// The known_hosts file the attached link reads, for tests that check the folder's lifetime.
+    #[cfg(test)]
+    pub(crate) fn attached_known_hosts(&self) -> Option<PathBuf> {
+        lock(&self.inner.ssh_link).link.as_ref().and_then(SshLink::known_hosts_file)
     }
 
     fn set_connecting(&self, connecting: bool) {
@@ -734,6 +757,9 @@ impl CoreHost {
         }
         // After the join: a connect that was in flight when Stop was pressed may have attached a link meanwhile.
         self.detach_ssh_link();
+        // The startup thread has finished, so no connect can still be in flight; a stop must not leave the
+        // connect flag set, or the status would keep reading `connecting` after the stop.
+        lock(&self.inner.ssh_link).connecting = false;
         let ssh = self.mode() == ServerMode::Ssh;
         let mut s = lock(&self.inner.status);
         // A stopped own core is still the app's core: reporting "unverified" would show a false trust warning.
@@ -825,12 +851,18 @@ impl CoreHost {
     /// reached through a forward. Password auth waits for the user; key auth connects here, on the startup thread.
     fn run_ssh_startup(&self) {
         let cfg = self.run_prefs().remote_server;
-        // A link left from an earlier run is dead or stale, so this run starts with nothing attached.
-        self.detach_ssh_link();
         let key_auth = cfg.ssh_auth == SshAuthKind::Key;
-        // Set before the phase changes, so a status read never shows the connect window as `failed`.
-        if key_auth {
-            self.set_connecting(true);
+        // A link left from an earlier run is dead or stale, so this run starts with nothing attached. This is not a
+        // user Disconnect, so the flag is cleared. The connect flag is set before the phase changes, so a status
+        // read never shows the connect window as `failed`.
+        let stale = {
+            let mut slot = lock(&self.inner.ssh_link);
+            slot.disconnected = false;
+            slot.connecting = key_auth;
+            slot.link.take()
+        };
+        if let Some(stale) = stale {
+            stale.stop();
         }
         {
             let mut s = lock(&self.inner.status);
@@ -2737,7 +2769,7 @@ process.on('SIGTERM', () => process.exit(0));
     use crate::prefs::SshAuthKind;
     use crate::ssh_link::{supervise, SshLink, SuperviseInput};
     use crate::ssh_server_scripts::parse_probe;
-    use crate::ssh_session::tests::{key_endpoint, probe_out, FakeExec, KNOWN, NEW};
+    use crate::ssh_session::tests::{key_endpoint, probe_out, FakeExec, NEW};
     use crate::ssh_session::Connected;
     use crate::ssh_transport::ForwardChild;
     use std::sync::atomic::AtomicUsize;
@@ -2786,7 +2818,7 @@ process.on('SIGTERM', () => process.exit(0));
             connected,
             endpoint: key_endpoint(),
             password: None,
-            known_hosts: PathBuf::from(KNOWN),
+            known_hosts: crate::ssh_link::KnownHostsDir::owning(crate::remote::temp_ssh_dir("core-host-test").unwrap()),
             health: Arc::new(|_| Some(NEW.to_string())),
         };
         (supervise(input), fake)
