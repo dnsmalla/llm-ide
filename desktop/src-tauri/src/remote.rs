@@ -110,7 +110,11 @@ fn record_observed(target: &PreparedTarget, key_type: &str, fingerprint: &str) {
 }
 
 fn confirm_key(target: &PreparedTarget) -> String {
-    format!("{}:{}", target.host.to_ascii_lowercase(), target.port)
+    confirm_key_for(&target.host, target.port)
+}
+
+fn confirm_key_for(host: &str, port: u16) -> String {
+    format!("{}:{}", host.to_ascii_lowercase(), port)
 }
 
 /// True for the OpenSSH SHA256 fingerprint shape this app shows: `SHA256:` + base64url-ish, no padding.
@@ -147,12 +151,17 @@ pub fn confirm_host_key(target: &PreparedTarget, key_type: &str, fingerprint: &s
 
 /// The confirmed key for this host:port, or a refusal. Every mutating remote command calls this.
 pub fn require_confirmed_host_key(target: &PreparedTarget) -> Result<ConfirmedHostKey, FsError> {
+    confirmed_host_key_for(&target.host, target.port)
+        .ok_or_else(|| herr("host_key_unconfirmed", "Test SSH and confirm the server's host-key fingerprint before deploying"))
+}
+
+/// The key confirmed for `host:port` in this app session, if any.
+pub(crate) fn confirmed_host_key_for(host: &str, port: u16) -> Option<ConfirmedHostKey> {
     confirmations()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .get(&confirm_key(target))
+        .get(&confirm_key_for(host, port))
         .cloned()
-        .ok_or_else(|| herr("host_key_unconfirmed", "Test SSH and confirm the server's host-key fingerprint before deploying"))
 }
 
 /// Drop one confirmation (tests and a changed target use this; production clears at app exit).

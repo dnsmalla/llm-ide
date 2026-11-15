@@ -1460,6 +1460,12 @@ pub(crate) fn runtime_for(p: &crate::prefs::Prefs) -> Result<Runtime, String> {
 /// child's environment: a same-user process can read another process's environment (`ps eww`, /proc/<pid>/environ).
 fn wire_secrets(cmd: &mut Command, jwt: &str, vault: &str, approval: &str) -> String {
     cmd.env("LLMIDE_SECRETS_STDIN", "1");
+    secrets_stdin_payload(jwt, vault, approval)
+}
+
+/// The one JSON line the core reads from its stdin, without a trailing newline. The SSH server start
+/// sends the same bytes, so both paths hand the core an identical payload.
+pub(crate) fn secrets_stdin_payload(jwt: &str, vault: &str, approval: &str) -> String {
     serde_json::json!({ "jwtSecret": jwt, "vaultKey": vault, "hostApprovalKey": approval }).to_string()
 }
 
