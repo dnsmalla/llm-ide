@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ConnectionState } from "../host-api/connection.ts";
 import { ProjectPicker } from "../screens/ProjectPicker.tsx";
-import { StatusPill, ToastHost, UiIcon, type ConnStatus } from "../ui/index.ts";
+import { Sheet, StatusPill, ToastHost, UiIcon, type ConnStatus } from "../ui/index.ts";
 import { navigate, useRoute } from "./hash.ts";
 import { visibleSections, type SectionDef, type ShellContext } from "./registry.ts";
 import "./sections.tsx"; // registers the built-in sections
@@ -26,6 +26,54 @@ function NavItems({ sections, activeId, variant }: { sections: readonly SectionD
         </li>
       ))}
     </ul>
+  );
+}
+
+// A phone tab bar past five items squeezes labels into ellipses ("Worksp…"); iOS and Android both cap it at five and move
+// the rest behind "More". The sidebar (>= 900px) always lists every section.
+const TAB_MAX = 5;
+
+function TabBar({ sections, activeId }: { sections: readonly SectionDef[]; activeId: string }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setOpen(false); }, [activeId]);
+  if (sections.length <= TAB_MAX) return <NavItems sections={sections} activeId={activeId} variant="tab" />;
+  const main = sections.slice(0, TAB_MAX - 1);
+  const rest = sections.slice(TAB_MAX - 1);
+  const restActive = rest.find((s) => s.id === activeId) ?? null;
+  return (
+    <>
+      <ul className="shell-nav-list shell-nav-tab">
+        {main.map((s) => (
+          <li key={s.id}>
+            <a className="shell-nav-item" href={`#/${s.id}`} aria-current={s.id === activeId ? "page" : undefined}>
+              <UiIcon name={s.icon} size={22} />
+              <span>{s.shortLabel ?? s.label}</span>
+            </a>
+          </li>
+        ))}
+        <li>
+          {/* While a "More" section is open, the tab shows that section so the bar still says where you are. */}
+          <button type="button" className="shell-nav-item shell-nav-more" aria-haspopup="dialog" aria-expanded={open}
+            aria-current={restActive ? "page" : undefined} onClick={() => setOpen(true)}>
+            <UiIcon name={restActive?.icon ?? "ellipsis"} size={22} />
+            <span>{restActive ? (restActive.shortLabel ?? restActive.label) : "More"}</span>
+          </button>
+        </li>
+      </ul>
+      <Sheet open={open} onClose={() => setOpen(false)} title="More">
+        <ul className="ui-list shell-more-list">
+          {rest.map((s) => (
+            <li key={s.id}>
+              <a className="ui-row" href={`#/${s.id}`} aria-current={s.id === activeId ? "true" : undefined} onClick={() => setOpen(false)}>
+                <span className="ui-row-icon"><UiIcon name={s.icon} size={18} /></span>
+                <span className="ui-row-body"><span className="ui-row-main"><span className="ui-row-title">{s.label}</span></span></span>
+                <UiIcon name="chevron-right" size={16} />
+              </a>
+            </li>
+          ))}
+        </ul>
+      </Sheet>
+    </>
   );
 }
 
@@ -66,7 +114,7 @@ export function Shell({ ctx, forceSection }: { ctx: ShellContext; forceSection?:
           </div>
         ) : null))}
       </main>
-      <nav className="shell-tabs" aria-label="Sections"><NavItems sections={sections} activeId={active.id} variant="tab" /></nav>
+      <nav className="shell-tabs" aria-label="Sections"><TabBar sections={sections} activeId={active.id} /></nav>
       <ToastHost />
     </div>
   );

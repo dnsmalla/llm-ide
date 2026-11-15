@@ -29,6 +29,22 @@
 .shell-nav-item:hover { color: var(--ui-text); }
 .shell-nav-item[aria-current="page"] { color: var(--ui-accent); }
 .shell-nav-tab .shell-nav-item[aria-current="page"] svg { transform: translateY(-1px); }
+.shell-nav-tab .shell-nav-item svg { transition: transform var(--ui-dur-fast) var(--ui-ease); }
+.shell-nav-tab .shell-nav-item:active svg { transform: scale(.9); }
+button.shell-nav-item { width: 100%; border: 0; background: transparent; font: inherit; cursor: pointer; }
+.shell-more-list .ui-row { min-height: 52px; }
+.shell-more-list .ui-row > svg:last-child { color: var(--ui-muted); flex: none; }
+
+/* Header: the mark repeats the sidebar brand on wide screens and costs a row on phones, so it is not shown. */
+.shell-heading > .web-mark { display: none; }
+/* Project picker as a compact pill: still the native <select> (keyboard, screen readers and the phone's own picker),
+ * restyled so it reads as a control in the header rather than a form field. */
+.shell-tools .web-select { appearance: none; -webkit-appearance: none; min-height: 34px; max-width: min(44vw, 260px); padding: 0 30px 0 var(--ui-s-3); border-radius: var(--ui-r-pill);
+  background: var(--ui-card-2) no-repeat right 10px center / 12px 12px; font-size: var(--ui-fs-sm); font-weight: var(--ui-fw-bold); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  transition: background-color var(--ui-dur-fast) var(--ui-ease), border-color var(--ui-dur-fast) var(--ui-ease); }
+.shell-tools .web-select:hover:not(:disabled) { border-color: color-mix(in srgb, var(--ui-text) 28%, var(--ui-line)); }
+.shell-tools .web-project-picker { display: inline-flex; align-items: center; gap: var(--ui-s-2); min-width: 0; }
 
 @media (min-width: 900px) {
   .shell { --shell-bottom: 0px; grid-template-columns: 248px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "side header" "side main"; }
@@ -43,8 +59,16 @@
   .shell-header { padding-top: calc(var(--ui-safe-top) + var(--ui-s-3)); padding-left: var(--ui-s-6); padding-right: calc(var(--ui-safe-right) + var(--ui-s-6)); }
   .shell-host { max-width: 28vw; }
 }
-@media (max-width: 420px) {
-  .shell-heading .web-mark { display: none; }
-  .shell-tools { width: 100%; justify-content: space-between; margin-left: 0; }
-  .shell-host { max-width: 60vw; }
+/* Phones: one header row. The role badge is in the picker's options already, and the connection pill shrinks to its dot
+ * (its text stays in the DOM for screen readers; font-size 0 only hides it visually). */
+@media (max-width: 599px) {
+  .shell-header { flex-wrap: nowrap; padding-top: calc(var(--ui-safe-top) + var(--ui-s-2)); padding-bottom: var(--ui-s-2); }
+  .shell-heading { flex: 1 1 auto; }
+  .shell-heading > div { min-width: 0; }
+  .shell-heading h1 { font-size: var(--ui-fs-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .shell-host { max-width: 40vw; }
+  .shell-tools { flex-wrap: nowrap; flex: 0 1 auto; }
+  .shell-tools .web-project-role { display: none; }
+  .shell-tools .web-select { max-width: 38vw; }
+  .shell-status .ui-pill { font-size: 0; gap: 0; width: 26px; min-height: 26px; padding: 0; justify-content: center; }
 }
