@@ -80,7 +80,7 @@ export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit
         <section className="web-connect-copy" aria-labelledby="web-connect-title">
           <p className="web-kicker">Desktop companion</p>
           <h1 id="web-connect-title">Your workspace, in your pocket.</h1>
-          <p className="web-sub">Connect this browser to your desktop for chat, approvals and read-only access to meetings, plans and library notes.</p>
+          <p className="web-sub">Connect this browser to your desktop for chat, approvals, your project's files and changes, and meetings, plans and library notes.</p>
           <ol className="web-steps" aria-label="How to connect">
             {STEPS.map((s, i) => (
               <li key={s.title}><span aria-hidden="true">{i + 1}</span><div><strong>{s.title}</strong><p>{s.body}</p></div></li>
