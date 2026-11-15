@@ -64,6 +64,16 @@ is_core() {
   [ -r "/proc/$1/cmdline" ] || return 1
   tr '\0' ' ' < "/proc/$1/cmdline" | grep -F -q server.mjs
 }
+is_alive() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null || return 1
+  # A zombie still answers kill -0 until its parent reaps it, so where /proc exists its state is read.
+  if [ -r "/proc/$1/stat" ]; then
+    S=$(sed 's/^.*) //' "/proc/$1/stat" | cut -c1)
+    [ "$S" != Z ] || return 1
+  fi
+  return 0
+}
 "##
     };
 }
@@ -73,22 +83,33 @@ macro_rules! sh_stop_core {
     () => {
         r##"stop_core() {
   PID=$(state_field pid)
-  if is_core "$PID"; then
-    kill -TERM "$PID" 2>/dev/null || true
-    i=0
-    while is_core "$PID" && [ "$i" -lt 5 ]; do
-      sleep 1
-      i=$((i + 1))
-    done
-    if is_core "$PID"; then
-      kill -KILL "$PID" 2>/dev/null || true
-    fi
+  # state.json is the only record of the core, so it is deleted only when the pid is provably
+  # gone or after a kill succeeded. A live pid that cannot be confirmed as the core is left alone.
+  if ! is_alive "$PID"; then
     rm -f "$STATE"
-    printf '__LLMIDE_STOP__=stopped\n'
-  else
-    rm -f "$STATE"
-    printf '__LLMIDE_STOP__=not-running\n'
+    printf '__LLMIDE_STOP__=not_running\n'
+    return 0
   fi
+  if ! is_core "$PID"; then
+    printf '__LLMIDE_STOP__=unknown\n'
+    return 1
+  fi
+  kill -TERM "$PID" 2>/dev/null || true
+  i=0
+  while is_alive "$PID" && [ "$i" -lt 5 ]; do
+    sleep 1
+    i=$((i + 1))
+  done
+  if is_alive "$PID"; then
+    kill -KILL "$PID" 2>/dev/null || true
+    sleep 1
+  fi
+  if is_alive "$PID"; then
+    printf '__LLMIDE_STOP__=unknown\n'
+    return 1
+  fi
+  rm -f "$STATE"
+  printf '__LLMIDE_STOP__=stopped\n'
 }
 "##
     };
@@ -100,6 +121,7 @@ pub const PROBE: &str = r##"set -u
 umask 077
 LC_ALL=C
 export LC_ALL
+printf '\n'
 printf '__LLMIDE_UNAME__=%s\n' "$(uname -s) $(uname -m)"
 FREE_KB=$(df -Pk "$HOME" 2>/dev/null | awk 'NR == 2 { print $4 }')
 case "$FREE_KB" in ''|*[!0-9]*) FREE_KB=0 ;; esac
@@ -108,7 +130,10 @@ INSTALLED=$(ls -1 "$HOME/.llmide-server/releases" 2>/dev/null | tr '\n' ' ')
 printf '__LLMIDE_INSTALLED__=%s\n' "${INSTALLED% }"
 CUR=$(readlink "$HOME/.llmide-server/current" 2>/dev/null || true)
 printf '__LLMIDE_CURRENT__=%s\n' "${CUR##*/}"
-CLAUDE_LINE=$(claude --version 2>/dev/null | head -n 1 || true)
+# The login PATH often misses the places the Claude CLI installs to, so those are tried first, for
+# this lookup only. The output is filtered because the server controls it: only plain text survives,
+# so it cannot carry a marker.
+CLAUDE_LINE=$(PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.claude/local:/usr/local/bin:$PATH" claude --version 2>/dev/null | head -n 1 | tr -cd 'A-Za-z0-9 ._()-' || true)
 printf '__LLMIDE_CLAUDE__=%s\n' "$CLAUDE_LINE"
 "##;
 
@@ -125,15 +150,33 @@ export LC_ALL
 ROOT="${HOME:?}/.llmide-server"
 "##,
     sh_validators!(),
-    r##"IFS= read -r HEADER || HEADER=""
+    r##"DONE_MARK=0
+PART=""
+STAGE=""
+mark() {
+  DONE_MARK=1
+  printf '__LLMIDE_INSTALL__=%s\n' "$1"
+}
+# Any failure removes the partial files. The generic failed marker is printed only when no specific
+# marker was, so a checksum or unpack failure keeps its precise name.
+on_exit() {
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if [ -n "$PART" ]; then rm -rf "$PART"; fi
+    if [ -n "$STAGE" ]; then rm -rf "$STAGE"; fi
+    if [ "$DONE_MARK" -eq 0 ]; then printf '__LLMIDE_INSTALL__=failed\n'; fi
+  fi
+}
+trap on_exit EXIT
+IFS= read -r HEADER || HEADER=""
 case "$HEADER" in
   *" "*) ;;
-  *) printf '__LLMIDE_INSTALL__=invalid\n'; exit 1 ;;
+  *) mark invalid; exit 1 ;;
 esac
 VERSION=${HEADER%% *}
 SHA=${HEADER#* }
 if ! valid_version "$VERSION" || ! valid_sha "$SHA"; then
-  printf '__LLMIDE_INSTALL__=invalid\n'
+  mark invalid
   exit 1
 fi
 mkdir -p "$ROOT/releases" "$ROOT/data"
@@ -146,7 +189,7 @@ cat > "$PART"
 ACTUAL=$(sha256sum "$PART" | awk '{ print $1 }')
 if [ "$ACTUAL" != "$SHA" ]; then
   rm -f "$PART"
-  printf '__LLMIDE_INSTALL__=checksum\n'
+  mark checksum
   exit 1
 fi
 mkdir "$STAGE"
@@ -154,13 +197,13 @@ mkdir "$STAGE"
 # stderr is dropped, but the exit status still decides success.
 if ! tar -xzf "$PART" -C "$STAGE" 2>/dev/null; then
   rm -rf "$PART" "$STAGE"
-  printf '__LLMIDE_INSTALL__=unpack\n'
+  mark unpack
   exit 1
 fi
 rm -f "$PART"
 if [ ! -f "$STAGE/core/node/node" ] || [ ! -f "$STAGE/core/root/extension/server.mjs" ]; then
   rm -rf "$STAGE"
-  printf '__LLMIDE_INSTALL__=layout\n'
+  mark layout
   exit 1
 fi
 chmod 700 "$STAGE"
@@ -174,7 +217,7 @@ fi
 touch "$REL"
 ln -sfn "$REL" "$ROOT/.current.tmp"
 mv -T "$ROOT/.current.tmp" "$ROOT/current"
-printf '__LLMIDE_INSTALL__=ok\n'
+mark ok
 "##,
 );
 
@@ -244,9 +287,24 @@ PID=$!
 exec 3<&-
 i=0
 until curl -s --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; do
+  # A core that dies at boot is reported at once, with the last log line, instead of after 20 s.
+  if ! is_alive "$PID"; then
+    LOG_LINE=$(tail -n 1 "$ROOT/core.log" 2>/dev/null | tr -cd 'A-Za-z0-9 ._()-' | cut -c1-300)
+    printf '__LLMIDE_START__=exited\n'
+    printf '__LLMIDE_LOG__=%s\n' "$LOG_LINE"
+    exit 1
+  fi
   i=$((i + 1))
   if [ "$i" -ge 20 ]; then
-    kill "$PID" 2>/dev/null || true
+    kill -TERM "$PID" 2>/dev/null || true
+    j=0
+    while is_alive "$PID" && [ "$j" -lt 5 ]; do
+      sleep 1
+      j=$((j + 1))
+    done
+    if is_alive "$PID"; then
+      kill -KILL "$PID" 2>/dev/null || true
+    fi
     printf '__LLMIDE_START__=timeout\n'
     exit 1
   fi
@@ -292,7 +350,7 @@ STATE="$ROOT/state.json"
 "##,
     sh_state_helpers!(),
     sh_stop_core!(),
-    "stop_core\n",
+    "stop_core || exit 1\n",
 );
 
 /// Repoints `current` at the newest release other than the one it points at now.
@@ -334,7 +392,7 @@ STATE="$ROOT/state.json"
 "##,
     sh_state_helpers!(),
     sh_stop_core!(),
-    r##"stop_core
+    r##"stop_core || exit 1
 rm -rf "$ROOT/releases" "$ROOT/current"
 printf '__LLMIDE_UNINSTALL__=ok\n'
 "##,
@@ -378,11 +436,12 @@ struct RawCoreState {
 }
 
 /// Returns the value of the last `__LLMIDE_<name>__=` marker, so a value printed later wins.
+/// A marker counts only at the start of a line: a marker inside a value or a banner is text, not a
+/// result, so the server cannot spoof one by echoing it.
 fn marker<'a>(stdout: &'a str, name: &str) -> Option<&'a str> {
     let prefix = format!("__LLMIDE_{name}__=");
     stdout.lines().rev().find_map(|line| {
-        let line = line.trim_end_matches('\r');
-        line.rfind(prefix.as_str()).map(|at| line[at + prefix.len()..].trim())
+        line.trim_end_matches('\r').strip_prefix(prefix.as_str()).map(str::trim)
     })
 }
 
@@ -490,6 +549,31 @@ pub fn parse_core_state(stdout: &str) -> Result<CoreState, FsError> {
         nonce: raw.nonce,
         version: raw.version,
     })
+}
+
+/// Reads a failed START: the `__LLMIDE_START__` value (`timeout`, `exited`, `invalid`, ...) and, for
+/// `exited`, the last line of `core.log` that the script attached. Returns None when START printed
+/// no START marker, which is the success case.
+pub fn parse_start_failure(stdout: &str) -> Option<(String, Option<String>)> {
+    let value = marker(stdout, "START")?;
+    let log = marker(stdout, "LOG")
+        .filter(|line| !line.is_empty())
+        .map(|line| line.chars().take(300).collect());
+    Some((value.to_string(), log))
+}
+
+/// Parses the `__LLMIDE_STOP__` marker printed by STOP and UNINSTALL. `unknown` means a live pid
+/// could not be confirmed as the core, so state.json was kept and nothing was removed.
+pub fn parse_stop(stdout: &str) -> Result<&'static str, FsError> {
+    match marker(stdout, "STOP") {
+        Some("stopped") => Ok("stopped"),
+        Some("not_running") => Ok("not_running"),
+        Some("unknown") => Err(herr(
+            "SSH_STOP_UNKNOWN",
+            "a live process could not be confirmed as the core, so it was left running and state.json was kept",
+        )),
+        _ => Err(herr("SSH_STOP_FAILED", "the server did not report a stop result")),
+    }
 }
 
 /// A release name: 1 to 64 of `[A-Za-z0-9._-]`, not starting with `.` or `-`. The same rule is
@@ -769,8 +853,15 @@ mod tests {
     #[cfg(unix)]
     fn path_with_shims(home: &std::path::Path) -> String {
         let inherited = std::env::var("PATH").unwrap_or_default();
+        // Stub commands a test put under home/stubs (a fake curl or claude) go first.
+        let mut front: Vec<String> = Vec::new();
+        let stubs = home.join("stubs");
+        if stubs.is_dir() {
+            front.push(stubs.display().to_string());
+        }
         if !cfg!(target_os = "macos") {
-            return inherited;
+            front.push(inherited);
+            return front.join(":");
         }
         let shim_dir = home.with_extension("shims");
         std::fs::create_dir_all(&shim_dir).expect("shim dir");
@@ -785,7 +876,9 @@ mod tests {
             std::fs::set_permissions(&mv_shim, std::fs::Permissions::from_mode(0o755))
                 .expect("chmod shim");
         }
-        format!("{}:{inherited}", shim_dir.display())
+        front.push(shim_dir.display().to_string());
+        front.push(inherited);
+        front.join(":")
     }
 
     /// Builds a `.tar.gz` shaped like the real bundle: `VERSION` and `core/` with a stub Node.
@@ -889,7 +982,7 @@ mod tests {
         assert!(out.contains("__LLMIDE_STATE__={\"running\":false}"), "{out}");
         let (ok, out) = run_sh(STOP, &home, b"");
         assert!(ok, "{out}");
-        assert!(out.contains("__LLMIDE_STOP__=not-running"), "{out}");
+        assert!(out.contains("__LLMIDE_STOP__=not_running"), "{out}");
 
         // UNINSTALL removes releases and current but keeps data.
         let (ok, out) = run_sh(UNINSTALL, &home, b"");
@@ -927,5 +1020,303 @@ mod tests {
         assert!(!root.join("state.json").exists());
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn marker_must_start_the_line() {
+        let out = "__LLMIDE_UNAME__=Linux x86_64\n__LLMIDE_FREE_MB__=5000\n\
+                   __LLMIDE_INSTALLED__=\n__LLMIDE_CURRENT__=\n__LLMIDE_CLAUDE__=\n\
+                   noise __LLMIDE_FREE_MB__=999999\n";
+        let probe = parse_probe(out).expect("probe parses");
+        assert_eq!(probe.free_mb, 5000);
+
+        let only_mid_line = "__LLMIDE_UNAME__=Linux x86_64\nnoise __LLMIDE_FREE_MB__=999999\n\
+                             __LLMIDE_INSTALLED__=\n__LLMIDE_CURRENT__=\n__LLMIDE_CLAUDE__=\n";
+        let err = parse_probe(only_mid_line).expect_err("a mid-line marker is not a result");
+        assert_eq!(err.code, PROBE_FAILED);
+    }
+
+    #[test]
+    fn claude_text_cannot_spoof() {
+        let out = "__LLMIDE_UNAME__=Darwin arm64\n__LLMIDE_FREE_MB__=5000\n\
+                   __LLMIDE_INSTALLED__=\n__LLMIDE_CURRENT__=\n\
+                   __LLMIDE_CLAUDE__=2.1.0 __LLMIDE_UNAME__=Linux x86_64\n";
+        let probe = parse_probe(out).expect("probe parses");
+        assert_eq!(probe.os, "Darwin");
+        assert_eq!(probe.arch, "arm64");
+        assert_eq!(
+            probe.claude,
+            ClaudeState::Installed { version: "2.1.0 __LLMIDE_UNAME__=Linux x86_64".to_string() }
+        );
+    }
+
+    #[test]
+    fn start_failure_exited_carries_the_log_line() {
+        let out = "__LLMIDE_START__=exited\n__LLMIDE_LOG__=Error: listen EADDRINUSE\n";
+        let (value, log) = parse_start_failure(out).expect("a failure");
+        assert_eq!(value, "exited");
+        assert_eq!(log.as_deref(), Some("Error: listen EADDRINUSE"));
+    }
+
+    #[test]
+    fn start_failure_timeout_has_no_log() {
+        let (value, log) = parse_start_failure("__LLMIDE_START__=timeout\n").expect("a failure");
+        assert_eq!(value, "timeout");
+        assert_eq!(log, None);
+        let invalid = parse_start_failure("__LLMIDE_START__=invalid\n").expect("a failure");
+        assert_eq!(invalid.0, "invalid");
+    }
+
+    #[test]
+    fn start_success_is_not_a_failure() {
+        let out = "__LLMIDE_STATE__={\"running\":true,\"port\":3461,\"pid\":77,\"nonce\":\"abcdefgh12345678\",\"version\":\"1.2.3\"}\n";
+        assert!(parse_start_failure(out).is_none());
+    }
+
+    #[test]
+    fn parse_stop_maps_the_three_results() {
+        assert_eq!(parse_stop("__LLMIDE_STOP__=stopped\n").expect("ok"), "stopped");
+        assert_eq!(parse_stop("__LLMIDE_STOP__=not_running\n").expect("ok"), "not_running");
+        let unknown = parse_stop("__LLMIDE_STOP__=unknown\n").expect_err("unknown is an error");
+        assert_eq!(unknown.code, "SSH_STOP_UNKNOWN");
+        let missing = parse_stop("nothing\n").expect_err("no marker is an error");
+        assert_eq!(missing.code, "SSH_STOP_FAILED");
+    }
+
+    #[test]
+    fn stop_and_uninstall_never_delete_state_without_a_result() {
+        // Guards the rule in text: the only removal of state.json sits after a verified exit.
+        let stop = STOP;
+        assert!(stop.contains("state.json is the only record"));
+        assert!(stop.contains("__LLMIDE_STOP__=unknown"));
+        assert!(UNINSTALL.contains("stop_core || exit 1"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_failure_leaves_no_partial_release() {
+        let base = unique_dir("truncated");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let root = home.join(".llmide-server");
+        let bundle = make_bundle(&base, "3.0.0");
+
+        // Header matches the real bundle but the body is cut short: the checksum refuses it.
+        let cut = &bundle[..bundle.len() / 2];
+        let (ok, out) = run_sh(INSTALL, &home, &install_stdin("3.0.0", &sha_hex(&bundle), cut));
+        assert!(!ok);
+        assert!(out.contains("__LLMIDE_INSTALL__=checksum"), "{out}");
+
+        // Garbage whose checksum matches the header: tar refuses it.
+        let garbage = b"not a tarball".to_vec();
+        let stdin = install_stdin("3.0.0", &sha_hex(&garbage), &garbage);
+        let (ok, out) = run_sh(INSTALL, &home, &stdin);
+        assert!(!ok);
+        assert!(out.contains("__LLMIDE_INSTALL__=unpack"), "{out}");
+
+        assert!(!root.join("releases/.3.0.0.part").exists());
+        assert!(!root.join("releases/.3.0.0.stage").exists());
+        assert!(!root.join("releases/3.0.0").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_failure_without_a_marker_prints_failed() {
+        let base = unique_dir("blocked");
+        let home = base.join("home");
+        let root = home.join(".llmide-server");
+        std::fs::create_dir_all(&root).expect("root");
+        // A file where the releases directory must go makes INSTALL fail before any marker.
+        std::fs::write(root.join("releases"), b"in the way").expect("blocker");
+        let bundle = make_bundle(&base, "3.0.0");
+        let (ok, out) = run_sh(INSTALL, &home, &install_stdin("3.0.0", &sha_hex(&bundle), &bundle));
+        assert!(!ok);
+        assert!(out.contains("__LLMIDE_INSTALL__=failed"), "{out}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_finds_claude_in_local_bin_and_filters_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = unique_dir("claude");
+        let home = base.join("home");
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).expect("local bin");
+        let claude = bin.join("claude");
+        // The stub's output carries a marker-looking text; the filter must keep it from being one.
+        std::fs::write(&claude, "#!/bin/sh\necho '2.9.9 __LLMIDE_UNAME__=Linux x86_64'\n").expect("stub");
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+        let (ok, out) = run_sh(PROBE, &home, b"");
+        assert!(ok, "{out}");
+        let probe = parse_probe(&out).expect("probe parses");
+        assert_eq!(
+            probe.claude,
+            ClaudeState::Installed { version: "2.9.9 __LLMIDE_UNAME__Linux x86_64".to_string() }
+        );
+        let uname = std::process::Command::new("uname").arg("-s").output().expect("uname");
+        assert_eq!(probe.os, String::from_utf8_lossy(&uname.stdout).trim());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Writes the seven constants to `LLMIDE_DUMP_SCRIPTS_DIR` for a manual smoke test on a Linux
+    /// host. Ignored by default and a no-op when the variable is unset.
+    #[test]
+    #[ignore = "writes the scripts for a manual Linux smoke test; set LLMIDE_DUMP_SCRIPTS_DIR"]
+    fn dump_scripts() {
+        let Some(dir) = std::env::var_os("LLMIDE_DUMP_SCRIPTS_DIR") else {
+            return;
+        };
+        for (name, body) in all_scripts() {
+            std::fs::write(std::path::Path::new(&dir).join(format!("{name}.sh")), body)
+                .expect("write script");
+        }
+    }
+
+    // ---- Linux-only: the core lifecycle needs /proc and setsid, so these run in CI on Linux ----
+
+    #[cfg(target_os = "linux")]
+    static LINUX_CORE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[cfg(target_os = "linux")]
+    fn find_on_path(name: &str) -> Option<std::path::PathBuf> {
+        let paths = std::env::var_os("PATH")?;
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    }
+
+    /// A home with one release whose `node` stays alive as a stand-in core. It runs the real node
+    /// only for the port probe. A `curl` stub answers `/health`. Returns None when there is no node
+    /// to borrow, so the test is skipped rather than failed.
+    #[cfg(target_os = "linux")]
+    fn live_home(tag: &str) -> Option<std::path::PathBuf> {
+        use std::os::unix::fs::PermissionsExt;
+        let real_node = find_on_path("node")?;
+        let base = unique_dir(tag);
+        let home = base.join("home");
+        let root = home.join(".llmide-server");
+        let release = root.join("releases/1.0.0");
+        std::fs::create_dir_all(release.join("core/node")).expect("node dir");
+        std::fs::create_dir_all(release.join("core/root/extension")).expect("extension dir");
+        std::fs::write(release.join("core/root/extension/server.mjs"), "").expect("server");
+        let node = release.join("core/node/node");
+        let body = format!(
+            "#!/bin/sh\nif [ \"$1\" = \"-e\" ]; then exec '{real}' \"$@\"; fi\n\
+             exec '{real}' -e 'setInterval(function () {{}}, 1000)' \"$@\"\n",
+            real = real_node.display()
+        );
+        std::fs::write(&node, body).expect("node stub");
+        std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        std::os::unix::fs::symlink(&release, root.join("current")).expect("current");
+        let stubs = home.join("stubs");
+        std::fs::create_dir_all(&stubs).expect("stubs");
+        let curl = stubs.join("curl");
+        std::fs::write(&curl, "#!/bin/sh\nexit 0\n").expect("curl stub");
+        std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        Some(home)
+    }
+
+    /// Kills whatever core the home's state.json recorded and removes the temp tree, even when the
+    /// test panicked part way through.
+    #[cfg(target_os = "linux")]
+    struct CoreCleanup(std::path::PathBuf);
+
+    #[cfg(target_os = "linux")]
+    impl Drop for CoreCleanup {
+        fn drop(&mut self) {
+            let state_path = self.0.join("home/.llmide-server/state.json");
+            if let Ok(raw) = std::fs::read_to_string(&state_path) {
+                if let Ok(state) = parse_core_state(&format!("__LLMIDE_STATE__={}", raw.trim())) {
+                    if let Some(pid) = state.pid {
+                        let _ = std::process::Command::new("kill")
+                            .args(["-KILL", &pid.to_string()])
+                            .status();
+                    }
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn pid_is_running(pid: u32) -> bool {
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => {
+                let state = stat.rsplit(')').next().and_then(|rest| rest.trim_start().chars().next());
+                state.is_some() && state != Some('Z')
+            }
+            Err(_) => false,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn started_pid(out: &str) -> u32 {
+        parse_core_state(out).expect("state parses").pid.expect("pid")
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn start_happy_path_writes_state() {
+        let _guard = LINUX_CORE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(home) = live_home("happy") else {
+            eprintln!("skipped: no node on PATH to borrow");
+            return;
+        };
+        let _cleanup = CoreCleanup(home.parent().expect("base").to_path_buf());
+        let (ok, out) = run_sh(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"));
+        assert!(ok, "{out}");
+        let state = parse_core_state(&out).expect("START prints a state line");
+        assert!(state.running);
+        let port = state.port.expect("port");
+        assert!((3460..=3479).contains(&port), "port {port}");
+        assert_eq!(mode_of(&home.join(".llmide-server/state.json")), 0o600);
+
+        let (ok, status) = run_sh(STATUS, &home, b"");
+        assert!(ok, "{status}");
+        assert!(parse_core_state(&status).expect("status parses").running, "{status}");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn start_reuses_a_live_core() {
+        let _guard = LINUX_CORE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(home) = live_home("reuse") else {
+            eprintln!("skipped: no node on PATH to borrow");
+            return;
+        };
+        let _cleanup = CoreCleanup(home.parent().expect("base").to_path_buf());
+        let (ok, first) = run_sh(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"));
+        assert!(ok, "{first}");
+        let (ok, second) = run_sh(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"));
+        assert!(ok, "{second}");
+        // The same pid comes back, so no second core was started.
+        assert_eq!(started_pid(&second), started_pid(&first));
+        assert_eq!(second.trim(), first.trim());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stop_kills_and_reports_stopped() {
+        let _guard = LINUX_CORE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(home) = live_home("stop") else {
+            eprintln!("skipped: no node on PATH to borrow");
+            return;
+        };
+        let _cleanup = CoreCleanup(home.parent().expect("base").to_path_buf());
+        let (ok, started) = run_sh(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"));
+        assert!(ok, "{started}");
+        let pid = started_pid(&started);
+
+        let (ok, stop) = run_sh(STOP, &home, b"");
+        assert!(ok, "{stop}");
+        assert_eq!(parse_stop(&stop).expect("stopped"), "stopped");
+        assert!(!pid_is_running(pid), "pid {pid} still running");
+
+        let (ok, status) = run_sh(STATUS, &home, b"");
+        assert!(ok, "{status}");
+        assert!(!parse_core_state(&status).expect("status parses").running, "{status}");
     }
 }
