@@ -138,6 +138,10 @@ INSTALLED=$(ls -1 "$HOME/.llmide-server/releases" 2>/dev/null | tr '\n' ' ')
 printf '__LLMIDE_INSTALLED__=%s\n' "${INSTALLED% }"
 CUR=$(readlink "$HOME/.llmide-server/current" 2>/dev/null || true)
 printf '__LLMIDE_CURRENT__=%s\n' "${CUR##*/}"
+# The glibc version decides which bundle the server can load. `getconf GNU_LIBC_VERSION` prints
+# "glibc 2.31"; musl has no such variable, so the value is empty there. Only digits and dots are kept.
+GLIBC=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $2 }' | tr -cd '0-9.')
+printf '__LLMIDE_GLIBC__=%s\n' "$GLIBC"
 "##,
     sh_path_prefix!(),
     r##"# The output is filtered because the server controls it: only plain text survives, so it cannot carry
@@ -167,6 +171,20 @@ mark() {
   DONE_MARK=1
   printf '__LLMIDE_INSTALL__=%s\n' "$1"
 }
+# Keeps the new release and the one `current` pointed at before the switch (the rollback target) and removes
+# every other release. Only names that pass valid_version are considered, so nothing outside releases/ is
+# touched, and a removal that fails is ignored: the new release is already live.
+prune_releases() {
+  for DIR in "$ROOT/releases"/*; do
+    [ -d "$DIR" ] || continue
+    NAME=${DIR##*/}
+    valid_version "$NAME" || continue
+    [ "$NAME" = "$1" ] && continue
+    [ "$NAME" = "$2" ] && continue
+    rm -rf "$ROOT/releases/$NAME" || true
+  done
+  return 0
+}
 # Any failure removes the partial files. The generic failed marker is printed only when no specific
 # marker was, so a checksum or unpack failure keeps its precise name.
 on_exit() {
@@ -195,7 +213,7 @@ REL="$ROOT/releases/$VERSION"
 PART="$ROOT/releases/.$VERSION.part"
 STAGE="$ROOT/releases/.$VERSION.stage"
 rm -rf "$PART" "$STAGE"
-cat > "$PART"
+cat > "$PART" || { rm -f "$PART"; mark disk; exit 1; }
 ACTUAL=$(sha256sum "$PART" | awk '{ print $1 }')
 if [ "$ACTUAL" != "$SHA" ]; then
   rm -f "$PART"
@@ -225,25 +243,94 @@ else
   mv "$STAGE" "$REL"
 fi
 touch "$REL"
+PREV=$(readlink "$ROOT/current" 2>/dev/null || true)
+PREV=${PREV##*/}
 ln -sfn "$REL" "$ROOT/.current.tmp"
 mv -T "$ROOT/.current.tmp" "$ROOT/current"
+prune_releases "$VERSION" "$PREV"
 mark ok
 "##,
 );
 
 /// Starts the core from `current`. Stdin is `<version> <nonce>\n` followed by the secrets payload,
 /// which is handed to the core's stdin untouched.
+///
+/// One START runs at a time per data folder: the lock is the `.start.lock` directory, taken before any
+/// state is read. The core is recorded in `state.json` right after it is spawned, so STATUS and STOP can
+/// see it while the health wait runs.
 pub const START: &str = concat!(
     r##"set -eu
 umask 077
+# The core keeps the login locale. The script itself runs in C so that its character classes do not depend
+# on the locale, so the login value is saved first.
+LOGIN_LC_ALL=${LC_ALL-}
 LC_ALL=C
 export LC_ALL
 ROOT="${HOME:?}/.llmide-server"
 STATE="$ROOT/state.json"
+LOCK="$ROOT/.start.lock"
+STATE_WRITTEN=0
 "##,
     sh_validators!(),
     sh_state_helpers!(),
-    r##"IFS= read -r HEADER || HEADER=""
+    r##"# Stops the core this script spawned. The core is our own child, so it is reaped here after it is
+# signalled: a zombie would otherwise look alive to is_alive on systems without /proc.
+kill_started_core() {
+  kill -TERM "$PID" 2>/dev/null || true
+  j=0
+  while is_alive "$PID" && [ "$j" -lt 5 ]; do
+    sleep 1
+    j=$((j + 1))
+  done
+  if is_alive "$PID"; then
+    kill -KILL "$PID" 2>/dev/null || true
+  fi
+  wait "$PID" 2>/dev/null || true
+  rm -f "$STATE"
+}
+# A lock is stale when its recorded pid is gone. Without a readable pid the holder may still be between
+# mkdir and its pid write, so the lock is stale only when it is older than 120 seconds.
+start_lock_is_stale() {
+  HOLDER=$(head -n 1 "$LOCK/pid" 2>/dev/null || true)
+  case "$HOLDER" in
+    ''|*[!0-9]*) ;;
+    *)
+      if is_alive "$HOLDER"; then return 1; fi
+      return 0
+      ;;
+  esac
+  NOW=$(date +%s)
+  MTIME=$(stat -c %Y "$LOCK" 2>/dev/null || stat -f %m "$LOCK" 2>/dev/null || true)
+  case "$MTIME" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ $((NOW - MTIME)) -gt 120 ]
+}
+# Returns 0 when the lock is taken, 1 when a live START holds it, 2 when the lock cannot be created.
+# A stale lock is reclaimed once; a second mkdir that loses the race means another START holds it.
+take_start_lock() {
+  if mkdir "$LOCK" 2>/dev/null; then
+    return 0
+  fi
+  [ -d "$LOCK" ] || return 2
+  start_lock_is_stale || return 1
+  rm -rf "$LOCK"
+  mkdir "$LOCK" 2>/dev/null || return 1
+}
+# Runs on every exit, including the signals an ssh session drop sends. A core that was spawned but is not
+# yet recorded in state.json is stopped, because STATUS and STOP cannot see it. Once state.json exists the
+# core is kept, even when the health wait was cut short: state.json describes it, so the next STATUS or
+# START finds it and reuses it or stops it.
+on_start_exit() {
+  if [ -n "${PID:-}" ] && [ "$STATE_WRITTEN" -eq 0 ]; then
+    kill_started_core || true
+  fi
+  HOLDER=$(head -n 1 "$LOCK/pid" 2>/dev/null || true)
+  if [ -z "$HOLDER" ] || [ "$HOLDER" = "$$" ]; then
+    rm -rf "$LOCK"
+  fi
+}
+IFS= read -r HEADER || HEADER=""
 case "$HEADER" in
   *" "*) ;;
   *) printf '__LLMIDE_START__=invalid\n'; exit 1 ;;
@@ -254,6 +341,21 @@ if ! valid_version "$VERSION" || ! valid_nonce "$NONCE"; then
   printf '__LLMIDE_START__=invalid\n'
   exit 1
 fi
+mkdir -p "$ROOT" 2>/dev/null || { printf '__LLMIDE_START__=lock-failed\n'; exit 1; }
+LOCK_RC=0
+take_start_lock || LOCK_RC=$?
+case "$LOCK_RC" in
+  0) ;;
+  1) printf '__LLMIDE_START__=busy\n'; exit 1 ;;
+  *) printf '__LLMIDE_START__=lock-failed\n'; exit 1 ;;
+esac
+if ! printf '%s\n' "$$" > "$LOCK/pid"; then
+  rm -rf "$LOCK"
+  printf '__LLMIDE_START__=lock-failed\n'
+  exit 1
+fi
+trap on_start_exit EXIT
+trap 'exit 1' HUP INT PIPE TERM
 if [ -f "$STATE" ]; then
   OLD_PID=$(state_field pid)
   if is_core "$OLD_PID"; then
@@ -268,8 +370,9 @@ if [ "${TARGET##*/}" != "$VERSION" ] || [ ! -f "$ROOT/current/core/node/node" ];
   exit 1
 fi
 # No ss or netstat on minimal servers, and /dev/tcp is bash-only, so the bundled node does the
-# bind test. It is the same node that will run the core, so the check uses the real runtime.
-PORT=$("$ROOT/current/core/node/node" -e 'const net = require("net");
+# bind test. It is the same node that will run the core, so the check uses the real runtime. It runs with
+# the same empty environment as the core: a login variable such as NODE_OPTIONS must not change the probes.
+PORT=$(env -i HOME="$HOME" PATH="${PATH:-/usr/bin:/bin}" "$ROOT/current/core/node/node" -e 'const net = require("net");
 let port = 3460;
 const next = () => {
   if (port > 3479) { process.stdout.write("none"); return; }
@@ -294,6 +397,21 @@ PIN="$ROOT/data/extension-ids.json"
 printf '%s' '{"ids":["ecojclccfoegmlffpiahbcenmkfhadlk"]}' > "$PIN.tmp" || { printf '__LLMIDE_START__=pin-failed\n'; exit 1; }
 chmod 600 "$PIN.tmp" || { printf '__LLMIDE_START__=pin-failed\n'; exit 1; }
 mv "$PIN.tmp" "$PIN" || { printf '__LLMIDE_START__=pin-failed\n'; exit 1; }
+# The core starts from an empty environment, as the local core does (core_env::core_env). Only the names
+# below are passed, and only when they are set: an empty value could change the core's behaviour. The
+# list mirrors core_env's Unix allow-list. LLMIDE_CLAUDE_PATH and LLMIDE_FEATURES are desktop settings,
+# so the server never passes them. HOME and PATH are always set.
+set -- "HOME=$HOME" "PATH=$LLMIDE_PATH_PREFIX:${PATH:-/usr/bin:/bin}"
+if [ -n "$LOGIN_LC_ALL" ]; then
+  set -- "$@" "LC_ALL=$LOGIN_LC_ALL"
+fi
+for NAME in USER LOGNAME SHELL LANG LANGUAGE TZ TMPDIR TEMP TMP XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR HTTP_PROXY HTTPS_PROXY NO_PROXY ALL_PROXY http_proxy https_proxy no_proxy all_proxy SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY LC_MESSAGES LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION; do
+  eval "NAME_IS_SET=\${$NAME+set}"
+  if [ -n "$NAME_IS_SET" ]; then
+    eval "NAME_VALUE=\${$NAME}"
+    set -- "$@" "$NAME=$NAME_VALUE"
+  fi
+done
 # The core gets the same PATH the PROBE lookup uses, so the core finds the same `claude`. The local spawn
 # sets the core's CORS allow-list to the webview origins of every desktop OS, because one server core can be
 # reached from any of them. Registration is single-owner: the core refuses a sign-up once an owner exists.
@@ -302,7 +420,7 @@ mv "$PIN.tmp" "$PIN" || { printf '__LLMIDE_START__=pin-failed\n'; exit 1; }
 # duplicated onto fd 3 and then handed to the core as its stdin. fd 3 is closed in the core so
 # it does not keep the pipe open.
 exec 3<&0
-PATH="$LLMIDE_PATH_PREFIX:$PATH" LLMIDE_SECRETS_STDIN=1 LLMIDE_PORT="$PORT" LLMIDE_CORE_NONCE="$NONCE" \
+env -i "$@" LLMIDE_SECRETS_STDIN=1 LLMIDE_PORT="$PORT" LLMIDE_CORE_NONCE="$NONCE" \
   LLMIDE_DATA_DIR="$ROOT/data" LLMIDE_DB_PATH="$ROOT/data/data.db" \
   LLMIDE_PLUGIN_DIR="$ROOT/data/addons/plugins" \
   LLMIDE_CORS_ORIGINS='tauri://localhost,http://tauri.localhost,https://tauri.localhost' \
@@ -312,34 +430,46 @@ PATH="$LLMIDE_PATH_PREFIX:$PATH" LLMIDE_SECRETS_STDIN=1 LLMIDE_PORT="$PORT" LLMI
   <&3 3<&- >>"$ROOT/core.log" 2>&1 &
 PID=$!
 exec 3<&-
+# Recorded before the health wait, so a cut-off START still leaves STATUS and STOP a core to see. A failed
+# write stops the core (the trap does that, because STATE_WRITTEN is still 0).
+if ! printf '{"running":true,"port":%s,"pid":%s,"nonce":"%s","version":"%s"}\n' "$PORT" "$PID" "$NONCE" "$VERSION" > "$STATE.tmp"; then
+  rm -f "$STATE.tmp"
+  printf '__LLMIDE_START__=state-failed\n'
+  exit 1
+fi
+if ! { chmod 600 "$STATE.tmp" && mv "$STATE.tmp" "$STATE"; }; then
+  rm -f "$STATE.tmp"
+  printf '__LLMIDE_START__=state-failed\n'
+  exit 1
+fi
+STATE_WRITTEN=1
+# The health probe is the bundled node, so the server needs no extra tool. It passes only when the core answers
+# /health with the nonce this START was given, which proves the core is ours and not another process on the port.
 i=0
-until curl -s --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; do
+until env -i HOME="$HOME" PATH="${PATH:-/usr/bin:/bin}" "$ROOT/current/core/node/node" -e 'const http = require("http");
+const [port, nonce] = process.argv.slice(1);
+const req = http.get({ host: "127.0.0.1", port: Number(port), path: "/health" }, (res) => {
+  res.resume();
+  process.exit(res.headers["x-llmide-nonce"] === nonce ? 0 : 1);
+});
+req.setTimeout(2000, () => req.destroy(new Error("timeout")));
+req.on("error", () => process.exit(1));' "$PORT" "$NONCE" >/dev/null 2>&1; do
   # A core that dies at boot is reported at once, with the last log line, instead of after 20 s.
   if ! is_alive "$PID"; then
     LOG_LINE=$(tail -n 1 "$ROOT/core.log" 2>/dev/null | tr -cd 'A-Za-z0-9 ._()-' | cut -c1-300)
+    kill_started_core || true
     printf '__LLMIDE_START__=exited\n'
     printf '__LLMIDE_LOG__=%s\n' "$LOG_LINE"
     exit 1
   fi
   i=$((i + 1))
   if [ "$i" -ge 20 ]; then
-    kill -TERM "$PID" 2>/dev/null || true
-    j=0
-    while is_alive "$PID" && [ "$j" -lt 5 ]; do
-      sleep 1
-      j=$((j + 1))
-    done
-    if is_alive "$PID"; then
-      kill -KILL "$PID" 2>/dev/null || true
-    fi
+    kill_started_core || true
     printf '__LLMIDE_START__=timeout\n'
     exit 1
   fi
   sleep 1
 done
-printf '{"running":true,"port":%s,"pid":%s,"nonce":"%s","version":"%s"}\n' "$PORT" "$PID" "$NONCE" "$VERSION" > "$STATE.tmp"
-chmod 600 "$STATE.tmp"
-mv "$STATE.tmp" "$STATE"
 printf '__LLMIDE_STATE__=%s\n' "$(tr -d '\n' < "$STATE")"
 "##,
 );
@@ -445,13 +575,13 @@ invalid() {
   exit 1
 }
 # Count the lines as they are read, so a second line is refused instead of silently dropped.
-LINES=0
+ADDKEY_COUNT=0
 LINE=""
 while IFS= read -r ADDKEY_IN || [ -n "$ADDKEY_IN" ]; do
-  LINES=$((LINES + 1))
+  ADDKEY_COUNT=$((ADDKEY_COUNT + 1))
   LINE=$ADDKEY_IN
 done
-[ "$LINES" -eq 1 ] || invalid
+[ "$ADDKEY_COUNT" -eq 1 ] || invalid
 case "$LINE" in
   'ssh-ed25519 '*) ;;
   *) invalid ;;
@@ -699,6 +829,40 @@ pub fn parse_add_key(stdout: &str) -> Result<&'static str, FsError> {
     }
 }
 
+/// The START result printed while another START holds the data folder's lock. The script prints it before
+/// it reads any state, so the losing call starts no core.
+#[allow(dead_code)]
+// NOTE: wired by the ssh_session follow-up, which maps it to SSH_START_BUSY.
+pub const START_BUSY: &str = "busy";
+
+/// Parses the `__LLMIDE_GLIBC__` marker printed by [`PROBE`]: the server's glibc version (for example
+/// `2.31`). Returns None when the server has no glibc version to report (musl, no getconf) or the value
+/// is not digits and dots.
+#[allow(dead_code)]
+// NOTE: wired by the ssh_session follow-up, which checks it before an upload of the standard bundle.
+pub fn parse_glibc(stdout: &str) -> Option<String> {
+    let value = marker(stdout, "GLIBC")?;
+    let well_formed = !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit() || b == b'.');
+    well_formed.then(|| value.to_string())
+}
+
+/// Parses the `__LLMIDE_INSTALL__` marker printed by [`INSTALL`]. Returns None on success (`ok`). A
+/// failure returns its kind: `checksum`, `unpack`, `layout`, `disk` or `invalid`; any other value, or no
+/// marker at all, returns `failed`.
+#[allow(dead_code)]
+// NOTE: wired by the ssh_session follow-up, which maps each kind to its own message.
+pub fn parse_install_failure(stdout: &str) -> Option<&'static str> {
+    match marker(stdout, "INSTALL") {
+        Some("ok") => None,
+        Some("checksum") => Some("checksum"),
+        Some("unpack") => Some("unpack"),
+        Some("layout") => Some("layout"),
+        Some("disk") => Some("disk"),
+        Some("invalid") => Some("invalid"),
+        _ => Some("failed"),
+    }
+}
+
 /// A release name: 1 to 64 of `[A-Za-z0-9._-]`, not starting with `.` or `-`. The same rule is
 /// enforced by the INSTALL and START scripts, so a name cannot escape the releases directory.
 pub fn valid_version(v: &str) -> bool {
@@ -729,7 +893,7 @@ pub fn install_stdin(version: &str, sha256_hex: &str, tarball: &[u8]) -> Vec<u8>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core_env::{webview_origins, EXTENSION_ID, EXTENSION_IDS_FILE};
+    use crate::core_env::{scrub, webview_origins, EXTENSION_ID, EXTENSION_IDS_FILE};
     use crate::fsutil::Os;
 
     const PROBE_OUTPUT: &str = "Welcome to the server\n\
@@ -877,6 +1041,8 @@ mod tests {
             assert!(!script.contains("<("), "{name} uses process substitution");
         }
         assert!(START.contains("127.0.0.1"));
+        // The health check uses the bundled node; a server without curl must still start.
+        assert!(!START.contains("curl"), "START still depends on curl");
     }
 
     /// The one `PATH` prefix line PROBE and START both include. Changing it here changes both scripts.
@@ -889,7 +1055,10 @@ mod tests {
     fn probe_and_start_share_the_path_prefix() {
         assert!(PROBE.contains(PATH_PREFIX_LINE), "PROBE lacks the shared prefix");
         assert!(START.contains(PATH_PREFIX_LINE), "START lacks the shared prefix");
-        assert!(START.contains(r#"PATH="$LLMIDE_PATH_PREFIX:$PATH" "#), "START does not use the prefix");
+        assert!(
+            START.contains(r#""PATH=$LLMIDE_PATH_PREFIX:${PATH:-/usr/bin:/bin}""#),
+            "START does not use the prefix for the core"
+        );
     }
 
     #[test]
@@ -1006,6 +1175,30 @@ mod tests {
     /// (the real target) uses GNU `mv -T` unchanged.
     #[cfg(unix)]
     fn run_sh(script: &str, home: &std::path::Path, stdin: &[u8]) -> (bool, String) {
+        run_sh_env(script, home, stdin, &[])
+    }
+
+    /// As [`run_sh`], with extra variables in the script's own environment, such as a secret the
+    /// server login might export. The test process environment is otherwise inherited.
+    #[cfg(unix)]
+    fn run_sh_env(
+        script: &str,
+        home: &std::path::Path,
+        stdin: &[u8],
+        extra_env: &[(&str, &str)],
+    ) -> (bool, String) {
+        let out = spawn_sh(script, home, stdin, extra_env).wait_with_output().expect("wait sh");
+        (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// Starts the script and returns the child, so a test can signal it while it runs.
+    #[cfg(unix)]
+    fn spawn_sh(
+        script: &str,
+        home: &std::path::Path,
+        stdin: &[u8],
+        extra_env: &[(&str, &str)],
+    ) -> std::process::Child {
         use std::io::Write;
         use std::process::{Command, Stdio};
         let path = path_with_shims(home);
@@ -1014,6 +1207,7 @@ mod tests {
             .arg(script)
             .env("HOME", home)
             .env("PATH", path)
+            .envs(extra_env.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1024,14 +1218,13 @@ mod tests {
             // A script that exits early closes the pipe; that is a result, not a test error.
             let _ = pipe.write_all(stdin);
         }
-        let out = child.wait_with_output().expect("wait sh");
-        (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned())
+        child
     }
 
     #[cfg(unix)]
     fn path_with_shims(home: &std::path::Path) -> String {
         let inherited = std::env::var("PATH").unwrap_or_default();
-        // Stub commands a test put under home/stubs (a fake curl or claude) go first.
+        // Stub commands a test put under home/stubs (a fake claude or setsid) go first.
         let mut front: Vec<String> = Vec::new();
         let stubs = home.join("stubs");
         if stubs.is_dir() {
@@ -1284,6 +1477,7 @@ mod tests {
         let (ok, out) = run_sh(INSTALL, &home, &install_stdin("3.0.0", &sha_hex(&bundle), cut));
         assert!(!ok);
         assert!(out.contains("__LLMIDE_INSTALL__=checksum"), "{out}");
+        assert_eq!(parse_install_failure(&out), Some("checksum"));
 
         // Garbage whose checksum matches the header: tar refuses it.
         let garbage = b"not a tarball".to_vec();
@@ -1291,6 +1485,7 @@ mod tests {
         let (ok, out) = run_sh(INSTALL, &home, &stdin);
         assert!(!ok);
         assert!(out.contains("__LLMIDE_INSTALL__=unpack"), "{out}");
+        assert_eq!(parse_install_failure(&out), Some("unpack"));
 
         assert!(!root.join("releases/.3.0.0.part").exists());
         assert!(!root.join("releases/.3.0.0.stage").exists());
@@ -1311,6 +1506,7 @@ mod tests {
         let (ok, out) = run_sh(INSTALL, &home, &install_stdin("3.0.0", &sha_hex(&bundle), &bundle));
         assert!(!ok);
         assert!(out.contains("__LLMIDE_INSTALL__=failed"), "{out}");
+        assert_eq!(parse_install_failure(&out), Some("failed"));
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1366,9 +1562,24 @@ mod tests {
             .find(|candidate| candidate.is_file())
     }
 
-    /// A home with one release whose `node` stays alive as a stand-in core. It runs the real node
-    /// only for the port probe. A `curl` stub answers `/health`. Returns None when there is no node
-    /// to borrow, so the test is skipped rather than failed.
+    /// The core the stand-in node runs: an HTTP server on `LLMIDE_PORT` that answers `/health` with the
+    /// `x-llmide-nonce` header, as the real core does. A file `answer-nonce` in HOME replaces the nonce,
+    /// so a test can play a core that answers with the wrong identity.
+    #[cfg(unix)]
+    const STUB_HTTP_CORE: &str = r#"const fs = require("fs");
+const http = require("http");
+http.createServer((req, res) => {
+  let nonce = process.env.LLMIDE_CORE_NONCE;
+  try { nonce = fs.readFileSync(process.env.HOME + "/answer-nonce", "utf8").trim(); } catch (error) { nonce = process.env.LLMIDE_CORE_NONCE; }
+  res.setHeader("x-llmide-nonce", nonce);
+  res.end("{}");
+}).listen(Number(process.env.LLMIDE_PORT), "127.0.0.1");
+"#;
+
+    /// A home with one release whose `node` is a stand-in core. The stand-in tells its two invocations
+    /// apart by the first argument: `-e` is a helper (the port probe or the health probe), which runs the
+    /// real node unchanged; anything else is the core, which records its pid and environment and then
+    /// serves [`STUB_HTTP_CORE`]. Returns None when there is no node to borrow, so the test is skipped.
     #[cfg(unix)]
     fn live_home(tag: &str) -> Option<std::path::PathBuf> {
         use std::os::unix::fs::PermissionsExt;
@@ -1381,22 +1592,18 @@ mod tests {
         std::fs::create_dir_all(release.join("core/root/extension")).expect("extension dir");
         std::fs::write(release.join("core/root/extension/server.mjs"), "").expect("server");
         let node = release.join("core/node/node");
-        // The core's own invocation (not the port probe, which is `-e`) records the environment it
-        // was started with, so a test can check what START exported.
         let body = format!(
             "#!/bin/sh\nif [ \"$1\" = \"-e\" ]; then exec '{real}' \"$@\"; fi\n\
+             echo $$ > \"$HOME/core-pid\"\n\
              env > \"$HOME/core-env.tmp\" && mv \"$HOME/core-env.tmp\" \"$HOME/core-env.txt\"\n\
-             exec '{real}' -e 'setInterval(function () {{}}, 1000)' \"$@\"\n",
-            real = real_node.display()
+             exec '{real}' -e '{js}'\n",
+            real = real_node.display(),
+            js = STUB_HTTP_CORE,
         );
         std::fs::write(&node, body).expect("node stub");
         std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).expect("chmod");
         std::os::unix::fs::symlink(&release, root.join("current")).expect("current");
-        let stubs = home.join("stubs");
-        std::fs::create_dir_all(&stubs).expect("stubs");
-        let curl = stubs.join("curl");
-        std::fs::write(&curl, "#!/bin/sh\nexit 0\n").expect("curl stub");
-        std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        std::fs::create_dir_all(home.join("stubs")).expect("stubs");
         Some(home)
     }
 
@@ -1449,10 +1656,20 @@ mod tests {
         };
         let _cleanup = CoreCleanup(home.parent().expect("base").to_path_buf());
         ensure_setsid(&home);
-        let (ok, out) = run_sh(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"));
+        // The login environment of the server account: a provider key and an unrelated secret must not reach
+        // the core, while the locale and time zone the account sets must.
+        let login_env = [
+            ("ANTHROPIC_API_KEY", "sk-test-not-for-the-core"),
+            ("SECRET_THING", "hidden-value"),
+            ("LLMIDE_PARENT_PID", "1"),
+            ("NODE_OPTIONS", "--require /tmp/evil.js"),
+            ("LANG", "en_US.UTF-8"),
+            ("TZ", "Asia/Tokyo"),
+        ];
+        let (ok, out) = run_sh_env(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"), &login_env);
         assert!(ok, "{out}");
 
-        // The curl stub answers at once, so START can return before the background stub has run `env`.
+        // START returns only after the stand-in answers /health with the nonce, so the env file is written.
         let env_file = home.join("core-env.txt");
         let mut waited = 0;
         while !env_file.exists() && waited < 100 {
@@ -1471,6 +1688,14 @@ mod tests {
         assert_eq!(env.get("LLMIDE_REGISTRATION_SINGLE_OWNER"), Some(&"1"));
         assert_eq!(env.get("LLMIDE_EXT_ACTIVE_SET"), Some(&"1"));
         assert!(!env.contains_key("LLMIDE_PARENT_PID"), "the server core must outlive the desktop");
+        assert!(!env.contains_key("ANTHROPIC_API_KEY"), "a provider key leaked into the core");
+        assert!(!env.contains_key("SECRET_THING"), "an unrelated secret leaked into the core");
+        assert!(!env.contains_key("NODE_OPTIONS"), "NODE_OPTIONS leaked into the core");
+        assert_eq!(env.get("LANG"), Some(&"en_US.UTF-8"));
+        assert_eq!(env.get("TZ"), Some(&"Asia/Tokyo"));
+        assert_eq!(env.get("LLMIDE_CORE_NONCE"), Some(&VALID_NONCE));
+        assert_eq!(env.get("LLMIDE_SECRETS_STDIN"), Some(&"1"));
+        assert_eq!(env.get("HOME"), Some(&home_text.as_str()));
 
         let data = home.join(".llmide-server/data");
         let pin = data.join(EXTENSION_IDS_FILE);
@@ -1557,6 +1782,302 @@ mod tests {
         let (ok, status) = run_sh(STATUS, &home, b"");
         assert!(ok, "{status}");
         assert!(!parse_core_state(&status).expect("status parses").running, "{status}");
+    }
+
+    // ---- START lock, health probe and cut-off start (unix; the core is a stand-in node) ----
+
+    #[cfg(unix)]
+    fn lock_dir_of(home: &std::path::Path) -> std::path::PathBuf {
+        home.join(".llmide-server/.start.lock")
+    }
+
+    #[cfg(unix)]
+    fn wait_until(mut ready: impl FnMut() -> bool) -> bool {
+        for _ in 0..100 {
+            if ready() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        false
+    }
+
+    #[cfg(unix)]
+    fn process_alive(pid: &str) -> bool {
+        std::process::Command::new("kill")
+            .args(["-0", pid])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn start_takes_the_lock_before_it_reads_state() {
+        let lock = START.find("take_start_lock || LOCK_RC=$?").expect("START takes the lock");
+        let state_read = START.find("if [ -f \"$STATE\" ]; then").expect("START reads state");
+        assert!(lock < state_read, "state is read before the lock is taken");
+        let state_write = START.find("> \"$STATE.tmp\"").expect("START writes state");
+        let health = START.find("until env -i HOME=").expect("health wait");
+        assert!(state_write < health, "state.json must be written before the health wait");
+    }
+
+    #[test]
+    fn start_health_probe_uses_node_and_the_nonce_header() {
+        assert!(!START.contains("curl"));
+        assert!(START.contains("/health"));
+        assert!(START.contains("res.headers[\"x-llmide-nonce\"] === nonce"));
+        assert!(START.contains("setTimeout(2000"));
+    }
+
+    #[test]
+    fn start_busy_is_the_marker_and_flows_through_the_failure_parser() {
+        assert_eq!(START_BUSY, "busy");
+        assert!(START.contains("printf '__LLMIDE_START__=busy\\n'"));
+        let (value, log) = parse_start_failure("__LLMIDE_START__=busy\n").expect("busy is a failure");
+        assert_eq!(value, START_BUSY);
+        assert_eq!(log, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_reports_busy_while_a_live_start_holds_the_lock() {
+        let base = unique_dir("lock-busy");
+        let home = base.join("home");
+        let lock = lock_dir_of(&home);
+        std::fs::create_dir_all(&lock).expect("lock");
+        // This test process is alive, so it stands in for a START that is still running.
+        std::fs::write(lock.join("pid"), format!("{}\n", std::process::id())).expect("pid");
+        let (ok, out) = run_sh(START, &home, format!("1.0.0 {VALID_NONCE}\n").as_bytes());
+        assert!(!ok, "{out}");
+        assert!(out.contains("__LLMIDE_START__=busy"), "{out}");
+        assert_eq!(out.matches("__LLMIDE_START__=").count(), 1, "one result marker: {out}");
+        assert!(lock.is_dir(), "a losing START must not remove the winner's lock");
+        assert!(!home.join(".llmide-server/state.json").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_waits_on_a_fresh_lock_whose_pid_is_not_written_yet() {
+        let base = unique_dir("lock-fresh");
+        let home = base.join("home");
+        let lock = lock_dir_of(&home);
+        std::fs::create_dir_all(&lock).expect("lock");
+        let (ok, out) = run_sh(START, &home, format!("1.0.0 {VALID_NONCE}\n").as_bytes());
+        assert!(!ok, "{out}");
+        assert!(out.contains("__LLMIDE_START__=busy"), "{out}");
+        assert!(lock.is_dir());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_reclaims_a_lock_whose_holder_is_dead_or_very_old_and_releases_it() {
+        // The holder is a pid that has exited and been reaped.
+        let base = unique_dir("lock-dead");
+        let home = base.join("home");
+        let lock = lock_dir_of(&home);
+        std::fs::create_dir_all(&lock).expect("lock");
+        let mut gone = std::process::Command::new("sh").arg("-c").arg("exit 0").spawn().expect("spawn");
+        let dead_pid = gone.id();
+        gone.wait().expect("reap");
+        std::fs::write(lock.join("pid"), format!("{dead_pid}\n")).expect("pid");
+        let (ok, out) = run_sh(START, &home, format!("1.0.0 {VALID_NONCE}\n").as_bytes());
+        assert!(!ok, "{out}");
+        assert!(out.contains("__LLMIDE_START__=version-mismatch"), "a dead holder must be reclaimed: {out}");
+        assert!(!lock.exists(), "the reclaimed lock is released on exit");
+        let _ = std::fs::remove_dir_all(&base);
+
+        // No pid at all, and the lock is older than 120 seconds.
+        let base = unique_dir("lock-old");
+        let home = base.join("home");
+        let lock = lock_dir_of(&home);
+        std::fs::create_dir_all(&lock).expect("lock");
+        let touched = std::process::Command::new("touch")
+            .args(["-t", "200001010000"])
+            .arg(&lock)
+            .status()
+            .expect("touch");
+        assert!(touched.success());
+        let (ok, out) = run_sh(START, &home, format!("1.0.0 {VALID_NONCE}\n").as_bytes());
+        assert!(!ok, "{out}");
+        assert!(out.contains("__LLMIDE_START__=version-mismatch"), "an old lock must be reclaimed: {out}");
+        assert!(!lock.exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_health_probe_refuses_a_core_that_answers_another_nonce() {
+        let _guard = LINUX_CORE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(home) = live_home("wrong-nonce") else {
+            eprintln!("skipped: no node on PATH to borrow");
+            return;
+        };
+        let _cleanup = CoreCleanup(home.parent().expect("base").to_path_buf());
+        std::fs::write(home.join("answer-nonce"), "not-the-nonce-0000000000").expect("answer");
+        ensure_setsid(&home);
+        let (ok, out) = run_sh(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"));
+        assert!(!ok, "{out}");
+        assert!(out.contains("__LLMIDE_START__=timeout"), "{out}");
+        assert_eq!(out.matches("__LLMIDE_START__=").count(), 1, "one result marker: {out}");
+        assert!(!home.join(".llmide-server/state.json").exists(), "a refused core is not recorded");
+        assert!(!lock_dir_of(&home).exists(), "the lock is released");
+        let pid = std::fs::read_to_string(home.join("core-pid")).expect("the core ran");
+        assert!(!process_alive(pid.trim()), "the refused core must be stopped");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_start_cut_off_during_the_health_wait_keeps_its_core_and_its_state() {
+        let _guard = LINUX_CORE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(home) = live_home("cut-off") else {
+            eprintln!("skipped: no node on PATH to borrow");
+            return;
+        };
+        let _cleanup = CoreCleanup(home.parent().expect("base").to_path_buf());
+        // The core never answers with the nonce, so START is still in its health wait when it is signalled.
+        std::fs::write(home.join("answer-nonce"), "not-the-nonce-0000000000").expect("answer");
+        ensure_setsid(&home);
+        let state_path = home.join(".llmide-server/state.json");
+        let mut child = spawn_sh(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"), &[]);
+        assert!(wait_until(|| state_path.exists()), "state.json is written before the health wait");
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status();
+        let status = child.wait().expect("wait for START");
+        assert!(!status.success());
+        let raw = std::fs::read_to_string(&state_path).expect("state.json survives the cut-off");
+        let state = parse_core_state(&format!("__LLMIDE_STATE__={}", raw.trim())).expect("state parses");
+        let pid = state.pid.expect("pid").to_string();
+        assert!(process_alive(&pid), "the core was started, so state.json must describe a live core");
+        assert!(!lock_dir_of(&home).exists(), "the lock is released when START is cut off");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_keeps_only_the_new_release_and_the_previous_one() {
+        let base = unique_dir("prune");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let root = home.join(".llmide-server");
+        // A directory whose name is not a release name is never touched.
+        std::fs::create_dir_all(root.join("releases/.keep-me")).expect("keep");
+        for version in ["1.0.0", "2.0.0", "3.0.0"] {
+            let bundle = make_bundle(&base, version);
+            let (ok, out) = run_sh(INSTALL, &home, &install_stdin(version, &sha_hex(&bundle), &bundle));
+            assert!(ok, "install {version}: {out}");
+            assert!(out.contains("__LLMIDE_INSTALL__=ok"), "{out}");
+        }
+        let mut names: Vec<String> = std::fs::read_dir(root.join("releases"))
+            .expect("releases")
+            .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec![".keep-me".to_string(), "2.0.0".to_string(), "3.0.0".to_string()]);
+        assert_eq!(
+            std::fs::read_link(root.join("current")).expect("current link"),
+            root.join("releases/3.0.0")
+        );
+        assert!(root.join("data").is_dir(), "the data folder is never pruned");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn parse_install_failure_names_each_failure_kind() {
+        assert_eq!(parse_install_failure("__LLMIDE_INSTALL__=ok\n"), None);
+        for kind in ["checksum", "unpack", "layout", "disk", "invalid"] {
+            assert_eq!(parse_install_failure(&format!("__LLMIDE_INSTALL__={kind}\n")), Some(kind));
+        }
+        assert_eq!(parse_install_failure("__LLMIDE_INSTALL__=failed\n"), Some("failed"));
+        assert_eq!(parse_install_failure("__LLMIDE_INSTALL__=something-new\n"), Some("failed"));
+        assert_eq!(parse_install_failure("banner only\n"), Some("failed"));
+    }
+
+    #[test]
+    fn parse_glibc_reads_a_version_or_nothing() {
+        assert_eq!(parse_glibc("noise\n__LLMIDE_GLIBC__=2.31\n").as_deref(), Some("2.31"));
+        assert_eq!(parse_glibc("__LLMIDE_GLIBC__=\n"), None, "musl and no-getconf servers print an empty value");
+        assert_eq!(parse_glibc("no marker here\n"), None);
+        assert_eq!(parse_glibc("__LLMIDE_GLIBC__=2.31 extra\n"), None);
+        assert_eq!(parse_glibc("x __LLMIDE_GLIBC__=2.31\n"), None, "a marker must start its line");
+    }
+
+    #[test]
+    fn probe_asks_for_the_glibc_version() {
+        assert!(PROBE.contains("getconf GNU_LIBC_VERSION"));
+        assert!(PROBE.contains("printf '__LLMIDE_GLIBC__=%s\\n'"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_reports_glibc_only_as_a_version() {
+        let base = unique_dir("glibc");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let (ok, out) = run_sh(PROBE, &home, b"");
+        assert!(ok, "{out}");
+        let glibc = parse_glibc(&out);
+        if let Some(version) = glibc {
+            assert!(version.bytes().all(|b| b.is_ascii_digit() || b == b'.'), "{version}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn start_passes_the_core_only_names_that_core_env_allows() {
+        let start_at = START.find("for NAME in ").expect("START has the allow-list loop");
+        let rest = &START[start_at + "for NAME in ".len()..];
+        let names: Vec<&str> = rest[..rest.find(';').expect("list ends")].split_whitespace().collect();
+        assert!(names.len() >= 20, "the allow-list shrank: {names:?}");
+        for required in ["TMPDIR", "LANG", "HTTPS_PROXY", "SSL_CERT_FILE", "LC_CTYPE"] {
+            assert!(names.contains(&required), "{required} is missing from the allow-list");
+        }
+        for name in names {
+            assert!(
+                !scrub(&[(name.to_string(), "1".to_string())], Os::Linux).is_empty(),
+                "START passes {name}, which core_env does not allow on Linux"
+            );
+        }
+        // The login environment is not an allow-list: none of these names may be passed.
+        for denied in ["ANTHROPIC_API_KEY", "SECRET_THING", "NODE_OPTIONS", "PATH", "LLMIDE_FEATURES"] {
+            assert!(!START[start_at..].split(';').next().unwrap_or("").contains(&format!(" {denied} ")));
+        }
+    }
+
+    #[test]
+    fn no_script_assigns_a_name_that_zsh_or_bash_treat_as_special() {
+        // Assigning these in a script breaks it under a zsh login shell: LINES and COLUMNS are special
+        // parameters, status and path are special in zsh, and the rest are shell parameters too.
+        const SPECIAL: &[&str] = &[
+            "LINES", "COLUMNS", "RANDOM", "SECONDS", "LINENO", "OPTIND", "OPTARG", "UID", "EUID", "PPID",
+            "USERNAME", "HOST", "TTY", "ERRNO", "FUNCNAME", "GROUPS", "status", "path", "options", "argv",
+            "prompt", "commands", "functions", "history", "signals", "aliases", "dirstack", "pipestatus",
+            "parameters", "reply", "match", "watch", "fpath", "cdpath", "mailpath", "manpath",
+        ];
+        const BINDING_WORDS: &[&str] = &["for", "read", "-r", "export", "local", "readonly"];
+        let mut hits = Vec::new();
+        for (script_name, script) in all_scripts() {
+            for line in script.lines() {
+                if line.trim_start().starts_with('#') {
+                    continue;
+                }
+                let words: Vec<&str> = line.split_whitespace().collect();
+                for (index, raw) in words.iter().enumerate() {
+                    let word = raw.trim_start_matches(['"', '\'']);
+                    let name = word.split('=').next().unwrap_or("");
+                    let assigns = word.contains('=') && SPECIAL.contains(&name);
+                    let binds = !word.contains('=')
+                        && SPECIAL.contains(&word)
+                        && index > 0
+                        && BINDING_WORDS.contains(&words[index - 1]);
+                    if assigns || binds {
+                        hits.push(format!("{script_name}: {}", line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(hits.is_empty(), "special names assigned:\n{}", hits.join("\n"));
     }
 
     // ---- ADD_KEY: the one public line that switches a password login to a key (unix only) ----
