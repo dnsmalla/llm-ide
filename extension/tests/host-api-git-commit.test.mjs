@@ -21,23 +21,30 @@ function repo(t) {
   return root;
 }
 
-test('commits only the selected path', (t) => {
+test('commits only the selected path', async (t) => {
   const root = repo(t);
-  const out = gitCommit(root, { message: 'change a', paths: ['a.txt'] });
+  const out = await gitCommit(root, { message: 'change a', paths: ['a.txt'] });
   assert.match(out.commit, /^[0-9a-f]{7,}$/);
   assert.equal(execFileSync('git', ['-C', root, 'show', '--name-only', '--format=', 'HEAD'], { encoding: 'utf8' }).trim(), 'a.txt');
   assert.match(execFileSync('git', ['-C', root, 'status', '--porcelain'], { encoding: 'utf8' }), /b\.txt/);
 });
 
-test('refuses empty messages and paths outside the repo', (t) => {
+test('refuses empty messages and paths outside the repo', async (t) => {
   const root = repo(t);
-  assert.throws(() => gitCommit(root, { message: '  ', paths: ['a.txt'] }), /message/);
-  assert.throws(() => gitCommit(root, { message: 'x', paths: ['../outside'] }), /path/);
-  assert.throws(() => gitCommit(root, { message: 'x', paths: ['/etc/passwd'] }), /path/);
+  await assert.rejects(() => gitCommit(root, { message: '  ', paths: ['a.txt'] }), /message/);
+  await assert.rejects(() => gitCommit(root, { message: 'x', paths: ['../outside'] }), /path/);
+  await assert.rejects(() => gitCommit(root, { message: 'x', paths: ['/etc/passwd'] }), /path/);
 });
 
-test('reports nothing to commit', (t) => {
+test('reports nothing to commit', async (t) => {
   const root = repo(t);
-  gitCommit(root, { message: 'a', paths: ['a.txt'] });
-  assert.throws(() => gitCommit(root, { message: 'again', paths: ['a.txt'] }), /nothing to commit/);
+  await gitCommit(root, { message: 'a', paths: ['a.txt'] });
+  await assert.rejects(() => gitCommit(root, { message: 'again', paths: ['a.txt'] }), /nothing to commit/);
+});
+
+test('refuses pathspec magic, dot, globs and denied paths', async (t) => {
+  const root = repo(t);
+  for (const bad of ['.', ':(top)a.txt', ':/', ':!a.txt', '*', 'sub/*.txt', '.env', 'k/id.pem', 'sub/./a.txt']) {
+    await assert.rejects(() => gitCommit(root, { message: 'x', paths: [bad] }), /path/, bad);
+  }
 });

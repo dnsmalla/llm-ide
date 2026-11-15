@@ -18,26 +18,26 @@ function repo(t) {
   return root;
 }
 
-test('clean status, then a modified file and its diff', (t) => {
+test('clean status, then a modified file and its diff', async (t) => {
   const root = repo(t);
-  assert.equal(gitStatus(root).clean, true);
+  assert.equal((await gitStatus(root)).clean, true);
   fs.writeFileSync(path.join(root, 'a.txt'), 'two\n');
-  const s = gitStatus(root);
+  const s = await gitStatus(root);
   assert.equal(s.clean, false);
   assert.equal(s.entries.find((e) => e.path === 'a.txt').status, 'M');
-  assert.match(gitDiff(root, { path: 'a.txt' }).patch, /\+two/);
+  assert.match((await gitDiff(root, { path: 'a.txt' })).patch, /\+two/);
 });
 
-test('a path outside the repository is refused before git runs', (t) => {
+test('a path outside the repository is refused before git runs', async (t) => {
   const root = repo(t);
-  assert.throws(() => gitDiff(root, { path: '../outside' }), /not valid/);
-  assert.throws(() => gitDiff(root, { path: '/etc/passwd' }), /not valid/);
+  await assert.rejects(() => gitDiff(root, { path: '../outside' }), /not valid/);
+  await assert.rejects(() => gitDiff(root, { path: '/etc/passwd' }), /not valid/);
 });
 
-test('a diff over the cap is truncated', (t) => {
+test('a diff over the cap is truncated', async (t) => {
   const root = repo(t);
   fs.writeFileSync(path.join(root, 'a.txt'), `${'x'.repeat(300_000)}\n`);
-  const out = gitDiff(root, { path: 'a.txt' });
+  const out = await gitDiff(root, { path: 'a.txt' });
   assert.equal(out.truncated, true);
   assert.equal(Buffer.byteLength(out.patch, 'utf8'), 262_144);
 });

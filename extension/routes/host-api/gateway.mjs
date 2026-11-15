@@ -854,17 +854,19 @@ export function createGateway(overrides) {
           return respond(s, id, command, out);
         } catch (e) {
           const code = e.code === 'conflict' ? 'conflict' : e.code === 'not_found' ? 'not_found' : e.code === 'invalid' ? 'invalid_payload' : 'denied';
-          return fail(s, id, code, String(e.message || e));
+          // A raw errno message (EACCES, ENOSPC, ...) embeds the absolute host path; only our own curated messages go out.
+          const raw = typeof e.code === 'string' && /^E[A-Z0-9]+$/.test(e.code);
+          return fail(s, id, code, raw ? 'The file could not be written.' : String(e.message || e));
         }
       }
       case 'git.status': {
         if (readRefused(s, entry, id)) return;
-        try { return respond(s, id, command, gitStatus(scopedProjectRoot(userId, p.projectId))); }
+        try { return respond(s, id, command, await gitStatus(scopedProjectRoot(userId, p.projectId))); }
         catch (e) { return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'internal', String(e.message || e)); }
       }
       case 'git.diff': {
         if (readRefused(s, entry, id)) return;
-        try { return respond(s, id, command, gitDiff(scopedProjectRoot(userId, p.projectId), { path: p.path, staged: p.staged === true })); }
+        try { return respond(s, id, command, await gitDiff(scopedProjectRoot(userId, p.projectId), { path: p.path, staged: p.staged === true })); }
         catch (e) { return fail(s, id, e.code === 'invalid' ? 'invalid_payload' : 'internal', String(e.message || e)); }
       }
       case 'git.commit': {
@@ -872,7 +874,7 @@ export function createGateway(overrides) {
         const wait = rate.write(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         try {
-          const out = gitCommit(scopedProjectRoot(userId, p.projectId), { message: p.message, paths: p.paths });
+          const out = await gitCommit(scopedProjectRoot(userId, p.projectId), { message: p.message, paths: p.paths });
           audit('git_commit', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `${p.projectId}:${p.paths.length}:${out.commit}` });
           return respond(s, id, command, out);
         } catch (e) {
@@ -885,7 +887,7 @@ export function createGateway(overrides) {
         const wait = rate.write(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         try {
-          const out = gitPush(scopedProjectRoot(userId, p.projectId));
+          const out = await gitPush(scopedProjectRoot(userId, p.projectId));
           audit('git_push', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: p.projectId });
           return respond(s, id, command, out);
         } catch (e) {
@@ -897,7 +899,7 @@ export function createGateway(overrides) {
         const wait = rate.write(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         try {
-          const out = terminalExec(scopedProjectRoot(userId, p.projectId), { argv: p.argv, timeoutMs: p.timeoutMs });
+          const out = await terminalExec(scopedProjectRoot(userId, p.projectId), { argv: p.argv, timeoutMs: p.timeoutMs });
           const fixed = { ...out, exitCode: out.exitCode ?? -1 };
           audit('terminal_exec', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `${p.projectId}:${String(p.argv?.[0] ?? '').slice(0, 40)}:${fixed.exitCode}` });
           return respond(s, id, command, fixed);
@@ -912,7 +914,7 @@ export function createGateway(overrides) {
         const wait = rate.write(entry.state.deviceId, deps.now());
         if (wait != null) return rateRefused(s, entry, id, wait);
         try {
-          const out = shellExec(scopedProjectRoot(userId, p.projectId), { command: p.command, timeoutMs: p.timeoutMs });
+          const out = await shellExec(scopedProjectRoot(userId, p.projectId), { command: p.command, timeoutMs: p.timeoutMs });
           const hash = createHash('sha256').update(String(p.command)).digest('hex').slice(0, 16);
           audit('terminal_shell', { peer: entry.peer, userId, deviceId: entry.state.deviceId, detail: `${p.projectId}:${hash}:${out.exitCode}` });
           return respond(s, id, command, out);

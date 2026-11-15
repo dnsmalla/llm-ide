@@ -1,19 +1,17 @@
 // Push the current branch to its already-configured upstream. No force, no remote/ref arguments, no prompt.
-import { execFileSync } from 'node:child_process';
+import { hostChildEnv, runCapture } from './exec-run.mjs';
 
 export const PUSH_TIMEOUT = 60_000;
 const BUFFER = 1 << 20;
 
-export function gitPush(root) {
-  const git = (args) => execFileSync('git', ['--no-optional-locks', '-C', root, ...args], {
-    encoding: 'utf8', timeout: PUSH_TIMEOUT, maxBuffer: BUFFER, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-  });
-  let out;
-  try { out = git(['push']); }
-  catch (e) {
-    const text = `${e?.stdout ?? ''}${e?.stderr ?? ''}`.trim();
-    throw Object.assign(new Error(text.split('\n').filter(Boolean).slice(-1)[0] || 'git push failed.'), { code: 'push_failed' });
+export async function gitPush(root) {
+  // hostChildEnv: git runs hooks (pre-push) and credential helpers, neither may see the core's secrets.
+  const r = await runCapture('git', ['--no-optional-locks', '-C', root, 'push'], { timeout: PUSH_TIMEOUT, maxBytes: BUFFER, env: hostChildEnv() });
+  if (r.error || r.timedOut || r.overflow || r.status !== 0) {
+    const text = `${r.stdout}${r.stderr}`.trim();
+    const message = r.timedOut ? 'git push timed out.' : (text.split('\n').filter(Boolean).slice(-1)[0] || 'git push failed.');
+    throw Object.assign(new Error(message), { code: 'push_failed' });
   }
-  const text = out.trim();
+  const text = r.stdout.trim();
   return { ok: true, output: text.length > 500 ? text.slice(-500) : text };
 }

@@ -1,34 +1,39 @@
 // Read-only git for the remote workspace. Every call is execFile, never a shell; the project root is supplied by the
 // gateway from scopedProjectRoot, and a path is always passed after `--`.
-import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { isDeniedPath } from '../../llm_agent/tools/handlers/repo-files.mjs';
+import { runCapture } from './exec-run.mjs';
 
 export const DIFF_MAX = 262_144;
 const TIMEOUT = 5_000;
 const BUFFER = 1 << 20;
 
-const git = (root, args) => execFileSync('git', ['--no-optional-locks', '-C', root, ...args], {
-  encoding: 'utf8', timeout: TIMEOUT, maxBuffer: BUFFER,
-});
+// Async so a slow repo cannot block the core's event loop; a non-zero exit or a timeout rejects like execFileSync did.
+async function git(root, args) {
+  const r = await runCapture('git', ['--no-optional-locks', '-C', root, ...args], { timeout: TIMEOUT, maxBytes: BUFFER });
+  if (r.error || r.timedOut || r.overflow || r.status !== 0) throw Object.assign(new Error('git failed'), { stdout: r.stdout, stderr: r.stderr });
+  return r.stdout;
+}
 
 function safeRel(rel) {
   if (typeof rel !== 'string' || rel.length > 4096 || path.isAbsolute(rel)) throw Object.assign(new Error('The path is not valid.'), { code: 'invalid' });
   const parts = rel.replaceAll('\\', '/').split('/');
   if (parts.some((p) => p === '..' || p === '')) throw Object.assign(new Error('The path is not valid.'), { code: 'invalid' });
+  if (isDeniedPath(rel)) throw Object.assign(new Error('That path is not readable.'), { code: 'invalid' });
   return parts.join('/');
 }
 
 /** Branch, ahead/behind and porcelain-v1 entries. A non-repo or a git failure is a `git_failed` code. */
-export function gitStatus(root) {
+export async function gitStatus(root) {
   let branch = 'HEAD';
-  try { branch = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).trim() || 'HEAD'; } catch { /* unborn or detached */ }
+  try { branch = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim() || 'HEAD'; } catch { /* unborn or detached */ }
   let ahead = 0; let behind = 0;
   try {
-    const counts = git(root, ['rev-list', '--left-right', '--count', '@{u}...HEAD']).trim().split(/\s+/).map(Number);
+    const counts = (await git(root, ['rev-list', '--left-right', '--count', '@{u}...HEAD'])).trim().split(/\s+/).map(Number);
     behind = counts[0] ?? 0; ahead = counts[1] ?? 0;
   } catch { /* no upstream */ }
   let raw;
-  try { raw = git(root, ['status', '--porcelain=v1', '-z']); }
+  try { raw = await git(root, ['status', '--porcelain=v1', '-z']); }
   catch { throw Object.assign(new Error('git status failed.'), { code: 'git_failed' }); }
   const tokens = raw.split('\0');
   const entries = [];
@@ -45,11 +50,11 @@ export function gitStatus(root) {
 }
 
 /** Unified diff for the project or one path, capped. `staged` reads the index. */
-export function gitDiff(root, { path: rel, staged = false } = {}) {
+export async function gitDiff(root, { path: rel, staged = false } = {}) {
   const args = ['diff', '--no-ext-diff', '--no-color', ...(staged ? ['--cached'] : []), '--unified=3'];
   if (rel !== undefined && rel !== null && rel !== '') args.push('--', safeRel(rel));
   let patch;
-  try { patch = git(root, args); }
+  try { patch = await git(root, args); }
   catch { throw Object.assign(new Error('git diff failed.'), { code: 'git_failed' }); }
   const truncated = Buffer.byteLength(patch, 'utf8') > DIFF_MAX;
   return { patch: truncated ? patch.slice(0, DIFF_MAX) : patch, truncated };

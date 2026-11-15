@@ -110,3 +110,14 @@ test('refuses to write through a final symlink', (t) => {
   assert.throws(() => writeProjectFile({ root, path: 'alias.txt', text: 'two' }), /symbolic|denied/);
   assert.equal(fs.readFileSync(path.join(root, 'real.txt'), 'utf8'), 'one');
 });
+
+test('an overwrite keeps the existing file mode; a new file is 0600', (t) => {
+  const root = project(t);
+  const script = path.join(root, 'run.sh');
+  fs.writeFileSync(script, '#!/bin/sh\n', { mode: 0o755 });
+  fs.chmodSync(script, 0o755);
+  writeProjectFile({ root, path: 'run.sh', text: '#!/bin/sh\necho hi\n' });
+  assert.equal(fs.statSync(script).mode & 0o777, 0o755);
+  writeProjectFile({ root, path: 'new.txt', text: 'x', create: true });
+  assert.equal(fs.statSync(path.join(root, 'new.txt')).mode & 0o777, 0o600);
+});

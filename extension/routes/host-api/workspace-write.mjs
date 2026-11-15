@@ -56,13 +56,18 @@ export function writeProjectFile({ root, path: rel, text, expectedHash, mustNotE
   if (!isInside(parent, realRoot)) throw fail('denied', 'That path is outside the project.');
   if (isDeniedPath(path.join(parent, path.basename(target)))) throw notWritable();
   let current = null;
+  let mode = 0o600; // a new file; an overwrite keeps its own mode (an executable script must stay executable)
   try {
     const st = fs.lstatSync(target);
     if (st.isSymbolicLink()) throw fail('denied', 'That path is a symbolic link.');
     if (!st.isFile()) throw fail('denied', 'That path is not a regular file.');
+    mode = st.mode & 0o777;
     current = hashText(fs.readFileSync(target, 'utf8'));
   } catch (e) {
-    if (e.code !== 'ENOENT') throw e; // a real read error (or our refusal) is not "missing"
+    if (e.code === 'ENOENT') { /* missing */ } else if (e.code && /^E[A-Z]+$/.test(e.code)) {
+      // A raw fs message carries the absolute host path; the client gets a code, not the path.
+      throw fail('denied', 'That file could not be read.');
+    } else throw e; // our own refusal
   }
   if (mustNotExist) {
     if (current !== null) throw fail('conflict', 'The file already exists.');
@@ -73,7 +78,7 @@ export function writeProjectFile({ root, path: rel, text, expectedHash, mustNotE
   const tmp = `${target}.llmide-${process.pid}-${Date.now()}.tmp`;
   let tempWritten = false;
   try {
-    fs.writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    fs.writeFileSync(tmp, text, { encoding: 'utf8', mode, flag: 'wx' });
     tempWritten = true;
     fs.renameSync(tmp, target);
   } finally {
