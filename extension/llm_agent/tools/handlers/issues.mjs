@@ -1,5 +1,6 @@
 // Agent tools for hosted issues. They reuse the same board check, vault token, parser and provider call as
 // routes/issue-writes.mjs, so a tool cannot reach a repository the Issues board would refuse.
+import { createHash } from 'node:crypto';
 import * as kb from '../../../kb/db.mjs';
 import { getSecret } from '../../../server/vault.mjs';
 import { safeAudit } from '../../../server/route-http.mjs';
@@ -48,8 +49,11 @@ export async function handleIssueComment(args, ctx) {
   if (!kb.findTicket(ctx.userId, { provider: w.provider, repo: w.repo, number: w.number, origin: WEB_ORIGIN[w.provider] })) {
     return { error: `issue ${w.provider}:${w.repo}#${w.number} is not on your Issues board` };
   }
-  const out = await callProvider(w, p.token);
+  // A retried turn re-sends the same comment: key the call on (issue, body) so onceForIdem replays the first answer
+  // instead of posting twice. A failed attempt frees the key, so a real retry after an error still goes through.
+  const key = createHash('sha256').update(JSON.stringify([w.provider, w.repo, w.number, w.body])).digest('hex').slice(0, 40);
+  const out = await onceForIdem(ctx.userId, { ...w, idem: `comment-${key}`, title: `#${w.number}` }, () => callProvider(w, p.token));
   safeAudit(p.db, { userId: ctx.userId, ip: null, userAgent: null, action: 'issues.comment', resource: `${w.provider}:${w.repo}#${w.number}`, outcome: out.status === 200 ? 'success' : 'failure', detail: { via: 'agent-tool', status: out.status } });
   if (out.status !== 200) return { error: out.body?.error?.message ?? `${NAME[w.provider]} answered ${out.status}` };
-  return { ok: true, provider: w.provider, repo: w.repo, number: w.number, url: out.body.url };
+  return { ok: true, provider: w.provider, repo: w.repo, number: w.number, url: out.body.url, deduped: out.body.deduped === true };
 }
