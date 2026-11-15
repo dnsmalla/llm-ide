@@ -81,9 +81,9 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
                 let _ = app.emit("app-menu", event.id().as_ref());
             }
             "menu_remote_workspace" => {
-                let _ = std::process::Command::new("open")
-                    .arg("https://llm-ide.com/app/")
-                    .spawn();
+                // Fixed URL through the crate's per-OS opener; plain `open` exists only on macOS.
+                let inv = crate::os_open::open_url_invocation(crate::fsutil::current_os(), "https://llm-ide.com/app/");
+                let _ = crate::os_open::spawn(&inv);
             }
             "menu_minimize" => {
                 if let Some(window) = app.get_webview_window("main") {
