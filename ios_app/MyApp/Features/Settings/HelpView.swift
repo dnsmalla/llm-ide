@@ -23,6 +23,14 @@ struct HelpView: View {
                         """
                     )
                     HelpSection(
+                        title: "Changes",
+                        content: """
+                        • Work → Changes lists the files changed in the desktop's project. Tap a file to see its diff.
+                        • Type a commit message and tap Commit all changed files, then Push branch to send the current branch to its upstream. Both ask you to confirm first.
+                        • This needs the desktop switch "Allow remote edits, commit, push and tests" (Settings → Phone and browser → Host API). It is off by default. After you turn it on, restart the core and scan the pairing QR again.
+                        """
+                    )
+                    HelpSection(
                         title: "Offline sync",
                         content: """
                         • On the desktop: Settings → Phone and browser → Offline sync → Add a device for offline sync shows an enrollment QR.
@@ -47,6 +55,7 @@ struct HelpView: View {
                         • LLM-IDE must be running on the desktop, on the same Wi‑Fi or Tailscale.
                         • "Security identity changed": the desktop's certificate changed — scan its pairing QR again.
                         • "Removed on the host": this iPhone was unpaired on the desktop — scan the QR again.
+                        • Changes shows an error such as "denied" or "capability unavailable": turn on "Allow remote edits, commit, push and tests" on the desktop, restart the core, then scan the QR again.
                         """
                     )
                 }
