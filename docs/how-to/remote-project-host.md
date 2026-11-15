@@ -189,3 +189,16 @@ which logs in as the operator, registers the folder, mints a one-use pairing PIN
 
 The desktop then pairs and opens the workspace. The SSH key is only the bootstrap channel; the workspace uses the pinned
 Host API.
+
+## Host Loop
+
+`/usr/local/bin/llmide-remote-loop <project-root> [loop-name]` runs a project's `system/loop.json` on the host:
+
+- `shellCommand` stages run with the project root as cwd
+- `skill` stages call the core's `/kb/loop/agent-run` with the Claude Agent SDK
+- unsupported stage kinds are recorded as skipped
+- the run record is written to `llm-doc/loop/host/<timestamp>/run.json`
+
+The desktop Remote workspace exposes **Run loop**: it asks for a loop name (blank = primary), runs this CLI over SSH,
+and prints the result. The VPS needs Claude credentials (or an Anthropic key) for skill stages; shell stages need only the
+host core.

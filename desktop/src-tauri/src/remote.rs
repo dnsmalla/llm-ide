@@ -486,6 +486,30 @@ pub async fn remote_ssh_test(target: SshTarget) -> Result<SshTestResult, FsError
 
 /// R-034 #7: remember the host-key fingerprint the user confirmed after a Test SSH. Deploy, update and
 /// uninstall refuse until this is called for the same host:port in this app session.
+/// Run the fixed host Loop CLI on the remote project. Same transport and quoting as the SSH project bootstrap.
+#[tauri::command]
+pub async fn remote_ssh_loop(target: SshTarget, path: String, loop_name: String) -> Result<String, FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if path.len() > 4096 || path.contains('\0') || path.contains('\n') || path.contains('\r') { return Err(herr("invalid_path", "invalid project path")); }
+        if loop_name.len() > 120 || loop_name.contains('\0') || loop_name.contains('\n') || loop_name.contains('\r') { return Err(herr("invalid_path", "invalid loop name")); }
+        let prepared = prepare(&target)?;
+        check_key_file(&prepared.key_path)?;
+        let qpath = format!("'{}'", path.replace('\'', "'\\''"));
+        let qloop = format!("'{}'", loop_name.replace('\'', "'\\''"));
+        let command = format!("/usr/local/bin/llmide-remote-loop {qpath} {qloop}");
+        let dir = temp_ssh_dir("ssh-loop")?;
+        let known = dir.join("known_hosts");
+        let args = ssh_args_known(&prepared, &command, &known, true);
+        let output = SystemSsh.run(&args).map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")));
+        let _ = std::fs::remove_dir_all(&dir);
+        let output = output?;
+        if output.code != Some(0) { return Err(herr("ssh_failed", failure_message(&output))); }
+        Ok(output.stdout.trim().to_string())
+    })
+    .await
+    .map_err(|e| herr("internal", format!("the remote Loop did not finish: {e}")))?
+}
+
 /// Run the fixed remote bootstrap command (`/usr/local/bin/llmide-remote-project`) for an SSH project.
 /// The path is single-quoted for the remote shell; the action is an enum, never free text.
 #[tauri::command]

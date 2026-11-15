@@ -6,3 +6,6 @@
 .remote-connect input { padding: 8px; }
 .remote-error { color: var(--tok-color-danger); }
 .remote-hint { color: var(--tok-color-text-muted); }
+.remote-loop-result { margin: 0; padding: 10px 12px; max-height: 180px; overflow: auto; background: var(--tok-color-surface2); border-bottom: 1px solid var(--tok-color-border); font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+
+.remote-loop-name { width: 190px; padding: 4px 6px; font-size: 11px; }
