@@ -1943,7 +1943,7 @@ pub async fn core_restart(host: tauri::State<'_, CoreHost>) -> Result<(), String
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::Write as _;
     use std::net::TcpListener;
@@ -2733,7 +2733,7 @@ process.on('SIGTERM', () => process.exit(0));
     /// `MODE` is process-wide (`require_local_mode` reads it), so tests that set it run one at a time.
     static MODE_TESTS: Mutex<()> = Mutex::new(());
 
-    fn mode_guard() -> MutexGuard<'static, ()> {
+    pub(crate) fn mode_guard() -> MutexGuard<'static, ()> {
         MODE_TESTS.lock().unwrap_or_else(|e| e.into_inner())
     }
 

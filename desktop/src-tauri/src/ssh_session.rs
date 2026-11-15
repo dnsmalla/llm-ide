@@ -10,8 +10,7 @@
 
 use std::io::Write;
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -20,8 +19,7 @@ use sha2::{Digest, Sha256};
 use crate::confirm::herr;
 use crate::core_host::{ct_eq, random_nonce};
 use crate::fs_ops::FsError;
-use crate::remote::{confirmed_host_key_for, temp_ssh_dir, write_known_hosts, PreparedTarget, RawOutput};
-use crate::remote_deploy::verified_known_host_line;
+use crate::remote::RawOutput;
 use crate::ssh_askpass::{grant, AskpassGrant};
 use crate::ssh_server_scripts::{
     check_probe, install_stdin, parse_core_state, parse_probe, parse_start_failure, parse_stop, start_stdin,
@@ -132,7 +130,7 @@ pub fn connect(
 }
 
 /// [`connect`] with the local port chooser injected, so tests do not depend on this machine's ports.
-fn connect_with(
+pub(crate) fn connect_with(
     exec: &dyn SshExec,
     health: &dyn Fn(u16) -> Option<String>,
     input: ConnectInput<'_>,
@@ -255,7 +253,7 @@ fn transport_check(output: RawOutput) -> Result<RawOutput, FsError> {
 
 /// The first free local port in `LOCAL_PORTS`. The probe listener is dropped at once, so the port is
 /// free only as a best guess; the forward's own bind is what decides.
-fn pick_local_port() -> Option<u16> {
+pub(crate) fn pick_local_port() -> Option<u16> {
     LOCAL_PORTS.clone().find(|port| TcpListener::bind(("127.0.0.1", *port)).is_ok())
 }
 
@@ -448,34 +446,6 @@ pub(crate) fn wait_for_core(
         }
         std::thread::sleep(HEALTH_POLL.min(deadline - now));
     }
-}
-
-/// The app's pinned known_hosts file for an endpoint: the host key the user confirmed, re-checked against
-/// a fresh `ssh-keyscan`. Writes one temporary file; the caller removes its parent folder when done.
-///
-/// Errors:
-///     `SSH_HOST_KEY_UNCONFIRMED` when no key was confirmed for this host and port, `host_key_changed`
-///     when the scan no longer offers that key.
-pub fn pinned_known_hosts(endpoint: &SshEndpoint) -> Result<PathBuf, FsError> {
-    let key = confirmed_host_key_for(&endpoint.host, endpoint.port)
-        .ok_or_else(|| herr("SSH_HOST_KEY_UNCONFIRMED", "confirm the server's host key before connecting"))?;
-    let target = PreparedTarget {
-        host: endpoint.host.clone(),
-        port: endpoint.port,
-        user: endpoint.user.clone(),
-        key_path: String::new(),
-    };
-    let scan = Command::new("ssh-keyscan")
-        .args(["-T", "10", "-p", &endpoint.port.to_string(), "-t", &key.key_type, &endpoint.host])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|e| herr("host_key_unavailable", format!("could not run ssh-keyscan: {e}")))?;
-    let line = verified_known_host_line(&String::from_utf8_lossy(&scan.stdout), &target, &key)
-        .ok_or_else(|| herr("host_key_changed", "the server's host key does not match the fingerprint you confirmed; test again and compare it"))?;
-    let dir = temp_ssh_dir("ssh-session")?;
-    write_known_hosts(&dir, &line)
 }
 
 /// The release bundle for `version`, preferring the compatibility build for older Linux servers.
@@ -945,14 +915,6 @@ pub(crate) mod tests {
 
         assert_eq!(err.code, "SSH_FORWARD_FAILED");
         assert_eq!(fake.kills(), 1, "the forward is killed when the nonce does not match");
-    }
-
-    #[test]
-    fn pinned_known_hosts_refuses_an_unconfirmed_host() {
-        // No confirmation is ever stored for this name, so the lookup must refuse before ssh-keyscan runs.
-        let ep = prepare_endpoint("llmide-unconfirmed.invalid", 22, "alice", SshAuth::Password).unwrap();
-        let err = pinned_known_hosts(&ep).unwrap_err();
-        assert_eq!(err.code, "SSH_HOST_KEY_UNCONFIRMED");
     }
 
     #[test]

@@ -92,11 +92,14 @@ pub struct RemoteServerPrefs {
     pub tls_pin: String,
     /// The SSH credential method. Absent in files written before SSH mode existed, which reads as `Key`.
     pub ssh_auth: SshAuthKind,
+    /// The server host key the user confirmed for SSH mode: `<host>:<port> <key-type> <key-base64>`, the same
+    /// public data a known_hosts line holds. Written only by `set_ssh_host_pin`, never by the webview.
+    pub ssh_host_pin: String,
 }
 
 impl Default for RemoteServerPrefs {
     fn default() -> Self {
-        Self { mode: ServerMode::Local, host: String::new(), port: 22, user: String::new(), key_path: String::new(), label: String::new(), hub_url: String::new(), tls_pin: String::new(), ssh_auth: SshAuthKind::Key }
+        Self { mode: ServerMode::Local, host: String::new(), port: 22, user: String::new(), key_path: String::new(), label: String::new(), hub_url: String::new(), tls_pin: String::new(), ssh_auth: SshAuthKind::Key, ssh_host_pin: String::new() }
     }
 }
 
@@ -110,6 +113,7 @@ impl RemoteServerPrefs {
         self.label = cap(self.label, 80);
         self.hub_url = cap(self.hub_url, 300);
         self.tls_pin = cap(self.tls_pin, 80);
+        self.ssh_host_pin = cap(self.ssh_host_pin, 512);
         // Hand-edited prefs or a webview call must not downgrade the hub to plaintext.
         if crate::remote_tls::validate_hub_url(&self.hub_url, cfg!(debug_assertions)).is_err() { self.hub_url.clear(); }
         // Empty is the normal WebPKI case; a non-empty pin must still have the exact shape.
@@ -382,11 +386,13 @@ impl Prefs {
         if let Some(v) = p.backend_port { n.backend_port = v; }
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
         if let Some(v) = &p.remote_server {
-            // A webview may choose mode/host/user, but the hub URL and pin are written only by the
-            // host's probe/trust path (`set_remote_pin`); keep whatever this host already verified.
+            // A webview may choose mode/host/user, but the hub URL, the hub pin and the SSH host pin are written
+            // only by the host's trust paths (`set_remote_pin`, `set_remote_hub`, `set_ssh_host_pin`); keep
+            // whatever this host already verified.
             let mut block = v.clone().normalized();
             block.hub_url = n.remote_server.hub_url.clone();
             block.tls_pin = n.remote_server.tls_pin.clone();
+            block.ssh_host_pin = n.remote_server.ssh_host_pin.clone();
             n.remote_server = block;
         }
         if let Some(v) = p.host_api_tls { n.host_api_tls = v; }
@@ -802,6 +808,20 @@ pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, s
     Ok(view(next, persisted))
 }
 
+/// Host-side writer for the SSH host key the user confirmed. The webview cannot call it; the SSH service calls it
+/// only after a native yes/no dialog. Stores the pin text as given; the service builds it from validated parts.
+pub(crate) fn set_ssh_host_pin(pin: String) -> Result<PrefsView, FsError> {
+    let mut g = state();
+    let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
+    let mut next = st.stored.clone();
+    next.remote_server.ssh_host_pin = pin;
+    if let Some(dir) = &st.dir { save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?; }
+    st.stored = next.clone();
+    let persisted = st.dir.is_some();
+    drop(g);
+    Ok(view(next, persisted))
+}
+
 /// Host-side writer for the native pickers only: a picked checkout turns source mode on and stores the path.
 /// Takes effect at the next app start, like every other backend path (see `launch()`).
 pub(crate) fn set_backend_paths(node: Option<String>, folder: Option<String>) -> Result<PrefsView, FsError> {
@@ -835,6 +855,24 @@ pub fn terminal_enabled(host_features: Option<&str>) -> bool {
     let launch = launch();
     let eff = effective_features_with(host_features, launch.terminal, &launch.features);
     crate::pty::feature_enabled(eff.as_deref(), "terminal")
+}
+
+/// Serialises tests that change the process-wide preferences (`STATE`). Taken by any test that writes them, so
+/// two such tests never interleave their reads and restores.
+#[cfg(test)]
+static PREFS_TESTS: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn prefs_guard() -> std::sync::MutexGuard<'static, ()> {
+    PREFS_TESTS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Replaces the stored SSH block exactly, without validation or a save. Tests use it to set up a saved server.
+#[cfg(test)]
+pub(crate) fn set_remote_server_for_test(block: RemoteServerPrefs) {
+    let mut g = state();
+    let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
+    st.stored.remote_server = block;
 }
 
 #[cfg(test)]
@@ -975,6 +1013,7 @@ mod tests {
                 hub_url: " https://hub.example.com ".into(),
                 tls_pin: "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
                 ssh_auth: SshAuthKind::Key,
+                ssh_host_pin: String::new(),
             }),
             ..Default::default()
         });
@@ -1024,11 +1063,34 @@ mod tests {
                 hub_url: "http://evil.example.com".into(),
                 tls_pin: "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".into(),
                 ssh_auth: SshAuthKind::Key,
+                ssh_host_pin: String::new(),
             }),
             ..Default::default()
         });
         assert_eq!(patched.remote_server.hub_url, "https://hub.example.com");
         assert_eq!(patched.remote_server.tls_pin, "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    }
+
+    #[test]
+    fn a_webview_patch_cannot_write_the_ssh_pin() {
+        let mut base = Prefs::default();
+        base.remote_server.ssh_host_pin = "example.com:22 ssh-ed25519 AAAA".into();
+        let patched = base.patched(&PrefsPatch {
+            remote_server: Some(RemoteServerPrefs {
+                mode: ServerMode::Ssh, host: "evil.example.com".into(), port: 22, user: "u".into(), key_path: "/k".into(),
+                ssh_host_pin: "evil.example.com:22 ssh-ed25519 BBBB".into(),
+                ..RemoteServerPrefs::default()
+            }),
+            ..Default::default()
+        });
+        assert_eq!(patched.remote_server.ssh_host_pin, "example.com:22 ssh-ed25519 AAAA");
+    }
+
+    #[test]
+    fn an_old_file_has_no_ssh_pin() {
+        let loaded = parse(r#"{"remoteServer":{"mode":"ssh","host":"example.com","port":22,"user":"alice","keyPath":"/k"}}"#);
+        assert_eq!(loaded.remote_server.mode, ServerMode::Ssh);
+        assert_eq!(loaded.remote_server.ssh_host_pin, "");
     }
 
     #[test]
@@ -1061,6 +1123,7 @@ mod tests {
 
     #[test]
     fn set_remote_ssh_validates() {
+        let _guard = prefs_guard();
         let before = stored().remote_server;
         let code = |r: Result<PrefsView, FsError>| r.unwrap_err().code;
         assert_eq!(code(set_remote_ssh("-x".into(), 22, "alice".into(), "/k".into(), SshAuthKind::Key, ServerMode::Ssh)), "invalid_host");
@@ -1303,6 +1366,7 @@ mod tests {
 
     #[test]
     fn set_prefs_without_a_data_dir_keeps_the_change_for_the_session() {
+        let _guard = prefs_guard();
         let v = apply(PrefsPatch { learn: Some(true), ..Default::default() }).unwrap();
         assert!(v.stored.learn && v.restart_needed);
         let _ = apply(PrefsPatch { learn: Some(false), ..Default::default() });

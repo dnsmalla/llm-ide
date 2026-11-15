@@ -55,6 +55,7 @@ mod remote;
 mod ssh_askpass;
 mod ssh_link;
 mod ssh_server_scripts;
+mod ssh_service;
 mod ssh_session;
 mod ssh_transport;
 mod remote_deploy;
