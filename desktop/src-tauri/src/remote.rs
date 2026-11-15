@@ -490,7 +490,7 @@ pub async fn remote_ssh_test(target: SshTarget) -> Result<SshTestResult, FsError
 #[tauri::command]
 pub async fn remote_ssh_worktree(target: SshTarget, action: String, path: String, name: String) -> Result<String, FsError> {
     tauri::async_runtime::spawn_blocking(move || {
-        if action != "list" && action != "diff" && action != "merge" && action != "remove" { return Err(herr("invalid_path", "action must be list, diff, merge or remove")); }
+        if action != "list" && action != "diff" && action != "merge" && action != "remove" && action != "prune" { return Err(herr("invalid_path", "action must be list, diff, merge, remove or prune")); }
         if path.len() > 4096 || path.contains('\0') || path.contains('\n') || path.contains('\r') { return Err(herr("invalid_path", "invalid project path")); }
         if name.len() > 120 || name.contains('\0') || name.contains('\n') || name.contains('\r') { return Err(herr("invalid_path", "invalid worktree name")); }
         let prepared = prepare(&target)?;

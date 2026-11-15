@@ -230,6 +230,7 @@ The Remote workspace **Worktrees** panel lists host Loop worktrees and offers:
 Diff     show the worktree's staged-vs-HEAD stat and patch before merging
 Merge    commit the worktree, create llmide/loop-<run>, merge with --no-ff into the live branch
 Remove   delete a clean worktree (refused when it has uncommitted changes)
+Prune    delete clean worktrees older than seven days; dirty ones are always kept
 ```
 
 CLI equivalent:
@@ -239,6 +240,7 @@ llmide-remote-worktree list   <project>
 llmide-remote-worktree diff   <project> <run-name>
 llmide-remote-worktree merge  <project> <run-name>
 llmide-remote-worktree remove <project> <run-name>
+llmide-remote-worktree prune  <project>
 ```
 
 A merge is refused if its branch already exists; a conflict is reported and left for manual resolution.

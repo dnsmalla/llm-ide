@@ -22,6 +22,23 @@ if (action === "list") {
   process.exit(0);
 }
 
+if (action === "prune") {
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const removed = []; const skipped = [];
+  for (const e of fs.readdirSync(base, { withFileTypes: true })) {
+    if (!e.isDirectory() || !e.name.startsWith("run-")) continue;
+    const d = path.join(base, e.name);
+    const dirty = run(["status", "--porcelain"], d).stdout.trim();
+    const age = fs.statSync(d).mtimeMs;
+    if (dirty || age > cutoff) { skipped.push({ name: e.name, reason: dirty ? "dirty" : "young" }); continue; }
+    const r = run(["worktree", "remove", d], project);
+    if (r.status === 0) removed.push(e.name); else skipped.push({ name: e.name, reason: "git refused" });
+  }
+  console.log(JSON.stringify({ pruned: removed.length, removed, skipped }));
+  process.exit(0);
+}
+
+
 if (!name || !/^run-[A-Za-z0-9._-]+$/.test(name)) fail("invalid worktree name");
 const dir = path.join(base, name);
 if (!fs.existsSync(dir)) fail("worktree not found");
@@ -62,4 +79,4 @@ if (action === "remove") {
   process.exit(0);
 }
 
-fail("usage: llmide-remote-worktree list|diff|merge|remove <project> [name]");
+fail("usage: llmide-remote-worktree list|diff|merge|remove|prune <project> [name]");
