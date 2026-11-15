@@ -154,6 +154,7 @@ struct LlmIdeControlView: View {
                 }
                 .padding(DesignSystem.Spacing.md)
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: llmIdeStore.pendingToolApproval?.requestId) { id in
                 guard let id else { return }
                 withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .bottom) }
@@ -295,10 +296,12 @@ struct LlmIdeControlView: View {
                 Image(systemName: "xmark.circle.fill")
                     .font(.body)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
+            .accessibilityLabel("Remove \(file.name)")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.leading, 8)
         .background(DesignSystem.Colors.surface)
         .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusXS, style: .continuous))
     }

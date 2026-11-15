@@ -11,6 +11,12 @@ struct ExplorerChatView: View {
     @EnvironmentObject var askStore: LlmIdeChatStore
     @State private var text = ""
     @State private var showClearConfirm = false
+    @FocusState private var isInputFocused: Bool
+
+    private var canSend: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !store.isStreaming
+            && !askStore.isStreaming && connection.connectionStatus == .connected
+    }
 
     private var transcript: some View {
         ScrollViewReader { proxy in
@@ -28,6 +34,7 @@ struct ExplorerChatView: View {
                 }
                 .padding(DesignSystem.Spacing.md)
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: store.llmIdeMessages.last?.text) { _ in
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
             }
@@ -53,22 +60,15 @@ struct ExplorerChatView: View {
                 ToolApprovalCard(request: tool, enabled: connection.connectionStatus == .connected) { store.submitToolApproval(allow: $0) }
                     .padding(.horizontal, DesignSystem.Spacing.md)
             }
-            HStack(spacing: DesignSystem.Spacing.sm) {
-                TextField("Describe the code change…", text: $text, axis: .vertical)
-                    .lineLimit(1...6)
-                    .textFieldStyle(.roundedBorder)
-                Button {
-                    let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !prompt.isEmpty else { return }
-                    text = ""
-                    Task { _ = await store.sendLlmideChat(prompt, mode: "execute") }
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.title2)
-                }
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isStreaming || askStore.isStreaming || connection.connectionStatus != .connected)
-                .accessibilityLabel("Run on desktop")
+            // Same composer as the Ask tab, so both chat surfaces look and feel identical. `canSend` is
+            // re-checked here because the bar's return key also submits.
+            ChatInputBar(text: $text, placeholder: "Describe the code change…", canSend: canSend,
+                         isFocused: $isInputFocused) {
+                guard canSend else { return }
+                let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                text = ""
+                Task { _ = await store.sendLlmideChat(prompt, mode: "execute") }
             }
-            .padding(DesignSystem.Spacing.md)
         }
         .hostScreenChrome(isBusy: store.isStreaming)
         .navigationTitle("Execute")

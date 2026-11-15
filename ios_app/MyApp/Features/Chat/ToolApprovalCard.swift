@@ -53,6 +53,9 @@ struct ToolApprovalCard: View {
         .background(DesignSystem.Colors.surface, in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous)
             .stroke(DesignSystem.Colors.primary.opacity(0.5), lineWidth: 1))
+        // Raised shadow: this card blocks the turn, so it should read as sitting above the transcript.
+        .shadow(color: .black.opacity(DesignSystem.Layout.shadowOpacityRaised),
+                radius: DesignSystem.Layout.shadowRadiusRaised, x: 0, y: 6)
         .accessibilityElement(children: .contain)
     }
 

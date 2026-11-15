@@ -64,15 +64,26 @@ struct ChatInputBar<Leading: View>: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
                 .onSubmit(onSend)
-            Button(action: onSend) {
+            Button {
+                // Existing UIKit helper: `.sensoryFeedback` needs iOS 17 and the deployment target is 16.
+                haptic(.light)
+                onSend()
+            } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: sendIconSize))
                     .foregroundColor(canSend ? DesignSystem.Colors.primary : DesignSystem.Colors.textTertiary)
+                    // A small pop when the button becomes live signals "ready" without a color change alone.
+                    .scaleEffect(canSend ? 1 : 0.9)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .disabled(!canSend)
             .accessibilityLabel("Send message")
         }
-        .padding(DesignSystem.Spacing.md)
-        .background(DesignSystem.Colors.surfaceSecondary)
+        .padding(.horizontal, DesignSystem.Spacing.md)
+        .padding(.vertical, DesignSystem.Spacing.sm)
+        // Material lets the transcript read through the bar when it scrolls beneath it.
+        .background(.ultraThinMaterial)
     }
 }

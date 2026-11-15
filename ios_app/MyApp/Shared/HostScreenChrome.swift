@@ -19,7 +19,7 @@ private struct HostScreenChrome: ViewModifier {
                 }
                 ProjectPickerBar(isBusy: isBusy) { id in _ = projects.select(id) }
             }
-            .background(DesignSystem.Colors.background)
+            .background(.bar)
         }
     }
 }

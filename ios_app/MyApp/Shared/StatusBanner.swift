@@ -41,7 +41,9 @@ struct StatusBanner: View {
                 Button(action: onDismiss) {
                     Image(systemName: "xmark")
                         .font(.caption2.weight(.semibold))
-                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Dismiss")
             }

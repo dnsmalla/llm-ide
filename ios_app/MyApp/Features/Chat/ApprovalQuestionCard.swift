@@ -39,9 +39,14 @@ struct ApprovalQuestionCard: View {
         .padding(DesignSystem.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous)
-                .fill(DesignSystem.Colors.primary.opacity(0.08))
+                // Opaque base first: the tint alone is translucent and would show the shadow through it.
+                .fill(DesignSystem.Colors.surface)
+                .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous)
+                    .fill(DesignSystem.Colors.primary.opacity(0.08)))
                 .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous)
                     .strokeBorder(DesignSystem.Colors.primary.opacity(0.35), lineWidth: 1)))
+        .shadow(color: .black.opacity(DesignSystem.Layout.shadowOpacityRaised),
+                radius: DesignSystem.Layout.shadowRadiusRaised, x: 0, y: 6)
     }
 
     private var header: some View {

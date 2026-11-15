@@ -56,6 +56,7 @@ struct ProjectPickerBar: View {
             } label: {
                 selectedLabel
             }
+            .frame(minHeight: 44)
             .disabled(isBusy)
             Spacer(minLength: 0)
         }
