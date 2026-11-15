@@ -46,48 +46,81 @@ jobs:
       - name: Install build tools
         run: dnf install -y binutils
 
-      - name: Fetch better-sqlite3 at the lockfile version
+      - name: Read the pinned versions and fetch the tarball
         id: pkg
         run: |
           set -euo pipefail
-          version=$(node -p "require('./extension/package-lock.json').packages['node_modules/better-sqlite3'].version")
+          helpers="$GITHUB_WORKSPACE/desktop/scripts/sqlite-compat.mjs"
+          # Both versions come from the lockfile; lockedPackage fails when either entry is missing.
+          pinned=$(node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            const { lockedPackage } = await import(process.argv[1]);
+            const lock = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+            const bs = lockedPackage(lock, 'node_modules/better-sqlite3');
+            const addon = lockedPackage(lock, 'node_modules/node-addon-api');
+            console.log([bs.version, bs.integrity, addon.version].join(' '));
+          " "$helpers" "$GITHUB_WORKSPACE/extension/package-lock.json")
+          read -r version integrity addon_version <<< "$pinned"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "addon_version=${addon_version}" >> "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/bs" && cd "$RUNNER_TEMP/bs"
           npm pack "better-sqlite3@${version}"
+          # The registry's sha512 integrity must match the lockfile: a mismatch means the module would be
+          # built from a different package than the one the desktop ships against.
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            const { integrityOf } = await import(process.argv[1]);
+            const actual = integrityOf(readFileSync(process.argv[2]));
+            if (actual !== process.argv[3]) {
+              console.error('::error::better-sqlite3 tarball integrity ' + actual + ' differs from the lockfile ' + process.argv[3]);
+              process.exit(1);
+            }
+            console.log('tarball integrity matches the lockfile');
+          " "$helpers" "$RUNNER_TEMP/bs/better-sqlite3-${version}.tgz" "$integrity"
           tar -xzf "better-sqlite3-${version}.tgz"
 
       - name: Build the module against glibc 2.28
-        working-directory: ${{ runner.temp }}/bs/package
+        env:
+          ADDON_VERSION: ${{ steps.pkg.outputs.addon_version }}
+          # gyp's make generator sets LDFLAGS.target ?= $(LDFLAGS), so this reaches the module's link line
+          # next to the flags binding.gyp already sets. Static libstdc++ and libgcc mean the module does not
+          # depend on the server's C++ runtime; the symbol-ceiling check below confirms the effect.
+          LDFLAGS: -static-libstdc++ -static-libgcc
         run: |
           set -euo pipefail
-          # Dependencies first: binding.gyp includes node-addon-api's headers from node_modules.
-          npm install --omit=dev --ignore-scripts --no-audit --no-fund
+          cd "$RUNNER_TEMP/bs/package"
+          # node-addon-api supplies the headers binding.gyp includes; it is pinned to the lockfile version.
+          npm install --omit=dev --ignore-scripts --no-audit --no-fund "node-addon-api@${ADDON_VERSION}"
           npm exec --yes --package=node-gyp@11 -- node-gyp rebuild --release --force_build=1 --target="${NODE_VERSION}"
 
-      - name: Check the glibc ceiling and write the checksum
-        working-directory: ${{ runner.temp }}/bs/package
+      - name: Check the symbol ceilings
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/bs/package"
+          objdump -T build/Release/better_sqlite3.node > "$RUNNER_TEMP/objdump.txt"
+          node "$GITHUB_WORKSPACE/desktop/scripts/sqlite-compat-check.mjs" "$RUNNER_TEMP/objdump.txt"
+
+      - name: Load the module and run a query
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/bs/package"
+          # nativeBinding points at the file just built, so this loads that exact binary, not a prebuild.
+          node -e "
+            const Database = require('./lib');
+            const db = new Database(':memory:', { nativeBinding: process.argv[1] });
+            const row = db.prepare('select 1 as x').get();
+            if (row.x !== 1) throw new Error('unexpected row: ' + JSON.stringify(row));
+            console.log('loaded the module, select 1 returned ' + row.x);
+          " "$RUNNER_TEMP/bs/package/build/Release/better_sqlite3.node"
+
+      - name: Write the module and its checksum
         env:
           VERSION: ${{ steps.pkg.outputs.version }}
         run: |
           set -euo pipefail
-          module=build/Release/better_sqlite3.node
-          objdump -T "$module" > "$RUNNER_TEMP/objdump.txt"
-          # maxGlibc is the same rule the desktop tests use: the module passes only when adding 2.28 to the
-          # list does not raise the highest version above 2.28.
-          node --input-type=module -e "
-            import { readFileSync } from 'node:fs';
-            import { maxGlibc } from '$GITHUB_WORKSPACE/desktop/scripts/sqlite-compat.mjs';
-            const lines = readFileSync(process.argv[1], 'utf8').split('\n');
-            const top = maxGlibc(lines);
-            console.log('highest GLIBC symbol version: ' + top);
-            if (maxGlibc([...lines, 'GLIBC_2.28']) !== '2.28') {
-              console.error('::error::module needs GLIBC ' + top + ', above the 2.28 ceiling');
-              process.exit(1);
-            }
-          " "$RUNNER_TEMP/objdump.txt"
-          mkdir -p "$OUT_DIR"
           name="better-sqlite3-${VERSION}-linux-x64-glibc2.28.node"
-          cp "$module" "$OUT_DIR/$name"
+          mkdir -p "$OUT_DIR"
+          cp "$RUNNER_TEMP/bs/package/build/Release/better_sqlite3.node" "$OUT_DIR/$name"
           (cd "$OUT_DIR" && sha256sum "$name" > "$name.sha256")
           cat "$OUT_DIR/$name.sha256"
 
@@ -95,7 +128,7 @@ jobs:
         with:
           name: sqlite-linux-compat
           path: |
-            ${{ env.OUT_DIR }}/*.node
-            ${{ env.OUT_DIR }}/*.node.sha256
+            sqlite-compat-out/*.node
+            sqlite-compat-out/*.node.sha256
           if-no-files-found: error
           retention-days: 30

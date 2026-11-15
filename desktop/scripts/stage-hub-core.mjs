@@ -7,12 +7,12 @@
 // With --compat-sqlite <absolute file>: the same bundle with the glibc 2.28 better-sqlite3 module in place
 // of the prebuild, named llmide-core-<version>-linux-x64-compat.tar.gz (+ .sha256 only; see sqlite-compat.mjs).
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir, devNull } from 'node:os';
-import { compatBundleName, verifyCompatModule } from './sqlite-compat.mjs';
+import { compatBundleName, readCompatModule } from './sqlite-compat.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DESKTOP = resolve(HERE, '..');
@@ -46,13 +46,10 @@ if (compatIndex >= 0 && (!compatFile || !isAbsolute(compatFile))) {
 }
 let compatBytes = null;
 if (compatFile) {
-  const shaFile = `${compatFile}.sha256`;
-  if (!existsSync(shaFile)) { console.error(`compat sqlite checksum file missing: ${shaFile}`); process.exit(2); }
-  compatBytes = readFileSync(compatFile);
   try {
-    verifyCompatModule(compatBytes, readFileSync(shaFile, 'utf8').trim().split(/\s+/)[0]);
+    compatBytes = readCompatModule(compatFile);
   } catch (err) {
-    console.error(`${err.message}: ${compatFile}`);
+    console.error(err.message);
     process.exit(1);
   }
 }
@@ -88,14 +85,26 @@ try {
   // then warns and the core finds the junk files. --no-xattrs is probed, not assumed: GNU tar builds may lack it.
   const tarEnv = { ...process.env, COPYFILE_DISABLE: '1' };
   const xattrFlags = tarAcceptsNoXattrs() ? ['--no-xattrs'] : [];
-  execFileSync('tar', [...xattrFlags, '-czf', tar, '-C', stage, '.'], { stdio: 'inherit', env: tarEnv });
-  const sha = createHash('sha256').update(readFileSync(tar)).digest('hex');
-  writeFileSync(`${tar}.sha256`, `${sha}  ${basename(tar)}\n`);
-  // The compat run writes only its own checksum: SHA256SUMS and VERSION here would describe the hub bundle
-  // and overwrite it when both are staged into the same --out directory.
-  if (!compatBytes) {
-    writeFileSync(join(out, 'SHA256SUMS'), `${sha}  ${basename(tar)}\n`);
-    writeFileSync(join(out, 'VERSION'), `${version}\n`);
+  // The tarball and its checksum are built under temporary names and renamed into place only when both
+  // exist: an interrupted run must not leave a bundle under the name the app prefers (the -compat one).
+  const partial = join(out, `.${basename(tar)}.partial-${process.pid}`);
+  const partialSha = `${partial}.sha256`;
+  try {
+    execFileSync('tar', [...xattrFlags, '-czf', partial, '-C', stage, '.'], { stdio: 'inherit', env: tarEnv });
+    const sha = createHash('sha256').update(readFileSync(partial)).digest('hex');
+    writeFileSync(partialSha, `${sha}  ${basename(tar)}\n`);
+    renameSync(partialSha, `${tar}.sha256`);
+    renameSync(partial, tar);
+    // The compat run writes only its own checksum: SHA256SUMS and VERSION here would describe the hub bundle
+    // and overwrite it when both are staged into the same --out directory.
+    if (!compatBytes) {
+      writeFileSync(join(out, 'SHA256SUMS'), `${sha}  ${basename(tar)}\n`);
+      writeFileSync(join(out, 'VERSION'), `${version}\n`);
+    }
+  } catch (err) {
+    rmSync(partial, { force: true });
+    rmSync(partialSha, { force: true });
+    throw err;
   }
   console.log(tar);
 } finally {
