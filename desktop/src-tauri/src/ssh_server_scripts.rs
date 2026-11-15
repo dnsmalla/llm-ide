@@ -307,6 +307,7 @@ PATH="$LLMIDE_PATH_PREFIX:$PATH" LLMIDE_SECRETS_STDIN=1 LLMIDE_PORT="$PORT" LLMI
   LLMIDE_PLUGIN_DIR="$ROOT/data/addons/plugins" \
   LLMIDE_CORS_ORIGINS='tauri://localhost,http://tauri.localhost,https://tauri.localhost' \
   LLMIDE_REGISTRATION_SINGLE_OWNER=1 \
+  LLMIDE_EXT_ACTIVE_SET=1 \
   setsid nohup "$ROOT/current/core/node/node" "$ROOT/current/core/root/extension/server.mjs" \
   <&3 3<&- >>"$ROOT/core.log" 2>&1 &
 PID=$!
@@ -918,6 +919,13 @@ mod tests {
     }
 
     #[test]
+    fn start_passes_the_extension_switches_the_desktop_library_writes() {
+        // Without this the core ignores the switches made in Library -> Extensions, and in SSH mode
+        // the desktop's webview is served only by this core.
+        assert!(START.contains("LLMIDE_EXT_ACTIVE_SET=1 "));
+    }
+
+    #[test]
     fn start_enables_single_owner_registration_only_on_the_core() {
         assert!(START.contains("LLMIDE_REGISTRATION_SINGLE_OWNER=1 "));
         assert!(!PROBE.contains("LLMIDE_REGISTRATION_SINGLE_OWNER"));
@@ -1461,6 +1469,7 @@ mod tests {
         assert!(env["PATH"].starts_with(&path_head), "PATH was {}", env["PATH"]);
         assert_eq!(env.get("LLMIDE_CORS_ORIGINS"), Some(&START_CORS_VALUE));
         assert_eq!(env.get("LLMIDE_REGISTRATION_SINGLE_OWNER"), Some(&"1"));
+        assert_eq!(env.get("LLMIDE_EXT_ACTIVE_SET"), Some(&"1"));
         assert!(!env.contains_key("LLMIDE_PARENT_PID"), "the server core must outlive the desktop");
 
         let data = home.join(".llmide-server/data");
