@@ -278,11 +278,19 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
       const skipped = s.skillId === "skills/test-gap-writer" && !isFactoryLoop(target)
         ? paths.filter((p) => isTestFileName(p) && !created.includes(p))
         : [];
+      // A path is only dropped from the guard once it is really reverted: a failed revert would otherwise leave the
+      // edited test on disk while the guard no longer sees it (fail open).
+      let notReverted: string[] = [];
       if (skipped.length) {
-        await ctx.host("loop_revert_paths", { paths: skipped, created: [], ...changedPathArgs(ctx.runId, ctx.projectRoot) }).catch(() => undefined);
-        ctx.log(`skipped existing test file(s): ${skipped.join(", ")}`);
+        try {
+          await ctx.host("loop_revert_paths", { paths: skipped, created: [], ...changedPathArgs(ctx.runId, ctx.projectRoot) });
+          ctx.log(`skipped existing test file(s): ${skipped.join(", ")}`);
+        } catch (e) {
+          notReverted = skipped;
+          ctx.log(`could not revert existing test file(s) ${skipped.join(", ")}: ${e instanceof Error ? e.message : String(e)}; the guard will judge them`);
+        }
       }
-      const judged = skipped.length ? paths.filter((p) => !skipped.includes(p)) : paths;
+      const judged = skipped.length ? paths.filter((p) => !skipped.includes(p) || notReverted.includes(p)) : paths;
       return guardProtected(ctx, guardedPaths(target, s, judged, created, await importOnlyTests(ctx, target, s, judged, created, plannedFiles)), target, b, created);
     },
   });

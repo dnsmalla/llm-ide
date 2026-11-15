@@ -389,6 +389,18 @@ test("R2: a test writer keeps a new test file, but an edited test or build confi
   assert.equal(reverted.includes("tests/test_new.py"), false, "the new test file stays");
 });
 
+test("R2b: when reverting an edited existing test fails, the guard still judges it (no fail open)", async () => {
+  const { host } = fakeHost({ loop_revert_paths: () => { throw new Error("revert denied"); } });
+  const { core } = fakeCore({ reply: "wrote", resultSubtype: "success", changedPaths: ["tests/test_golden.py"], createdPaths: [] });
+  const { ctx, log } = ctxOf({ host, core });
+  const loop = { ...loopOf([stage()]), defaultKey: "regression" };
+  const writer = stage({ id: "g1", name: "Refactor Test Write", kind: "skill", command: null, skillId: "skills/test-gap-writer" });
+  const r = await createStageDeps(ctx, loop).runStage(writer, []);
+  assert.equal(r.ok, false, "an unreverted test edit must stop the stage");
+  assert.match(r.output, /test_golden\.py/);
+  assert.ok(log.some((l) => /could not revert existing test file/.test(l)), log.join("\n"));
+});
+
 test("F4: a worktree run's test map reads its own graph snapshot, not the project's", async () => {
   const graph = JSON.stringify({ files: [{ path: "src/a.ts", name: "a.ts", loc: 2, functions: [{ name: "run", line: 1 }] }], calls: [] });
   const { fs, writes } = fakeWritableFs({ "system/loop-runs/r1/graph/graph-code.json": graph });
