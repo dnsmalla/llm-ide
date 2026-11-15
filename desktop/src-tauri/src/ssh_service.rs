@@ -313,6 +313,21 @@ pub fn status(host: &CoreHost) -> SshServerStatus {
     build_status(host, None)
 }
 
+/// Reads the server's core state with the constant STATUS script over the pinned transport. Read-only: no
+/// preference, link or pin changes, so the live check can compare the core before and after a disconnect.
+/// Test-only, because nothing in the app needs it; the production path reads state inside connect.
+///
+/// Errors:
+///     `SSH_PASSWORD_REQUIRED`, `SSH_HOST_KEY_UNCONFIRMED`, the transport codes, and the parser's codes for a bad state.
+#[cfg(test)]
+pub(crate) fn server_core_state(deps: &Deps, password: Option<&str>) -> Result<crate::ssh_server_scripts::CoreState, FsError> {
+    let endpoint = saved_endpoint(password)?;
+    let pin = require_pin(&endpoint)?;
+    let pinned = pinned_dir(&endpoint, &pin)?;
+    let output = run_pinned(deps, &endpoint, &pinned, password, crate::ssh_server_scripts::STATUS)?;
+    crate::ssh_server_scripts::parse_core_state(&output.stdout)
+}
+
 /// Creates a dedicated key, adds its public line to the server, checks that the server accepts it, and only
 /// then saves key auth. Until the check passes, nothing in preferences changes.
 ///

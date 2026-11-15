@@ -55,6 +55,8 @@ mod remote;
 mod ssh_askpass;
 mod ssh_cmds;
 mod ssh_link;
+#[cfg(test)]
+mod ssh_live;
 mod ssh_server_scripts;
 mod ssh_service;
 mod ssh_session;
