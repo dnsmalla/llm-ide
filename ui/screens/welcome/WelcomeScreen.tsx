@@ -5,6 +5,7 @@ import { safeText } from "../shell/safe-text";
 import { openedAgo } from "../shell/relative-time";
 import { NAME_MAX, PROJECT_EXPLAINER, validateProjectName } from "./model";
 import { GuideDialog } from "./HelpGuide";
+import { RemoteCard } from "./RemoteCard.tsx";
 
 export { GuideDialog };
 
@@ -162,6 +163,8 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
             </button>
           </section>
         </div>
+
+        <RemoteCard />
 
         <aside className="wc-explainer" aria-label="What is a project">
           <strong>What counts as a project folder?</strong>

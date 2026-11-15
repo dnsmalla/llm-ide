@@ -149,11 +149,12 @@ inside the desktop is still a separate phase. Use the browser window as the desk
 
 ## Native desktop client
 
-The desktop toolbar has **Remote**:
+The **Welcome** page has a **Remote host** card:
 
-1. enter `wss://llm-ide.com/host-api/v1` (or your host's Host API URL)
-2. enter the host's pairing PIN
-3. choose a remote project
+1. add the SSH host, port, user and private-key path, then **Test SSH**
+2. enter `wss://llm-ide.com/host-api/v1` (or your host's Host API URL)
+3. enter the host's pairing PIN and **Connect workspace**
+4. choose a remote project
 
 The section reuses the web workspace UI — files, save, Changes, commit/push, allowlisted terminal and gated full shell —
 over a desktop-side Host API WebSocket. The local project and the remote project are separate: the Remote section never

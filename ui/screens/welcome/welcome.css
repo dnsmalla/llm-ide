@@ -162,3 +162,9 @@
 .wc-current { border-radius: 12px; background: linear-gradient(150deg, color-mix(in srgb, var(--tok-color-accent3) 8%, var(--tok-color-surface)), var(--tok-color-surface)); }
 .wc-recent-open { border-radius: 12px; }
 .wc-recent-open:hover:not(:disabled) { border-color: color-mix(in srgb, var(--tok-color-accent) 40%, var(--tok-color-border)); }
+
+.wc-remote { margin-top: 16px; }
+.wc-remote-grid { display: grid; grid-template-columns: 2fr 80px 1fr; gap: 8px; margin: 10px 0; }
+.wc-remote-wide { grid-column: 1 / -1; }
+.wc-remote-sep { height: 1px; background: var(--tok-color-border); margin: 16px 0; }
+.wc-remote-ok { color: var(--tok-color-accent3); font-size: 12px; word-break: break-all; }
