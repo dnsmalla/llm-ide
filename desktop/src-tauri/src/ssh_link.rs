@@ -266,7 +266,7 @@ struct Supervision<'a> {
 /// Why one reconnect attempt did not reattach. `Retry` tries again after the next backoff. `ForwardRetry` is the
 /// same, but the server confirmed its core and the local forward failed (it could not start, exited, or another
 /// program answered on the port). `Unresponsive` is also a confirmed core, but the forward stayed up and `/health`
-/// never answered with the nonce. Each of the two failure kinds counts toward [`MAX_FORWARD_FAILURES`] on its own.
+/// never answered with the nonce. Both failure kinds count toward [`MAX_FORWARD_FAILURES`] in one streak.
 enum Attempt {
     Retry,
     ForwardRetry,
@@ -308,11 +308,11 @@ fn watch_until_exit(sup: &Supervision<'_>, forward: &mut dyn ForwardChild, pause
 /// reached a state that needs the user; in the second case that state is already recorded.
 fn reconnect(sup: &Supervision<'_>, pause: &mut dyn FnMut(Pause)) -> Option<Box<dyn ForwardChild>> {
     let mut attempt: u32 = 0;
-    // Each count is an unbroken run of one kind of failure. An attempt that could not reach the server's STATUS
-    // says nothing about the local port or the core, so it resets both. A different kind of failure resets the other
-    // count, so the code a give-up reports is always the one its own streak earned.
-    let mut forward_failures: u32 = 0;
-    let mut silent_failures: u32 = 0;
+    // One streak of failed reattaches, of either kind. A streak that mixes the two still ends, so the link never
+    // retries forever. An attempt that could not reach the server's STATUS says nothing about the local port or the
+    // core, so it starts the streak again. The give-up code is the silent one only when every failure was silent.
+    let mut failures: u32 = 0;
+    let mut all_silent = true;
     loop {
         if sup.shared.is_stopped() {
             return None;
@@ -326,28 +326,19 @@ fn reconnect(sup: &Supervision<'_>, pause: &mut dyn FnMut(Pause)) -> Option<Box<
         match try_reattach(sup) {
             Ok(next) => return Some(next),
             Err(Attempt::Retry) => {
-                forward_failures = 0;
-                silent_failures = 0;
+                failures = 0;
+                all_silent = true;
             }
-            Err(Attempt::ForwardRetry) => {
-                silent_failures = 0;
-                forward_failures += 1;
-                if forward_failures >= MAX_FORWARD_FAILURES {
-                    sup.shared.set_state(LinkState::Failed {
-                        code: FORWARD_FAILED_CODE,
-                        message: FORWARD_FAILED_MESSAGE.to_string(),
-                    });
-                    return None;
-                }
-            }
-            Err(Attempt::Unresponsive) => {
-                forward_failures = 0;
-                silent_failures += 1;
-                if silent_failures >= MAX_FORWARD_FAILURES {
-                    sup.shared.set_state(LinkState::Failed {
-                        code: UNRESPONSIVE_CODE,
-                        message: UNRESPONSIVE_MESSAGE.to_string(),
-                    });
+            Err(failed @ (Attempt::ForwardRetry | Attempt::Unresponsive)) => {
+                failures += 1;
+                all_silent &= matches!(failed, Attempt::Unresponsive);
+                if failures >= MAX_FORWARD_FAILURES {
+                    let (code, message) = if all_silent {
+                        (UNRESPONSIVE_CODE, UNRESPONSIVE_MESSAGE)
+                    } else {
+                        (FORWARD_FAILED_CODE, FORWARD_FAILED_MESSAGE)
+                    };
+                    sup.shared.set_state(LinkState::Failed { code, message: message.to_string() });
                     return None;
                 }
             }
@@ -845,33 +836,31 @@ mod tests {
     }
 
     #[test]
-    fn a_forward_failure_restarts_the_silent_count() {
-        // Four silent attempts, then a forward that exits, then four more silent ones: neither run reaches five, so the
-        // link keeps trying instead of ending with a code the last streak does not earn.
-        // Attempts 1-4 and 6-9 keep the forward up with no answer; attempt 5's forward exits at once. Only an
-        // unbroken run of five counts, so no streak reaches five and the link keeps trying until it is stopped.
+    fn a_mixed_streak_of_failed_reattachments_still_ends_as_forward_failed() {
+        // Four silent attempts, then a forward that exits: five failed attempts in a row. Not all of them were silent,
+        // so the local forward takes the blame. The link must still give up rather than retry forever.
         let first = Handle::new();
-        let fake = FakeExec::new((0..9).map(|_| state_out(REMOTE_PORT, NEW, "2.0.0")).collect());
-        for attempt in 1..=9 {
-            let handle = Handle::new();
-            if attempt == 5 {
-                handle.exited.store(true, Ordering::SeqCst);
-            }
-            fake.queue_forward(handle.forward());
+        let fake = FakeExec::new((0..5).map(|_| state_out(REMOTE_PORT, NEW, "2.0.0")).collect());
+        for _ in 0..4 {
+            fake.queue_forward(Handle::new().forward());
         }
+        let exited = Handle::new();
+        exited.exited.store(true, Ordering::SeqCst);
+        fake.queue_forward(exited.forward());
         let silent = |_: u16| None;
-        let (link, _) = drive(&fake, None, first.forward(), &silent, |link, seen| {
+        let (link, observed) = drive(&fake, None, first.forward(), &silent, |_, seen| {
             if seen.pauses.len() == 1 {
                 first.exited.store(true, Ordering::SeqCst);
-            } else if seen.pauses.len() == 30 {
-                link.stop();
             }
         });
         assert_eq!(
             link.state(),
-            LinkState::Failed { code: "SSH_LINK_STOPPED", message: "The connection was closed.".into() },
-            "a streak broken by a forward failure must not end the link"
+            LinkState::Failed {
+                code: "SSH_FORWARD_FAILED",
+                message: "The local port for this server is in use. Quit the other program and connect again.".into(),
+            }
         );
+        assert_eq!(observed.backoffs().len(), 5, "the fifth failure ends the link, with no sixth attempt");
     }
 
     #[test]
