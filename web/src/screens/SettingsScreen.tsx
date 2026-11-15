@@ -29,7 +29,7 @@ export function SettingsScreen({ ctx }: { ctx: ShellContext }) {
         <dl className="web-kv"><dt>Address</dt><dd><code>{ctx.hostUrl}</code></dd></dl>
         <div className="web-row-actions">
           <ChangeAddress onSubmit={a.changeAddress} />
-          <Button variant="danger" icon="trash" onClick={a.forget}>Forget this desktop</Button>
+          <Button size="sm" variant="danger" icon="trash" onClick={a.forget}>Forget this desktop</Button>
         </div>
         <p className="ui-hint">Forgetting removes this browser's access. You pair again with a new PIN from the desktop's Settings.</p>
       </Card>
