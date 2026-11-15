@@ -36,7 +36,7 @@ struct ProjectPickerBar: View {
     private var picker: some View {
         HStack(spacing: DesignSystem.Spacing.xs) {
             Image(systemName: "folder")
-                .font(.system(size: 13))
+                .font(.footnote)
                 .foregroundColor(DesignSystem.Colors.textSecondary)
             Text("Project")
                 .font(DesignSystem.Typography.captionFont.weight(.medium))
@@ -77,7 +77,7 @@ struct ProjectPickerBar: View {
                     .background(DesignSystem.Colors.surfaceSecondary, in: Capsule())
             }
             Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundColor(DesignSystem.Colors.textTertiary)
         }
         .padding(.horizontal, 10)

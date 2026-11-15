@@ -56,7 +56,7 @@ struct ConnectView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(DesignSystem.Spacing.md)
                     .background(DesignSystem.Colors.primary.opacity(0.08))
-                    .cornerRadius(DesignSystem.Layout.cornerRadiusM)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
                 }
                 if let err = errorMessage, !connection.requiresRepair {
                     HStack(spacing: 6) {
@@ -70,7 +70,7 @@ struct ConnectView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(DesignSystem.Spacing.md)
                     .background(DesignSystem.Colors.danger.opacity(0.08))
-                    .cornerRadius(DesignSystem.Layout.cornerRadiusM)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
                 }
                 Button {
                     withAnimation { showManual.toggle() }
@@ -128,7 +128,7 @@ struct ConnectView: View {
                     .fill(DesignSystem.Colors.primary.opacity(0.12))
                     .frame(width: 80, height: 80)
                 Image(systemName: "desktopcomputer")
-                    .font(.system(size: 36))
+                    .font(.largeTitle)
                     .foregroundColor(DesignSystem.Colors.primary)
             }
             Text("Connect to Your Desktop")
@@ -144,7 +144,7 @@ struct ConnectView: View {
             } label: {
                 HStack(spacing: DesignSystem.Spacing.xs) {
                     Image(systemName: "qrcode.viewfinder")
-                        .font(.system(size: 18))
+                        .font(.body)
                     Text("Scan QR Code")
                         .font(DesignSystem.Typography.bodyFont.weight(.semibold))
                 }
@@ -152,7 +152,7 @@ struct ConnectView: View {
                 .padding(.horizontal, DesignSystem.Spacing.lg)
                 .padding(.vertical, DesignSystem.Spacing.sm)
                 .background(DesignSystem.Colors.primary)
-                .cornerRadius(DesignSystem.Layout.cornerRadiusM)
+                .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
             }
             .padding(.top, DesignSystem.Spacing.xs)
         }
@@ -211,13 +211,13 @@ struct ConnectView: View {
                     ? DesignSystem.Colors.primary
                     : DesignSystem.Colors.primary.opacity(0.4))
                 .foregroundColor(.white)
-                .cornerRadius(DesignSystem.Layout.cornerRadiusM)
+                .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
             }
             .disabled(ip.isEmpty || pin.isEmpty || isConnecting)
         }
         .padding(DesignSystem.Spacing.lg)
         .background(DesignSystem.Colors.surface)
-        .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
     }
 
     @ViewBuilder
@@ -240,8 +240,8 @@ struct ConnectView: View {
             }
             .padding(DesignSystem.Spacing.md)
             .background(DesignSystem.Colors.background)
-            .cornerRadius(DesignSystem.Layout.cornerRadiusM)
-            .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM)
+            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous)
                 .stroke(DesignSystem.Colors.primary.opacity(0.2), lineWidth: 1))
         }
     }
@@ -318,13 +318,13 @@ private struct DemoChatView: View {
                     }
                     .padding(DesignSystem.Spacing.md)
                     .background(DesignSystem.Colors.surface)
-                    .cornerRadius(DesignSystem.Layout.cornerRadiusM)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
 
                     HStack {
                         TextField("Message the agent", text: $draft).disabled(true)
                             .padding(10)
                             .background(DesignSystem.Colors.surface)
-                            .cornerRadius(DesignSystem.Layout.cornerRadiusM)
+                            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
                         Button {} label: { Image(systemName: "arrow.up.circle.fill") }.disabled(true)
                     }
                     .accessibilityHint("Sending is disabled in the demo")

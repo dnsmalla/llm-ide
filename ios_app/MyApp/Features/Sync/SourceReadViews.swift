@@ -176,7 +176,7 @@ struct SourceReadSettingsCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(DesignSystem.Spacing.md)
             .background(DesignSystem.Colors.surface)
-            .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
         }
     }
 

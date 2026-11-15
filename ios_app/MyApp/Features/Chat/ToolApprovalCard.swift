@@ -50,8 +50,8 @@ struct ToolApprovalCard: View {
             }
         }
         .padding(DesignSystem.Spacing.md)
-        .background(DesignSystem.Colors.surface, in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
-        .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM)
+        .background(DesignSystem.Colors.surface, in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous)
             .stroke(DesignSystem.Colors.primary.opacity(0.5), lineWidth: 1))
         .accessibilityElement(children: .contain)
     }
@@ -69,11 +69,11 @@ struct ToolApprovalCard: View {
         }
         if request.overwrites == true {
             Label("This replaces a file that already exists.", systemImage: "exclamationmark.triangle.fill")
-                .font(DesignSystem.Typography.footnoteFont).foregroundColor(.orange)
+                .font(DesignSystem.Typography.footnoteFont).foregroundColor(DesignSystem.Colors.warning)
         }
         if request.replaceAll == true {
             Label("Replaces ALL occurrences, not just one.", systemImage: "exclamationmark.triangle.fill")
-                .font(DesignSystem.Typography.footnoteFont).foregroundColor(.orange)
+                .font(DesignSystem.Typography.footnoteFont).foregroundColor(DesignSystem.Colors.warning)
         }
         if let old = request.oldString { block(old, tint: DesignSystem.Colors.danger, label: "Remove") }
         if let new = request.newString { block(new, tint: DesignSystem.Colors.success, label: "Add") }
@@ -101,7 +101,7 @@ struct ToolApprovalCard: View {
                     .foregroundColor(DesignSystem.Colors.textPrimary)
             }
             .padding(8)
-            .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+            .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusXS, style: .continuous))
         }
     }
 }

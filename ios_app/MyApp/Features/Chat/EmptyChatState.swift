@@ -6,11 +6,13 @@ struct EmptyChatState: View {
     let icon: String
     let title: String
     let subtitle: String
+    /// Scales with Dynamic Type so the glyph keeps its proportion to the text beside it.
+    @ScaledMetric(relativeTo: .title) private var iconSize: CGFloat = 34
 
     var body: some View {
         VStack(spacing: DesignSystem.Spacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: 34))
+                .font(.system(size: iconSize))
                 .foregroundColor(DesignSystem.Colors.textTertiary)
             Text(title)
                 .font(DesignSystem.Typography.calloutFont.weight(.medium))

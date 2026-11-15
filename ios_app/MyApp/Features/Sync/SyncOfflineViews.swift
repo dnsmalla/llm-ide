@@ -132,7 +132,7 @@ struct SyncSettingsCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(DesignSystem.Spacing.md)
             .background(DesignSystem.Colors.surface)
-            .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
         }
         .onAppear { if email.isEmpty { email = syncStore.megaEmail } }
         .sheet(isPresented: $showScanner) {

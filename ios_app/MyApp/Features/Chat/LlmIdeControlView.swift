@@ -26,6 +26,9 @@ struct LlmIdeControlView: View {
     @State private var showClearConfirm = false
     @State private var showFilePicker = false
     @FocusState private var isInputFocused: Bool
+    /// Composer glyph and its hit area scale with Dynamic Type; 44pt is the HIG minimum tap target.
+    @ScaledMetric(relativeTo: .body) private var composerIconSize: CGFloat = 18
+    @ScaledMetric(relativeTo: .body) private var composerButtonSize: CGFloat = 44
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
 
@@ -241,9 +244,9 @@ struct LlmIdeControlView: View {
                     .disabled(!connection.supports(HostApiCommand.chatSend.capability))
                 } label: {
                     Image(systemName: "paperclip")
-                        .font(.system(size: 18))
+                        .font(.system(size: composerIconSize))
                         .foregroundColor(DesignSystem.Colors.primary)
-                        .frame(width: 40, height: 40)
+                        .frame(width: composerButtonSize, height: composerButtonSize)
                         .background(DesignSystem.Colors.surfaceSecondary)
                         .clipShape(Circle())
                 }
@@ -255,9 +258,9 @@ struct LlmIdeControlView: View {
                     haptic(.medium)
                 } label: {
                     Image(systemName: speech.isListening ? "mic.fill" : "mic")
-                        .font(.system(size: 18))
+                        .font(.system(size: composerIconSize))
                         .foregroundColor(speech.isListening ? DesignSystem.Colors.danger : DesignSystem.Colors.primary)
-                        .frame(width: 40, height: 40)
+                        .frame(width: composerButtonSize, height: composerButtonSize)
                         .background(DesignSystem.Colors.surfaceSecondary)
                         .clipShape(Circle())
                 }
@@ -282,7 +285,7 @@ struct LlmIdeControlView: View {
     private func fileChip(_ file: ChatFileText, index: Int) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "doc.text.fill")
-                .font(.system(size: 16))
+                .font(.callout)
                 .foregroundColor(DesignSystem.Colors.primary)
             Text(file.name)
                 .font(DesignSystem.Typography.footnoteFont)
@@ -290,14 +293,14 @@ struct LlmIdeControlView: View {
                 .lineLimit(1)
             Button { removeFile(at: index); haptic(.light) } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
+                    .font(.body)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(DesignSystem.Colors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusXS, style: .continuous))
     }
 
     private var canSend: Bool {

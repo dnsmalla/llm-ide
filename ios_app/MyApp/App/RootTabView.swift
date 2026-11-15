@@ -118,7 +118,7 @@ struct LiveChatPairingView: View {
     var body: some View {
         VStack(spacing: DesignSystem.Spacing.lg) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 40))
+                .font(.largeTitle)
                 .foregroundColor(DesignSystem.Colors.primary)
             Text("Live Chat needs the desktop")
                 .font(DesignSystem.Typography.titleFont.weight(.bold))
@@ -205,7 +205,7 @@ struct StatusPill: View {
     private var color: Color {
         switch status {
         case .connected:    return DesignSystem.Colors.success
-        case .connecting:   return .orange
+        case .connecting:   return DesignSystem.Colors.warning
         case .disconnected: return DesignSystem.Colors.danger
         }
     }

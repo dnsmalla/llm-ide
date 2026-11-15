@@ -38,19 +38,19 @@ struct ApprovalQuestionCard: View {
         }
         .padding(DesignSystem.Spacing.md)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.accentColor.opacity(0.08))
-                .overlay(RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1)))
+            RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous)
+                .fill(DesignSystem.Colors.primary.opacity(0.08))
+                .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous)
+                    .strokeBorder(DesignSystem.Colors.primary.opacity(0.35), lineWidth: 1)))
     }
 
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: "questionmark.bubble.fill")
-                .foregroundStyle(Color.accentColor)
+                .foregroundColor(DesignSystem.Colors.primary)
             Text(request.questions.count > 1 ? "Questions" : "Question")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
+                .foregroundColor(DesignSystem.Colors.textSecondary)
             Spacer(minLength: 0)
         }
     }
@@ -61,15 +61,16 @@ struct ApprovalQuestionCard: View {
             if let header = question.header, !header.isEmpty {
                 Text(header.uppercased())
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
             }
             Text(question.question)
-                .font(.callout)
+                .font(DesignSystem.Typography.calloutFont)
+                .foregroundColor(DesignSystem.Colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             if question.multiSelect {
                 Text("Pick any that apply")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
             }
             ForEach(question.options, id: \.label) { option in
                 optionRow(index: index, question: question, option: option)
@@ -87,15 +88,15 @@ struct ApprovalQuestionCard: View {
                 Image(systemName: chosen
                       ? (question.multiSelect ? "checkmark.square.fill" : "largecircle.fill.circle")
                       : (question.multiSelect ? "square" : "circle"))
-                    .foregroundStyle(chosen ? Color.accentColor : .secondary)
+                    .foregroundColor(chosen ? DesignSystem.Colors.primary : DesignSystem.Colors.textSecondary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.label)
                         .font(.callout.weight(chosen ? .semibold : .regular))
                         .multilineTextAlignment(.leading)
                     if let description = option.description, !description.isEmpty {
                         Text(description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(DesignSystem.Typography.captionFont)
+                            .foregroundColor(DesignSystem.Colors.textSecondary)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -104,11 +105,11 @@ struct ApprovalQuestionCard: View {
             }
             .padding(DesignSystem.Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10)
-                .fill(chosen ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08)))
+            .background(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusS, style: .continuous)
+                .fill(chosen ? DesignSystem.Colors.primary.opacity(0.14) : DesignSystem.Colors.surfaceSecondary))
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.primary)
+        .foregroundColor(DesignSystem.Colors.textPrimary)
     }
 
     private func toggle(index: Int, label: String, multiSelect: Bool) {

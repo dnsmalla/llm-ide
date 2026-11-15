@@ -17,6 +17,7 @@ struct ChatInputBar<Leading: View>: View {
     private let isFocused: FocusState<Bool>.Binding
     private let onSend: () -> Void
     @ViewBuilder private let leading: () -> Leading
+    @ScaledMetric(relativeTo: .title) private var sendIconSize: CGFloat = 32
 
     init(
         text: Binding<String>,
@@ -58,14 +59,14 @@ struct ChatInputBar<Leading: View>: View {
                 .padding(.vertical, 10)
                 .background(DesignSystem.Colors.surface)
                 .overlay(
-                    RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL)
+                    RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous)
                         .stroke(DesignSystem.Colors.border, lineWidth: 1)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL))
+                .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
                 .onSubmit(onSend)
             Button(action: onSend) {
                 Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 30))
+                    .font(.system(size: sendIconSize))
                     .foregroundColor(canSend ? DesignSystem.Colors.primary : DesignSystem.Colors.textTertiary)
             }
             .disabled(!canSend)

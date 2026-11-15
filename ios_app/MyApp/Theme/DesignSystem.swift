@@ -22,9 +22,12 @@ public struct DesignSystem {
         public static let surfaceSecondary = Color(light: "#F2F4FA", dark: "#303342")
         public static let textPrimary      = Color(light: "#1F242E", dark: "#F0F2FA")
         public static let textSecondary    = Color(light: "#6B758C", dark: "#C7CFE6")
-        public static let textTertiary     = Color(light: "#8B91A3", dark: "#838AA0")
+        public static let textTertiary     = Color(light: "#8B91A3", dark: "#9AA1B8")
         public static let danger           = Color(light: "#CC3333", dark: "#F58080")
         public static let success          = Color(light: "#2EA666", dark: "#61E6A6")
+        /// Amber for caution states (overwrite / replace-all warnings, "connecting").
+        /// Replaces the system `.orange`, which is too light on the white card surface.
+        public static let warning          = Color(light: "#B26A00", dark: "#F2B35A")
         public static let border           = Color(light: "#D8DAE3", dark: "#33353C")
     }
 
@@ -38,11 +41,15 @@ public struct DesignSystem {
 
     public struct Layout {
         public static let marginMobile: CGFloat = 20
+        public static let cornerRadiusXS: CGFloat = 8
         public static let cornerRadiusS: CGFloat = 10
         public static let cornerRadiusM: CGFloat = 14
         public static let cornerRadiusL: CGFloat = 20
         public static let shadowRadius: CGFloat = 16
         public static let shadowOpacity: Double = 0.06
+        /// Stronger shadow for floating, action-demanding surfaces (approval cards).
+        public static let shadowRadiusRaised: CGFloat = 24
+        public static let shadowOpacityRaised: Double = 0.14
     }
 
     /// Point sizes plus DYNAMIC-TYPE-AWARE `Font` values.

@@ -30,7 +30,7 @@ struct QRScannerSheet: View {
                 if permissionDenied {
                     VStack(spacing: DesignSystem.Spacing.md) {
                         Image(systemName: "camera.fill")
-                            .font(.system(size: 40))
+                            .font(.largeTitle)
                             .foregroundColor(.white.opacity(0.5))
                         Text("Camera access is needed to scan the QR code.")
                             .font(DesignSystem.Typography.bodyFont)
@@ -67,7 +67,7 @@ struct QRScannerSheet: View {
                     // Viewfinder + hint
                     VStack {
                         Spacer()
-                        RoundedRectangle(cornerRadius: 24)
+                        RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous)
                             .stroke(Color.white.opacity(0.8), lineWidth: 3)
                             .frame(width: 230, height: 230)
                         Text("Point at the pairing QR in LLM-IDE on your desktop")
@@ -81,7 +81,7 @@ struct QRScannerSheet: View {
                                 .multilineTextAlignment(.center)
                                 .padding(DesignSystem.Spacing.md)
                                 .background(DesignSystem.Colors.danger.opacity(0.9),
-                                            in: RoundedRectangle(cornerRadius: 10))
+                                            in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusS, style: .continuous))
                                 .padding(.horizontal, DesignSystem.Spacing.xl)
                                 .padding(.top, DesignSystem.Spacing.md)
                                 .transition(.opacity)

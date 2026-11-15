@@ -24,7 +24,7 @@ struct SettingsView: View {
                                         .fill(statusColor.opacity(0.12))
                                         .frame(width: 40, height: 40)
                                     Image(systemName: "desktopcomputer")
-                                        .font(.system(size: 18))
+                                        .font(.body)
                                         .foregroundColor(statusColor)
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
@@ -93,7 +93,7 @@ struct SettingsView: View {
                             .buttonStyle(.plain)
                         }
                         .background(DesignSystem.Colors.surface)
-                        .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
                         .shadow(color: .black.opacity(DesignSystem.Layout.shadowOpacity),
                                 radius: DesignSystem.Layout.shadowRadius, x: 0, y: 2)
                     }
@@ -107,19 +107,19 @@ struct SettingsView: View {
                     NavigationLink { UsageView() } label: {
                         HStack(spacing: DesignSystem.Spacing.md) {
                             Image(systemName: "gauge.with.dots.needle.67percent")
-                                .font(.system(size: 20))
+                                .font(.title3)
                                 .foregroundColor(DesignSystem.Colors.primary)
                             Text("Usage & limits")
                                 .font(DesignSystem.Typography.bodyFont.weight(.medium))
                                 .foregroundColor(DesignSystem.Colors.textPrimary)
                             Spacer()
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.footnote.weight(.semibold))
                                 .foregroundColor(DesignSystem.Colors.textTertiary)
                         }
                         .padding(DesignSystem.Spacing.md)
                         .background(DesignSystem.Colors.surface)
-                        .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -130,19 +130,19 @@ struct SettingsView: View {
                 } label: {
                     HStack(spacing: DesignSystem.Spacing.md) {
                         Image(systemName: "questionmark.circle.fill")
-                            .font(.system(size: 20))
+                            .font(.title3)
                             .foregroundColor(DesignSystem.Colors.primary)
                         Text("Help & FAQ")
                             .font(DesignSystem.Typography.bodyFont.weight(.medium))
                             .foregroundColor(DesignSystem.Colors.textPrimary)
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.footnote.weight(.semibold))
                             .foregroundColor(DesignSystem.Colors.textTertiary)
                     }
                     .padding(DesignSystem.Spacing.md)
                     .background(DesignSystem.Colors.surface)
-                    .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
                 }
                 .buttonStyle(.plain)
 
@@ -150,7 +150,7 @@ struct SettingsView: View {
                 VStack(spacing: 0) {
                     HStack(spacing: DesignSystem.Spacing.md) {
                         Image(systemName: "info.circle.fill")
-                            .font(.system(size: 20))
+                            .font(.title3)
                             .foregroundColor(DesignSystem.Colors.primary)
                         Text("Version")
                             .font(DesignSystem.Typography.bodyFont.weight(.medium))
@@ -171,7 +171,7 @@ struct SettingsView: View {
                         .padding(DesignSystem.Spacing.md)
                 }
                 .background(DesignSystem.Colors.surface)
-                .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+                .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
             }
             .padding(DesignSystem.Layout.marginMobile)
         }

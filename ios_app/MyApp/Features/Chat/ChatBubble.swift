@@ -65,7 +65,7 @@ struct ChatBubble: View {
                     // intrinsic width anyway.
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(DesignSystem.Colors.surfaceSecondary,
-                                in: RoundedRectangle(cornerRadius: 8))
+                                in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusXS, style: .continuous))
                 }
             }
         }
@@ -118,7 +118,7 @@ struct ChatBubble: View {
                             Image(uiImage: ui)
                                 .resizable().scaledToFit()
                                 .frame(maxWidth: 200, maxHeight: 200)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusS, style: .continuous))
                         }
                         if !message.text.isEmpty {
                             if isUser {
@@ -144,10 +144,10 @@ struct ChatBubble: View {
             .padding(.vertical, 10)
             .background(isUser ? DesignSystem.Colors.primary : DesignSystem.Colors.surface)
             .overlay(
-                RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM)
+                RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous)
                     .stroke(isUser ? Color.clear : DesignSystem.Colors.border, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
+            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM, style: .continuous))
             if !isUser { Spacer(minLength: 40) }
         }
     }

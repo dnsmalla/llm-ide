@@ -19,19 +19,19 @@ struct StatusBanner: View {
         switch content {
         case .connection(let isConnecting):
             HStack(spacing: 8) {
-                Image(systemName: "wifi.slash").font(.system(size: 13))
+                Image(systemName: "wifi.slash").font(.footnote)
                 Text(isConnecting ? "Connecting to your desktop…" : "Not connected to your desktop")
                     .font(DesignSystem.Typography.footnoteFont.weight(.medium))
                 Spacer()
             }
-            .foregroundColor(.white)
+            .foregroundColor(DesignSystem.Colors.textPrimary)
             .padding(.horizontal, DesignSystem.Spacing.md)
             .padding(.vertical, 8)
-            .background(DesignSystem.Colors.textTertiary)
+            .background(DesignSystem.Colors.surfaceSecondary)
         case .error(let message, let onDismiss):
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 13))
+                    .font(.footnote)
                     .foregroundColor(DesignSystem.Colors.danger)
                 Text(message)
                     .font(DesignSystem.Typography.footnoteFont)
@@ -40,7 +40,7 @@ struct StatusBanner: View {
                 Spacer(minLength: 4)
                 Button(action: onDismiss) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.caption2.weight(.semibold))
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }
                 .accessibilityLabel("Dismiss")
