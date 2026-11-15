@@ -8,6 +8,7 @@ const FEATURES: ReadonlyArray<readonly [string, string]> = [
   ["Auto Tasks", "The tasks your desktop plans. See their status and start one from this browser."],
   ["Loop", "Start a loop on an issue, follow its progress, and cancel it, even when you are away from the desk."],
   ["History", "The desktop's chats and usage, read-only."],
+  ["Workspace", "Open the desktop's project files in a text editor and save them, review Changes, commit the files you tick and push, and run allowlisted commands in Terminal. Editing, commit, push and Terminal need the desktop switch \u201cAllow remote edits, commit, push and tests\u201d (Settings \u2192 Host API pairing on the desktop). Full shell is a separate checkbox in Terminal that also needs \u201cAllow remote full shell\u201d, and the browser asks you to confirm each command. After turning a switch on, restart the core and pair again."],
 ];
 
 export function HelpScreen({ ctx }: { ctx: ShellContext }) {
@@ -33,6 +34,7 @@ export function HelpScreen({ ctx }: { ctx: ShellContext }) {
           <li><strong>Origin not allowed.</strong> Add this page&apos;s address ({globalThis.location?.origin ?? "this page"}) to the desktop&apos;s allowed web origins, then retry.</li>
           <li><strong>Certificate.</strong> Open the desktop&apos;s address in this browser once and trust its certificate, then come back. A changed certificate means pairing again.</li>
           <li><strong>Desktop asleep or closed.</strong> LLM-IDE must be running on the same network (or Tailscale). Use the offline copy if sync is linked.</li>
+          <li><strong>Edits or Terminal refused.</strong> A message such as &ldquo;capability unavailable&rdquo; or &ldquo;denied&rdquo; means the desktop has not allowed it. On the desktop, open Settings &rarr; Host API pairing, turn on &ldquo;Allow remote edits, commit, push and tests&rdquo; (and &ldquo;Allow remote full shell&rdquo; for the full shell), restart the core, then pair this browser again.</li>
           <li><strong>&ldquo;Removed on the host&rdquo;.</strong> This browser was unpaired on the desktop. Pair again with a new PIN.</li>
         </ul>
       </Card>
