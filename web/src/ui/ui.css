@@ -82,14 +82,15 @@ button, input, select, textarea { font-family: inherit; }
 .ui-btn[data-size="sm"] { min-height: 36px; padding: 0 var(--ui-s-3); font-size: var(--ui-fs-sm); border-radius: var(--ui-r-sm); }
 .ui-btn[data-size="lg"] { min-height: 52px; padding: 0 var(--ui-s-6); font-size: var(--ui-fs-lg); border-radius: var(--ui-r-lg); }
 .ui-btn[data-block="true"] { display: flex; width: 100%; }
-.ui-btn[data-variant="primary"] { background: var(--ui-accent); color: var(--ui-on-accent); }
+.ui-btn[data-variant="primary"] { background: var(--ui-accent); color: var(--ui-on-accent); box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%), var(--ui-elev-1); }
 .ui-btn[data-variant="primary"]:hover:not(:disabled) { filter: brightness(1.08); }
 .ui-btn[data-variant="secondary"] { background: var(--ui-card-2); color: var(--ui-text); border-color: var(--ui-line); }
 .ui-btn[data-variant="secondary"]:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-card-2) 82%, var(--ui-text)); }
 .ui-btn[data-variant="ghost"] { background: transparent; color: var(--ui-text); }
 .ui-btn[data-variant="ghost"]:hover:not(:disabled) { background: var(--ui-hover); }
-.ui-btn[data-variant="danger"] { background: var(--ui-danger); color: var(--ui-on-accent); }
-.ui-btn[data-variant="danger"]:hover:not(:disabled) { filter: brightness(1.08); }
+/* Tinted, not filled: a destructive action should be findable without being the loudest thing on the screen. */
+.ui-btn[data-variant="danger"] { background: color-mix(in srgb, var(--ui-danger) 12%, var(--ui-card)); color: var(--ui-danger); border-color: color-mix(in srgb, var(--ui-danger) 38%, transparent); }
+.ui-btn[data-variant="danger"]:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-danger) 20%, var(--ui-card)); }
 .ui-btn:active:not(:disabled) { transform: scale(.975); }
 .ui-btn:disabled { opacity: .5; cursor: default; }
 .ui-btn[data-loading="true"] { cursor: progress; opacity: .85; }
@@ -111,10 +112,16 @@ button, input, select, textarea { font-family: inherit; }
 @keyframes ui-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 /* ---- Card, SectionHeader, ListRow --------------------------------------------------------------------------- */
-.ui-card { background: var(--ui-card); border: 1px solid var(--ui-line); border-radius: var(--ui-r-lg); box-shadow: var(--ui-elev-1); min-width: 0; }
+/* padding: 0 — the shared kit also styles .ui-card (with padding), which doubled every card's inset on top of head/body. */
+.ui-card { padding: 0; background: var(--ui-card); border: 1px solid var(--ui-line); border-radius: var(--ui-r-lg); box-shadow: var(--ui-elev-1), inset 0 1px 0 color-mix(in srgb, var(--ui-text) 4%, transparent); min-width: 0; }
 .ui-card-body { padding: var(--ui-s-4); display: grid; gap: var(--ui-s-3); }
 .ui-card[data-flush="true"] .ui-card-body { padding: 0; gap: 0; }
 .ui-card-head { padding: var(--ui-s-4) var(--ui-s-4) 0; }
+@media (min-width: 600px) {
+  .ui-card-body { padding: var(--ui-s-5); }
+  .ui-card-head { padding: var(--ui-s-5) var(--ui-s-5) 0; }
+  .ui-card[data-flush="true"] .ui-card-head { padding-bottom: var(--ui-s-2); }
+}
 .ui-card[data-flush="true"] .ui-card-head { padding-bottom: var(--ui-s-2); }
 .ui-sectionhead { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--ui-s-3); min-width: 0; }
 .ui-sectionhead > div { min-width: 0; }
