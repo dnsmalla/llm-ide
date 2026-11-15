@@ -409,6 +409,9 @@ export const config = Object.freeze({
   // Remote mode (LLMIDE_ALLOW_REMOTE=1) additionally closes it unless
   // LLMIDE_ALLOW_REMOTE_REGISTRATION=1 — see computeRegistrationOpen.
   registrationOpen: computeRegistrationOpen(isProd, process.env),
+  // Single-owner mode (a server core, set by the desktop's SSH START script): once an owner account exists,
+  // a registration without an invite is refused. Read with registrationOpen by selfRegistrationOpen (server/users.mjs).
+  registrationSingleOwner: envBool('LLMIDE_REGISTRATION_SINGLE_OWNER', false),
 
   // CORS — comma-separated list of allowed origins beyond the always-
   // accepted chrome-extension://* / localhost / 127.0.0.1 set.
@@ -471,6 +474,7 @@ export function configSummary() {
     vaultKeyDigest:  digest(config.vaultKey),
     accessTokenTTLSec: config.accessTokenTTLSec,
     registrationOpen: config.registrationOpen,
+    registrationSingleOwner: config.registrationSingleOwner,
     features: config.features ? [...config.features].sort() : null,
   };
 }

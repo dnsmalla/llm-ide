@@ -10,7 +10,7 @@ import { errAuth, errInternal, errNotFound, errValidation } from '../core/errors
 import { tryConsume, tryPeek } from './rate-limit.mjs';
 import {
   changePassword, findUserById, login, logout, logoutAll, refreshSession, registerUser,
-  createPasswordResetToken, consumePasswordResetToken,
+  createPasswordResetToken, consumePasswordResetToken, selfRegistrationOpen,
 } from './users.mjs';
 import { listSecretKeys, setSecret, VAULT_KEYS, isVaultError, isUserSettableVaultKey } from './vault.mjs';
 import {
@@ -100,7 +100,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   if (method === 'GET' && url === '/auth/well-known') {
     send(res, 200, {
       issuer: config.jwtIssuer,
-      registrationOpen: config.registrationOpen,
+      registrationOpen: selfRegistrationOpen(db),
       vaultKeys: VAULT_KEYS,
       accessTokenTTLSec: config.accessTokenTTLSec,
     });
@@ -181,7 +181,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       safeAudit(db, { userId: null, requestId, ip, userAgent: ua, action: 'auth.register', outcome: 'failure', detail: { error: err.code || err.message } });
       // While registration is closed, an invalid / used / expired / wrong-email invite is answered
       // exactly like a closed registration: never reveal whether the token existed.
-      if (!config.registrationOpen && err.code === 'INVITE_INVALID') {
+      if (!selfRegistrationOpen(db) && err.code === 'INVITE_INVALID') {
         send(res, 403, { error: { code: 'REGISTRATION_CLOSED', message: 'Registration is closed' } });
         return;
       }

@@ -78,6 +78,25 @@ function defaultGrant(db) {
     : { teamRole: 'member', maxMode: 'execute', usdCapMonth: 0 };
 }
 
+/**
+ * Whether a registration WITHOUT an invite is accepted right now. This is the one place that answers it:
+ * `registerUser` enforces it and `auth-routes` reports it on `/auth/well-known` and in the closed-invite
+ * answer, so the sign-in screen never offers a sign-up the server would refuse.
+ *
+ * Single-owner mode (`LLMIDE_REGISTRATION_SINGLE_OWNER`, a server core owned by one person) closes it once an
+ * owner exists. "Owner" is the same definition the bootstrap rule and `defaultGrant` use: a `members` row with
+ * `team_role = 'owner'` (`ownerCount`). Invites are not affected by this function; callers accept an invite
+ * separately.
+ *
+ * @param db An open database handle.
+ * @returns {boolean} True when a no-invite registration would be accepted.
+ */
+export function selfRegistrationOpen(db) {
+  if (!config.registrationOpen) return false;
+  // Short-circuit keeps the flag-off path free of any query: behaviour is unchanged when the flag is unset.
+  return !(config.registrationSingleOwner && ownerCount(db) > 0);
+}
+
 // `invite` is a plaintext invite token: its presence lets a registration through while registration is
 // closed (ADR 0021). The route validates and burns it in the same transaction, so a bad token rolls the
 // account back — this function never trusts it for anything else.
@@ -87,7 +106,7 @@ export function registerUser(db, { email, password, displayName, invite = null, 
     && typeof config.bootstrapToken === 'string' && config.bootstrapToken.length > 0
     && bootstrap === config.bootstrapToken
     && ownerCount(db) === 0;
-  if (!config.registrationOpen && !invite && !bootstrapOk) throw errForbidden('Registration is disabled');
+  if (!selfRegistrationOpen(db) && !invite && !bootstrapOk) throw errForbidden('Registration is disabled');
   const e = validateEmail(email);
   validatePassword(password);
   const name = String(displayName || '').trim().slice(0, MAX_NAME) || e.split('@')[0];
