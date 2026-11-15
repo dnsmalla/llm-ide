@@ -153,6 +153,11 @@ the new one. You do not need to press **Stop server** first. If the new release 
 check, the app stops it, points `current` back at the previous release, and starts the previous release
 again if a core was running before the update.
 
+A rebuilt core with the same version number is replaced the same way on the next connect. The app compares the
+SHA-256 of its bundle with the one recorded for the server's release, so a new build of the same version does not
+stay unused. If that new release does not answer its health check, it is left stopped, because no earlier
+release of that version exists to return to.
+
 Each release is large, so the app keeps only the current release and the one before it. Older release folders are removed after an update succeeds.
 
 ## Secrets
