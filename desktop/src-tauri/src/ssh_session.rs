@@ -150,14 +150,14 @@ fn connect_with(
     let probe = parse_probe(&link.run(PROBE, None)?.stdout)?;
     check_probe(&probe)?;
     let status = parse_core_state(&link.run(STATUS, None)?.stdout)?;
-    let (core, replaced) = ensure_core(&link, &input, &probe, &status)?;
+    let (core, replacement) = ensure_core(&link, &input, &probe, &status)?;
 
     write_session(input.session_file, input.endpoint, &core.nonce)?;
     let (mut forward, _grant) = open_forward(&link, local_port, core.port)?;
     if let Err(e) = wait_for_core(&mut *forward, health, local_port, &core.nonce, input.health_timeout) {
         forward.kill();
-        if replaced {
-            roll_back(&link);
+        if let Some(replacement) = replacement.as_ref().filter(|_| is_start_failure(&e)) {
+            fail_update(&link, &input, replacement);
         }
         return Err(e);
     }
@@ -172,26 +172,49 @@ fn connect_with(
     })
 }
 
+/// What a replacement changed on the server. `previous` is the release `current` pointed at before the
+/// install. It is set only when the install switched `current` away from it, which is the only case a
+/// failed start has to undo.
+struct Replacement {
+    was_running: bool,
+    previous: Option<String>,
+}
+
 /// Makes the server run `input.version`, installing and restarting only when it does not already. Returns
-/// the core and whether this call replaced an older core (the case that rolls back on failure).
+/// the core and, when this call started one, what that start replaced.
 fn ensure_core(
     link: &Link<'_>,
     input: &ConnectInput<'_>,
     probe: &Probe,
     status: &CoreState,
-) -> Result<(RunningCore, bool), FsError> {
+) -> Result<(RunningCore, Option<Replacement>), FsError> {
     let already_running = status.running && status.version.as_deref() == Some(input.version);
     if status.running {
         require_ours(status, input.session_file, input.endpoint)?;
     }
-    if probe.current.as_deref() != Some(input.version) {
-        install_core(link, input.bundle, input.version)?;
-    }
+    let previous = install_if_needed(link, input, probe)?;
     if already_running {
-        return Ok((running_core(status)?, false));
+        return Ok((running_core(status)?, None));
     }
-    let core = replace_core(link, input, status.running)?;
-    Ok((core, status.running))
+    let replacement = Replacement { was_running: status.running, previous };
+    let core = replace_core(link, input, &replacement)?;
+    Ok((core, Some(replacement)))
+}
+
+/// Uploads the release when `current` is another version. Returns the release `current` pointed at before,
+/// which is `None` when nothing was switched away from.
+fn install_if_needed(link: &Link<'_>, input: &ConnectInput<'_>, probe: &Probe) -> Result<Option<String>, FsError> {
+    if probe.current.as_deref() == Some(input.version) {
+        return Ok(None);
+    }
+    install_core(link, input.bundle, input.version)?;
+    Ok(probe.current.clone())
+}
+
+/// Only a core that never answered (`SSH_START_FAILED`) is grounds for rolling back. A forward or ssh
+/// failure is a local problem, and reverting a working release over it would be wrong.
+fn is_start_failure(error: &FsError) -> bool {
+    error.code == "SSH_START_FAILED"
 }
 
 /// Refuses inputs that would otherwise reach ssh or the server in a useless state.
@@ -211,7 +234,15 @@ fn check_inputs(input: &ConnectInput<'_>) -> Result<(), FsError> {
 fn transport_check(output: RawOutput) -> Result<RawOutput, FsError> {
     match output.code {
         Some(255) | None => {
-            if output.stderr.contains("Permission denied") {
+            if output.stderr.contains("Host key verification failed")
+                || output.stderr.contains("REMOTE HOST IDENTIFICATION HAS CHANGED")
+            {
+                // Checked first: a changed key also exits 255, and must not read as an unreachable server.
+                Err(herr(
+                    "SSH_HOST_KEY_CHANGED",
+                    "The server's host key changed. Test the connection again and confirm the new fingerprint.",
+                ))
+            } else if output.stderr.contains("Permission denied") {
                 // The exact sentence is part of the contract; stderr is never shown, as it can echo the login.
                 Err(herr("SSH_AUTH_FAILED", "The server refused this login."))
             } else {
@@ -228,28 +259,38 @@ fn pick_local_port() -> Option<u16> {
     LOCAL_PORTS.clone().find(|port| TcpListener::bind(("127.0.0.1", *port)).is_ok())
 }
 
-/// Stops the running core when a new release replaces it, then starts the new one. A failed START on a
-/// replacement rolls back, so `current` points at the release that was working before.
-fn replace_core(link: &Link<'_>, input: &ConnectInput<'_>, was_running: bool) -> Result<RunningCore, FsError> {
-    if was_running {
+/// Stops the running core when a new release replaces it, then starts the new one. A failed start with an
+/// install behind it is undone, so `current` points at the release that worked before.
+fn replace_core(link: &Link<'_>, input: &ConnectInput<'_>, replacement: &Replacement) -> Result<RunningCore, FsError> {
+    if replacement.was_running {
         stop_core(link)?;
     }
-    match start_core(link, input) {
-        Ok(core) => Ok(core),
-        Err(e) => {
-            if was_running {
-                roll_back(link);
-            }
-            Err(e)
+    let started = start_core(link, input, input.version);
+    if matches!(&started, Err(e) if is_start_failure(e)) {
+        fail_update(link, input, replacement);
+    }
+    started
+}
+
+/// Undoes a failed update: stop the new core, repoint `current` at the previous release, and when a core was
+/// running before, start that release again. Best effort, because the caller reports the start failure.
+fn fail_update(link: &Link<'_>, input: &ConnectInput<'_>, replacement: &Replacement) {
+    let Some(previous) = replacement.previous.as_deref() else {
+        return;
+    };
+    roll_back(link);
+    if replacement.was_running {
+        if let Ok(core) = start_core(link, input, previous) {
+            let _ = write_session(input.session_file, input.endpoint, &core.nonce);
         }
     }
 }
 
-/// Starts the core with a fresh nonce. START may hand back a core that was already live, so the nonce,
+/// Starts `version` with a fresh nonce. START may hand back a core that was already live, so the nonce,
 /// port and version are taken from what START printed, never from what was sent.
-fn start_core(link: &Link<'_>, input: &ConnectInput<'_>) -> Result<RunningCore, FsError> {
+fn start_core(link: &Link<'_>, input: &ConnectInput<'_>, version: &str) -> Result<RunningCore, FsError> {
     let nonce = random_nonce().map_err(|e| herr("SSH_START_FAILED", e))?;
-    let stdin = start_stdin(input.version, &nonce, input.secrets_payload);
+    let stdin = start_stdin(version, &nonce, input.secrets_payload);
     let output = link.run(START, Some(&stdin))?;
     if let Some((value, log)) = parse_start_failure(&output.stdout) {
         let detail = log.map(|line| format!(": {line}")).unwrap_or_default();
@@ -467,6 +508,7 @@ mod tests {
     const KEY: &str = "/home/alice/.ssh/id_ed25519";
     const OLD: &str = "oldnonce0123456789";
     const NEW: &str = "newnonce0123456789";
+    const RESTORED: &str = "restorednonce012345";
     const PAYLOAD: &[u8] = b"{\"jwtSecret\":\"j\",\"vaultKey\":\"v\",\"hostApprovalKey\":\"a\"}";
     const TARBALL: &[u8] = b"fake-tarball-bytes";
     const PASSWORD: &str = "hunter2";
@@ -718,6 +760,7 @@ mod tests {
             state_out(3462, NEW, "2.0.0"),
             ok(STOP_OK),
             ok(ROLLBACK_OK),
+            state_out(3463, RESTORED, "1.0.0"),
         ]);
         let silent = |_: u16| None;
         let err = expect_err(connect_with(&fake, &silent, input(&ep, &scratch, None), &|| Some(3456)));
@@ -725,9 +768,80 @@ mod tests {
         assert_eq!(err.code, "SSH_START_FAILED");
         assert_eq!(
             fake.names(),
-            vec!["probe", "status", "install", "stop", "start", "forward", "stop", "rollback"]
+            vec!["probe", "status", "install", "stop", "start", "forward", "stop", "rollback", "start"]
         );
         assert_eq!(fake.kills(), 1, "the forward is killed before the rollback");
+        assert!(
+            std::fs::read_to_string(&scratch.session).unwrap().contains(RESTORED),
+            "the session record holds the restored core's nonce"
+        );
+    }
+
+    #[test]
+    fn failed_health_after_update_on_a_stopped_core_rolls_back_without_a_restart() {
+        let scratch = Scratch::new("stopped-rollback");
+        let ep = key_endpoint();
+        let fake = FakeExec::new(vec![
+            probe_out("1.0.0"),
+            ok(STOPPED_STATUS),
+            ok(INSTALL_OK),
+            state_out(3462, NEW, "2.0.0"),
+            ok(STOP_OK),
+            ok(ROLLBACK_OK),
+        ]);
+        let silent = |_: u16| None;
+        let err = expect_err(connect_with(&fake, &silent, input(&ep, &scratch, None), &|| Some(3456)));
+
+        assert_eq!(err.code, "SSH_START_FAILED");
+        assert_eq!(
+            fake.names(),
+            vec!["probe", "status", "install", "start", "forward", "stop", "rollback"],
+            "current is switched back even though no core was running"
+        );
+    }
+
+    #[test]
+    fn forward_mismatch_after_update_keeps_the_new_release() {
+        let scratch = Scratch::new("mismatch-update");
+        let ep = key_endpoint();
+        record_running_core(&scratch, &ep, OLD);
+        let fake = FakeExec::new(vec![
+            probe_out("1.0.0"),
+            state_out(3460, OLD, "1.0.0"),
+            ok(INSTALL_OK),
+            ok(STOP_OK),
+            state_out(3462, NEW, "2.0.0"),
+        ]);
+        let other = |_: u16| Some("someoneelsesnonce0".to_string());
+        let err = expect_err(connect_with(&fake, &other, input(&ep, &scratch, None), &|| Some(3456)));
+
+        assert_eq!(err.code, "SSH_FORWARD_FAILED");
+        assert_eq!(
+            fake.names(),
+            vec!["probe", "status", "install", "stop", "start", "forward"],
+            "a local forward problem must not stop or revert the new release"
+        );
+    }
+
+    #[test]
+    fn host_key_change_is_not_unreachable() {
+        for stderr in [
+            "Host key verification failed.",
+            "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@",
+        ] {
+            let scratch = Scratch::new("hostkey");
+            let ep = key_endpoint();
+            let fake = FakeExec::new(vec![ssh_error(stderr)]);
+            let healthy = |_: u16| Some(NEW.to_string());
+            let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+
+            assert_eq!(err.code, "SSH_HOST_KEY_CHANGED", "for {stderr}");
+            assert_eq!(
+                err.message,
+                "The server's host key changed. Test the connection again and confirm the new fingerprint."
+            );
+            assert_eq!(fake.names(), vec!["probe"]);
+        }
     }
 
     #[test]
