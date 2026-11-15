@@ -1,7 +1,7 @@
 // Process-wide singletons the screens share: the core status store and the core client.
 import { createCoreClient } from "./core";
 import { createChatBinding } from "./chat-binding";
-import { host, invokeHost, isHostAvailable, isRemoteCoreMode, setRemoteModeProvider, sshForwardReady } from "./host";
+import { coreBaseUrl, host, invokeHost, isHostAvailable, isRemoteCoreMode, setRemoteModeProvider } from "./host";
 import { createTrustGate } from "./trust-gate";
 import { createStatusStore } from "./status-store";
 import { createBusProofStore } from "./bus-proof";
@@ -30,10 +30,8 @@ const busProof = createBusProofStore({
 
 /** The one core client. Its base URL follows the supervised core (it changes across restarts). */
 export const core = createCoreClient({
-  baseUrl: () => {
-    const s = coreStatusStore.getSnapshot().status;
-    return s && s.url && (s.state === "ready" || sshForwardReady(s)) ? s.url : null;
-  },
+  // Same rule as the trust gate (host.ts `sshForwardReady`): a reconnecting forward hands out no URL.
+  baseUrl: () => coreBaseUrl(coreStatusStore.getSnapshot().status),
   credentialsAllowed: () => trustGate.allowed(),
   hostProof: () => busProof.get(),
   onOutcome: (o) => diagnosticsLog.record(o),

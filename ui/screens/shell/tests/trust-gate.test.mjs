@@ -45,16 +45,45 @@ test("a pinned remote core is trusted without asking again", () => {
 
 const sshSt = (o = {}) => ({ url: "http://127.0.0.1:3456", state: "ssh", trust: "ssh_forward", mode: "ssh", link: "connected", restarts: 0, pid: null, ...o });
 
-test("ssh mode: a connected or reconnecting forward may carry credentials, with no confirm prompt", () => {
+test("ssh mode: only a connected forward may carry credentials, with no confirm prompt", () => {
   let s = sshSt();
   const g = createTrustGate({ getStatus: () => s, isHost: () => true });
   assert.deepEqual(g.view(), { allowed: true, needsConfirm: false, url: "http://127.0.0.1:3456" });
+  // While reconnecting the local port is free: another local process could bind it, so nothing is sent.
   s = sshSt({ link: "reconnecting" });
-  assert.equal(g.allowed(), true);
+  assert.deepEqual(g.view(), { allowed: false, needsConfirm: false, url: "http://127.0.0.1:3456" });
+  assert.equal(g.allowed(), false);
+});
+
+test("ssh mode: the gate closes while the link is down, reopens on the return, and the subscriber sees the reopening", () => {
+  let s = sshSt({ link: "connected" });
+  let fire = () => {};
+  const g = createTrustGate({ getStatus: () => s, isHost: () => true, subscribeStatus: (l) => { fire = l; } });
+  const seenByListener = [];
+  g.subscribe(() => seenByListener.push(g.allowed()));
+  const allowedAt = [g.allowed()];
+  s = sshSt({ link: "reconnecting" });
+  fire();
+  allowedAt.push(g.allowed());
+  s = sshSt({ link: "connected" });
+  fire();
+  allowedAt.push(g.allowed());
+  assert.deepEqual(allowedAt, [true, false, true]);
+  // The runtime's subscriber republishes the token when allowed: it runs on the reopening, with the gate open.
+  assert.deepEqual(seenByListener, [false, true]);
+});
+
+test("non-ssh cases are unchanged: a spawned local core and a pinned hub are allowed, with no prompt", () => {
+  let s = st({ trust: "spawned" });
+  const local = createTrustGate({ getStatus: () => s, isHost: () => true });
+  assert.deepEqual(local.view(), { allowed: true, needsConfirm: false, url: "http://127.0.0.1:4000" });
+  s = st({ url: "http://127.0.0.1:3459/tok", state: "remote", trust: "remote_pinned", mode: "remote", pid: null });
+  const hub = createTrustGate({ getStatus: () => s, isHost: () => true });
+  assert.deepEqual(hub.view(), { allowed: true, needsConfirm: false, url: "http://127.0.0.1:3459/tok" });
 });
 
 test("ssh mode: any other link, state, trust or an empty url is refused and never asks to confirm", () => {
-  const cases = [{ link: "connecting" }, { link: "needs_password" }, { link: "failed" }, { link: "stopped" }, { link: null }, { state: "stopped" }, { trust: "spawned" }, { url: "" }];
+  const cases = [{ link: "reconnecting" }, { link: "connecting" }, { link: "needs_password" }, { link: "failed" }, { link: "stopped" }, { link: null }, { state: "stopped" }, { trust: "spawned" }, { url: "" }];
   for (const over of cases) {
     const s = sshSt(over);
     const g = createTrustGate({ getStatus: () => s, isHost: () => true });

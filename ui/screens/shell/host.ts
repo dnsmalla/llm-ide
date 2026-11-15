@@ -189,11 +189,19 @@ export function isRemoteCoreMode(mode: string | null | undefined): boolean {
 
 /**
  * True when the ssh forward can carry requests and credentials. Shared by the trust gate and the core base URL so
- * both agree on what "the server is reachable" means; a reconnecting forward still counts because its URL is the
- * same one the core answers on once the link returns.
+ * both agree on what "the server is reachable" means. Only `connected` counts: while the link reconnects, the local
+ * port is free and another local process could bind it and receive the token or the login password.
  */
 export function sshForwardReady(s: CoreStatus): boolean {
-  return s.mode === "ssh" && s.state === "ssh" && s.trust === "ssh_forward" && (s.link === "connected" || s.link === "reconnecting") && s.url !== "";
+  return s.mode === "ssh" && s.state === "ssh" && s.trust === "ssh_forward" && s.link === "connected" && s.url !== "";
+}
+
+/**
+ * The core URL the shell may hand out for requests: a ready core the host spawned, or a usable ssh forward. Anything
+ * else is `null`, so no request (and no credential) is sent to a port that is not verified right now.
+ */
+export function coreBaseUrl(s: CoreStatus | null): string | null {
+  return s && s.url && (s.state === "ready" || sshForwardReady(s)) ? s.url : null;
 }
 
 const asStr = (v: unknown): string | null => (typeof v === "string" ? v : null);

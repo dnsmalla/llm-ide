@@ -12,7 +12,7 @@ import type { SshServerStatus, SshServerTest, SshServerTarget } from "../host.ts
 
 const trusted: SshServerTest = {
   hostKeyType: "ssh-ed25519", fingerprint: "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff", trusted: true, changed: false,
-  os: "Linux", arch: "x86_64", freeMb: 20480, installedVersion: null, claude: "missing",
+  os: "Linux", arch: "x86_64", freeMb: 20480, installedVersion: null, claude: "missing", glibc: "2.35",
 };
 const unknownKey: SshServerTest = { ...trusted, trusted: false, os: null, arch: null, freeMb: null, claude: null };
 const savedSettings = { host: "saved.example.com", port: 2222, user: "ops", keyPath: "", auth: "password" as const };
@@ -322,4 +322,111 @@ test("uninstall: the typed name matches trimmed and case-insensitive, and the ta
   assert.equal(result?.link, "off");
   assert.deepEqual(calls, ["uninstall:hunter2:server.example.com"]);
   assert.equal(m.getState().error, null);
+});
+
+const foreignError = { code: "SSH_CORE_FOREIGN", message: "Another computer started the server on this account." };
+
+test("stopServer sends the form's current target and force false, with no password when none is given", async () => {
+  const calls: unknown[][] = [];
+  const m = filled(fakeIo({ async stop(target, password, force) { calls.push([target, password, force]); return { ...status, link: "stopped" }; } }));
+  m.setField("host", "edited.example.com");
+  await m.stopServer();
+  assert.deepEqual(calls, [[{ host: "edited.example.com", port: 22, user: "deploy", keyPath: "/home/deploy/.ssh/id_ed25519", auth: "key" }, undefined, false]]);
+});
+
+test("stopServer forwards the password for this call only, and force true when asked", async () => {
+  const calls: unknown[][] = [];
+  const m = filled(fakeIo({ async stop(_target, password, force) { calls.push([password, force]); return { ...status, link: "stopped" }; } }));
+  await m.stopServer("hunter2", { force: true });
+  assert.deepEqual(calls, [["hunter2", true]]);
+  assert.equal(JSON.stringify(m.getState()).includes("hunter2"), false);
+});
+
+test("stopServer on a core another computer started records foreign: stop, and no error text", async () => {
+  const m = filled(fakeIo({ async stop() { throw foreignError; } }));
+  assert.equal(await m.stopServer(), null);
+  assert.equal(m.getState().foreign, "stop");
+  assert.equal(m.getState().error, null);
+});
+
+test("the forced stop sends force true, and a success clears foreign", async () => {
+  const forces: boolean[] = [];
+  const m = filled(fakeIo({ async stop(_target, _password, force) { forces.push(force); if (!force) throw foreignError; return { ...status, link: "stopped" }; } }));
+  await m.stopServer();
+  const result = await m.stopServer(undefined, { force: true });
+  assert.deepEqual(forces, [false, true]);
+  assert.equal(result?.link, "stopped");
+  assert.equal(m.getState().foreign, null);
+  assert.equal(m.getState().error, null);
+});
+
+test("uninstall on a foreign core records foreign: uninstall; the forced uninstall sends force true", async () => {
+  const calls: unknown[][] = [];
+  const m = filled(fakeIo({ async uninstall(password, confirmHost, force) { calls.push([password, confirmHost, force]); if (!force) throw foreignError; return { ...status, link: "off" }; } }));
+  assert.equal(await m.uninstall("hunter2", "server.example.com"), null);
+  assert.equal(m.getState().foreign, "uninstall");
+  assert.equal(m.getState().error, null);
+  const result = await m.uninstall("hunter2", "server.example.com", { force: true });
+  assert.equal(result?.link, "off");
+  assert.deepEqual(calls, [["hunter2", "server.example.com", false], ["hunter2", "server.example.com", true]]);
+  assert.equal(m.getState().foreign, null);
+});
+
+test("a change of the target clears the foreign-core prompt; a status read does not", async () => {
+  const m = filled(fakeIo({ async stop() { throw foreignError; } }));
+  await m.stopServer();
+  await m.refreshStatus();
+  assert.equal(m.getState().foreign, "stop", "a background status read keeps the prompt");
+  m.setField("user", "ops");
+  assert.equal(m.getState().foreign, null);
+  await m.stopServer();
+  m.setAuth("password");
+  assert.equal(m.getState().foreign, null);
+});
+
+test("dismissForeign clears the prompt without any host call", async () => {
+  const calls: string[] = [];
+  const m = filled(fakeIo({ async stop() { calls.push("stop"); throw foreignError; } }));
+  await m.stopServer();
+  m.dismissForeign();
+  assert.equal(m.getState().foreign, null);
+  assert.deepEqual(calls, ["stop"]);
+});
+
+test("createSshServerIo: stop and uninstall send force, and the password only as an argument", async () => {
+  const calls: [string, Record<string, unknown> | undefined][] = [];
+  const io = createSshServerIo(async <T>(command: string, args?: Record<string, unknown>) => {
+    calls.push([command, args]);
+    return status as unknown as T;
+  });
+  const target: SshServerTarget = { host: "server.example.com", port: 22, user: "deploy", keyPath: "", auth: "password" };
+  await io.stop(target, undefined, false);
+  await io.stop(target, "hunter2", true);
+  await io.uninstall("hunter2", "server.example.com", true);
+  await io.uninstall(undefined, "server.example.com", false);
+  assert.deepEqual(calls, [
+    ["remote_ssh_server_stop", { target, force: false }],
+    ["remote_ssh_server_stop", { target, password: "hunter2", force: true }],
+    ["remote_ssh_server_uninstall", { confirmHost: "server.example.com", password: "hunter2", force: true }],
+    ["remote_ssh_server_uninstall", { confirmHost: "server.example.com", force: false }],
+  ]);
+});
+
+test("error text: the timeout and busy start read as fixed sentences; forward, glibc and mismatch show the host's message", () => {
+  assert.equal(sshServerErrorText({ code: "SSH_TIMEOUT", message: "x" }), "The server did not answer in time.");
+  assert.equal(sshServerErrorText({ code: "SSH_START_BUSY", message: "x" }), "The server is already starting. Try again in a moment.");
+  const forward = "The local port for this server is in use. Quit the other program and connect again.";
+  assert.equal(sshServerErrorText({ code: "SSH_FORWARD_FAILED", message: forward }), forward);
+  const glibc = "This server's system libraries are too old for the standard server bundle (glibc 2.31; 2.34 needed). Build the compatible bundle and try again.";
+  assert.equal(sshServerErrorText({ code: "SSH_GLIBC_TOO_OLD", message: glibc }), glibc);
+  assert.equal(sshServerErrorText({ code: "confirm_mismatch", message: "Those are not the saved server's details." }), "Those are not the saved server's details.");
+});
+
+test("decodeSshServerTest: glibc is the version text when present; absent or a wrong type reads as null", () => {
+  assert.equal(decodeSshServerTest({ ...trusted, glibc: "2.31" })?.glibc, "2.31");
+  const { glibc: _absent, ...older } = trusted;
+  assert.equal(decodeSshServerTest(older)?.glibc, null, "an older host build still decodes");
+  assert.equal(decodeSshServerTest({ ...trusted, glibc: 231 })?.glibc, null);
+  assert.equal(decodeSshServerTest({ ...trusted, glibc: "two" })?.glibc, null);
+  assert.equal(decodeSshServerTest({ ...trusted, glibc: null })?.glibc, null);
 });

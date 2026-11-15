@@ -53,7 +53,9 @@ test('status: mode "ssh" + link "reconnecting" decodes; link "weird" decodes to 
   assert.equal(isRemoteCoreMode("remote"), true);
   assert.equal(isRemoteCoreMode("local"), false);
   assert.equal(isRemoteCoreMode(undefined), false);
-  assert.equal(sshForwardReady(s), true);
+  // A reconnecting forward is not usable: its local port may be held by another process until the link returns.
+  assert.equal(sshForwardReady(s), false);
+  assert.equal(sshForwardReady({ ...s, link: "connected" }), true);
   assert.equal(sshForwardReady({ ...s, link: "needs_password" }), false);
   assert.equal(sshForwardReady({ ...s, url: "" }), false);
 });

@@ -61,6 +61,8 @@ export interface SshServerTest {
   installedVersion: string | null;
   /** `missing` or the Claude Code version text; null until the key is trusted. */
   claude: string | null;
+  /** The server's glibc version (`x.y`), or null when unknown or when an older host does not send it. */
+  glibc: string | null;
 }
 
 /** The ssh server link as Settings shows it. `off`: not ssh mode; `restart_required`: saved, applies at the next start. */

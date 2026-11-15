@@ -22,17 +22,25 @@ export type SshServerBusy = "test" | "confirm" | "connect" | "disconnect" | "sta
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNullableString = (v: unknown): v is string | null => v === null || typeof v === "string";
 const SSH_LINKS: readonly SshServerLink[] = ["off", "restart_required", "connecting", "connected", "reconnecting", "needs_password", "failed", "stopped"];
+const GLIBC_VERSION = /^\d+\.\d+$/;
+/** The stop or uninstall the foreign-core prompt asks to repeat with `force`. */
+export type SshForeignAction = "stop" | "uninstall";
+/** Shown for a server another computer started. The same sentence for stop and for uninstall. */
+export const SSH_FOREIGN_TEXT = "Another computer started the server on this account. Stopping it ends that computer's work.";
+const isForeignCore = (e: unknown): boolean => isRecord(e) && e.code === "SSH_CORE_FOREIGN";
 
 /** Strict decode of `remote_ssh_server_test` / `_confirm`; any wrong type reads as null (the host answered something unknown). */
 export function decodeSshServerTest(raw: unknown): SshServerTest | null {
   if (!isRecord(raw)) return null;
-  const { hostKeyType, fingerprint, trusted, changed, os, arch, freeMb, installedVersion, claude } = raw;
+  const { hostKeyType, fingerprint, trusted, changed, os, arch, freeMb, installedVersion, claude, glibc } = raw;
   if (typeof hostKeyType !== "string" || hostKeyType.length === 0) return null;
   if (typeof fingerprint !== "string" || fingerprint.length === 0) return null;
   if (typeof trusted !== "boolean" || typeof changed !== "boolean") return null;
   if (!isNullableString(os) || !isNullableString(arch) || !isNullableString(installedVersion) || !isNullableString(claude)) return null;
   if (freeMb !== null && (typeof freeMb !== "number" || !Number.isFinite(freeMb))) return null;
-  return { hostKeyType, fingerprint, trusted, changed, os, arch, freeMb, installedVersion, claude };
+  // glibc is optional: an older host build does not send it, and a wrong type must not fail the whole test answer.
+  const glibcVersion = typeof glibc === "string" && GLIBC_VERSION.test(glibc) ? glibc : null;
+  return { hostKeyType, fingerprint, trusted, changed, os, arch, freeMb, installedVersion, claude, glibc: glibcVersion };
 }
 
 /** Strict decode of a `remote_ssh_server_*` status. An unknown link reads as `failed`, like the core status does. */
@@ -61,6 +69,14 @@ export function sshServerErrorText(e: unknown): string {
     case "SSH_HOST_KEY_UNCONFIRMED": return "Test the connection and confirm the server's host key first.";
     case "SSH_HOST_KEY_CHANGED": return "The server's host key changed. Test the connection again and confirm the new fingerprint.";
     case "SSH_CORE_FOREIGN": return "Another computer started the server on this account. This version supports one desktop per server account.";
+    case "SSH_TIMEOUT": return "The server did not answer in time.";
+    case "SSH_START_BUSY": return "The server is already starting. Try again in a moment.";
+    // The host's own sentences are the user-facing text for these; they name the next step.
+    case "SSH_FORWARD_FAILED":
+    case "SSH_GLIBC_TOO_OLD":
+    case "confirm_mismatch":
+      if (message.length > 0) return message.slice(0, 300);
+      return "The SSH server request failed.";
     case "SSH_BUNDLE_MISSING": return "This build has no Linux server bundle.";
     // Key install: the host reports these codes; the sentences say what the user can do next.
     case "SSH_KEY_NOT_NEEDED": return "This server already uses a key.";
@@ -138,8 +154,9 @@ export interface SshServerIo {
   connect(target: SshServerTarget, password?: string): Promise<SshServerStatus>;
   disconnect(): Promise<SshServerStatus>;
   status(): Promise<SshServerStatus>;
-  stop(password?: string): Promise<SshServerStatus>;
-  uninstall(password: string | undefined, confirmHost: string): Promise<SshServerStatus>;
+  /** The target is the form's current one: the host stops the server only when it is the saved one. */
+  stop(target: SshServerTarget, password: string | undefined, force: boolean): Promise<SshServerStatus>;
+  uninstall(password: string | undefined, confirmHost: string, force: boolean): Promise<SshServerStatus>;
 }
 
 export type SshInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -169,11 +186,11 @@ export function createSshServerIo(invoke: SshInvoke): SshServerIo {
     async status() {
       return decodeOrThrow(await invoke<unknown>("remote_ssh_server_status"), decodeSshServerStatus);
     },
-    async stop(password) {
-      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_stop", withPassword({}, password)), decodeSshServerStatus);
+    async stop(target, password, force) {
+      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_stop", withPassword({ target, force }, password)), decodeSshServerStatus);
     },
-    async uninstall(password, confirmHost) {
-      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_uninstall", withPassword({ confirmHost }, password)), decodeSshServerStatus);
+    async uninstall(password, confirmHost, force) {
+      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_uninstall", withPassword({ confirmHost, force }, password)), decodeSshServerStatus);
     },
     async saved() {
       const view = decodePrefsView(await invoke<unknown>("get_prefs"));
@@ -202,6 +219,8 @@ export interface SshServerState {
   /** The last status the host reported. */
   status: SshServerStatus | null;
   error: string | null;
+  /** Set when a stop or uninstall found a core another computer started: the action waits for an explicit "anyway". */
+  foreign: SshForeignAction | null;
 }
 
 export const SSH_SERVER_INITIAL: SshServerState = {
@@ -215,6 +234,7 @@ export const SSH_SERVER_INITIAL: SshServerState = {
   test: null,
   status: null,
   error: null,
+  foreign: null,
 };
 
 export class SshServerModel extends Store<SshServerState> {
@@ -230,7 +250,7 @@ export class SshServerModel extends Store<SshServerState> {
     this.#generation += 1;
     const fieldErrors = { ...this.getState().fieldErrors };
     delete fieldErrors[field];
-    const patch: Partial<SshServerState> = { fieldErrors, error: null };
+    const patch: Partial<SshServerState> = { fieldErrors, error: null, foreign: null };
     if (field === "host") patch.host = value;
     else if (field === "port") patch.port = value;
     else if (field === "user") patch.user = value;
@@ -244,7 +264,7 @@ export class SshServerModel extends Store<SshServerState> {
     this.#generation += 1;
     const fieldErrors = { ...this.getState().fieldErrors };
     delete fieldErrors.keyPath;
-    this.set({ auth, fieldErrors, error: null });
+    this.set({ auth, fieldErrors, error: null, foreign: null });
   }
 
   /** The target the host receives: exactly the non-secret fields. */
@@ -359,9 +379,19 @@ export class SshServerModel extends Store<SshServerState> {
     return this.run("disconnect", () => this.#io.disconnect());
   }
 
-  /** Stop the server process on the server. */
-  stopServer(password?: string): Promise<SshServerStatus | null> {
-    return this.run("stop", () => this.#io.stop(password));
+  /**
+   * Stop the server process on the server. The form's current target is sent, so the host stops the server the
+   * dialog names. `force` repeats the call after the user accepted the foreign-core prompt.
+   */
+  stopServer(password?: string, options: { force?: boolean } = {}): Promise<SshServerStatus | null> {
+    const target = this.target();
+    const force = options.force === true;
+    return this.run("stop", () => this.#io.stop(target, password, force), false, "stop");
+  }
+
+  /** The user chose Cancel on the foreign-core prompt: nothing is sent. */
+  dismissForeign(): void {
+    this.set({ foreign: null });
   }
 
   /**
@@ -378,13 +408,14 @@ export class SshServerModel extends Store<SshServerState> {
    * Remove the server install. The typed host name is checked here, against the target, before anything is sent;
    * a mismatch is refused with an error and no host call. The host checks the saved name again.
    */
-  uninstall(password: string | undefined, typedHost: string): Promise<SshServerStatus | null> {
+  uninstall(password: string | undefined, typedHost: string, options: { force?: boolean } = {}): Promise<SshServerStatus | null> {
     const target = this.getState().host.trim();
     if (!uninstallConfirmed(typedHost, target)) {
       this.set({ error: SSH_TEXT.uninstallMismatch });
       return Promise.resolve(null);
     }
-    return this.run("uninstall", () => this.#io.uninstall(password, target));
+    const force = options.force === true;
+    return this.run("uninstall", () => this.#io.uninstall(password, target, force), false, "uninstall");
   }
 
   private async reloadSaved(): Promise<void> {
@@ -396,19 +427,27 @@ export class SshServerModel extends Store<SshServerState> {
     }
   }
 
-  /** `scoped`: the answer is about the target it was asked for, so a change of target while it runs drops it. */
-  private async run(busy: SshServerBusy, action: () => Promise<SshServerStatus>, scoped = false): Promise<SshServerStatus | null> {
+  /**
+   * `scoped`: the answer is about the target it was asked for, so a change of target while it runs drops it.
+   * `foreignAction`: a stop or uninstall, whose SSH_CORE_FOREIGN answer asks for confirmation instead of showing an error.
+   */
+  private async run(busy: SshServerBusy, action: () => Promise<SshServerStatus>, scoped = false, foreignAction: SshForeignAction | null = null): Promise<SshServerStatus | null> {
     if (this.getState().busy) return null;
     this.set({ busy, error: null });
     const generation = this.#generation;
     try {
       const status = await action();
       if (scoped && generation !== this.#generation) return null;
-      this.set({ status, error: null });
+      // A background status read does not count as an action: it must not close a prompt the user has not answered.
+      this.set(busy === "status" ? { status, error: null } : { status, error: null, foreign: null });
       return status;
     } catch (e) {
       if (scoped && generation !== this.#generation) return null;
-      this.set({ error: sshServerErrorText(e) });
+      if (foreignAction !== null && isForeignCore(e)) {
+        this.set({ foreign: foreignAction, error: null });
+        return null;
+      }
+      this.set(foreignAction !== null ? { error: sshServerErrorText(e), foreign: null } : { error: sshServerErrorText(e) });
       return null;
     } finally {
       this.set({ busy: null });

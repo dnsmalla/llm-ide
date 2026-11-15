@@ -28,6 +28,8 @@ test("ssh mode: reconnecting is a warning", () => {
   const v = view(ssh({ link: "reconnecting" }));
   assert.equal(v.level, "warn");
   assert.equal(v.label, "Reconnecting to the SSH server…");
+  // The core cannot serve requests while the forward is down: the same "core is down" presentation as a stopped core.
+  assert.equal(v.down, true);
 });
 
 test("ssh mode: needs_password asks for the password as a warning", () => {

@@ -1,8 +1,9 @@
 // Settings → Server & Backend → SSH server: the card's layout. Everything it shows comes from SshServerModel's state
 // and the two UI-only values the card owns (the password, which confirmation is open). It holds no host answer itself.
 import { useEffect, useRef, type ReactNode } from "react";
+import { StatusBanner } from "@llmide/ui-kit";
 import { ErrorText, Field, Button } from "../ui.tsx";
-import { sshBadgeText, type SshServerModel, type SshServerState } from "../ssh-server-model.ts";
+import { SSH_FOREIGN_TEXT, sshBadgeText, type SshServerModel, type SshServerState } from "../ssh-server-model.ts";
 
 /** Which confirmation is open, and the host it was opened for (a dialog never follows a host change). */
 export interface SshDialog { kind: "stop" | "uninstall"; host: string }
@@ -177,6 +178,25 @@ export function SshServerView({ m, s, password, onPassword, dialog, onDialog, on
           onCancel={() => onDialog(null)}
           onConfirm={(typed) => { onDialog(null); void m.uninstall(pw, typed); }}
         />
+      ) : null}
+      {/* The host refused a stop or uninstall because another computer started the core: only an explicit "anyway" repeats it. */}
+      {s.foreign !== null ? (
+        <div className="st-dialog" role="alertdialog" aria-label="Another computer started the server">
+          <StatusBanner severity="warning" message={SSH_FOREIGN_TEXT} />
+          <div className="st-row">
+            <Button
+              tone="danger"
+              disabled={busy}
+              onClick={() => {
+                if (s.foreign === "stop") void m.stopServer(pw, { force: true });
+                else if (s.foreign === "uninstall") void m.uninstall(pw, s.host.trim(), { force: true });
+              }}
+            >
+              {s.foreign === "stop" ? "Stop it anyway" : "Uninstall anyway"}
+            </Button>
+            <Button disabled={busy} onClick={() => m.dismissForeign()}>Cancel</Button>
+          </div>
+        </div>
       ) : null}
 
       <ErrorText text={s.error} />

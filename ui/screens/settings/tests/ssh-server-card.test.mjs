@@ -236,3 +236,62 @@ test("the SSH to Local switch names the SSH server; the hub text is unchanged", 
   assert.match(m.SSH_LOCAL_CONFIRM, /stops using the SSH server/);
   assert.equal(m.REMOTE_TEXT.localConfirm, "Switching to Local desktop stops using the hub and restarts the core on this computer.");
 });
+
+// The view is a plain function over the model (no hooks), so its element tree can be walked and a button's handler
+// called without a DOM: this is how the forced retries are exercised.
+const TREE = (model, extra = {}) => m.SshServerView({ m: model, s: model.getState(), password: "", onPassword() {}, dialog: null, onDialog() {}, onRestart() {}, ...extra });
+function findButton(node, label) {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findButton(child, label);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!node || typeof node !== "object" || !node.props) return null;
+  if (node.props.children === label && typeof node.props.onClick === "function") return node;
+  return findButton(node.props.children, label);
+}
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const FOREIGN_SENTENCE = "Another computer started the server on this account. Stopping it ends that computer's work.";
+const FOREIGN = { code: "SSH_CORE_FOREIGN", message: "Another computer started the server on this account." };
+
+test("the test result shows the glibc version when the host reports it, and nothing when it does not", async () => {
+  const withGlibc = await model({ test: async () => ({ ...TRUSTED, glibc: "2.31" }) }, async (x) => { await x.test(); });
+  assert.match(plain(renderToStaticMarkup(VIEW(withGlibc))), /System libraries: glibc 2\.31/);
+  const without = await model({ test: async () => ({ ...TRUSTED, glibc: null }) }, async (x) => { await x.test(); });
+  assert.doesNotMatch(plain(renderToStaticMarkup(VIEW(without))), /System libraries/);
+});
+
+test("a foreign core: stop shows the warning with Stop it anyway, uninstall with Uninstall anyway", async () => {
+  const stopped = await model({ stop: async () => { throw FOREIGN; } }, async (x) => { await x.stopServer(); });
+  const stopHtml = plain(renderToStaticMarkup(VIEW(stopped)));
+  assert.ok(stopHtml.includes(FOREIGN_SENTENCE), "the warning sentence");
+  assert.match(stopHtml, /Stop it anyway/);
+  assert.doesNotMatch(stopHtml, /Uninstall anyway/);
+  const uninstalled = await model({ uninstall: async () => { throw FOREIGN; } }, async (x) => { await x.uninstall(undefined, "server.example.com"); });
+  const uninstallHtml = plain(renderToStaticMarkup(VIEW(uninstalled)));
+  assert.ok(uninstallHtml.includes(FOREIGN_SENTENCE), "the same sentence for uninstall");
+  assert.match(uninstallHtml, /Uninstall anyway/);
+  assert.doesNotMatch(uninstallHtml, /Stop it anyway/);
+  assert.doesNotMatch(plain(renderToStaticMarkup(VIEW(await model()))), /anyway/, "no warning without a foreign core");
+});
+
+test("Stop it anyway and Uninstall anyway repeat the call with force true; Cancel clears the warning", async () => {
+  const calls = [];
+  const stopModel = await model({ stop: async (_target, _password, force) => { calls.push(["stop", force]); if (!force) throw FOREIGN; return status("stopped"); } }, async (x) => { await x.stopServer(); });
+  findButton(TREE(stopModel), "Stop it anyway").props.onClick();
+  await tick();
+  assert.deepEqual(calls, [["stop", false], ["stop", true]]);
+  assert.equal(stopModel.getState().foreign, null, "a forced stop that succeeds leaves no warning");
+
+  const uninstallModel = await model({ uninstall: async (_password, _host, force) => { calls.push(["uninstall", force]); if (!force) throw FOREIGN; return status("off"); } }, async (x) => { await x.uninstall(undefined, "server.example.com"); });
+  findButton(TREE(uninstallModel), "Uninstall anyway").props.onClick();
+  await tick();
+  assert.deepEqual(calls.slice(2), [["uninstall", false], ["uninstall", true]]);
+
+  const cancelled = await model({ stop: async () => { throw FOREIGN; } }, async (x) => { await x.stopServer(); });
+  findButton(TREE(cancelled), "Cancel").props.onClick();
+  assert.equal(cancelled.getState().foreign, null);
+  assert.equal(calls.length, 4, "Cancel calls nothing");
+});

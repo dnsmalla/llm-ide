@@ -31,6 +31,7 @@ export function TestSummary({ test }: { test: SshServerTest }): ReactNode {
   return (
     <div className="st-note" role="status" aria-label="Server check">
       <p className="st-ok">{system}</p>
+      {test.glibc ? <p className="st-hint">{`System libraries: glibc ${test.glibc}`}</p> : null}
       <p className="st-hint">{disk}</p>
       <p className="st-hint">{test.installedVersion ? `Server part: version ${test.installedVersion}` : "Server part: not installed yet"}</p>
       {test.claude === "missing" ? <StatusBanner severity="warning" message={CLAUDE_MISSING_TEXT} /> : null}
