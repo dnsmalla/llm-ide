@@ -52,6 +52,24 @@ for (const s of stages) {
     const ok = r.status === 200 && !body.error;
     results.push({ name: s.name, kind: s.kind, ok, status: r.status, reply: String(body.reply ?? "").slice(0, 1000), error: body.error ?? null, at });
     if (!ok && s.severity === "blocking") { passed = false; break; }
+  } else if (s.kind === "regressionSweep") {
+    const r = spawnSync("/opt/llmide-node/bin/node", ["--experimental-strip-types", "/opt/llmide-remote/loop-native/host-regression.mjs", runRoot], { encoding: "utf8", timeout: (s.timeoutSeconds || 900) * 1000, env: { ...process.env, LLMIDE_TOKEN: login.accessToken } });
+    const ok = r.status === 0;
+    results.push({ name: s.name, kind: s.kind, ok, exitCode: r.status, stdout: String(r.stdout ?? "").slice(0, 2000), stderr: String(r.stderr ?? "").slice(0, 1000), at });
+    if (!ok && s.severity === "blocking") { passed = false; break; }
+  } else if (s.kind === "testPrune") {
+    const r = spawnSync("/opt/llmide-node/bin/node", ["--experimental-strip-types", "/opt/llmide-remote/loop-native/host-testmap.mjs", runRoot, "prune"], { encoding: "utf8", timeout: (s.timeoutSeconds || 900) * 1000 });
+    const ok = r.status === 0;
+    results.push({ name: s.name, kind: s.kind, ok, exitCode: r.status, stdout: String(r.stdout ?? "").slice(0, 2000), stderr: String(r.stderr ?? "").slice(0, 1000), at });
+    if (!ok && s.severity === "blocking") { passed = false; break; }
+  } else if (s.kind === "artifactCheck") {
+    if (!s.check) { results.push({ name: s.name, kind: s.kind, ok: false, output: "no check configuration", at }); passed = false; break; }
+    const tmp = path.join("/tmp", `llmide-artifact-${Date.now()}.json`);
+    fs.writeFileSync(tmp, JSON.stringify({ check: s.check, stages }));
+    const r = spawnSync("/opt/llmide-node/bin/node", ["--experimental-strip-types", "/opt/llmide-remote/loop-native/host-artifact.mjs", runRoot, tmp], { encoding: "utf8", timeout: (s.timeoutSeconds || 300) * 1000 });
+    const ok = r.status === 0;
+    results.push({ name: s.name, kind: s.kind, ok, exitCode: r.status, stdout: String(r.stdout ?? "").slice(0, 2000), stderr: String(r.stderr ?? "").slice(0, 1000), at });
+    if (!ok && s.severity === "blocking") { passed = false; break; }
   } else if (s.kind === "codeGraph") {
     const outDir = path.join(runRoot, "system/loop-runs/host/graph");
     fs.mkdirSync(outDir, { recursive: true });

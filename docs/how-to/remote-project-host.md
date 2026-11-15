@@ -199,7 +199,9 @@ Host API.
 - `codeGraph` runs the bundled GraphKit CLI (`/opt/llmide-remote/graph-kit.js`) into `system/loop-runs/host/graph`
 - `testMap` `structure`, `map` and `ledger` reuse the desktop's pure TypeScript logic through `host-testmap.mjs`
 - `map` uses the host graph when present
-- `artifactCheck`, `testPrune` and `regressionSweep` are skipped
+- `artifactCheck` runs the desktop's deterministic checks through `host-artifact.mjs`
+- `testPrune` writes its report through `host-testmap.mjs prune`
+- `regressionSweep` re-verifies fixed faults through `host-regression.mjs`
 - a git project runs in `.llmide-loop-worktrees/run-<timestamp>` (a detached worktree from HEAD), not in the live folder
 - the run record is written to `llm-doc/loop/host/<timestamp>/run.json` **inside that worktree**
 - the worktree is left for review; add `.llmide-loop-worktrees/` to the project's `.gitignore`

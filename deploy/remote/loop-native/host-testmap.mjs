@@ -4,6 +4,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { detectTestStructure, writeTestStructure, buildTestMap, writeTestMap, parseTestResults, ledgerDiff, readLedger, writeLedger } from "./testmap.ts";
+import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 
 const root = path.resolve(process.argv[2] || "");
 const op = process.argv[3];
@@ -29,6 +30,13 @@ if (op === "map") {
   const map = await buildTestMap(api, "", structure, "system/loop/refactor/graph/graph-code.json", new Date(), scope);
   const w = await writeTestMap(api, "", map);
   console.log(JSON.stringify({ op, entries: map.entries.length, untested: map.untestedFunctions, tested: map.testedFunctions, md: w.md, json: w.json }));
+  process.exit(0);
+}
+if (op === "prune") {
+  const notes = [];
+  const findings = await scanTestPrune(api, "", structure, notes);
+  const p = await writeTestPrune(api, "", findings);
+  console.log(JSON.stringify({ op, findings: findings.length, notes, path: p }));
   process.exit(0);
 }
 if (op === "ledger") {
