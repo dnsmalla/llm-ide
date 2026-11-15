@@ -50,6 +50,8 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
   const [cards, setCards] = useState<RunCard[]>([]);
   const [live, setLive] = useState<LiveLoopCard | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped only by the Refresh button; the 5 s interval refreshes inside the effect without re-running it.
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!active) return;
@@ -79,7 +81,7 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
     refresh();
     const timer = window.setInterval(() => { if (!document.hidden) refresh(); }, 5_000);
     return () => { alive = false; window.clearInterval(timer); };
-  }, [fs, projectRoot, scope, active]);
+  }, [fs, projectRoot, scope, active, reload]);
 
   useEffect(() => {
     const onLive = () => setLive(readLiveCard());
@@ -125,7 +127,7 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
           <p className="fx-summary">{cards.length} run{cards.length === 1 ? "" : "s"}</p>
         </div>
         <span className="fx-spacer" />
-        <button type="button" className="fx-btn" onClick={() => setTick((n) => n + 1)}>Refresh</button>
+        <button type="button" className="fx-btn" onClick={() => setReload((n) => n + 1)}>Refresh</button>
       </header>
       {error ? <p className="fx-error" role="status">{error}</p> : null}
       <div className="fx-lanes" role="list" aria-label={`${scope} board`}>
