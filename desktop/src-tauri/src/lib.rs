@@ -52,6 +52,7 @@ mod prefs;
 mod project_search;
 mod pty;
 mod remote;
+mod ssh_transport;
 mod remote_deploy;
 mod remote_hub;
 mod remote_session;
