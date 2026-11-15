@@ -217,6 +217,14 @@ pub struct Prefs {
     pub host_api_compose: bool,
     pub host_api_push: bool,
     pub host_api_tool_approvals: bool,
+    /// Opt-in, default OFF: serve `files.write` / `git.commit` / `git.push` / `terminal.exec` to paired devices
+    /// (`LLMIDE_HOST_API_WORKSPACE_WRITE=1`). A remote edit can change a test script, so this is code execution.
+    #[serde(default)]
+    pub host_api_workspace_write: bool,
+    /// Opt-in, default OFF: serve `terminal.shell` (`LLMIDE_HOST_API_SHELL=1`). Only passed while workspace write is
+    /// on, so the core never serves a full shell without the narrower capability.
+    #[serde(default)]
+    pub host_api_shell: bool,
     /// Set once the three default-on capabilities above were restored for a file that predates this field. A missing
     /// key reads as false (the file is old); `Default` is true (a fresh install needs no migration).
     #[serde(default)]
@@ -240,7 +248,7 @@ impl Default for Prefs {
             lta_mode: LtaMode::Off, router: false, cap: false, compress: false, learn: false, continue_summary: false, terminal: true, theme: Theme::Dark,
             features: Vec::new(), backend_source: false, backend_node: String::new(), backend_dir: String::new(), backend_port: 0, backend_auto_start: true,
             remote_server: RemoteServerPrefs::default(),
-            host_api_tls: false, host_api_read: true, host_api_compose: true, host_api_push: false, host_api_tool_approvals: true, host_api_caps_migrated: true,
+            host_api_tls: false, host_api_read: true, host_api_compose: true, host_api_push: false, host_api_tool_approvals: true, host_api_workspace_write: false, host_api_shell: false, host_api_caps_migrated: true,
             host_api_web_origins: Vec::new(),
             loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0, update_checks: true, notifications: NotifyPrefs::default(),
         }
@@ -271,6 +279,8 @@ pub struct PrefsPatch {
     pub host_api_compose: Option<bool>,
     pub host_api_push: Option<bool>,
     pub host_api_tool_approvals: Option<bool>,
+    pub host_api_workspace_write: Option<bool>,
+    pub host_api_shell: Option<bool>,
     pub host_api_web_origins: Option<Vec<String>>,
     pub loop_defaults: Option<LoopDefaults>,
     pub graph_auto_update_minutes: Option<u32>,
@@ -370,6 +380,8 @@ impl Prefs {
         if let Some(v) = p.host_api_compose { n.host_api_compose = v; }
         if let Some(v) = p.host_api_push { n.host_api_push = v; }
         if let Some(v) = p.host_api_tool_approvals { n.host_api_tool_approvals = v; }
+        if let Some(v) = p.host_api_workspace_write { n.host_api_workspace_write = v; }
+        if let Some(v) = p.host_api_shell { n.host_api_shell = v; }
         if let Some(v) = &p.host_api_web_origins { n.host_api_web_origins = normalize_web_origins(v); }
         if let Some(v) = &p.loop_defaults {
             n.loop_defaults = v.clone().clamped();
@@ -466,6 +478,7 @@ fn from_stored(p: &Prefs) -> Prefs {
             remote_server: Some(p.remote_server.clone()),
             host_api_tls: Some(p.host_api_tls), host_api_read: Some(p.host_api_read), host_api_compose: Some(p.host_api_compose),
             host_api_push: Some(p.host_api_push), host_api_tool_approvals: Some(p.host_api_tool_approvals),
+            host_api_workspace_write: Some(p.host_api_workspace_write), host_api_shell: Some(p.host_api_shell),
             host_api_web_origins: Some(p.host_api_web_origins.clone()),
             loop_defaults: Some(p.loop_defaults.clone()), graph_auto_update_minutes: Some(p.graph_auto_update_minutes),
             update_checks: Some(p.update_checks), notifications: Some(p.notifications),
@@ -582,6 +595,12 @@ pub fn core_env_pairs(p: &Prefs, host_features: Option<&str>) -> Vec<(&'static s
     v.push(("LLMIDE_HOST_API_COMPOSE", flag(p.host_api_compose)));
     if p.host_api_push { v.push(("LLMIDE_HOST_API_PUSH", "1".to_string())); }
     v.push(("LLMIDE_HOST_API_TOOL_APPROVALS", flag(p.host_api_tool_approvals)));
+    // Default OFF and omitted when off (like push): a stale value in the host env must not be the only thing that
+    // decides whether a remote device can write files or run a shell. Shell is gated on workspace write.
+    if p.host_api_workspace_write {
+        v.push(("LLMIDE_HOST_API_WORKSPACE_WRITE", "1".to_string()));
+        if p.host_api_shell { v.push(("LLMIDE_HOST_API_SHELL", "1".to_string())); }
+    }
     if !p.host_api_web_origins.is_empty() { v.push(("LLMIDE_HOST_API_WEB_ORIGINS", p.host_api_web_origins.join(","))); }
     if !p.terminal || !p.features.is_empty() {
         if let Some(f) = effective_features_with(host_features, p.terminal, &p.features) { v.push(("LLMIDE_FEATURES", f)); }
@@ -825,6 +844,24 @@ mod tests {
         assert_eq!(d.lta_mode, LtaMode::Off);
         assert!(d.terminal);
         assert!(without_host_api(core_env_pairs(&d, None)).is_empty(), "defaults pass nothing else to the core");
+    }
+
+    #[test]
+    fn workspace_write_and_shell_are_opt_in_and_shell_needs_write() {
+        let d = Prefs::default();
+        assert!(!d.host_api_workspace_write && !d.host_api_shell);
+        let keys = |p: &Prefs| core_env_pairs(p, None).into_iter().map(|(k, _)| k).collect::<Vec<_>>();
+        assert!(!keys(&d).contains(&"LLMIDE_HOST_API_WORKSPACE_WRITE") && !keys(&d).contains(&"LLMIDE_HOST_API_SHELL"));
+        let shell_only = Prefs { host_api_shell: true, ..Prefs::default() };
+        assert!(!keys(&shell_only).contains(&"LLMIDE_HOST_API_SHELL"), "shell alone is never passed");
+        let write = d.patched(&PrefsPatch { host_api_workspace_write: Some(true), ..Default::default() });
+        assert!(core_env_pairs(&write, None).contains(&("LLMIDE_HOST_API_WORKSPACE_WRITE", "1".to_string())));
+        assert!(!keys(&write).contains(&"LLMIDE_HOST_API_SHELL"));
+        let both = write.patched(&PrefsPatch { host_api_shell: Some(true), ..Default::default() });
+        assert!(core_env_pairs(&both, None).contains(&("LLMIDE_HOST_API_SHELL", "1".to_string())));
+        let back = parse(&serde_json::to_string(&both).unwrap());
+        assert!(back.host_api_workspace_write && back.host_api_shell);
+        assert!(!parse(r#"{"terminal":true}"#).host_api_workspace_write, "old files default to off");
     }
 
     #[test]

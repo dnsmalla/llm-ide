@@ -72,6 +72,7 @@ test("the hub env serves Host API read but never compose or tool approvals", () 
   assert.doesNotMatch(installer, /LLMIDE_HOST_API_(COMPOSE|TOOL_APPROVALS)/);
   const deploy = read("llmide-deploy");
   assert.match(deploy, /\|LLMIDE_HOST_API_READ\|/, "the env allowlist accepts READ");
+  assert.match(deploy, /\|LLMIDE_HOST_API_WORKSPACE_WRITE\|LLMIDE_HOST_API_SHELL\|/, "the env allowlist accepts the opt-in write and shell switches");
   assert.doesNotMatch(deploy, /LLMIDE_HOST_API_(COMPOSE|TOOL_APPROVALS)/);
 });
 

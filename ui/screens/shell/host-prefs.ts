@@ -73,6 +73,10 @@ export interface HostPrefs {
   hostApiCompose: boolean;
   hostApiPush: boolean;
   hostApiToolApprovals: boolean;
+  /** Opt-in: remote files.write / git.commit / git.push / terminal.exec (`LLMIDE_HOST_API_WORKSPACE_WRITE`). */
+  hostApiWorkspaceWrite: boolean;
+  /** Opt-in: remote terminal.shell (`LLMIDE_HOST_API_SHELL`); the host only passes it while workspace write is on. */
+  hostApiShell: boolean;
   /** Browser origins allowed to connect directly (`LLMIDE_HOST_API_WEB_ORIGINS`); the host normalises them on save. */
   hostApiWebOrigins: string[];
   /** Host-owned marker of the one-time migration that turned read/compose/tool approvals on; never set from the UI. */
@@ -154,6 +158,7 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
   const remoteServer = decodeRemoteServer(raw.remoteServer);
   return { ltaMode, router: router as boolean, cap: cap as boolean, compress: compress as boolean, learn: learn as boolean, continueSummary, terminal: terminal as boolean, theme, features, backendSource, backendNode, backendDir, backendPort, backendAutoStart, remoteServer,
     hostApiTls: raw.hostApiTls === true, hostApiRead: raw.hostApiRead === true, hostApiCompose: raw.hostApiCompose === true, hostApiPush: raw.hostApiPush === true, hostApiToolApprovals: raw.hostApiToolApprovals === true,
+    hostApiWorkspaceWrite: raw.hostApiWorkspaceWrite === true, hostApiShell: raw.hostApiShell === true,
     hostApiWebOrigins: Array.isArray(raw.hostApiWebOrigins) ? raw.hostApiWebOrigins.filter((x): x is string => typeof x === "string" && x.length <= 300).slice(0, 10) : [],
     hostApiCapsMigrated: raw.hostApiCapsMigrated === true, loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
 }

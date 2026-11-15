@@ -241,6 +241,7 @@ export function HostApiPairingView({ devices, pin, now, busy, error, notice, con
 /** The five Host API v1 capabilities the desktop passes to the core it spawns (desktop prefs, exact `1`). */
 export interface HostApiPrefs {
   hostApiTls: boolean; hostApiRead: boolean; hostApiCompose: boolean; hostApiPush: boolean; hostApiToolApprovals: boolean;
+  hostApiWorkspaceWrite: boolean; hostApiShell: boolean;
   /** Browser origins allowed to connect directly (normalised by the host on save). */
   hostApiWebOrigins: string[];
 }
@@ -297,6 +298,13 @@ export function HostApiSettingsView({ prefs, onSave }: { prefs: HostApiPrefs; on
       <Switch label="Let paired devices compose chats (modes, models, new chat)" checked={prefs.hostApiCompose} onChange={(v) => onSave({ hostApiCompose: v })} />
       <Switch label="Send push notifications to paired devices" checked={prefs.hostApiPush} onChange={(v) => onSave({ hostApiPush: v })} />
       <Switch label="Let paired devices answer tool approvals" checked={prefs.hostApiToolApprovals} onChange={(v) => onSave({ hostApiToolApprovals: v })} />
+      <Switch label="Allow remote edits, commit, push and tests" checked={prefs.hostApiWorkspaceWrite === true}
+        hint="Warning: a paired device can change files, including test scripts, so this lets it run code on this machine. Applies after the core restarts; devices must re-pair to receive it."
+        onChange={(v) => onSave(v ? { hostApiWorkspaceWrite: true } : { hostApiWorkspaceWrite: false, hostApiShell: false })} />
+      <Switch label="Allow remote full shell" checked={prefs.hostApiShell === true && prefs.hostApiWorkspaceWrite === true}
+        disabled={prefs.hostApiWorkspaceWrite !== true}
+        hint="Needs remote edits above. Gives a paired device an unrestricted shell. Applies after the core restarts; devices must re-pair to receive it."
+        onChange={(v) => onSave({ hostApiShell: v })} />
       <AllowedOriginsEditor origins={prefs.hostApiWebOrigins ?? []} onChange={(next) => onSave({ hostApiWebOrigins: next })} />
       <p className="st-hint">Applies on the next core start.</p>
     </div>
@@ -326,7 +334,7 @@ export default function HostApiPairing(): ReactNode {
   useEffect(() => {
     let live = true;
     void host.getExtraPrefs?.().then((p) => {
-      if (live) setPrefs({ hostApiTls: p.hostApiTls, hostApiRead: p.hostApiRead, hostApiCompose: p.hostApiCompose, hostApiPush: p.hostApiPush, hostApiToolApprovals: p.hostApiToolApprovals, hostApiWebOrigins: p.hostApiWebOrigins ?? [] });
+      if (live) setPrefs({ hostApiTls: p.hostApiTls, hostApiRead: p.hostApiRead, hostApiCompose: p.hostApiCompose, hostApiPush: p.hostApiPush, hostApiToolApprovals: p.hostApiToolApprovals, hostApiWorkspaceWrite: p.hostApiWorkspaceWrite === true, hostApiShell: p.hostApiShell === true, hostApiWebOrigins: p.hostApiWebOrigins ?? [] });
     });
     return () => { live = false; };
   }, [host]);
