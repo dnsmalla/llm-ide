@@ -1,0 +1,101 @@
+name: sqlite-linux-compat
+
+# Builds better-sqlite3 against glibc 2.28 for the SSH server bundle. The prebuild shipped in the package
+# needs glibc 2.34, and Ubuntu 20.04 servers have 2.31. Manual only: the artifact is downloaded and then
+# staged with `stage-hub-core.mjs --compat-sqlite`, so this workflow never publishes anything itself.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # manylinux_2_28 is AlmaLinux 8 (glibc 2.28), so anything linked here runs on the 2.31 servers.
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    env:
+      # Must match desktop/scripts/node-pin.json; the first step fails if they differ.
+      NODE_VERSION: '22.23.4'
+      OUT_DIR: ${{ github.workspace }}/sqlite-compat-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the pinned Node
+        run: |
+          set -euo pipefail
+          # The tarball hash comes from node-pin.json so the pin lives in one place.
+          read -r file sha < <(python3 - <<'PY'
+          import json
+          import os
+          pin = json.load(open('desktop/scripts/node-pin.json'))
+          if pin['version'] != os.environ['NODE_VERSION']:
+              raise SystemExit('desktop/scripts/node-pin.json version differs from NODE_VERSION')
+          target = pin['targets']['linux-x64']
+          print(target['file'], target['sha256'])
+          PY
+          )
+          curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/${file}"
+          echo "${sha}  ${file}" | sha256sum -c -
+          tar -xzf "${file}" -C /opt
+          echo "/opt/${file%.tar.gz}/bin" >> "$GITHUB_PATH"
+
+      - name: Install build tools
+        run: dnf install -y binutils
+
+      - name: Fetch better-sqlite3 at the lockfile version
+        id: pkg
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./extension/package-lock.json').packages['node_modules/better-sqlite3'].version")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/bs" && cd "$RUNNER_TEMP/bs"
+          npm pack "better-sqlite3@${version}"
+          tar -xzf "better-sqlite3-${version}.tgz"
+
+      - name: Build the module against glibc 2.28
+        working-directory: ${{ runner.temp }}/bs/package
+        run: |
+          set -euo pipefail
+          # Dependencies first: binding.gyp includes node-addon-api's headers from node_modules.
+          npm install --omit=dev --ignore-scripts --no-audit --no-fund
+          npm exec --yes --package=node-gyp@11 -- node-gyp rebuild --release --force_build=1 --target="${NODE_VERSION}"
+
+      - name: Check the glibc ceiling and write the checksum
+        working-directory: ${{ runner.temp }}/bs/package
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          set -euo pipefail
+          module=build/Release/better_sqlite3.node
+          objdump -T "$module" > "$RUNNER_TEMP/objdump.txt"
+          # maxGlibc is the same rule the desktop tests use: the module passes only when adding 2.28 to the
+          # list does not raise the highest version above 2.28.
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            import { maxGlibc } from '$GITHUB_WORKSPACE/desktop/scripts/sqlite-compat.mjs';
+            const lines = readFileSync(process.argv[1], 'utf8').split('\n');
+            const top = maxGlibc(lines);
+            console.log('highest GLIBC symbol version: ' + top);
+            if (maxGlibc([...lines, 'GLIBC_2.28']) !== '2.28') {
+              console.error('::error::module needs GLIBC ' + top + ', above the 2.28 ceiling');
+              process.exit(1);
+            }
+          " "$RUNNER_TEMP/objdump.txt"
+          mkdir -p "$OUT_DIR"
+          name="better-sqlite3-${VERSION}-linux-x64-glibc2.28.node"
+          cp "$module" "$OUT_DIR/$name"
+          (cd "$OUT_DIR" && sha256sum "$name" > "$name.sha256")
+          cat "$OUT_DIR/$name.sha256"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sqlite-linux-compat
+          path: |
+            ${{ env.OUT_DIR }}/*.node
+            ${{ env.OUT_DIR }}/*.node.sha256
+          if-no-files-found: error
+          retention-days: 30
