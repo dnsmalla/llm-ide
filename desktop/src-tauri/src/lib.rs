@@ -52,6 +52,7 @@ mod prefs;
 mod project_search;
 mod pty;
 mod remote;
+mod ssh_askpass;
 mod ssh_transport;
 mod remote_deploy;
 mod remote_hub;
@@ -559,6 +560,11 @@ fn panic_takes_the_app_down(thread_name: Option<&str>) -> bool {
 }
 
 pub fn run() {
+    // First statement on purpose: when ssh runs this exe as its askpass helper, it must answer and
+    // exit before any plugin, window or core spawn happens.
+    if ssh_askpass::run_helper_if_requested() {
+        return;
+    }
     let host = CoreHost::new();
     let setup_host = host.clone();
     let _ = CORE.set(host.clone());
