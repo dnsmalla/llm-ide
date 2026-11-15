@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 const [action, projectArg, name] = process.argv.slice(2);
 const project = path.resolve(projectArg || "");
 const base = path.join(project, ".llmide-loop-worktrees");
+// Same exclusions as the desktop's loop_worktree.rs EXCLUDES: run bookkeeping must never be committed into the live branch.
+const EXCLUDES = [":(exclude,icase).factory", ":(exclude,icase,glob)**/.factory/**", ":(exclude)system/loop", ":(exclude)llm-doc/loop/test"];
 const run = (args, cwd) => spawnSync("git", args, { cwd, encoding: "utf8" });
 const fail = (msg) => { console.error(msg); process.exit(2); };
 if (!fs.existsSync(project) || !fs.existsSync(base)) fail("no loop worktrees");
@@ -14,7 +16,7 @@ if (!fs.existsSync(project) || !fs.existsSync(base)) fail("no loop worktrees");
 if (action === "list") {
   const rows = fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory() && e.name.startsWith("run-")).map((e) => {
     const dir = path.join(base, e.name);
-    const status = run(["status", "--porcelain"], dir);
+    const status = run(["status", "--porcelain", "--", ".", ...EXCLUDES], dir);
     const branch = run(["rev-parse", "--abbrev-ref", "HEAD"], dir).stdout.trim();
     return { name: e.name, path: dir, branch, dirty: Boolean(status.stdout.trim()) };
   });
@@ -22,16 +24,17 @@ if (action === "list") {
   process.exit(0);
 }
 
+// NOTE: --force below is safe because every check above already proved nothing outside the excluded run bookkeeping is dirty.
 if (action === "prune") {
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const removed = []; const skipped = [];
   for (const e of fs.readdirSync(base, { withFileTypes: true })) {
     if (!e.isDirectory() || !e.name.startsWith("run-")) continue;
     const d = path.join(base, e.name);
-    const dirty = run(["status", "--porcelain"], d).stdout.trim();
+    const dirty = run(["status", "--porcelain", "--", ".", ...EXCLUDES], d).stdout.trim();
     const age = fs.statSync(d).mtimeMs;
     if (dirty || age > cutoff) { skipped.push({ name: e.name, reason: dirty ? "dirty" : "young" }); continue; }
-    const r = run(["worktree", "remove", d], project);
+    const r = run(["worktree", "remove", "--force", d], project);
     if (r.status === 0) removed.push(e.name); else skipped.push({ name: e.name, reason: "git refused" });
   }
   console.log(JSON.stringify({ pruned: removed.length, removed, skipped }));
@@ -44,9 +47,13 @@ const dir = path.join(base, name);
 if (!fs.existsSync(dir)) fail("worktree not found");
 
 if (action === "merge") {
-  const add = run(["add", "-A"], dir);
+  // Merging moves the live checkout: refuse when it has uncommitted work or an unfinished merge, so a conflict
+  // can never land on top of the user's edits.
+  const live = run(["status", "--porcelain", "--untracked-files=no"], project).stdout.trim();
+  if (live) fail("the live checkout has uncommitted changes; commit or stash them before merging");
+  const add = run(["add", "-A", "--", ".", ...EXCLUDES], dir);
   if (add.status !== 0) fail(`git add failed: ${add.stderr.trim()}`);
-  const dirty = run(["status", "--porcelain"], dir).stdout.trim();
+  const dirty = run(["diff", "--cached", "--name-only"], dir).stdout.trim();
   if (dirty) {
     const commit = run(["-c", "user.name=LLM-IDE Loop", "-c", "user.email=loop@llm-ide.local", "commit", "-m", `loop: ${name}`], dir);
     if (commit.status !== 0) fail(`commit failed: ${commit.stderr.trim()}`);
@@ -56,13 +63,17 @@ if (action === "merge") {
   const co = run(["checkout", "-b", branch], dir);
   if (co.status !== 0) fail(`checkout failed: ${co.stderr.trim()}`);
   const merge = run(["merge", "--no-ff", branch, "-m", `merge ${branch}`], project);
-  if (merge.status !== 0) fail(`merge failed (resolve manually): ${merge.stderr.trim() || merge.stdout.trim()}`);
+  if (merge.status !== 0) {
+    const conflicts = run(["diff", "--name-only", "--diff-filter=U"], project).stdout.trim().split("\n").filter(Boolean);
+    run(["merge", "--abort"], project);
+    fail(`merge conflicted and was aborted; the live checkout is unchanged. Conflicting files: ${conflicts.join(", ") || "(unknown)"}`);
+  }
   console.log(JSON.stringify({ merged: true, branch, project, worktree: dir }));
   process.exit(0);
 }
 
 if (action === "diff") {
-  const add = run(["add", "-A"], dir);
+  const add = run(["add", "-A", "--", ".", ...EXCLUDES], dir);
   if (add.status !== 0) fail(`git add failed: ${add.stderr.trim()}`);
   const d = run(["diff", "--cached", "--stat", "HEAD"], dir);
   const patch = run(["diff", "--cached", "HEAD"], dir);
@@ -71,9 +82,9 @@ if (action === "diff") {
 }
 
 if (action === "remove") {
-  const dirty = run(["status", "--porcelain"], dir).stdout.trim();
+  const dirty = run(["status", "--porcelain", "--", ".", ...EXCLUDES], dir).stdout.trim();
   if (dirty) fail("worktree has uncommitted changes; merge or discard them first");
-  const r = run(["worktree", "remove", dir], project);
+  const r = run(["worktree", "remove", "--force", dir], project);
   if (r.status !== 0) fail(`remove failed: ${r.stderr.trim()}`);
   console.log(JSON.stringify({ removed: true, worktree: dir }));
   process.exit(0);

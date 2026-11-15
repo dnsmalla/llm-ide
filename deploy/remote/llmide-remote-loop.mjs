@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import os from "node:os";
 import { spawnSync } from "node:child_process";
 
 const root = path.resolve(process.argv[2] || "");
@@ -16,7 +17,14 @@ if (!loop) { console.error("loop not found"); process.exit(2); }
 const stages = Array.isArray(loop.config?.stages) ? loop.config.stages.filter((s) => s.enabled).sort((a, b) => a.order - b.order) : [];
 
 // Isolate the run from the live project. The engine accepts linked worktrees under this exact directory name.
-const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+// ms + random suffix: two runs started in the same second must not share a worktree or metadata folder.
+const stamp = `${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomBytes(3).toString("hex")}`;
+// Run metadata (run.json, graph output, temp inputs) lives OUTSIDE the worktree so the worktree stays clean for
+// Prune/Remove and a merge never commits it. `meta-*` deliberately does not match the `run-*` worktree prefix.
+const metaDir = path.join(root, ".llmide-loop-worktrees", `meta-${stamp}`);
+fs.mkdirSync(metaDir, { recursive: true });
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "llmide-loop-"));
+process.on("exit", () => { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} });
 const worktreeRoot = path.join(root, ".llmide-loop-worktrees", `run-${stamp}`);
 let runRoot = root;
 if (fs.existsSync(path.join(root, ".git"))) {
@@ -64,14 +72,14 @@ for (const s of stages) {
     if (!ok && s.severity === "blocking") { passed = false; break; }
   } else if (s.kind === "artifactCheck") {
     if (!s.check) { results.push({ name: s.name, kind: s.kind, ok: false, output: "no check configuration", at }); passed = false; break; }
-    const tmp = path.join("/tmp", `llmide-artifact-${Date.now()}.json`);
+    const tmp = path.join(tmpDir, "artifact.json");
     fs.writeFileSync(tmp, JSON.stringify({ check: s.check, stages }));
     const r = spawnSync("/opt/llmide-node/bin/node", ["--experimental-strip-types", "/opt/llmide-remote/loop-native/host-artifact.mjs", runRoot, tmp], { encoding: "utf8", timeout: (s.timeoutSeconds || 300) * 1000 });
     const ok = r.status === 0;
     results.push({ name: s.name, kind: s.kind, ok, exitCode: r.status, stdout: String(r.stdout ?? "").slice(0, 2000), stderr: String(r.stderr ?? "").slice(0, 1000), at });
     if (!ok && s.severity === "blocking") { passed = false; break; }
   } else if (s.kind === "codeGraph") {
-    const outDir = path.join(runRoot, "system/loop-runs/host/graph");
+    const outDir = path.join(metaDir, "graph");
     fs.mkdirSync(outDir, { recursive: true });
     const outFile = path.join(outDir, "graph-code.json");
     const r = spawnSync("/opt/llmide-node/bin/node", ["/opt/llmide-remote/graph-kit.js", "code", runRoot, "--out", outFile, "--no-calls"], { encoding: "utf8", timeout: (s.timeoutSeconds || 900) * 1000 });
@@ -82,7 +90,7 @@ for (const s of stages) {
     const last = [...results].reverse().find((r) => r.kind === "shellCommand" && /test/i.test(r.name) && !/baseline|pre-check/i.test(r.name));
     if (!last) { results.push({ name: s.name, kind: s.kind, ok: true, output: "no Test stage ran before the ledger", at }); }
     else {
-      const tmp = path.join("/tmp", `llmide-ledger-${Date.now()}.log`);
+      const tmp = path.join(tmpDir, "ledger.log");
       fs.writeFileSync(tmp, last.stdout || "");
       const r = spawnSync("/opt/llmide-node/bin/node", ["--experimental-strip-types", "/opt/llmide-remote/loop-native/host-testmap.mjs", runRoot, "ledger", tmp], { encoding: "utf8", timeout: (s.timeoutSeconds || 900) * 1000 });
       const ok = r.status === 0;
@@ -101,8 +109,7 @@ for (const s of stages) {
     if (skipped.blocking) { passed = false; break; }
   }
 }
-const dir = path.join(runRoot, "llm-doc/loop/host", stamp);
-fs.mkdirSync(dir, { recursive: true });
+const dir = metaDir;
 fs.writeFileSync(path.join(dir, "run.json"), JSON.stringify({ loop: loop.name, root, worktree: runRoot, passed, partial, stages: results }, null, 2) + "\n");
 console.log(JSON.stringify({ loop: loop.name, root, worktree: runRoot, passed, partial, stages: results.length, run: path.join(dir, "run.json") }));
 if (!passed) process.exit(1);
