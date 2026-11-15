@@ -61,6 +61,18 @@ pub enum ServerMode {
     #[default]
     Local,
     Remote,
+    /// A core on a Linux server, reached through the system `ssh`. Stored here; the host acts on it in a later step.
+    Ssh,
+}
+
+/// Which credential the SSH mode uses. Records only the METHOD: a password is typed at connect time and is never
+/// stored, so there is deliberately no field for one.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SshAuthKind {
+    #[default]
+    Key,
+    Password,
 }
 
 /// Non-secret remote connection settings. The private key PATH is stored; the key's contents never are.
@@ -78,11 +90,13 @@ pub struct RemoteServerPrefs {
     pub hub_url: String,
     /// Leaf SPKI pin (`sha256:` + 43 base64url). Empty until the user confirms the probe.
     pub tls_pin: String,
+    /// The SSH credential method. Absent in files written before SSH mode existed, which reads as `Key`.
+    pub ssh_auth: SshAuthKind,
 }
 
 impl Default for RemoteServerPrefs {
     fn default() -> Self {
-        Self { mode: ServerMode::Local, host: String::new(), port: 22, user: String::new(), key_path: String::new(), label: String::new(), hub_url: String::new(), tls_pin: String::new() }
+        Self { mode: ServerMode::Local, host: String::new(), port: 22, user: String::new(), key_path: String::new(), label: String::new(), hub_url: String::new(), tls_pin: String::new(), ssh_auth: SshAuthKind::Key }
     }
 }
 
@@ -749,6 +763,45 @@ pub fn set_remote_hub(hub_url: String, tls_pin: String, mode: ServerMode) -> Res
     Ok(view(next, persisted))
 }
 
+/// Host-side writer for the SSH connection block. Validates the same shapes `ssh_transport::prepare_endpoint` checks
+/// before any ssh runs, so a bad block is refused here instead of at connect time. The hub URL and TLS pin belong to
+/// the hub and are kept as they are.
+///
+/// NOTE: no caller yet; the SSH connect flow in a later task is the first one.
+#[allow(dead_code)]
+pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, ssh_auth: SshAuthKind, mode: ServerMode) -> Result<PrefsView, FsError> {
+    let host = host.trim().to_string();
+    if !crate::remote::valid_host(&host) {
+        return Err(herr("invalid_host", "enter a hostname or IP address without spaces or a leading '-'"));
+    }
+    if port == 0 {
+        return Err(herr("invalid_port", "the SSH port must be between 1 and 65535"));
+    }
+    let user = user.trim().to_string();
+    if !crate::remote::valid_user(&user) {
+        return Err(herr("invalid_user", "enter a plain SSH user name (letters, digits, '.', '_' or '-')"));
+    }
+    let key_path = key_path.trim().to_string();
+    // A password login reads no key file, so the key path is only checked when the key is the method.
+    if ssh_auth == SshAuthKind::Key && !crate::remote::valid_key_path(&key_path) {
+        return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
+    }
+    let mut g = state();
+    let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
+    let mut next = st.stored.clone();
+    next.remote_server.host = host;
+    next.remote_server.port = port;
+    next.remote_server.user = user;
+    next.remote_server.key_path = key_path;
+    next.remote_server.ssh_auth = ssh_auth;
+    next.remote_server.mode = mode;
+    if let Some(dir) = &st.dir { save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?; }
+    st.stored = next.clone();
+    let persisted = st.dir.is_some();
+    drop(g);
+    Ok(view(next, persisted))
+}
+
 /// Host-side writer for the native pickers only: a picked checkout turns source mode on and stores the path.
 /// Takes effect at the next app start, like every other backend path (see `launch()`).
 pub(crate) fn set_backend_paths(node: Option<String>, folder: Option<String>) -> Result<PrefsView, FsError> {
@@ -921,6 +974,7 @@ mod tests {
                 label: " prod ".into(),
                 hub_url: " https://hub.example.com ".into(),
                 tls_pin: "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
+                ssh_auth: SshAuthKind::Key,
             }),
             ..Default::default()
         });
@@ -969,6 +1023,7 @@ mod tests {
                 mode: ServerMode::Remote, host: "evil.example.com".into(), port: 22, user: "u".into(), key_path: "/k".into(), label: String::new(),
                 hub_url: "http://evil.example.com".into(),
                 tls_pin: "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".into(),
+                ssh_auth: SshAuthKind::Key,
             }),
             ..Default::default()
         });
@@ -981,6 +1036,67 @@ mod tests {
         assert!(serde_json::from_str::<PrefsPatch>(r#"{"remoteServer":{"host":"x","keyContents":"secret"}}"#).is_err());
         assert!(serde_json::from_str::<PrefsPatch>(r#"{"remoteServer":{"mode":"remote","keyPath":"/tmp/key"}}"#).is_ok());
         assert!(serde_json::from_str::<PrefsPatch>(r#"{"remoteServer":{"mode":"elsewhere"}}"#).is_err());
+    }
+
+    #[test]
+    fn old_prefs_file_still_loads() {
+        let loaded = parse(r#"{"ltaMode":"off","remoteServer":{"host":"example.com","port":22,"user":"alice","keyPath":"/k"}}"#);
+        assert_eq!(loaded.remote_server.ssh_auth, SshAuthKind::Key);
+        assert_eq!(loaded.remote_server.mode, ServerMode::Local);
+    }
+
+    #[test]
+    fn ssh_mode_round_trips() {
+        let d = tmp("ssh");
+        let p = Prefs {
+            remote_server: RemoteServerPrefs { mode: ServerMode::Ssh, ssh_auth: SshAuthKind::Password, host: "example.com".into(), user: "alice".into(), ..RemoteServerPrefs::default() },
+            ..Prefs::default()
+        };
+        save_to(&d, &p).unwrap();
+        let back = load_from(&d);
+        assert_eq!(back.remote_server.mode, ServerMode::Ssh);
+        assert_eq!(back.remote_server.ssh_auth, SshAuthKind::Password);
+        assert_eq!(back, p);
+    }
+
+    #[test]
+    fn set_remote_ssh_validates() {
+        let before = stored().remote_server;
+        let code = |r: Result<PrefsView, FsError>| r.unwrap_err().code;
+        assert_eq!(code(set_remote_ssh("-x".into(), 22, "alice".into(), "/k".into(), SshAuthKind::Key, ServerMode::Ssh)), "invalid_host");
+        assert_eq!(code(set_remote_ssh("example.com".into(), 0, "alice".into(), "/k".into(), SshAuthKind::Key, ServerMode::Ssh)), "invalid_port");
+        assert_eq!(code(set_remote_ssh("example.com".into(), 22, "-l".into(), "/k".into(), SshAuthKind::Key, ServerMode::Ssh)), "invalid_user");
+        assert_eq!(code(set_remote_ssh("example.com".into(), 22, "alice".into(), "".into(), SshAuthKind::Key, ServerMode::Ssh)), "invalid_key_path");
+        // Password auth needs no key file, so an empty key path is saved as is.
+        let saved = set_remote_ssh("example.com".into(), 22, "alice".into(), "  ".into(), SshAuthKind::Password, ServerMode::Ssh).unwrap();
+        assert_eq!(saved.stored.remote_server.ssh_auth, SshAuthKind::Password);
+        assert_eq!(saved.stored.remote_server.mode, ServerMode::Ssh);
+        assert_eq!(saved.stored.remote_server.key_path, "");
+        // The writer is global state; put back what this test found.
+        let _ = apply(PrefsPatch { remote_server: Some(before), ..Default::default() });
+    }
+
+    #[test]
+    fn no_password_field_exists() {
+        let p = Prefs { remote_server: RemoteServerPrefs { ssh_auth: SshAuthKind::Password, ..RemoteServerPrefs::default() }, ..Prefs::default() };
+        let value = serde_json::to_value(&p).unwrap();
+        fn collect_keys(v: &serde_json::Value, keys: &mut Vec<String>) {
+            match v {
+                serde_json::Value::Object(map) => {
+                    for (k, child) in map {
+                        keys.push(k.clone());
+                        collect_keys(child, keys);
+                    }
+                }
+                serde_json::Value::Array(items) => items.iter().for_each(|child| collect_keys(child, keys)),
+                _ => {}
+            }
+        }
+        let mut keys = Vec::new();
+        collect_keys(&value, &mut keys);
+        let with_pass: Vec<&String> = keys.iter().filter(|k| k.to_lowercase().contains("pass")).collect();
+        assert!(with_pass.is_empty(), "{with_pass:?}");
+        assert_eq!(value["remoteServer"]["sshAuth"], "password");
     }
 
     #[test]
