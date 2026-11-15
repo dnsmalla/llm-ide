@@ -11,11 +11,15 @@
 // NOTE: no production code calls this module yet; a later SSH server mode task wires it in and removes this allow.
 #![allow(dead_code)]
 
+use std::io::Write;
 use std::path::Path;
+use std::process::{Child, Command, ExitStatus, Stdio};
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
-use crate::remote::{valid_host, valid_key_path, valid_user, CONNECT_TIMEOUT_SECS};
+use crate::pty::shell_env;
+use crate::remote::{valid_host, valid_key_path, valid_user, RawOutput, CONNECT_TIMEOUT_SECS};
+use crate::ssh_askpass::AskpassGrant;
 
 /// How the ssh child authenticates. Key auth is non-interactive; password auth lets ssh prompt the user.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,11 +67,17 @@ pub fn prepare_endpoint(host: &str, port: u16, user: &str, auth: SshAuth) -> Res
     if !valid_user(user) {
         return Err(herr("invalid_user", "enter a plain SSH user name (letters, digits, '.', '_' or '-')"));
     }
-    if let SshAuth::Key { path } = &auth {
-        if !valid_key_path(path) {
-            return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
+    // Trimmed the same way as `remote::prepare`, and the trimmed value is what gets stored and handed to -i.
+    let auth = match auth {
+        SshAuth::Key { path } => {
+            let path = path.trim().to_string();
+            if !valid_key_path(&path) {
+                return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
+            }
+            SshAuth::Key { path }
         }
-    }
+        SshAuth::Password => SshAuth::Password,
+    };
     Ok(SshEndpoint { host: host.to_string(), port, user: user.to_string(), auth })
 }
 
@@ -90,6 +100,7 @@ pub fn exec_args(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'
     push_option(&mut args, "ForwardAgent=no");
     push_option(&mut args, "ClearAllForwardings=yes");
     push_option(&mut args, "PermitLocalCommand=no");
+    push_no_connection_sharing(&mut args);
     push_host_key_options(&mut args, known_hosts, if strict { "yes" } else { "accept-new" });
     push_auth_options(&mut args, ep);
     // Long remote Loop runs sit silent for minutes; keepalives stop idle timeouts and fail a dead link.
@@ -114,10 +125,23 @@ pub fn exec_args(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'
 ///
 /// Returns:
 ///     The argv after `ssh`. It contains `-N` and no remote command.
-pub fn forward_args(ep: &SshEndpoint, known_hosts: &Path, local_port: u16, remote_port: u16) -> Vec<String> {
+///
+/// Errors:
+///     `invalid_port` when either port is 0. Port 0 would ask ssh for a random port, which the app could
+///     not reach or report.
+pub fn forward_args(
+    ep: &SshEndpoint,
+    known_hosts: &Path,
+    local_port: u16,
+    remote_port: u16,
+) -> Result<Vec<String>, FsError> {
+    if local_port == 0 || remote_port == 0 {
+        return Err(herr("invalid_port", "forward ports must be between 1 and 65535"));
+    }
     let mut args = vec!["-N".to_string(), "-a".to_string(), "-x".to_string()];
     push_option(&mut args, "ForwardAgent=no");
     push_option(&mut args, "PermitLocalCommand=no");
+    push_no_connection_sharing(&mut args);
     push_option(&mut args, "ExitOnForwardFailure=yes");
     push_host_key_options(&mut args, known_hosts, "yes");
     push_auth_options(&mut args, ep);
@@ -126,13 +150,20 @@ pub fn forward_args(ep: &SshEndpoint, known_hosts: &Path, local_port: u16, remot
     args.push("-L".to_string());
     args.push(format!("127.0.0.1:{local_port}:127.0.0.1:{remote_port}"));
     push_endpoint(&mut args, ep);
-    args
+    Ok(args)
 }
 
 /// Appends one `-o <value>` pair.
 fn push_option(args: &mut Vec<String>, value: &str) {
     args.push("-o".to_string());
     args.push(value.to_string());
+}
+
+/// Turns off connection multiplexing. A `ControlPath` in the user's ssh config would let this command
+/// reuse another session's connection, which skips the pinned known_hosts file and the password prompt.
+fn push_no_connection_sharing(args: &mut Vec<String>) {
+    push_option(args, "ControlMaster=no");
+    push_option(args, "ControlPath=none");
 }
 
 /// Host-key policy and known_hosts files. The global file is neutralised so a system-wide entry cannot
@@ -168,6 +199,148 @@ fn push_endpoint(args: &mut Vec<String>, ep: &SshEndpoint) {
     args.push("-p".to_string());
     args.push(ep.port.to_string());
     args.push(format!("{}@{}", ep.user, ep.host));
+}
+
+/// Runs the system `ssh` for one call, or a fake in tests. Argv always comes from [`exec_args`] or
+/// [`forward_args`]; this trait never builds argv itself.
+pub trait SshExec: Send + Sync {
+    /// Runs the child to completion and captures its output. `stdin` bytes are written and the pipe is
+    /// closed; `None` gives the child a null stdin. `askpass` adds the one-time password helper variables.
+    fn run(&self, args: &[String], stdin: Option<&[u8]>, askpass: Option<&AskpassGrant>) -> std::io::Result<RawOutput>;
+
+    /// Starts a long-lived child (a port forward) and returns without waiting for it.
+    fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn ForwardChild>>;
+}
+
+/// A running forward. Dropping it stops the child.
+pub trait ForwardChild: Send {
+    /// The exit code once the child has ended, `None` while it still runs.
+    fn try_exited(&mut self) -> Option<i32>;
+
+    /// Stops the child and waits for it, so no zombie process remains. Calling it again is harmless.
+    fn kill(&mut self);
+}
+
+/// Production runner: the system `ssh`, found through PATH like the existing key-only runner.
+pub struct SystemSshExec;
+
+impl SshExec for SystemSshExec {
+    fn run(&self, args: &[String], stdin: Option<&[u8]>, askpass: Option<&AskpassGrant>) -> std::io::Result<RawOutput> {
+        run_program("ssh", args, stdin, askpass)
+    }
+
+    fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn ForwardChild>> {
+        Ok(Box::new(spawn_program("ssh", args, askpass)?))
+    }
+}
+
+/// The production forward child. Its stderr is drained by a detached thread so ssh never blocks on a full pipe.
+struct SystemForwardChild {
+    child: Child,
+}
+
+impl ForwardChild for SystemForwardChild {
+    fn try_exited(&mut self) -> Option<i32> {
+        match self.child.try_wait() {
+            Ok(Some(status)) => Some(exit_code(status)),
+            Ok(None) => None,
+            // An unreadable status means the child can no longer be watched; report it as gone, not alive.
+            Err(_) => Some(-1),
+        }
+    }
+
+    fn kill(&mut self) {
+        // An error here means the child has already exited, which is the state `kill` is meant to reach.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for SystemForwardChild {
+    fn drop(&mut self) {
+        ForwardChild::kill(self);
+    }
+}
+
+/// One number for an exit status. A death by signal has no exit code, so it becomes `128 + signal`, the
+/// shell convention, which keeps it distinct from "still running".
+fn exit_code(status: ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return 128 + signal;
+        }
+    }
+    -1
+}
+
+/// Builds the child command with a scrubbed environment. `env_clear` first, then only the terminal
+/// shell's allowlist (no API keys, no loader or start-up hooks), then the askpass variables. The
+/// askpass variables come last because they are the only ones this module adds on purpose.
+fn child_command(program: &str, args: &[String], askpass: Option<&AskpassGrant>) -> Command {
+    let mut command = Command::new(program);
+    command.args(args).env_clear();
+    for (key, value) in shell_env(std::env::vars()) {
+        command.env(key, value);
+    }
+    if let Some(grant) = askpass {
+        for (key, value) in grant.env() {
+            command.env(key, value);
+        }
+    }
+    command
+}
+
+/// Runs `program` to completion with `args`, capturing stdout and stderr.
+///
+/// The stdin bytes are written on a scoped thread while `wait_with_output` drains stdout and stderr, so a
+/// child that echoes a large input cannot deadlock on a full stdout pipe. stderr is captured for the
+/// caller and never logged here.
+fn run_program(
+    program: &str,
+    args: &[String],
+    stdin: Option<&[u8]>,
+    askpass: Option<&AskpassGrant>,
+) -> std::io::Result<RawOutput> {
+    let mut command = child_command(program, args, askpass);
+    command
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    let stdin_pipe = child.stdin.take();
+    let output = std::thread::scope(|scope| {
+        if let (Some(bytes), Some(mut pipe)) = (stdin, stdin_pipe) {
+            // A write error (the child exited early) is not ours to report; the exit status says what happened.
+            scope.spawn(move || {
+                let _ = pipe.write_all(bytes);
+            });
+        }
+        child.wait_with_output()
+    })?;
+    Ok(RawOutput {
+        code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+/// Starts `program` without waiting: no stdin, stdout discarded, stderr drained.
+fn spawn_program(program: &str, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<SystemForwardChild> {
+    let mut command = child_command(program, args, askpass);
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    if let Some(mut stderr) = child.stderr.take() {
+        // Detached on purpose: the thread ends when the child closes stderr. Its bytes are never logged.
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+        });
+    }
+    Ok(SystemForwardChild { child })
 }
 
 #[cfg(test)]
@@ -241,7 +414,7 @@ mod tests {
 
     #[test]
     fn forward_args_shape() {
-        let args = forward_args(&key_endpoint(), Path::new(KNOWN), 3457, 3460);
+        let args = forward_args(&key_endpoint(), Path::new(KNOWN), 3457, 3460).unwrap();
         assert!(args.iter().any(|a| a == "-N"));
         assert!(has_pair(&args, "-L", "127.0.0.1:3457:127.0.0.1:3460"));
         assert!(has_option(&args, "ExitOnForwardFailure=yes"));
@@ -266,5 +439,89 @@ mod tests {
                 .code,
             "invalid_key_path"
         );
+    }
+
+    #[test]
+    fn no_connection_sharing() {
+        // A ControlMaster in the user's ssh config could hand this connection to another session and skip
+        // the pinned known_hosts file and the password prompt, so both builders switch it off.
+        let key = key_endpoint();
+        let password = password_endpoint();
+        for ep in [&key, &password] {
+            let exec = exec_args(ep, Path::new(KNOWN), true, COMMAND);
+            let forward = forward_args(ep, Path::new(KNOWN), 3457, 3460).unwrap();
+            for args in [&exec, &forward] {
+                assert!(has_option(args, "ControlMaster=no"));
+                assert!(has_option(args, "ControlPath=none"));
+            }
+        }
+    }
+
+    #[test]
+    fn forward_rejects_port_zero() {
+        let ep = key_endpoint();
+        assert_eq!(forward_args(&ep, Path::new(KNOWN), 0, 3460).unwrap_err().code, "invalid_port");
+        assert_eq!(forward_args(&ep, Path::new(KNOWN), 3457, 0).unwrap_err().code, "invalid_port");
+    }
+
+    #[test]
+    fn key_path_is_trimmed() {
+        let ep = prepare_endpoint("example.com", 22, "alice", SshAuth::Key { path: format!(" {KEY} ") }).unwrap();
+        let args = exec_args(&ep, Path::new(KNOWN), true, COMMAND);
+        assert!(has_pair(&args, "-i", KEY), "the trimmed path must be the one handed to -i");
+        // Trimming must not let an option-like value through after the spaces are removed.
+        let err = prepare_endpoint("example.com", 22, "alice", SshAuth::Key { path: " -oProxyCommand=x ".into() });
+        assert_eq!(err.unwrap_err().code, "invalid_key_path");
+    }
+
+    #[cfg(unix)]
+    mod runner {
+        use super::super::{run_program, spawn_program, ForwardChild};
+        use crate::ssh_askpass;
+
+        fn sh(script: &str) -> Vec<String> {
+            vec!["-c".to_string(), script.to_string()]
+        }
+
+        #[test]
+        fn stdin_reaches_child() {
+            let out = run_program("/bin/sh", &sh("cat"), Some(b"abc"), None).unwrap();
+            assert_eq!(out.code, Some(0));
+            assert_eq!(out.stdout, "abc");
+        }
+
+        #[test]
+        fn large_stdin_does_not_deadlock() {
+            // The child echoes stdin into a full stdout pipe; writing stdin before reading stdout would hang.
+            let payload = vec![b'x'; 512 * 1024];
+            let out = run_program("/bin/sh", &sh("cat"), Some(&payload), None).unwrap();
+            assert_eq!(out.stdout.len(), payload.len());
+        }
+
+        #[test]
+        fn env_is_scrubbed() {
+            std::env::set_var("ANTHROPIC_API_KEY", "sk-test-do-not-leak");
+            let out = run_program("/bin/sh", &sh("env"), None, None).unwrap();
+            assert!(!out.stdout.contains("ANTHROPIC_API_KEY"), "the API key reached the ssh child");
+            assert!(!out.stdout.contains("sk-test-do-not-leak"));
+        }
+
+        #[test]
+        fn askpass_env_is_passed() {
+            let grant = ssh_askpass::grant("unused-test-secret").unwrap();
+            let out = run_program("/bin/sh", &sh("env"), None, Some(&grant)).unwrap();
+            for (name, value) in grant.env() {
+                let line = format!("{name}={value}");
+                assert!(out.stdout.lines().any(|l| l == line), "{name} missing from the child environment");
+            }
+        }
+
+        #[test]
+        fn forward_child_kill() {
+            let mut child = spawn_program("/bin/sh", &sh("exec sleep 30"), None).unwrap();
+            assert_eq!(child.try_exited(), None);
+            child.kill();
+            assert!(child.try_exited().is_some());
+        }
     }
 }
