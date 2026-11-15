@@ -750,7 +750,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
           setRunLog((l) => [...l, `readiness copy failed: ${e instanceof Error ? e.message : String(e)}`]);
         }
       }
-      // Every run is archived under llm-doc/loop/<yyyy>/<MM>/, with its plan and full log.
+      // Every run is archived under system/loop-runs/archive/, with its plan and full log.
       try {
         const dir = await writeRunArchive(fs, target, outcome, archiveLog, new Date(), activeRun ? repoPrefixFor(projectRoot ?? "", activeRun.worktree) : "", target.defaultKey === "test" ? target.inputPath ?? "" : "");
         if (dir) {

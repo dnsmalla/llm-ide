@@ -58,7 +58,11 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
     // One effect owns both the first load and the refresh interval, so a tick never tears the effect down and
     // re-reads from scratch; `alive` (not React state) guards against late results after unmount or scope change.
     let alive = true;
+    // A slow read must not stack with the next 5 s tick: overlapping refreshes could land out of order.
+    let inFlight = false;
     const refresh = (): void => {
+      if (inFlight) return;
+      inFlight = true;
       setLive(readLiveCard());
       void Promise.all([
         readRecentRuns(fs, 100),
@@ -75,7 +79,7 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
           const at = laneOf(run, loaded[i], names);
           return { run, lane: at.lane, note: at.note, failed: run.statusCode !== "success" };
         }));
-      }, (e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); });
+      }, (e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); }).finally(() => { inFlight = false; });
     };
     setError(null);
     refresh();
