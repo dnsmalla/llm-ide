@@ -102,6 +102,15 @@ Without the environment flag the host refuses every shell command. The shell run
 root, with a 30-second timeout and 256 KiB output cap. Audit records a command hash, never the full text. This is
 remote code execution: enable it only for a single-owner host you control.
 
+### Limits of the path denylist
+
+- **Tracked secrets.** The `.env` / `.ssh` / secret denylist covers path operands only. If a secret was ever committed,
+  `git log -p`, `git show <rev>` and `git diff` without a path print it. Keep secrets out of history, and do not grant
+  a device access to a repository whose history contains them.
+- **`workspace_write` is code execution.** `files.write` can change `package.json` `"test"` (or any test config), and
+  `terminal.exec` then runs `npm test`. Once a device holds `workspace_write`, `shell` is not a separate boundary:
+  grant `workspace_write` only to a device you would trust with a shell on the host.
+
 ## 7. Acceptance checklist
 
 Run each on the server and record the result:
