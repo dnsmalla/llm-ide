@@ -268,3 +268,13 @@ test("a loop with no shell stage in the batch phase has no preflight: planning r
   assert.equal(out.passed, true, out.statusSummary);
   assert.deepEqual(state.ran, ["plan", "snap", "write", "apply", "check"]);
 });
+
+test("a failed rollback marks the batch blocked in the plan, whatever status it had reached", async () => {
+  const { state, deps, opts } = fakeRun({ plan: TODO("R1") + "\n" + TODO("R2"), failBatches: ["R1"] });
+  opts.restore = async () => { throw new Error("git reset failed"); };
+  const out = await runRefactorBatches(config(ALL), deps, opts);
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /rollback failed: git reset failed/);
+  assert.match(state.plan, /### R1 — R1 \(status: blocked\)\n- Blocked: rollback failed — /);
+  assert.match(state.plan, /### R2 — R2 \(status: todo\)/);
+});

@@ -61,11 +61,11 @@ function batchStatus(plan: string | null, id: string): string | null {
 }
 
 /** The plan with the first todo batch `id` marked blocked, and the reason as a line right under its header. */
-function markBlocked(plan: string, id: string, reason: string): string {
+function markBlocked(plan: string, id: string, reason: string, anyStatus = false): string {
   const lines = plan.split("\n");
-  const at = lines.findIndex((line) => { const m = HEADER.exec(line); return m !== null && m[1] === id && m[2] === "todo"; });
+  const at = lines.findIndex((line) => { const m = HEADER.exec(line); return m !== null && m[1] === id && (anyStatus || m[2] === "todo"); });
   if (at < 0) return plan;
-  lines[at] = lines[at].replace(/\(status:\s*todo\)/, "(status: blocked)");
+  lines[at] = lines[at].replace(/\(status:\s*\w+\)/, "(status: blocked)");
   lines.splice(at + 1, 0, `- Blocked: ${reason}`);
   return lines.join("\n");
 }
@@ -178,6 +178,12 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
       rolledBack = { id: todo.id, reason, leftTodo: false };
       note = `rollback failed: ${oneLine(message)}; the worktree may hold ${todo.id}`;
       opts.log(`✗ ${note}`);
+      // The tree may still hold the half-applied batch, possibly with the plan already saying done: block it in the
+      // plan too (whatever its status now) so no later run treats it as applied or retries it on a dirty tree.
+      try {
+        const current = await opts.readPlan();
+        if (current !== null) await opts.writePlan(markBlocked(current, todo.id, `rollback failed — ${reason}`, true));
+      } catch { /* the summary line above is all that is left */ }
       break;
     }
     rolledBack = { id: todo.id, reason, leftTodo };
