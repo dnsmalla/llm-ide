@@ -8,6 +8,9 @@
 //! Password auth carries no secret here: [`SshAuth::Password`] holds no data, so a password can never
 //! reach an argv or an environment variable from this module.
 
+// NOTE: no production code calls this module yet; a later SSH server mode task wires it in and removes this allow.
+#![allow(dead_code)]
+
 use std::path::Path;
 
 use crate::confirm::herr;
