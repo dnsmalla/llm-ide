@@ -637,8 +637,6 @@ impl CoreHost {
     }
 
     /// Where SSH mode gets its link. The SSH connect flow installs the production connector; tests inject fakes.
-    // NOTE: no production code calls this yet; the SSH connect task wires it in and removes this allow.
-    #[allow(dead_code)]
     pub fn set_ssh_connector(&self, connector: SshConnector) {
         *lock(&self.inner.ssh_connector) = connector;
     }
@@ -1577,6 +1575,15 @@ enum Probe {
     Healthy { nonce: Option<String> },
 }
 
+/// The nonce `/health` echoes on a loopback port, or `None` when nothing healthy answers in time. SSH server mode
+/// checks the forwarded port with it, so a port held by some other process is never taken for the server core.
+pub(crate) fn health_nonce(port: u16, timeout: Duration) -> Option<String> {
+    match probe(port, timeout) {
+        Probe::Healthy { nonce } => nonce,
+        Probe::Down => None,
+    }
+}
+
 /// GET /health on loopback. Redirects are never followed (a 3xx is "down"), so a
 /// listener cannot bounce the host to another address.
 fn probe(port: u16, timeout: Duration) -> Probe {
@@ -1620,6 +1627,11 @@ static RESOURCE_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 pub fn set_resource_dir(dir: PathBuf) {
     let _ = RESOURCE_DIR.set(dir);
+}
+
+/// The resource dir recorded at startup, for the SSH server bundle lookup. `None` before `set_resource_dir`.
+pub(crate) fn resource_dir() -> Option<PathBuf> {
+    RESOURCE_DIR.get().cloned()
 }
 
 /// File name of the staged node: `node.exe` on Windows (see `scripts/stage-core.mjs`).

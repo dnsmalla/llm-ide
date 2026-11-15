@@ -5,9 +5,6 @@
 //! START returned. Every server command is a constant from `ssh_server_scripts`; no step builds a
 //! shell command from data.
 
-// NOTE: no production code calls this module yet; a later SSH server mode task wires it in and removes this allow.
-#![allow(dead_code)]
-
 use std::io::Write;
 use std::net::TcpListener;
 use std::path::Path;
@@ -52,6 +49,8 @@ pub struct ConnectInput<'a> {
 pub struct Connected {
     pub local_url: String,
     pub local_port: u16,
+    /// Read by the tests that check the port came from STATUS; the service never needs it.
+    #[cfg(test)]
     pub remote_port: u16,
     pub nonce: String,
     pub version: String,
@@ -106,29 +105,6 @@ impl Link<'_> {
     }
 }
 
-/// Connects to the server, installs and starts the core when needed, and opens the verified forward.
-///
-/// Preconditions: `input.known_hosts` is the pinned one-key file, or `None` when the host key was
-/// never confirmed (then no ssh call is made).
-/// Postconditions: on success `forward` runs and `/health` on `local_url` echoed the started nonce.
-/// On failure no forward is left running.
-///
-/// Args:
-///     exec: The ssh runner, or a fake in tests.
-///     health: Returns the nonce `/health` echoes on a local port, or `None` when nothing answers.
-///     input: Endpoint, secrets, bundle and the session record path.
-///
-/// Errors:
-///     Fixed codes such as `SSH_HOST_KEY_UNCONFIRMED`, `SSH_AUTH_FAILED`, `SSH_CORE_FOREIGN`,
-///     `SSH_START_FAILED` and `SSH_FORWARD_FAILED`.
-pub fn connect(
-    exec: &dyn SshExec,
-    health: &dyn Fn(u16) -> Option<String>,
-    input: ConnectInput<'_>,
-) -> Result<Connected, FsError> {
-    connect_with(exec, health, input, &pick_local_port)
-}
-
 /// [`connect`] with the local port chooser injected, so tests do not depend on this machine's ports.
 pub(crate) fn connect_with(
     exec: &dyn SshExec,
@@ -162,6 +138,7 @@ pub(crate) fn connect_with(
     Ok(Connected {
         local_url: format!("http://127.0.0.1:{local_port}"),
         local_port,
+        #[cfg(test)]
         remote_port: core.port,
         nonce: core.nonce,
         version: core.version,

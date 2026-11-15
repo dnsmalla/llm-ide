@@ -784,8 +784,6 @@ pub fn set_remote_hub(hub_url: String, tls_pin: String, mode: ServerMode) -> Res
 /// before any ssh runs, so a bad block is refused here instead of at connect time. The hub URL and TLS pin belong to
 /// the hub and are kept as they are.
 ///
-/// NOTE: no caller yet; the SSH connect flow in a later task is the first one.
-#[allow(dead_code)]
 pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, ssh_auth: SshAuthKind, mode: ServerMode) -> Result<PrefsView, FsError> {
     let host = host.trim().to_string();
     if !crate::remote::valid_host(&host) {

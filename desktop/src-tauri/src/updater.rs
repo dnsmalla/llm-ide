@@ -165,6 +165,8 @@ pub async fn update_install(app: tauri::AppHandle, host: tauri::State<'_, crate:
     let chat = app.state::<crate::chat_cmds::ChatService>();
     let _ = chat.quit_archive_default();
     let _ = host.stop();
+    // stop() drops the forward but not the known_hosts folder ssh_service keeps for it.
+    crate::ssh_service::disconnect(&host);
     crate::pty::kill_all();
     // The Windows installer exits the process from inside `install()` without running the exit handler, so
     // there is no later point for the full cleanup there.

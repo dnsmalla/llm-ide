@@ -35,8 +35,6 @@ const MAX_TOKEN_LINE: usize = 256;
 const MAX_SECRET: usize = 4096;
 
 /// A running one-time grant. Dropping it stops the listener and wipes the secret.
-// NOTE: only `grant()` constructs this; it becomes live with the SSH server-mode task.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AskpassGrant {
     addr: String,
@@ -49,7 +47,6 @@ pub struct AskpassGrant {
 impl AskpassGrant {
     /// Environment for the ssh child: the askpass helper, the forced-askpass switch, and the
     /// one-time address and token. Carries no secret.
-    #[allow(dead_code)] // NOTE: used by the SSH server-mode task that spawns ssh.
     pub fn env(&self) -> Vec<(String, String)> {
         vec![
             ("SSH_ASKPASS".to_string(), self.helper.to_string_lossy().into_owned()),
@@ -75,8 +72,6 @@ impl Drop for AskpassGrant {
 /// Preconditions: none; `secret` may be empty (the helper then prints nothing useful).
 /// Postconditions: the listener is bound to `127.0.0.1` on an ephemeral port. It closes after one
 /// successful answer, after 60 s without one, or when the grant is dropped.
-// NOTE: the SSH server-mode task that spawns ssh is the first production caller.
-#[allow(dead_code)]
 pub fn grant(secret: &str) -> std::io::Result<AskpassGrant> {
     let token = crate::core_host::random_nonce().map_err(std::io::Error::other)?;
     let helper = std::env::current_exe()?;

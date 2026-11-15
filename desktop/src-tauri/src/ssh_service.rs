@@ -9,9 +9,6 @@
 //! never stored, logged, or placed in an argv, an environment variable, a status or an error. Error messages
 //! are fixed text; ssh's stderr is never shown.
 
-// NOTE: no production code calls this module yet; Task 9b wraps these functions in Tauri commands and removes this allow.
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -215,7 +212,7 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
 ///
 /// Errors:
 ///     `SSH_PASSWORD_REQUIRED`, `SSH_HOST_KEY_UNCONFIRMED`, `SSH_BUNDLE_MISSING`, plus the codes of
-///     `ssh_session::connect`.
+///     `ssh_session::connect_with`.
 pub fn open_link(deps: &Deps, target: &SshServerTarget, password: Option<&str>) -> Result<OpenedLink, FsError> {
     let endpoint = target_endpoint(target, password)?;
     let pin = require_pin(&endpoint)?;
@@ -286,6 +283,18 @@ pub fn attach_link(host: &CoreHost, opened: OpenedLink) -> SshServerStatus {
     }
 }
 
+/// The startup connector's entry. Keeps what [`connect`] keeps (the remembered version and Claude state, and the
+/// known_hosts folder the link reads) and leaves attaching to the core host, which is already starting in SSH mode.
+///
+/// Errors: the codes of [`open_link`].
+pub(crate) fn open_saved_link(deps: &Deps, target: &SshServerTarget) -> Result<SshLink, FsError> {
+    let OpenedLink { link, version, claude, known_hosts } = open_link(deps, target, None)?;
+    *locked(&REMEMBERED) = Some(Remembered { version, claude });
+    // NOTE: a folder replaced here belonged to a link the startup path is about to stop, so no live ssh reads it.
+    *locked(&LIVE_DIR) = Some(known_hosts);
+    Ok(link)
+}
+
 /// Stops the forward. The server core keeps running; no ssh call is made.
 pub fn disconnect(host: &CoreHost) -> SshServerStatus {
     host.detach_ssh_link();
@@ -340,6 +349,26 @@ pub fn uninstall(deps: &Deps, host: &CoreHost, password: Option<&str>, confirm_h
 /// Locks a process-wide slot. A poisoned lock still holds valid data, so the guard is taken anyway.
 fn locked<T>(slot: &Mutex<T>) -> MutexGuard<'_, T> {
     slot.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Panic-hook cleanup: drops the known_hosts folder and the remembered state. Only try-locks, because the panicking
+/// thread may hold one of these slots and a blocking lock there would hang the exit.
+pub(crate) fn forget_for_panic() {
+    if let Some(mut slot) = try_locked(&LIVE_DIR) {
+        slot.take();
+    }
+    if let Some(mut slot) = try_locked(&REMEMBERED) {
+        *slot = None;
+    }
+}
+
+/// Non-blocking [`locked`]: `None` when another thread holds the lock. A poisoned lock still holds valid data.
+fn try_locked<T>(slot: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
+    match slot.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
 }
 
 fn observed() -> &'static Mutex<HashMap<String, Offered>> {

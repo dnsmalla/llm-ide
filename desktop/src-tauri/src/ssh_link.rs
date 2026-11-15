@@ -8,9 +8,6 @@
 //! The password is held only in [`Shared`], and only as a [`Secret`] that is zeroed on drop. It is never
 //! formatted, logged, or placed in an argv or environment variable by this module.
 
-// NOTE: no production code calls this module yet; a later SSH server mode task wires it in and removes this allow.
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};

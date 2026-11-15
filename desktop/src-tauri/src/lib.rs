@@ -53,6 +53,7 @@ mod project_search;
 mod pty;
 mod remote;
 mod ssh_askpass;
+mod ssh_cmds;
 mod ssh_link;
 mod ssh_server_scripts;
 mod ssh_service;
@@ -468,6 +469,13 @@ macro_rules! product_handlers {
                 remote::remote_ssh_loop,
                 remote::remote_ssh_worktree,
                 remote::remote_ssh_confirm,
+                ssh_cmds::remote_ssh_server_test,
+                ssh_cmds::remote_ssh_server_confirm,
+                ssh_cmds::remote_ssh_server_connect,
+                ssh_cmds::remote_ssh_server_disconnect,
+                ssh_cmds::remote_ssh_server_status,
+                ssh_cmds::remote_ssh_server_stop,
+                ssh_cmds::remote_ssh_server_uninstall,
                 app_restart,
                 remote_deploy::remote_deploy_plan,
                 remote_deploy::remote_deploy_bootstrap,
@@ -582,6 +590,7 @@ pub fn run() {
         // tokio and the app lives on, so it must not take the core and every terminal with it. Only the main thread
         // panicking means the app is really going down.
         if panic_takes_the_app_down(std::thread::current().name()) {
+            ssh_service::forget_for_panic();
             if let Some(h) = CORE.get() {
                 h.shutdown_from_panic();
             }
@@ -678,6 +687,8 @@ pub fn run() {
             if let Ok(res) = app.path().resource_dir() {
                 core_host::set_resource_dir(res);
             }
+            // Before the startup thread below: in SSH mode that thread calls the connector with the saved server.
+            setup_host.set_ssh_connector(ssh_cmds::startup_connector());
             tray::setup(app.handle());
         tray::start_watch(app.handle().clone());
             menu::setup(app.handle())?;
@@ -686,6 +697,8 @@ pub fn run() {
             let signal_chat = app.state::<chat_cmds::ChatService>().inner().clone();
             if let Err(e) = ctrlc::set_handler(move || {
                 let _ = signal_chat.quit_archive(std::time::Duration::from_secs(3));
+                // The link's known_hosts folder is owned by ssh_service, so it is removed before the host stops.
+                ssh_service::disconnect(&signal_host);
                 signal_host.shutdown();
                 loop_runner::stop_all_for_exit();
                 graph_gen::graph_cancel();
@@ -730,7 +743,11 @@ pub fn run() {
 pub(crate) fn exit_cleanup(app: &tauri::AppHandle) {
     capture_host::shutdown();
     let _ = app.state::<chat_cmds::ChatService>().quit_archive_default();
-    app.state::<CoreHost>().shutdown();
+    let host = app.state::<CoreHost>();
+    // Before shutdown: the link's known_hosts folder is owned by ssh_service, which shutdown does not touch.
+    // The server core is not stopped here; SSH mode only drops the forward to it.
+    ssh_service::disconnect(&host);
+    host.shutdown();
     // Loop and Self-Heal stage commands lead their own process groups: without this they outlive the app on unix.
     loop_runner::stop_all_for_exit();
     pty::kill_all();

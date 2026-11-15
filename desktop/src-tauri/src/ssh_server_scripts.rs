@@ -6,9 +6,6 @@
 //! `__LLMIDE_<NAME>__=<value>` lines; the parsers read only those, so login banners and rc-file noise
 //! are harmless.
 
-// NOTE: no production code calls this module yet; a later SSH server mode task wires it in and removes this allow.
-#![allow(dead_code)]
-
 use serde::Deserialize;
 
 use crate::confirm::herr;
