@@ -24,6 +24,9 @@ pub const TOOL_VARS: &[&str] = &[
     "CONDA_PYTHON_EXE", "NVM_DIR", "NODE_PATH", "VOLTA_HOME", "BUN_INSTALL", "PNPM_HOME", "GEM_HOME", "GEM_PATH",
     "RBENV_ROOT", "SDKMAN_DIR", "DOTNET_ROOT", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy",
     "no_proxy", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS",
+    // Stages run `sh -c` (not `-lc`) once the login PATH is known, so locale set in ~/.profile would otherwise be
+    // lost; a Finder launch often has no LANG at all and tools then fall back to ASCII.
+    "LANG", "LC_ALL", "LC_CTYPE",
 ];
 
 /// What a stage takes from the user's login shell.
