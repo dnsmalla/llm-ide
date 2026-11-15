@@ -25,7 +25,7 @@ export function ScanView({ mode, notice, problem, videoRef, canDecodePhoto, onPh
         <div className="pair-cam">
           <video ref={videoRef} muted playsInline aria-label="Camera preview" />
           <span className="pair-frame" aria-hidden="true" />
-          <p className="web-muted">{mode === "starting" ? "Starting the camera…" : "Point the camera at the QR code on your desktop (Settings → Host API pairing)."}</p>
+          <p className="web-muted">{mode === "starting" ? "Starting the camera…" : "Point the camera at the QR code on your desktop (Settings → Phone and browser)."}</p>
         </div>
       )}
       {notice && <Banner tone="warn" title={mode === "unavailable" ? "Scanning is not available" : "Camera problem"}>{notice} Paste the pairing link instead.</Banner>}

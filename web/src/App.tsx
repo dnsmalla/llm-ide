@@ -206,7 +206,7 @@ function SupportBody() {
       <h2>Pair the browser</h2>
       <ol>
         <li>Open the LLM-IDE desktop app and keep it running.</li>
-        <li>Go to <strong>Settings → Host API pairing</strong> and choose <strong>Show PIN</strong>.</li>
+        <li>Go to <strong>Settings → Phone and browser</strong> and choose <strong>Show PIN</strong>.</li>
         <li>Enter the host address and the six-digit PIN at <a href="/app/">llm-ide.com/app</a>.</li>
         <li>If the desktop lists allowed web origins, add this page's address there before pairing.</li>
       </ol>

@@ -16,7 +16,7 @@ export interface PairingProps {
 
 const STEPS = [
   { title: "Open the desktop app", body: "Keep LLM-IDE running on the computer that holds your project." },
-  { title: "Show the pairing PIN", body: "Settings → Host API pairing → Show PIN." },
+  { title: "Show the pairing PIN", body: "Settings → Phone and browser → Show PIN." },
   { title: "Enter it here", body: "This browser connects directly. Nothing is copied to a cloud account." },
 ] as const;
 
@@ -110,7 +110,7 @@ export function PairingScreen({ initialUrl, busy, error, revokedNotice, onSubmit
               <Button type="button" variant="secondary" block onClick={() => setScanning(true)} disabled={busy}>Scan the pairing QR</Button>
               <TextField label="Hub or desktop address" type="url" value={url} onChange={(e) => setUrl(e.target.value)} required autoComplete="off" spellCheck={false} inputMode="url" error={urlProblem} hint={hostUrlHint()} />
               <TextField label="Pairing PIN" className="web-pin" inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} required autoFocus placeholder="••••••" hint="Six digits from Settings → Host API pairing." />
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} required autoFocus placeholder="••••••" hint="Six digits from Settings → Phone and browser." />
               <Button type="submit" variant="primary" size="lg" block loading={busy}>{busy ? "Pairing…" : "Pair browser"}</Button>
             </form>
             <ScanSheet open={scanning} onClose={() => setScanning(false)} onOffer={startScan} />
