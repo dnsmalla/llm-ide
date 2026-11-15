@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use crate::core_host::ct_eq;
 use crate::fs_ops::FsError;
 use crate::ssh_server_scripts::{parse_core_state, STATUS};
-use crate::ssh_session::{open_forward, wait_for_core, Connected, Link};
+use crate::ssh_session::{open_forward, wait_for_core, Connected, Link, NO_ANSWER_CODE};
 use crate::ssh_transport::{ForwardChild, SshEndpoint, SshExec};
 
 /// The one-line known_hosts folder of one endpoint. Removed when dropped, so it lives exactly as long as the
@@ -58,9 +58,10 @@ const WAKE_INTERVAL: Duration = Duration::from_millis(50);
 /// How long [`SshLink::stop`] waits for the supervisor thread to finish before it gives up on it.
 const STOP_WAIT: Duration = Duration::from_secs(1);
 
-/// Consecutive reattach attempts that reached the forward step and failed there, before the link gives up. While
-/// the local port is taken by another program, every attempt fails the same way; retrying forever would leave the
-/// state at `reconnecting` with no way out.
+/// Consecutive reattach attempts of one kind that failed, before the link gives up. A forward that fails at once
+/// (for example, the local port is taken by another program) fails the same way every time; retrying forever would
+/// leave the state at `reconnecting` with no way out. The same limit applies to a forward that stays up while
+/// `/health` never answers.
 const MAX_FORWARD_FAILURES: u32 = 5;
 
 const STOPPED_CODE: &str = "SSH_LINK_STOPPED";
@@ -70,6 +71,8 @@ const CORE_FOREIGN_CODE: &str = "SSH_CORE_FOREIGN";
 const CORE_FOREIGN_MESSAGE: &str = "A different core is running on the server now, so it was left alone.";
 const FORWARD_FAILED_CODE: &str = "SSH_FORWARD_FAILED";
 const FORWARD_FAILED_MESSAGE: &str = "The local port for this server is in use. Quit the other program and connect again.";
+const UNRESPONSIVE_CODE: &str = "SSH_CORE_UNRESPONSIVE";
+const UNRESPONSIVE_MESSAGE: &str = "The server core is not answering. Stop the server and connect again.";
 
 /// What the link reports to the app. Carries no secret and no ssh output.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -261,11 +264,13 @@ struct Supervision<'a> {
 }
 
 /// Why one reconnect attempt did not reattach. `Retry` tries again after the next backoff. `ForwardRetry` is the
-/// same, but the server confirmed its core and the local forward or its `/health` check failed; those count
-/// toward [`MAX_FORWARD_FAILURES`].
+/// same, but the server confirmed its core and the local forward failed (it could not start, exited, or another
+/// program answered on the port). `Unresponsive` is also a confirmed core, but the forward stayed up and `/health`
+/// never answered with the nonce. Each of the two failure kinds counts toward [`MAX_FORWARD_FAILURES`] on its own.
 enum Attempt {
     Retry,
     ForwardRetry,
+    Unresponsive,
     Halt(LinkState),
 }
 
@@ -303,9 +308,11 @@ fn watch_until_exit(sup: &Supervision<'_>, forward: &mut dyn ForwardChild, pause
 /// reached a state that needs the user; in the second case that state is already recorded.
 fn reconnect(sup: &Supervision<'_>, pause: &mut dyn FnMut(Pause)) -> Option<Box<dyn ForwardChild>> {
     let mut attempt: u32 = 0;
-    // Counts only an unbroken run of forward failures: an attempt that could not reach the server's STATUS
-    // says nothing about the local port, so it starts the count again.
+    // Each count is an unbroken run of one kind of failure. An attempt that could not reach the server's STATUS
+    // says nothing about the local port or the core, so it resets both. A different kind of failure resets the other
+    // count, so the code a give-up reports is always the one its own streak earned.
     let mut forward_failures: u32 = 0;
+    let mut silent_failures: u32 = 0;
     loop {
         if sup.shared.is_stopped() {
             return None;
@@ -318,13 +325,28 @@ fn reconnect(sup: &Supervision<'_>, pause: &mut dyn FnMut(Pause)) -> Option<Box<
         }
         match try_reattach(sup) {
             Ok(next) => return Some(next),
-            Err(Attempt::Retry) => forward_failures = 0,
+            Err(Attempt::Retry) => {
+                forward_failures = 0;
+                silent_failures = 0;
+            }
             Err(Attempt::ForwardRetry) => {
+                silent_failures = 0;
                 forward_failures += 1;
                 if forward_failures >= MAX_FORWARD_FAILURES {
                     sup.shared.set_state(LinkState::Failed {
                         code: FORWARD_FAILED_CODE,
                         message: FORWARD_FAILED_MESSAGE.to_string(),
+                    });
+                    return None;
+                }
+            }
+            Err(Attempt::Unresponsive) => {
+                forward_failures = 0;
+                silent_failures += 1;
+                if silent_failures >= MAX_FORWARD_FAILURES {
+                    sup.shared.set_state(LinkState::Failed {
+                        code: UNRESPONSIVE_CODE,
+                        message: UNRESPONSIVE_MESSAGE.to_string(),
                     });
                     return None;
                 }
@@ -358,9 +380,15 @@ fn try_reattach(sup: &Supervision<'_>) -> Result<Box<dyn ForwardChild>, Attempt>
     let healthy = wait_for_core(&mut watched, sup.health, sup.local_port, sup.nonce, sup.health_timeout);
     match healthy {
         Ok(()) => Ok(forward),
-        Err(_) => {
+        Err(error) => {
             forward.kill();
-            Err(Attempt::ForwardRetry)
+            // A timeout with the forward still up means the core did not answer. Any other failure here is the local
+            // forward: it exited, or another program answered on the port.
+            if error.code == NO_ANSWER_CODE {
+                Err(Attempt::Unresponsive)
+            } else {
+                Err(Attempt::ForwardRetry)
+            }
         }
     }
 }
@@ -763,10 +791,15 @@ mod tests {
     }
 
     #[test]
-    fn five_failed_reattachments_end_with_forward_failed() {
-        // STATUS confirms the core every time, but the local port never answers with its nonce.
+    fn five_forwards_that_exit_at_once_end_with_forward_failed() {
+        // The local port is taken by another program: every forward exits before the core can answer.
         let first = Handle::new();
         let fake = FakeExec::new((0..5).map(|_| state_out(REMOTE_PORT, NEW, "2.0.0")).collect());
+        let exits: Vec<Handle> = (0..5).map(|_| Handle::new()).collect();
+        for handle in &exits {
+            handle.exited.store(true, Ordering::SeqCst);
+            fake.queue_forward(handle.forward());
+        }
         let silent = |_: u16| None;
         let (link, observed) = drive(&fake, None, first.forward(), &silent, |_, seen| {
             if seen.pauses.len() == 1 {
@@ -783,7 +816,62 @@ mod tests {
         assert_eq!(observed.backoffs().len(), 5, "one backoff per attempt, then no sixth attempt");
         let expected: Vec<&str> = (0..5).flat_map(|_| ["status", "forward"]).collect();
         assert_eq!(fake.names(), expected, "no forward is spawned after the fifth failure");
-        assert_eq!(fake.kills(), 5, "each failed forward is killed");
+        assert!(exits.iter().all(|handle| handle.kill_count() == 1), "each failed forward is killed once");
+    }
+
+    #[test]
+    fn five_silent_reattachments_end_as_core_unresponsive() {
+        // The forward stays up and STATUS confirms the core, but `/health` never answers with its nonce. The local port
+        // is not the problem here, so the message must not blame it.
+        let first = Handle::new();
+        let fake = FakeExec::new((0..5).map(|_| state_out(REMOTE_PORT, NEW, "2.0.0")).collect());
+        let silent = |_: u16| None;
+        let (link, observed) = drive(&fake, None, first.forward(), &silent, |_, seen| {
+            if seen.pauses.len() == 1 {
+                first.exited.store(true, Ordering::SeqCst);
+            }
+        });
+        assert_eq!(
+            link.state(),
+            LinkState::Failed {
+                code: "SSH_CORE_UNRESPONSIVE",
+                message: "The server core is not answering. Stop the server and connect again.".into(),
+            }
+        );
+        assert_eq!(observed.backoffs().len(), 5, "one backoff per attempt, then no sixth attempt");
+        let expected: Vec<&str> = (0..5).flat_map(|_| ["status", "forward"]).collect();
+        assert_eq!(fake.names(), expected, "no forward is spawned after the fifth failure");
+        assert_eq!(fake.kills(), 5, "each silent forward is killed");
+    }
+
+    #[test]
+    fn a_forward_failure_restarts_the_silent_count() {
+        // Four silent attempts, then a forward that exits, then four more silent ones: neither run reaches five, so the
+        // link keeps trying instead of ending with a code the last streak does not earn.
+        // Attempts 1-4 and 6-9 keep the forward up with no answer; attempt 5's forward exits at once. Only an
+        // unbroken run of five counts, so no streak reaches five and the link keeps trying until it is stopped.
+        let first = Handle::new();
+        let fake = FakeExec::new((0..9).map(|_| state_out(REMOTE_PORT, NEW, "2.0.0")).collect());
+        for attempt in 1..=9 {
+            let handle = Handle::new();
+            if attempt == 5 {
+                handle.exited.store(true, Ordering::SeqCst);
+            }
+            fake.queue_forward(handle.forward());
+        }
+        let silent = |_: u16| None;
+        let (link, _) = drive(&fake, None, first.forward(), &silent, |link, seen| {
+            if seen.pauses.len() == 1 {
+                first.exited.store(true, Ordering::SeqCst);
+            } else if seen.pauses.len() == 30 {
+                link.stop();
+            }
+        });
+        assert_eq!(
+            link.state(),
+            LinkState::Failed { code: "SSH_LINK_STOPPED", message: "The connection was closed.".into() },
+            "a streak broken by a forward failure must not end the link"
+        );
     }
 
     #[test]

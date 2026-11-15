@@ -36,6 +36,10 @@ const LOCAL_PORTS: std::ops::RangeInclusive<u16> = 3456..=3459;
 pub(crate) const FOREIGN_CORE_CODE: &str = "SSH_CORE_FOREIGN";
 pub(crate) const FOREIGN_CORE_MESSAGE: &str = "Another computer started the server on this account.";
 
+/// The code `wait_for_core` gives when the forward stayed up and `/health` never answered. `ssh_link` reads it to tell a
+/// silent core apart from a local forward that failed.
+pub(crate) const NO_ANSWER_CODE: &str = "SSH_START_FAILED";
+
 /// Time limit per remote script. Most scripts are quick. START waits for the core's own health check, UNINSTALL
 /// removes releases on a disk that may be slow, and INSTALL uploads a bundle of about 200 MB over a slow link.
 const SCRIPT_DEADLINE: Duration = Duration::from_secs(60);
@@ -604,7 +608,7 @@ pub(crate) fn wait_for_core(
         }
         let now = Instant::now();
         if now >= deadline {
-            return Err(herr("SSH_START_FAILED", "the core did not answer on the forwarded port"));
+            return Err(herr(NO_ANSWER_CODE, "the core did not answer on the forwarded port"));
         }
         std::thread::sleep(HEALTH_POLL.min(deadline - now));
     }
