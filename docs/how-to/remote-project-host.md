@@ -205,3 +205,13 @@ The desktop Remote workspace exposes **Run loop**: it asks for a loop name (blan
 and prints the result. A skipped blocking stage fails the run (`partial: true`), so a host run cannot claim success for
 desktop-only map/graph stages it did not execute. The VPS needs Claude credentials (or an Anthropic key) for skill stages; shell stages need only the
 host core.
+
+## iPhone review
+
+With the `read` capability, the iPhone shows a **Changes** tab for the selected project:
+
+- branch, ahead/behind, clean/dirty
+- changed-file list from `git.status`
+- one unified diff from `git.diff`
+
+Review is read-only on the phone; commit and push stay on the host workspace.
