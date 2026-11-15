@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
 const BASE = "/srv/llmide/projects";
 const op = JSON.parse(fs.readFileSync("/etc/llmide-remote/operator.json","utf8"));
 const key = fs.readFileSync("/etc/systemd/system/llmide-remote.service","utf8").match(/LLMIDE_HOST_APPROVAL_KEY=([0-9a-f]{64})/)?.[1];
@@ -26,6 +27,15 @@ if (login.status !== 200) { console.error("operator login failed"); process.exit
 const auth = {authorization:`Bearer ${login.body.accessToken}`,"x-llmide-host-nonce":proof};
 const reg = await post("/kb/projects/register",{root,name:path.basename(root)},{...auth});
 if (reg.status !== 200) { console.error("register failed", reg.status, JSON.stringify(reg.body)); process.exit(4); }
+// The Host API scopes reads/writes to the user's repo allow-list; registration alone is not enough.
+try {
+  const require = createRequire("/opt/llmide-remote/extension/package.json");
+  const Database = require("better-sqlite3");
+  const db = new Database("/var/lib/llmide-remote/data.db");
+  db.prepare("delete from user_repos where user_id=? and path=?").run(login.body.user.id, root);
+  db.prepare("insert into user_repos (user_id,path,label,added_at) values (?,?,?,datetime('now'))").run(login.body.user.id, root, path.basename(root));
+  db.close();
+} catch (e) { console.error("repo allow-list failed", e.message); process.exit(5); }
 const pin = await post("/host-api/pin",{},{...auth});
 if (pin.status !== 200) { console.error("pin failed", pin.status); process.exit(5); }
 console.log(JSON.stringify({root,projectId:reg.body.id,url:op.url,pin:pin.body.pin,fingerprint:pin.body.fingerprint}));
