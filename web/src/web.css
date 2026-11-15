@@ -95,6 +95,8 @@ code { font-family: var(--ui-mono); font-size: .92em; background: var(--ui-hover
 
 /* ---- Chat ------------------------------------------------------------------------------------------------- */
 .web-chat { position: relative; height: 100%; min-height: 0; max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; }
+.web-chat-bar .ui-btn { color: var(--ui-muted); font-weight: var(--ui-fw-medium); }
+.web-chat-bar .ui-btn:first-child { color: var(--ui-text); }
 .web-chat-bar { display: flex; justify-content: flex-end; gap: var(--ui-s-1); padding: var(--ui-s-1) calc(var(--ui-safe-right) + var(--ui-s-3)) 0 calc(var(--ui-safe-left) + var(--ui-s-3)); flex: none; }
 .web-chat-banners { display: grid; gap: var(--ui-s-2); padding: 0 calc(var(--ui-safe-right) + var(--ui-s-4)) 0 calc(var(--ui-safe-left) + var(--ui-s-4)); flex: none; }
 .web-chat-banners:empty { display: none; }
@@ -143,7 +145,10 @@ code { font-family: var(--ui-mono); font-size: .92em; background: var(--ui-hover
 .web-dock .web-status { padding: 0 var(--ui-s-1); min-height: 0; }
 .web-dock .web-status:empty { display: none; }
 .web-dock .chat-composer { padding: var(--ui-s-2) var(--ui-s-3) var(--ui-s-3); border: 1px solid var(--ui-line); border-radius: var(--ui-r-xl); background: var(--ui-card); box-shadow: var(--ui-elev-2); gap: var(--ui-s-2); }
-.web-dock .chat-composer:focus-within { border-color: var(--ui-accent); }
+.web-dock .chat-composer:focus-within { border-color: var(--ui-accent); box-shadow: var(--ui-elev-2), 0 0 0 3px color-mix(in srgb, var(--ui-accent) 22%, transparent); }
+/* The shared Composer wraps its textarea in a bordered card; inside the dock that read as a box in a box. */
+.web-dock .chat-input-card { border: 0; background: transparent; box-shadow: none; padding: 0; border-radius: 0; }
+.web-dock .chat-input-card:focus-within { border: 0; box-shadow: none; }
 .web-dock .chat-textarea { min-height: 44px; max-height: 40vh; resize: none; padding: 10px 4px; border: 0; background: transparent; font-size: 16px; line-height: 1.45; outline: none; color: var(--ui-text); overflow-y: hidden; }
 .web-dock .chat-textarea::placeholder { color: var(--ui-muted); opacity: 1; }
 .web-dock .chat-composer-bar { flex-wrap: wrap; gap: var(--ui-s-2); }

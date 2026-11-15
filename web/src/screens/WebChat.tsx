@@ -166,7 +166,7 @@ export function WebChat(p: WebChatProps) {
   return (
     <div className="web-chat">
       <div className="web-chat-bar">
-        {p.onNewChat && (<Button size="sm" variant="ghost" onClick={p.onNewChat} disabled={chatBlocked || busy} title={disabledReason ?? (busy ? "Wait for the reply to finish" : execute ? "Start a fresh Execute chat" : "Start a new phone chat; this one stays in the chat list")}>New chat</Button>)}
+        {p.onNewChat && (<Button size="sm" variant="ghost" icon="plus" onClick={p.onNewChat} disabled={chatBlocked || busy} title={disabledReason ?? (busy ? "Wait for the reply to finish" : execute ? "Start a fresh Execute chat" : "Start a new phone chat; this one stays in the chat list")}>New chat</Button>)}
         {execute
           ? <Button size="sm" variant="ghost" icon="trash" onClick={() => setConfirmDelete(true)} disabled={chatBlocked || busy} title={disabledReason ?? (busy ? "Wait for the run to finish" : undefined)}>Delete this chat</Button>
           : <Button size="sm" variant="ghost" onClick={p.onClear} disabled={chatBlocked || busy} title={disabledReason ?? (busy ? "Wait for the reply to finish" : undefined)}>Clear history</Button>}

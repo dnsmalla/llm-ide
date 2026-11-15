@@ -136,7 +136,7 @@ test("web chat: New chat only when offered, disabled during a turn; the compose 
   const out = html(h(UI.WebChat, chatProps(idle, { onNewChat: noop, compose: h("p", null, "COMPOSE-SLOT") })));
   assert.match(out, /New chat/); assert.match(out, /COMPOSE-SLOT/);
   const busy = [{ type: "sent", commandId: "c-1", text: "hi" }].reduce(UI.reduce, UI.initialChatState);
-  assert.match(html(h(UI.WebChat, chatProps(busy, { onNewChat: noop }))), /<button[^>]*disabled=""[^>]*>New chat/);
+  assert.match(html(h(UI.WebChat, chatProps(busy, { onNewChat: noop }))), /<button[^>]*disabled=""[^>]*>(?:(?!<\/button>).)*New chat/);
 });
 test("tool approval card says where saved rules live, still offers no saved rule", () => {
   const s = [{ type: "sent", commandId: "c-1", text: "hi" }, ev("toolApproval.request", { requestId: "r-1", commandId: "c-1", toolName: "Edit", summary: "edit a.txt", truncated: false })].reduce(UI.reduce, UI.initialChatState);
