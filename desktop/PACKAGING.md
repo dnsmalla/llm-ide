@@ -429,7 +429,7 @@ loaded when disabled).
 
 The SSH server mode runs the core on a Linux server reached by the system `ssh`. This section records how the server bundle is produced and found, the server layout, the password custody and the one-desktop-per-account limit. User steps are in `docs/how-to/connect-over-ssh.md`, and the rules are in `docs/explanation/invariants.md` ("SSH server mode").
 
-Verification status: a first live check ran the server scripts on one Ubuntu 20.04 server. The full app flow has not been verified end to end yet.
+Verification status: the connect path was run end to end against one Ubuntu 20.04 server (password login, install, start, forward, sign-up and sign-in, disconnect and reconnect, stop, uninstall). Clicking through the app window, key install on a real account, and Windows desktops have not been verified.
 
 ### Where the Linux bundle comes from
 
@@ -450,7 +450,7 @@ The password is typed in the app and held in memory for that run only. `ssh_askp
 
 ### One desktop per server account
 
-A core is recorded with the desktop that started it: `ssh-session.json` in the app data folder holds the host, port, user and nonce, mode `0600`. Another desktop that finds a running core without a matching record gets `SSH_CORE_FOREIGN` (`ssh_session::require_ours`) from Connect and the core is left alone. Stop server and Uninstall refuse the same way unless the caller passes `force`, which the UI sends only after the user chooses Stop it anyway or Uninstall anyway. This is deliberate for this version: one server account, one desktop install. Test: `ssh_session::tests::foreign_core_is_refused`.
+A core is recorded with the desktop that started it: `ssh-session.json` in the app data folder holds the host, port, user and nonce, mode `0600`. While a start is in flight, the record also holds that start's nonce as `pending`, so a start whose reply was lost still leaves a core that the same desktop recognises on the next Connect. Another desktop that finds a running core without a matching record gets `SSH_CORE_FOREIGN` (`ssh_session::require_ours`) from Connect and the core is left alone. Stop server and Uninstall refuse the same way unless the caller passes `force`, which the UI sends only after the user chooses Stop it anyway or Uninstall anyway. This is deliberate for this version: one server account, one desktop install. Test: `ssh_session::tests::foreign_core_is_refused`.
 
 ## Release
 

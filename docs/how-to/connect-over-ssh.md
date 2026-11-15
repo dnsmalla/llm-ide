@@ -13,8 +13,10 @@ the server.
 This is the third server mode. The other two are **Local desktop** (the core runs on this computer)
 and **Remote server** (an LLM-IDE hub you connect to, see [Connect the desktop to a server](configure-remote-server.md)).
 
-> A first live check ran the server scripts on one Ubuntu 20.04 server. The full app flow has not been
-> verified end to end yet. Read the [limits](#limits) before you rely on it.
+> The connect path was run end to end against one Ubuntu 20.04 server: password login, install, start,
+> forward, sign-up and sign-in, disconnect and reconnect, stop, and uninstall. Clicking through the app
+> window, key install on a real account, and Windows desktops have not been verified. Read the
+> [limits](#limits) before you rely on it.
 
 ## What you need
 
@@ -88,8 +90,10 @@ connect after an app update replaces it with the new version (see [Updates](#upd
 | **Stop server** | Closes the forward. | Stops the core. |
 | **Uninstall…** | Closes the forward. | Stops the core and removes the installed releases. Your data is kept. You must type the server's host name to confirm. |
 
-Stop server and Uninstall act on the saved server. If the form shows other details, they refuse with
-`Those are not the saved server's details.` If the core was started by another desktop, both refuse and
+Stop server and Uninstall act on the saved server. Stop server refuses a form whose Host, Port or User differ
+from the saved server, with `Those are not the saved server's details.` Uninstall compares only the host
+name you type in its confirmation with the saved host, and refuses another name with
+`Type the server's host name to uninstall.` If the core was started by another desktop, both refuse and
 offer **Stop it anyway** or **Uninstall anyway**. Use those only when you know the other desktop's work can
 stop.
 
@@ -138,9 +142,11 @@ After it starts, the core must answer `/health` with the nonce the desktop sent.
 bundled Node.js, so the server does not need curl. A core that does not answer in about 20 seconds is
 stopped, and its state is removed.
 
-The core starts detached from the SSH session, so it does not stop when the SSH connection drops. A
-connection that drops during a start leaves the core running and recorded in `state.json`. The next
-Connect finds it and reuses it. The desktop never sends a stop signal to it, except through **Stop
+The core starts detached from the SSH session, so it does not stop when the SSH connection drops. If the
+connection drops during a start, the core can keep running and recorded in `state.json`. The desktop
+records each start's nonce before it sends the start, so the next Connect from the same desktop finds that
+core, confirms it with STATUS, and reuses it without a second start. Another desktop does not reuse it: it
+refuses the core as foreign. The desktop never sends a stop signal to the core, except through **Stop
 server**, **Uninstall** or the update described below.
 
 When the connection drops, the app reopens the forward after 1, 2, 4 and 8 seconds, then every 15 seconds,
@@ -188,8 +194,9 @@ work until `claude login` succeeds on the server.
 
 ## Limits
 
-- **A first live check, not an end-to-end test.** A first live check ran the server scripts on one Ubuntu
-  20.04 server. The full app flow has not been verified end to end yet.
+- **Verification.** The connect path was run end to end against one Ubuntu 20.04 server: password login,
+  install, start, forward, sign-up and sign-in, disconnect and reconnect, stop, and uninstall. Clicking
+  through the app window, key install on a real account, and Windows desktops have not been verified.
 - **Linux x86_64 only.** Other systems are refused before anything is installed.
 - **2 GB of free disk.** Test shows the free space, and Connect refuses a server with less than 2048 MB free.
 - **glibc version.** The standard server bundle needs glibc 2.34 or newer. Servers such as Ubuntu 20.04
@@ -205,7 +212,8 @@ work until `claude login` succeeds on the server.
   available yet.
 - **Other users on the server.** Other users on the same server can reach the core's loopback port. The
   core lets only its first account register; later sign-ups need an invite from the owner, and every
-  sign-in still needs a valid account.
+  sign-in still needs a valid account. Until the first account exists, another account on the server could
+  create it first and own the core. Create your account right after the first connect.
 - **Link only while connected.** The desktop sends no requests through the forward while the link is
   reconnecting. Requests wait until it is connected again.
 - **Host names.** Use the real host name or IP address. A host alias from `~/.ssh/config` cannot be used.
@@ -228,7 +236,7 @@ Each row starts with the exact sentence the app shows.
 | `Test the connection and confirm the server's host key first.` | No host key is trusted yet, or the saved key belongs to another host or port. | Press Test, compare the fingerprint, and press Trust this key. |
 | `The server's host key changed. Test the connection again and confirm the new fingerprint.` | The server presents a different host key than the one you trusted. This can mean a reinstalled server or an attack. | Ask the server's operator for the new fingerprint. Test again and trust it only if it matches. |
 | `Another computer started the server on this account.` | A core this desktop did not start is running for this account. | Use the desktop that started it. Press **Stop it anyway** or **Uninstall anyway** only if you are sure that work can stop. |
-| `Those are not the saved server's details.` | The Host, Port or User in the form differ from the saved server, so Stop server or Uninstall refused to act. | Put back the saved values to act on that server. To use other values, connect to them first. |
+| `Those are not the saved server's details.` | The Host, Port or User in the form differ from the saved server, so Stop server refused to act. | Put back the saved values to stop that server. To use other values, connect to them first. |
 | `The server is already starting. Try again in a moment.` | Another start of the core is running for this data folder. | Wait a moment, then press Connect again. |
 | `The local port for this server is in use. Quit the other program and connect again.` | Another program took one of the local ports `3456` to `3459` for the forward. | Quit that program, then connect again. |
 | `This build has no Linux server bundle.` | The app build does not contain the server bundle. | Use a development build made with `node desktop/scripts/stage-hub-core.mjs` (see `desktop/PACKAGING.md`). |
@@ -242,7 +250,8 @@ Each row starts with the exact sentence the app shows.
 | `the port forward to the server stopped` | The SSH forward ended. The app reconnects with a delay. | Wait for the reconnect. If it keeps failing, check the network. |
 | `no local port in 3456..=3459 is free for the forward` | Four local ports are busy. | Close the program that uses them, then connect again. |
 | `The server core is not running. Connect again to start it.` | The core was stopped on the server. | Press Connect. |
-| `A different core is running on the server now, so it was left alone.` | Another core took the server's port or replaced this one while the app was connected. | Stop server, then connect again. |
+| `A different core is running on the server now, so it was left alone.` | Another desktop started a core on this account while this app was connected, so the server's core is no longer the one this app started. | Press **Stop server**. It answers `Another computer started the server on this account.` with **Stop it anyway**. That button stops the other desktop's core, so press it only when you are sure that work can stop. Then connect again. |
+| `The server core is not answering. Stop the server and connect again.` | The forward stayed up, but the core did not answer its health check with its nonce on five reconnect attempts in a row. | Press **Stop server**, then Connect. If Stop server asks for **Stop it anyway**, another desktop started this core: see the row above. |
 | `The server did not accept the new key. Your password login is unchanged.` | The key check failed. | Connect with the password and try Use a key from now on again. |
 | `Type the server's host name to uninstall.` | The confirmation text does not match the saved host. | Type the saved host name exactly. |
 
