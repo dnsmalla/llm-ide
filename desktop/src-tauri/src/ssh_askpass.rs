@@ -78,6 +78,18 @@ impl Drop for AskpassGrant {
     }
 }
 
+/// The program ssh runs as its askpass helper: this app's own executable.
+///
+/// NOTE: a `cargo test` binary cannot act as the helper (its `main` is the test runner), so the live
+/// end-to-end check points this at the built app binary. The override exists in test builds only.
+fn helper_exe() -> std::io::Result<std::path::PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = std::env::var_os("LLMIDE_TEST_ASKPASS_EXE") {
+        return Ok(std::path::PathBuf::from(path));
+    }
+    std::env::current_exe()
+}
+
 /// Starts a one-time grant that answers `secret` to the first client presenting the token.
 ///
 /// Preconditions: none; `secret` may be empty (the helper then prints nothing useful).
@@ -85,7 +97,7 @@ impl Drop for AskpassGrant {
 /// successful answer, after 60 s without one, or when the grant is dropped.
 pub fn grant(secret: &str) -> std::io::Result<AskpassGrant> {
     let token = crate::core_host::random_nonce().map_err(std::io::Error::other)?;
-    let helper = std::env::current_exe()?;
+    let helper = helper_exe()?;
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     // Nonblocking so the worker can notice `stop` and the deadline between polls.
     listener.set_nonblocking(true)?;
