@@ -141,15 +141,34 @@ struct WorkView: View {
         sections.contains(chosen) ? chosen : (sections.first ?? .execute)
     }
 
+    /// Sections opened at least once. They stay mounted (only hidden) so a segment switch keeps their @State — an Execute
+    /// draft, a commit message, a running task sheet — the way separate tabs did. Mounting waits for the first visit so
+    /// launching the app does not run every screen's loads.
+    @State private var visited: Set<WorkSection> = []
+
+    @ViewBuilder
+    private func screen(for section: WorkSection) -> some View {
+        switch section {
+        case .execute: ExplorerChatView()
+        case .tasks:   TasksView()
+        case .loop:    LoopView()
+        case .changes: ChangesView()
+        }
+    }
+
     var body: some View {
-        Group {
-            switch current {
-            case .execute: ExplorerChatView()
-            case .tasks:   TasksView()
-            case .loop:    LoopView()
-            case .changes: ChangesView()
+        ZStack {
+            ForEach(sections, id: \.self) { section in
+                if section == current || visited.contains(section) {
+                    screen(for: section)
+                        .opacity(section == current ? 1 : 0)
+                        .allowsHitTesting(section == current)
+                        .accessibilityHidden(section != current)
+                }
             }
         }
+        .onAppear { visited.insert(current) }
+        .onChange(of: current) { newValue in visited.insert(newValue) }
         .safeAreaInset(edge: .top, spacing: 0) {
             if sections.count > 1 {
                 Picker("Work", selection: Binding(get: { current }, set: { chosen = $0 })) {
