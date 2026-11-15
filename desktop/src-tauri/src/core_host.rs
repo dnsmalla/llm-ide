@@ -250,7 +250,9 @@ pub struct CoreStatus {
     /// Additive: the spawned core holds :3456, the only port the Chrome extension talks to.
     #[serde(rename = "extensionReachable")]
     pub extension_reachable: bool,
-    /// Additive, SSH mode only: `connected` | `reconnecting` | `needs_password` | `failed`; `null` otherwise.
+    /// Additive, SSH mode only; `null` otherwise. One of: `connecting` (a key-mode connect is running), `connected` and
+    /// `reconnecting` (the live link's state), `needs_password` (password auth, not connected yet), `failed` (a connect
+    /// ended with an error, or the live link reports `Failed`), `stopped` (after a Stop, or at launch with start off).
     pub link: Option<&'static str>,
 }
 
@@ -285,6 +287,14 @@ fn unwired_ssh_connector() -> SshConnector {
     Arc::new(|_| Err(crate::fs_ops::FsError { code: "SSH_NOT_WIRED", message: "SSH server mode is not available in this build yet.".into() }))
 }
 
+/// SSH mode's link slot. The link and the "a key-mode connect is running" flag share one lock, so an attach and
+/// the flag change together and `status` never reads one without the other.
+#[derive(Default)]
+struct SshSlot {
+    link: Option<SshLink>,
+    connecting: bool,
+}
+
 struct Inner {
     status: Mutex<Status>,
     child: Mutex<Option<ManagedChild>>,
@@ -311,7 +321,7 @@ struct Inner {
     run_prefs: Mutex<Option<crate::prefs::Prefs>>,
     prefs_source: PrefsSource,
     /// The supervised forward SSH mode serves. Its own lock: `status` reads it, and nothing holds both locks.
-    ssh_link: Mutex<Option<SshLink>>,
+    ssh_link: Mutex<SshSlot>,
     ssh_connector: Mutex<SshConnector>,
 }
 
@@ -390,23 +400,41 @@ fn mode_name(mode: ServerMode) -> &'static str {
     }
 }
 
-/// The `link` field: a live link's state, or with no link attached, what the user still has to do.
-fn link_label(state: Option<&LinkState>, password_auth: bool) -> &'static str {
+/// The label of a live link's state.
+fn live_link_label(state: &LinkState) -> &'static str {
     match state {
-        Some(LinkState::Connected) => "connected",
-        Some(LinkState::Reconnecting { .. }) => "reconnecting",
-        Some(LinkState::NeedsPassword) => "needs_password",
-        Some(LinkState::Failed { .. }) => "failed",
-        None if password_auth => "needs_password",
-        None => "failed",
+        LinkState::Connected => "connected",
+        LinkState::Reconnecting { .. } => "reconnecting",
+        LinkState::NeedsPassword => "needs_password",
+        LinkState::Failed { .. } => "failed",
     }
 }
 
-/// What SSH mode adds to `status()`, read from the attached link on every call.
+/// What SSH mode reads from the link slot on each `status()` call, taken in one lock.
 struct SshView {
     url: Option<String>,
-    link: &'static str,
-    error: Option<String>,
+    state: Option<LinkState>,
+    connecting: bool,
+    password_auth: bool,
+}
+
+/// `url`, `error` and `link` for SSH mode. A live link decides the label. With no link, the connect flag and the
+/// phase decide: a stopped host says `stopped`, not `failed`.
+fn ssh_fields(view: SshView, phase: Phase, stored_error: Option<String>) -> (String, Option<String>, &'static str) {
+    let error = match &view.state {
+        Some(LinkState::Failed { message, .. }) => Some(message.clone()),
+        _ => stored_error,
+    };
+    let label = match &view.state {
+        Some(state) => live_link_label(state),
+        None if view.connecting => "connecting",
+        None if phase == Phase::Stopped => "stopped",
+        None if view.password_auth => "needs_password",
+        // Phase::Starting is the window before the startup thread starts a key-mode connect.
+        None if phase == Phase::Starting => "connecting",
+        None => "failed",
+    };
+    (view.url.unwrap_or_default(), error, label)
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -474,7 +502,7 @@ impl CoreHost {
                 lifecycle: Mutex::new(()),
                 run_prefs: Mutex::new(None),
                 prefs_source: Arc::new(crate::prefs::stored),
-                ssh_link: Mutex::new(None),
+                ssh_link: Mutex::new(SshSlot::default()),
                 ssh_connector: Mutex::new(unwired_ssh_connector()),
             }),
         }
@@ -532,7 +560,10 @@ impl CoreHost {
         let ssh = self.ssh_view(mode);
         let s = lock(&self.inner.status);
         let (url, error, link) = match ssh {
-            Some(view) => (view.url.unwrap_or_default(), view.error.or_else(|| s.error.clone()), Some(view.link)),
+            Some(view) => {
+                let (url, error, label) = ssh_fields(view, s.state, s.error.clone());
+                (url, error, Some(label))
+            }
             None => (s.url.clone(), s.error.clone(), None),
         };
         CoreStatus {
@@ -567,27 +598,26 @@ impl CoreHost {
         if mode != ServerMode::Ssh {
             return None;
         }
-        let live = lock(&self.inner.ssh_link).as_ref().map(|link| (link.url(), link.state()));
+        let (url, state, connecting) = {
+            let slot = lock(&self.inner.ssh_link);
+            (slot.link.as_ref().map(SshLink::url), slot.link.as_ref().map(SshLink::state), slot.connecting)
+        };
         let password_auth = self.run_prefs().remote_server.ssh_auth == SshAuthKind::Password;
-        let (url, state) = match live {
-            Some((url, state)) => (Some(url), Some(state)),
-            None => (None, None),
-        };
-        let error = match &state {
-            Some(LinkState::Failed { message, .. }) => Some(message.clone()),
-            _ => None,
-        };
-        Some(SshView { url, link: link_label(state.as_ref(), password_auth), error })
+        Some(SshView { url, state, connecting, password_auth })
     }
 
-    /// Makes `link` the one SSH mode serves. A link already attached is stopped first: a link that reached
-    /// `NeedsPassword` is dead and must be replaced, not resumed.
+    /// Makes `link` the one SSH mode serves. The swap is one lock, so two concurrent attaches cannot both see the
+    /// same previous link and leak one. The replaced link is stopped after the lock is released; a link that
+    /// reached `NeedsPassword` is dead and must be replaced, not resumed.
     pub fn attach_ssh_link(&self, link: SshLink) {
-        let previous = lock(&self.inner.ssh_link).take();
+        let previous = {
+            let mut slot = lock(&self.inner.ssh_link);
+            slot.connecting = false;
+            std::mem::replace(&mut slot.link, Some(link))
+        };
         if let Some(previous) = previous {
             previous.stop();
         }
-        *lock(&self.inner.ssh_link) = Some(link);
         let mut s = lock(&self.inner.status);
         s.state = Phase::Ssh;
         s.error = None;
@@ -596,10 +626,14 @@ impl CoreHost {
 
     /// Stops and drops the attached link. The server core keeps running: that is the point of SSH mode.
     pub fn detach_ssh_link(&self) {
-        let link = lock(&self.inner.ssh_link).take();
+        let link = lock(&self.inner.ssh_link).link.take();
         if let Some(link) = link {
             link.stop();
         }
+    }
+
+    fn set_connecting(&self, connecting: bool) {
+        lock(&self.inner.ssh_link).connecting = connecting;
     }
 
     /// Where SSH mode gets its link. The SSH connect flow installs the production connector; tests inject fakes.
@@ -610,7 +644,7 @@ impl CoreHost {
     }
 
     fn ssh_link_is_live(&self) -> bool {
-        matches!(lock(&self.inner.ssh_link).as_ref().map(SshLink::state), Some(LinkState::Connected | LinkState::Reconnecting { .. }))
+        matches!(lock(&self.inner.ssh_link).link.as_ref().map(SshLink::state), Some(LinkState::Connected | LinkState::Reconnecting { .. }))
     }
 
     fn ssh_startup_running(&self) -> bool {
@@ -647,7 +681,7 @@ impl CoreHost {
         }
         // try_lock as above: the panic may have been raised while this slot is held on this thread.
         if let Ok(mut slot) = self.inner.ssh_link.try_lock() {
-            let link = slot.take();
+            let link = slot.link.take();
             drop(slot);
             if let Some(link) = link {
                 link.stop();
@@ -679,10 +713,12 @@ impl CoreHost {
     /// Initial state when "Start backend on app launch" is off: nothing was spawned, but Start can.
     pub fn mark_stopped(&self, data_dir: Option<PathBuf>) {
         *lock(&self.inner.data_dir) = data_dir;
+        // Same trust a user Stop leaves: an SSH core is never one this app spawned.
+        let ssh = self.mode() == ServerMode::Ssh;
         let mut s = lock(&self.inner.status);
         s.closing = true;
         s.state = Phase::Stopped;
-        s.trust = "spawned";
+        s.trust = if ssh { "ssh_forward" } else { "spawned" };
         s.pid = None;
         s.nonce = None;
         s.error = None;
@@ -791,6 +827,11 @@ impl CoreHost {
         let cfg = self.run_prefs().remote_server;
         // A link left from an earlier run is dead or stale, so this run starts with nothing attached.
         self.detach_ssh_link();
+        let key_auth = cfg.ssh_auth == SshAuthKind::Key;
+        // Set before the phase changes, so a status read never shows the connect window as `failed`.
+        if key_auth {
+            self.set_connecting(true);
+        }
         {
             let mut s = lock(&self.inner.status);
             s.state = Phase::Ssh;
@@ -799,23 +840,30 @@ impl CoreHost {
             s.error = None;
             s.error_code = None;
         }
-        if cfg.ssh_auth == SshAuthKind::Password {
+        if !key_auth {
             return;
         }
         let connector = lock(&self.inner.ssh_connector).clone();
         match connector(&cfg) {
             // A Stop arrived while connecting: the link is dropped here, not attached to a host nobody is using.
-            Ok(link) if self.is_closing() => link.stop(),
+            Ok(link) if self.is_closing() => {
+                self.set_connecting(false);
+                link.stop();
+            }
+            // attach clears the connecting flag in the same lock that stores the link.
             Ok(link) => self.attach_ssh_link(link),
             Err(e) => self.set_ssh_failed(e.message),
         }
     }
 
     fn set_ssh_failed(&self, message: String) {
-        let mut s = lock(&self.inner.status);
-        s.state = Phase::Ssh;
-        s.error = Some(message);
-        s.error_code = Some("SSH_UNAVAILABLE");
+        {
+            let mut s = lock(&self.inner.status);
+            s.state = Phase::Ssh;
+            s.error = Some(message);
+            s.error_code = Some("SSH_UNAVAILABLE");
+        }
+        self.set_connecting(false);
     }
 
     fn run_startup(&self) {
@@ -2682,11 +2730,15 @@ process.on('SIGTERM', () => process.exit(0));
 
     /// A real supervised link over a scripted exec. The returned exec records every ssh call it saw.
     fn ssh_link_over_fake(kills: &Arc<AtomicUsize>) -> (SshLink, Arc<FakeExec>) {
+        ssh_link_on_port(kills, 3456)
+    }
+
+    fn ssh_link_on_port(kills: &Arc<AtomicUsize>, port: u16) -> (SshLink, Arc<FakeExec>) {
         let fake = Arc::new(FakeExec::new(Vec::new()));
         let claude = parse_probe(&probe_out("2.0.0").unwrap().stdout).unwrap().claude;
         let connected = Connected {
-            local_url: "http://127.0.0.1:3456".into(),
-            local_port: 3456,
+            local_url: format!("http://127.0.0.1:{port}"),
+            local_port: port,
             remote_port: 3460,
             nonce: NEW.into(),
             version: "2.0.0".into(),
@@ -2831,7 +2883,7 @@ process.on('SIGTERM', () => process.exit(0));
         assert!(!fake.names().contains(&"stop"), "the server core keeps running: {:?}", fake.names());
         let s = host.status();
         assert_eq!(s.state, Phase::Stopped);
-        assert_eq!(s.link, Some("failed"), "no link is attached after a stop");
+        assert_eq!(s.link, Some("stopped"), "a stopped host is not a failed one");
         host.set_mode(ServerMode::Local);
     }
 
@@ -2840,15 +2892,61 @@ process.on('SIGTERM', () => process.exit(0));
         let _mode = mode_guard();
         let host = ssh_host(SshAuthKind::Password, never_launcher(), refusing_connector());
         let old_kills = Arc::new(AtomicUsize::new(0));
-        let (old, _f1) = ssh_link_over_fake(&old_kills);
+        let (old, _f1) = ssh_link_on_port(&old_kills, 3456);
         host.attach_ssh_link(old);
         let new_kills = Arc::new(AtomicUsize::new(0));
-        let (new, _f2) = ssh_link_over_fake(&new_kills);
+        let (new, _f2) = ssh_link_on_port(&new_kills, 3457);
         host.attach_ssh_link(new);
-        assert_eq!(old_kills.load(Ordering::SeqCst), 1, "the replaced link is stopped first");
+        assert_eq!(old_kills.load(Ordering::SeqCst), 1, "the replaced link is stopped");
         assert_eq!(new_kills.load(Ordering::SeqCst), 0, "the new link is live");
+        assert_eq!(host.status().url, "http://127.0.0.1:3457", "status reports the link that replaced the old one");
         host.shutdown();
         assert_eq!(new_kills.load(Ordering::SeqCst), 1, "app shutdown detaches the link");
+        host.set_mode(ServerMode::Local);
+    }
+
+    #[test]
+    fn a_key_connect_shows_connecting_until_it_returns() {
+        let _mode = mode_guard();
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let g = gate.clone();
+        let kills = Arc::new(AtomicUsize::new(0));
+        let k = kills.clone();
+        let connector: SshConnector = Arc::new(move |_| {
+            let (open, opened) = &*g;
+            let mut open = open.lock().unwrap();
+            while !*open {
+                open = opened.wait(open).unwrap();
+            }
+            Ok(ssh_link_over_fake(&k).0)
+        });
+        let host = ssh_host(SshAuthKind::Key, never_launcher(), connector);
+        host.start().unwrap();
+        let blocked = wait_until(&host, "the connecting state", |s| s.link == Some("connecting") && s.state == Phase::Ssh);
+        assert_eq!(blocked.state, Phase::Ssh);
+        assert_eq!(blocked.url, "", "no URL before the link exists");
+        {
+            let (open, opened) = &*gate;
+            *open.lock().unwrap() = true;
+            opened.notify_all();
+        }
+        let connected = wait_until(&host, "the connected link", |s| s.link == Some("connected"));
+        assert_eq!(connected.url, "http://127.0.0.1:3456");
+        host.stop().unwrap();
+        assert_eq!(host.status().link, Some("stopped"));
+        assert_eq!(kills.load(Ordering::SeqCst), 1, "stop stops the link that connected");
+        host.set_mode(ServerMode::Local);
+    }
+
+    #[test]
+    fn mark_stopped_in_ssh_mode_matches_a_user_stop() {
+        let _mode = mode_guard();
+        let host = ssh_host(SshAuthKind::Key, never_launcher(), refusing_connector());
+        host.mark_stopped(Some(std::env::temp_dir()));
+        let s = host.status();
+        assert_eq!(s.state, Phase::Stopped);
+        assert_eq!(s.trust, "ssh_forward", "an SSH core is never reported as spawned by this app");
+        assert_eq!(s.link, Some("stopped"));
         host.set_mode(ServerMode::Local);
     }
 
