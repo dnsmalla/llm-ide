@@ -2,7 +2,7 @@
 // Types for the web client. Types only: the host validates every frame it sends.
 export const HOST_API_VERSION = 1;
 export const HOST_API_LIMITS = {"maxFrameBytes":1048576,"defaultListItems":100,"maxListItems":500,"maxListBytes":786432} as const;
-export const HOST_API_CAPABILITIES = ["host","chat","approvals","tool_approvals","read","compose","push"] as const;
+export const HOST_API_CAPABILITIES = ["host","chat","approvals","tool_approvals","read","compose","push","workspace_write","shell"] as const;
 export type HostApiCapability = (typeof HOST_API_CAPABILITIES)[number];
 export const HOST_API_ERROR_CODES = ["auth_failed","capability_unavailable","unknown_command","invalid_payload","not_found","conflict","busy","denied","desktop_only","rate_limited","host_unreachable","internal"] as const;
 export type HostApiErrorCode = (typeof HOST_API_ERROR_CODES)[number];
@@ -22,10 +22,10 @@ export const HOST_API_COMMANDS = {
   "files.list": { capability: "read", idempotent: true },
   "files.read": { capability: "read", idempotent: true },
   "files.stat": { capability: "read", idempotent: true },
-  "files.write": { capability: "read", idempotent: false },
-  "git.commit": { capability: "read", idempotent: false },
+  "files.write": { capability: "workspace_write", idempotent: false },
+  "git.commit": { capability: "workspace_write", idempotent: false },
   "git.diff": { capability: "read", idempotent: true },
-  "git.push": { capability: "read", idempotent: false },
+  "git.push": { capability: "workspace_write", idempotent: false },
   "git.status": { capability: "read", idempotent: true },
   "host.auth.pair": { capability: "host", idempotent: false },
   "host.auth.revoke": { capability: "host", idempotent: true },
@@ -46,8 +46,8 @@ export const HOST_API_COMMANDS = {
   "tasks.list": { capability: "read", idempotent: true },
   "tasks.run": { capability: "compose", idempotent: false },
   "tasks.status": { capability: "compose", idempotent: true },
-  "terminal.exec": { capability: "read", idempotent: false },
-  "terminal.shell": { capability: "read", idempotent: false },
+  "terminal.exec": { capability: "workspace_write", idempotent: false },
+  "terminal.shell": { capability: "shell", idempotent: false },
   "toolApprovals.answer": { capability: "tool_approvals", idempotent: false },
   "usage.get": { capability: "read", idempotent: true },
 } as const;
@@ -72,10 +72,10 @@ export interface HostApiCommandMap {
   "git.diff": { request: { path?: string; projectId: string; staged?: boolean }; result: { patch: string; truncated: boolean } };
   "git.push": { request: { projectId: string }; result: { ok: boolean; output: string } };
   "git.status": { request: { projectId: string }; result: { ahead: number; behind: number; branch: string; clean: boolean; entries: Array<{ from?: string; path: string; status: string; x: string; y: string }> } };
-  "host.auth.pair": { request: { pin: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push">; token: string } };
+  "host.auth.pair": { request: { pin: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push" | "workspace_write" | "shell">; token: string } };
   "host.auth.revoke": { request: { token: string }; result: { revoked: boolean } };
-  "host.auth.token": { request: { token: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push"> } };
-  "host.hello": { request: { apiVersions: Array<number>; clientName: string; clientVersion: string; platform: "ios" | "web" | "desktop" | "mac" }; result: { apiVersion: 1; apiVersions: Array<number>; capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push">; certificateFingerprint?: string; hostKind: "mac" | "desktop" | "hub"; hostName: string; protocolVersion: number; requiresAuth: boolean } };
+  "host.auth.token": { request: { token: string }; result: { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push" | "workspace_write" | "shell"> } };
+  "host.hello": { request: { apiVersions: Array<number>; clientName: string; clientVersion: string; platform: "ios" | "web" | "desktop" | "mac" }; result: { apiVersion: 1; apiVersions: Array<number>; capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push" | "workspace_write" | "shell">; certificateFingerprint?: string; hostKind: "mac" | "desktop" | "hub"; hostName: string; protocolVersion: number; requiresAuth: boolean } };
   "host.ping": { request: Record<string, never>; result: Record<string, never> };
   "host.snapshot": { request: { topics: Array<"chat" | "status" | "autotasks" | "loop"> }; result: { snapshots: Record<string, Record<string, unknown>> } };
   "loop.cancel": { request: { id: string }; result: { cancelled: boolean } };
@@ -106,6 +106,6 @@ export interface HostApiEventMap {
   "chat.delta": { text: string };
   "chat.done": { requestId: string; stopReason?: string };
   "chat.error": { message: string; retryable?: boolean };
-  "host.capabilities": { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push"> };
+  "host.capabilities": { capabilities: Array<"host" | "chat" | "approvals" | "tool_approvals" | "read" | "compose" | "push" | "workspace_write" | "shell"> };
   "toolApproval.request": { command?: string; commandId: string; contentPreview?: string; filePath?: string; newString?: string; oldString?: string; overwrites?: boolean; replaceAll?: boolean; requestId: string; summary?: string; toolName: string; truncated: boolean };
 }

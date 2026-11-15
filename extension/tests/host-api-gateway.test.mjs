@@ -8,8 +8,8 @@ const flush = () => new Promise((r) => setImmediate(r));
 const HELLO = { clientName: 't', clientVersion: '1', platform: 'web', apiVersions: [1] };
 const req = (id, command, payload = {}) => JSON.stringify({ apiVersion: 1, id, type: 'request', command, payload, ts: 1 });
 
-function harness({ detachGraceMs, toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, models = null, pinUser = () => 'u1', member = () => ({ teamRole: 'owner', maxMode: 'execute' }), projectRequired = false } = {}) {
-  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, readCalls: [], pending: [], audits: [], modelCalls: 0, member, skew: 0 };
+function harness({ detachGraceMs, toolApprovals = false, chatClear = false, hold = false, skipInit = () => false, history = null, fingerprint = null, read = false, reads = null, compose = false, workspaceWrite = false, shell = false, models = null, pinUser = () => 'u1', member = () => ({ teamRole: 'owner', maxMode: 'execute' }), projectRequired = false } = {}) {
+  const t = { sent: [], closed: [], turns: [], cancelled: [], decided: [], cleared: [], saved: [], toolApprovals, read, compose, workspaceWrite, shell, readCalls: [], pending: [], audits: [], modelCalls: 0, member, skew: 0 };
   const tokens = new Map(); // token -> { userId, deviceId, scopes }
   let n = 0;
   const quick = new Map(); // projectId || '' -> current phone chat
@@ -25,7 +25,7 @@ function harness({ detachGraceMs, toolApprovals = false, chatClear = false, hold
     close: (s) => t.closed.push(s),
     hostName: () => 'Test Computer',
     certificateFingerprint: () => fingerprint,
-    capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : []), ...(t.read ? ['read'] : []), ...(t.compose ? ['compose'] : [])],
+    capabilities: () => ['host', 'chat', 'approvals', ...(t.toolApprovals ? ['tool_approvals'] : []), ...(t.read ? ['read'] : []), ...(t.compose ? ['compose'] : []), ...(t.workspaceWrite ? ['workspace_write'] : []), ...(t.shell ? ['shell'] : [])],
     // ADR 0021 authority; the default is the install owner, so the full served list is paired.
     member: (userId) => t.member(userId),
     projectRequired: () => projectRequired,
@@ -1105,4 +1105,48 @@ test('a turn that ends while attached keeps its outcome (half-open socket), tail
   assert.equal(r.state, 'done');
   assert.equal(r.text.length, 100_000);
   assert.equal(r.truncated, true);
+});
+
+// --- workspace_write / shell: off by default, explicit grant at pairing --------------------------------
+test('hostApiCapabilities: workspace_write and shell only with their own switches', async () => {
+  const { hostApiCapabilities } = await import('../routes/host-api/gateway.mjs');
+  assert.deepEqual(hostApiCapabilities({}), ['host', 'chat', 'approvals']);
+  assert.ok(hostApiCapabilities({ LLMIDE_HOST_API_READ: '1' }).every((c) => c !== 'workspace_write' && c !== 'shell'));
+  assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_WORKSPACE_WRITE: '1' }), ['host', 'chat', 'approvals', 'workspace_write']);
+  assert.deepEqual(hostApiCapabilities({ LLMIDE_HOST_API_SHELL: '1' }), ['host', 'chat', 'approvals', 'shell']);
+});
+
+test('workspace writes and the shell are capability_unavailable unless served', async () => {
+  // The session gate runs on the served set; the project-authority lookup in front of it needs a real DB, so test the gate itself.
+  const { HostApiSession } = await import('../routes/host-api/session.mjs');
+  const session = new HostApiSession(); session.greeted('t'); session.phase = { kind: 'authed', userId: 'u1', deviceId: 'd1', clientName: 't' };
+  const served = new Set(['host', 'chat', 'approvals', 'read', 'compose', 'push']);
+  for (const command of ['files.write', 'git.commit', 'git.push', 'terminal.exec', 'terminal.shell']) {
+    assert.equal(session.gate(command, served).code, 'capability_unavailable', command);
+  }
+  assert.equal(session.gate('terminal.exec', new Set([...served, 'workspace_write'])).allow, true);
+  assert.equal(session.gate('terminal.shell', new Set([...served, 'workspace_write'])).allow, false);
+  assert.equal(session.gate('terminal.shell', new Set([...served, 'shell'])).allow, true);
+});
+
+test('a device paired before workspace_write was served is denied with a re-pair hint', async () => {
+  const t = harness({ read: true }); await t.paired({ n: 1 }); const token = t.last().result.token;
+  assert.ok(!t.last().result.capabilities.includes('workspace_write'));
+  const t2 = harness({ read: true, workspaceWrite: true, shell: true }); t2.tokens.set(token, t.tokens.get(token)); const s2 = { n: 2 };
+  t2.g.opened(s2, '127.0.0.1');
+  await t2.g.receive(s2, req('c-h', 'host.hello', HELLO));
+  await t2.g.receive(s2, req('c-a', 'host.auth.token', { token }));
+  assert.ok(!t2.last().result.capabilities.includes('workspace_write'));
+  await t2.g.receive(s2, req('c-w', 'files.write', { projectId: 'p', path: 'a', text: 'x' }));
+  assert.equal(t2.lastError(), 'denied'); assert.match(t2.last().error.message, /workspace_write/);
+  await t2.g.receive(s2, req('c-s', 'terminal.shell', { projectId: 'p', command: 'id', confirm: true }));
+  assert.equal(t2.lastError(), 'denied'); assert.match(t2.last().error.message, /shell/);
+  assert.equal(t2.audits.at(-1)[0], 'scope_denied');
+});
+
+test('pairing while served grants workspace_write and shell to an owner, never to a viewer', async () => {
+  const owner = harness({ read: true, workspaceWrite: true, shell: true }); await owner.paired({});
+  assert.ok(owner.last().result.capabilities.includes('workspace_write') && owner.last().result.capabilities.includes('shell'));
+  const viewer = harness({ read: true, workspaceWrite: true, shell: true, member: () => ({ teamRole: 'viewer', maxMode: 'ask' }) }); await viewer.paired({});
+  assert.ok(!viewer.last().result.capabilities.some((c) => c === 'workspace_write' || c === 'shell'));
 });

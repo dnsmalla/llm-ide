@@ -123,7 +123,11 @@ export function hostApiCapabilities(env = process.env) {
     ...(env.LLMIDE_HOST_API_TOOL_APPROVALS === '1' ? ['tool_approvals'] : []),
     ...(env.LLMIDE_HOST_API_READ === '1' ? ['read'] : []), // default off: a device gets read only if paired while served
     ...(env.LLMIDE_HOST_API_COMPOSE === '1' ? ['compose'] : []), // default off, as read
-    ...(env.LLMIDE_HOST_API_PUSH === '1' ? ['push'] : [])]; // default off: push notifications sent by this desktop
+    ...(env.LLMIDE_HOST_API_PUSH === '1' ? ['push'] : []), // default off: push notifications sent by this desktop
+    // Default off and never in a legacy/viewer token: these let a paired device change files, commit, push and run
+    // programs on this computer, so a device gets them only if the owner turned them on BEFORE pairing it.
+    ...(env.LLMIDE_HOST_API_WORKSPACE_WRITE === '1' ? ['workspace_write'] : []), // files.write, git.commit, git.push, terminal.exec
+    ...(env.LLMIDE_HOST_API_SHELL === '1' ? ['shell'] : [])]; // terminal.shell (still needs LLMIDE_ALLOW_REMOTE_SHELL=1)
 }
 
 const agentV2 = () => import('../agent-v2.mjs');

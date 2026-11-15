@@ -13,7 +13,9 @@
     "tool_approvals",
     "read",
     "compose",
-    "push"
+    "push",
+    "workspace_write",
+    "shell"
   ],
   "commands": {
     "host.hello": {
@@ -109,7 +111,9 @@
                 "tool_approvals",
                 "read",
                 "compose",
-                "push"
+                "push",
+                "workspace_write",
+                "shell"
               ]
             },
             "minItems": 1
@@ -170,7 +174,9 @@
                 "tool_approvals",
                 "read",
                 "compose",
-                "push"
+                "push",
+                "workspace_write",
+                "shell"
               ]
             },
             "minItems": 1
@@ -215,7 +221,9 @@
                 "tool_approvals",
                 "read",
                 "compose",
-                "push"
+                "push",
+                "workspace_write",
+                "shell"
               ]
             },
             "minItems": 1
@@ -1678,7 +1686,7 @@
       }
     },
     "files.write": {
-      "capability": "read",
+      "capability": "workspace_write",
       "v2Tag": null,
       "direction": "client_to_host",
       "idempotent": false,
@@ -2171,7 +2179,7 @@
       }
     },
     "git.commit": {
-      "capability": "read",
+      "capability": "workspace_write",
       "v2Tag": null,
       "direction": "client_to_host",
       "idempotent": false,
@@ -2224,7 +2232,7 @@
       }
     },
     "git.push": {
-      "capability": "read",
+      "capability": "workspace_write",
       "v2Tag": null,
       "direction": "client_to_host",
       "idempotent": false,
@@ -2260,7 +2268,7 @@
       }
     },
     "terminal.exec": {
-      "capability": "read",
+      "capability": "workspace_write",
       "v2Tag": null,
       "direction": "client_to_host",
       "idempotent": false,
@@ -2324,7 +2332,7 @@
       }
     },
     "terminal.shell": {
-      "capability": "read",
+      "capability": "shell",
       "v2Tag": null,
       "direction": "client_to_host",
       "idempotent": false,

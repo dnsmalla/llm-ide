@@ -159,6 +159,6 @@ test('workspace write commands are in the contract', async () => {
   const { HOST_API_COMMANDS } = await import('../routes/host-api/commands.generated.mjs');
   assert.ok(HOST_API_COMMANDS['files.stat']);
   assert.ok(HOST_API_COMMANDS['files.write']);
-  assert.equal(HOST_API_COMMANDS['files.write'].capability, 'read');
+  assert.equal(HOST_API_COMMANDS['files.write'].capability, 'workspace_write');
   assert.equal(HOST_API_COMMANDS['files.write'].idempotent, false);
 });
