@@ -149,6 +149,14 @@ test('the gate CLI exits 1 on a bad fixture and names the problem', () => {
   assert.match(run.stdout, /highest symbol versions: GLIBC 2\.34/);
 });
 
+test('the gate CLI fails on empty input and on input with no versioned symbols', () => {
+  for (const input of ['', 'objdump: not a dynamic object\n']) {
+    const run = spawnSync(process.execPath, [join(SCRIPTS, 'sqlite-compat-check.mjs')], { input, encoding: 'utf8' });
+    assert.equal(run.status, 1, `exit ${run.status} for ${JSON.stringify(input)}`);
+    assert.match(run.stderr, /no versioned symbols found/);
+  }
+});
+
 test('the gate CLI exits 0 on a good fixture and reads stdin when no file is given', () => {
   const good = fixture('GLIBC_2.2.5', 'GLIBC_2.28', 'GLIBCXX_3.4.28', 'CXXABI_1.3.12');
   const run = spawnSync(process.execPath, [join(SCRIPTS, 'sqlite-compat-check.mjs')], { input: good, encoding: 'utf8' });

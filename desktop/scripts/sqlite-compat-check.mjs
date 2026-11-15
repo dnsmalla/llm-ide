@@ -6,6 +6,11 @@ import { checkCeilings, symbolCeilings } from './sqlite-compat.mjs';
 
 const source = process.argv[2];
 const text = source ? readFileSync(source, 'utf8') : readFileSync(0, 'utf8');
+// Empty or symbol-less input (an objdump that failed, a wrong file) must not pass the gate silently.
+if (!/(?<![A-Za-z0-9_])(?:GLIBC|GLIBCXX|CXXABI)_[A-Za-z0-9.]+/.test(text)) {
+  console.error('no versioned symbols found');
+  process.exit(1);
+}
 const found = symbolCeilings(text);
 console.log(`highest symbol versions: GLIBC ${found.glibc}, GLIBCXX ${found.glibcxx}, CXXABI ${found.cxxabi}`);
 const problems = checkCeilings(text);
