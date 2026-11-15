@@ -7,26 +7,30 @@ applies_to: desktop
 
 SSH server mode runs the LLM-IDE core on a Linux server that you can already log into with SSH. The
 desktop installs the core in your home folder on that server, starts it, and reaches it through one
-SSH port forward. You do not need a domain, a TLS certificate, root access, systemd or Node.js on the
-server.
+SSH port forward. You do not need a domain, a TLS certificate, root access, systemd, Node.js or curl on
+the server.
 
 This is the third server mode. The other two are **Local desktop** (the core runs on this computer)
 and **Remote server** (an LLM-IDE hub you connect to, see [Connect the desktop to a server](configure-remote-server.md)).
 
-> The feature has not been tested on a real server yet. Read the [limits](#limits) before you rely on it.
+> A first live check ran the server scripts on one Ubuntu 20.04 server. The full app flow has not been
+> verified end to end yet. Read the [limits](#limits) before you rely on it.
 
 ## What you need
 
 - A Linux server on the x86_64 architecture, with at least 2 GB of free disk in your home folder.
 - An SSH login on that server: a host name or IP address, a port (usually `22`), a user name, and either
   a private key file on this computer or the account password.
+- A login shell that is POSIX-compatible: bash, dash, zsh or ksh. Fish and csh are not supported.
+- The `sha256sum`, `tar` and `setsid` commands on the server, and the usual POSIX utilities.
 - Optional: the Claude CLI installed on the server and signed in with `claude login`. Without it the
   core runs, but Claude features do not work. See [Claude on the server](#claude-on-the-server).
 
 ## Connect
 
 1. Open **Settings → Server & Backend → SSH server**.
-2. Enter the server's **Host**, **Port** and **User**.
+2. Enter the server's **Host**, **Port** and **User**. Use the real host name or IP address. A host alias
+   from `~/.ssh/config` cannot be used: the app's key scan cannot resolve it.
 3. Choose how you log in: **Key file** (enter the absolute path to the private key, for example
    `/Users/alice/.ssh/id_ed25519`) or **Password**.
 4. Press **Test**. The app connects only to read the server's host key and shows its fingerprint.
@@ -34,8 +38,9 @@ and **Remote server** (an LLM-IDE hub you connect to, see [Connect the desktop t
 5. Compare the fingerprint with the one the server's operator gives you, then press **Trust this key**
    and confirm the dialog. The app saves the key and refuses any other key for this server from now on.
 6. Press **Test** again. The app logs in and shows what it found: the operating system and architecture,
-   the free disk space, the installed core version, and whether the Claude CLI is installed. With
-   password login, this step asks for the password.
+   the free disk space, the installed core version, and whether the Claude CLI is installed. The app checks
+   only that `claude --version` runs, not that you are signed in. With password login, this step asks for
+   the password.
 7. Press **Connect**. The app uploads the core only when the server's current release is another version,
    checks the upload's SHA-256 on the server, starts the core, opens the forward and checks that the core
    it reached is the one it started.
@@ -74,7 +79,8 @@ on this computer. The server may keep the public line, which does nothing withou
 
 ## Disconnect, stop and uninstall
 
-These three actions do different things. The server core keeps running until you stop it.
+These three actions do different things. The server core keeps running until you stop it, or until a
+connect after an app update replaces it with the new version (see [Updates](#updates)).
 
 | Action | Effect on this computer | Effect on the server |
 |---|---|---|
@@ -82,8 +88,16 @@ These three actions do different things. The server core keeps running until you
 | **Stop server** | Closes the forward. | Stops the core. |
 | **Uninstall…** | Closes the forward. | Stops the core and removes the installed releases. Your data is kept. You must type the server's host name to confirm. |
 
+Stop server and Uninstall act on the saved server. If the form shows other details, they refuse with
+`Those are not the saved server's details.` If the core was started by another desktop, both refuse and
+offer **Stop it anyway** or **Uninstall anyway**. Use those only when you know the other desktop's work can
+stop.
+
 The core also keeps running after you quit the desktop app. When you open the app again with key login, it
 reconnects to the running core without a new upload. With password login it asks for the password first.
+
+To delete the server's data after Uninstall, remove the folder by hand on the server:
+`rm -rf ~/.llmide-server`. The app keeps it on purpose, so the database survives a reinstall.
 
 ## What happens on the server
 
@@ -104,15 +118,42 @@ The core listens on `127.0.0.1` only, on the first free port from `3460` to `347
 public address. The desktop's end of the forward is one of `127.0.0.1:3456` to `127.0.0.1:3459`, the same
 ports the app already allows for the local core.
 
-The core starts detached from the SSH session, so it does not stop when the SSH connection drops. The
-desktop never sends a stop signal to it, except through **Stop server** or **Uninstall**.
+### One core per data folder
+
+Only one core runs for each data folder, and only one start runs at a time. A start takes the lock folder
+`~/.llmide-server/.start.lock` before it reads the state, and removes it when it ends. A lock whose holder
+has exited is reclaimed automatically. If a start is already running, Connect says
+`The server is already starting. Try again in a moment.`
+
+### Environment
+
+The core starts with an empty environment and a short allow-list: your home folder, user name, shell,
+locale, time zone, temporary folder, proxy and certificate settings, and the `PATH` that finds the
+Claude CLI. Other variables that your server login exports do not reach the core, so a provider API key
+in your shell profile is not passed to it. Sign in to the Claude CLI on the server (`claude login`).
+
+### Health check
+
+After it starts, the core must answer `/health` with the nonce the desktop sent. The check uses the
+bundled Node.js, so the server does not need curl. A core that does not answer in about 20 seconds is
+stopped, and its state is removed.
+
+The core starts detached from the SSH session, so it does not stop when the SSH connection drops. A
+connection that drops during a start leaves the core running and recorded in `state.json`. The next
+Connect finds it and reuses it. The desktop never sends a stop signal to it, except through **Stop
+server**, **Uninstall** or the update described below.
 
 When the connection drops, the app reopens the forward after 1, 2, 4 and 8 seconds, then every 15 seconds,
 and checks the core's identity each time. The core is not affected.
 
-An update that does not start is undone. If the new release does not answer its health check, the app
-stops it, points `current` back at the previous release, and starts the previous release again if a core
-was running before the update.
+### Updates
+
+After an app update that brings a new core version, the first connect stops the running core and starts
+the new one. You do not need to press **Stop server** first. If the new release does not answer its health
+check, the app stops it, points `current` back at the previous release, and starts the previous release
+again if a core was running before the update.
+
+Each release is large, so the app keeps only the current release and the one before it. Older release folders are removed after an update succeeds.
 
 ## Secrets
 
@@ -120,27 +161,36 @@ The desktop sends its own core secrets (the JWT secret, the vault key and the ho
 server core over the SSH channel's standard input each time the core starts. They never appear in a command
 line or an environment variable of the server's start script, and they are not written to the server's disk.
 
+The server core receives these secrets in its memory, so an administrator of the server (root, or anyone
+who can read the process memory) can read them. Connect only to a server whose administrator you trust with
+this desktop's data.
+
 The per-start health nonce is written to `state.json` on the server (mode `0600`). It identifies the core to
 the desktop. It is not one of the secrets above.
 
-One server account belongs to one desktop install. If another desktop finds a core it did not start, it
-refuses to touch it and shows `Another computer started the server on this account…`. Use one desktop per
+One server account belongs to one desktop install. If another desktop started the core, Connect refuses to
+use it and shows `Another computer started the server on this account.` Stop server and Uninstall refuse
+the same way. **Stop it anyway** and **Uninstall anyway** repeat the action on purpose. Use one desktop per
 server account.
 
 ## Claude on the server
 
 The core uses the Claude CLI that is installed on the server. Install it there, then run `claude login` on
-the server. If the core holds a Claude API key for your account, that key is used before the server's CLI. The
-app looks for the CLI in
-the server's login `PATH`, and also in `~/.local/bin`, `~/.npm-global/bin`, `~/.claude/local` and
-`/usr/local/bin`.
+the server. If the core holds a Claude API key for your account, that key is used before the server's CLI.
+The app looks for the CLI in the server's login `PATH`, and also in `~/.local/bin`, `~/.npm-global/bin`,
+`~/.claude/local` and `/usr/local/bin`. It checks only that `claude --version` runs. Claude features do not
+work until `claude login` succeeds on the server.
 
 ## Limits
 
+- **A first live check, not an end-to-end test.** A first live check ran the server scripts on one Ubuntu
+  20.04 server. The full app flow has not been verified end to end yet.
 - **Linux x86_64 only.** Other systems are refused before anything is installed.
 - **2 GB of free disk.** Test shows the free space, and Connect refuses a server with less than 2048 MB free.
 - **glibc version.** The standard server bundle needs glibc 2.34 or newer. Servers such as Ubuntu 20.04
-  (glibc 2.31) need the *compat* bundle, which is built for glibc 2.28. See the "SSH server mode" section of `desktop/PACKAGING.md`.
+  (glibc 2.31) need the *compat* bundle, which is built for glibc 2.28. The app reads the server's glibc
+  version and refuses the standard bundle on an older server. See the "SSH server mode" section of
+  `desktop/PACKAGING.md`.
 - **The bundle is not in the installer yet.** In this version the server bundle is read from a development
   checkout (`desktop/resources/hub/` or `desktop/dist/hub/`), or from the app's resources if a build put it
   there. It is not downloaded and it is not shipped inside the installer. A build without a bundle shows
@@ -148,8 +198,12 @@ the server's login `PATH`, and also in `~/.local/bin`, `~/.npm-global/bin`, `~/.
 - **Sections.** In SSH server mode the app shows Home, Issues, Gantt, Library, Chat and Settings. Files,
   Changes, Terminal, opening a server folder as a project, and Loop on the server are planned and not
   available yet.
-- **Shared servers.** Another user on the same server can reach the core's loopback port. The core's own
-  sign-in is what stops them from using it.
+- **Other users on the server.** Other users on the same server can reach the core's loopback port. The
+  core lets only its first account register; later sign-ups need an invite from the owner, and every
+  sign-in still needs a valid account.
+- **Link only while connected.** The desktop sends no requests through the forward while the link is
+  reconnecting. Requests wait until it is connected again.
+- **Host names.** Use the real host name or IP address. A host alias from `~/.ssh/config` cannot be used.
 - **Web and iPhone.** They cannot reach a core in SSH server mode.
 
 The first account created on the server core becomes its owner. After that, further sign-ups are refused
@@ -165,14 +219,21 @@ Each row starts with the exact sentence the app shows.
 | `The server refused this login.` | The key or password was rejected. | Check the user name, the key path (absolute) or the password. |
 | `Enter the password for this server.` | Password login is selected and no password was entered. | Type the password and try again. |
 | `Could not reach the server.` | The host, the port or the network is wrong, or SSH does not answer. | Check the host, port, firewall and that `ssh` works from a terminal on this computer. |
+| `The server did not answer in time.` | A command on the server or the network took too long. | Check the server's load and the network, then try again. |
 | `Test the connection and confirm the server's host key first.` | No host key is trusted yet, or the saved key belongs to another host or port. | Press Test, compare the fingerprint, and press Trust this key. |
 | `The server's host key changed. Test the connection again and confirm the new fingerprint.` | The server presents a different host key than the one you trusted. This can mean a reinstalled server or an attack. | Ask the server's operator for the new fingerprint. Test again and trust it only if it matches. |
-| `Another computer started the server on this account. This version supports one desktop per server account.` | A core this desktop did not start is running for this account. | Press Stop server on the desktop that started it, then connect again from this one. |
+| `Another computer started the server on this account.` | A core this desktop did not start is running for this account. | Use the desktop that started it. Press **Stop it anyway** or **Uninstall anyway** only if you are sure that work can stop. |
+| `Those are not the saved server's details.` | The Host, Port or User in the form differ from the saved server, so Stop server or Uninstall refused to act. | Put back the saved values to act on that server. To use other values, connect to them first. |
+| `The server is already starting. Try again in a moment.` | Another start of the core is running for this data folder. | Wait a moment, then press Connect again. |
+| `The local port for this server is in use. Quit the other program and connect again.` | Another program took one of the local ports `3456` to `3459` for the forward. | Quit that program, then connect again. |
 | `This build has no Linux server bundle.` | The app build does not contain the server bundle. | Use a development build made with `node desktop/scripts/stage-hub-core.mjs` (see `desktop/PACKAGING.md`). |
 | `the server runs <OS>; only Linux is supported` | The server is not Linux. | SSH server mode needs a Linux server. |
 | `the server is <arch>; only x86_64 is supported` | The server is not 64-bit Intel or AMD. | Use an x86_64 server. |
 | `only <N> MB free on the server; at least 2048 MB are needed` | Not enough disk space in the home folder. | Free space, then test again. |
-| `the server could not start the core (<reason>)` | The core did not start. The reason is one of `timeout`, `exited`, `invalid`, `no-port` or `version-mismatch`. For `exited`, the message ends with the core's last log line. | Read `~/.llmide-server/core.log` on the server. A glibc error there means the server needs the compat bundle. |
+| `This server's system libraries are too old for the standard server bundle (glibc <x.y>; 2.34 needed). Build the compatible bundle and try again.` | The server's glibc is older than 2.34, so the standard bundle cannot load there. | Build the compat bundle (see `desktop/PACKAGING.md`), then try again. |
+| `The upload was damaged. Try again.` | The core upload did not match its checksum on the server. | Connect again. |
+| `The server could not unpack the bundle.` | The uploaded bundle could not be unpacked on the server. | Build the bundle again and connect again. |
+| `the server could not start the core (<reason>)` | The core did not start. The reason is the script's result word: `timeout`, `exited`, `invalid`, `no-port`, `version-mismatch`, `pin-failed`, `state-failed` or `lock-failed`. For `exited`, the message ends with the core's last log line. | Read `~/.llmide-server/core.log` on the server. A glibc error there means the server needs the compat bundle. |
 | `the port forward to the server stopped` | The SSH forward ended. The app reconnects with a delay. | Wait for the reconnect. If it keeps failing, check the network. |
 | `no local port in 3456..=3459 is free for the forward` | Four local ports are busy. | Close the program that uses them, then connect again. |
 | `The server core is not running. Connect again to start it.` | The core was stopped on the server. | Press Connect. |

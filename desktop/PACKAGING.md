@@ -429,16 +429,18 @@ loaded when disabled).
 
 The SSH server mode runs the core on a Linux server reached by the system `ssh`. This section records how the server bundle is produced and found, the server layout, the password custody and the one-desktop-per-account limit. User steps are in `docs/how-to/connect-over-ssh.md`, and the rules are in `docs/explanation/invariants.md` ("SSH server mode").
 
+Verification status: a first live check ran the server scripts on one Ubuntu 20.04 server. The full app flow has not been verified end to end yet.
+
 ### Where the Linux bundle comes from
 
 - **Build:** `node desktop/scripts/stage-hub-core.mjs [--out <absolute dir>] [--version <x.y.z>]` writes `llmide-core-<version>-linux-x64.tar.gz`, its `.sha256`, `VERSION` and `SHA256SUMS` to `desktop/dist/hub/` by default. The bundle is the pinned Node 22 runtime plus the staged core, so the server needs neither Node nor a compiler.
-- **Compat build:** the standard bundle's `better-sqlite3` prebuild needs glibc 2.34. Ubuntu 20.04 has glibc 2.31, so such servers need `llmide-core-<version>-linux-x64-compat.tar.gz`. It is built by the manual workflow `.github/workflows/sqlite-linux-compat.yml` (a `manylinux_2_28` container, glibc 2.28), downloaded, and staged with `node desktop/scripts/stage-hub-core.mjs --compat-sqlite <absolute file>`. The module is accepted only when its SHA-256 matches the published `.sha256` (`desktop/scripts/sqlite-compat.mjs`).
+- **Compat build:** PROBE reports the server's glibc version (`__LLMIDE_GLIBC__`, from `getconf GNU_LIBC_VERSION`). The app refuses to upload the standard bundle to a server with an older glibc. The standard bundle's `better-sqlite3` prebuild needs glibc 2.34. Ubuntu 20.04 has glibc 2.31, so such servers need `llmide-core-<version>-linux-x64-compat.tar.gz`. It is built by the manual workflow `.github/workflows/sqlite-linux-compat.yml` (a `manylinux_2_28` container, glibc 2.28), downloaded, and staged with `node desktop/scripts/stage-hub-core.mjs --compat-sqlite <absolute file>`. The module is accepted only when its SHA-256 matches the published `.sha256` (`desktop/scripts/sqlite-compat.mjs`).
 - **Lookup:** `ssh_cmds::bundle_in` looks in the app's resource folder, `hub/`, for the compat name first and then the plain name. `ssh_session::bundle_for` then tries `desktop/resources/hub/`, `desktop/dist/hub/` and `../desktop/resources/hub/` (relative to the working directory), and finally `remote_deploy::bundle_path`.
 - **Limit in this version:** `desktop/src-tauri/tauri.conf.json` ships only `../resources/core` as a resource, so the Linux bundle is **not** inside the installer and the app does not download it. It is found only in a development checkout or where a build put it into the resources. Shipping it in the installer or downloading it is a later decision, to be made once the bundle size is measured. A build without the bundle refuses Connect with `This build has no Linux server bundle.`
 
 ### Server layout
 
-The core lives under `~/.llmide-server/` on the server: `releases/<version>/` (one folder per installed version, immutable once installed), `current` (a symbolic link to the running release), `data/` (kept by Uninstall), `state.json` (pid, port, version and the per-start health nonce, mode `0600`) and `core.log`. Folders are `0700`. The core binds `127.0.0.1` on the first free port in `3460`..`3479`. The scripts that create and change this layout are the constants in `desktop/src-tauri/src/ssh_server_scripts.rs` (`INSTALL`, `START`, `STOP`, `ROLLBACK`, `UNINSTALL`).
+The core lives under `~/.llmide-server/` on the server: `releases/<version>/` (one folder per installed version, immutable once installed; INSTALL keeps only the new release and the one `current` pointed at before), `current` (a symbolic link to the running release), `data/` (kept by Uninstall), `state.json` (pid, port, version and the per-start health nonce, mode `0600`), `core.log`, and `.start.lock` (a directory that exists only while a START runs). Folders are `0700`. The core binds `127.0.0.1` on the first free port in `3460`..`3479`. START runs the core under `env -i` with the allow-list that `core_env::core_env` uses on Linux, and it checks `/health` with the bundled node, so the server needs no curl (see the invariants for the rules and their tests). The scripts that create and change this layout are the constants in `desktop/src-tauri/src/ssh_server_scripts.rs` (`INSTALL`, `START`, `STOP`, `ROLLBACK`, `UNINSTALL`).
 
 Secrets are not written to this layout. `START` hands the core its JWT secret, vault key and host approval key on stdin, using the same `LLMIDE_SECRETS_STDIN` path as the local core (`extension/core/secrets-stdin.mjs`).
 
@@ -448,7 +450,7 @@ The password is typed in the app and held in memory for that run only. `ssh_askp
 
 ### One desktop per server account
 
-A core is recorded with the desktop that started it: `ssh-session.json` in the app data folder holds the host, port, user and nonce, mode `0600`. Another desktop that finds a running core without a matching record gets `SSH_CORE_FOREIGN` (`ssh_session::require_ours`) and the core is left alone. This is deliberate for this version: one server account, one desktop install. Test: `ssh_session::tests::foreign_core_is_refused`.
+A core is recorded with the desktop that started it: `ssh-session.json` in the app data folder holds the host, port, user and nonce, mode `0600`. Another desktop that finds a running core without a matching record gets `SSH_CORE_FOREIGN` (`ssh_session::require_ours`) from Connect and the core is left alone. Stop server and Uninstall refuse the same way unless the caller passes `force`, which the UI sends only after the user chooses Stop it anyway or Uninstall anyway. This is deliberate for this version: one server account, one desktop install. Test: `ssh_session::tests::foreign_core_is_refused`.
 
 ## Release
 
