@@ -219,7 +219,8 @@ With the `read` capability, the iPhone shows a **Changes** tab for the selected 
 - changed-file list from `git.status`
 - one unified diff from `git.diff`
 
-Review is read-only on the phone; commit and push stay on the host workspace.
+The same screen can commit the listed files (with a message) and push the current branch. Both actions ask for confirmation;
+the commit path only includes the files shown by `git.status`.
 
 ### Worktree lifecycle
 
