@@ -141,8 +141,9 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
           </section>
         )}
 
-        <div className="wc-cards">
-          <form className="wc-card" onSubmit={onCreate} aria-labelledby="wc-new-title" aria-busy={busy === "create"} noValidate>
+        <div className="wc-cards wc-cards-three">
+          <form className="wc-card wc-card-create" onSubmit={onCreate} aria-labelledby="wc-new-title" aria-busy={busy === "create"} noValidate>
+            <span className="wc-card-kicker">Start fresh</span>
             <h2 id="wc-new-title" className="wc-h2">New project</h2>
             <p className="wc-text wc-muted">Name it, then choose where it should live. LLM-IDE creates the folder and sets up the workspace in it.</p>
             <label className="sh-field">
@@ -155,16 +156,18 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
             <button type="submit" className="sh-button sh-button-primary" disabled={disabled}>{busy === "create" ? "Creating…" : "Choose location…"}</button>
           </form>
 
-          <section className="wc-card" aria-labelledby="wc-open-title">
+          <section className="wc-card wc-card-open" aria-labelledby="wc-open-title">
+            <span className="wc-card-kicker">Continue</span>
             <h2 id="wc-open-title" className="wc-h2">Open existing project</h2>
             <p className="wc-text wc-muted">Resume an LLM-IDE project, or adopt a folder you have already, such as a cloned repository.</p>
+            <p className="wc-open-hint">Choose the project folder itself, not its parent.</p>
             <button type="button" className="sh-button sh-button-primary" disabled={disabled} onClick={() => void run("open", async () => (await actions.openFolder()) !== false)}>
               {busy === "open" ? "Opening…" : "Open folder…"}
             </button>
           </section>
-        </div>
 
-        <RemoteCard />
+          <RemoteCard />
+        </div>
 
         <aside className="wc-explainer" aria-label="What is a project">
           <strong>What counts as a project folder?</strong>

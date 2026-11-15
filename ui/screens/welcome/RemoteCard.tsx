@@ -10,7 +10,7 @@ const EMPTY = { name: "", sshHost: "", port: "22", user: "root", keyPath: "", ap
 export function RemoteCard() {
   const [hosts, setHosts] = useState<RemoteHost[]>(() => loadHosts());
   const [active, setActive] = useState<string | null>(() => activeHostId());
-  const [adding, setAdding] = useState(hosts.length === 0);
+  const [adding, setAdding] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [pins, setPins] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -61,15 +61,21 @@ export function RemoteCard() {
 
   return (
     <section className="wc-card wc-remote" aria-labelledby="wc-remote-title">
+      <span className="wc-card-kicker">Connect</span>
       <div className="wc-remote-head">
         <div>
           <h2 id="wc-remote-title" className="wc-h2">Remote hosts</h2>
-          <p className="wc-text wc-muted">Add SSH hosts and connect to their workspace. Files stay on the host.</p>
+          <p className="wc-text wc-muted">Open an SSH project. Files and Loop runs stay on the server.</p>
         </div>
-        <button type="button" className="sh-button" onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "Add host"}</button>
+        {(hosts.length > 0 || adding) ? <button type="button" className="sh-button" onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "Add host"}</button> : null}
       </div>
 
-      {hosts.length === 0 && !adding ? <p className="wc-text wc-muted">No remote hosts yet.</p> : null}
+      {hosts.length === 0 && !adding ? (
+        <div className="wc-remote-empty">
+          <p className="wc-text wc-muted">No remote hosts yet. Add a server once; it stays saved here.</p>
+          <button type="button" className="sh-button sh-button-primary" onClick={() => setAdding(true)}>Add host</button>
+        </div>
+      ) : null}
       <ul className="wc-remote-list">
         {hosts.map((h) => (
           <li key={h.id} className="wc-remote-row" data-active={active === h.id || undefined}>
