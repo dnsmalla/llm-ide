@@ -159,3 +159,33 @@ The **Welcome** page has a **Remote host** card:
 The section reuses the web workspace UI — files, save, Changes, commit/push, allowlisted terminal and gated full shell —
 over a desktop-side Host API WebSocket. The local project and the remote project are separate: the Remote section never
 touches the local core.
+
+## Open SSH project (VPS reference host)
+
+The reference deployment runs a core on the VPS:
+
+```text
+Node 22                     /opt/llmide-node
+core                        /opt/llmide-remote/extension (systemd: llmide-remote)
+data                        /var/lib/llmide-remote
+projects                    /srv/llmide/projects
+core port                   3457
+Host API TLS                3017
+public path                 wss://llm-ide.com/remote/host-api/v1
+bootstrap CLI               /usr/local/bin/llmide-remote-project
+```
+
+The SSH host entry stores a **remote project path** such as `/srv/llmide/projects/demo`. **Open SSH** runs:
+
+```text
+/usr/local/bin/llmide-remote-project open <path>
+```
+
+which logs in as the operator, registers the folder, mints a one-use pairing PIN and returns:
+
+```json
+{ "root": "...", "projectId": "...", "url": "wss://...", "pin": "......", "fingerprint": "sha256:..." }
+```
+
+The desktop then pairs and opens the workspace. The SSH key is only the bootstrap channel; the workspace uses the pinned
+Host API.

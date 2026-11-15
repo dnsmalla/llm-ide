@@ -12,6 +12,8 @@ export interface RemoteHost {
   user: string;
   keyPath: string;
   api: string;
+  /** Remote project folder opened by the SSH bootstrap, e.g. /srv/llmide/projects/demo. */
+  projectPath: string;
 }
 interface Active { host: RemoteHost; conn: HostConnection; projects: RemoteProject[]; selected: string | null }
 
@@ -29,7 +31,7 @@ export function loadHosts(): RemoteHost[] {
   try {
     const raw = localStorage.getItem(KEY);
     const v = raw ? JSON.parse(raw) : [];
-    return Array.isArray(v) ? v.filter((h): h is RemoteHost => typeof h?.id === "string" && typeof h?.api === "string").slice(0, 50) : [];
+    return Array.isArray(v) ? v.filter((h): h is RemoteHost => typeof h?.id === "string" && typeof h?.api === "string").map((h) => ({ ...h, projectPath: typeof h.projectPath === "string" ? h.projectPath : "" })).slice(0, 50) : [];
   } catch { return []; }
 }
 

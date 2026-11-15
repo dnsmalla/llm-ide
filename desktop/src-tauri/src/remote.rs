@@ -486,6 +486,30 @@ pub async fn remote_ssh_test(target: SshTarget) -> Result<SshTestResult, FsError
 
 /// R-034 #7: remember the host-key fingerprint the user confirmed after a Test SSH. Deploy, update and
 /// uninstall refuse until this is called for the same host:port in this app session.
+/// Run the fixed remote bootstrap command (`/usr/local/bin/llmide-remote-project`) for an SSH project.
+/// The path is single-quoted for the remote shell; the action is an enum, never free text.
+#[tauri::command]
+pub async fn remote_ssh_project(target: SshTarget, action: String, path: String) -> Result<String, FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if action != "list" && action != "open" { return Err(herr("invalid_path", "action must be list or open")); }
+        if path.len() > 4096 || path.contains('\0') || path.contains('\n') || path.contains('\r') { return Err(herr("invalid_path", "invalid project path")); }
+        let prepared = prepare(&target)?;
+        check_key_file(&prepared.key_path)?;
+        let quoted = format!("'{}'", path.replace('\'', "'\\''"));
+        let command = format!("/usr/local/bin/llmide-remote-project {action} {quoted}");
+        let dir = temp_ssh_dir("ssh-project")?;
+        let known = dir.join("known_hosts");
+        let args = ssh_args_known(&prepared, &command, &known, true);
+        let output = SystemSsh.run(&args).map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")));
+        let _ = std::fs::remove_dir_all(&dir);
+        let output = output?;
+        if output.code != Some(0) { return Err(herr("ssh_failed", failure_message(&output))); }
+        Ok(output.stdout.trim().to_string())
+    })
+    .await
+    .map_err(|e| herr("internal", format!("the SSH project command did not finish: {e}")))?
+}
+
 #[tauri::command]
 pub async fn remote_ssh_confirm(target: SshTarget, host_key_type: String, fingerprint: String) -> Result<ConfirmedHostKey, FsError> {
     tauri::async_runtime::spawn_blocking(move || {

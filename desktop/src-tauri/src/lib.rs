@@ -458,6 +458,7 @@ macro_rules! product_handlers {
                 prefs::get_prefs,
                 prefs::set_prefs,
                 remote::remote_ssh_test,
+                remote::remote_ssh_project,
                 remote::remote_ssh_confirm,
                 app_restart,
                 remote_deploy::remote_deploy_plan,
