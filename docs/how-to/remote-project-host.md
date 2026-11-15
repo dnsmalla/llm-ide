@@ -200,5 +200,6 @@ Host API.
 - the run record is written to `llm-doc/loop/host/<timestamp>/run.json`
 
 The desktop Remote workspace exposes **Run loop**: it asks for a loop name (blank = primary), runs this CLI over SSH,
-and prints the result. The VPS needs Claude credentials (or an Anthropic key) for skill stages; shell stages need only the
+and prints the result. A skipped blocking stage fails the run (`partial: true`), so a host run cannot claim success for
+desktop-only map/graph stages it did not execute. The VPS needs Claude credentials (or an Anthropic key) for skill stages; shell stages need only the
 host core.

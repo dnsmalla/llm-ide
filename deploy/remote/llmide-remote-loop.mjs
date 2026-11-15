@@ -1,0 +1,56 @@
+#!/opt/llmide-node/bin/node
+// Host Loop runner for the VPS core. Shell and skill stages run here; desktop-only stages are reported as skipped and a
+// skipped BLOCKING stage makes the run fail, never a false pass.
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
+
+const root = path.resolve(process.argv[2] || "");
+if (!fs.existsSync(root)) { console.error("project not found"); process.exit(2); }
+const store = JSON.parse(fs.readFileSync(path.join(root, "system/loop.json"), "utf8"));
+const wanted = process.argv[3];
+const loops = Array.isArray(store.loops) ? store.loops : [];
+const loop = wanted ? loops.find((l) => l.name === wanted || l.defaultKey === wanted) : loops.find((l) => l.isPrimary) ?? loops[0];
+if (!loop) { console.error("loop not found"); process.exit(2); }
+const stages = Array.isArray(loop.config?.stages) ? loop.config.stages.filter((s) => s.enabled).sort((a, b) => a.order - b.order) : [];
+
+const op = JSON.parse(fs.readFileSync("/etc/llmide-remote/operator.json", "utf8"));
+const key = fs.readFileSync("/etc/systemd/system/llmide-remote.service", "utf8").match(/LLMIDE_HOST_APPROVAL_KEY=([0-9a-f]{64})/)?.[1];
+const proof = crypto.createHmac("sha256", Buffer.from(key, "hex")).update("bus-host-proof/v1").digest("hex");
+const base = "http://127.0.0.1:3457";
+const login = await fetch(base + "/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: op.email, password: op.password }) }).then((r) => r.json());
+if (!login.accessToken) { console.error("login failed"); process.exit(3); }
+
+const results = [];
+let passed = true;
+let partial = false;
+for (const s of stages) {
+  const at = new Date().toISOString();
+  if (s.kind === "shellCommand") {
+    const r = spawnSync("/bin/sh", ["-lc", s.command], { cwd: root, encoding: "utf8", timeout: (s.timeoutSeconds || 900) * 1000, maxBuffer: 4 * 1024 * 1024 });
+    const ok = r.status === 0;
+    results.push({ name: s.name, kind: s.kind, ok, exitCode: r.status, stdout: String(r.stdout ?? "").slice(0, 2000), stderr: String(r.stderr ?? "").slice(0, 1000), at });
+    if (!ok && s.severity === "blocking") { passed = false; break; }
+  } else if (s.kind === "skill") {
+    const r = await fetch(base + "/kb/loop/agent-run", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${login.accessToken}`, "x-llmide-host-nonce": proof },
+      body: JSON.stringify({ message: s.prompt || s.name, skills: s.skillId ? [s.skillId] : [], repoRoot: root, role: "loop", timeoutMs: Math.min(1800000, (s.timeoutSeconds || 1800) * 1000) }),
+    });
+    const body = await r.json().catch(() => ({}));
+    const ok = r.status === 200 && !body.error;
+    results.push({ name: s.name, kind: s.kind, ok, status: r.status, reply: String(body.reply ?? "").slice(0, 1000), error: body.error ?? null, at });
+    if (!ok && s.severity === "blocking") { passed = false; break; }
+  } else {
+    const skipped = { name: s.name, kind: s.kind, ok: false, skipped: true, blocking: s.severity === "blocking", at };
+    results.push(skipped);
+    partial = true;
+    if (skipped.blocking) { passed = false; break; }
+  }
+}
+const dir = path.join(root, "llm-doc/loop/host", new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19));
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, "run.json"), JSON.stringify({ loop: loop.name, root, passed, partial, stages: results }, null, 2) + "\n");
+console.log(JSON.stringify({ loop: loop.name, root, passed, partial, stages: results.length, run: path.join(dir, "run.json") }));
+if (!passed) process.exit(1);

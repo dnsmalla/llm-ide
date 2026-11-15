@@ -503,7 +503,12 @@ pub async fn remote_ssh_loop(target: SshTarget, path: String, loop_name: String)
         let output = SystemSsh.run(&args).map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")));
         let _ = std::fs::remove_dir_all(&dir);
         let output = output?;
-        if output.code != Some(0) { return Err(herr("ssh_failed", failure_message(&output))); }
+        // A failed Loop still writes run.json and prints its JSON result; show that instead of a bare exit code.
+        if output.code != Some(0) {
+            let body = output.stdout.trim();
+            if !body.is_empty() { return Ok(body.to_string()); }
+            return Err(herr("ssh_failed", failure_message(&output)));
+        }
         Ok(output.stdout.trim().to_string())
     })
     .await
