@@ -44,6 +44,15 @@ if (action === "merge") {
   process.exit(0);
 }
 
+if (action === "diff") {
+  const add = run(["add", "-A"], dir);
+  if (add.status !== 0) fail(`git add failed: ${add.stderr.trim()}`);
+  const d = run(["diff", "--cached", "--stat", "HEAD"], dir);
+  const patch = run(["diff", "--cached", "HEAD"], dir);
+  console.log(JSON.stringify({ worktree: dir, stat: d.stdout.trim(), patch: String(patch.stdout || "").slice(0, 262144), truncated: String(patch.stdout || "").length > 262144 }));
+  process.exit(0);
+}
+
 if (action === "remove") {
   const dirty = run(["status", "--porcelain"], dir).stdout.trim();
   if (dirty) fail("worktree has uncommitted changes; merge or discard them first");
@@ -53,4 +62,4 @@ if (action === "remove") {
   process.exit(0);
 }
 
-fail("usage: llmide-remote-worktree list|merge|remove <project> [name]");
+fail("usage: llmide-remote-worktree list|diff|merge|remove <project> [name]");

@@ -14,3 +14,4 @@
 .remote-wt-row { padding: 3px 0; }
 .remote-wt-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .remote-wt-msg { color: var(--tok-color-text-muted); margin: 4px 0; }
+.remote-wt-diff { max-height: 220px; overflow: auto; margin: 8px 0 0; padding: 8px; background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: 6px; font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }

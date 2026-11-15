@@ -227,6 +227,7 @@ the commit path only includes the files shown by `git.status`.
 The Remote workspace **Worktrees** panel lists host Loop worktrees and offers:
 
 ```text
+Diff     show the worktree's staged-vs-HEAD stat and patch before merging
 Merge    commit the worktree, create llmide/loop-<run>, merge with --no-ff into the live branch
 Remove   delete a clean worktree (refused when it has uncommitted changes)
 ```
@@ -235,6 +236,7 @@ CLI equivalent:
 
 ```bash
 llmide-remote-worktree list   <project>
+llmide-remote-worktree diff   <project> <run-name>
 llmide-remote-worktree merge  <project> <run-name>
 llmide-remote-worktree remove <project> <run-name>
 ```

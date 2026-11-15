@@ -15,6 +15,7 @@ export function RemoteWorkspace() {
   const [worktrees, setWorktrees] = useState<{ name: string; branch: string; dirty: boolean }[] | null>(null);
   const [wtBusy, setWtBusy] = useState(false);
   const [wtMessage, setWtMessage] = useState<string | null>(null);
+  const [wtDiff, setWtDiff] = useState<string | null>(null);
   if (!active || !selected) return null;
   const fake = { session: { connection: active.conn }, projects: { selectedId: selected } } as never;
 
@@ -31,7 +32,7 @@ export function RemoteWorkspace() {
     finally { setLoopBusy(false); }
   };
 
-  const wtCall = async (action: "list" | "merge" | "remove", name = "") => {
+  const wtCall = async (action: "list" | "diff" | "merge" | "remove", name = "") => {
     if (!active.host.projectPath) { setWtMessage("Add a remote project path in Welcome first."); return; }
     setWtBusy(true); setWtMessage(null);
     try {
@@ -39,8 +40,9 @@ export function RemoteWorkspace() {
         target: { host: active.host.sshHost, port: active.host.port, user: active.host.user, keyPath: active.host.keyPath },
         action, path: active.host.projectPath, name,
       });
-      const parsed = JSON.parse(raw) as { worktrees?: { name: string; branch: string; dirty: boolean }[]; merged?: boolean; removed?: boolean };
+      const parsed = JSON.parse(raw) as { worktrees?: { name: string; branch: string; dirty: boolean }[]; merged?: boolean; removed?: boolean; stat?: string; patch?: string; truncated?: boolean };
       if (action === "list") setWorktrees(parsed.worktrees ?? []);
+      else if (action === "diff") setWtDiff(`${parsed.stat || ""}\n\n${parsed.patch || ""}${parsed.truncated ? "\n… truncated" : ""}`);
       else { setWtMessage(parsed.merged ? "Merged." : parsed.removed ? "Removed." : raw); await wtCall("list"); }
     } catch (e) { setWtMessage(e instanceof Error ? e.message : String(e)); }
     finally { setWtBusy(false); }
@@ -66,10 +68,12 @@ export function RemoteWorkspace() {
           {worktrees.length === 0 ? <p className="remote-wt-msg">No worktrees.</p> : worktrees.map((w) => (
             <div className="remote-wt-row" key={w.name}>
               <span>{w.name} · {w.branch}{w.dirty ? " · uncommitted" : ""}</span>
+              <button type="button" disabled={wtBusy} onClick={() => void wtCall("diff", w.name)}>Diff</button>
               <button type="button" disabled={wtBusy} onClick={() => void wtCall("merge", w.name)}>Merge</button>
               <button type="button" disabled={wtBusy || w.dirty} onClick={() => void wtCall("remove", w.name)}>Remove</button>
             </div>
           ))}
+          {wtDiff ? <pre className="remote-wt-diff">{wtDiff}</pre> : null}
         </div>
       ) : null}
       {createElement(WorkspaceScreen as unknown as ComponentType<{ ctx: unknown }>, { ctx: fake })}
