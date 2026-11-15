@@ -1,27 +1,74 @@
-// One remote host connection for this app run. The Welcome card creates it; the Remote section consumes it.
+// Saved remote hosts and the one active connection. Hosts live in localStorage; a session token is kept per host for
+// this app run only, so reconnecting after a restart asks for the PIN again.
 import { HostConnection } from "../../../web/src/host-api/connection.ts";
 import { normalizeRemoteUrl } from "./model.ts";
 
 export interface RemoteProject { id: string; name: string; role: string; maxMode: string }
-interface Active { conn: HostConnection; projects: RemoteProject[]; selected: string | null }
+export interface RemoteHost {
+  id: string;
+  name: string;
+  sshHost: string;
+  port: number;
+  user: string;
+  keyPath: string;
+  api: string;
+}
+interface Active { host: RemoteHost; conn: HostConnection; projects: RemoteProject[]; selected: string | null }
 
-let token: string | null = null;
-const tokens = { get: () => token, set: (t: string | null) => { token = t; }, identity: () => null };
+const KEY = "llmide.remoteHosts";
+let tokensByUrl = new Map<string, string>();
+let tokenUrl: string | null = null;
+const tokens = {
+  get: () => (tokenUrl ? tokensByUrl.get(tokenUrl) ?? null : null),
+  set: (t: string | null) => { if (!tokenUrl) return; if (t) tokensByUrl.set(tokenUrl, t); else tokensByUrl.delete(tokenUrl); },
+  identity: () => null,
+};
 let active: Active | null = null;
 
-export const getRemote = (): Active | null => active;
-export const setSelectedRemote = (id: string): void => { if (active) active.selected = id; };
-export const closeRemote = (): void => { active?.conn.close(); active = null; };
+export function loadHosts(): RemoteHost[] {
+  try {
+    const raw = localStorage.getItem(KEY);
+    const v = raw ? JSON.parse(raw) : [];
+    return Array.isArray(v) ? v.filter((h): h is RemoteHost => typeof h?.id === "string" && typeof h?.api === "string").slice(0, 50) : [];
+  } catch { return []; }
+}
 
-/** Pair, list projects, keep the connection. Throws a readable error for the form. */
-export async function connectRemote(address: string, pin: string): Promise<Active> {
-  const conn = new HostConnection({ url: normalizeRemoteUrl(address), clientName: "LLM-IDE Desktop", clientVersion: "0.0.0", tokens });
+function saveHosts(hosts: RemoteHost[]): void {
+  try { localStorage.setItem(KEY, JSON.stringify(hosts.slice(0, 50))); } catch { /* private mode */ }
+}
+
+export function addHost(input: Omit<RemoteHost, "id">): RemoteHost[] {
+  const hosts = loadHosts();
+  const existing = hosts.find((h) => h.sshHost === input.sshHost && h.user === input.user && h.api === input.api);
+  const host: RemoteHost = { ...input, id: existing?.id ?? `h-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}` };
+  const next = existing ? hosts.map((h) => h.id === existing.id ? host : h) : [host, ...hosts];
+  saveHosts(next);
+  return next;
+}
+
+export function removeHost(id: string): RemoteHost[] {
+  const next = loadHosts().filter((h) => h.id !== id);
+  saveHosts(next);
+  if (active?.host.id === id) closeRemote();
+  return next;
+}
+
+export const getRemote = (): Active | null => active;
+export const activeHostId = (): string | null => active?.host.id ?? null;
+export const setSelectedRemote = (id: string): void => { if (active) active.selected = id; };
+export function closeRemote(): void { active?.conn.close(); active = null; }
+
+/** Pair the saved host, list its projects, keep it active. Throws a readable error for the form. */
+export async function connectSavedHost(host: RemoteHost, pin: string): Promise<Active> {
+  const url = normalizeRemoteUrl(host.api);
+  tokenUrl = url;
+  const conn = new HostConnection({ url, clientName: "LLM-IDE Desktop", clientVersion: "0.0.0", tokens });
   const result = await conn.connect(pin.trim() || undefined);
   if (result === "needsPin") throw new Error("This host withheld its token. Check the address, then pair again with its PIN.");
   if (!conn.capabilities.has("read")) throw new Error("This host does not serve the read capability, so its workspace is unavailable.");
   const list = await conn.send("projects.list", {}).done;
   const projects = list.projects as RemoteProject[];
   if (projects.length === 0) throw new Error("The host has no projects registered for this account.");
-  active = { conn, projects, selected: projects[0].id };
+  active = { host, conn, projects, selected: projects[0].id };
   return active;
 }
