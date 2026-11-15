@@ -60,6 +60,9 @@ export function closeRemote(): void { active?.conn.close(); active = null; }
 
 /** Pair the saved host, list its projects, keep it active. Throws a readable error for the form. */
 export async function connectSavedHost(host: RemoteHost, pin: string): Promise<Active> {
+  // Already open: reuse it instead of creating a second socket.
+  if (active && active.host.id === host.id) return active;
+  closeRemote();
   const url = normalizeRemoteUrl(host.api);
   tokenUrl = url;
   const conn = new HostConnection({ url, clientName: "LLM-IDE Desktop", clientVersion: "0.0.0", tokens });

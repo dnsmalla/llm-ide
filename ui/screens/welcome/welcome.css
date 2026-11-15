@@ -171,10 +171,13 @@
 
 .wc-remote-head { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; }
 .wc-remote-list { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.wc-remote-row { display: flex; gap: 12px; justify-content: space-between; align-items: center; padding: 10px; border: 1px solid var(--tok-color-border); border-radius: 8px; }
+.wc-remote-row { display: flex; gap: 10px; justify-content: space-between; align-items: center; padding: 7px 9px; border: 1px solid var(--tok-color-border); border-radius: 8px; }
 .wc-remote-row[data-active] { border-color: var(--tok-color-accent); }
-.wc-remote-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 12px; }
+.wc-remote-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 11px; line-height: 1.35; }
 .wc-remote-text span { color: var(--tok-color-text-muted); word-break: break-all; }
-.wc-remote-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.wc-remote-pin { width: 86px; }
-.wc-remote-add { border-top: 1px solid var(--tok-color-border); margin-top: 10px; padding-top: 10px; }
+.wc-remote-actions { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.wc-remote-actions .sh-button { padding: 4px 8px; font-size: 11px; }
+.wc-remote-pin { width: 74px; padding: 4px 6px; font-size: 11px; }
+.wc-remote-add { border-top: 1px solid var(--tok-color-border); margin-top: 8px; padding-top: 8px; }
+.wc-remote .wc-remote-grid { gap: 6px; margin: 8px 0; }
+.wc-remote .sh-field { font-size: 11px; }
