@@ -395,6 +395,82 @@ printf '__LLMIDE_UNINSTALL__=ok\n'
 "##,
 );
 
+/// Appends one public key to `~/.ssh/authorized_keys`. Stdin is exactly one line,
+/// `ssh-ed25519 <base64> <comment>`, and nothing else is accepted: no options prefix, no second line,
+/// no other key type. The check runs here as well as in the app, because this script is the last
+/// thing that can refuse a line before it reaches the server's sshd.
+///
+/// Prints `added` or `present`, or `invalid` (nothing changed) or `failed`. Only the marker is printed,
+/// never the key. Runs under dash, so no bash-only syntax.
+pub const ADD_KEY: &str = r##"set -u
+umask 077
+LC_ALL=C
+export LC_ALL
+fail() {
+  printf '__LLMIDE_ADDKEY__=failed\n'
+  exit 1
+}
+invalid() {
+  printf '__LLMIDE_ADDKEY__=invalid\n'
+  exit 1
+}
+# Count the lines as they are read, so a second line is refused instead of silently dropped.
+LINES=0
+LINE=""
+while IFS= read -r ADDKEY_IN || [ -n "$ADDKEY_IN" ]; do
+  LINES=$((LINES + 1))
+  LINE=$ADDKEY_IN
+done
+[ "$LINES" -eq 1 ] || invalid
+case "$LINE" in
+  'ssh-ed25519 '*) ;;
+  *) invalid ;;
+esac
+REST=${LINE#ssh-ed25519 }
+case "$REST" in
+  *' '*' '*) invalid ;;
+  *' '*) ;;
+  *) invalid ;;
+esac
+KEY_B64=${REST%% *}
+KEY_COMMENT=${REST#* }
+case "$KEY_B64" in
+  ''|*[!A-Za-z0-9+/=]*) invalid ;;
+esac
+case "$KEY_COMMENT" in
+  ''|*[!A-Za-z0-9@._-]*) invalid ;;
+esac
+[ -n "${HOME:-}" ] || fail
+SSH_DIR="$HOME/.ssh"
+AUTH="$SSH_DIR/authorized_keys"
+# An existing ~/.ssh keeps its mode: only a folder this script creates gets 0700.
+if [ ! -d "$SSH_DIR" ]; then
+  mkdir -m 700 "$SSH_DIR" || fail
+fi
+if [ ! -e "$AUTH" ]; then
+  : > "$AUTH" || fail
+fi
+[ -f "$AUTH" ] || fail
+grep -qxF -- "$LINE" "$AUTH"
+case $? in
+  0) printf '__LLMIDE_ADDKEY__=present\n'; exit 0 ;;
+  1) ;;
+  *) fail ;;
+esac
+# A file that does not end in a newline would join its last line with the new key.
+if [ -s "$AUTH" ]; then
+  NL=$(printf '\n.')
+  NL=${NL%.}
+  LAST=$(tail -c 1 "$AUTH"; printf '.')
+  LAST=${LAST%.}
+  if [ "$LAST" != "$NL" ]; then
+    printf '\n' >> "$AUTH" || fail
+  fi
+fi
+printf '%s\n' "$LINE" >> "$AUTH" || fail
+printf '__LLMIDE_ADDKEY__=added\n'
+"##;
+
 /// The Probe result the app decides on before uploading anything.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
@@ -582,6 +658,17 @@ pub fn parse_uninstall(stdout: &str) -> Result<(), FsError> {
     }
 }
 
+/// Parses the `__LLMIDE_ADDKEY__` marker printed by ADD_KEY. `invalid` means the script refused the line and
+/// changed nothing; any other value, or no marker, means the key could not be added.
+pub fn parse_add_key(stdout: &str) -> Result<&'static str, FsError> {
+    match marker(stdout, "ADDKEY") {
+        Some("added") => Ok("added"),
+        Some("present") => Ok("present"),
+        Some("invalid") => Err(herr("SSH_KEY_INVALID", "The new key was not accepted.")),
+        _ => Err(herr("SSH_KEY_INSTALL_FAILED", "The key could not be added on the server.")),
+    }
+}
+
 /// A release name: 1 to 64 of `[A-Za-z0-9._-]`, not starting with `.` or `-`. The same rule is
 /// enforced by the INSTALL and START scripts, so a name cannot escape the releases directory.
 pub fn valid_version(v: &str) -> bool {
@@ -624,7 +711,7 @@ mod tests {
 
     const VALID_NONCE: &str = "abcdefgh12345678";
 
-    fn all_scripts() -> [(&'static str, &'static str); 7] {
+    fn all_scripts() -> [(&'static str, &'static str); 8] {
         [
             ("PROBE", PROBE),
             ("INSTALL", INSTALL),
@@ -633,6 +720,7 @@ mod tests {
             ("STOP", STOP),
             ("ROLLBACK", ROLLBACK),
             ("UNINSTALL", UNINSTALL),
+            ("ADD_KEY", ADD_KEY),
         ]
     }
 
@@ -1324,6 +1412,99 @@ mod tests {
         let (ok, status) = run_sh(STATUS, &home, b"");
         assert!(ok, "{status}");
         assert!(!parse_core_state(&status).expect("status parses").running, "{status}");
+    }
+
+    // ---- ADD_KEY: the one public line that switches a password login to a key (unix only) ----
+
+    const ADD_KEY_LINE: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPlaceholderKeyBody llmide-desktop";
+
+    #[cfg(unix)]
+    fn add_key_home(tag: &str) -> std::path::PathBuf {
+        let base = unique_dir(tag);
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).expect("create home");
+        home
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn add_key_is_idempotent() {
+        let home = add_key_home("addkey-idem");
+        let stdin = format!("{ADD_KEY_LINE}\n");
+        let (ok, out) = run_sh(ADD_KEY, &home, stdin.as_bytes());
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_ADDKEY__=added"), "{out}");
+        let (ok, out) = run_sh(ADD_KEY, &home, stdin.as_bytes());
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_ADDKEY__=present"), "{out}");
+
+        let auth = home.join(".ssh").join("authorized_keys");
+        assert_eq!(std::fs::read_to_string(&auth).expect("read"), stdin);
+        assert_eq!(mode_of(&auth), 0o600);
+        assert_eq!(mode_of(&home.join(".ssh")), 0o700);
+        let _ = std::fs::remove_dir_all(home.parent().expect("base"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn add_key_rejects_multiline() {
+        let home = add_key_home("addkey-reject");
+        let ssh = home.join(".ssh");
+        std::fs::create_dir_all(&ssh).expect("create .ssh");
+        let auth = ssh.join("authorized_keys");
+        let before = "ssh-rsa AAAAOLDKEY old-laptop\n";
+        std::fs::write(&auth, before).expect("seed");
+        let cases = [
+            format!("{ADD_KEY_LINE}\n{ADD_KEY_LINE}\n"),
+            format!("{ADD_KEY_LINE}\nssh-ed25519 AAAAsecond second\n"),
+            "ssh-rsa AAAAB3NzaC1yc2E llmide-desktop\n".to_string(),
+            format!("command=\"echo x\" {ADD_KEY_LINE}\n"),
+            "ssh-ed25519 AAAAC3NzaC1 my key\n".to_string(),
+            "ssh-ed25519 AAAAC3NzaC1 comment\textra\n".to_string(),
+            "ssh-ed25519 AAAAC3NzaC1 bad$comment\n".to_string(),
+        ];
+        for stdin in cases {
+            let (ok, out) = run_sh(ADD_KEY, &home, stdin.as_bytes());
+            assert!(!ok, "accepted {stdin:?}: {out}");
+            assert!(out.contains("__LLMIDE_ADDKEY__=invalid"), "{stdin:?}: {out}");
+            assert_eq!(std::fs::read_to_string(&auth).expect("read"), before, "{stdin:?} changed the file");
+        }
+        let _ = std::fs::remove_dir_all(home.parent().expect("base"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn add_key_keeps_existing_lines() {
+        let home = add_key_home("addkey-keep");
+        let ssh = home.join(".ssh");
+        std::fs::create_dir_all(&ssh).expect("create .ssh");
+        let auth = ssh.join("authorized_keys");
+        // No trailing newline: the new key must start on its own line.
+        std::fs::write(&auth, "ssh-rsa AAAAOLDKEY old-laptop").expect("seed");
+        let stdin = format!("{ADD_KEY_LINE}\n");
+        let (ok, out) = run_sh(ADD_KEY, &home, stdin.as_bytes());
+        assert!(ok, "{out}");
+        assert!(out.contains("__LLMIDE_ADDKEY__=added"), "{out}");
+        assert_eq!(
+            std::fs::read_to_string(&auth).expect("read"),
+            format!("ssh-rsa AAAAOLDKEY old-laptop\n{ADD_KEY_LINE}\n")
+        );
+        let _ = std::fs::remove_dir_all(home.parent().expect("base"));
+    }
+
+    #[test]
+    fn parse_add_key_maps_results() {
+        assert_eq!(parse_add_key("__LLMIDE_ADDKEY__=added\n").expect("added"), "added");
+        assert_eq!(parse_add_key("banner\n__LLMIDE_ADDKEY__=present\n").expect("present"), "present");
+        let invalid = parse_add_key("__LLMIDE_ADDKEY__=invalid\n").unwrap_err();
+        assert_eq!(invalid.code, "SSH_KEY_INVALID");
+        assert_eq!(invalid.message, "The new key was not accepted.");
+        for out in ["__LLMIDE_ADDKEY__=failed\n", "", "noise __LLMIDE_ADDKEY__=added\n"] {
+            let err = parse_add_key(out).unwrap_err();
+            assert_eq!(err.code, "SSH_KEY_INSTALL_FAILED", "{out:?}");
+            assert_eq!(err.message, "The key could not be added on the server.");
+        }
     }
 }
 

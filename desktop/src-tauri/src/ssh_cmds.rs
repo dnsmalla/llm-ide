@@ -28,6 +28,8 @@ const KEYSCAN_TIMEOUT_SECS: &str = "10";
 /// The `/health` nonce check on the forwarded port, matching the local core's probe budget.
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(800);
 const SESSION_FILE: &str = "ssh-session.json";
+/// The folder under the desktop data dir that holds the keys this app creates.
+const SSH_KEY_DIR: &str = "ssh";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tauri::command]
@@ -93,6 +95,19 @@ pub async fn remote_ssh_server_stop(host: tauri::State<'_, CoreHost>, password: 
 }
 
 #[tauri::command]
+pub async fn remote_ssh_server_install_key(host: tauri::State<'_, CoreHost>, password: String) -> Result<SshServerStatus, FsError> {
+    let host = host.inner().clone();
+    // The password moves into the blocking task and is dropped when the task ends.
+    tauri::async_runtime::spawn_blocking(move || {
+        let deps = production_deps()?;
+        let key_dir = key_dir()?;
+        ssh_service::install_key(&deps, &host, &key_dir, &password)
+    })
+    .await
+    .map_err(|_| herr("internal", "the SSH key install did not finish."))?
+}
+
+#[tauri::command]
 pub async fn remote_ssh_server_uninstall(
     host: tauri::State<'_, CoreHost>,
     password: Option<String>,
@@ -116,6 +131,7 @@ pub(crate) fn production_deps() -> Result<Deps, FsError> {
         ask: Arc::new(|shown: &str, key_type: &str, fingerprint: &str| ask_host_key(shown, key_type, fingerprint)),
         health: Arc::new(|port: u16| core_host::health_nonce(port, HEALTH_TIMEOUT)),
         bundle: Arc::new(|| bundle_in(core_host::resource_dir().as_deref(), VERSION)),
+        keygen: Arc::new(|path: &Path| keygen(path)),
         version: VERSION.to_string(),
         secrets_payload: Arc::new(secrets_payload),
         session_file: session_file()?,
@@ -162,6 +178,48 @@ fn keyscan(endpoint: &SshEndpoint) -> Result<String, FsError> {
         .output()
         .map_err(|_| herr("host_key_unavailable", "Could not run ssh-keyscan."))?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// The argv for the local `ssh-keygen`: an ed25519 key with no passphrase, a fixed comment, and the private key
+/// at `path`. The arguments are separate items and nothing is read from the webview.
+pub(crate) fn keygen_args(path: &Path) -> Vec<String> {
+    vec![
+        "-q".to_string(),
+        "-t".to_string(),
+        "ed25519".to_string(),
+        "-N".to_string(),
+        String::new(),
+        "-C".to_string(),
+        "llmide-desktop".to_string(),
+        "-f".to_string(),
+        path.to_string_lossy().into_owned(),
+    ]
+}
+
+/// Creates the key pair with the system `ssh-keygen` and returns its public line. Output is discarded, so
+/// nothing from the tool reaches an error or a log.
+fn keygen(path: &Path) -> Result<String, FsError> {
+    let status = Command::new("ssh-keygen")
+        .args(keygen_args(path))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    match status {
+        Ok(done) if done.success() => {}
+        _ => return Err(herr(ssh_service::KEYGEN_FAILED, ssh_service::KEYGEN_MESSAGE)),
+    }
+    let line = std::fs::read_to_string(ssh_service::public_key_path(path))
+        .map_err(|_| herr(ssh_service::KEYGEN_FAILED, ssh_service::KEYGEN_MESSAGE))?;
+    Ok(line.trim().to_string())
+}
+
+/// The folder for the keys this app creates: `ssh` under the desktop data dir, private to the user.
+fn key_dir() -> Result<PathBuf, FsError> {
+    fsutil::desktop_data_dir()
+        .and_then(|d| fsutil::private_dir(&d))
+        .map(|d| d.join(SSH_KEY_DIR))
+        .map_err(|_| herr("data_dir_unavailable", "This computer's app data folder is not available."))
 }
 
 /// The dialog body. It names the key and the endpoint the user is trusting, and says what happens to any other key.
@@ -289,7 +347,26 @@ mod tests {
         assert_eq!(bundle_in(Some(&res.0), VERSION), bundle_for(VERSION).map(PathBuf::from));
     }
 
-    const COMMANDS: [&str; 7] = [
+    #[test]
+    fn keygen_argv_is_fixed() {
+        let path = Path::new("/home/alice/.llmide/ssh/id_llmide_example.com_22");
+        assert_eq!(
+            keygen_args(path),
+            vec![
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-C",
+                "llmide-desktop",
+                "-f",
+                "/home/alice/.llmide/ssh/id_llmide_example.com_22",
+            ]
+        );
+    }
+
+    const COMMANDS: [&str; 8] = [
         "remote_ssh_server_test",
         "remote_ssh_server_confirm",
         "remote_ssh_server_connect",
@@ -297,6 +374,7 @@ mod tests {
         "remote_ssh_server_status",
         "remote_ssh_server_stop",
         "remote_ssh_server_uninstall",
+        "remote_ssh_server_install_key",
     ];
 
     #[test]

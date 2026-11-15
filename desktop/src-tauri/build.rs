@@ -184,6 +184,7 @@ const COMMANDS: &[&str] = &[
     "remote_ssh_server_status",
     "remote_ssh_server_stop",
     "remote_ssh_server_uninstall",
+    "remote_ssh_server_install_key",
     "app_restart",
     "remote_deploy_plan",
     "remote_deploy_bootstrap",

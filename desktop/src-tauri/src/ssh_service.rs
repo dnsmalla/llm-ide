@@ -10,7 +10,7 @@
 //! are fixed text; ssh's stderr is never shown.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
@@ -19,11 +19,14 @@ use serde::{Deserialize, Serialize};
 use crate::confirm::herr;
 use crate::core_host::CoreHost;
 use crate::fs_ops::FsError;
+use crate::fsutil;
 use crate::prefs::{self, ServerMode, SshAuthKind};
 use crate::remote::{temp_ssh_dir, valid_fingerprint, valid_host_key_type, write_known_hosts, PreparedTarget, RawOutput};
 use crate::remote_deploy::{fingerprint_for_key_b64, known_host_name};
 use crate::ssh_link::{supervise, SshLink, SuperviseInput};
-use crate::ssh_server_scripts::{parse_probe, parse_stop, parse_uninstall, ClaudeState, PROBE, STOP, UNINSTALL};
+use crate::ssh_server_scripts::{
+    parse_add_key, parse_probe, parse_stop, parse_uninstall, ClaudeState, ADD_KEY, PROBE, STOP, UNINSTALL,
+};
 use crate::ssh_session::{connect_with, pick_local_port, ConnectInput, Link};
 use crate::ssh_transport::{prepare_endpoint, SshAuth, SshEndpoint, SshExec};
 
@@ -106,6 +109,9 @@ pub struct Deps {
     pub health: Arc<dyn Fn(u16) -> Option<String> + Send + Sync>,
     /// The Linux core bundle for this app version, if one is available.
     pub bundle: Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>,
+    /// Creates an ed25519 key pair at the private-key path (public key at `<path>.pub`, no passphrase) and
+    /// returns the trimmed public line. Production runs the system `ssh-keygen`.
+    pub keygen: Arc<dyn Fn(&Path) -> Result<String, FsError> + Send + Sync>,
     pub version: String,
     /// The secrets line the core reads from stdin.
     pub secrets_payload: Arc<dyn Fn() -> Result<String, FsError> + Send + Sync>,
@@ -307,6 +313,50 @@ pub fn status(host: &CoreHost) -> SshServerStatus {
     build_status(host, None)
 }
 
+/// Creates a dedicated key, adds its public line to the server, checks that the server accepts it, and only
+/// then saves key auth. Until the check passes, nothing in preferences changes.
+///
+/// Preconditions: the saved login is password auth, the host key is pinned, and `password` is non-empty.
+/// Postconditions: on success the key pair lives under `key_dir` and preferences hold key auth with its path.
+/// The running link is left as it is; the key is used from the next connect. On any failure after the key
+/// files were created, both files are removed. The server may keep the public line, which is harmless without
+/// the private key.
+///
+/// Errors:
+///     `SSH_KEY_NOT_NEEDED`, `SSH_PASSWORD_REQUIRED`, `SSH_HOST_KEY_UNCONFIRMED`, `SSH_KEYGEN_FAILED`,
+///     `SSH_KEY_INVALID`, `SSH_KEY_INSTALL_FAILED`, `SSH_KEY_VERIFY_FAILED`, and the transport codes of the
+///     pinned calls.
+pub fn install_key(deps: &Deps, host: &CoreHost, key_dir: &Path, password: &str) -> Result<SshServerStatus, FsError> {
+    let saved = prefs::stored().remote_server;
+    if saved.ssh_auth != SshAuthKind::Password {
+        return Err(herr("SSH_KEY_NOT_NEEDED", "This server already uses a key."));
+    }
+    let target = SshServerTarget {
+        host: saved.host.clone(),
+        port: saved.port,
+        user: saved.user.clone(),
+        key_path: String::new(),
+        auth: SshAuthKind::Password,
+    };
+    let endpoint = target_endpoint(&target, Some(password))?;
+    let pin = require_pin(&endpoint)?;
+    let pinned = pinned_dir(&endpoint, &pin)?;
+    fsutil::private_dir(key_dir).map_err(|_| herr(KEYGEN_FAILED, KEYGEN_MESSAGE))?;
+    let key_path = key_file_path(key_dir, &endpoint.host, endpoint.port);
+    // A file left by an earlier failed attempt must not block the new key.
+    remove_key_files(&key_path);
+
+    let installed = install_and_verify(deps, &endpoint, &pinned, &key_path, password).and_then(|()| {
+        let key_text = path_text(&key_path)?;
+        prefs::set_remote_ssh(saved.host, saved.port, saved.user, key_text, SshAuthKind::Key, saved.mode)
+    });
+    if let Err(error) = installed {
+        remove_key_files(&key_path);
+        return Err(error);
+    }
+    Ok(build_status(host, None))
+}
+
 /// Stops the forward, then stops the server core named in state.json.
 ///
 /// Errors:
@@ -345,6 +395,102 @@ pub fn uninstall(deps: &Deps, host: &CoreHost, password: Option<&str>, confirm_h
 }
 
 // ---- helpers ----------------------------------------------------------------------------------------------
+
+/// Codes and text for a key the local ssh-keygen could not create. Shared with the production keygen.
+pub(crate) const KEYGEN_FAILED: &str = "SSH_KEYGEN_FAILED";
+pub(crate) const KEYGEN_MESSAGE: &str = "Could not create a key on this computer.";
+const KEY_VERIFY_MESSAGE: &str = "The server did not accept the new key. Your password login is unchanged.";
+const KEY_REJECTED_MESSAGE: &str = "The new key was not accepted.";
+
+/// The private key file for an endpoint: `<key_dir>/id_llmide_<host>_<port>`. The host is lower-cased and every
+/// character outside `[a-z0-9.-]` becomes `_`, so the name holds no path separator whatever the typed host.
+fn key_file_path(key_dir: &Path, host: &str, port: u16) -> PathBuf {
+    let name: String = host
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-' { c } else { '_' })
+        .collect();
+    key_dir.join(format!("id_llmide_{name}_{port}"))
+}
+
+/// The public half of a key pair: the private path with `.pub` appended, as ssh-keygen names it.
+pub(crate) fn public_key_path(private: &Path) -> PathBuf {
+    let mut name = private.as_os_str().to_owned();
+    name.push(".pub");
+    PathBuf::from(name)
+}
+
+/// The same shape rule the ADD_KEY script enforces: `ssh-ed25519 <base64> <comment>` with exactly two spaces.
+fn valid_public_line(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("ssh-ed25519 ") else {
+        return false;
+    };
+    let mut parts = rest.split(' ');
+    let (Some(base64), Some(comment), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    !base64.is_empty()
+        && !comment.is_empty()
+        && base64.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+        && comment.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'@' | b'.' | b'_' | b'-'))
+}
+
+fn path_text(path: &Path) -> Result<String, FsError> {
+    path.to_str().map(str::to_string).ok_or_else(|| herr(KEYGEN_FAILED, KEYGEN_MESSAGE))
+}
+
+/// Removes the private and public key files. Best effort: a missing file is the normal case.
+fn remove_key_files(private: &Path) {
+    let _ = std::fs::remove_file(private);
+    let _ = std::fs::remove_file(public_key_path(private));
+}
+
+/// Generates the pair, adds the public line through ADD_KEY (the only call that gets the password), then logs
+/// in with the new key alone. Returns `Ok` only after the server accepted the key.
+fn install_and_verify(
+    deps: &Deps,
+    endpoint: &SshEndpoint,
+    pinned: &KnownHostsDir,
+    key_path: &Path,
+    password: &str,
+) -> Result<(), FsError> {
+    let public_line = (deps.keygen)(key_path)?;
+    if !valid_public_line(&public_line) {
+        return Err(herr("SSH_KEY_INVALID", KEY_REJECTED_MESSAGE));
+    }
+    set_private_mode(key_path)?;
+
+    let stdin = format!("{public_line}\n");
+    let add = Link { exec: &*deps.exec, endpoint, known_hosts: &pinned.file, password: Some(password) };
+    parse_add_key(&add.run(ADD_KEY, Some(stdin.as_bytes()))?.stdout)?;
+
+    let key_endpoint = prepare_endpoint(
+        &endpoint.host,
+        endpoint.port,
+        &endpoint.user,
+        SshAuth::Key { path: path_text(key_path)? },
+    )?;
+    // No password here: the probe must succeed on the key alone, or the key is not in use.
+    let verify = Link { exec: &*deps.exec, endpoint: &key_endpoint, known_hosts: &pinned.file, password: None };
+    verify
+        .run(PROBE, None)
+        .and_then(|out| parse_probe(&out.stdout))
+        .map_err(|_| herr("SSH_KEY_VERIFY_FAILED", KEY_VERIFY_MESSAGE))?;
+    Ok(())
+}
+
+/// ssh refuses a private key that other users can read, so the file is set to 0600 before it is used.
+fn set_private_mode(path: &Path) -> Result<(), FsError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|_| herr(KEYGEN_FAILED, KEYGEN_MESSAGE))?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
 
 /// Locks a process-wide slot. A poisoned lock still holds valid data, so the guard is taken anyway.
 fn locked<T>(slot: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -606,10 +752,11 @@ mod tests {
     use crate::ssh_session::Connected;
     use crate::ssh_transport::ForwardChild;
     use base64::Engine as _;
+    use crate::ssh_askpass::AskpassGrant;
     use std::io;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, MutexGuard};
+    use std::sync::{Arc, Mutex, MutexGuard};
 
     const HOST: &str = "example.com";
     const KEY_PATH: &str = "/home/alice/.ssh/id_ed25519";
@@ -669,6 +816,59 @@ mod tests {
         }
     }
 
+    const ADD_KEY_ADDED: &str = "__LLMIDE_ADDKEY__=added\n";
+    const KEY_VERIFY_MESSAGE: &str = "The server did not accept the new key. Your password login is unchanged.";
+
+    /// The public line [`fake_keygen`] produces.
+    fn generated_line() -> String {
+        format!("ssh-ed25519 {} llmide-desktop", key_b64("generated"))
+    }
+
+    /// Writes a key pair the way ssh-keygen does and returns the public line. Counted by the Fixture.
+    fn fake_keygen(path: &Path) -> Result<String, FsError> {
+        std::fs::write(path, "PRIVATE KEY MATERIAL").unwrap();
+        std::fs::write(public_key_path(path), format!("{}\n", generated_line())).unwrap();
+        Ok(generated_line())
+    }
+
+    fn saved_password_block() -> RemoteServerPrefs {
+        RemoteServerPrefs {
+            mode: ServerMode::Ssh,
+            host: HOST.into(),
+            port: 22,
+            user: "alice".into(),
+            ssh_auth: SshAuthKind::Password,
+            ..RemoteServerPrefs::default()
+        }
+    }
+
+    /// Records, for each ssh run, whether it was handed a one-time password grant, then forwards to the fake.
+    struct GrantSpy {
+        inner: Arc<FakeExec>,
+        grants: Mutex<Vec<bool>>,
+    }
+
+    impl GrantSpy {
+        fn new(inner: Arc<FakeExec>) -> Self {
+            Self { inner, grants: Mutex::new(Vec::new()) }
+        }
+
+        fn grants(&self) -> Vec<bool> {
+            self.grants.lock().unwrap().clone()
+        }
+    }
+
+    impl SshExec for GrantSpy {
+        fn run(&self, args: &[String], stdin: Option<&[u8]>, askpass: Option<&AskpassGrant>) -> io::Result<RawOutput> {
+            self.grants.lock().unwrap().push(askpass.is_some());
+            self.inner.run(args, stdin, askpass)
+        }
+
+        fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> io::Result<Box<dyn ForwardChild>> {
+            self.inner.spawn_forward(args, askpass)
+        }
+    }
+
     /// Forward that never exits on its own and counts its kills.
     struct CountingForward {
         kills: Arc<AtomicUsize>,
@@ -691,6 +891,7 @@ mod tests {
         host: CoreHost,
         scans: Arc<AtomicUsize>,
         asks: Arc<AtomicUsize>,
+        keygens: Arc<AtomicUsize>,
         _prefs: MutexGuard<'static, ()>,
         _mode: MutexGuard<'static, ()>,
     }
@@ -704,7 +905,15 @@ mod tests {
             host.set_mode(ServerMode::Local);
             set_remote_server_for_test(RemoteServerPrefs::default());
             reset_for_tests();
-            Self { dir, host, scans: Arc::default(), asks: Arc::default(), _prefs: prefs, _mode: mode }
+            Self {
+                dir,
+                host,
+                scans: Arc::default(),
+                asks: Arc::default(),
+                keygens: Arc::default(),
+                _prefs: prefs,
+                _mode: mode,
+            }
         }
 
         fn deps(&self, exec: &Arc<FakeExec>, scan: &str, answer: bool, bundle: bool) -> Deps {
@@ -714,7 +923,7 @@ mod tests {
             }
             let bundle_path = bundle.then_some(bundle_path);
             let scan = scan.to_string();
-            let (scans, asks) = (self.scans.clone(), self.asks.clone());
+            let (scans, asks, keygens) = (self.scans.clone(), self.asks.clone(), self.keygens.clone());
             Deps {
                 exec: exec.clone(),
                 scan: Arc::new(move |_: &SshEndpoint| {
@@ -724,6 +933,10 @@ mod tests {
                 ask: Arc::new(move |_: &str, _: &str, _: &str| {
                     asks.fetch_add(1, Ordering::SeqCst);
                     answer
+                }),
+                keygen: Arc::new(move |path: &Path| {
+                    keygens.fetch_add(1, Ordering::SeqCst);
+                    fake_keygen(path)
                 }),
                 health: Arc::new(|_: u16| Some(NEW.to_string())),
                 bundle: Arc::new(move || bundle_path.clone()),
@@ -1056,5 +1269,131 @@ mod tests {
         assert_eq!(kills.load(Ordering::SeqCst), 1);
         assert!(exec.calls().is_empty());
         assert_eq!(status.link, "stopped");
+    }
+
+    #[test]
+    fn install_key_switches_auth() {
+        let fx = Fixture::new("svc-install-key");
+        set_remote_server_for_test(saved_password_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![ok(ADD_KEY_ADDED), probe_out("")]);
+        let spy = Arc::new(GrantSpy::new(exec.clone()));
+        let mut deps = fx.deps(&exec, "", true, true);
+        deps.exec = spy.clone();
+        let key_dir = fx.dir.join("keys");
+        let status = install_key(&deps, &fx.host, &key_dir, PASSWORD).unwrap();
+        assert_eq!(status.host, HOST);
+
+        let key_path = key_file_path(&key_dir, HOST, 22);
+        let key_text = key_path.display().to_string();
+        let saved = prefs::stored().remote_server;
+        assert_eq!(saved.ssh_auth, SshAuthKind::Key);
+        assert_eq!(saved.key_path, key_text);
+        assert!(key_path.exists() && public_key_path(&key_path).exists(), "the key pair is kept on success");
+
+        let calls = exec.calls();
+        assert_eq!(calls.len(), 2, "one ADD_KEY and one verification probe");
+        assert_eq!(calls[0].args.last().map(String::as_str), Some(ADD_KEY));
+        let expected_stdin = format!("{}\n", generated_line());
+        assert_eq!(calls[0].stdin.as_deref(), Some(expected_stdin.as_bytes()));
+        assert_eq!(calls[1].args.last().map(String::as_str), Some(PROBE));
+        assert!(calls[1].args.windows(2).any(|w| w[0] == "-i" && w[1] == key_text), "probe uses the new key");
+        assert!(has_option(&calls[1].args, "BatchMode=yes"));
+        assert_eq!(spy.grants(), vec![true, false], "only ADD_KEY gets the password grant");
+    }
+
+    #[test]
+    fn install_key_failure_changes_nothing() {
+        let cases = [
+            ("add-failed", vec![ok("__LLMIDE_ADDKEY__=failed\n")], "SSH_KEY_INSTALL_FAILED"),
+            ("probe-refused", vec![ok(ADD_KEY_ADDED), ssh_error(PERMISSION_DENIED)], "SSH_KEY_VERIFY_FAILED"),
+        ];
+        for (label, outputs, expected) in cases {
+            let fx = Fixture::new(label);
+            set_remote_server_for_test(saved_password_block());
+            set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+            let before = prefs::stored().remote_server;
+            let exec = fake(outputs);
+            let deps = fx.deps(&exec, "", true, true);
+            let key_dir = fx.dir.join("keys");
+            let error = install_key(&deps, &fx.host, &key_dir, PASSWORD).unwrap_err();
+
+            assert_eq!(error.code, expected, "{label}");
+            assert_eq!(prefs::stored().remote_server, before, "{label}: preferences changed");
+            let key_path = key_file_path(&key_dir, HOST, 22);
+            assert!(!key_path.exists(), "{label}: private key left behind");
+            assert!(!public_key_path(&key_path).exists(), "{label}: public key left behind");
+        }
+        // The verification failure has its own fixed text, which the UI shows as-is.
+        let fx = Fixture::new("svc-verify-text");
+        set_remote_server_for_test(saved_password_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![ok(ADD_KEY_ADDED), ssh_error(PERMISSION_DENIED)]);
+        let deps = fx.deps(&exec, "", true, true);
+        let error = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
+        assert_eq!(error.message, KEY_VERIFY_MESSAGE);
+    }
+
+    #[test]
+    fn install_key_needs_password_auth() {
+        let fx = Fixture::new("svc-install-key-keyed");
+        set_remote_server_for_test(saved_key_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, "", true, true);
+        let refused = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
+        assert_eq!(refused.code, "SSH_KEY_NOT_NEEDED");
+        assert_eq!(refused.message, "This server already uses a key.");
+        assert!(exec.calls().is_empty());
+        assert_eq!(fx.keygens.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn install_key_needs_a_pin_and_a_password() {
+        let fx = Fixture::new("svc-install-key-gates");
+        set_remote_server_for_test(saved_password_block());
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, "", true, true);
+        let no_pin = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
+        assert_eq!(no_pin.code, "SSH_HOST_KEY_UNCONFIRMED");
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let empty = install_key(&deps, &fx.host, &fx.dir.join("keys"), "").unwrap_err();
+        assert_eq!(empty.code, "SSH_PASSWORD_REQUIRED");
+        assert!(exec.calls().is_empty());
+        assert_eq!(fx.keygens.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn install_key_never_leaks_the_password() {
+        fn record(seen: &mut Vec<String>, exec: &FakeExec) {
+            for call in exec.calls() {
+                seen.push(call.args.join(" "));
+                seen.push(String::from_utf8_lossy(call.stdin.as_deref().unwrap_or_default()).into_owned());
+            }
+        }
+        let mut seen = Vec::new();
+
+        let fx = Fixture::new("svc-key-leak-ok");
+        set_remote_server_for_test(saved_password_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![ok(ADD_KEY_ADDED), probe_out("")]);
+        let deps = fx.deps(&exec, "", true, true);
+        let status = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap();
+        seen.push(serde_json::to_string(&status).unwrap());
+        record(&mut seen, &exec);
+        drop(deps);
+        drop(fx);
+
+        let fx = Fixture::new("svc-key-leak-fail");
+        set_remote_server_for_test(saved_password_block());
+        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![ok("__LLMIDE_ADDKEY__=failed\n")]);
+        let deps = fx.deps(&exec, "", true, true);
+        let error = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
+        seen.push(format!("{} {}", error.code, error.message));
+        record(&mut seen, &exec);
+
+        let all = seen.join("\n");
+        assert!(!all.contains(PASSWORD), "the password reached an argv, stdin, status or error: {all}");
     }
 }

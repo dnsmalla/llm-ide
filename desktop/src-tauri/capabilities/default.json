@@ -175,6 +175,7 @@
     "allow-remote-ssh-server-status",
     "allow-remote-ssh-server-stop",
     "allow-remote-ssh-server-uninstall",
+    "allow-remote-ssh-server-install-key",
     "allow-app-restart",
     "allow-remote-deploy-plan",
     "allow-remote-deploy-bootstrap",
