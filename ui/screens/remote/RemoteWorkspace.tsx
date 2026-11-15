@@ -16,6 +16,8 @@ export function RemoteWorkspace() {
   const [wtBusy, setWtBusy] = useState(false);
   const [wtMessage, setWtMessage] = useState<string | null>(null);
   const [wtDiff, setWtDiff] = useState<string | null>(null);
+  // Merge moves the live branch on the server, so it needs an explicit second click (the webview has no window.confirm).
+  const [confirmMerge, setConfirmMerge] = useState<string | null>(null);
   if (!active || !selected) return null;
   const fake = { session: { connection: active.conn }, projects: { selectedId: selected } } as never;
 
@@ -70,7 +72,15 @@ export function RemoteWorkspace() {
             <div className="remote-wt-row" key={w.name}>
               <span>{w.name} · {w.branch}{w.dirty ? " · uncommitted" : ""}</span>
               <button type="button" disabled={wtBusy} onClick={() => void wtCall("diff", w.name)}>Diff</button>
-              <button type="button" disabled={wtBusy} onClick={() => void wtCall("merge", w.name)}>Merge</button>
+              {confirmMerge === w.name ? (
+                <>
+                  <span role="alert">Merge {w.name} into the live branch?</span>
+                  <button type="button" disabled={wtBusy} onClick={() => { setConfirmMerge(null); void wtCall("merge", w.name); }}>Confirm merge</button>
+                  <button type="button" onClick={() => setConfirmMerge(null)}>Cancel</button>
+                </>
+              ) : (
+                <button type="button" disabled={wtBusy} onClick={() => setConfirmMerge(w.name)}>Merge</button>
+              )}
               <button type="button" disabled={wtBusy || w.dirty} onClick={() => void wtCall("remove", w.name)}>Remove</button>
             </div>
           ))}
