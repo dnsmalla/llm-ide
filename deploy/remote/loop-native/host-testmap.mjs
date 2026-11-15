@@ -1,8 +1,9 @@
 #!/opt/llmide-node/bin/node
 // Host adapter for the desktop's pure TestMap logic. Paths are repo-relative, like FsApi in the desktop.
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
-import { detectTestStructure, writeTestStructure, buildTestMap, writeTestMap } from "./testmap.ts";
+import { detectTestStructure, writeTestStructure, buildTestMap, writeTestMap, parseTestResults, ledgerDiff, readLedger, writeLedger } from "./testmap.ts";
 
 const root = path.resolve(process.argv[2] || "");
 const op = process.argv[3];
@@ -28,6 +29,17 @@ if (op === "map") {
   const map = await buildTestMap(api, "", structure, "system/loop/refactor/graph/graph-code.json", new Date(), scope);
   const w = await writeTestMap(api, "", map);
   console.log(JSON.stringify({ op, entries: map.entries.length, untested: map.untestedFunctions, tested: map.testedFunctions, md: w.md, json: w.json }));
+  process.exit(0);
+}
+if (op === "ledger") {
+  const output = fs.readFileSync(process.argv[4], "utf8");
+  const parsed = parseTestResults(output);
+  if (parsed.failing.length === 0 && parsed.passing.length === 0) { console.log(JSON.stringify({ op, recorded: false })); process.exit(0); }
+  const p = "system/loop/test/ledger.json";
+  const previous = await readLedger(api, p);
+  const diff = ledgerDiff(previous, parsed, parsed.failing.length === 0);
+  await writeLedger(api, p, { runId: crypto.randomUUID(), recordedAt: new Date().toISOString(), failing: parsed.failing, passing: parsed.passing });
+  console.log(JSON.stringify({ op, recorded: true, failing: parsed.failing.length, passing: parsed.passing.length, newFailures: diff.newFailures, stillFailing: diff.stillFailing, fixed: diff.fixed, path: p }));
   process.exit(0);
 }
 console.error(`unsupported testMap op: ${op}`); process.exit(2);
