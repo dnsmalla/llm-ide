@@ -126,20 +126,20 @@ fn active_root() -> Result<PathBuf, String> {
     crate::project::active_root().ok_or_else(|| "no project is open".to_string())
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
-    tauri::async_runtime::spawn_blocking(f).await.unwrap_or_else(|e| panic!("project layout task failed: {e}"))
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("project layout task failed: {e}"))
 }
 
 #[tauri::command]
 pub async fn project_paths() -> Result<Paths, String> {
     let root = active_root()?;
-    Ok(blocking(move || Paths { root: root.to_string_lossy().into_owned(), id: project_meta(&root).id, folders: folders(&root) }).await)
+    Ok(blocking(move || Paths { root: root.to_string_lossy().into_owned(), id: project_meta(&root).id, folders: folders(&root) }).await?)
 }
 
 #[tauri::command]
 pub async fn project_memory() -> Result<ProjectMemory, String> {
     let root = active_root()?;
-    Ok(blocking(move || memory(&root)).await)
+    Ok(blocking(move || memory(&root)).await?)
 }
 
 /// Re-create missing canonical folders/files for the active project (the Mac's "Rebuild missing folders").
@@ -147,7 +147,7 @@ pub async fn project_memory() -> Result<ProjectMemory, String> {
 #[tauri::command]
 pub async fn project_rebuild_folders() -> Result<(), String> {
     let root = active_root()?;
-    blocking(move || crate::project_scaffold::scaffold(&root, &project_meta(&root))).await
+    blocking(move || crate::project_scaffold::scaffold(&root, &project_meta(&root))).await?
 }
 
 /// The project marker's metadata, or a fresh identity derived from the folder name when the marker is missing.
