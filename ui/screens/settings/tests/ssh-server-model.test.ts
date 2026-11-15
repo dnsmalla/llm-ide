@@ -150,3 +150,59 @@ test("error text: fixed sentences for the known codes, the host message otherwis
   assert.equal(sshServerErrorText({ code: "SSH_UNREACHABLE", message: "x" }), "Could not reach the server.");
   assert.equal(sshServerErrorText({ code: "SSH_DISK_LOW", message: "Not enough disk: 120 MB free." }), "Not enough disk: 120 MB free.");
 });
+
+function deferred<T>(): { promise: Promise<T>; resolve(v: T): void } {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+test("model: a test answer that arrives after the host changed is dropped", async () => {
+  const pending = deferred<SshServerTest>();
+  const m = filled(fakeIo({ async test() { return pending.promise; } }));
+  const running = m.test();
+  m.setField("host", "other.example.com");
+  pending.resolve(trusted);
+  await running;
+  assert.equal(m.getState().test, null);
+  assert.equal(m.getState().busy, null);
+  assert.equal(await m.connect(), null, "the old server's trust must not open the new host");
+  assert.match(m.getState().error ?? "", /confirm the server's host key/);
+});
+
+test("model: any target field changed while a test runs drops its answer", async () => {
+  for (const [field, value] of [["port", "2222"], ["user", "ops"], ["keyPath", "/home/ops/.ssh/id_ed25519"]] as const) {
+    const pending = deferred<SshServerTest>();
+    const m = filled(fakeIo({ async test() { return pending.promise; } }));
+    const running = m.test();
+    m.setField(field, value);
+    pending.resolve(trusted);
+    await running;
+    assert.equal(m.getState().test, null, field);
+  }
+});
+
+test("model: a confirmation answer that arrives after the host changed is dropped", async () => {
+  const pending = deferred<SshServerTest>();
+  const m = filled(fakeIo({ async confirm() { return pending.promise; } }));
+  await m.test(); // untrusted, so there is something to confirm
+  const running = m.confirmFingerprint();
+  m.setField("host", "other.example.com");
+  pending.resolve(trusted);
+  await running;
+  assert.equal(m.getState().test, null);
+  assert.equal(m.getState().busy, null);
+  assert.equal(await m.connect(), null);
+});
+
+test("model: a connect answer that arrives after the host changed is dropped", async () => {
+  const pending = deferred<SshServerStatus>();
+  const m = filled(fakeIo({ async test() { return trusted; }, async connect() { return pending.promise; } }));
+  await m.test();
+  const running = m.connect();
+  m.setField("host", "other.example.com");
+  pending.resolve(status);
+  assert.equal(await running, null);
+  assert.equal(m.getState().status, null);
+  assert.equal(m.getState().busy, null);
+});

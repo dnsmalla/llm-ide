@@ -164,6 +164,11 @@ export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "to
  */
 export const SSH_SECTIONS: readonly SectionId[] = REMOTE_SECTIONS;
 export const LOCAL_ONLY_NOTICE = "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to a hub.";
+const LOCAL_ONLY_NOTICE_SSH = "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to an SSH server.";
+/** The notice for a section the current mode cannot serve: hub mode keeps its text, ssh mode names the server instead. */
+export function localOnlyNotice(mode: NavMode): string {
+  return mode === "ssh" ? LOCAL_ONLY_NOTICE_SSH : LOCAL_ONLY_NOTICE;
+}
 
 export function visibleSectionsFor(mode: NavMode): readonly SectionDef[] {
   if (mode === "remote") return SECTIONS.filter((s) => REMOTE_SECTIONS.includes(s.id));

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { visibleSectionsFor, isSelectableFor, REMOTE_SECTIONS, REMOTE_GROUP_HIDDEN, LOCAL_ONLY_NOTICE } from "../sections.ts";
+import { visibleSectionsFor, isSelectableFor, REMOTE_SECTIONS, REMOTE_GROUP_HIDDEN, LOCAL_ONLY_NOTICE, localOnlyNotice } from "../sections.ts";
 
 test("remote mode lists only the screens that work over a hub", () => {
   assert.deepEqual(visibleSectionsFor("remote").map((s) => s.id), ["welcome", "issues", "gantt", "library", "chat", "settings"]);
@@ -47,4 +47,10 @@ test("sections: ssh mode lists the same sections as remote mode", () => {
   assert.deepEqual(visibleSectionsFor("ssh").map((s) => s.id), visibleSectionsFor("remote").map((s) => s.id));
   assert.equal(isSelectableFor("chat", "ssh"), true);
   assert.equal(isSelectableFor("explorer", "ssh"), false);
+});
+
+test("the local-only notice names a hub in hub mode and an SSH server in ssh mode", () => {
+  assert.equal(localOnlyNotice("remote"), "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to a hub.");
+  assert.equal(localOnlyNotice("remote"), LOCAL_ONLY_NOTICE);
+  assert.equal(localOnlyNotice("ssh"), "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to an SSH server.");
 });

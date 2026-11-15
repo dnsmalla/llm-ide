@@ -174,12 +174,15 @@ export const SSH_SERVER_INITIAL: SshServerState = {
 
 export class SshServerModel extends Store<SshServerState> {
   readonly #io: SshServerIo;
+  /** Bumped by every change of the target fields. A host answer that started under an older value is stale. */
+  #generation = 0;
   constructor(io: SshServerIo) {
     super({ ...SSH_SERVER_INITIAL, fieldErrors: {} });
     this.#io = io;
   }
 
   setField(field: SshServerField, value: string): void {
+    this.#generation += 1;
     const fieldErrors = { ...this.getState().fieldErrors };
     delete fieldErrors[field];
     const patch: Partial<SshServerState> = { fieldErrors, error: null };
@@ -193,6 +196,7 @@ export class SshServerModel extends Store<SshServerState> {
   }
 
   setAuth(auth: SshAuth): void {
+    this.#generation += 1;
     const fieldErrors = { ...this.getState().fieldErrors };
     delete fieldErrors.keyPath;
     this.set({ auth, fieldErrors, error: null });
@@ -218,10 +222,13 @@ export class SshServerModel extends Store<SshServerState> {
       return;
     }
     this.set({ busy: "test", error: null, test: null });
+    const generation = this.#generation;
     try {
       const test = await this.#io.test(this.target(), password);
+      if (generation !== this.#generation) return;
       this.set({ test, error: null });
     } catch (e) {
+      if (generation !== this.#generation) return;
       this.set({ test: null, error: sshServerErrorText(e) });
     } finally {
       this.set({ busy: null });
@@ -238,10 +245,13 @@ export class SshServerModel extends Store<SshServerState> {
       return;
     }
     this.set({ busy: "confirm", error: null });
+    const generation = this.#generation;
     try {
       const test = await this.#io.confirm(this.target(), last.hostKeyType, last.fingerprint);
+      if (generation !== this.#generation) return;
       this.set({ test, error: null });
     } catch (e) {
+      if (generation !== this.#generation) return;
       this.set({ error: sshServerErrorText(e) });
     } finally {
       this.set({ busy: null });
@@ -260,7 +270,7 @@ export class SshServerModel extends Store<SshServerState> {
       return null;
     }
     const target = this.target();
-    return this.run("connect", () => this.#io.connect(target, password));
+    return this.run("connect", () => this.#io.connect(target, password), true);
   }
 
   refreshStatus(): Promise<SshServerStatus | null> {
@@ -281,14 +291,18 @@ export class SshServerModel extends Store<SshServerState> {
     return this.run("uninstall", () => this.#io.uninstall(password, confirmHost));
   }
 
-  private async run(busy: SshServerBusy, action: () => Promise<SshServerStatus>): Promise<SshServerStatus | null> {
+  /** `scoped`: the answer is about the target it was asked for, so a change of target while it runs drops it. */
+  private async run(busy: SshServerBusy, action: () => Promise<SshServerStatus>, scoped = false): Promise<SshServerStatus | null> {
     if (this.getState().busy) return null;
     this.set({ busy, error: null });
+    const generation = this.#generation;
     try {
       const status = await action();
+      if (scoped && generation !== this.#generation) return null;
       this.set({ status, error: null });
       return status;
     } catch (e) {
+      if (scoped && generation !== this.#generation) return null;
       this.set({ error: sshServerErrorText(e) });
       return null;
     } finally {

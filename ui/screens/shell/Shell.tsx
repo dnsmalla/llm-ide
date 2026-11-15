@@ -25,7 +25,7 @@ import { setTerminalDockOpen, toggleTerminalDock, useTerminalDockOpen } from "..
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { deepLinkSection } from "./deep-link.ts";
-import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, isSelectable, isSelectableFor, LOCAL_ONLY_NOTICE, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type NavAction, type NavMode, type SectionDef, type SectionId } from "./sections";
+import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, isSelectable, isSelectableFor, localOnlyNotice, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type NavAction, type NavMode, type SectionDef, type SectionId } from "./sections";
 import { RemoteProjectBar } from "./RemoteProjectBar";
 import { getHubError, remoteBanner, subscribeHubError } from "./remote-status";
 import { bindRemoteSession } from "./remote-session";
@@ -176,7 +176,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   useEffect(() => { if (modeKnown) rawDispatch({ type: "mode", mode: navMode }); }, [modeKnown, navMode]);
   const dispatch = useCallback((action: NavAction) => {
     const { active, mode } = navRef.current;
-    if (action.type === "select" && isSelectable(action.id) && !isSelectableFor(action.id, mode)) setSectionNotice({ text: LOCAL_ONLY_NOTICE, at: active });
+    if (action.type === "select" && isSelectable(action.id) && !isSelectableFor(action.id, mode)) setSectionNotice({ text: localOnlyNotice(mode), at: active });
     rawDispatch(action);
   }, []);
   const [apiWarning, setApiWarning] = useState<string | null>(null);

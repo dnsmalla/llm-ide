@@ -110,9 +110,12 @@ test("remote server mode round-trips through prefs and tests through the host co
     },
   });
   assert.deepEqual(await host.getRemoteServer(), REMOTE, "an older prefs file reads as Local desktop");
+  // Seed a non-default SSH login and pin: a save must send these back, not a hard-coded key/empty reset.
+  const pin = "203.0.113.7:22 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample";
+  state.stored = { ...state.stored, remoteServer: { ...REMOTE, sshAuth: "password", sshHostPin: pin } };
   assert.deepEqual(await host.setRemoteServer(next), next);
   // The host reads the whole block, and a block without ssh_auth resets SSH to key auth: the stored SSH fields ride along.
-  const block = { ...next, sshAuth: "key", sshHostPin: "" };
+  const block = { ...next, sshAuth: "password", sshHostPin: pin };
   assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { remoteServer: block } }]);
   assert.deepEqual(state.stored.remoteServer, block);
   const result = await host.testRemoteSsh(next);
