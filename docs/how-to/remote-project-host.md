@@ -220,3 +220,22 @@ With the `read` capability, the iPhone shows a **Changes** tab for the selected 
 - one unified diff from `git.diff`
 
 Review is read-only on the phone; commit and push stay on the host workspace.
+
+### Worktree lifecycle
+
+The Remote workspace **Worktrees** panel lists host Loop worktrees and offers:
+
+```text
+Merge    commit the worktree, create llmide/loop-<run>, merge with --no-ff into the live branch
+Remove   delete a clean worktree (refused when it has uncommitted changes)
+```
+
+CLI equivalent:
+
+```bash
+llmide-remote-worktree list   <project>
+llmide-remote-worktree merge  <project> <run-name>
+llmide-remote-worktree remove <project> <run-name>
+```
+
+A merge is refused if its branch already exists; a conflict is reported and left for manual resolution.

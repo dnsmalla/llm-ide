@@ -460,6 +460,7 @@ macro_rules! product_handlers {
                 remote::remote_ssh_test,
                 remote::remote_ssh_project,
                 remote::remote_ssh_loop,
+                remote::remote_ssh_worktree,
                 remote::remote_ssh_confirm,
                 app_restart,
                 remote_deploy::remote_deploy_plan,

@@ -166,6 +166,7 @@
     "allow-remote-ssh-test",
     "allow-remote-ssh-project",
     "allow-remote-ssh-loop",
+    "allow-remote-ssh-worktree",
     "allow-remote-ssh-confirm",
     "allow-app-restart",
     "allow-remote-deploy-plan",

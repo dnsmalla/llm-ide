@@ -175,6 +175,7 @@ const COMMANDS: &[&str] = &[
     "remote_ssh_test",
     "remote_ssh_project",
     "remote_ssh_loop",
+    "remote_ssh_worktree",
     "remote_ssh_confirm",
     "app_restart",
     "remote_deploy_plan",

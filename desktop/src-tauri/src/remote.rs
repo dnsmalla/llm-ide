@@ -486,6 +486,39 @@ pub async fn remote_ssh_test(target: SshTarget) -> Result<SshTestResult, FsError
 
 /// R-034 #7: remember the host-key fingerprint the user confirmed after a Test SSH. Deploy, update and
 /// uninstall refuse until this is called for the same host:port in this app session.
+/// List, merge or remove host Loop worktrees through the fixed CLI.
+#[tauri::command]
+pub async fn remote_ssh_worktree(target: SshTarget, action: String, path: String, name: String) -> Result<String, FsError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if action != "list" && action != "merge" && action != "remove" { return Err(herr("invalid_path", "action must be list, merge or remove")); }
+        if path.len() > 4096 || path.contains('\0') || path.contains('\n') || path.contains('\r') { return Err(herr("invalid_path", "invalid project path")); }
+        if name.len() > 120 || name.contains('\0') || name.contains('\n') || name.contains('\r') { return Err(herr("invalid_path", "invalid worktree name")); }
+        let prepared = prepare(&target)?;
+        check_key_file(&prepared.key_path)?;
+        let qpath = format!("'{}'", path.replace('\'', "'\\''"));
+        let qname = format!("'{}'", name.replace('\'', "'\\''"));
+        let command = if name.is_empty() {
+            format!("/usr/local/bin/llmide-remote-worktree {action} {qpath}")
+        } else {
+            format!("/usr/local/bin/llmide-remote-worktree {action} {qpath} {qname}")
+        };
+        let dir = temp_ssh_dir("ssh-worktree")?;
+        let known = dir.join("known_hosts");
+        let args = ssh_args_known(&prepared, &command, &known, true);
+        let output = SystemSsh.run(&args).map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")));
+        let _ = std::fs::remove_dir_all(&dir);
+        let output = output?;
+        if output.code != Some(0) {
+            let body = output.stdout.trim();
+            if !body.is_empty() { return Ok(body.to_string()); }
+            return Err(herr("ssh_failed", failure_message(&output)));
+        }
+        Ok(output.stdout.trim().to_string())
+    })
+    .await
+    .map_err(|e| herr("internal", format!("the worktree command did not finish: {e}")))?
+}
+
 /// Run the fixed host Loop CLI on the remote project. Same transport and quoting as the SSH project bootstrap.
 #[tauri::command]
 pub async fn remote_ssh_loop(target: SshTarget, path: String, loop_name: String) -> Result<String, FsError> {
