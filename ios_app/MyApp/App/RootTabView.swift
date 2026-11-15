@@ -1,9 +1,11 @@
 import SwiftUI
 import SharedProtocol
 
-/// The paired shell: Chat first, then the read-only History (Host API v1 `read` or offline sync) and
-/// Settings. Chat is the surface people open the app for, so it is the landing tab and the only one that
-/// badges when the desktop needs an answer.
+/// The paired shell: Ask first, then Work (Execute / Auto Tasks / Loop / Changes behind one segmented
+/// switch), the read-only History (Host API v1 `read` or offline sync) and Settings. Ask is the surface
+/// people open the app for, so it is the landing tab and the only one that badges when the desktop needs
+/// an answer. Work groups the four host-gated screens so the bar never exceeds iOS's five-tab limit
+/// (a sixth would collapse into the system "More" tab).
 struct RootTabView: View {
     let deviceName: String
     @EnvironmentObject var connection: ConnectionService
@@ -13,9 +15,28 @@ struct RootTabView: View {
     @EnvironmentObject var projectsStore: ProjectsStore
     @EnvironmentObject var connectionStore: ConnectionStore
 
-    enum Tab: Hashable { case chat, explorer, tasks, loop, changes, history, settings }
+    enum Tab: Hashable { case chat, work, history, settings }
     @State private var selection: Tab = .chat
     @State private var showLiveScanner = false
+
+    /// The Work screens this host currently serves, in display order. Each keeps the capability gate the
+    /// standalone tab had; the Work tab exists only while at least one is available.
+    private var workSections: [WorkSection] {
+        let caps = connection.hostCapabilities
+        let canCompose = caps?.contains("compose") == true
+        let canRead = caps?.contains("read") == true
+        var sections: [WorkSection] = []
+        if canCompose { sections.append(.execute) }
+        if canCompose, canRead { sections.append(.tasks) }
+        if canCompose, canRead { sections.append(.loop) }
+        if connection.servesV1Read { sections.append(.changes) }
+        return sections
+    }
+
+    /// Never leave the user on a tab whose gate just closed.
+    private func leaveWorkIfUnavailable() {
+        if workSections.isEmpty, selection == .work { selection = .chat }
+    }
 
     var body: some View {
         TabView(selection: $selection) {
@@ -29,32 +50,14 @@ struct RootTabView: View {
                     LiveChatPairingView(message: connection.requiresRepair ? connection.errorMessage : nil) { showLiveScanner = true }
                 }
             }
-            .tabItem { Label("Ask", systemImage: "bubble.left.and.bubble.right.fill") }
+            .tabItem { Label("Ask", systemImage: selection == .chat ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right") }
             .badge(llmIdeStore.pendingApproval == nil ? 0 : 1)
             .tag(Tab.chat)
 
-            if connection.hostCapabilities?.contains("compose") == true {
-                NavigationStack { ExplorerChatView() }
-                    .tabItem { Label("Execute", systemImage: "hammer") }
-                    .tag(Tab.explorer)
-            }
-
-            if connection.hostCapabilities?.contains("compose") == true, connection.hostCapabilities?.contains("read") == true {
-                NavigationStack { TasksView() }
-                    .tabItem { Label("Auto Tasks", systemImage: "checklist") }
-                    .tag(Tab.tasks)
-            }
-
-            if connection.hostCapabilities?.contains("compose") == true, connection.hostCapabilities?.contains("read") == true {
-                NavigationStack { LoopView() }
-                    .tabItem { Label("Loop", systemImage: "arrow.triangle.2.circlepath") }
-                    .tag(Tab.loop)
-            }
-
-            if connection.servesV1Read {
-                NavigationStack { ChangesView() }
-                    .tabItem { Label("Changes", systemImage: "arrow.left.arrow.right") }
-                    .tag(Tab.changes)
+            if !workSections.isEmpty {
+                NavigationStack { WorkView(sections: workSections) }
+                    .tabItem { Label("Work", systemImage: selection == .work ? "hammer.fill" : "hammer") }
+                    .tag(Tab.work)
             }
 
             if connection.servesV1Read || syncStore.phase != .off {
@@ -64,13 +67,12 @@ struct RootTabView: View {
             }
 
             NavigationStack { SettingsView() }
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tabItem { Label("Settings", systemImage: selection == .settings ? "gearshape.fill" : "gearshape") }
                 .tag(Tab.settings)
         }
         .tint(DesignSystem.Colors.primary)
         .onChange(of: connection.hostCapabilities) { _ in
-            if connection.hostCapabilities?.contains("compose") != true, selection == .explorer || selection == .tasks || selection == .loop { selection = .chat }
-            if !connection.servesV1Read, selection == .changes { selection = .chat }
+            leaveWorkIfUnavailable()
         }
         .sheet(isPresented: $showLiveScanner) {
             QRScannerSheet { scan in
@@ -96,6 +98,7 @@ struct RootTabView: View {
         // `read` gone and no sync: the History tab is gone, so never leave the user on it.
         .onChange(of: connection.servesV1Read) { on in
             if !on, syncStore.phase == .off, selection == .history { selection = .chat }
+            leaveWorkIfUnavailable()
         }
     }
 
@@ -107,6 +110,59 @@ struct RootTabView: View {
         guard connection.servesV1Read else { return }
         usageStore.refresh()
         Task { await connection.reads.refresh() }
+    }
+}
+
+// MARK: — Work tab
+
+/// The screens grouped under the Work tab.
+enum WorkSection: Hashable, CaseIterable {
+    case execute, tasks, loop, changes
+
+    var title: String {
+        switch self {
+        case .execute: return "Execute"
+        case .tasks:   return "Tasks"
+        case .loop:    return "Loop"
+        case .changes: return "Changes"
+        }
+    }
+}
+
+/// Hosts the Work screens behind a segmented switch. The screens are unchanged: each still contributes its own
+/// title and toolbar to the enclosing `NavigationStack`, so switching segments swaps the nav bar with it.
+/// The switch hides when the host serves a single screen, since a one-option control is noise.
+struct WorkView: View {
+    let sections: [WorkSection]
+    @State private var chosen: WorkSection = .execute
+
+    /// `chosen` can name a screen whose capability was withdrawn while it was selected.
+    private var current: WorkSection {
+        sections.contains(chosen) ? chosen : (sections.first ?? .execute)
+    }
+
+    var body: some View {
+        Group {
+            switch current {
+            case .execute: ExplorerChatView()
+            case .tasks:   TasksView()
+            case .loop:    LoopView()
+            case .changes: ChangesView()
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if sections.count > 1 {
+                Picker("Work", selection: Binding(get: { current }, set: { chosen = $0 })) {
+                    ForEach(sections, id: \.self) { section in
+                        Text(section.title).tag(section)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, DesignSystem.Spacing.md)
+                .padding(.vertical, DesignSystem.Spacing.xs)
+                .background(.bar)
+            }
+        }
     }
 }
 
