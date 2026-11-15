@@ -65,6 +65,7 @@ The Swift Mac app (`mac/`) was removed on 2026-11-06 (it is in git history); the
 - **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/`
 - **Runtime feature set → core** — the desktop host passes the user's enabled features to the core it spawns as `LLMIDE_FEATURES` (`desktop/src-tauri/src/prefs.rs`, `core_env.rs`; unset/empty → all). Disabled route groups answer 404 `feature_disabled`. A toggle applies on the NEXT core start — never auto-restart the core on a feature change (it kills in-flight Loop/agent work); an adopted external core keeps its own env.
 - **Encrypted sync, no accounts** — phones and browsers read encrypted snapshots from user-owned storage (MEGA, own server SFTP, Box) and queue prompts; the desktop needs no login (ADR 0020; `extension/CLAUDE.md` "Sync"). The relay v1 byte format (`schema/relay/v1`) survives only as sync's envelope format.
+- **Three server modes** — Local desktop (core on this computer), Remote server (a hub over HTTPS) and SSH server (the core runs on a Linux server, reached by one `ssh -L` forward; `desktop/src-tauri/src/ssh_*.rs`, see `docs/how-to/connect-over-ssh.md`)
 
 Project layout and folder tree: [docs/reference/project-structure.md](docs/reference/project-structure.md).
 

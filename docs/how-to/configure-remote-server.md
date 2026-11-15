@@ -104,3 +104,4 @@ and uninstall. None of it is needed to connect to a hub someone else runs.
 - [Install a server](install-a-server.md) — the one-command Ubuntu/Debian installer
 - [Run an always-online hub](run-a-hub.md) — operator details, backups, updates, limits
 - [Desktop core lifecycle](desktop-core-lifecycle.md)
+- [Connect the desktop to a Linux server over SSH](connect-over-ssh.md) — the third mode: the core runs on a server you log into with SSH
