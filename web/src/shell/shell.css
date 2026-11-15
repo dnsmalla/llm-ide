@@ -72,3 +72,5 @@ button.shell-nav-item { width: 100%; border: 0; background: transparent; font: i
   .shell-tools .web-select { max-width: 38vw; }
   .shell-status .ui-pill { font-size: 0; gap: 0; width: 26px; min-height: 26px; padding: 0; justify-content: center; }
 }
+/* A project error or refusal is an alert the header must show in full: let the row wrap only while one is present. */
+.shell-header:has(.web-project-error) { flex-wrap: wrap; }

@@ -190,12 +190,12 @@ code { font-family: var(--ui-mono); font-size: .92em; background: var(--ui-hover
 
 /* ---- Project picker ---------------------------------------------------------------------------------------- */
 .web-project-picker { display: flex; align-items: center; gap: var(--ui-s-2); flex-wrap: wrap; min-width: 0; }
-.web-project-picker .web-select { max-width: 240px; min-width: 0; min-height: 40px; font-size: var(--ui-fs-md); }
+/* Size and shape of the header picker live in shell.css (.shell-tools .web-select); same specificity, and this file loads later. */
+.web-project-picker .web-select { min-width: 0; }
 .web-project-role { display: inline-flex; align-items: center; min-height: 22px; padding: 0 var(--ui-s-2); border: 1px solid var(--ui-line); border-radius: 999px; color: var(--ui-muted); font-size: var(--ui-fs-xs); font-weight: 700; text-transform: capitalize; background: var(--ui-card-2); }
 .web-project-role[data-role="owner"], .web-project-role[data-role="admin"] { color: var(--ui-warn); border-color: color-mix(in srgb, var(--ui-warn) 40%, transparent); }
 .web-project-empty { color: var(--ui-muted); font-size: var(--ui-fs-sm); }
 .web-project-error { flex-basis: 100%; margin: 0; color: var(--ui-danger); font-size: var(--ui-fs-xs); }
-@media (max-width: 420px) { .web-project-picker { flex: 1; } .web-project-picker .web-select { flex: 1; max-width: none; } }
 
 /* ---- History / read panel ------------------------------------------------------------------------------- */
 .web-read { display: grid; gap: var(--ui-s-4); min-width: 0; align-content: start; }
