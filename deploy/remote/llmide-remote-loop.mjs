@@ -52,6 +52,11 @@ for (const s of stages) {
     const ok = r.status === 200 && !body.error;
     results.push({ name: s.name, kind: s.kind, ok, status: r.status, reply: String(body.reply ?? "").slice(0, 1000), error: body.error ?? null, at });
     if (!ok && s.severity === "blocking") { passed = false; break; }
+  } else if (s.kind === "testMap" && (s.testOp === "structure" || s.testOp === "map")) {
+    const r = spawnSync("/opt/llmide-node/bin/node", ["--experimental-strip-types", "/opt/llmide-remote/loop-native/host-testmap.mjs", runRoot, s.testOp, loop.inputPath || ""], { encoding: "utf8", timeout: (s.timeoutSeconds || 900) * 1000 });
+    const ok = r.status === 0;
+    results.push({ name: s.name, kind: s.kind, ok, exitCode: r.status, stdout: String(r.stdout ?? "").slice(0, 2000), stderr: String(r.stderr ?? "").slice(0, 1000), at });
+    if (!ok && s.severity === "blocking") { passed = false; break; }
   } else {
     const skipped = { name: s.name, kind: s.kind, ok: false, skipped: true, blocking: s.severity === "blocking", at };
     results.push(skipped);
