@@ -39,3 +39,11 @@ test("the entry takes a pending focus request from the shell bus, then live ones
   assert.match(entry, /take\(shellBus\.takePending\("goto-section"\)\);/);
   assert.match(entry, /if \(ev && ev\.section === "conflicts"\)/);
 });
+
+test("the loop-run board guards async results with the local alive flag and does not re-run its effect on a tick", () => {
+  const src = read("../LoopRuns.tsx");
+  assert.equal(/if \(!live\) return;/.test(src), false, "React state must not gate the load");
+  assert.equal(/if \(live\) setError/.test(src), false);
+  assert.match(src, /if \(!alive\) return;/);
+  assert.equal(/\[fs, projectRoot, scope, tick, active\]/.test(src), false, "tick is not an effect dependency");
+});

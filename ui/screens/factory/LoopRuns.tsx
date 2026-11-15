@@ -50,31 +50,36 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
   const [cards, setCards] = useState<RunCard[]>([]);
   const [live, setLive] = useState<LiveLoopCard | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!active) return;
+    // One effect owns both the first load and the refresh interval, so a tick never tears the effect down and
+    // re-reads from scratch; `alive` (not React state) guards against late results after unmount or scope change.
     let alive = true;
+    const refresh = (): void => {
+      setLive(readLiveCard());
+      void Promise.all([
+        readRecentRuns(fs, 100),
+        loadLoops(fs).then((r) => r.kind === "ok" ? r.store.loops.find((l) => l.name === scope) ?? null : null, () => null),
+      ]).then(async ([rows, loop]) => {
+        if (!alive) return;
+        const names = loop ? loop.config.stages.filter((s) => s.enabled).map((s) => s.name) : [];
+        setSteps(names);
+        const shown = rows.filter((r) => r.loopName === scope).slice(0, 40);
+        const loaded = await Promise.all(shown.map((r) => loadRunRecord(fs, r.id, r.startedAt).catch(() => null)));
+        if (!alive) return;
+        setError(null);
+        setCards(shown.map((run, i) => {
+          const at = laneOf(run, loaded[i], names);
+          return { run, lane: at.lane, note: at.note, failed: run.statusCode !== "success" };
+        }));
+      }, (e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); });
+    };
     setError(null);
-    setLive(readLiveCard());
-    void Promise.all([
-      readRecentRuns(fs, 100),
-      loadLoops(fs).then((r) => r.kind === "ok" ? r.store.loops.find((l) => l.name === scope) ?? null : null, () => null),
-    ]).then(async ([rows, loop]) => {
-      if (!live) return;
-      const names = loop ? loop.config.stages.filter((s) => s.enabled).map((s) => s.name) : [];
-      setSteps(names);
-      const shown = rows.filter((r) => r.loopName === scope).slice(0, 40);
-      const loaded = await Promise.all(shown.map((r) => loadRunRecord(fs, r.id, r.startedAt).catch(() => null)));
-      if (!alive) return;
-      setCards(shown.map((run, i) => {
-        const at = laneOf(run, loaded[i], names);
-        return { run, lane: at.lane, note: at.note, failed: run.statusCode !== "success" };
-      }));
-    }, (e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
-    const timer = window.setInterval(() => setTick((n) => n + 1), 5_000);
+    refresh();
+    const timer = window.setInterval(() => { if (!document.hidden) refresh(); }, 5_000);
     return () => { alive = false; window.clearInterval(timer); };
-  }, [fs, projectRoot, scope, tick, active]);
+  }, [fs, projectRoot, scope, active]);
 
   useEffect(() => {
     const onLive = () => setLive(readLiveCard());
