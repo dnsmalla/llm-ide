@@ -91,12 +91,35 @@ struct RunningCore {
 }
 
 /// The desktop's record of the core it started. Stored 0600; the nonce is the only proof of ownership.
+///
+/// `nonce` is the core this desktop last started or confirmed. `pending` is the nonce of a START whose reply never
+/// came back: the server may be running a core with it, so the next connect accepts that core as ours too. It is
+/// absent on records written before it existed, and a successful connect clears it.
 #[derive(Serialize, Deserialize)]
 struct SessionRecord {
     host: String,
     port: u16,
     user: String,
     nonce: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending: Option<String>,
+}
+
+impl SessionRecord {
+    fn new(endpoint: &SshEndpoint, nonce: &str, pending: Option<&str>) -> Self {
+        Self {
+            host: endpoint.host.clone(),
+            port: endpoint.port,
+            user: endpoint.user.clone(),
+            nonce: nonce.to_string(),
+            pending: pending.map(str::to_string),
+        }
+    }
+
+    /// Whether the record names `endpoint`. The host name is compared without case, as ssh does.
+    fn is_for(&self, endpoint: &SshEndpoint) -> bool {
+        self.host.eq_ignore_ascii_case(&endpoint.host) && self.port == endpoint.port && self.user == endpoint.user
+    }
 }
 
 /// One remote command at a time, with the ssh arguments and askpass decided in one place.
@@ -153,6 +176,8 @@ pub(crate) fn connect_with(
     let status = parse_core_state(&link.run(STATUS, None)?.stdout)?;
     let (core, replacement) = ensure_core(&link, &input, &probe, &status, &bundle_sha)?;
 
+    // Also clears any pending nonce: the core in use is now the one named here, and the connect is past the start.
+    // Written before the forward so a later connect can recognise the core even if this connect fails.
     write_session(input.session_file, input.endpoint, &core.nonce)?;
     let (mut forward, _grant) = open_forward(&link, local_port, core.port)?;
     if let Err(e) = wait_for_core(&mut *forward, health, local_port, &core.nonce, input.health_timeout) {
@@ -335,9 +360,8 @@ fn fail_update(link: &Link<'_>, input: &ConnectInput<'_>, replacement: &Replacem
     };
     roll_back(link);
     if replacement.was_running {
-        if let Ok(core) = start_core(link, input, previous, false) {
-            let _ = write_session(input.session_file, input.endpoint, &core.nonce);
-        }
+        // start_core records the nonce of the restored core itself.
+        let _ = start_core(link, input, previous, false);
     }
 }
 
@@ -354,9 +378,16 @@ fn start_core(
     expect_our_nonce: bool,
 ) -> Result<RunningCore, FsError> {
     let nonce = random_nonce().map_err(|e| herr("SSH_START_FAILED", e))?;
+    // Recorded before START is sent. A START whose reply is lost can still leave a core running with this nonce, and
+    // the next connect must recognise that core. The record goes back to its earlier state only when START says that
+    // it started nothing that is still running. Failing here stops the START before it is sent.
+    let before = record_pending(input.session_file, input.endpoint, &nonce)?;
     let stdin = start_stdin(version, &nonce, input.secrets_payload);
+    // A transport error or deadline leaves the pending nonce in place: START's answer never came, so the core may be up.
     let output = link.run(START, Some(&stdin))?;
     if let Some((value, log)) = parse_start_failure(&output.stdout) {
+        // Each failure marker is printed after START has stopped any core it spawned, so none runs with `nonce`.
+        restore_record(input.session_file, before);
         // Another START holds the data folder's lock. It is not a failed start, so no release is rolled back for it.
         if value == START_BUSY {
             return Err(herr("SSH_START_BUSY", "The server is already starting. Try again in a moment."));
@@ -369,8 +400,11 @@ fn start_core(
     }
     let core = running_core(&parse_core_state(&output.stdout)?)?;
     if expect_our_nonce && !ct_eq(&core.nonce, &nonce) {
+        // Another desktop's core answered. The core this START sent never ran, so nothing of it is recorded.
+        restore_record(input.session_file, before);
         return Err(herr(FOREIGN_CORE_CODE, FOREIGN_CORE_MESSAGE));
     }
+    save_record(input.session_file, &SessionRecord::new(input.endpoint, &core.nonce, None))?;
     Ok(core)
 }
 
@@ -438,11 +472,13 @@ pub(crate) fn require_ours(status: &CoreState, session_file: &Path, endpoint: &S
         return Ok(());
     }
     let record = read_session(session_file);
+    // The pending nonce counts too: a START whose reply was lost may have left a core running with it, and that core
+    // is ours. STATUS must still report the nonce, so a pending record alone proves nothing.
     let is_ours = record.is_some_and(|r| {
-        r.host.eq_ignore_ascii_case(&endpoint.host)
-            && r.port == endpoint.port
-            && r.user == endpoint.user
-            && status.nonce.as_deref().is_some_and(|nonce| ct_eq(&r.nonce, nonce))
+        r.is_for(endpoint)
+            && status.nonce.as_deref().is_some_and(|nonce| {
+                ct_eq(&r.nonce, nonce) || r.pending.as_deref().is_some_and(|pending| ct_eq(pending, nonce))
+            })
     });
     if is_ours {
         Ok(())
@@ -462,21 +498,45 @@ fn roll_back(link: &Link<'_>) {
     let _ = link.run(ROLLBACK, None);
 }
 
-/// Records the core this desktop started. Written after START so the nonce is the one the core runs
-/// with, and before the forward so a later connect can recognise the core even if this one fails.
+/// Records the core this desktop started, with no pending START. Written once START has answered with the core's
+/// nonce, and again after the connect succeeds, which clears any pending nonce.
 pub(crate) fn write_session(path: &Path, endpoint: &SshEndpoint, nonce: &str) -> Result<(), FsError> {
-    let record = SessionRecord {
-        host: endpoint.host.clone(),
-        port: endpoint.port,
-        user: endpoint.user.clone(),
-        nonce: nonce.to_string(),
-    };
-    let json = serde_json::to_string(&record).map_err(|e| herr("session_record_failed", e.to_string()))?;
+    save_record(path, &SessionRecord::new(endpoint, nonce, None))
+}
+
+/// Writes the record as one file, 0600. Its contents are a host, a port, a user and nonces: no secret.
+fn save_record(path: &Path, record: &SessionRecord) -> Result<(), FsError> {
+    let json = serde_json::to_string(record).map_err(|e| herr("session_record_failed", e.to_string()))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|e| herr("session_record_failed", format!("could not create the session folder: {e}")))?;
     }
     write_private(path, json.as_bytes())
+}
+
+/// Adds `nonce` as the pending START before START is sent, and returns the record as it was. The current nonce of
+/// this endpoint is kept. A record for another endpoint, or none, has no current nonce, so the pending one stands in.
+fn record_pending(path: &Path, endpoint: &SshEndpoint, nonce: &str) -> Result<Option<SessionRecord>, FsError> {
+    let before = read_session(path);
+    let current = before
+        .as_ref()
+        .filter(|record| record.is_for(endpoint))
+        .map_or_else(|| nonce.to_string(), |record| record.nonce.clone());
+    save_record(path, &SessionRecord::new(endpoint, &current, Some(nonce)))?;
+    Ok(before)
+}
+
+/// Puts back the record that [`record_pending`] returned, or removes the file when there was none. Best effort: the
+/// caller reports the START's own outcome, and a record left with a pending nonce is harmless.
+fn restore_record(path: &Path, before: Option<SessionRecord>) {
+    match before {
+        Some(record) => {
+            let _ = save_record(path, &record);
+        }
+        None => {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 fn read_session(path: &Path) -> Option<SessionRecord> {
@@ -1148,6 +1208,170 @@ pub(crate) mod tests {
         assert_eq!(err.code, "SSH_TIMEOUT");
         assert_eq!(err.message, "The server did not answer in time.");
         assert_eq!(fake.names(), vec!["probe"], "nothing runs after a timed-out probe");
+    }
+
+    /// The nonce a record holds as its current one, read from the file so the test sees what is on disk.
+    fn record_nonce(scratch: &Scratch) -> Option<String> {
+        let value = record_json(scratch)?;
+        value.get("nonce")?.as_str().map(str::to_string)
+    }
+
+    /// The pending nonce a record holds, if any.
+    fn pending_in_record(scratch: &Scratch) -> Option<String> {
+        let value = record_json(scratch)?;
+        value.get("pending")?.as_str().map(str::to_string)
+    }
+
+    fn record_json(scratch: &Scratch) -> Option<serde_json::Value> {
+        let text = std::fs::read_to_string(&scratch.session).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    #[test]
+    fn a_start_cut_off_by_a_dropped_connection_is_reused_by_the_next_connect() {
+        // The reply to START never arrives: a connection reset, then a deadline. The core may still be running with
+        // the nonce START was sent, so the record keeps it and the next connect recognises that core.
+        let cuts: [(io::Result<RawOutput>, &str); 2] = [
+            (Err(io::Error::other("connection reset")), "SSH_UNREACHABLE"),
+            (Err(io::Error::new(io::ErrorKind::TimedOut, "deadline")), "SSH_TIMEOUT"),
+        ];
+        for (cut, code) in cuts {
+            let scratch = Scratch::new("cut-start");
+            let ep = key_endpoint();
+            let first = FakeExec::new(vec![probe_out(""), ok(STOPPED_STATUS), ok(INSTALL_OK), cut]);
+            let healthy = started_health(&first);
+            let err = expect_err(connect_with(&first, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+            assert_eq!(err.code, code);
+            assert_eq!(first.names(), vec!["probe", "status", "install", "start"]);
+            let sent = first.started_nonce();
+            assert!(!sent.is_empty(), "START was sent a nonce");
+            assert_eq!(pending_in_record(&scratch).as_deref(), Some(sent.as_str()), "the record names the cut START's nonce");
+
+            // The server now runs the core that the cut START started, on the release INSTALL put in place.
+            let second = FakeExec::new(vec![probe_with_release("2.0.0", &bundle_sha()), state_out(3460, &sent, "2.0.0")]);
+            let answering = sent.clone();
+            let healthy = move |_: u16| Some(answering.clone());
+            let connected = expect_ok(connect_with(&second, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+            assert_eq!(second.names(), vec!["probe", "status", "forward"], "the running core is reused, with no second START");
+            assert_eq!(connected.nonce, sent);
+            assert_eq!(record_nonce(&scratch).as_deref(), Some(sent.as_str()));
+            assert_eq!(pending_in_record(&scratch), None, "a successful connect clears the pending nonce");
+        }
+    }
+
+    #[test]
+    fn a_start_that_reports_a_clean_failure_puts_the_record_back() {
+        // START printed `exited` after stopping its own core, so no core runs with the nonce it was sent. The record
+        // that an earlier connect wrote must be exactly as it was.
+        let scratch = Scratch::new("clean-start-fail");
+        let ep = key_endpoint();
+        record_running_core(&scratch, &ep, OLD);
+        let fake = FakeExec::new(vec![probe_out(""), ok(STOPPED_STATUS), ok(INSTALL_OK), start_failed("exited")]);
+        let healthy = started_health(&fake);
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_START_FAILED");
+        assert_eq!(fake.names(), vec!["probe", "status", "install", "start"]);
+        assert_eq!(record_nonce(&scratch).as_deref(), Some(OLD));
+        assert_eq!(pending_in_record(&scratch), None, "the failed START's nonce is not left pending");
+    }
+
+    #[test]
+    fn a_clean_failed_update_rolls_back_and_records_the_restored_core() {
+        // The core of 1.0.0 that this desktop started is still running when 2.0.0 fails cleanly. The rollback starts
+        // 1.0.0 again, and the record must name that core.
+        let scratch = Scratch::new("clean-update-fail");
+        let ep = key_endpoint();
+        record_running_core(&scratch, &ep, OLD);
+        let fake = FakeExec::new(vec![
+            probe_out("1.0.0"),
+            state_out(3460, OLD, "1.0.0"),
+            ok(INSTALL_OK),
+            ok(STOP_OK),
+            start_failed("exited"),
+            ok(STOP_OK),
+            ok(ROLLBACK_OK),
+            state_out(3463, RESTORED, "1.0.0"),
+        ]);
+        let silent = |_: u16| None;
+        let err = expect_err(connect_with(&fake, &silent, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, "SSH_START_FAILED");
+        assert_eq!(record_nonce(&scratch).as_deref(), Some(RESTORED));
+        assert_eq!(pending_in_record(&scratch), None);
+    }
+
+    #[test]
+    fn a_start_that_hands_back_a_live_core_of_ours_records_the_nonce_it_returned() {
+        // START answers with a core that is already running under a nonce this desktop recorded earlier. The record
+        // must end up with the nonce START returned, not the one this call sent.
+        // A core of 1.0.0 that this desktop started is running. Connecting to 2.0.0 installs, stops it and starts 2.0.0,
+        // and START answers with a live core under RESTORED. That is not a foreign core, because the core was not
+        // stopped in place of the one this desktop owns.
+        let scratch = Scratch::new("reused-core");
+        let ep = key_endpoint();
+        record_running_core(&scratch, &ep, OLD);
+        let fake = FakeExec::new(vec![
+            probe_out("1.0.0"),
+            state_out(3461, OLD, "1.0.0"),
+            ok(INSTALL_OK),
+            ok(STOP_OK),
+            state_out(3462, RESTORED, "2.0.0"),
+        ]);
+        let healthy = |_: u16| Some(RESTORED.to_string());
+        let connected = expect_ok(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(connected.nonce, RESTORED);
+        assert_eq!(record_nonce(&scratch).as_deref(), Some(RESTORED));
+        assert_eq!(pending_in_record(&scratch), None);
+    }
+
+    #[test]
+    fn a_record_without_a_pending_nonce_still_loads() {
+        // Records written before the pending field existed hold only host, port, user and nonce.
+        let scratch = Scratch::new("old-record");
+        let ep = key_endpoint();
+        std::fs::create_dir_all(scratch.session.parent().unwrap()).unwrap();
+        std::fs::write(
+            &scratch.session,
+            format!("{{\"host\":\"{}\",\"port\":22,\"user\":\"alice\",\"nonce\":\"{OLD}\"}}", ep.host),
+        )
+        .unwrap();
+        let status = parse_core_state(&state_out(3461, OLD, "2.0.0").unwrap().stdout).unwrap();
+        require_ours(&status, &scratch.session, &ep).expect("the record's nonce is ours");
+    }
+
+    /// Writes a record with a pending nonce for the test endpoint, as a cut START leaves it.
+    fn write_record_with_pending(scratch: &Scratch, nonce: &str, pending: &str) {
+        std::fs::create_dir_all(scratch.session.parent().unwrap()).unwrap();
+        let json = serde_json::json!({
+            "host": "example.com", "port": 22, "user": "alice", "nonce": nonce, "pending": pending,
+        });
+        std::fs::write(&scratch.session, json.to_string()).unwrap();
+    }
+
+    #[test]
+    fn a_pending_nonce_is_ours_and_another_nonce_is_still_foreign() {
+        let scratch = Scratch::new("pending-ours");
+        let ep = key_endpoint();
+        write_record_with_pending(&scratch, OLD, NEW);
+        let pending_core = parse_core_state(&state_out(3461, NEW, "2.0.0").unwrap().stdout).unwrap();
+        require_ours(&pending_core, &scratch.session, &ep).expect("the pending nonce is ours");
+        let foreign = parse_core_state(&state_out(3461, "foreignnonce0123456", "2.0.0").unwrap().stdout).unwrap();
+        let err = require_ours(&foreign, &scratch.session, &ep).expect_err("a stranger's nonce is refused");
+        assert_eq!(err.code, FOREIGN_CORE_CODE);
+    }
+
+    #[test]
+    fn a_foreign_core_is_still_refused_while_a_start_is_pending() {
+        let scratch = Scratch::new("pending-foreign");
+        let ep = key_endpoint();
+        write_record_with_pending(&scratch, OLD, NEW);
+        let fake = FakeExec::new(vec![
+            probe_with_release("2.0.0", &bundle_sha()),
+            state_out(3460, "foreignnonce0123456", "2.0.0"),
+        ]);
+        let healthy = |_: u16| Some(NEW.to_string());
+        let err = expect_err(connect_with(&fake, &healthy, input(&ep, &scratch, None), &|| Some(3456)));
+        assert_eq!(err.code, FOREIGN_CORE_CODE);
+        assert_eq!(fake.names(), vec!["probe", "status"], "a foreign core is never stopped or replaced");
     }
 
     /// The sha of the scratch bundle's bytes, the one the app sends in the INSTALL header.
