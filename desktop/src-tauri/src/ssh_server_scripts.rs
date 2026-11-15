@@ -329,10 +329,11 @@ kill_started_core() {
   wait "$PID" 2>/dev/null || true
   rm -f "$STATE"
 }
-# A lock is stale when its recorded pid is gone. Without a readable pid the holder may still be between
-# mkdir and its pid write, so the lock is stale only when it is older than 120 seconds.
-start_lock_is_stale() {
-  HOLDER=$(head -n 1 "$LOCK/pid" 2>/dev/null || true)
+# A lock folder is stale when its recorded pid is gone. Without a readable pid the holder may still be between
+# mkdir and its pid write, so the folder is stale only when it is older than 120 seconds.
+start_lock_is_stale_at() {
+  DIR=$1
+  HOLDER=$(head -n 1 "$DIR/pid" 2>/dev/null || true)
   case "$HOLDER" in
     ''|*[!0-9]*) ;;
     *)
@@ -341,21 +342,35 @@ start_lock_is_stale() {
       ;;
   esac
   NOW=$(date +%s)
-  MTIME=$(stat -c %Y "$LOCK" 2>/dev/null || stat -f %m "$LOCK" 2>/dev/null || true)
+  MTIME=$(stat -c %Y "$DIR" 2>/dev/null || stat -f %m "$DIR" 2>/dev/null || true)
   case "$MTIME" in
     ''|*[!0-9]*) return 1 ;;
   esac
   [ $((NOW - MTIME)) -gt 120 ]
 }
+start_lock_is_stale() {
+  start_lock_is_stale_at "$LOCK"
+}
 # Returns 0 when the lock is taken, 1 when a live START holds it, 2 when the lock cannot be created.
-# A stale lock is reclaimed once; a second mkdir that loses the race means another START holds it.
+# A stale lock is reclaimed by rename, never by rm and then mkdir. Two STARTs can both judge the same lock stale;
+# a rename of one path succeeds for only one of them, and the other answers busy. The renamed folder is judged
+# again, because a lock that a START took after our check is live, and it is put back when nothing took its place.
 take_start_lock() {
   if mkdir "$LOCK" 2>/dev/null; then
     return 0
   fi
   [ -d "$LOCK" ] || return 2
   start_lock_is_stale || return 1
-  rm -rf "$LOCK"
+  RECLAIMED="$LOCK.stale.$$"
+  mv "$LOCK" "$RECLAIMED" 2>/dev/null || return 1
+  if ! start_lock_is_stale_at "$RECLAIMED"; then
+    # Not put back over a lock that another START has just created: that folder stays where it is.
+    if [ ! -e "$LOCK" ]; then
+      mv "$RECLAIMED" "$LOCK" 2>/dev/null || true
+    fi
+    return 1
+  fi
+  rm -rf "$RECLAIMED"
   mkdir "$LOCK" 2>/dev/null || return 1
 }
 # Runs on every exit, including the signals an ssh session drop sends. A core that was spawned but is not
@@ -439,17 +454,18 @@ printf '%s' '{"ids":["ecojclccfoegmlffpiahbcenmkfhadlk"]}' > "$PIN.tmp" || { pri
 chmod 600 "$PIN.tmp" || { printf '__LLMIDE_START__=pin-failed\n'; exit 1; }
 mv "$PIN.tmp" "$PIN" || { printf '__LLMIDE_START__=pin-failed\n'; exit 1; }
 # The core starts from an empty environment, as the local core does (core_env::core_env). Only the names
-# below are passed, and only when they are set: an empty value could change the core's behaviour. The
-# list mirrors core_env's Unix allow-list. LLMIDE_CLAUDE_PATH and LLMIDE_FEATURES are desktop settings,
-# so the server never passes them. HOME and PATH are always set.
+# below are passed, and only when they have a value: core_env::scrub drops empty values, and an empty
+# TZ or proxy variable would change the core's behaviour. The list mirrors core_env's Unix allow-list.
+# LLMIDE_CLAUDE_PATH and LLMIDE_FEATURES are desktop settings, so the server never passes them. HOME and
+# PATH are always set.
 set -- "HOME=$HOME" "PATH=$LLMIDE_PATH_PREFIX:${PATH:-/usr/bin:/bin}"
 if [ -n "$LOGIN_LC_ALL" ]; then
   set -- "$@" "LC_ALL=$LOGIN_LC_ALL"
 fi
 for NAME in USER LOGNAME SHELL LANG LANGUAGE TZ TMPDIR TEMP TMP XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR HTTP_PROXY HTTPS_PROXY NO_PROXY ALL_PROXY http_proxy https_proxy no_proxy all_proxy SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY LC_MESSAGES LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION; do
-  eval "NAME_IS_SET=\${$NAME+set}"
-  if [ -n "$NAME_IS_SET" ]; then
-    eval "NAME_VALUE=\${$NAME}"
+  # ${NAME-} is empty for both unset and set-but-empty, so one test covers both.
+  eval "NAME_VALUE=\${$NAME-}"
+  if [ -n "$NAME_VALUE" ]; then
     set -- "$@" "$NAME=$NAME_VALUE"
   fi
 done
@@ -1735,6 +1751,9 @@ http.createServer((req, res) => {
             ("NODE_OPTIONS", "--require /tmp/evil.js"),
             ("LANG", "en_US.UTF-8"),
             ("TZ", "Asia/Tokyo"),
+            // Set but empty: core_env::scrub drops these, so the server core must not get them either.
+            ("HTTP_PROXY", ""),
+            ("TMPDIR", ""),
         ];
         let (ok, out) = run_sh_env(START, &home, &start_stdin("1.0.0", VALID_NONCE, b"{}\n"), &login_env);
         assert!(ok, "{out}");
@@ -1761,6 +1780,8 @@ http.createServer((req, res) => {
         assert!(!env.contains_key("ANTHROPIC_API_KEY"), "a provider key leaked into the core");
         assert!(!env.contains_key("SECRET_THING"), "an unrelated secret leaked into the core");
         assert!(!env.contains_key("NODE_OPTIONS"), "NODE_OPTIONS leaked into the core");
+        assert!(!env.contains_key("HTTP_PROXY"), "an empty HTTP_PROXY reached the core");
+        assert!(!env.contains_key("TMPDIR"), "an empty TMPDIR reached the core");
         assert_eq!(env.get("LANG"), Some(&"en_US.UTF-8"));
         assert_eq!(env.get("TZ"), Some(&"Asia/Tokyo"));
         assert_eq!(env.get("LLMIDE_CORE_NONCE"), Some(&VALID_NONCE));
@@ -1956,6 +1977,8 @@ http.createServer((req, res) => {
         assert!(!ok, "{out}");
         assert!(out.contains("__LLMIDE_START__=version-mismatch"), "a dead holder must be reclaimed: {out}");
         assert!(!lock.exists(), "the reclaimed lock is released on exit");
+        let leftovers = stale_folders_in(&home);
+        assert!(leftovers.is_empty(), "the reclaimed folder is removed, not left beside the lock: {leftovers:?}");
         let _ = std::fs::remove_dir_all(&base);
 
         // No pid at all, and the lock is older than 120 seconds.
@@ -1973,6 +1996,38 @@ http.createServer((req, res) => {
         assert!(!ok, "{out}");
         assert!(out.contains("__LLMIDE_START__=version-mismatch"), "an old lock must be reclaimed: {out}");
         assert!(!lock.exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Names of the `.start.lock.stale.*` folders under the server root. A reclaim renames the stale lock to one of
+    /// these before it removes it.
+    #[cfg(unix)]
+    fn stale_folders_in(home: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(home.join(".llmide-server"))
+            .map(|entries| {
+                entries
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .filter(|name| name.starts_with(".start.lock.stale."))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leftover_stale_folder_does_not_block_a_later_start() {
+        // A reclaim that died between its rename and its removal leaves a folder with the stale name. The lock itself
+        // is what START takes, so the leftover must not make a later START answer busy.
+        let base = unique_dir("lock-leftover");
+        let home = base.join("home");
+        let root = home.join(".llmide-server");
+        std::fs::create_dir_all(root.join(".start.lock.stale.4242")).expect("leftover");
+        let (ok, out) = run_sh(START, &home, format!("1.0.0 {VALID_NONCE}\n").as_bytes());
+        assert!(!ok, "{out}");
+        assert!(out.contains("__LLMIDE_START__=version-mismatch"), "a leftover folder must not block the lock: {out}");
+        assert_eq!(out.matches("__LLMIDE_START__=").count(), 1, "one result marker: {out}");
+        assert!(!lock_dir_of(&home).exists(), "the lock is released on exit");
         let _ = std::fs::remove_dir_all(&base);
     }
 
