@@ -301,6 +301,35 @@ mod tests {
         }
     }
 
+    /// Serializes the tests that set the helper override, because the environment is process-wide.
+    static HELPER_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Restores one environment variable when dropped, so a failing assert cannot leak the override.
+    struct RestoreEnv {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl Drop for RestoreEnv {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn helper_exe_uses_the_test_override_only_when_it_is_set() {
+        const KEY: &str = "LLMIDE_TEST_ASKPASS_EXE";
+        let _serial = HELPER_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = RestoreEnv { key: KEY, previous: std::env::var_os(KEY) };
+        std::env::set_var(KEY, "/opt/llmide/askpass-helper");
+        assert_eq!(helper_exe().unwrap(), PathBuf::from("/opt/llmide/askpass-helper"));
+        std::env::remove_var(KEY);
+        assert_eq!(helper_exe().unwrap(), std::env::current_exe().unwrap());
+    }
+
     #[test]
     fn debug_never_prints_the_token() {
         let g = grant("hunter2").unwrap();

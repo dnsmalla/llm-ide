@@ -2956,6 +2956,24 @@ process.on('SIGTERM', () => process.exit(0));
     }
 
     #[test]
+    fn a_stopped_host_with_a_connect_flag_reads_stopped() {
+        // The flag can outlive a stop by a moment; the stopped phase must win so the UI never reads `connecting` after Stop.
+        let view = SshView { url: None, state: None, connecting: true, disconnected: false, password_auth: false };
+        let (_, _, label) = ssh_fields(view, Phase::Stopped, None);
+        assert_eq!(label, "stopped");
+    }
+
+    #[test]
+    fn stop_clears_the_connect_flag() {
+        let _mode = mode_guard();
+        let host = ssh_host(SshAuthKind::Key, never_launcher(), refusing_connector());
+        host.set_connecting(true);
+        host.stop().unwrap();
+        assert!(!lock(&host.inner.ssh_link).connecting, "stop leaves no connect flag behind");
+        host.set_mode(ServerMode::Local);
+    }
+
+    #[test]
     fn attach_replaces_and_stops_the_old_link() {
         let _mode = mode_guard();
         let host = ssh_host(SshAuthKind::Password, never_launcher(), refusing_connector());
