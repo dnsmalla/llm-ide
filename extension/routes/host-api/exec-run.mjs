@@ -40,15 +40,28 @@ export function runCapture(cmd, args, { cwd, timeout, env, maxBytes = 1 << 20, s
       clearTimeout(timer);
       resolve({ status, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8'), timedOut, overflow, error: spawnError });
     };
-    const timer = setTimeout(() => { timedOut = true; killTree(child); }, timeout);
+    // After a kill, 'close' can be held off indefinitely by a setsid'd grandchild that inherited the pipes (the group
+    // kill cannot reach it). Resolve on 'exit' plus a short grace instead and drop the pipes so nothing hangs.
+    const GRACE_MS = 250;
+    const abort = () => {
+      killTree(child);
+      child.once('exit', (code) => {
+        const t = setTimeout(() => { child.stdout.destroy(); child.stderr.destroy(); finish(code); }, GRACE_MS);
+        t.unref();
+      });
+      if (child.exitCode !== null || child.signalCode !== null) {
+        setTimeout(() => { child.stdout.destroy(); child.stderr.destroy(); finish(child.exitCode); }, GRACE_MS).unref();
+      }
+    };
+    const timer = setTimeout(() => { timedOut = true; abort(); }, timeout);
     child.stdout.on('data', (chunk) => {
       outLen += chunk.length;
-      if (outLen > maxBytes) { overflow = true; killTree(child); return; }
+      if (outLen > maxBytes) { if (!overflow) { overflow = true; abort(); } return; }
       out.push(chunk);
     });
     child.stderr.on('data', (chunk) => {
       errLen += chunk.length;
-      if (errLen > maxBytes) { overflow = true; killTree(child); return; }
+      if (errLen > maxBytes) { if (!overflow) { overflow = true; abort(); } return; }
       err.push(chunk);
     });
     child.on('error', (error) => { spawnError = error; finish(null); });
