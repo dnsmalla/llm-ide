@@ -24,11 +24,8 @@ struct ChangesView: View {
             if let id = projectsStore.selectedId {
                 content(projectId: id)
             } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "folder").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("No project selected").font(.headline)
-                    Text("Choose a project in the picker first.").font(.subheadline).foregroundStyle(.secondary)
-                }
+                EmptyChatState(icon: "folder", title: "No project selected",
+                               subtitle: "Choose a project in the picker first.")
             }
         }
         .navigationTitle("Changes")

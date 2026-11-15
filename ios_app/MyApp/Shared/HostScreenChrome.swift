@@ -20,6 +20,9 @@ private struct HostScreenChrome: ViewModifier {
                 ProjectPickerBar(isBusy: isBusy) { id in _ = projects.select(id) }
             }
             .background(.bar)
+            // Banners come and go with connection state; animate the stack so the content below slides.
+            .animation(.easeInOut(duration: 0.25), value: connection.connectionStatus)
+            .animation(.easeInOut(duration: 0.25), value: connection.errorMessage)
         }
     }
 }

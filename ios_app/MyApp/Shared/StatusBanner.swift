@@ -1,13 +1,16 @@
 import SwiftUI
 
-/// The connection / error banner strip above the chat transcript. One component, two cases — the error
+/// The connection / error banner above a screen's content. One component, two cases — the error
 /// case carries an `onDismiss` so the caller controls how the message clears
 /// (`connection.errorMessage = nil`).
+///
+/// Rendered as an inset rounded pill rather than a full-bleed strip, and it carries its own
+/// insertion/removal transition so any caller that animates the `if` around it gets a slide-and-fade.
 struct StatusBanner: View {
     enum Content {
-        /// Gray "wifi.slash" strip. `isConnecting` toggles the copy.
+        /// Amber "wifi.slash" capsule. `isConnecting` toggles the copy.
         case connection(isConnecting: Bool)
-        /// Red-tinted error strip with an × dismiss button.
+        /// Red-tinted error pill with an × dismiss button.
         case error(message: String, onDismiss: () -> Void)
     }
 
@@ -16,20 +19,32 @@ struct StatusBanner: View {
     init(_ content: Content) { self.content = content }
 
     var body: some View {
+        banner
+            .padding(.horizontal, DesignSystem.Spacing.md)
+            .padding(.vertical, 4)
+            .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    @ViewBuilder
+    private var banner: some View {
         switch content {
         case .connection(let isConnecting):
             HStack(spacing: 8) {
-                Image(systemName: "wifi.slash").font(.footnote)
+                Image(systemName: "wifi.slash")
+                    .font(.footnote)
+                    .foregroundColor(DesignSystem.Colors.warning)
                 Text(isConnecting ? "Connecting to your desktop…" : "Not connected to your desktop")
                     .font(DesignSystem.Typography.footnoteFont.weight(.medium))
-                Spacer()
+                    .foregroundColor(DesignSystem.Colors.textPrimary)
+                Spacer(minLength: 0)
             }
-            .foregroundColor(DesignSystem.Colors.textPrimary)
             .padding(.horizontal, DesignSystem.Spacing.md)
             .padding(.vertical, 8)
-            .background(DesignSystem.Colors.surfaceSecondary)
+            .background(DesignSystem.Colors.warning.opacity(0.14), in: Capsule())
+            .overlay(Capsule().stroke(DesignSystem.Colors.warning.opacity(0.35), lineWidth: 0.5))
+            .accessibilityElement(children: .combine)
         case .error(let message, let onDismiss):
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.footnote)
                     .foregroundColor(DesignSystem.Colors.danger)
@@ -47,9 +62,13 @@ struct StatusBanner: View {
                 }
                 .accessibilityLabel("Dismiss")
             }
-            .padding(.horizontal, DesignSystem.Spacing.md)
-            .padding(.vertical, 8)
-            .background(DesignSystem.Colors.danger.opacity(0.12))
+            .padding(.leading, DesignSystem.Spacing.md)
+            .padding(.vertical, 2)
+            // Multi-line messages would look wrong in a full capsule, so the error pill is a rounded rect.
+            .background(DesignSystem.Colors.danger.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL, style: .continuous)
+                .stroke(DesignSystem.Colors.danger.opacity(0.35), lineWidth: 0.5))
         }
     }
 }

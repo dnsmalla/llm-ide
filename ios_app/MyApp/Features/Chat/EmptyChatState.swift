@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Centered "no messages yet" placeholder for a chat transcript. Caller picks the strings; the layout (34pt icon, `callout` title,
-/// `footnote` subtitle, 60pt top padding) is the shared design.
+/// "Nothing here yet" placeholder. Caller picks the strings; uses `ContentUnavailableView` on iOS 17+ and the
+/// original 34pt-icon / `callout` / `footnote` stack (60pt top padding) before that.
 struct EmptyChatState: View {
     let icon: String
     let title: String
@@ -10,6 +10,20 @@ struct EmptyChatState: View {
     @ScaledMetric(relativeTo: .title) private var iconSize: CGFloat = 34
 
     var body: some View {
+        if #available(iOS 17.0, *) {
+            // The system empty-state layout and typography; older OSes fall back to the hand-built stack below.
+            ContentUnavailableView {
+                Label(title, systemImage: icon)
+            } description: {
+                Text(subtitle)
+            }
+            .padding(.top, DesignSystem.Spacing.lg)
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         VStack(spacing: DesignSystem.Spacing.sm) {
             Image(systemName: icon)
                 .font(.system(size: iconSize))
