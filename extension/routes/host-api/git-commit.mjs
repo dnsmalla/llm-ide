@@ -28,10 +28,21 @@ async function git(root, args, timeout = TIMEOUT) {
   return r.stdout;
 }
 
+// A directory operand passes safeRel, but `git add -A -- config` would also stage config/.env. Expand every operand to
+// the files git would actually stage and run the denylist over each one.
+async function assertNoDeniedFiles(root, files) {
+  const out = await git(root, ['ls-files', '-m', '-o', '-d', '--exclude-standard', '-z', '--', ...files]);
+  for (const file of out.split('\0').filter(Boolean)) {
+    if (isDeniedPath(file)) throw err('That path cannot be committed.', 'invalid');
+  }
+}
+
 export async function gitCommit(root, { message, paths }) {
   if (typeof message !== 'string' || !message.trim() || message.length > 200 || message.includes('\0')) throw err('The commit message is not valid.', 'invalid');
   if (!Array.isArray(paths) || paths.length === 0 || paths.length > 100) throw err('Choose at least one file and at most 100.', 'invalid');
   const files = paths.map(safeRel);
+  try { await assertNoDeniedFiles(root, files); }
+  catch (e) { if (e?.code === 'invalid') throw e; throw err('git could not list those files.', 'git_failed'); }
   try { await git(root, ['add', '-A', '--', ...files]); }
   catch { throw err('git could not stage those files.', 'git_failed'); }
   let out;

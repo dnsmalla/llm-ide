@@ -48,3 +48,12 @@ test('refuses pathspec magic, dot, globs and denied paths', async (t) => {
     await assert.rejects(() => gitCommit(root, { message: 'x', paths: [bad] }), /path/, bad);
   }
 });
+
+test('refuses a directory whose expansion contains a denied file', async (t) => {
+  const root = repo(t);
+  fs.mkdirSync(path.join(root, 'config'));
+  fs.writeFileSync(path.join(root, 'config', 'app.json'), '{}\n');
+  fs.writeFileSync(path.join(root, 'config', '.env'), 'SECRET=1\n');
+  await assert.rejects(() => gitCommit(root, { message: 'x', paths: ['config'] }), /cannot be committed/);
+  assert.equal(execFileSync('git', ['-C', root, 'diff', '--cached', '--name-only'], { encoding: 'utf8' }).trim(), '');
+});
