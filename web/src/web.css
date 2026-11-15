@@ -235,6 +235,12 @@ code { font-family: var(--ui-mono); font-size: .92em; background: var(--ui-hover
 .sync-panel .web-read { background: none; }
 .sync-panel .ui-card { box-shadow: none; background: var(--ui-bg); }
 .sync-panel .web-form { padding: 0; border: 0; background: transparent; box-shadow: none; }
+/* Phones: the snapshot panel's sections are cards already; framing them again nested card-in-card-in-card and cost
+ * two insets of width. The panel frame returns in the two-column layout from 900px. */
+@media (max-width: 899px) {
+  .sync-panel-main { border: 0; background: transparent; box-shadow: none; padding: 0; }
+  .sync-panel-main .ui-card { background: var(--ui-card); box-shadow: var(--ui-elev-1); }
+}
 .sync-app > .web-form { width: min(100%, 560px); margin: var(--ui-s-5) auto; padding: var(--ui-s-5); border-radius: var(--ui-r-xl); }
 .sync-app > section:not(.sync-hero):not(.web-form) { max-width: 560px; margin: var(--ui-s-5) auto; display: grid; gap: var(--ui-s-3); }
 .sync-app > section h2 { margin: 0; }
