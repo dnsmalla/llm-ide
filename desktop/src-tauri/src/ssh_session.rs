@@ -8,7 +8,7 @@
 use std::io::{Read, Write};
 #[cfg(not(test))]
 use std::net::TcpListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -614,17 +614,45 @@ pub(crate) fn wait_for_core(
     }
 }
 
+/// Folders that may hold a development bundle, relative to the repository root, in search order.
+/// NOTE: `desktop/dist` is Vite's output folder and every web build empties it, so a bundle staged there
+/// disappears without warning. `desktop/dist/hub` is read only for one release, for checkouts staged before
+/// the move to `desktop/hub-dist`.
+const DEV_BUNDLE_FOLDERS: [&str; 3] = ["desktop/resources/hub", "desktop/hub-dist", "desktop/dist/hub"];
+
+/// The first existing `<root>/<folder>/<name>`. Names are the outer loop, so the first name in `names` wins
+/// in whichever folder it sits; that is how the compat build is preferred wherever it was staged.
+pub(crate) fn search_bundle(root: &Path, names: &[String]) -> Option<PathBuf> {
+    names
+        .iter()
+        .flat_map(|name| DEV_BUNDLE_FOLDERS.iter().map(move |folder| root.join(folder).join(name)))
+        .find(|path| path.is_file())
+}
+
+/// The development bundle for the first of `names` that exists. The search starts at the repository root so the
+/// answer does not depend on the working directory: `npm run tauri dev` runs in `desktop/src-tauri`. With no
+/// repository root, the folders are tried relative to the working directory and to its parent.
+pub(crate) fn find_dev_bundle(names: &[String]) -> Option<PathBuf> {
+    match crate::core_host::repo_root() {
+        Ok(root) => search_bundle(&root, names),
+        Err(_) => names.iter().find_map(|name| {
+            let one = std::slice::from_ref(name);
+            search_bundle(Path::new(""), one).or_else(|| search_bundle(Path::new(".."), one))
+        }),
+    }
+}
+
 /// The release bundle for `version`, preferring the compatibility build for older Linux servers.
+/// `LLMIDE_HUB_BUNDLE` is honoured first: an explicitly named file wins over any search.
 pub fn bundle_for(version: &str) -> Option<String> {
-    let name = format!("llmide-core-{version}-linux-x64-compat.tar.gz");
-    [
-        format!("desktop/resources/hub/{name}"),
-        format!("desktop/dist/hub/{name}"),
-        format!("../desktop/resources/hub/{name}"),
-    ]
-    .into_iter()
-    .find(|p| Path::new(p).is_file())
-    .or_else(|| crate::remote_deploy::bundle_path(version))
+    if let Some(explicit) = crate::remote_deploy::explicit_bundle() {
+        return Some(explicit);
+    }
+    let names = [
+        format!("llmide-core-{version}-linux-x64-compat.tar.gz"),
+        format!("llmide-core-{version}-linux-x64.tar.gz"),
+    ];
+    find_dev_bundle(&names).map(|path| path.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -1646,5 +1674,147 @@ pub(crate) mod tests {
                 ("forward", None),
             ]
         );
+    }
+
+    /// Serializes the tests that read or set `LLMIDE_HUB_BUNDLE` and `LLMIDE_REPO_ROOT`, which are process-wide.
+    /// The `ssh_cmds` bundle test takes it too: an override set by another test would change what `bundle_for` returns.
+    pub(crate) static BUNDLE_ENV_TESTS: Mutex<()> = Mutex::new(());
+
+    /// A throwaway repository root (only `extension/server.mjs`), removed on drop.
+    struct FakeRepo(PathBuf);
+
+    impl FakeRepo {
+        fn new(label: &str) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("llmide-bundle-{label}-{}-{nanos}", std::process::id()));
+            std::fs::create_dir_all(root.join("extension")).unwrap();
+            std::fs::write(root.join("extension").join("server.mjs"), b"").unwrap();
+            Self(root)
+        }
+
+        /// Writes a bundle named `name` into `<root>/<folder>` and returns its path.
+        fn put(&self, folder: &str, name: &str) -> PathBuf {
+            let dir = self.0.join(folder);
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(name);
+            std::fs::write(&path, b"tarball").unwrap();
+            path
+        }
+    }
+
+    impl Drop for FakeRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Sets (or removes) one environment variable and restores the previous value when dropped.
+    struct RestoreEnv {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl RestoreEnv {
+        fn new(key: &'static str, value: Option<&std::ffi::OsStr>) -> Self {
+            let previous = std::env::var_os(key);
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for RestoreEnv {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    const BUNDLE_VERSION: &str = "9.8.7";
+
+    fn compat_name() -> String {
+        format!("llmide-core-{BUNDLE_VERSION}-linux-x64-compat.tar.gz")
+    }
+
+    fn plain_name() -> String {
+        format!("llmide-core-{BUNDLE_VERSION}-linux-x64.tar.gz")
+    }
+
+    fn both_names() -> [String; 2] {
+        [compat_name(), plain_name()]
+    }
+
+    #[test]
+    fn bundle_search_finds_the_staged_folder_under_the_repo_root() {
+        let repo = FakeRepo::new("staged");
+        let staged = repo.put("desktop/hub-dist", &compat_name());
+        assert_eq!(search_bundle(&repo.0, &both_names()), Some(staged));
+    }
+
+    #[test]
+    fn bundle_search_still_reads_the_old_dist_hub_folder() {
+        let repo = FakeRepo::new("legacy");
+        let legacy = repo.put("desktop/dist/hub", &plain_name());
+        assert_eq!(search_bundle(&repo.0, &[plain_name()]), Some(legacy));
+    }
+
+    #[test]
+    fn bundle_search_prefers_the_compat_name_in_any_folder() {
+        let repo = FakeRepo::new("prefer");
+        repo.put("desktop/resources/hub", &plain_name());
+        let compat = repo.put("desktop/hub-dist", &compat_name());
+        assert_eq!(search_bundle(&repo.0, &both_names()), Some(compat));
+    }
+
+    #[test]
+    fn bundle_search_for_the_hub_ignores_the_compat_name() {
+        let repo = FakeRepo::new("hub-plain");
+        repo.put("desktop/hub-dist", &compat_name());
+        assert_eq!(search_bundle(&repo.0, &[plain_name()]), None);
+    }
+
+    #[test]
+    fn bundle_search_returns_none_when_nothing_is_staged() {
+        let repo = FakeRepo::new("empty");
+        assert_eq!(search_bundle(&repo.0, &both_names()), None);
+    }
+
+    #[test]
+    fn bundle_for_searches_the_repo_root_not_the_working_directory() {
+        let _serial = BUNDLE_ENV_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let repo = FakeRepo::new("root");
+        let staged = repo.put("desktop/hub-dist", &compat_name());
+        let _root = RestoreEnv::new("LLMIDE_REPO_ROOT", Some(repo.0.as_os_str()));
+        let _bundle = RestoreEnv::new("LLMIDE_HUB_BUNDLE", None);
+        assert_eq!(bundle_for(BUNDLE_VERSION), Some(staged.to_string_lossy().into_owned()));
+    }
+
+    #[test]
+    fn explicit_hub_bundle_wins_over_a_found_candidate() {
+        let _serial = BUNDLE_ENV_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let repo = FakeRepo::new("explicit");
+        repo.put("desktop/hub-dist", &compat_name());
+        let explicit = repo.put("custom", "chosen.tar.gz");
+        let _root = RestoreEnv::new("LLMIDE_REPO_ROOT", Some(repo.0.as_os_str()));
+        let _bundle = RestoreEnv::new("LLMIDE_HUB_BUNDLE", Some(explicit.as_os_str()));
+        assert_eq!(bundle_for(BUNDLE_VERSION), Some(explicit.to_string_lossy().into_owned()));
+    }
+
+    #[test]
+    fn missing_explicit_hub_bundle_is_ignored() {
+        let _serial = BUNDLE_ENV_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let repo = FakeRepo::new("missing-env");
+        let staged = repo.put("desktop/hub-dist", &compat_name());
+        let gone = repo.0.join("gone.tar.gz");
+        let _root = RestoreEnv::new("LLMIDE_REPO_ROOT", Some(repo.0.as_os_str()));
+        let _bundle = RestoreEnv::new("LLMIDE_HUB_BUNDLE", Some(gone.as_os_str()));
+        assert_eq!(bundle_for(BUNDLE_VERSION), Some(staged.to_string_lossy().into_owned()));
     }
 }

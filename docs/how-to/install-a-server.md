@@ -23,7 +23,7 @@ the desktop's deploy flow. The server needs **no Node, npm or compiler**.
 
   ```sh
   node desktop/scripts/stage-hub-core.mjs
-  # -> desktop/dist/hub/llmide-core-<version>-linux-x64.tar.gz
+  # -> desktop/hub-dist/llmide-core-<version>-linux-x64.tar.gz
   ```
 
 ## One command
@@ -52,7 +52,7 @@ Options:
 |---|---|
 | `--domain <name>` | Public DNS name (required). |
 | `--email <addr>` | Let's Encrypt account email. Without it certbot registers without an email. |
-| `--bundle <path>` | Bundle to install. Default: search beside the script and in `desktop/dist/hub/`. |
+| `--bundle <path>` | Bundle to install. Default: search beside the script and in `desktop/hub-dist/` (and the old `desktop/dist/hub/`). |
 | `--version <x.y.z>` | Bundle version. Default: parsed from the bundle filename or its `VERSION`. |
 | `--skip-apt` | Do not install nginx/certbot/openssl (they must already be present). |
 | `--dry-run` | Validate and print the plan; change nothing. Works as a normal user. |

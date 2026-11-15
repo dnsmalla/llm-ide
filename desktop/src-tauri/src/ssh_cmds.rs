@@ -344,6 +344,8 @@ mod tests {
 
     #[test]
     fn bundle_prefers_the_compat_name_in_resources() {
+        // Takes the shared env lock: a concurrent LLMIDE_HUB_BUNDLE override would make bundle_for return a file here.
+        let _serial = crate::ssh_session::tests::BUNDLE_ENV_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let res = TempDir::new("bundle");
         let compat = res.0.join("hub").join(format!("llmide-core-{VERSION}-linux-x64-compat.tar.gz"));
         let plain = res.0.join("hub").join(format!("llmide-core-{VERSION}-linux-x64.tar.gz"));

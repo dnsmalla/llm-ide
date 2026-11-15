@@ -280,16 +280,17 @@ pub fn stages() -> Vec<DeployStage> {
     }).collect()
 }
 
+/// The file named by `LLMIDE_HUB_BUNDLE`, when it is set and exists.
+pub(crate) fn explicit_bundle() -> Option<String> {
+    let path = std::env::var("LLMIDE_HUB_BUNDLE").ok()?;
+    (!path.is_empty() && std::path::Path::new(&path).is_file()).then_some(path)
+}
+
+/// The plain hub bundle for `version`: the env override, else the development folders (plain name only).
 pub fn bundle_path(version: &str) -> Option<String> {
-    if let Ok(p) = std::env::var("LLMIDE_HUB_BUNDLE") {
-        if !p.is_empty() && std::path::Path::new(&p).is_file() { return Some(p); }
-    }
-    let candidates = [
-        format!("desktop/resources/hub/llmide-core-{version}-linux-x64.tar.gz"),
-        format!("desktop/dist/hub/llmide-core-{version}-linux-x64.tar.gz"),
-        format!("../desktop/resources/hub/llmide-core-{version}-linux-x64.tar.gz"),
-    ];
-    candidates.into_iter().find(|p| std::path::Path::new(p).is_file())
+    if let Some(explicit) = explicit_bundle() { return Some(explicit); }
+    let name = format!("llmide-core-{version}-linux-x64.tar.gz");
+    crate::ssh_session::find_dev_bundle(&[name]).map(|path| path.to_string_lossy().into_owned())
 }
 
 pub fn build_plan(p: &Preflight, domain: &str, version: &str, bundle: &str, now: u64, review_ack: bool) -> DeployPlan {

@@ -32,8 +32,9 @@ task list are in `docs/superpowers/plans/2026-11-08-remote-server-modes.md` (D1â
 4. Enter the domain, run **Preflight**, and read the blockers/warnings. A missing nginx/certbot,
    ARM host, password-sudo server, less than 2 GB free, or a missing hub bundle blocks the deploy.
 5. Build the bundle on the machine that stages the app: `node desktop/scripts/stage-hub-core.mjs`
-   (Linux x64, pinned Node 22.23.4 + production deps; no npm on the server). The plan looks for
-   `desktop/dist/hub/llmide-core-<version>-linux-x64.tar.gz`.
+   (Linux x64, pinned Node 22.23.4 + production deps; no npm on the server). The bundle is written to
+   `desktop/hub-dist/llmide-core-<version>-linux-x64.tar.gz`, and the plan looks there (and in
+   `desktop/resources/hub/`).
 6. Type the domain in the confirmation field and press **Deploy**. The stages are: pre-deploy backup
    (existing installs), service user/dirs, secret env over stdin, bundle + SHA-256, nginx, start,
    health gate, then a one-time owner setup window. A failure restores the previous release when one

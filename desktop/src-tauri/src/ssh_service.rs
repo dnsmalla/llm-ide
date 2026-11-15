@@ -205,6 +205,10 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
     Ok(base_result(&offered, true, false))
 }
 
+/// The `SSH_BUNDLE_MISSING` sentence. It names the command and the folder, because a developer who sees
+/// only "no bundle" has to search the repository to learn where the bundle goes.
+pub(crate) const BUNDLE_MISSING_TEXT: &str = "This build has no Linux server bundle. Build it with: node desktop/scripts/stage-hub-core.mjs --compat-sqlite <module> (it is written to desktop/hub-dist/).";
+
 /// Connects without touching preferences or the core host. Used by [`connect`] and by the startup connector.
 ///
 /// Preconditions: a pin exists for the endpoint, a bundle is available, and a password is given for a
@@ -224,7 +228,7 @@ fn open_link_locked(deps: &Deps, target: &SshServerTarget, password: Option<&str
     let endpoint = target_endpoint(target, password)?;
     let pin = require_pin(&endpoint)?;
     let bundle = (deps.bundle)().ok_or_else(|| {
-        herr("SSH_BUNDLE_MISSING", "This build has no Linux server bundle. Build it with desktop/scripts/stage-hub-core.mjs.")
+        herr("SSH_BUNDLE_MISSING", BUNDLE_MISSING_TEXT)
     })?;
     let secrets = (deps.secrets_payload)()?;
     // Owned here: if the connect fails, dropping it removes the folder before this function returns.

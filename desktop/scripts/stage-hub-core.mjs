@@ -4,6 +4,7 @@
 // Node, npm or compiler. Usage:
 //   node desktop/scripts/stage-hub-core.mjs [--out <absolute dir>] [--version <x.y.z>]
 // Output: <out>/llmide-core-<version>-linux-x64.tar.gz + .sha256 + VERSION + SHA256SUMS
+// The default <out> is desktop/hub-dist (not desktop/dist, which every web build empties).
 // With --compat-sqlite <absolute file>: the same bundle with the glibc 2.28 better-sqlite3 module in place
 // of the prebuild, named llmide-core-<version>-linux-x64-compat.tar.gz (+ .sha256 only; see sqlite-compat.mjs).
 import { execFileSync } from 'node:child_process';
@@ -13,6 +14,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir, devNull } from 'node:os';
 import { compatBundleName, readCompatModule } from './sqlite-compat.mjs';
+import { resolveHubOut } from './hub-out.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DESKTOP = resolve(HERE, '..');
@@ -32,7 +34,8 @@ function tarAcceptsNoXattrs() {
   }
 }
 
-const out = resolve(arg('--out', join(DESKTOP, 'dist', 'hub')));
+// Default output is outside Vite's dist folder (see hub-out.mjs).
+const out = resolve(resolveHubOut(args, DESKTOP));
 if (!out.startsWith('/')) { console.error('--out must be absolute'); process.exit(2); }
 const pkg = JSON.parse(readFileSync(join(DESKTOP, 'package.json'), 'utf8'));
 const version = arg('--version', pkg.version || '0.0.0');

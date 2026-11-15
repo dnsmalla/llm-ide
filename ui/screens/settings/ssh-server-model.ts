@@ -77,7 +77,10 @@ export function sshServerErrorText(e: unknown): string {
     case "confirm_mismatch":
       if (message.length > 0) return message.slice(0, 300);
       return "The SSH server request failed.";
-    case "SSH_BUNDLE_MISSING": return "This build has no Linux server bundle.";
+    // The host's sentence names the command and the folder the bundle goes to; a fixed text would hide them.
+    case "SSH_BUNDLE_MISSING":
+      if (message.length > 0) return message.slice(0, 300);
+      return "This build has no Linux server bundle.";
     // Key install: the host reports these codes; the sentences say what the user can do next.
     case "SSH_KEY_NOT_NEEDED": return "This server already uses a key.";
     case "SSH_KEY_VERIFY_FAILED": return "The server did not accept the new key. Your password login is unchanged.";

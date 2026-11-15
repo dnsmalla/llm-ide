@@ -87,9 +87,10 @@ case "$DOMAIN" in
   *[0-9].[0-9]*) die "enter a DNS name, not an IP address" ;;
 esac
 
-# Auto-detect a staged bundle next to this script or in the desktop's dist folder.
+# Auto-detect a staged bundle next to this script or in the desktop's staging folders. The last match wins,
+# so desktop/hub-dist (the default output) beats the legacy desktop/dist/hub.
 if [ -z "$BUNDLE" ]; then
-  for f in "$SCRIPT_DIR"/llmide-core-*-linux-x64.tar.gz "$SCRIPT_DIR"/../../desktop/dist/hub/llmide-core-*-linux-x64.tar.gz; do
+  for f in "$SCRIPT_DIR"/llmide-core-*-linux-x64.tar.gz "$SCRIPT_DIR"/../../desktop/dist/hub/llmide-core-*-linux-x64.tar.gz "$SCRIPT_DIR"/../../desktop/hub-dist/llmide-core-*-linux-x64.tar.gz; do
     [ -f "$f" ] && BUNDLE=$f
   done
 fi

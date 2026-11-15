@@ -422,6 +422,12 @@ test("error text: the timeout and busy start read as fixed sentences; forward, g
   assert.equal(sshServerErrorText({ code: "confirm_mismatch", message: "Those are not the saved server's details." }), "Those are not the saved server's details.");
 });
 
+test("error text: a missing server bundle shows the host's sentence, which names the build command and folder", () => {
+  const host = "This build has no Linux server bundle. Build it with: node desktop/scripts/stage-hub-core.mjs --compat-sqlite <module> (it is written to desktop/hub-dist/).";
+  assert.equal(sshServerErrorText({ code: "SSH_BUNDLE_MISSING", message: host }), host);
+  assert.equal(sshServerErrorText({ code: "SSH_BUNDLE_MISSING", message: "" }), "This build has no Linux server bundle.");
+});
+
 test("decodeSshServerTest: glibc is the version text when present; absent or a wrong type reads as null", () => {
   assert.equal(decodeSshServerTest({ ...trusted, glibc: "2.31" })?.glibc, "2.31");
   const { glibc: _absent, ...older } = trusted;

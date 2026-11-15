@@ -40,8 +40,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 /// The local ports the forward may use, as `ssh_session` picks them.
 const LOCAL_PORTS: std::ops::RangeInclusive<u16> = 3456..=3459;
 const ORIGIN_UNKNOWN: &str = "https://evil.example";
-const BUNDLE_HINT: &str =
-    "no Linux server bundle for this build. Build one with: node desktop/scripts/stage-hub-core.mjs [--compat-sqlite <file>]";
+const BUNDLE_HINT: &str = ssh_service::BUNDLE_MISSING_TEXT;
 
 /// What the developer typed, read once. The login fields change only when step 9 switches to key auth.
 struct Live {
@@ -198,21 +197,16 @@ impl Drop for Run {
     }
 }
 
-/// The Linux bundle for this version: the app's resource folder first, then the staged `dist/hub` folder.
-/// Resolved from `CARGO_MANIFEST_DIR`, because `cargo test` runs in `desktop/src-tauri`, where the relative
-/// candidates in `ssh_session::bundle_for` do not point at the staged files.
+/// The Linux bundle for this version: the app's resource folder first, then the staged folders of the repository.
+/// The repository root comes from `CARGO_MANIFEST_DIR`, because `cargo test` runs in `desktop/src-tauri`.
 fn live_bundle() -> Option<PathBuf> {
     let desktop = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?;
     let names = [
         format!("llmide-core-{VERSION}-linux-x64-compat.tar.gz"),
         format!("llmide-core-{VERSION}-linux-x64.tar.gz"),
     ];
-    ssh_cmds::bundle_in(Some(&desktop.join("resources")), VERSION).or_else(|| {
-        names
-            .into_iter()
-            .map(|name| desktop.join("dist").join("hub").join(name))
-            .find(|path| path.is_file())
-    })
+    ssh_cmds::bundle_in(Some(&desktop.join("resources")), VERSION)
+        .or_else(|| ssh_session::search_bundle(desktop.parent()?, &names))
 }
 
 fn random_hex() -> Result<String, FsError> {
