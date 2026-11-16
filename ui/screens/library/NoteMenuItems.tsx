@@ -1,3 +1,5 @@
+import { REVEAL_LABEL } from "../shell/server-path.ts";
+
 // The note context menu's buttons. Kept apart from LibraryScreen so each item's rule (Reveal in Finder only when the
 // screen can reveal) is rendered and tested without opening the menu. The caller supplies the actions and the close.
 export interface NoteMenuItemsProps {
@@ -9,12 +11,14 @@ export interface NoteMenuItemsProps {
   onCopyPath?(text: string): unknown;
   /** Absent when this screen cannot reveal (ssh mode): the item is not drawn, so it cannot be clicked. */
   onRevealPath?(projectRelative: string): unknown;
+  /** The reveal item's label: "Reveal in Finder", or "Copy path" in ssh mode. */
+  revealLabel?: string;
   onUnhide(): void;
   onRemove(): void;
   onClose(): void;
 }
 
-export function NoteMenuItems({ rel, hidden, onOpen, onCopyPath, onRevealPath, onUnhide, onRemove, onClose }: NoteMenuItemsProps) {
+export function NoteMenuItems({ rel, hidden, onOpen, onCopyPath, onRevealPath, revealLabel = REVEAL_LABEL, onUnhide, onRemove, onClose }: NoteMenuItemsProps) {
   // Every item closes the menu after its action, as the menu always did.
   const run = (action: () => void) => () => {
     action();
@@ -25,7 +29,7 @@ export function NoteMenuItems({ rel, hidden, onOpen, onCopyPath, onRevealPath, o
       <button type="button" role="menuitem" className="lib-context-close" aria-label="Close menu" onClick={onClose}>×</button>
       <button type="button" role="menuitem" onClick={run(onOpen)}>Open</button>
       <button type="button" role="menuitem" onClick={run(() => void onCopyPath?.(`llm-doc/${rel}`))}>Copy relative path</button>
-      {onRevealPath ? <button type="button" role="menuitem" onClick={run(() => void onRevealPath(`llm-doc/${rel}`))}>Reveal in Finder</button> : null}
+      {onRevealPath ? <button type="button" role="menuitem" onClick={run(() => void onRevealPath(`llm-doc/${rel}`))}>{revealLabel}</button> : null}
       {/* Hides from this list only: the note file stays where it is. */}
       {hidden ? (
         <button type="button" role="menuitem" onClick={run(onUnhide)}>Unhide</button>

@@ -5,6 +5,7 @@ import { reportUiIncident } from "../../shell/self-heal";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { SectionProps } from "@llmide/screens/shell";
+import { COPY_SERVER_PATH_LABEL, fileManagerActionFor } from "../../shell/server-path.ts";
 import { createHostFs } from "../../explorer/fs";
 import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
@@ -106,7 +107,7 @@ const loopTrailDeps: TrailDeps = {
   allowed: (provider, op) => readRepoConfig().operations[provider].includes(op),
 };
 
-export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNode {
+export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
   const [load, setLoad] = useState<LoopLoad | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -333,8 +334,12 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
     setShipRun({ info, item, entry, passed: entry.statusCode === "success", reviewedPatchId: fields.diffSummary?.patchId ?? null, requestProvider: fields.ship?.provider ?? null, processName: fields.workItem ? undefined : entry.loopName });
   };
 
+  // ssh mode: the run records and worktree are on the server, so the buttons copy the server path instead.
+  const serverFiles = mode === "ssh";
+  const fileAction = fileManagerActionFor(serverFiles, projectRoot, (rel) => invokeHost("reveal_in_os", { relPath: rel }));
+  const revealText = (local: string) => (serverFiles ? COPY_SERVER_PATH_LABEL : local);
   const revealRunRecord = (entry: LoopRunIndexEntry) => {
-    void invokeHost("reveal_in_os", { relPath: runRecordPath(entry.id, entry.startedAt) })
+    void fileAction?.run(runRecordPath(entry.id, entry.startedAt))
       .catch(() => setNotice("Could not show the run record in the file manager."));
   };
 
@@ -374,7 +379,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
   }, [fs, projectRoot, runs, workRoot]);
   /** The working tree as a project-relative path, for reveal_in_os (which resolves inside the project root). */
   const workRelative = workRoot && projectRoot && workRoot.startsWith(`${projectRoot}/`) ? workRoot.slice(projectRoot.length + 1) : "";
-  const revealRel = (rel: string) => { void invokeHost("reveal_in_os", { relPath: rel }).catch(() => setNotice("Could not show that in the file manager.")); };
+  const revealRel = (rel: string) => { void fileAction?.run(rel).catch(() => setNotice("Could not show that in the file manager.")); };
 
   const store = load?.kind === "ok" ? load.store : null;
   const loop = store?.loops.find((l) => l.id === selectedLoopId) ?? store?.loops[0] ?? null;
@@ -1166,11 +1171,11 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <section className="loop-card" aria-label="Output">
           <h2>Output</h2>
           <dl className="loop-meta">
-            <dt>Run journal</dt><dd><span>system/loop-runs/ · one JSON record per run, plus an index</span>{outputExists.journal ? <button type="button" className="loop-btn" onClick={() => revealRel("system/loop-runs")}>Reveal</button> : <span className="loop-native-hint">not yet</span>}</dd>
-            <dt>Fault state</dt><dd><span>system/faults.csv · refreshed by the Regression stage</span>{outputExists.faults ? <button type="button" className="loop-btn" onClick={() => revealRel("system/faults.csv")}>Reveal</button> : <span className="loop-native-hint">not yet</span>}</dd>
-            <dt>Working tree</dt><dd><span>{workRoot ? "repair edits land here and stay; review with git before committing" : "not resolved yet"}</span>{workRoot ? <button type="button" className="loop-btn" onClick={() => revealRel(workRelative)}>Reveal</button> : null}</dd>
+            <dt>Run journal</dt><dd><span>system/loop-runs/ · one JSON record per run, plus an index</span>{outputExists.journal ? <button type="button" className="loop-btn" onClick={() => revealRel("system/loop-runs")}>{revealText("Reveal")}</button> : <span className="loop-native-hint">not yet</span>}</dd>
+            <dt>Fault state</dt><dd><span>system/faults.csv · refreshed by the Regression stage</span>{outputExists.faults ? <button type="button" className="loop-btn" onClick={() => revealRel("system/faults.csv")}>{revealText("Reveal")}</button> : <span className="loop-native-hint">not yet</span>}</dd>
+            <dt>Working tree</dt><dd><span>{workRoot ? "repair edits land here and stay; review with git before committing" : "not resolved yet"}</span>{workRoot ? <button type="button" className="loop-btn" onClick={() => revealRel(workRelative)}>{revealText("Reveal")}</button> : null}</dd>
             <dt>Run log</dt><dd><span>live, in the panel to the right</span></dd>
-            {loop.config.writeSummaryNote ? <><dt>Summary notes</dt><dd><span>llm-doc/loop/ · one readable note per run</span>{outputExists.summaries ? <button type="button" className="loop-btn" onClick={() => revealRel("llm-doc/loop")}>Reveal</button> : <span className="loop-native-hint">none written yet</span>}</dd></> : null}
+            {loop.config.writeSummaryNote ? <><dt>Summary notes</dt><dd><span>llm-doc/loop/ · one readable note per run</span>{outputExists.summaries ? <button type="button" className="loop-btn" onClick={() => revealRel("llm-doc/loop")}>{revealText("Reveal")}</button> : <span className="loop-native-hint">none written yet</span>}</dd></> : null}
           </dl>
         </section>
 
@@ -1202,7 +1207,7 @@ export function NativeLoopScreen({ projectRoot, active }: SectionProps): ReactNo
         <div className="loop-pane-head"><span>Run log</span><span className="loop-spacer" /><button type="button" className="loop-native-hint loop-clear" onClick={() => { const text = runLog.join("\n"); if (text) void navigator.clipboard?.writeText(text).then(() => setNotice("Run log copied.")).catch(() => setNotice("Could not copy the run log.")); }}>Copy</button><button type="button" className="loop-native-hint loop-clear" onClick={() => setRunLog([])}>Clear</button></div>
         {selectedRun ? (
           <div className="loop-past-run loop-log-body" tabIndex={0} aria-label="Past run details">
-            <div className="loop-inline"><h3>{selectedRun.loopName}</h3><span className="loop-spacer" />{runRecord ? <button type="button" className="loop-btn" onClick={() => revealRunRecord(selectedRun)}>Reveal JSON</button> : null}<button type="button" className="loop-btn" onClick={closeRun}>Back</button></div>
+            <div className="loop-inline"><h3>{selectedRun.loopName}</h3><span className="loop-spacer" />{runRecord ? <button type="button" className="loop-btn" onClick={() => revealRunRecord(selectedRun)}>{revealText("Reveal JSON")}</button> : null}<button type="button" className="loop-btn" onClick={closeRun}>Back</button></div>
             <p className="loop-native-hint">{selectedRun.statusCode} · {new Date(selectedRun.startedAt).toLocaleString()} · {selectedRun.iterationsUsed} iteration{selectedRun.iterationsUsed === 1 ? "" : "s"}</p>
             <p>{selectedRun.statusSummary}</p>
             {!runRecordLoaded ? <p className="loop-native-hint" role="status">Loading the run record…</p> : runRecord === null ? <p className="loop-native-hint">Could not load this run&apos;s record. It may have been removed or edited by hand.</p> : <>

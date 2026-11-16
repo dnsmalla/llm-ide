@@ -41,6 +41,8 @@ export interface LibraryNavProps {
   onChangeFolder: (() => void) | null;
   /** Reveals the meetings folder in the OS file manager (Mac "Reveal Folder in Finder"); absent when the host cannot. */
   onRevealMeetings?: () => void;
+  /** The meetings button's label; absent means "Reveal meetings folder" (ssh mode passes "Copy path"). */
+  revealMeetingsLabel?: string;
   rebuild: RebuildProgress | null;
   onRebuild: (() => void) | null;
   onCancelRebuild: () => void;
@@ -176,7 +178,7 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
         ) : null}
         {p.onRevealMeetings ? (
           <button type="button" className="lib-btn" onClick={p.onRevealMeetings}>
-            Reveal meetings folder
+            {p.revealMeetingsLabel ?? "Reveal meetings folder"}
           </button>
         ) : null}
         {p.onRebuild && (

@@ -22,7 +22,8 @@ import { withCreatedHook } from "./sources/created-hook.ts";
 import { sourceConnections } from "./sources/SourcePanes";
 import { createWriteHost } from "./write/write-host.ts";
 import { projectMutations } from "./project-ops.ts";
-import { exportFileFor, fileManagerRevealFor, libraryChooseFor } from "./local-actions.ts";
+import { exportFileFor, libraryChooseFor } from "./local-actions.ts";
+import { fileManagerActionFor } from "../shell/server-path.ts";
 
 export { LibraryScreen, type LibraryScreenProps } from "./LibraryScreen";
 export { EXTENSION_PLACEHOLDERS, type LibraryExtension } from "./LibraryNav";
@@ -106,6 +107,8 @@ export default function Library({ active, projectRoot, mode }: SectionProps) {
     const path = await invokeHost<unknown>("export_note", { name, text });
     return typeof path === "string" ? path : null;
   });
+  // ssh mode: "Copy path" copies the server path under the open project root; local mode reveals the note.
+  const revealAction = fileManagerActionFor(mode === "ssh", projectRoot, (relPath) => invokeHost("reveal_in_os", { relPath }));
   return <LibraryScreen
     store={store}
     host={host}
@@ -120,7 +123,8 @@ export default function Library({ active, projectRoot, mode }: SectionProps) {
     hostAvailable={available}
     projectOpen={projectRoot !== null}
     onCopyPath={async (text) => { await navigator.clipboard?.writeText(text); }}
-    onRevealPath={fileManagerRevealFor(mode === "ssh", (relPath) => invokeHost("reveal_in_os", { relPath }))}
+    onRevealPath={revealAction?.run}
+    revealLabel={revealAction?.label}
     onExportFile={exportNote}
     exportAvailable={exportNote !== undefined}
     chooseFolder={libraryChooseFor(mode === "ssh", () => void store.chooseRoot())}

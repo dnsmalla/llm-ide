@@ -27,24 +27,26 @@ async function ctl(files) {
 
 const ids = (items) => items.map((m) => m.id);
 
-test("tree menu: Reveal in Finder is offered on this computer and hidden for a server folder", async () => {
+test("tree menu: Reveal in Finder on this computer, Copy path for a server folder, same place in the menu", async () => {
   const { c } = await ctl({ "a.txt": "x" });
   c.select("a.txt", { shift: false, toggle: false });
   const snap = c.getSnapshot();
   const local = { projectRoot: "/proj", clipboardSet: false, serverFiles: false };
-  assert.ok(ids(treeMenuItems(snap, "a.txt", local)).includes("reveal"));
-  assert.equal(ids(treeMenuItems(snap, "a.txt", { ...local, serverFiles: true })).includes("reveal"), false);
-  // The other items keep their place: only the local-only one goes.
+  const labelOf = (items) => items.find((m) => m.id === "reveal")?.label;
+  assert.equal(labelOf(treeMenuItems(snap, "a.txt", local)), "Reveal in Finder");
+  assert.equal(labelOf(treeMenuItems(snap, "a.txt", { ...local, serverFiles: true })), "Copy path");
+  // The item keeps its place: only its label changes between the two modes.
   assert.deepEqual(
     ids(treeMenuItems(snap, "a.txt", { ...local, serverFiles: true })),
-    ids(treeMenuItems(snap, "a.txt", local)).filter((id) => id !== "reveal"),
+    ids(treeMenuItems(snap, "a.txt", local)),
   );
 });
 
-test("Changes menu: Reveal in Finder is hidden for a server folder and kept locally", () => {
+test("Changes menu: Reveal in Finder on this computer, Copy path for a server folder", () => {
   const item = { group: "changes", entry: { path: "src/a.ts", index: ".", worktree: "M", kind: "changed", orig_path: null, submodule: false } };
-  assert.ok(changeMenu(item).some((m) => m.id === "reveal"));
-  assert.equal(changeMenu(item, true).some((m) => m.id === "reveal"), false);
+  const labelOf = (menu) => menu.find((m) => m.id === "reveal")?.label;
+  assert.equal(labelOf(changeMenu(item)), "Reveal in Finder");
+  assert.equal(labelOf(changeMenu(item, true)), "Copy path");
   assert.ok(changeMenu(item, true).some((m) => m.id === "copy"), "copy path still works for a server folder");
 });
 

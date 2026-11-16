@@ -1,7 +1,8 @@
 // SSH server mode: the Library's "Reveal in Finder" actions are not offered (the reveal command is refused there).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fileManagerRevealFor, projectLocationReveal } from "../local-actions.ts";
+import { projectLocationReveal } from "../local-actions.ts";
+import { fileManagerActionFor } from "../../shell/server-path.ts";
 import { loadEntry, react, server } from "./helpers.mjs";
 
 const L = await loadEntry();
@@ -10,24 +11,35 @@ const html = (el) => server().renderToStaticMarkup(el);
 
 test("Library reveal: offered outside ssh mode and sends the project-relative path", async () => {
   const sent = [];
-  const reveal = fileManagerRevealFor(false, async (rel) => { sent.push(rel); });
-  assert.equal(typeof reveal, "function");
-  await reveal("llm-doc/notes/a.md");
+  const action = fileManagerActionFor(false, "/Users/me/proj", async (rel) => { sent.push(rel); });
+  assert.equal(action?.label, "Reveal in Finder");
+  await action.run("llm-doc/notes/a.md");
   assert.deepEqual(sent, ["llm-doc/notes/a.md"]);
 });
 
-test("Library reveal: no handler in ssh mode", () => {
-  assert.equal(fileManagerRevealFor(true, async () => { throw new Error("must not run"); }), undefined);
+test("Library reveal: ssh mode copies the absolute server path instead of revealing", async () => {
+  const copied = [];
+  const action = fileManagerActionFor(true, "/home/me/proj", async () => { throw new Error("must not reveal"); }, (text) => copied.push(text));
+  assert.equal(action?.label, "Copy path");
+  await action.run("llm-doc/notes/a.md");
+  assert.deepEqual(copied, ["/home/me/proj/llm-doc/notes/a.md"]);
+});
+
+test("Library reveal: ssh mode without an open root offers nothing", () => {
+  assert.equal(fileManagerActionFor(true, null, async () => undefined), undefined);
 });
 
 // The note menu is rendered through the component that draws it, so the check is on the markup a user sees.
 const menu = (over = {}) => html(h(L.NoteMenuItems, { rel: "a.md", hidden: false, onOpen() {}, onUnhide() {}, onRemove() {}, onClose() {}, ...over }));
 
-test("note menu: Reveal in Finder is drawn in local mode and absent in ssh mode", async () => {
-  const local = menu({ onRevealPath: fileManagerRevealFor(false, async () => undefined) });
-  assert.match(local, /role="menuitem"[^>]*>Reveal in Finder</);
-  const ssh = menu({ onRevealPath: fileManagerRevealFor(true, async () => undefined) });
+test("note menu: Reveal in Finder is drawn in local mode; ssh mode draws Copy path", async () => {
+  const local = fileManagerActionFor(false, "/proj", async () => undefined);
+  const localMenu = menu({ onRevealPath: local.run, revealLabel: local.label });
+  assert.match(localMenu, /role="menuitem"[^>]*>Reveal in Finder</);
+  const sshAction = fileManagerActionFor(true, "/proj", async () => undefined);
+  const ssh = menu({ onRevealPath: sshAction.run, revealLabel: sshAction.label });
   assert.doesNotMatch(ssh, /Reveal in Finder/);
+  assert.match(ssh, /role="menuitem"[^>]*>Copy path</);
   // The other items stay.
   for (const label of ["Open", "Copy relative path", "Remove from List"]) assert.match(ssh, new RegExp(`>${label}<`));
 });
@@ -38,19 +50,23 @@ test("note menu: a hidden note offers Unhide, and the reveal item follows the sa
   assert.doesNotMatch(hidden, /Reveal in Finder/, "no handler, no item");
 });
 
-test("extension reveal: a location inside the project reveals outside ssh mode; ssh mode reveals nothing", () => {
+test("extension reveal: a location inside the project reveals outside ssh mode; ssh mode copies its server path", () => {
   const root = () => "/Users/me/proj";
   const sent = [];
-  const local = projectLocationReveal(false, root, (rel) => sent.push(rel));
+  const copied = [];
+  const local = projectLocationReveal(false, root, (rel) => sent.push(rel), (text) => copied.push(text));
   assert.equal(local.canReveal("/Users/me/proj/src/a.md"), true);
+  assert.equal(local.label, undefined, "local mode keeps the Reveal label");
   local.reveal("/Users/me/proj/src/a.md");
   assert.deepEqual(sent, ["src/a.md"]);
   assert.equal(local.canReveal("/etc/passwd"), false);
 
-  const ssh = projectLocationReveal(true, root, (rel) => sent.push(rel));
-  assert.equal(ssh.canReveal("/Users/me/proj/src/a.md"), false);
+  const ssh = projectLocationReveal(true, root, (rel) => sent.push(rel), (text) => copied.push(text));
+  assert.equal(ssh.label, "Copy path");
+  assert.equal(ssh.canReveal("/Users/me/proj/src/a.md"), true);
   ssh.reveal("/Users/me/proj/src/a.md");
-  assert.deepEqual(sent, ["src/a.md"], "ssh mode sent nothing");
+  assert.deepEqual(sent, ["src/a.md"], "ssh mode revealed nothing");
+  assert.deepEqual(copied, ["/Users/me/proj/src/a.md"]);
 });
 
 // SSH server mode: "Choose folder…" and "Export" act on this computer, so the Library does not offer them.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { shellBus } from "../../shell/bus";
 import { inSshMode } from "../../shell/host.ts";
+import { COPY_SERVER_PATH_LABEL, fileManagerActionFor } from "../../shell/server-path.ts";
 import type { ProjectPaths } from "../host.ts";
 import { PATHS_TEXT, folderNote, pathsIsNoticeOnly, projectError, syncProviderFor } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
@@ -38,11 +39,17 @@ export default function PathsSection() {
 
   if (!host.projectPaths) return <NeedsHost what="The project folders" />;
 
+  // ssh mode: the folders are on the server, so the button copies the server path under the project root.
+  const ssh = inSshMode();
+  const revealPath = host.revealPath;
+  const action = fileManagerActionFor(ssh, data?.root ?? null, revealPath ? (rel) => revealPath.call(host, rel) : undefined);
+  const revealLabel = (local: string) => (ssh ? COPY_SERVER_PATH_LABEL : local);
+
   const reveal = async (rel: string) => {
-    if (!host.revealPath) return;
+    if (!action) return;
     setBusy(rel || "__root__");
     try {
-      await host.revealPath(rel);
+      await action.run(rel);
     } catch (e) {
       setError(projectError(e));
     } finally {
@@ -105,7 +112,7 @@ export default function PathsSection() {
           <div className="st-row">
             <span className="st-label">Project root</span>
             <span className="st-pre st-grow" title={data.root}>{data.root}</span>
-            {host.revealPath ? <Button disabled={busy !== null} onClick={() => void reveal("")}>Reveal in Finder</Button> : null}
+            {action ? <Button disabled={busy !== null} onClick={() => void reveal("")}>{revealLabel("Reveal in Finder")}</Button> : null}
           </div>
           <ul className="st-stack" aria-label="Project folders">
             {data.folders.map((f) => (
@@ -113,8 +120,8 @@ export default function PathsSection() {
                 <span className="st-pre st-grow">{f.name}</span>
                 {folderNote(f.name) ? <span className="st-hint">{folderNote(f.name)}</span> : null}
                 <span className="st-status" data-tone={f.exists ? "ok" : "warning"}>{f.exists ? PATHS_TEXT.present : PATHS_TEXT.missing}</span>
-                {host.revealPath ? (
-                  <Button disabled={busy !== null || !f.exists} onClick={() => void reveal(f.name)}>{PATHS_TEXT.reveal}</Button>
+                {action ? (
+                  <Button disabled={busy !== null || !f.exists} onClick={() => void reveal(f.name)}>{revealLabel(PATHS_TEXT.reveal)}</Button>
                 ) : null}
               </li>
             ))}
@@ -126,7 +133,7 @@ export default function PathsSection() {
               <div className="st-row">
                 <span className="st-pre st-grow" title={notes}>{notes}</span>
                 {sync ? <span className="st-status" data-tone="ok">{sync}</span> : null}
-                {notesInProject && host.revealPath && notesRel ? <Button disabled={busy !== null} onClick={() => void reveal(notesRel)}>Reveal</Button> : null}
+                {notesInProject && action && notesRel ? <Button disabled={busy !== null} onClick={() => void reveal(notesRel)}>{revealLabel("Reveal")}</Button> : null}
                 <Button onClick={() => shellBus.publish({ type: "goto-section", section: "library" })}>Open Library</Button>
               </div>
             ) : <p className="st-hint">No notes folder is configured in this project.</p>}

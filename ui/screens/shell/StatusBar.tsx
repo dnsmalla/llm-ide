@@ -6,6 +6,7 @@ import { BusInbox } from "./approvals/BusInbox";
 import { MenuButton, type MenuItem } from "./MenuButton";
 import { shellBus } from "./bus";
 import { host, type ProjectInfo } from "./host";
+import { COPY_SERVER_PATH_LABEL, copyText } from "./server-path.ts";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { useActiveProject, useCoreSession, useCoreStatusView, useFeatures } from "./use-shell";
 import { HOME_CHOICES, readHome, selectHome, storeHome } from "./landing";
@@ -39,6 +40,8 @@ export function projectSwitcherItems(project: ProjectInfo | null, recent: readon
     const openServer = context.openServerFolder ?? null;
     return [
       ...(openServer ? [{ id: "open", label: "Open server folder…", onSelect: openServer }] : []),
+      // The project is on the server: Reveal in Finder becomes Copy path, which copies the server root.
+      ...(project ? [{ id: "copy-path", label: COPY_SERVER_PATH_LABEL, title: "Copy the project folder's path on the server.", onSelect: () => copyText(project.root) }] : []),
       { id: "close", label: "Close project", title: "Back to the Welcome page. Nothing is deleted.", disabled: !project, onSelect: () => void a.closeProject() },
     ];
   }

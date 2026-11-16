@@ -3,12 +3,13 @@ import type { MenuItem } from "./ContextMenu";
 import type { ExplorerSnapshot } from "./controller";
 import { parentOf } from "./fs";
 import { topLevel } from "./tree-model";
+import { COPY_SERVER_PATH_LABEL, REVEAL_LABEL } from "../shell/server-path.ts";
 
 export interface TreeMenuContext {
   projectRoot: string | null;
   /** A cut or copy is pending, so Paste is enabled. */
   clipboardSet: boolean;
-  /** The project lives on an SSH server: actions that open this computer's file manager are left out. */
+  /** The project lives on an SSH server: Reveal becomes Copy path, which copies the absolute server path. */
   serverFiles: boolean;
 }
 
@@ -40,8 +41,8 @@ export function treeMenuItems(snap: ExplorerSnapshot, path: string | null, ctx: 
   const sel = path !== null && snap.selection.paths.has(path) ? topLevel(snap.selection.paths) : path !== null ? [path] : [];
   const single = sel.length === 1;
   const isFile = path !== null && findEntry(snap, path)?.kind === "file";
-  // Reveal opens this computer's file manager on the file, so it only exists for a project on this computer.
-  const reveal: MenuItem[] = ctx.serverFiles ? [] : [{ id: "reveal", label: "Reveal in Finder", disabled: sel.length === 0 || !ctx.projectRoot }];
+  // Reveal opens this computer's file manager on the file. On a server folder the same item copies the server path.
+  const reveal: MenuItem[] = [{ id: "reveal", label: ctx.serverFiles ? COPY_SERVER_PATH_LABEL : REVEAL_LABEL, disabled: sel.length === 0 || !ctx.projectRoot }];
   return [
     ...(isFile && single ? [{ id: "open", label: "Open" }] : []),
     { id: "cut", label: sel.length > 1 ? `Cut ${sel.length} Items` : "Cut", disabled: sel.length === 0 },

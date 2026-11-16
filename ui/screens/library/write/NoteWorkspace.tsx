@@ -33,6 +33,8 @@ export interface NoteWorkspaceProps extends LinkHandlers {
   onChanged: () => void;
   onCopyPath?: (text: string) => Promise<void> | void;
   onRevealPath?: (projectRelative: string) => Promise<void> | void;
+  /** The reveal button's label: "Reveal" here, "Copy path" in ssh mode (the file is on the server). */
+  revealLabel?: string;
   /** False while the Library section is hidden (the shell keeps it mounted): shortcuts are off. */
   active?: boolean;
   /** Host save panel: returns the chosen path, or null when cancelled. Absent: write a copy into the notes folder. */
@@ -208,7 +210,7 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
         )}
         {p.exportable === false ? null : <button type="button" className="lib-btn" onClick={() => void doExport()} disabled={exporting}>{exporting ? "Exporting…" : "Export"}</button>}
         {p.onCopyPath ? <button type="button" className="lib-btn" onClick={() => void p.onCopyPath!(`llm-doc/${rel}`)}>Copy path</button> : null}
-        {p.onRevealPath ? <button type="button" className="lib-btn" onClick={() => void p.onRevealPath!(`llm-doc/${rel}`)}>Reveal</button> : null}
+        {p.onRevealPath ? <button type="button" className="lib-btn" onClick={() => void p.onRevealPath!(`llm-doc/${rel}`)}>{p.revealLabel ?? "Reveal"}</button> : null}
         <button type="button" className="lib-btn lib-btn-danger" onClick={() => { setDel(null); setDialog("delete"); }}>
           Delete…
         </button>

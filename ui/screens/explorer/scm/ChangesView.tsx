@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from
 import { StatusBanner } from "@llmide/ui-kit";
 import { ContextMenu, type MenuItem } from "../ContextMenu";
 import { invokeHost } from "../../shell/host";
+import { COPY_SERVER_PATH_LABEL, REVEAL_LABEL, copyText, serverPathOf } from "../../shell/server-path.ts";
 import type { ScmController, ScmSnapshot } from "./controller";
 import {
   GROUP_LABEL, HOOKS_NOTE, MAX_MESSAGE_BYTES, ROW_HEIGHT, TOO_MANY_NOTICE, displayLine, letterWord, rowKey, scrollToReveal, splitPath, validateAmend,
@@ -16,15 +17,16 @@ export interface ChangesProps {
   onOpenDiff: (path: string, staged: boolean) => void;
   /** Initial viewport height before the first measurement (tests, first paint). */
   initialViewport?: number;
-  /** The repository is on an SSH server: "Reveal in Finder" is left out of the file menu. */
+  /** The repository is on an SSH server: Reveal becomes Copy path, which copies the absolute server path under this root. */
   serverFiles?: boolean;
+  projectRoot?: string | null;
 }
 
 const GROUP_HINT: Partial<Record<keyof typeof GROUP_LABEL, string>> = {
   conflicts: "Resolve by editing the file, then stage it to mark it resolved.",
 };
 
-export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialViewport = 480, serverFiles = false }: ChangesProps) {
+export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialViewport = 480, serverFiles = false, projectRoot = null }: ChangesProps) {
   const scroller = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(initialViewport);
@@ -148,6 +150,9 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
             else if (id === "unstage") void controller.unstageItem(item);
             else if (id === "discard") void controller.discard([item]);
             else if (id === "copy") void navigator.clipboard?.writeText(item.entry.path).catch(() => undefined);
+            else if (id === "reveal" && serverFiles) {
+              if (projectRoot) copyText(serverPathOf(projectRoot, item.entry.path));
+            }
             else if (id === "reveal") void invokeHost("reveal_in_os", { relPath: item.entry.path }).catch(() => undefined);
           }}
           onClose={() => setMenu(null)}
@@ -165,8 +170,8 @@ export function changeMenu(item: FileItem, serverFiles = false): MenuItem[] {
     ? { id: "unstage", label: "Unstage" }
     : { id: "stage", label: group === "conflicts" ? "Mark resolved (stage)" : "Stage" };
   const discard = (group === "changes" || group === "untracked") && !entry.submodule ? [{ id: "discard", label: "Discard Changes", danger: true }] : [];
-  // Reveal opens this computer's file manager, which cannot show a file that lives on the server.
-  const reveal: MenuItem[] = serverFiles ? [] : [{ id: "reveal", label: "Reveal in Finder" }];
+  // Reveal opens this computer's file manager, which cannot show a file that lives on the server: there it copies the server path.
+  const reveal: MenuItem[] = [{ id: "reveal", label: serverFiles ? COPY_SERVER_PATH_LABEL : REVEAL_LABEL }];
   return [staging, ...discard, { id: "copy", label: "Copy Path", separator: true }, ...reveal];
 }
 

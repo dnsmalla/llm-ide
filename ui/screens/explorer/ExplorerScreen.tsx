@@ -3,6 +3,7 @@
 import { shellBus } from "../shell/bus";
 import { unsavedWork } from "../shell/unsaved-work.ts";
 import { chatApprovalStore } from "../shell/chat-approvals";
+import { serverPathOf } from "../shell/server-path.ts";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Chip, Icon, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
@@ -279,6 +280,9 @@ export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, 
     else if (id === "copy-abs" && sel.length && projectRoot) copy(sel.map((p) => absolutePathUnder(projectRoot, p)).join("\n"));
     // One reveal only: the host rate-limits reveal_in_os (300 ms gap), so a loop would open the first item and
     // silently drop the rest. Revealing several items in one Finder window needs a host command that takes a list.
+    else if (id === "reveal" && sel.length && serverFiles) {
+      if (projectRoot) copy(sel.map((p) => serverPathOf(projectRoot, p)).join("\n"));
+    }
     else if (id === "reveal" && sel.length) void invokeHost("reveal_in_os", { relPath: path && sel.includes(path) ? path : sel[0] }).catch(() => undefined);
     else if (id === "find-in" && path) {
       // The Mac's "Find in Folder": scope the project search to the folder and show the Search panel.

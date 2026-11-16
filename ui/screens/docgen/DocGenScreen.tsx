@@ -34,6 +34,8 @@ export interface DocGenScreenProps {
   onOpenFile: (path: string) => void;
   /** Reveal a project-relative path in the OS file manager (desktop only). */
   onReveal?: (path: string) => void;
+  /** The reveal buttons' label: "Reveal", or "Copy path" in ssh mode. */
+  revealLabel?: string;
   /** A failed reveal, shown as a banner until the next reveal (null when none). */
   revealNotice?: string | null;
   /** The host's picker for a Markdown template file (desktop only). */
@@ -205,7 +207,7 @@ export function DocGenScreen(p: DocGenScreenProps): ReactNode {
           </div>
           <div role="tabpanel" id="dg-out-pane" aria-labelledby={view === "result" ? "dg-out-result" : "dg-out-history"} className="dg-pane dg-center-pane">
             {view === "result" ? (
-              <ResultPanel surface={store.surface} run={run} externalDestination={p.externalDestination ?? null} onCancel={() => store.run.cancel()} onRetry={() => void store.generate(chatItem ? [chatItem] : [])} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onExport={p.onExport ? (name, text) => void p.onExport!(name, text) : undefined} onOpenSaved={p.onOpenFile} onReveal={p.onReveal} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
+              <ResultPanel surface={store.surface} run={run} externalDestination={p.externalDestination ?? null} onCancel={() => store.run.cancel()} onRetry={() => void store.generate(chatItem ? [chatItem] : [])} onRefine={(t) => store.run.refine(t)} onSave={() => void store.run.save()} onSaveAsNew={() => void store.run.save({ asNew: true })} onExport={p.onExport ? (name, text) => void p.onExport!(name, text) : undefined} onOpenSaved={p.onOpenFile} onReveal={p.onReveal} revealLabel={p.revealLabel} onDiscard={() => store.run.reset()} onOpenExternal={p.onOpenExternal} onOpenSettings={p.onOpenSettings} onSignIn={p.onOpenSettings} mermaid={p.mermaid} initialSections={p.initialSections} />
             ) : (
               <HistoryPanel fs={p.env.fs} dir={s.destination} version={run.saved?.hash ?? ""} active={p.active} onOpen={p.onOpenFile} initialViewport={p.initialViewport} />
             )}

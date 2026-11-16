@@ -3,6 +3,8 @@ import type { ProjectMemory } from "../host.ts";
 import { MEMORY_TEXT, bytesLabel, projectError } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { shellBus } from "../../shell/bus";
+import { inSshMode } from "../../shell/host.ts";
+import { COPY_SERVER_PATH_LABEL, fileManagerActionFor } from "../../shell/server-path.ts";
 import { Button, ErrorText, NeedsHost } from "../ui.tsx";
 
 /**
@@ -25,11 +27,17 @@ export default function MemorySection() {
 
   if (!host.projectMemory) return <NeedsHost what="The project memory" />;
 
+  // ssh mode: the memory files are on the server, so the button copies the server path under the project root.
+  const ssh = inSshMode();
+  const revealPath = host.revealPath;
+  const action = fileManagerActionFor(ssh, data?.root ?? null, revealPath ? (rel) => revealPath.call(host, rel) : undefined);
+  const revealLabel = ssh ? COPY_SERVER_PATH_LABEL : MEMORY_TEXT.reveal;
+
   const reveal = async (rel: string) => {
-    if (!host.revealPath) return;
+    if (!action) return;
     setBusy(rel);
     try {
-      await host.revealPath(rel);
+      await action.run(rel);
     } catch (e) {
       setError(projectError(e));
     } finally {
@@ -54,8 +62,8 @@ export default function MemorySection() {
               <span className="st-status" data-tone={data.graph ? "ok" : "warning"}>
                 {data.graph ? `${MEMORY_TEXT.generated} · ${bytesLabel(data.graph.sizeBytes)}` : MEMORY_TEXT.notGenerated}
               </span>
-              {data.graph && host.revealPath ? (
-                <Button disabled={busy !== null} onClick={() => void reveal(data.graph!.path)}>{MEMORY_TEXT.reveal}</Button>
+              {data.graph && action ? (
+                <Button disabled={busy !== null} onClick={() => void reveal(data.graph!.path)}>{revealLabel}</Button>
               ) : null}
             </div>
           </div>
@@ -69,8 +77,8 @@ export default function MemorySection() {
                   <li key={f.path} className="st-row">
                     <span className="st-pre st-grow">{f.name}</span>
                     <span className="st-hint">{bytesLabel(f.sizeBytes)}</span>
-                    {host.revealPath ? (
-                      <Button disabled={busy !== null} onClick={() => void reveal(f.path)}>{MEMORY_TEXT.reveal}</Button>
+                    {action ? (
+                      <Button disabled={busy !== null} onClick={() => void reveal(f.path)}>{revealLabel}</Button>
                     ) : null}
                   </li>
                 ))}

@@ -92,7 +92,7 @@ export function ScmPanel({ projectRoot, onOpenFile, onOpenDiff, onFilesChanged, 
           <div id="scm-tabpanel" role="tabpanel" aria-labelledby={`scm-tab-${snap.tab}`} className="scm-tabpanel">
             {snap.tab === "changes" && (
               <>
-                <ChangesView controller={controller} snap={snap} onOpenFile={onOpenFile} onOpenDiff={onOpenDiff} serverFiles={serverFiles} />
+                <ChangesView controller={controller} snap={snap} onOpenFile={onOpenFile} onOpenDiff={onOpenDiff} serverFiles={serverFiles} projectRoot={projectRoot} />
                 <HunkPane controller={controller} snap={snap} />
               </>
             )}

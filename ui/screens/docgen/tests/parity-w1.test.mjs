@@ -33,7 +33,7 @@ test("reveal: a saved document gets a Reveal button only when the host can revea
 
 test("reveal: the Visual image preview has a Reveal action wired to the host through the source env", () => {
   const code = src("SourcePanel.tsx");
-  assert.match(code, /\{env\.reveal && <button type="button" className="dg-btn" onClick=\{\(\) => env\.reveal!\(preview\.path\)\}>Reveal<\/button>\}/);
+  assert.match(code, /\{env\.reveal && <button type="button" className="dg-btn" onClick=\{\(\) => env\.reveal!\(preview\.path\)\}>\{env\.revealLabel \?\? "Reveal"\}<\/button>\}/);
   const section = src("section.tsx");
   assert.match(section, /invokeHost\("reveal_in_os", \{ relPath: rel \}\)/);
   assert.match(section, /const rel = safeRelativePath\(path\);/);

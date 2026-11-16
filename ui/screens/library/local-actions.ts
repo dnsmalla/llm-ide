@@ -1,14 +1,7 @@
 // Library actions that open this computer's file manager. In ssh mode the Library's project files are on the server, so
-// these are not offered: the reveal command is refused there and would only fail.
+// "Reveal in Finder" becomes "Copy path" (see shell/server-path.ts); the actions that need this computer are left out.
 import { projectRelativeOf, type LocationReveal } from "./extensions/legacy-labels.ts";
-
-/** The Library's "Reveal in Finder" for a project-relative path, or undefined when the menu item must be left out. */
-export function fileManagerRevealFor(ssh: boolean, reveal: (relPath: string) => Promise<unknown>): ((relPath: string) => Promise<void>) | undefined {
-  if (ssh) return undefined;
-  return async (relPath) => {
-    await reveal(relPath);
-  };
-}
+import { COPY_SERVER_PATH_LABEL, copyText, fileManagerActionFor } from "../shell/server-path.ts";
 
 /** The Library's "Choose folder…" action, or null in ssh mode: the notes folder is on this computer. */
 export function libraryChooseFor(ssh: boolean, choose: () => void): (() => void) | null {
@@ -20,14 +13,24 @@ export function exportFileFor<T extends (name: string, text: string) => Promise<
   return ssh ? undefined : exportNote;
 }
 
-/** Reveal for the extension panes: only a location inside the open project, and never in ssh mode. */
-export function projectLocationReveal(ssh: boolean, rootOf: () => string | null, reveal: (relPath: string) => void): LocationReveal {
+/**
+ * Reveal for the extension panes: only a location inside the open project. Outside ssh mode it reveals; in ssh mode it
+ * copies the absolute server path.
+ */
+export function projectLocationReveal(
+  ssh: boolean,
+  rootOf: () => string | null,
+  reveal: (relPath: string) => void,
+  copy: (text: string) => void = copyText,
+): LocationReveal {
   return {
-    canReveal: (location) => !ssh && projectRelativeOf(location, rootOf()) !== null,
+    label: ssh ? COPY_SERVER_PATH_LABEL : undefined,
+    canReveal: (location) => projectRelativeOf(location, rootOf()) !== null,
     reveal: (location) => {
-      if (ssh) return;
-      const rel = projectRelativeOf(location, rootOf());
-      if (rel !== null) reveal(rel);
+      const root = rootOf();
+      const rel = projectRelativeOf(location, root);
+      if (rel === null) return;
+      void fileManagerActionFor(ssh, root, (relPath) => Promise.resolve(reveal(relPath)), copy)?.run(rel);
     },
   };
 }

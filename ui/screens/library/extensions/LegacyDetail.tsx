@@ -303,7 +303,7 @@ function SourceDetail({ model, state, s, revealer }: { model: LegacyModel; state
           )}
           {reveal !== null && (
             <button type="button" className="lib-btn" disabled={busy} onClick={() => revealer?.reveal(reveal)}>
-              Reveal
+              {revealer?.label ?? "Reveal"}
             </button>
           )}
         </div>

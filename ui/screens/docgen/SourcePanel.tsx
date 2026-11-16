@@ -20,6 +20,8 @@ export interface SourceEnv {
   readImage?: (path: string) => Promise<string | null>;
   /** Shows a project-relative path in the OS file manager (the host's reveal_in_os). Absent outside the desktop app. */
   reveal?: (path: string) => void;
+  /** The reveal button's label: "Reveal", or "Copy path" in ssh mode (the file is on the server). */
+  revealLabel?: string;
 }
 
 export interface SourcePanelProps {
@@ -291,7 +293,7 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
       {preview ? (
         <div className="dg-image-preview" role="dialog" aria-label={`Image preview ${preview.path}`} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); closePreview(true); } }}>
           <div className="dg-image-canvas" role="img" aria-label={preview.path} style={{ backgroundImage: `url(${preview.url})` }} />
-          <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" />{env.reveal && <button type="button" className="dg-btn" onClick={() => env.reveal!(preview.path)}>Reveal</button>}<button type="button" className="dg-btn" onClick={() => closePreview(true)}>Close</button></div>
+          <div className="dg-bar"><span className="dg-muted">{preview.path}</span><span className="dg-spacer" />{env.reveal && <button type="button" className="dg-btn" onClick={() => env.reveal!(preview.path)}>{env.revealLabel ?? "Reveal"}</button>}<button type="button" className="dg-btn" onClick={() => closePreview(true)}>Close</button></div>
           {env.readImage && siblings.length > 1 && (
             <div ref={stripRef} className="dg-thumbs" role="group" aria-label={`Images in ${crumbs}`} aria-busy={!thumbsReady}>
               {siblings.map((r) => {

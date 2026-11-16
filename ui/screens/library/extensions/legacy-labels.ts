@@ -155,4 +155,6 @@ export function projectRelativeOf(location: string, root: string | null | undefi
 export interface LocationReveal {
   canReveal(location: string): boolean;
   reveal(location: string): void;
+  /** The button label: "Reveal" here, "Copy path" in ssh mode (the location is on the server). */
+  label?: string;
 }

@@ -23,6 +23,7 @@ import { WriteQueue } from "./write/write-queue.ts";
 import { NoFolder, LoadError } from "./States";
 import { useLibraryState } from "./use-library.ts";
 import { Floating } from "../shell/Floating";
+import { COPY_SERVER_PATH_LABEL } from "../shell/server-path.ts";
 import { unsavedWork } from "../shell/unsaved-work.ts";
 
 /** The write side (S-I). Absent: the Library is read-only, as before. */
@@ -56,6 +57,8 @@ export interface LibraryScreenProps {
   projectOpen?: boolean;
   onCopyPath?: (text: string) => Promise<void> | void;
   onRevealPath?: (projectRelative: string) => Promise<void> | void;
+  /** The label of the reveal buttons: "Reveal in Finder" here, "Copy path" in ssh mode (the file is on the server). */
+  revealLabel?: string;
   /** Host save panel for Export; absent writes a copy into the notes folder. */
   onExportFile?: (name: string, text: string) => Promise<string | null>;
   /** "Choose folder…": undefined keeps the notes-folder chooser; null hides it (ssh mode: the folder is on this computer). */
@@ -65,7 +68,7 @@ export interface LibraryScreenProps {
   initialHeight?: number;
 }
 
-export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, loadExtensionCounts, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, onExportFile, chooseFolder, exportAvailable = true, initialHeight }: LibraryScreenProps): ReactNode {
+export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, loadExtensionCounts, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, revealLabel, onExportFile, chooseFolder, exportAvailable = true, initialHeight }: LibraryScreenProps): ReactNode {
   const chooseAction = chooseFolder === undefined ? () => void store.chooseRoot() : chooseFolder;
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
@@ -278,6 +281,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                 onRefresh={refresh}
                 onChangeFolder={projectOpen || chooseAction === null ? null : chooseAction}
                 onRevealMeetings={onRevealPath ? () => void revealMeetings() : undefined}
+                revealMeetingsLabel={revealLabel === COPY_SERVER_PATH_LABEL ? COPY_SERVER_PATH_LABEL : undefined}
                 rebuild={rebuild}
                 onRebuild={runRebuild ? startRebuild : null}
                 onCancelRebuild={cancelRebuild}
@@ -325,6 +329,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
               onOpenNote={openNote}
               onCopyPath={onCopyPath}
               onRevealPath={onRevealPath}
+              revealLabel={revealLabel}
               onExportFile={onExportFile}
               exportable={exportAvailable}
               active={active}
@@ -348,6 +353,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
             onOpen={() => store.select(noteMenu.rel)}
             onCopyPath={onCopyPath}
             onRevealPath={onRevealPath}
+            revealLabel={revealLabel}
             onUnhide={() => store.unhideNotes([noteMenu.rel])}
             onRemove={() => { const msg = refusedMessage(store.hideNotes([noteMenu.rel]).refused); if (msg) setLinkNotice(msg); }}
             onClose={() => setNoteMenu(null)}

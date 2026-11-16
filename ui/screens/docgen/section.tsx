@@ -19,6 +19,7 @@ import { DocGenStore } from "./store.ts";
 import type { Surface } from "./model.ts";
 import { safeRelativePath } from "../shell/bus";
 import { REVEAL_FAILED } from "./reveal.ts";
+import { COPY_SERVER_PATH_LABEL, copyText, serverPathOf } from "../shell/server-path.ts";
 import { pickTemplateFile } from "./template-file.ts";
 import type { ExternalSaver } from "./save.ts";
 
@@ -57,8 +58,10 @@ async function openExternal(url: string): Promise<void> {
   await invokeHost("open_external_url", { url });
 }
 
-export function GenerationSection({ surface, active, projectRoot }: SectionProps & { surface: Surface }) {
+export function GenerationSection({ surface, active, projectRoot, mode }: SectionProps & { surface: Surface }) {
   const available = shellHost.isAvailable();
+  // ssh mode: the outputs are on the server, so Reveal copies the server path under the project root.
+  const serverFiles = mode === "ssh";
   const deps = useMemo(() => {
     const fs = createHostFs();
     const notes = createNotesHost((cmd, args) => invokeHost(cmd, args));
@@ -118,9 +121,13 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
     setRevealNotice(null);
     const rel = safeRelativePath(path);
     if (!rel) { setRevealNotice(REVEAL_FAILED); return; }
+    if (serverFiles) {
+      if (projectRoot) copyText(serverPathOf(projectRoot, rel));
+      return;
+    }
     // A failure is shown, not swallowed: the screen's banner says the file could not be shown.
     void invokeHost("reveal_in_os", { relPath: rel }).then(() => undefined, () => setRevealNotice(REVEAL_FAILED));
-  }, [available]);
+  }, [available, serverFiles, projectRoot]);
   const mermaid = useMemo(() => (available ? hostMermaidRuntime(invokeHost) : undefined), [available]);
   const onExport = useCallback(async (name: string, text: string) => {
     setExportNotice(null);
@@ -134,6 +141,7 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
   }, []);
   const env = useMemo(() => ({
     reveal: available ? onReveal : undefined,
+    revealLabel: serverFiles ? COPY_SERVER_PATH_LABEL : undefined,
     fs: available ? deps.fs : null,
     notes: available ? deps.notes : null,
     readImage: available ? async (path: string) => {
@@ -141,11 +149,11 @@ export function GenerationSection({ surface, active, projectRoot }: SectionProps
       const o = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
       return typeof o.dataUrl === "string" ? o.dataUrl : null;
     } : undefined,
-  }), [available, deps, onReveal]);
+  }), [available, deps, onReveal, serverFiles]);
   const onOpenFile = useCallback((path: string) => {
     const rel = safeRelativePath(path);
     if (rel) shellBus.publish({ type: "open-file", path: rel });
   }, []);
   const onOpenSettings = useCallback(() => shellBus.publish({ type: "goto-section", section: "settings", anchor: "providers" }), []);
-  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onReveal={available ? onReveal : undefined} revealNotice={revealNotice} pickTemplateFile={available ? () => pickTemplateFile(invokeHost) : undefined} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} onExport={available ? onExport : undefined} exportNotice={exportNotice} externalDestination={external?.name ?? null} onPickExternal={available ? () => void pickExternal() : undefined} onClearExternal={available ? () => void clearExternal() : undefined} />;
+  return <DocGenScreen store={deps.store} env={env} active={active} projectRoot={projectRoot} onOpenFile={onOpenFile} onReveal={available ? onReveal : undefined} revealLabel={serverFiles ? COPY_SERVER_PATH_LABEL : undefined} revealNotice={revealNotice} pickTemplateFile={available ? () => pickTemplateFile(invokeHost) : undefined} onOpenExternal={(u) => void openExternal(u)} onOpenSettings={onOpenSettings} mermaid={mermaid} onExport={available ? onExport : undefined} exportNotice={exportNotice} externalDestination={external?.name ?? null} onPickExternal={available ? () => void pickExternal() : undefined} onClearExternal={available ? () => void clearExternal() : undefined} />;
 }
