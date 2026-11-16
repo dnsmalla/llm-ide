@@ -10,12 +10,13 @@ const FS = ["fs_list_dir", "fs_read_file", "fs_read_image", "fs_read_range", "fs
 const GIT = ["git_status", "git_diff", "git_diff_hunks", "git_stage", "git_stage_all", "git_stage_hunks", "git_discard", "git_discard_all", "git_identity", "git_commit", "git_commit_amend", "git_branches", "git_checkout", "git_create_branch", "git_log", "git_commit_files", "git_commit_diff", "git_tags", "git_tag_create", "git_branch_delete", "git_stash_list", "git_stash_push", "git_stash_apply", "git_stash_pop", "git_stash_drop", "git_merge", "git_merge_abort", "git_show", "git_config"];
 const SEARCH_AND_PROJECT = ["project_search_start", "project_search_cancel", "project_active", "project_close"];
 const PTY = ["pty_spawn", "pty_write", "pty_ack", "pty_resize", "pty_kill", "pty_status", "pty_retry_consent"];
-const ADMITTED_IN_SSH = [...FS, ...GIT, ...SEARCH_AND_PROJECT, ...PTY];
+const PROJECT_SETUP = ["project_paths", "project_memory", "project_rebuild_folders", "read_graph_file", "repo_clone"];
+const ADMITTED_IN_SSH = [...FS, ...GIT, ...SEARCH_AND_PROJECT, ...PTY, ...PROJECT_SETUP];
 
 // Each of these touches this computer (native dialogs, the OS file manager or viewer, local project lists) or is not an Explorer command.
 const REFUSED_IN_SSH = [
   "fs_open_pdf", "reveal_in_os", "project_open", "project_create", "project_open_recent", "project_recent", "project_recent_all",
-  "project_forget_recent", "project_paths", "project_rebuild_folders", "project_memory", "project_layout", "project_root", "project_scaffold",
+  "project_forget_recent", "project_layout", "project_root", "project_scaffold",
   "read_file", "notes_list", "chat_list", "self_heal_prepare", "source_pick_folder",
 ];
 
@@ -73,6 +74,50 @@ test("local mode calls every command", async () => {
   bridge();
   try {
     for (const cmd of [...ADMITTED_IN_SSH, ...REFUSED_IN_SSH]) assert.equal(await invokeHost(cmd), cmd, cmd);
+  } finally {
+    reset();
+  }
+});
+
+test("ssh_admits_project_setup_commands: Paths, Memory, graph reads and clone run on the server folder", async () => {
+  bridge();
+  setRemoteModeProvider(() => true);
+  setSshModeProvider(() => true);
+  try {
+    for (const cmd of PROJECT_SETUP) assert.equal(await invokeHost(cmd), cmd, cmd);
+  } finally {
+    reset();
+  }
+});
+
+test("ssh_still_refuses_reveal_and_project_create", async () => {
+  bridge();
+  setRemoteModeProvider(() => true);
+  setSshModeProvider(() => true);
+  try {
+    for (const cmd of ["reveal_in_os", "project_create", "fs_open_pdf"]) {
+      await assert.rejects(invokeHost(cmd), (e) => e.code === "remote_mode" && e.command === cmd, cmd);
+    }
+  } finally {
+    reset();
+  }
+});
+
+test("refusal_text_names_ssh_mode in ssh mode, and keeps the remote text in hub mode", async () => {
+  bridge();
+  setRemoteModeProvider(() => true);
+  try {
+    setSshModeProvider(() => true);
+    await assert.rejects(invokeHost("reveal_in_os", { relPath: "" }), (e) => {
+      assert.equal(e.code, "remote_mode");
+      assert.equal(e.message, "This action uses the local computer and is unavailable in SSH server mode.");
+      return true;
+    });
+    setSshModeProvider(() => false);
+    await assert.rejects(invokeHost("reveal_in_os", { relPath: "" }), (e) => {
+      assert.equal(e.message, "This action uses the local computer and is unavailable in remote mode.");
+      return true;
+    });
   } finally {
     reset();
   }

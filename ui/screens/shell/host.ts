@@ -155,7 +155,9 @@ export class RemoteModeError extends Error {
   // --experimental-strip-types, which cannot run parameter properties (ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX).
   readonly command: string;
   constructor(command: string) {
-    super("This action uses the local computer and is unavailable in remote mode.");
+    super(sshModeProvider()
+    ? "This action uses the local computer and is unavailable in SSH server mode."
+    : "This action uses the local computer and is unavailable in remote mode.");
     this.name = "RemoteModeError";
     this.command = command;
   }
@@ -194,9 +196,18 @@ const SSH_EXPLORER_EXACT = new Set([
   "project_search_start", "project_search_cancel", "project_active", "project_close",
   "fs_watch_start", "fs_watch_set", "fs_watch_stop",
 ]);
+/**
+ * Project setup on the server folder: the Paths and Memory cards, the graph and chat reads of the folder's own files, and
+ * the clone into `<root>/code`. The host confines each of them to the server folder. `project_create` (New project) and
+ * the reveal commands stay refused: they are local dialogs or write the layout in the user's home.
+ */
+const SSH_PROJECT_SETUP_EXACT = new Set([
+  "project_paths", "project_memory", "project_rebuild_folders", "read_graph_file", "repo_clone",
+]);
 function sshExplorerAdmitted(command: string): boolean {
   if (command === "fs_open_pdf") return false;
-  return SSH_EXPLORER_EXACT.has(command) || command.startsWith("fs_") || command.startsWith("git_") || command.startsWith("pty_");
+  return SSH_EXPLORER_EXACT.has(command) || SSH_PROJECT_SETUP_EXACT.has(command)
+    || command.startsWith("fs_") || command.startsWith("git_") || command.startsWith("pty_");
 }
 
 // The server folder vanished (ssh mode): listeners return the app to the server home. One hook here covers every

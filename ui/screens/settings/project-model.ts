@@ -28,7 +28,16 @@ export function decodePaths(v: unknown): ProjectPaths | null {
     folders.push({ name, exists: row.exists });
     if (folders.length >= 50) break;
   }
-  return { root: clean(v.root, 4096), id: clean(v.id, 200), folders };
+  // NOTE: only an explicit `false` marks a plain folder; an older host omits the field and must keep the full Paths card.
+  return { root: clean(v.root, 4096), id: clean(v.id, 200), folders, isProject: v.isProject !== false };
+}
+
+/**
+ * What the Paths card shows: a plain server folder in ssh mode gets only the notice (no folders, no Rebuild, no
+ * export, since those need a project). Local mode always shows the full card.
+ */
+export function pathsIsNoticeOnly(data: ProjectPaths, sshMode: boolean): boolean {
+  return sshMode && !data.isProject;
 }
 
 export function decodeMemory(v: unknown): ProjectMemory | null {
@@ -112,6 +121,8 @@ export const PATHS_TEXT = {
   partial:
     "The layout is read-only here. This group shows the folders, opens them in Finder, re-creates missing folders, and links to Library for the index rebuild.",
   noProject: "Open a project to see its folders.",
+  plainFolder:
+    "This folder is not an LLM-IDE project. To use project features, create one with New project in the server folder picker.",
 } as const;
 
 export const MEMORY_TEXT = {

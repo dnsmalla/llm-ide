@@ -131,6 +131,8 @@ export interface ProjectPaths {
   /** The KB project id from system/project.json (not the DocGen hash). */
   id: string;
   folders: ProjectFolder[];
+  /** False for a server folder that was never made with New project (no `system/project.json`). Absent on older hosts reads as true. */
+  isProject: boolean;
 }
 
 export interface ProjectMemoryFile {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { shellBus } from "../../shell/bus";
+import { inSshMode } from "../../shell/host.ts";
 import type { ProjectPaths } from "../host.ts";
-import { PATHS_TEXT, folderNote, projectError, syncProviderFor } from "../project-model.ts";
+import { PATHS_TEXT, folderNote, pathsIsNoticeOnly, projectError, syncProviderFor } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { createHostFs } from "../../explorer/fs.ts";
 import { call } from "../core-api.ts";
@@ -87,6 +88,8 @@ export default function PathsSection() {
     }
   };
 
+  // A plain server folder (ssh mode) has no project layout, so the card is the notice alone.
+  const noticeOnly = Boolean(data && pathsIsNoticeOnly(data, inSshMode()));
   const sync = notes ? syncProviderFor(notes) : null;
   const notesInProject = Boolean(data && notes && notes.startsWith(`${data.root.replace(/\/+$/, "")}/`));
   const notesRel = data && notesInProject && notes ? notes.slice(data.root.replace(/\/+$/, "").length + 1) : null;
@@ -96,7 +99,8 @@ export default function PathsSection() {
       <p className="st-hint">{PATHS_TEXT.hint}</p>
       <ErrorText text={error} />
       {data === null && !error ? <p className="st-hint" role="status">Loading the project folders...</p> : null}
-      {data ? (
+      {noticeOnly ? <p className="st-hint" role="status">{PATHS_TEXT.plainFolder}</p> : null}
+      {data && !noticeOnly ? (
         <>
           <div className="st-row">
             <span className="st-label">Project root</span>

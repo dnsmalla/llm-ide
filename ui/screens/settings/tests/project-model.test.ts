@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATHS_TEXT, bytesLabel, decodeMemory, decodePaths, folderNote, parseBackendUrl, projectError, safeRelativePath, syncProviderFor } from "../project-model.ts";
+import { PATHS_TEXT, bytesLabel, decodeMemory, decodePaths, folderNote, parseBackendUrl, pathsIsNoticeOnly, projectError, safeRelativePath, syncProviderFor } from "../project-model.ts";
 
 test("safeRelativePath: project-relative only (no absolute, drive, .., controls)", () => {
   assert.equal(safeRelativePath("system/graph/graph.json"), "system/graph/graph.json");
@@ -22,7 +22,7 @@ test("paths: folders decoded, invalid rows dropped, text cleaned", () => {
       null,
     ],
   });
-  assert.deepEqual(got, { root: "/Users/a/proj", id: "proj-1", folders: [{ name: "system", exists: true }, { name: "llm-doc/plans", exists: false }] });
+  assert.deepEqual(got, { root: "/Users/a/proj", id: "proj-1", folders: [{ name: "system", exists: true }, { name: "llm-doc/plans", exists: false }], isProject: true });
   assert.equal(decodePaths({ root: "/p" }), null);
   assert.equal(decodePaths(null), null);
   const many = decodePaths({ root: "/p", id: "p", folders: Array.from({ length: 100 }, (_, i) => ({ name: `d${i}`, exists: true })) });
@@ -81,4 +81,19 @@ test("backend URLs are loopback-only and need an explicit port", () => {
   for (const bad of ["http://example.com:3457", "http://127.0.0.1", "ftp://127.0.0.1:1", "nope", "http://127.0.0.1:80"]) {
     assert.ok("error" in parseBackendUrl(bad), bad);
   }
+});
+
+test("paths_shows_notice_for_plain_server_folder: ssh mode and isProject false shows the notice alone", () => {
+  const plain = decodePaths({ root: "/srv/home/docs", id: "", folders: [], isProject: false });
+  assert.equal(plain?.isProject, false);
+  assert.ok(plain && pathsIsNoticeOnly(plain, true));
+  assert.equal(PATHS_TEXT.plainFolder, "This folder is not an LLM-IDE project. To use project features, create one with New project in the server folder picker.");
+});
+
+test("paths_unchanged_in_local_mode: the full card shows, and an older host without isProject counts as a project", () => {
+  const plain = decodePaths({ root: "/Users/a/proj", id: "p", folders: [], isProject: false });
+  assert.ok(plain && !pathsIsNoticeOnly(plain, false));
+  const older = decodePaths({ root: "/srv/p", id: "p", folders: [] });
+  assert.equal(older?.isProject, true);
+  assert.ok(older && !pathsIsNoticeOnly(older, true));
 });
