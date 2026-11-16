@@ -5803,8 +5803,6 @@ export type PostKbReposCloneGrantResponse400 = CommonError;
 
 export type PostKbReposCloneGrantResponse401 = CommonError;
 
-export type PostKbReposCloneGrantResponse403 = CommonError;
-
 /** Request parts for `POST /kb/repos/check-token` (schema/http/kb-sources.schema.json). */
 export type PostKbReposCheckTokenRequest = {
   body: {
@@ -10945,7 +10943,6 @@ export interface ApiEndpoints {
       200: PostKbReposCloneGrantResponse200;
       400: PostKbReposCloneGrantResponse400;
       401: PostKbReposCloneGrantResponse401;
-      403: PostKbReposCloneGrantResponse403;
     };
   };
   "POST /kb/repos/check-token": {

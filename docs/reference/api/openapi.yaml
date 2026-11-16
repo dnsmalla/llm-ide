@@ -15025,12 +15025,6 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
-        "403":
-          description: "Forbidden"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
   /kb/review/approve:
     post:
       summary: "Execute an approved review item (re-runs guardrails)"

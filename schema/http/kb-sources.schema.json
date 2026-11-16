@@ -1137,8 +1137,7 @@
           }
         },
         "400": { "$ref": "_common#/$defs/Error" },
-        "401": { "$ref": "_common#/$defs/Error" },
-        "403": { "$ref": "_common#/$defs/Error" }
+        "401": { "$ref": "_common#/$defs/Error" }
       }
     },
     "POST /kb/repos/check-token": {
