@@ -2304,11 +2304,13 @@ name = "llmide-workspace-core"
 version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
+ "getrandom 0.3.4",
  "ignore",
  "libc",
  "notify",
  "regex",
  "serde",
+ "serde_json",
  "sha2",
  "trash",
  "windows-sys 0.61.2",

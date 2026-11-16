@@ -31,6 +31,16 @@ fn scratch(name: &str) -> TempDirGuard {
     TempDirGuard(fs::canonicalize(&d).unwrap())
 }
 
+/// The local home, as the desktop passes it: the breadth rules then match what the app itself refuses.
+fn test_home() -> std::path::PathBuf {
+    crate::paths::home_dir().map(std::path::PathBuf::from).unwrap_or_default()
+}
+
+/// `create_project` for tests that only need the new root.
+fn create(parent: &Path, name: &str) -> Result<std::path::PathBuf, String> {
+    create_project(parent, name, &test_home()).map(|(root, _)| root)
+}
+
 #[test]
 fn names_must_be_one_safe_segment() {
     for bad in [
@@ -58,7 +68,7 @@ fn iso_dates_are_utc_and_exact() {
 #[test]
 fn create_makes_the_mac_layout_and_the_project_marker() {
     let parent = scratch("create");
-    let root = create_project(&parent, "Alpha Project").unwrap();
+    let root = create(&parent, "Alpha Project").unwrap();
     assert_eq!(root, parent.join("Alpha Project"));
     for d in REQUIRED_DIRECTORIES {
         assert!(root.join(d).is_dir(), "{d} missing");
@@ -96,7 +106,7 @@ fn create_makes_the_mac_layout_and_the_project_marker() {
 #[test]
 fn a_name_with_json_and_placeholder_text_stays_inert() {
     let parent = scratch("inert");
-    let root = create_project(&parent, "Q3 @ID@ 'Alpha' {x}").unwrap();
+    let root = create(&parent, "Q3 @ID@ 'Alpha' {x}").unwrap();
     let cs: serde_json::Value = serde_json::from_str(&fs::read_to_string(root.join(".claude/settings.json")).unwrap()).unwrap();
     assert_eq!(cs["projectName"], "Q3 @ID@ 'Alpha' {x}");
     let readme = fs::read_to_string(root.join("README.md")).unwrap();
@@ -106,10 +116,10 @@ fn a_name_with_json_and_placeholder_text_stays_inert() {
 #[test]
 fn unicode_and_long_names_work() {
     let parent = scratch("uni");
-    let a = create_project(&parent, "\u{30d7}\u{30ed}\u{30b8}\u{30a7}\u{30af}\u{30c8} caf\u{e9}").unwrap();
+    let a = create(&parent, "\u{30d7}\u{30ed}\u{30b8}\u{30a7}\u{30af}\u{30c8} caf\u{e9}").unwrap();
     assert!(a.join("system/project.json").is_file());
     let long = "n".repeat(NAME_MAX_CHARS);
-    let b = create_project(&parent, &long).unwrap();
+    let b = create(&parent, &long).unwrap();
     assert!(b.join("llm-doc").is_dir());
 }
 
@@ -119,13 +129,13 @@ fn an_existing_path_is_refused_and_left_untouched() {
     let existing = parent.join("Mine");
     fs::create_dir_all(&existing).unwrap();
     fs::write(existing.join("keep.txt"), "precious").unwrap();
-    let err = create_project(&parent, "Mine").unwrap_err();
+    let err = create(&parent, "Mine").unwrap_err();
     assert!(err.contains("already exists"), "{err}");
     assert_eq!(fs::read_to_string(existing.join("keep.txt")).unwrap(), "precious");
     assert_eq!(fs::read_dir(&existing).unwrap().count(), 1, "nothing was scaffolded into it");
     // an existing FILE of that name too
     fs::write(parent.join("File"), "x").unwrap();
-    assert!(create_project(&parent, "File").unwrap_err().contains("already exists"));
+    assert!(create(&parent, "File").unwrap_err().contains("already exists"));
     assert_eq!(fs::read_to_string(parent.join("File")).unwrap(), "x");
 }
 
@@ -135,17 +145,17 @@ fn an_existing_symlink_is_refused_and_a_symlinked_parent_resolves_first() {
     let parent = scratch("links");
     let elsewhere = scratch("links-target");
     std::os::unix::fs::symlink(&elsewhere, parent.join("Linked")).unwrap();
-    assert!(create_project(&parent, "Linked").unwrap_err().contains("already exists"));
+    assert!(create(&parent, "Linked").unwrap_err().contains("already exists"));
     assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0, "the symlink target was not touched");
     // a symlinked parent: the project lands in the real folder
     let alias = parent.join("alias");
     std::os::unix::fs::symlink(&elsewhere, &alias).unwrap();
-    let root = create_project(&alias, "Inside").unwrap();
+    let root = create(&alias, "Inside").unwrap();
     assert_eq!(root, elsewhere.join("Inside"));
     // a parent that is a symlink to "/" resolves to a too-broad project root
     let to_root = parent.join("to-root");
     std::os::unix::fs::symlink("/", &to_root).unwrap();
-    assert!(create_project(&to_root, "evil").unwrap_err().contains("too broad"));
+    assert!(create(&to_root, "evil").unwrap_err().contains("too broad"));
     assert!(!Path::new("/evil").exists());
 }
 
@@ -163,16 +173,16 @@ fn drive_roots_are_system_trees_in_any_spelling() {
 fn too_broad_or_unusable_parents_are_refused() {
     for p in ["/", "/etc", "/usr", "/System", "/Users", "/home"] {
         if Path::new(p).is_dir() {
-            let err = create_project(Path::new(p), "proj").unwrap_err();
+            let err = create(Path::new(p), "proj").unwrap_err();
             assert!(err.contains("too broad"), "{p}: {err}");
         }
     }
-    assert!(create_project(Path::new("/nonexistent-llmide-parent"), "proj").is_err());
+    assert!(create(Path::new("/nonexistent-llmide-parent"), "proj").is_err());
     let d = scratch("notdir");
     fs::write(d.join("f"), "x").unwrap();
-    assert!(create_project(&d.join("f"), "proj").is_err());
+    assert!(create(&d.join("f"), "proj").is_err());
     // a bad name never reaches the filesystem
-    assert!(create_project(&d, "../escape").is_err());
+    assert!(create(&d, "../escape").is_err());
     assert!(!d.parent().unwrap().join("escape").exists());
 }
 
@@ -185,18 +195,18 @@ fn a_failed_scaffold_removes_only_the_folder_this_call_created() {
         fs::write(root.join("system/partial"), "x").unwrap();
         Err("disk full".into())
     };
-    let err = create_project_with(&parent, "Doomed", &boom).unwrap_err();
+    let err = create_project_with(&parent, "Doomed", &test_home(), &boom).unwrap_err();
     assert_eq!(err, "disk full");
     assert!(!parent.join("Doomed").exists(), "the half-built folder is gone");
     assert_eq!(fs::read_to_string(parent.join("neighbour.txt")).unwrap(), "mine");
     // and the name is free again
-    assert!(create_project(&parent, "Doomed").is_ok());
+    assert!(create(&parent, "Doomed").is_ok());
 }
 
 #[test]
 fn scaffold_is_idempotent_and_never_overwrites_user_edits() {
     let parent = scratch("idem");
-    let root = create_project(&parent, "Again").unwrap();
+    let root = create(&parent, "Again").unwrap();
     fs::write(root.join("README.md"), "my own readme").unwrap();
     fs::write(root.join("CLAUDE.md"), "my rules").unwrap();
     fs::write(root.join("system/project.json"), "{\"id\":\"keep\"}").unwrap();
@@ -210,6 +220,6 @@ fn scaffold_is_idempotent_and_never_overwrites_user_edits() {
 #[test]
 fn the_new_root_opens_as_a_project() {
     let parent = scratch("opens");
-    let root = create_project(&parent, "Openable").unwrap();
-    assert_eq!(crate::project::validate_root(&root).unwrap(), root);
+    let root = create(&parent, "Openable").unwrap();
+    assert_eq!(crate::paths::validate_root(&root, &test_home()).unwrap(), root);
 }

@@ -1,7 +1,8 @@
 //! Project-root rules and real-path checks, shared by the desktop host and the SSH workspace helper.
 //!
 //! - `checked_root` canonicalises a folder and refuses it when it is too broad to be a project.
-//! - `is_too_broad` is the breadth rule (mirror of `extension/core/broad-root.mjs`).
+//! - `validate_root` is the same check for a folder the caller names, with the home directory passed in.
+//! - `is_too_broad` is the breadth rule (mirror of `extension/core/broad-root.mjs`), home passed in.
 //! - `fd_path` reads the real location of an OPEN file, so a check made on the path can be confirmed on the
 //!   descriptor that is actually read.
 
@@ -15,7 +16,7 @@ pub fn checked_root(root: &Path) -> R<PathBuf> {
     if !real.is_dir() {
         return err("no_project", "project root is not a directory");
     }
-    if is_too_broad(&real.to_string_lossy(), home_dir().as_deref()) {
+    if is_too_broad(&real, &home_or_empty()) {
         return err("root_too_broad", "the project root is too broad");
     }
     Ok(real)
@@ -57,8 +58,35 @@ const SECRET_HOME_DIRS: [&str; 3] = [".ssh", ".aws", ".gnupg"];
 /// home directory, system trees, volumes, other users' homes, temp dirs, home
 /// containers (Documents/Desktop/Downloads...), Windows drive/system/users trees and
 /// UNC share roots. A project INSIDE a container (`~/Desktop/proj`) is fine.
-/// `home` is the canonical home directory, when known.
-pub fn is_too_broad(real: &str, home: Option<&str>) -> bool {
+/// `home` is the canonical home directory; an empty path means the home is unknown.
+pub fn is_too_broad(path: &Path, home: &Path) -> bool {
+    let home_text = home.to_string_lossy();
+    let home_opt = (!home_text.is_empty()).then_some(&*home_text);
+    too_broad_text(&path.to_string_lossy(), home_opt)
+}
+
+/// Canonicalises `chosen`, requires a directory, and refuses a root that is too broad for `home`.
+///
+/// `home` is the canonical home directory, or an empty path when unknown (the home-relative rules then do
+/// not apply, the system-wide rules still do). Error texts are shown to the user, so they stay stable.
+pub fn validate_root(chosen: &Path, home: &Path) -> Result<PathBuf, String> {
+    let real = std::fs::canonicalize(chosen).map_err(|e| format!("cannot resolve the chosen folder: {e}"))?;
+    if !real.is_dir() {
+        return Err("the chosen path is not a folder".into());
+    }
+    let s = real.to_string_lossy();
+    if s.contains('\0') || is_too_broad(&real, home) {
+        return Err("that folder is too broad to open as a project; pick a project folder".into());
+    }
+    Ok(real)
+}
+
+/// The canonical home directory as a path, or an empty path when it is unknown.
+pub fn home_or_empty() -> PathBuf {
+    home_dir().map(PathBuf::from).unwrap_or_default()
+}
+
+fn too_broad_text(real: &str, home: Option<&str>) -> bool {
     if real.is_empty() {
         return true;
     }
@@ -288,5 +316,130 @@ mod tests {
         assert_eq!(plain_path(&dotted), dotted, "the plain form would name {base:?}");
         assert!(!base.exists());
         std::fs::remove_dir_all(&dotted).unwrap();
+    }
+
+    fn too_broad(p: &str, home: Option<&str>) -> bool {
+        is_too_broad(Path::new(p), Path::new(home.unwrap_or("")))
+    }
+
+    fn validate(p: &Path) -> Result<PathBuf, String> {
+        validate_root(p, Path::new(""))
+    }
+
+    #[test]
+    fn credential_and_kernel_trees_match_the_server_list() {
+        let h = Some("/Users/alice");
+        for p in [
+            "/Users/alice/.ssh", "/Users/alice/.ssh/keys", "/Users/alice/.aws", "/Users/alice/.gnupg/x",
+            "/Users/alice/.config", "/proc", "/proc/1", "/dev", "/sys/kernel", "/boot", "/root",
+            "/private/var/folders/ab/cdef", "/private/var/folders/ab/cdef/T",
+        ] {
+            assert!(too_broad(p, h), "{p} must be too broad");
+        }
+        for p in ["/Users/alice/.config/nvim", "/root/proj", "/private/var/folders/ab/cdef/T/proj"] {
+            assert!(!too_broad(p, h), "{p} must be allowed");
+        }
+    }
+
+    use std::fs;
+
+    const HOME: Option<&str> = Some("/Users/alice");
+
+    fn broad(p: &str) -> bool {
+        too_broad(p, HOME)
+    }
+
+    #[test]
+    fn refuses_root_home_and_system_trees() {
+        for p in ["/", "/Users", "/home", "/etc", "/usr", "/var", "/opt", "/private", "/Library", "/System",
+                  "/System/Library", "/usr/local", "/Users/alice", "/Volumes", "/Volumes/disk", "/tmp",
+                  "/private/tmp", "/var/tmp", "/Users/bob", "/home/bob", "/System/Volumes/Data"] {
+            assert!(broad(p), "{p} must be too broad");
+        }
+    }
+
+    #[test]
+    fn refuses_home_containers_and_other_users_containers() {
+        for p in ["/Users/alice/Documents", "/Users/alice/Desktop", "/Users/alice/Downloads",
+                  "/Users/alice/Library", "/Users/alice/public", "/Users/bob/Documents", "/home/bob/Desktop"] {
+            assert!(broad(p), "{p} must be too broad");
+        }
+    }
+
+    #[test]
+    fn allows_projects_inside_containers() {
+        for p in ["/Users/alice/Desktop/LLM", "/Users/alice/code/app", "/Volumes/disk/proj",
+                  "/home/bob/work/app", "/srv/app", "/opt/tools/proj", "/Users/alice/Documents/a"] {
+            assert!(!broad(p), "{p} must be allowed");
+        }
+    }
+
+    #[test]
+    fn refuses_windows_trees_and_unc_roots() {
+        for p in ["C:\\", "C:", "C:\\Users", "C:\\Users\\alice", "C:\\Windows", "C:\\Windows\\System32",
+                  "C:\\Program Files", "C:\\Program Files (x86)", "C:\\ProgramData",
+                  "\\\\?\\C:\\Users\\alice", "\\\\srv\\share", "\\\\?\\UNC\\srv\\share", "\\\\srv"] {
+            assert!(too_broad(p, Some("C:\\Users\\alice")), "{p} must be too broad");
+        }
+        for p in ["C:\\work\\app", "\\\\?\\C:\\Users\\alice\\code\\app", "\\\\srv\\share\\proj"] {
+            assert!(!too_broad(p, Some("C:\\Users\\alice")), "{p} must be allowed");
+        }
+    }
+
+    #[test]
+    fn home_comparison_is_case_insensitive_and_empty_is_broad() {
+        assert!(too_broad("/users/ALICE", HOME));
+        assert!(too_broad("", HOME));
+    }
+
+    /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for TempDirGuard {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    fn scratch(name: &str) -> TempDirGuard {
+        let d = std::env::temp_dir().join(format!("llmide-proj-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        TempDirGuard(fs::canonicalize(&d).unwrap())
+    }
+
+    #[test]
+    fn validate_rejects_files_missing_and_root() {
+        let d = scratch("v");
+        let f = d.join("a.txt");
+        fs::write(&f, "x").unwrap();
+        assert!(validate(&f).is_err());
+        assert!(validate(&d.join("nope")).is_err());
+        assert!(validate(Path::new("/")).is_err());
+        let proj = d.join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        assert_eq!(validate(&proj).unwrap(), proj);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_canonicalises_symlinks_before_breadth_check() {
+        let d = scratch("sl");
+        std::os::unix::fs::symlink("/", d.join("rootlink")).unwrap();
+        assert!(validate(&d.join("rootlink")).is_err());
     }
 }

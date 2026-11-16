@@ -8,6 +8,7 @@
 //! - `fs`: list, read, write, create, rename, copy and delete inside one root (see that module's docs).
 //! - `paths`: root validation, the "too broad" rule, the real-path check of an open descriptor and the Windows
 //!   verbatim-prefix rule that git and cmd.exe need.
+//! - `project`: the New project scaffold, the project marker and the Paths/Memory layout of a project root.
 //! - `git`, `git_config`: the hardened git runner, status, diff and stage; `scm`: the Changes actions (discard, commit,
 //!   branches, stash, merge, amend) and `confirm_spec`, the one table of their native dialog wording.
 //! - `text`: single-line sanitising for text the user reads.
@@ -18,6 +19,7 @@ pub mod git;
 pub mod git_config;
 pub mod scm;
 pub mod paths;
+pub mod project;
 pub mod search;
 pub mod text;
 pub mod trash;
