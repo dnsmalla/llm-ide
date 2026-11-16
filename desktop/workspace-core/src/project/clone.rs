@@ -5,6 +5,7 @@
 //! error or a log. `Token` redacts itself in `Debug` and `Display` and has no `Serialize`, so it cannot leave by
 //! accident. The destination is chosen by the caller's root and is always `<root>/code/<name>`.
 
+use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -116,7 +117,7 @@ pub fn plan(root: &Path, req: &CloneRequest) -> Result<ClonePlan, String> {
 /// removes the partial destination and returns `CANCELLED`. Nothing in the error text includes the token.
 pub fn run(plan: &ClonePlan, token: Option<&Token>, cancel: &AtomicBool, git: &Path) -> Result<CloneResult, String> {
     let token = token.filter(|t| t.is_usable()).map(Token::expose);
-    clone_with_fallback(git, &plan.remote, &plan.dest, &plan.provider, token, cancel)?;
+    clone_with_fallback(git, &plan.remote, &plan.dest, &plan.provider, token, cancel, &process_env())?;
     Ok(CloneResult { path: plan.dest.to_string_lossy().into_owned(), name: plan.name.clone() })
 }
 
@@ -220,8 +221,34 @@ pub fn is_auth_failure(message: &str) -> bool {
         .any(|needle| m.contains(needle))
 }
 
-fn clone_with_fallback(git: &Path, remote: &str, dest: &Path, provider: &str, token: Option<&str>, cancel: &AtomicBool) -> Result<(), String> {
-    let first = clone_into(git, remote, dest, provider, token, cancel, CLONE_CAP);
+/// This process's environment, the one git inherits. Passed down so a test can supply its own.
+fn process_env() -> Vec<(OsString, OsString)> {
+    std::env::vars_os().collect()
+}
+
+/// True for the variables that make up git's config-pair list (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`,
+/// `GIT_CONFIG_VALUE_<n>`). These are the only way a header reaches git from the environment.
+fn is_git_config_pair(name: &OsStr) -> bool {
+    let Some(name) = name.to_str() else { return false };
+    name == "GIT_CONFIG_COUNT" || name.starts_with("GIT_CONFIG_KEY_") || name.starts_with("GIT_CONFIG_VALUE_")
+}
+
+/// The inherited environment minus any config pair. A pair set in the caller's shell (an `extraHeader`, say) would
+/// otherwise reach git on the anonymous retry, which must send no credential at all.
+fn inherited_env(parent: &[(OsString, OsString)]) -> Vec<(OsString, OsString)> {
+    parent.iter().filter(|(name, _)| !is_git_config_pair(name)).cloned().collect()
+}
+
+fn clone_with_fallback(
+    git: &Path,
+    remote: &str,
+    dest: &Path,
+    provider: &str,
+    token: Option<&str>,
+    cancel: &AtomicBool,
+    parent: &[(OsString, OsString)],
+) -> Result<(), String> {
+    let first = clone_into(git, remote, dest, provider, token, cancel, CLONE_CAP, parent);
     let Err(err) = first else { return first };
     // A cancel that lands while the first attempt is failing is reported as the cancel, not as git's error.
     if cancel.load(Ordering::SeqCst) {
@@ -233,7 +260,7 @@ fn clone_with_fallback(git: &Path, remote: &str, dest: &Path, provider: &str, to
     // A stale/expired token must not make a public repository unclonable. Retry with the same URL and no
     // credential; if the repository is private this fails too and we return the original (clearer) error.
     let _ = std::fs::remove_dir_all(dest);
-    match clone_into(git, remote, dest, provider, None, cancel, CLONE_CAP) {
+    match clone_into(git, remote, dest, provider, None, cancel, CLONE_CAP, parent) {
         Ok(()) => Ok(()),
         Err(_) if cancel.load(Ordering::SeqCst) => Err(CANCELLED.into()),
         Err(_) => Err(err),
@@ -243,7 +270,7 @@ fn clone_with_fallback(git: &Path, remote: &str, dest: &Path, provider: &str, to
 /// A stalled transfer (below 1000 B/s for 60 s) ends by itself; the wall-clock cap below bounds everything else.
 const LOW_SPEED_ARGS: [&str; 4] = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=60"];
 /// Overall cap for one clone attempt. Generous (large repositories), but finite.
-const CLONE_CAP: Duration = Duration::from_secs(30 * 60);
+pub const CLONE_CAP: Duration = Duration::from_secs(30 * 60);
 
 /// argv (after the program) and environment of one `git clone`. Pure, so it is testable. The token only ever
 /// appears in the environment, never in argv. `windows` is a parameter for the test.
@@ -296,7 +323,17 @@ fn wait_capped(mut child: Child, cap: Duration, cancel: &AtomicBool) -> Result<(
     }
 }
 
-fn clone_into(git: &Path, remote: &str, dest: &Path, provider: &str, token: Option<&str>, cancel: &AtomicBool, cap: Duration) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+fn clone_into(
+    git: &Path,
+    remote: &str,
+    dest: &Path,
+    provider: &str,
+    token: Option<&str>,
+    cancel: &AtomicBool,
+    cap: Duration,
+    parent: &[(OsString, OsString)],
+) -> Result<(), String> {
     if cancel.load(Ordering::SeqCst) {
         return Err(CANCELLED.into());
     }
@@ -304,8 +341,10 @@ fn clone_into(git: &Path, remote: &str, dest: &Path, provider: &str, token: Opti
         std::fs::create_dir_all(parent).map_err(|e| format!("cannot create code/: {e}"))?;
     }
     let (args, env) = clone_invocation(remote, dest, provider, token, cfg!(windows));
+    // The child's environment is the inherited one minus config pairs, then the clone's own pair (if a token is set).
+    // Set on this child only, never on the process.
     let mut cmd = Command::new(git);
-    cmd.args(&args).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.args(&args).env_clear().envs(inherited_env(parent)).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
         // Own process group, so the cap and the cancel flag can kill git together with its helpers (kill_tree).
@@ -514,11 +553,11 @@ mod tests {
         let git = crate::git::git_binary().expect("git on PATH");
         let cancel = AtomicBool::new(false);
         let dest = base.join("dest");
-        clone_into(&git, base.to_str().unwrap(), &dest, "github", None, &cancel, CLONE_CAP).unwrap();
+        clone_into(&git, base.to_str().unwrap(), &dest, "github", None, &cancel, CLONE_CAP, &process_env()).unwrap();
         assert_eq!(std::fs::read_to_string(dest.join("README.md")).unwrap(), "hello");
         // A token must produce a VALID GIT_CONFIG_KEY_0 even when the local remote needs no auth.
         let dest2 = base.join("dest2");
-        clone_into(&git, base.to_str().unwrap(), &dest2, "github", Some("tok"), &cancel, CLONE_CAP).unwrap();
+        clone_into(&git, base.to_str().unwrap(), &dest2, "github", Some("tok"), &cancel, CLONE_CAP, &process_env()).unwrap();
         assert_eq!(std::fs::read_to_string(dest2.join("README.md")).unwrap(), "hello");
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -538,6 +577,74 @@ mod tests {
         assert!(win_env.iter().all(|(n, _)| n != "GIT_ASKPASS"), "no /usr/bin/true on Windows");
         assert!(win_env.iter().any(|(n, v)| n == "GIT_TERMINAL_PROMPT" && v == "0"));
         assert!(win_env.iter().all(|(n, _)| n != "GIT_CONFIG_COUNT"), "no token, no config pair");
+    }
+
+    /// A cancel that lands while the first attempt runs wins over the auth error git then reports. The fake git
+    /// announces itself, waits for `go`, then fails with an auth error, so the cancel is set before git can fail.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancel_during_the_first_attempt_reports_cancelled_not_the_auth_error() {
+        let s = Scratch::new("cancel-first");
+        let started = s.0.join("started");
+        let go = s.0.join("go");
+        let body = format!(
+            "touch '{}'; while [ ! -f '{}' ]; do sleep 1; done; echo 'fatal: Authentication failed for x' >&2; exit 128",
+            started.display(),
+            go.display()
+        );
+        let git = fake_git(&s.0, &body);
+        let p = plan(&s.0, &request("github", "o/r", Some("ghp_X"))).unwrap();
+        let cancel = AtomicBool::new(false);
+        let result = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| clone_with_fallback(&git, &p.remote, &p.dest, &p.provider, Some("ghp_X"), &cancel, &process_env()));
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !started.exists() {
+                assert!(Instant::now() < deadline, "the fake git never started");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            cancel.store(true, Ordering::SeqCst);
+            std::fs::write(&go, "").unwrap();
+            worker.join().unwrap()
+        });
+        assert_eq!(result.unwrap_err(), CANCELLED);
+    }
+
+    /// The anonymous retry must be anonymous even when the caller's environment holds a config pair. The parent
+    /// environment here carries `GIT_CONFIG_COUNT`, `KEY_0` and `VALUE_0` (an extraHeader that would be rejected). The
+    /// fake git fails whenever a key is set, so the retry only succeeds if the inherited pair was removed. The pair is
+    /// set on the child command only, never with a process-wide `set_var`.
+    #[cfg(unix)]
+    #[test]
+    fn the_anonymous_retry_ignores_an_inherited_config_pair() {
+        let s = Scratch::new("inherited-pair");
+        let git = fake_git(
+            &s.0,
+            "if [ -n \"$GIT_CONFIG_KEY_0\" ]; then echo 'fatal: Authentication failed for x' >&2; exit 128; fi; last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"",
+        );
+        let p = plan(&s.0, &request("github", "o/r", Some("ghp_X"))).unwrap();
+        let mut parent = process_env();
+        parent.extend([
+            (OsString::from("GIT_CONFIG_COUNT"), OsString::from("1")),
+            (OsString::from("GIT_CONFIG_KEY_0"), OsString::from("http.https://github.com.extraHeader")),
+            (OsString::from("GIT_CONFIG_VALUE_0"), OsString::from("Authorization: Basic bm9wZQ==")),
+        ]);
+        let cancel = AtomicBool::new(false);
+        // The first attempt sends the token and fails; the retry must succeed without any header.
+        clone_with_fallback(&git, &p.remote, &p.dest, &p.provider, Some("ghp_X"), &cancel, &parent).unwrap();
+        assert!(p.dest.is_dir(), "the anonymous retry cloned the repository");
+    }
+
+    #[test]
+    fn inherited_env_drops_only_the_config_pairs() {
+        let parent = vec![
+            (OsString::from("PATH"), OsString::from("/usr/bin")),
+            (OsString::from("GIT_CONFIG_COUNT"), OsString::from("1")),
+            (OsString::from("GIT_CONFIG_KEY_0"), OsString::from("k")),
+            (OsString::from("GIT_CONFIG_VALUE_12"), OsString::from("v")),
+            (OsString::from("GIT_CONFIG_GLOBAL"), OsString::from("/dev/null")),
+        ];
+        let names: Vec<String> = inherited_env(&parent).into_iter().map(|(n, _)| n.to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["PATH", "GIT_CONFIG_GLOBAL"]);
     }
 
     #[cfg(unix)]

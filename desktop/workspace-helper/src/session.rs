@@ -8,7 +8,7 @@ use std::fs;
 use std::io;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use llmide_workspace_core::git::git_binary;
@@ -33,11 +33,13 @@ pub const GIT_MISSING_MESSAGE: &str = "git is not installed on the server.";
 /// The message of a clone whose thread panicked. The panic text is never sent, since it could name a path or a value.
 const CLONE_INTERNAL_MESSAGE: &str = "the clone stopped unexpectedly on the server";
 
-/// The one clone the helper runs at a time: the cancel flag of the running clone, and a signal for when it ends.
-/// The reader cancels it directly, so a cancel never waits behind the worker queue, as a search cancel does not.
+/// The one clone the helper runs at a time. The slot holds the running clone's id and cancel flag. Ids come from a
+/// counter, unique per helper process and starting at 1, so a cancel or an event can name the clone it belongs to.
+/// The reader cancels a clone directly, so a cancel never waits behind the worker queue, as a search cancel does not.
 #[derive(Default)]
 pub struct Clones {
-    running: Mutex<Option<Arc<AtomicBool>>>,
+    next_id: AtomicU64,
+    running: Mutex<Option<(u64, Arc<AtomicBool>)>>,
     ended: Condvar,
 }
 
@@ -46,28 +48,37 @@ impl Clones {
         Self::default()
     }
 
-    /// Claims the slot for a new clone and returns its cancel flag. `None` when a clone is already running.
-    pub fn begin(&self) -> Option<Arc<AtomicBool>> {
+    /// Claims the slot for a new clone and returns its id and cancel flag. `None` when a clone is already running.
+    pub fn begin(&self) -> Option<(u64, Arc<AtomicBool>)> {
         let mut running = lock(&self.running);
         if running.is_some() {
             return None;
         }
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
         let flag = Arc::new(AtomicBool::new(false));
-        *running = Some(Arc::clone(&flag));
-        Some(flag)
+        *running = Some((id, Arc::clone(&flag)));
+        Some((id, flag))
     }
 
-    /// Frees the slot. It is called before the clone's event is sent, so a request sent after the event is never
-    /// refused as busy.
-    pub fn finish(&self) {
-        *lock(&self.running) = None;
+    /// Sends the clone's event with the slot still held, then frees the slot. The send and the release happen under
+    /// one lock, so no request can claim the slot while the event is unsent: a `begin` waits, and once it succeeds the
+    /// event is already out. A stale `id` (a slot that now belongs to another clone) frees nothing.
+    pub fn end(&self, id: u64, announce: impl FnOnce()) {
+        let mut running = lock(&self.running);
+        announce();
+        if running.as_ref().is_some_and(|(held, _)| *held == id) {
+            *running = None;
+        }
         self.ended.notify_all();
     }
 
-    /// Sets the cancel flag of the running clone. Does nothing when no clone is running.
-    pub fn cancel(&self) {
-        if let Some(flag) = lock(&self.running).as_ref() {
-            flag.store(true, Ordering::SeqCst);
+    /// Sets the cancel flag of clone `id` if it is the running one. A stale or unknown id does nothing, so a late
+    /// cancel can never stop a newer clone.
+    pub fn cancel(&self, id: u64) {
+        if let Some((held, flag)) = lock(&self.running).as_ref() {
+            if *held == id {
+                flag.store(true, Ordering::SeqCst);
+            }
         }
     }
 
@@ -75,7 +86,7 @@ impl Clones {
     /// at end of input, so the process never exits in the middle of a clone.
     pub fn stop_and_wait(&self) {
         let mut running = lock(&self.running);
-        if let Some(flag) = running.as_ref() {
+        if let Some((_, flag)) = running.as_ref() {
             flag.store(true, Ordering::SeqCst);
         }
         while running.is_some() {
@@ -265,22 +276,29 @@ impl Session {
             return err("git_missing", GIT_MISSING_MESSAGE);
         };
         let plan = clone::plan(&root, &req).map_err(|message| FsError { code: "clone_refused", message })?;
-        let Some(cancel) = self.clones.begin() else {
+        let Some((id, cancel)) = self.clones.begin() else {
             return err("busy", "a clone is already running on the server");
         };
         let out = Arc::clone(&self.out);
         let clones = Arc::clone(&self.clones);
-        std::thread::spawn(move || {
+        let release = Arc::clone(&self.clones);
+        let started = std::thread::Builder::new().name("repo-clone".into()).spawn(move || {
             let ran = catch_unwind(AssertUnwindSafe(|| clone::run(&plan, req.token.as_ref(), &cancel, &git)));
             let data = match ran {
-                Ok(Ok(done)) => json!({"ok": true, "path": done.path, "name": done.name}),
-                Ok(Err(message)) => clone_failure(&message),
-                Err(_) => json!({"ok": false, "code": "internal", "message": CLONE_INTERNAL_MESSAGE}),
+                Ok(Ok(done)) => json!({"id": id, "ok": true, "path": done.path, "name": done.name}),
+                Ok(Err(message)) => clone_failure(id, &message),
+                Err(_) => json!({"id": id, "ok": false, "code": "internal", "message": CLONE_INTERNAL_MESSAGE}),
             };
-            clones.finish();
-            out.send(&event("clone", data));
+            clones.end(id, || {
+                out.send(&event("clone", data));
+            });
         });
-        Ok(json!({"started": true}))
+        if started.is_err() {
+            // The thread never ran, so nothing else will free the slot; without this every later clone would be busy.
+            release.end(id, || {});
+            return err("internal", "the helper could not start the clone");
+        }
+        Ok(json!({"started": true, "id": id}))
     }
 
     /// Stops the watcher, any running clone and any running search, and waits for them to wind down. Used at end of
@@ -302,9 +320,9 @@ impl Session {
 
 /// The `clone` event for a clone that ended with an error. A cancel is its own code, so the desktop can tell a stop
 /// the person asked for from a failure. Git's text is the only external text here, and it never carries the token.
-fn clone_failure(message: &str) -> Value {
+fn clone_failure(id: u64, message: &str) -> Value {
     let code = if message == clone::CANCELLED { "cancelled" } else { "clone_failed" };
-    json!({"ok": false, "code": code, "message": message})
+    json!({"id": id, "ok": false, "code": code, "message": message})
 }
 
 /// Whether `git --version` runs. The core's git lookup only finds the binary, and the desktop wants to know that
@@ -384,4 +402,47 @@ fn validate_folder_name(name: &str) -> R<()> {
         return err("invalid_path", "that is not a valid folder name");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The slot is held while the event is sent. A claim made during the send waits for it, so it can only succeed
+    /// after the event is out.
+    #[test]
+    fn the_slot_stays_held_until_the_event_is_sent() {
+        let clones = Clones::new();
+        let (id, _) = clones.begin().expect("the first claim");
+        let announced = AtomicBool::new(false);
+        let claimed_after_announce = std::thread::scope(|scope| {
+            let waiter = scope.spawn(|| loop {
+                if clones.begin().is_some() {
+                    return announced.load(Ordering::SeqCst);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            });
+            clones.end(id, || {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                announced.store(true, Ordering::SeqCst);
+            });
+            waiter.join().unwrap()
+        });
+        assert!(claimed_after_announce, "no claim succeeded before the event was sent");
+    }
+
+    #[test]
+    fn ids_are_unique_and_a_stale_end_frees_nothing() {
+        let clones = Clones::new();
+        let (first, _) = clones.begin().expect("first");
+        assert_eq!(first, 1, "ids start at 1");
+        clones.end(first, || {});
+        let (second, _) = clones.begin().expect("second");
+        assert_eq!(second, 2);
+        clones.end(first, || {});
+        assert!(clones.begin().is_none(), "ending the old id leaves the new clone's slot held");
+        clones.cancel(first);
+        clones.end(second, || {});
+        assert!(clones.begin().is_some(), "the held slot is freed by its own id");
+    }
 }

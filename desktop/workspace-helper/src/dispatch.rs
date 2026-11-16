@@ -76,8 +76,13 @@ pub fn is_immediate(req: &Request) -> bool {
 
 pub fn cancel_now(searches: &Searches, clones: &Clones, req: &Request) -> Value {
     if req.cmd == "clone_cancel" {
-        clones.cancel();
-        return ok_response(req.id, Value::Null);
+        return match arg::<u64>(&req.args, "id") {
+            Ok(id) => {
+                clones.cancel(id);
+                ok_response(req.id, Value::Null)
+            }
+            Err(e) => err_response(req.id, e.code, &e.message),
+        };
     }
     match arg::<u64>(&req.args, "id") {
         Ok(id) => {
@@ -103,7 +108,7 @@ fn run_command(session: &mut Session, req: &Request) -> R<Value> {
         }
         "repo_clone" => session.clone_start(arg::<CloneRequest>(args, "req")?),
         "clone_cancel" => {
-            session.clones.cancel();
+            session.clones.cancel(arg::<u64>(args, "id")?);
             Ok(Value::Null)
         }
         "graph_read" => {
@@ -901,24 +906,40 @@ mod tests {
         json!({"id": id, "cmd": "graph_read", "args": {"path": path.to_string_lossy()}}).to_string()
     }
 
-    /// The reply to `clone_cancel`, taken the way the reader answers it: outside the serial worker.
-    fn cancel_clone(f: &Fixture) -> Value {
-        let req = parse_request(br#"{"id":90,"cmd":"clone_cancel","args":{}}"#).unwrap();
+    /// The reply to `clone_cancel {id}`, taken the way the reader answers it: outside the serial worker.
+    fn cancel_clone(f: &Fixture, id: u64) -> Value {
+        let line = json!({"id": 90, "cmd": "clone_cancel", "args": {"id": id}}).to_string();
+        let req = parse_request(line.as_bytes()).unwrap();
         cancel_now(&f.session.searches, &f.session.clones, &req)
     }
 
-    /// Waits for the `clone` event that ends a clone, and returns its data.
-    fn clone_event(captured: &Arc<Mutex<Vec<u8>>>) -> Value {
+    /// The `clone` event for clone `id`, if it has been written yet.
+    fn clone_event_now(captured: &Arc<Mutex<Vec<u8>>>, id: u64) -> Option<Value> {
+        let text = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+        text.lines()
+            .map(|l| serde_json::from_str::<Value>(l).unwrap())
+            .find(|v| v["event"] == "clone" && v["data"]["id"] == id)
+            .map(|v| v["data"].clone())
+    }
+
+    /// Waits for the `clone` event that ends clone `id`, and returns its data.
+    fn clone_event(captured: &Arc<Mutex<Vec<u8>>>, id: u64) -> Value {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         loop {
-            let text = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
-            let found = text.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).find(|v| v["event"] == "clone");
-            if let Some(v) = found {
-                return v["data"].clone();
+            if let Some(data) = clone_event_now(captured, id) {
+                return data;
             }
-            assert!(std::time::Instant::now() < deadline, "no clone event in: {text}");
+            let text = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+            assert!(std::time::Instant::now() < deadline, "no clone event for {id} in: {text}");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+    }
+
+    /// Starts a clone and returns its id from the `started` reply.
+    fn start_clone(f: &mut Fixture, id: u64, url: &str) -> u64 {
+        let started = ok_of(&f.call(&clone_line(id, url, None))).clone();
+        assert_eq!(started["started"], true);
+        started["id"].as_u64().expect("started carries the clone id")
     }
 
     /// Waits until git has created `path`, so a cancel lands while the clone is running.
@@ -953,15 +974,14 @@ mod tests {
         let mut f = Fixture::new("clone-answers");
         let project = f.open_project();
         use_fake_git(&mut f, SLOW_GIT);
-        let started = ok_of(&f.call(&clone_line(1, "o/r", None))).clone();
-        assert_eq!(started["started"], true);
+        let id = start_clone(&mut f, 1, "o/r");
         wait_for_path(&project.join("code").join("r"));
         let timer = std::time::Instant::now();
         let listed = f.call(r#"{"id":2,"cmd":"fs_list_dir","args":{"req":{"path":""}}}"#);
         assert!(timer.elapsed() < std::time::Duration::from_millis(500), "a listing during a clone took {:?}", timer.elapsed());
         ok_of(&listed);
-        ok_of(&cancel_clone(&f));
-        assert_eq!(clone_event(&f.captured)["code"], "cancelled");
+        ok_of(&cancel_clone(&f, id));
+        assert_eq!(clone_event(&f.captured, id)["code"], "cancelled");
     }
 
     #[cfg(unix)]
@@ -970,10 +990,64 @@ mod tests {
         let mut f = Fixture::new("clone-busy");
         f.open_project();
         use_fake_git(&mut f, SLOW_GIT);
-        ok_of(&f.call(&clone_line(1, "o/one", None)));
+        let id = start_clone(&mut f, 1, "o/one");
         assert_eq!(code_of(&f.call(&clone_line(2, "o/two", None))), "busy");
-        ok_of(&cancel_clone(&f));
-        assert_eq!(clone_event(&f.captured)["code"], "cancelled");
+        ok_of(&cancel_clone(&f, id));
+        assert_eq!(clone_event(&f.captured, id)["code"], "cancelled");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn started_and_event_carry_the_same_id_and_ids_grow() {
+        let mut f = Fixture::new("clone-ids");
+        let project = f.open_project();
+        use_fake_git(&mut f, SLOW_GIT);
+        let first = start_clone(&mut f, 1, "o/one");
+        wait_for_path(&project.join("code").join("one"));
+        ok_of(&cancel_clone(&f, first));
+        assert_eq!(clone_event(&f.captured, first)["id"], first);
+        let second = start_clone(&mut f, 3, "o/two");
+        assert!(second > first, "ids are unique and grow: {first} then {second}");
+        ok_of(&cancel_clone(&f, second));
+        assert_eq!(clone_event(&f.captured, second)["id"], second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_cancel_does_not_stop_a_newer_clone() {
+        let mut f = Fixture::new("clone-stale");
+        let project = f.open_project();
+        use_fake_git(&mut f, SLOW_GIT);
+        let old = start_clone(&mut f, 1, "o/one");
+        ok_of(&cancel_clone(&f, old));
+        assert_eq!(clone_event(&f.captured, old)["code"], "cancelled");
+        let newer = start_clone(&mut f, 3, "o/two");
+        wait_for_path(&project.join("code").join("two"));
+        // A late cancel for the finished clone is a no-op that still answers null.
+        assert!(ok_of(&cancel_clone(&f, old)).is_null());
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(clone_event_now(&f.captured, newer).is_none(), "the newer clone is still running");
+        ok_of(&cancel_clone(&f, newer));
+        assert_eq!(clone_event(&f.captured, newer)["code"], "cancelled");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_request_right_after_an_event_is_not_refused_as_busy() {
+        let mut f = Fixture::new("clone-after-event");
+        let project = f.open_project();
+        // Succeeds at once: creates the destination and exits 0.
+        use_fake_git(&mut f, "last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"");
+        let mut id = start_clone(&mut f, 1, "o/one");
+        for round in 2..=4u64 {
+            let data = clone_event(&f.captured, id);
+            assert_eq!(data["ok"], true, "{data}");
+            // The event is already written, so the slot is free: the next start is accepted, never busy.
+            id = start_clone(&mut f, round, &format!("o/round{round}"));
+        }
+        let last = clone_event(&f.captured, id);
+        assert_eq!(last["ok"], true, "{last}");
+        assert!(project.join("code").join("round4").is_dir());
     }
 
     #[cfg(unix)]
@@ -982,11 +1056,11 @@ mod tests {
         let mut f = Fixture::new("clone-cancel");
         let project = f.open_project();
         use_fake_git(&mut f, SLOW_GIT);
-        ok_of(&f.call(&clone_line(1, "o/r", None)));
+        let id = start_clone(&mut f, 1, "o/r");
         let dest = project.join("code").join("r");
         wait_for_path(&dest);
-        ok_of(&cancel_clone(&f));
-        let data = clone_event(&f.captured);
+        ok_of(&cancel_clone(&f, id));
+        let data = clone_event(&f.captured, id);
         assert_eq!(data["ok"], false);
         assert_eq!(data["code"], "cancelled");
         assert_eq!(data["message"], "clone cancelled");
@@ -1001,8 +1075,8 @@ mod tests {
         use_fake_git(&mut f, REFUSING_GIT);
         let marker = "ghp_TOKEN_MARKER_7731";
         // A refused token: the clone retries anonymously, fails, and the event carries git's error only.
-        ok_of(&f.call(&clone_line(1, "o/r", Some(marker))));
-        let refused = clone_event(&f.captured);
+        let started = start_clone(&mut f, 1, "o/r");
+        let refused = clone_event(&f.captured, started);
         assert_eq!(refused["ok"], false);
         assert_eq!(refused["code"], "clone_failed");
         // A bad URL with the token set is refused synchronously.
