@@ -30,6 +30,25 @@ and **Remote server** (an LLM-IDE hub you connect to, see [Connect the desktop t
 
 ## Connect
 
+You can connect from the Welcome screen or from Settings. Both use the same form and the same steps.
+
+### From the Welcome screen
+
+1. Press **Connect to SSH server**, then **Connect…**. The dialog opens over the Welcome screen.
+2. Enter the server's details and choose the login method, as described below. The dialog runs the same
+   Test and Connect steps as Settings.
+3. When the connection works, press **Switch to this server now**, then **Switch** in the confirmation. Only
+   that confirmation restarts the app; pressing the first button changes nothing on this computer.
+
+### Recent SSH servers
+
+The Welcome screen lists up to 10 saved servers, most recent first. **Connect** on a row connects at once for
+a key login. A password login opens the dialog and asks only for the password. **Edit** opens the dialog
+filled in. **Forget** removes the server, its recent folders, and its saved host key, unless another saved
+server uses the same host.
+
+### From Settings
+
 1. Open **Settings → Server & Backend → SSH server**.
 2. Enter the server's **Host**, **Port** and **User**. Use the real host name or IP address. A host alias
    from `~/.ssh/config` cannot be used: the app's key scan cannot resolve it.
@@ -102,6 +121,63 @@ reconnects to the running core without a new upload. With password login it asks
 
 To delete the server's data after Uninstall, remove the folder by hand on the server:
 `rm -rf ~/.llmide-server`. The app keeps it on purpose, so the database survives a reinstall.
+
+## Work on the server
+
+After you switch to the server, the Welcome screen shows the server home instead of the local project list.
+
+### Server home
+
+The server home shows the connection state, with **Disconnect** and **Stop server**, and the server's user, the
+core version and the Claude CLI version. When the link needs a password, a password field appears on this
+screen. **Open folder…** is available only while the link is connected. Below it, the page lists up to 10
+recent folders on this server. A folder that is no longer there is marked `This folder is no longer on the server.`
+and has a **Remove** button. **Continue** appears when a folder is open and returns you to the app's home section.
+
+### Folder picker
+
+**Open folder…** shows the folders on the server, starting at the server user's home folder. The picker has
+breadcrumbs, a **Show hidden** check box and **New folder** (the name is checked before it is created). Double-click
+a folder to enter it. **Open** opens the selected folder, and **Open this folder** opens the current one.
+You cannot go above the home folder. A symbolic link that points outside the home folder is listed with
+`link`, but you cannot enter or open it. Opening a folder registers it with the server core, so the core's
+project list has it.
+
+### Explorer and terminal
+
+With a server folder open, the sidebar lists Home, Issues, Gantt, Library, Chat, Settings and Explorer. Explorer
+reads and writes files, searches, watches for changes and shows **Changes** (git) on the server. Its terminal
+opens your login shell on the server, in the open folder. Each terminal tab is its own SSH session, so a
+tab keeps running while the file commands reconnect.
+
+When no approval is active, opening a terminal asks **Allow terminal access?**. Press **Allow terminal**. That
+approval lets new terminals open for 30 minutes. A terminal is a real shell with your server user's permissions.
+
+Explorer commands never touch this computer's files. Commands that act on this computer, such as opening a PDF
+in its viewer, showing a folder dialog on this computer, or creating or cloning a local project, are refused in
+SSH mode.
+
+### Deleting files
+
+Deleting in Explorer moves the item to the server's Trash. On Linux the helper uses the freedesktop Trash
+(normally `~/.local/share/Trash` on the server). If the server has no usable Trash, the delete fails with
+`cannot move to trash` and the item stays where it was. Nothing is deleted permanently.
+
+### git on the server
+
+**Changes** uses the server's `git`, with the server user's identity and credentials. If `git` is not installed
+on the server, the panel shows `git is not installed on this server.` The rest of Explorer still works. Explorer
+has no `git init`, so run it in the terminal.
+
+### The helper
+
+The file, git, search and watch commands run in a helper program on the server:
+`~/.llmide-server/current/core/bin/llmide-workspace`. It is installed with each server release, so its version
+matches the desktop. The desktop starts it over one SSH channel and talks to it on standard input and output.
+It has no network listener, and it ends when the channel closes. It refuses any folder outside the server user's
+home folder, and it checks that again on every request. If the server part is a different version from the
+desktop, the desktop shows `The server part is a different version. Connect again to update it.`; Connect
+installs the matching release.
 
 ## What happens on the server
 
@@ -207,9 +283,11 @@ work until `claude login` succeeds on the server.
   checkout (`desktop/resources/hub/` or `desktop/hub-dist/`), or from the app's resources if a build put it
   there. It is not downloaded and it is not shipped inside the installer. A build without a bundle shows
   `This build has no Linux server bundle.`
-- **Sections.** In SSH server mode the app shows Home, Issues, Gantt, Library, Chat and Settings. Files,
-  Changes, Terminal, opening a server folder as a project, and Loop on the server are planned and not
-  available yet.
+- **Sections.** In SSH server mode the app shows Home, Issues, Gantt, Library, Chat, Settings and Explorer.
+  Explorer's files, search, Changes (git), watching and terminal run on the server. Loop on the server is not
+  available yet, and neither are the other screens that read this computer's files or run its processes.
+- **Explorer on the server.** Deletes go to the server's Trash, and nothing is deleted permanently. Opening a
+  PDF in this computer's viewer and local project create or clone are refused. Explorer has no `git init`.
 - **Other users on the server.** Other users on the same server can reach the core's loopback port. The
   core lets only its first account register; later sign-ups need an invite from the owner, and every
   sign-in still needs a valid account. Until the first account exists, another account on the server could
@@ -244,6 +322,11 @@ Each row starts with the exact sentence the app shows.
 | `the server is <arch>; only x86_64 is supported` | The server is not 64-bit Intel or AMD. | Use an x86_64 server. |
 | `only <N> MB free on the server; at least 2048 MB are needed` | Not enough disk space in the home folder. | Free space, then test again. |
 | `This server's system libraries are too old for the standard server bundle (glibc <x.y>; 2.34 needed). Build the compatible bundle and try again.` | The server's glibc is older than 2.34, so the standard bundle cannot load there. | Build the compat bundle (see `desktop/PACKAGING.md`), then try again. |
+| `This folder is no longer on the server.` | The open folder was deleted, renamed or replaced on the server. The app shows the server home. | Open the folder again from the picker, or remove it from the recent folders. |
+| `The connection to the server was lost.` | The channel to the server's helper ended, so a file, git, search or watch request failed. The folder stays open. | Try the action again; the app reconnects on the next request. If it keeps failing, press **Connect** again. |
+| `The server part is a different version. Connect again to update it.` | The helper on the server is not the version this desktop was built with. | Press **Connect**. It installs the matching release and then works as usual. |
+| `git is not installed on this server.` | The server has no `git`, so **Changes** cannot run. | Install `git` on the server, then reopen the folder. |
+| `cannot move to trash: <reason>` | The server has no usable Trash, so the delete was refused and nothing was removed. | Remove the item in a terminal on the server, or from the server's own tools. |
 | `The upload was damaged. Try again.` | The core upload did not match its checksum on the server. | Connect again. |
 | `The server could not unpack the bundle.` | The uploaded bundle could not be unpacked on the server. | Build the bundle again and connect again. |
 | `the server could not start the core (<reason>)` | The core did not start. The reason is the script's result word: `timeout`, `exited`, `invalid`, `no-port`, `version-mismatch`, `pin-failed`, `state-failed` or `lock-failed`. For `exited`, the message ends with the core's last log line. | Read `~/.llmide-server/core.log` on the server. A glibc error there means the server needs the compat bundle. |

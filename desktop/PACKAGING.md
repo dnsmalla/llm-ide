@@ -444,6 +444,9 @@ Both bundles carry `core/bin/llmide-workspace` (mode 0755), the static Linux pro
 
 - **Default build:** `stage-hub-core.mjs` runs `cargo build --release --target x86_64-unknown-linux-musl` in `desktop/workspace-helper/`, so the crate's `.cargo/config.toml` (rust-lld, static CRT) applies. This needs cargo and the rustup target: run `rustup target add x86_64-unknown-linux-musl` once. Without the target the script stops before staging with `install the target: rustup target add x86_64-unknown-linux-musl`.
 - **Prebuilt:** `--workspace-helper <absolute file>` uses a binary built elsewhere, for a machine without the target. The file must be a Linux (ELF) program; anything else is refused before staging with `--workspace-helper is not a Linux program: <path>`.
+- **Runtime:** the helper reads one JSON request per line on stdin and writes replies and events on stdout. It has no network listener and ends when stdin closes. It refuses any folder outside the server user's home folder, and it checks that on every request (`desktop/workspace-helper/src/session.rs`, `Session::root`). Deletes go to the freedesktop Trash on Linux; without one the delete fails with `trash_unavailable` and nothing is removed (`desktop/workspace-core/src/trash.rs`).
+- **git:** the helper reports whether `git` is on the server in its `hello` answer. Without `git` the git commands answer `git_missing` with `git is not installed on this server.`, and the rest of the Explorer still works. A server without `git` is not a packaging error.
+- **Version check:** the desktop refuses a helper whose protocol or version differs from its own (`workspace_version`, `The server part is a different version. Connect again to update it.`). The helper ships in each release, so Connect replaces it along with the core.
 
 ### Server layout
 
