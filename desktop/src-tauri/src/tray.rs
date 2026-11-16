@@ -27,13 +27,8 @@ static PROJECT_ITEM: Mutex<Option<MenuItem<Wry>>> = Mutex::new(None);
 
 // ---- notification templates -------------------------------------------------------------
 
-/// Invisible "format" characters (Unicode Cf): bidi overrides/isolates, zero-width
-/// joiners, BOM, tag characters. They can reorder or hide text in a notification.
-pub(crate) fn is_invisible_format(c: char) -> bool {
-    matches!(c,
-        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
-        | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}' | '\u{E0000}'..='\u{E007F}')
-}
+// Shared with the core crate so the text rules have one definition (llmide_workspace_core::text).
+pub(crate) use llmide_workspace_core::text::is_invisible_format;
 
 // ---- tray settings (close-to-tray, menu-bar icon) ---------------------------------------
 

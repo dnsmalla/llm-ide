@@ -112,56 +112,8 @@ fn open_nofollow(p: &Path) -> Result<std::fs::File, String> {
     opts.open(p).map_err(|e| format!("cannot open graph.json: {e}"))
 }
 
-/// The real path of an open file, from its descriptor.
-#[cfg(target_os = "macos")]
-pub(crate) fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
-    use std::os::fd::AsRawFd;
-    use std::os::unix::ffi::OsStrExt;
-    let mut buf = [0u8; libc::PATH_MAX as usize];
-    // SAFETY: F_GETPATH writes a NUL-terminated path of at most PATH_MAX bytes into buf.
-    let rc = unsafe { libc::fcntl(f.as_raw_fd(), libc::F_GETPATH, buf.as_mut_ptr()) };
-    if rc == -1 {
-        return None;
-    }
-    let len = buf.iter().position(|&b| b == 0)?;
-    Some(PathBuf::from(std::ffi::OsStr::from_bytes(&buf[..len])))
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
-    use std::os::fd::AsRawFd;
-    std::fs::read_link(format!("/proc/self/fd/{}", f.as_raw_fd())).ok()
-}
-
-/// The final path of the open handle, in the same `\\?\C:\...` form `std::fs::canonicalize` returns, so it
-/// compares directly with a canonical root.
-#[cfg(windows)]
-pub(crate) fn fd_path(f: &std::fs::File) -> Option<PathBuf> {
-    use std::os::windows::ffi::OsStringExt;
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Storage::FileSystem::{GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED, VOLUME_NAME_DOS};
-    let mut buf = vec![0u16; 512];
-    loop {
-        // SAFETY: the handle is open for as long as `f` lives; `buf` holds `buf.len()` u16s.
-        let n = unsafe { GetFinalPathNameByHandleW(f.as_raw_handle(), buf.as_mut_ptr(), buf.len() as u32, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS) } as usize;
-        if n == 0 {
-            return None;
-        }
-        if n < buf.len() {
-            return Some(PathBuf::from(std::ffi::OsString::from_wide(&buf[..n])));
-        }
-        if n > 32_768 {
-            return None;
-        }
-        // Too small: `n` is the size needed, terminating NUL included.
-        buf.resize(n, 0);
-    }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
-pub(crate) fn fd_path(_: &std::fs::File) -> Option<PathBuf> {
-    None
-}
+// The real-path check of an open file is shared with the SSH helper; see llmide_workspace_core::paths.
+pub(crate) use llmide_workspace_core::paths::fd_path;
 
 #[cfg(test)]
 mod tests {

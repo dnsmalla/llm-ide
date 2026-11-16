@@ -126,31 +126,8 @@ impl DialogGuard {
     }
 }
 
-/// Single line of plain text: control and invisible format characters (bidi overrides,
-/// zero-width joiners, BOM, tag characters) are dropped, whitespace runs collapse to one
-/// space, capped at `max` characters.
-pub(crate) fn sanitize_line(s: &str, max: usize) -> String {
-    let mut out = String::new();
-    let mut gap = false;
-    for c in s.chars() {
-        if c.is_whitespace() || c.is_control() {
-            gap = !out.is_empty();
-            continue;
-        }
-        if crate::tray::is_invisible_format(c) {
-            continue;
-        }
-        if gap {
-            out.push(' ');
-            gap = false;
-        }
-        out.push(c);
-        if out.chars().count() >= max {
-            break;
-        }
-    }
-    out.chars().take(max).collect()
-}
+// Shared with the core crate (llmide_workspace_core::text); the rule is documented there.
+pub(crate) use llmide_workspace_core::text::sanitize_line;
 
 /// True only if the user pressed `accept` in a modal native dialog. Cancel is listed first
 /// (the default button) and wins on any other outcome. Blocks: call from a blocking thread.

@@ -51,6 +51,8 @@ base64 = "=0.22.1"
 url = "=2.5.8"
 # Project search (S-H): linear-time matcher (MIT OR Apache-2.0); already in the lock via ignore.
 regex = "=1.13.1"
+# Tauri-free file, path and trash logic (desktop/workspace-core); the SSH workspace helper compiles the same crate.
+llmide-workspace-core = { path = "../workspace-core" }
 
 # Autobench runs bring the app frontmost (activateIgnoringOtherApps); same versions tao already locks.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -72,3 +74,5 @@ keyring = { version = "=3.6.3", default-features = false, features = ["sync-secr
 [dev-dependencies]
 # R-034 #11: generate a throwaway CA/leaf to exercise the pin verifier's chain + pin paths.
 rcgen = "=0.13.2"
+# The core's recording trash fake (`trash::tests::FakeTrash`) for the desktop's git and delete tests.
+llmide-workspace-core = { path = "../workspace-core", features = ["test-util"] }
