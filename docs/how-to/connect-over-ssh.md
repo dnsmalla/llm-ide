@@ -53,15 +53,16 @@ for the session you switch into: the app saves the start mode back to local as i
 next start, including one after a crash, opens the local Welcome screen again. To return to the Welcome screen
 during an SSH session, use **Close server** (see [Disconnect, stop and uninstall](#disconnect-stop-and-uninstall)).
 
+Caveat: if the app cannot save `Local` at start (for example the preferences file is not writable), the saved mode
+stays SSH. The next start then opens the server again, and **Close server** does too, until the file can be written.
+
 ### Recent SSH servers
 
 The Welcome screen lists up to 10 saved servers, most recent first, under **Connect to SSH server**. **Connect**
-on a row opens the connect flow for that server: a key login connects at once, and a password login asks for
-the password first. Then the dialog offers **Switch to this server now**. **Connect to SSH server…** opens the
-dialog for a new server. **Connect** on a row connects at once for
-a key login. A password login opens the dialog and asks only for the password. **Edit** opens the dialog
+on a row connects at once for a key login. A password login opens the dialog and asks only for the password. If the
+app must restart to use the server, the dialog offers **Switch to this server now**. **Edit** opens the dialog
 filled in. **Forget** removes the server, its recent folders, and its saved host key, unless another saved
-server uses the same host.
+server uses the same host. **Connect to SSH server…** opens the dialog for a new server.
 
 ### From Settings
 
