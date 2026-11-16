@@ -13,9 +13,10 @@
 //! ```
 //!
 //! Optional: `LLMIDE_LIVE_SSH_KEY=<private key path>` uses key auth instead of the password;
-//! `LLMIDE_LIVE_SSH_INSTALL_KEY=1` (password auth only) runs step 16; `LLMIDE_LIVE_SSH_UNINSTALL=1` runs step 18.
+//! `LLMIDE_LIVE_SSH_INSTALL_KEY=1` (password auth only) runs step 23; `LLMIDE_LIVE_SSH_UNINSTALL=1` runs step 25.
 //!
-//! Steps 9 to 15 work in a random folder under the server's home folder and remove it again. The terminal step shows
+//! Steps 9 to 22 work in a random folder under the server's home folder and remove it again. The project steps
+//! (15 to 21) create their project inside that folder, so the same cleanup removes it. The terminal step shows
 //! the app's "Allow terminal access?" dialog once, and waits for your answer: press "Allow terminal". A failed run
 //! removes the folder on a best-effort basis.
 //!
@@ -27,6 +28,7 @@ use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tauri::ipc::{Channel, InvokeResponseBody, Response};
 
 use crate::confirm::herr;
@@ -37,16 +39,19 @@ use crate::fs_watch::{fs_watch_set, fs_watch_start, fs_watch_stop};
 use crate::fsutil;
 use crate::git::git_status;
 use crate::project::project_active;
+use crate::project_layout::{project_memory, project_paths, project_rebuild_folders};
 use crate::project_search::{project_search_start, Query};
 use crate::prefs::{self, prefs_guard, set_remote_server_for_test, RemoteServerPrefs, ServerMode, SshAuthKind};
 use crate::remote::temp_ssh_dir;
+use crate::repo_clone::repo_clone;
 use crate::ssh_cmds;
 use crate::ssh_key_install;
 use crate::ssh_service::{self, Deps, SshServerTarget, SshServerTest};
 use crate::ssh_session;
 use crate::ssh_workspace_cmds::{
-    remote_ssh_workspace_close, remote_ssh_workspace_forget, remote_ssh_workspace_list_dirs,
-    remote_ssh_workspace_mkdir, remote_ssh_workspace_open, remote_ssh_workspace_recent,
+    remote_ssh_project_create, remote_ssh_workspace_close, remote_ssh_workspace_forget,
+    remote_ssh_workspace_list_dirs, remote_ssh_workspace_mkdir, remote_ssh_workspace_open,
+    remote_ssh_workspace_recent,
 };
 use crate::workspace_backend;
 
@@ -734,6 +739,140 @@ fn terminal_session(
     }
 }
 
+/// The project the project steps create inside the test folder. It goes away with the test folder.
+const LIVE_PROJECT: &str = "live-project";
+
+/// The id the UI registers a project under: `p` and the first 32 hex characters of the SHA-256 of its root. This is
+/// `projectIdFor` in the UI (the Doc Gen id), so the core sees the same id the desktop sends.
+fn project_id_for(root: &str) -> String {
+    let hex: String = Sha256::digest(root.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("p{}", &hex[..32])
+}
+
+/// The root of the open server project, or a failed step when none is open.
+fn open_project_root() -> Result<String, Failed> {
+    project_active().map(|active| active.root).ok_or_else(|| failed("NOT_ACTIVE", "no project is open"))
+}
+
+/// A core call made the way the page makes it: signed in as the step 6 account, with the access token as a bearer.
+fn core_post(run: &Run, path: &str, body: Value) -> Result<Reply, Failed> {
+    let account = run.account.as_ref().ok_or_else(|| failed("LIVE_ORDER", "step 6 did not create an account"))?;
+    let token = sign_in(&run.local_url, account)?;
+    send(agent().post(&format!("{}{path}", run.local_url)).set("Authorization", &format!("Bearer {token}")), Some(body.to_string()))
+}
+
+/// Step 15: the work folder has no `system/project.json`, so Paths says it is not a project and Rebuild refuses it
+/// with `not_a_project`.
+fn step_project_plain(_run: &mut Run) -> Result<Outcome, Failed> {
+    let paths = block(project_paths()).map_err(|message| failed("PATHS_FAILED", message))?;
+    expect(paths["isProject"] == json!(false), "PLAIN_IS_PROJECT", "a folder without system/project.json reports isProject")?;
+    // The entry point returns the message text only; the helper's `not_a_project` copy is the one this matches.
+    match block(project_rebuild_folders()) {
+        Err(message) if message.contains("This folder is not an LLM-IDE project.") => {
+            println!("  paths: isProject false; rebuild: not_a_project");
+        }
+        Ok(()) => return Err(failed("REBUILD_PLAIN", "Rebuild ran on a folder that is not a project")),
+        Err(message) => return Err(failed("REBUILD_FAILED", message)),
+    }
+    Ok(Outcome::Done)
+}
+
+/// Step 16: New project creates `llmide-live-<hex>/live-project` and opens it. The same name again is refused.
+fn step_project_create(run: &mut Run) -> Result<Outcome, Failed> {
+    let outer = run.test_folder.clone().ok_or_else(|| failed("LIVE_ORDER", "the test folder name is missing"))?;
+    let created = block(remote_ssh_project_create(outer.clone(), LIVE_PROJECT.to_string()))?;
+    expect(
+        created.root.starts_with(&outer) && created.root.ends_with(LIVE_PROJECT),
+        "PROJECT_ROOT",
+        "New project did not create the folder inside the test folder",
+    )?;
+    let info = block(remote_ssh_workspace_open(created.root.clone()))?;
+    expect(
+        project_active().is_some_and(|active| active.root == info.root),
+        "NOT_ACTIVE",
+        "project_active does not report the new project",
+    )?;
+    let again = block(remote_ssh_project_create(outer, LIVE_PROJECT.to_string()));
+    expect(again.is_err(), "CREATE_TWICE", "New project accepted a name that already exists")?;
+    println!("  new project created under the test folder, opened, and a repeat name refused");
+    Ok(Outcome::Done)
+}
+
+/// Step 17: the new project reports `isProject` and an id, and Memory lists its files.
+fn step_project_paths(_run: &mut Run) -> Result<Outcome, Failed> {
+    let paths = block(project_paths()).map_err(|message| failed("PATHS_FAILED", message))?;
+    expect(paths["isProject"] == json!(true), "PATHS_NOT_PROJECT", "Paths does not report the new project")?;
+    let id = paths["id"].as_str().unwrap_or_default();
+    expect(!id.is_empty(), "PATHS_NO_ID", "Paths reports no project id")?;
+    let memory = block(project_memory()).map_err(|message| failed("MEMORY_FAILED", message))?;
+    expect(memory.is_object(), "MEMORY_SHAPE", "Memory did not return an object")?;
+    println!("  paths: isProject true with an id; memory: ok");
+    Ok(Outcome::Done)
+}
+
+/// Step 18: Rebuild missing folders runs write-if-absent, so an edited scaffolded file keeps its text.
+fn step_project_rebuild(_run: &mut Run) -> Result<Outcome, Failed> {
+    let edited = "edited by the live check\n";
+    write_text("CLAUDE.md", edited)?;
+    block(project_rebuild_folders()).map_err(|message| failed("REBUILD_FAILED", message))?;
+    let read = block(fs_read_file(request(json!({"path": "CLAUDE.md"}))?))?;
+    expect(read["text"].as_str() == Some(edited), "REBUILD_OVERWROTE", "Rebuild changed an existing file")?;
+    println!("  rebuild missing folders: ok, the edited CLAUDE.md is unchanged");
+    Ok(Outcome::Done)
+}
+
+/// Step 19: the same register and install-skills calls the welcome page makes, through the forward.
+fn step_project_register(run: &mut Run) -> Result<Outcome, Failed> {
+    let root = open_project_root()?;
+    let registered = core_post(run, "/kb/projects/register", json!({"id": project_id_for(&root), "root": root}))?;
+    expect(
+        (200..300).contains(&registered.status),
+        "REGISTER_PROJECT",
+        format!("register answered HTTP {} ({})", registered.status, registered.error_code()),
+    )?;
+    let installed = core_post(run, "/kb/project/install-skills", json!({"path": root, "language": "en"}))?;
+    let declined = installed.json().and_then(|value| value["ok"].as_bool()) == Some(false);
+    expect(
+        (200..300).contains(&installed.status) && !declined,
+        "INSTALL_SKILLS",
+        format!("install-skills answered HTTP {} ({})", installed.status, installed.error_code()),
+    )?;
+    println!("  register and install-skills: ok");
+    Ok(Outcome::Done)
+}
+
+/// Step 20: clone the small public repository with no token. The clone lands in `code/Hello-World` of the project.
+fn step_project_clone(_run: &mut Run) -> Result<Outcome, Failed> {
+    let cloned = block(repo_clone(
+        "github".to_string(),
+        "https://github.com/octocat/Hello-World".to_string(),
+        None,
+        None,
+    ))
+    .map_err(|message| failed("CLONE_FAILED", message))?;
+    expect(cloned.name == "Hello-World", "CLONE_NAME", "the clone is not named Hello-World")?;
+    expect(
+        listed_names("code/Hello-World")?.iter().any(|name| name == "README"),
+        "CLONE_README",
+        "code/Hello-World/README is not in the clone",
+    )?;
+    println!("  clone without a token: code/Hello-World/README is there (server path {})", cloned.path);
+    Ok(Outcome::Done)
+}
+
+/// Step 21: opens the work folder again, so the close step below runs as before.
+fn step_project_back_to_work(run: &mut Run) -> Result<Outcome, Failed> {
+    let work = run.folder_root.clone().ok_or_else(|| failed("LIVE_ORDER", "the workspace step did not open a folder"))?;
+    block(remote_ssh_workspace_close())?;
+    block(remote_ssh_workspace_open(work.clone()))?;
+    expect(
+        project_active().is_some_and(|active| active.root == work),
+        "NOT_ACTIVE",
+        "the work folder is not open again after the project steps",
+    )?;
+    Ok(Outcome::Done)
+}
+
 /// Deletes the test folder through the helper: the helper opens the home folder, the test folder is deleted from
 /// there, and the folder is closed again. Without a Trash the folder stays and the step says so.
 fn step_workspace_close(run: &mut Run) -> Result<Outcome, Failed> {
@@ -835,7 +974,7 @@ fn step_uninstall(run: &mut Run) -> Result<Outcome, Failed> {
 
 /// Runs the steps in order. Returns how many passed, or the failing step number with its failure.
 fn run_steps(run: &mut Run) -> Result<usize, (usize, Failed)> {
-    let steps: [(&str, StepFn); 18] = [
+    let steps: [(&str, StepFn); 25] = [
         ("test", step_test),
         ("confirm and test", step_confirm_and_test),
         ("connect", step_connect),
@@ -850,6 +989,13 @@ fn run_steps(run: &mut Run) -> Result<usize, (usize, Failed)> {
         ("search", step_search),
         ("watch", step_watch),
         ("terminal", step_terminal),
+        ("project plain folder refused", step_project_plain),
+        ("project create", step_project_create),
+        ("project paths and memory", step_project_paths),
+        ("project rebuild keeps edits", step_project_rebuild),
+        ("project register and skills", step_project_register),
+        ("project clone", step_project_clone),
+        ("project back to work folder", step_project_back_to_work),
         ("workspace close", step_workspace_close),
         ("install key", step_install_key),
         ("stop server", step_stop),
