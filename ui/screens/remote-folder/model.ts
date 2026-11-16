@@ -36,6 +36,8 @@ export interface RemoteProject {
 export interface WorkspaceIo {
   listDirs(path: string, hidden: boolean): Promise<RemoteListing>;
   mkdir(path: string, name: string): Promise<{ path: string }>;
+  /** Creates a project folder named `name` inside `parent` and answers it as the open folder. */
+  createProject(parent: string, name: string): Promise<RemoteProject>;
   open(path: string): Promise<RemoteProject>;
   close(): Promise<void>;
   recent(): Promise<string[]>;
@@ -99,6 +101,9 @@ export function createWorkspaceIo(invoke: WorkspaceInvoke): WorkspaceIo {
     },
     async mkdir(path, name) {
       return decodeOrThrow(await invoke("remote_ssh_workspace_mkdir", { path, name }), decodeMkdirResult);
+    },
+    async createProject(parent, name) {
+      return decodeOrThrow(await invoke("remote_ssh_project_create", { parent, name }), decodeRemoteProject);
     },
     async open(path) {
       return decodeOrThrow(await invoke("remote_ssh_workspace_open", { path }), decodeRemoteProject);
@@ -266,6 +271,57 @@ export function leaveRemoteFolder(deps: LeaveDeps, message: string): Promise<voi
   return leaving;
 }
 
+/** The new-project flow's extra dependency: the core registration, which returns its warnings (see `registerNewProject`). */
+export interface NewProjectDeps {
+  /** Registers the created project with the core and installs the skills kit. Resolves the warnings to show (none when clean). */
+  registerNew(project: RemoteProject): Promise<string[]>;
+}
+
+/** Everything the picker needs: the open flow's steps and the new project's registration. */
+export type PickerDeps = OpenFlowDeps & NewProjectDeps;
+
+/** A project that was created, opened and refreshed, but whose registration gave warnings. Try again reruns only the registration. */
+export interface PendingProject {
+  project: RemoteProject;
+  warnings: string[];
+}
+
+/** Runs the registration step. A throw becomes one warning, so the created project is never lost to it. */
+async function registerNewOrWarn(deps: NewProjectDeps, project: RemoteProject): Promise<string[]> {
+  try {
+    return await deps.registerNew(project);
+  } catch (e) {
+    return [`It could not be registered with the core yet (${reasonOf(e)}). Doc Gen registers it when you open it.`];
+  }
+}
+
+/**
+ * Create a project folder inside the listed folder, then open it: the unsaved-work question first (when the guard is
+ * given), then the host creates it, the core registers it (warnings only), and the shell refreshes. Null when the user
+ * stays. A create failure throws the host's error unchanged, and nothing is opened.
+ */
+export async function createServerProject(
+  io: WorkspaceIo,
+  parent: string,
+  name: string,
+  deps: PickerDeps,
+): Promise<PendingProject | null> {
+  const guard = deps.guard ?? (<T>(_cancelled: T, action: () => Promise<T>) => action());
+  return guard<PendingProject | null>(null, async () => {
+    // Same gate as the open: a root_missing from a call still in flight must not close the new folder.
+    beginServerFolderOpen();
+    let project: RemoteProject;
+    try {
+      project = await io.createProject(parent, name);
+    } finally {
+      endServerFolderOpen();
+    }
+    const warnings = await registerNewOrWarn(deps, project);
+    await deps.refresh();
+    return { project, warnings };
+  });
+}
+
 export const PICKER_INITIAL = {
   home: null,
   path: null,
@@ -278,6 +334,10 @@ export const PICKER_INITIAL = {
   creating: false,
   newName: "",
   newNameError: null,
+  creatingProject: false,
+  newProjectName: "",
+  newProjectError: null,
+  pending: null,
 } as const satisfies PickerState;
 
 export interface PickerState {
@@ -298,16 +358,22 @@ export interface PickerState {
   creating: boolean;
   newName: string;
   newNameError: string | null;
+  /** The New project name field is open. */
+  creatingProject: boolean;
+  newProjectName: string;
+  newProjectError: string | null;
+  /** A created project whose registration gave warnings: shown with Try again and Continue; the other actions wait. */
+  pending: PendingProject | null;
 }
 
 /** The folder picker. Navigation stays inside what the host lists; every answer is checked against the current path. */
 export class FolderPickerModel extends Store<PickerState> {
   readonly #io: WorkspaceIo;
-  readonly #deps: OpenFlowDeps;
+  readonly #deps: PickerDeps;
   /** Bumped by every listing. A listing that finishes after a newer one started is dropped. */
   #generation = 0;
 
-  constructor(io: WorkspaceIo, deps: OpenFlowDeps) {
+  constructor(io: WorkspaceIo, deps: PickerDeps) {
     super({ ...PICKER_INITIAL, entries: [] });
     this.#io = io;
     this.#deps = deps;
@@ -344,7 +410,7 @@ export class FolderPickerModel extends Store<PickerState> {
   }
 
   startNewFolder(): void {
-    this.set({ creating: true, newName: "", newNameError: null });
+    this.set({ creating: true, newName: "", newNameError: null, creatingProject: false, newProjectError: null });
   }
 
   cancelNewFolder(): void {
@@ -353,6 +419,74 @@ export class FolderPickerModel extends Store<PickerState> {
 
   setNewName(value: string): void {
     this.set({ newName: value, newNameError: null });
+  }
+
+  startNewProject(): void {
+    this.set({ creatingProject: true, newProjectName: "", newProjectError: null, creating: false, newNameError: null });
+  }
+
+  cancelNewProject(): void {
+    this.set({ creatingProject: false, newProjectName: "", newProjectError: null });
+  }
+
+  setNewProjectName(value: string): void {
+    this.set({ newProjectName: value, newProjectError: null });
+  }
+
+  /**
+   * Creates a project folder named by the field, inside the listed folder (the server home included), and opens it.
+   * Resolves the project when it is open and registered cleanly; null when the user stays, the create is refused (the
+   * error shows in the field), or registration gave warnings (see `pending`; the project is open either way).
+   */
+  async createProject(): Promise<RemoteProject | null> {
+    const s = this.getState();
+    if (s.busy || s.path === null || s.pending !== null) return null;
+    const error = folderNameError(s.newProjectName);
+    if (error !== null) {
+      this.set({ newProjectError: error });
+      return null;
+    }
+    const name = s.newProjectName.trim();
+    this.set({ busy: true, newProjectError: null });
+    try {
+      const created = await createServerProject(this.#io, s.path, name, this.#deps);
+      if (created === null) return null;
+      this.set({ creatingProject: false, newProjectName: "" });
+      if (created.warnings.length === 0) return created.project;
+      this.set({ pending: created });
+      return null;
+    } catch (e) {
+      this.set({ newProjectError: workspaceErrorText(e) });
+      return null;
+    } finally {
+      this.set({ busy: false });
+    }
+  }
+
+  /** Reruns only the registration of the pending project. Resolves the project when it is clean now, else null. */
+  async retryRegistration(): Promise<RemoteProject | null> {
+    const pending = this.getState().pending;
+    if (pending === null || this.getState().busy) return null;
+    this.set({ busy: true });
+    try {
+      const warnings = await registerNewOrWarn(this.#deps, pending.project);
+      if (warnings.length === 0) {
+        this.set({ pending: null });
+        return pending.project;
+      }
+      this.set({ pending: { project: pending.project, warnings } });
+      return null;
+    } finally {
+      this.set({ busy: false });
+    }
+  }
+
+  /** Leaves the pending project as it is (its registration warnings are dropped). Resolves the open project. */
+  keepPendingProject(): RemoteProject | null {
+    const pending = this.getState().pending;
+    if (pending === null) return null;
+    this.set({ pending: null });
+    return pending.project;
   }
 
   /**
@@ -401,7 +535,7 @@ export class FolderPickerModel extends Store<PickerState> {
   }
 
   async #open(path: string): Promise<RemoteProject | null> {
-    if (this.getState().busy) return null;
+    if (this.getState().busy || this.getState().pending !== null) return null;
     this.set({ busy: true, error: null });
     try {
       return await openServerFolder(this.#io, path, this.#deps);

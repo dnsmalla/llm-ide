@@ -11,7 +11,7 @@ import { projectStore } from "./project-store";
 import { backgroundRoot } from "./background-scope.ts";
 import { serverFolderHandlerFor, setServerFolderHandler } from "./server-folder";
 import { FolderPicker } from "../remote-folder/FolderPicker.tsx";
-import { goHomeAfterOpen, returnHomeFromMissingFolder, serverOpenDeps, serverWorkspaceIo } from "../remote-folder/wiring.ts";
+import { goHomeAfterOpen, returnHomeFromMissingFolder, serverPickerDeps, serverWorkspaceIo } from "../remote-folder/wiring.ts";
 import { SectionErrorBoundary } from "./ErrorBoundary";
 import { CoreDownPanel, LoginPanel } from "./Panels";
 import { CrashReportBanner } from "./CrashReportBanner";
@@ -136,7 +136,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   }, [serverMode, sshLink]);
   useEffect(() => subscribeNoProject(() => { void projectStore.refresh(); }), []);
   const pickerIo = useMemo(() => serverWorkspaceIo(), []);
-  const pickerDeps = useMemo(() => serverOpenDeps(), []);
+  const pickerDeps = useMemo(() => serverPickerDeps(), []);
   // Until the first status poll the mode is unknown: render no section rather than briefly mounting local ones.
   const visibleSections = modeKnown ? visibleSectionsFor(navMode) : [];
   // Next-launch crash notice (Mac CrashReportBanner): read once; Dismiss deletes the host's records.

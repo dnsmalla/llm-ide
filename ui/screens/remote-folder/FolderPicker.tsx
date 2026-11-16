@@ -6,7 +6,7 @@ import "../welcome/welcome.css";
 import "./remote-folder.css";
 import { useModel, useStore } from "../settings/context.tsx";
 import { Button, ErrorText } from "../settings/ui.tsx";
-import { breadcrumbsFor, FolderPickerModel, type OpenFlowDeps, type PickerState, type RemoteProject, type WorkspaceIo } from "./model.ts";
+import { breadcrumbsFor, FolderPickerModel, type PickerDeps, type PickerState, type RemoteProject, type WorkspaceIo } from "./model.ts";
 
 export const OUTSIDE_HOME_TEXT = "Outside your home folder";
 
@@ -27,6 +27,12 @@ export interface FolderPickerViewProps {
   onCreate(): void;
   onOpenSelected(): void;
   onOpenCurrent(): void;
+  onStartNewProject(): void;
+  onCancelNewProject(): void;
+  onNewProjectName(value: string): void;
+  onCreateProject(): void;
+  onRetryRegistration(): void;
+  onKeepPending(): void;
   onClose(): void;
   /** Takes the initial focus when the picker opens. */
   listRef?: RefObject<HTMLUListElement | null>;
@@ -37,6 +43,8 @@ export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
   const busy = s.busy;
   const crumbs = s.path === null ? [] : breadcrumbsFor(s.path, s.home);
   const selectedEntry = s.entries.find((e) => e.name === s.selected) ?? null;
+  // A created project whose registration warned is open already: the other actions wait for Try again or Continue.
+  const pending = s.pending ?? null;
   return (
     <div className="wc-modal rf-modal">
       <div className="wc-modal-card rf-card" role="dialog" aria-modal="true" aria-labelledby="rf-title">
@@ -60,7 +68,10 @@ export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
                 <input type="checkbox" checked={s.showHidden} disabled={busy} onChange={() => p.onToggleHidden()} />
                 <span>Show hidden</span>
               </label>
-              <Button disabled={busy || s.path === null || s.creating} onClick={p.onStartNew}>New folder</Button>
+              <div className="rf-actions-row">
+                <Button disabled={busy || s.path === null || s.creating || pending !== null} onClick={p.onStartNew}>New folder</Button>
+                <Button disabled={busy || s.path === null || s.creatingProject || pending !== null} onClick={p.onStartNewProject}>New project…</Button>
+              </div>
             </div>
 
             {s.creating ? (
@@ -84,6 +95,43 @@ export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
                   <Button disabled={busy} onClick={p.onCancelNew}>Cancel</Button>
                 </div>
               </form>
+            ) : null}
+
+            {s.creatingProject ? (
+              <form className="rf-new" onSubmit={(e) => { e.preventDefault(); p.onCreateProject(); }} noValidate>
+                <p className="rf-status">The project is created in {s.path ?? "this folder"} and opened.</p>
+                <label className="st-field">
+                  <span className="st-label">Project name</span>
+                  <input
+                    className="st-input"
+                    aria-label="New project name"
+                    value={s.newProjectName ?? ""}
+                    disabled={busy}
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-invalid={s.newProjectError ? true : undefined}
+                    onChange={(e) => p.onNewProjectName(e.currentTarget.value)}
+                  />
+                </label>
+                <ErrorText text={s.newProjectError ?? null} />
+                <div className="st-row">
+                  <Button tone="primary" disabled={busy} onClick={p.onCreateProject}>Create project</Button>
+                  <Button disabled={busy} onClick={p.onCancelNewProject}>Cancel</Button>
+                </div>
+              </form>
+            ) : null}
+
+            {pending ? (
+              <div className="rf-pending" role="status">
+                <p className="rf-status">Project {pending.project.name} is open. It is not fully set up yet:</p>
+                <ul className="rf-warnings">
+                  {pending.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+                <div className="st-row">
+                  <Button tone="primary" disabled={busy} onClick={p.onRetryRegistration}>Try again</Button>
+                  <Button disabled={busy} onClick={p.onKeepPending}>Continue</Button>
+                </div>
+              </div>
             ) : null}
 
             <ErrorText text={s.error} />
@@ -114,10 +162,10 @@ export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
         </div>
         <div className="wc-modal-foot rf-foot">
           <div className="st-root rf-actions">
-            <Button disabled={busy || selectedEntry === null || selectedEntry.outsideHome} onClick={p.onOpenSelected}>Open</Button>
+            <Button disabled={busy || pending !== null || selectedEntry === null || selectedEntry.outsideHome} onClick={p.onOpenSelected}>Open</Button>
             {/* The home folder is not a project: the host refuses it, so the button is off there rather than failing. */}
-            <Button tone="primary" disabled={busy || s.path === null || s.path === s.home} onClick={p.onOpenCurrent}>Open this folder</Button>
-            <Button disabled={busy} onClick={p.onClose}>Cancel</Button>
+            <Button tone="primary" disabled={busy || pending !== null || s.path === null || s.path === s.home} onClick={p.onOpenCurrent}>Open this folder</Button>
+            <Button disabled={busy || pending !== null} onClick={p.onClose}>Cancel</Button>
           </div>
         </div>
       </div>
@@ -127,7 +175,7 @@ export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
 
 export interface FolderPickerProps {
   io: WorkspaceIo;
-  deps: OpenFlowDeps;
+  deps: PickerDeps;
   /** The folder is open as the project; the shell closes the picker and goes home. */
   onOpened(project: RemoteProject): void;
   onClose(): void;
@@ -143,11 +191,11 @@ export function FolderPicker({ io, deps, onOpened, onClose }: FolderPickerProps)
   }, [m]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && pickerEscapeCloses(s.busy)) onClose();
+      if (e.key === "Escape" && pickerEscapeCloses(s.busy || s.pending !== null)) onClose();
     };
     globalThis.addEventListener?.("keydown", onKey);
     return () => globalThis.removeEventListener?.("keydown", onKey);
-  }, [onClose, s.busy]);
+  }, [onClose, s.busy, s.pending]);
   return (
     <FolderPickerView
       state={s}
@@ -161,6 +209,12 @@ export function FolderPicker({ io, deps, onOpened, onClose }: FolderPickerProps)
       onCreate={() => void m.createFolder()}
       onOpenSelected={() => void m.openSelected().then((project) => { if (project) onOpened(project); })}
       onOpenCurrent={() => void m.openCurrent().then((project) => { if (project) onOpened(project); })}
+      onStartNewProject={() => m.startNewProject()}
+      onCancelNewProject={() => m.cancelNewProject()}
+      onNewProjectName={(value) => m.setNewProjectName(value)}
+      onCreateProject={() => void m.createProject().then((project) => { if (project) onOpened(project); })}
+      onRetryRegistration={() => void m.retryRegistration().then((project) => { if (project) onOpened(project); })}
+      onKeepPending={() => { const project = m.keepPendingProject(); if (project) onOpened(project); }}
       onClose={onClose}
       listRef={listRef}
     />

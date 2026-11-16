@@ -5,8 +5,8 @@ import { core } from "../shell/runtime.ts";
 import { projectStore } from "../shell/project-store.ts";
 import { shellBus } from "../shell/bus.ts";
 import { readHome } from "../shell/landing.ts";
-import { registerProject } from "../welcome/model.ts";
-import { createWorkspaceIo, leaveRemoteFolder, type OpenFlowDeps, type WorkspaceIo } from "./model.ts";
+import { registerNewProject, registerProject } from "../welcome/model.ts";
+import { createWorkspaceIo, leaveRemoteFolder, type OpenFlowDeps, type PickerDeps, type WorkspaceIo } from "./model.ts";
 
 let workspaceIo: WorkspaceIo | null = null;
 
@@ -24,6 +24,11 @@ export function serverOpenDeps(): OpenFlowDeps {
     announce: (text) => projectStore.announce(text),
     guard: (cancelled, action) => projectStore.guardLeave(cancelled, action),
   };
+}
+
+/** The picker's deps: the open flow's, plus the new project's registration (warnings, skills kit). */
+export function serverPickerDeps(): PickerDeps {
+  return { ...serverOpenDeps(), registerNew: (project) => registerNewProject(project, { core }) };
 }
 
 /** After a folder opened: the same landing as Welcome's Continue (the home section of the project). */

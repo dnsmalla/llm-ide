@@ -27,3 +27,6 @@
   .rf-modal { padding: 8px; }
   .rf-foot { justify-content: stretch; }
 }
+.rf-actions-row { display: flex; flex-wrap: wrap; gap: var(--tok-space-sm, 8px); }
+.rf-pending { display: flex; flex-direction: column; gap: var(--tok-space-sm, 8px); padding: var(--tok-space-sm, 8px) 0; }
+.rf-warnings { margin: 0; padding-left: 18px; color: var(--tok-color-text-muted); }
