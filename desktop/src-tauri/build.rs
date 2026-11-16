@@ -180,6 +180,7 @@ const COMMANDS: &[&str] = &[
     "remote_ssh_server_test",
     "remote_ssh_server_confirm",
     "remote_ssh_server_connect",
+    "remote_ssh_switch_mode",
     "remote_ssh_server_disconnect",
     "remote_ssh_server_status",
     "remote_ssh_server_stop",

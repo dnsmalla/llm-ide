@@ -171,6 +171,7 @@
     "allow-remote-ssh-server-test",
     "allow-remote-ssh-server-confirm",
     "allow-remote-ssh-server-connect",
+    "allow-remote-ssh-switch-mode",
     "allow-remote-ssh-server-disconnect",
     "allow-remote-ssh-server-status",
     "allow-remote-ssh-server-stop",

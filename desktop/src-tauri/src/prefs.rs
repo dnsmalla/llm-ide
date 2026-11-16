@@ -1033,6 +1033,15 @@ pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, s
     })
 }
 
+/// Host-side writer for the saved server's mode alone. The SSH service calls it when the user switches to the saved
+/// server; the webview cannot change the mode directly.
+pub(crate) fn set_remote_server_mode(mode: ServerMode) -> Result<PrefsView, FsError> {
+    edit_remote_server(|block| {
+        block.mode = mode;
+        Ok(())
+    })
+}
+
 /// Host-side writer for a confirmed SSH host key: replaces any key saved for the same host and port. The webview
 /// cannot call it; the SSH service calls it only after a native yes/no dialog. Text that is not a valid pin is refused,
 /// so nothing unreadable is stored.
@@ -1072,8 +1081,6 @@ pub(crate) fn forget_ssh_server(host: &str, port: u16, user: &str) -> Result<(),
 /// Errors:
 ///     `invalid_path` for a path that is not absolute, is over `SSH_FOLDER_PATH_MAX` bytes, or has a control character;
 ///     `unknown_server` when the server is not in the recent list.
-// NOTE: the workspace folder commands in the next step are the first callers.
-#[allow(dead_code)]
 pub(crate) fn record_ssh_recent_folder(server: &str, path: &str) -> Result<(), FsError> {
     if !valid_folder_path(path) {
         return Err(herr("invalid_path", "the folder path must be absolute, at most 4096 bytes, with no control character"));
@@ -1089,8 +1096,6 @@ pub(crate) fn record_ssh_recent_folder(server: &str, path: &str) -> Result<(), F
 }
 
 /// The folder paths saved for one server, most recent first.
-// NOTE: the workspace folder commands in the next step are the first callers.
-#[allow(dead_code)]
 pub(crate) fn ssh_recent_folders(server: &str) -> Vec<String> {
     stored()
         .remote_server
@@ -1102,8 +1107,6 @@ pub(crate) fn ssh_recent_folders(server: &str) -> Vec<String> {
 }
 
 /// Removes one folder from a server's list. Removing a folder that is not saved is not an error.
-// NOTE: the workspace folder commands in the next step are the first callers.
-#[allow(dead_code)]
 pub(crate) fn forget_ssh_recent_folder(server: &str, path: &str) -> Result<(), FsError> {
     edit_remote_server(|block| {
         block.ssh_recent_folders.retain(|folder| !(folder.server == server && folder.path == path));

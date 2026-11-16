@@ -68,6 +68,15 @@ pub async fn remote_ssh_server_connect(
     .map_err(|_| herr("internal", "the SSH server connect did not finish."))?
 }
 
+/// Makes the saved server the one the app serves at its next start. The UI restarts the app after this call. Cancel
+/// never calls it, so the next start stays local.
+#[tauri::command]
+pub async fn remote_ssh_switch_mode() -> Result<(), FsError> {
+    tauri::async_runtime::spawn_blocking(ssh_service::switch_mode)
+        .await
+        .map_err(|_| herr("internal", "the switch to the SSH server did not finish."))?
+}
+
 #[tauri::command]
 pub async fn remote_ssh_server_disconnect(host: tauri::State<'_, CoreHost>) -> Result<SshServerStatus, FsError> {
     let host = host.inner().clone();
@@ -391,10 +400,11 @@ mod tests {
         );
     }
 
-    const COMMANDS: [&str; 10] = [
+    const COMMANDS: [&str; 11] = [
         "remote_ssh_server_test",
         "remote_ssh_server_confirm",
         "remote_ssh_server_connect",
+        "remote_ssh_switch_mode",
         "remote_ssh_server_disconnect",
         "remote_ssh_server_status",
         "remote_ssh_server_stop",

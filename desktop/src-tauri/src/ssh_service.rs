@@ -262,7 +262,9 @@ fn open_link_locked(deps: &Deps, target: &SshServerTarget, password: Option<&str
     Ok(OpenedLink { link: supervise(supervised), version, claude })
 }
 
-/// Connects, then saves SSH mode and serves the link. Preferences change only after a successful connect.
+/// Connects, then saves the server and serves the link when the app is already in SSH mode. Preferences change only
+/// after a successful connect. The app's mode is kept: it becomes SSH only through [`switch_mode`], so Cancel on the
+/// switch leaves the next start local.
 ///
 /// The operation lock is held from the connect to the attach, so a Stop or Uninstall cannot run between them.
 ///
@@ -270,15 +272,40 @@ fn open_link_locked(deps: &Deps, target: &SshServerTarget, password: Option<&str
 pub fn connect(deps: &Deps, host: &CoreHost, target: &SshServerTarget, password: Option<&str>) -> Result<SshServerStatus, FsError> {
     let _operation = operation();
     let opened = open_link_locked(deps, target, password)?;
+    let mode = prefs::stored().remote_server.mode;
     prefs::set_remote_ssh(
         target.host.clone(),
         target.port,
         target.user.clone(),
         target.key_path.clone(),
         target.auth,
-        ServerMode::Ssh,
+        mode,
     )?;
     Ok(attach_link(host, opened))
+}
+
+/// Saves SSH server mode, so the next app start serves the saved server. Changes nothing else and does not restart:
+/// the caller restarts the app. A saved server with no pinned host key is refused, because the next start could not
+/// connect to it.
+///
+/// Errors:
+///     `invalid_host` when no SSH server is saved; `SSH_HOST_KEY_UNCONFIRMED` when the saved server has no pinned key.
+pub fn switch_mode() -> Result<(), FsError> {
+    let _operation = operation();
+    let saved = prefs::stored().remote_server;
+    if saved.host.trim().is_empty() {
+        return Err(herr("invalid_host", "Connect to a server before switching to it."));
+    }
+    let target = SshServerTarget {
+        host: saved.host,
+        port: saved.port,
+        user: saved.user,
+        key_path: saved.key_path,
+        auth: saved.ssh_auth,
+    };
+    require_pin(&endpoint_shape(&target)?)?;
+    prefs::set_remote_server_mode(ServerMode::Ssh)?;
+    Ok(())
 }
 
 /// Makes an opened link the one SSH mode serves. Outside SSH mode the link is stopped again, because the mode
@@ -1098,8 +1125,10 @@ pub(crate) mod tests {
         assert!(exec.calls().is_empty());
     }
 
+    /// Connect saves the server and keeps the app's mode. The user switches to SSH mode with `switch_mode`, so
+    /// Cancel on the switch leaves the next start local.
     #[test]
-    fn connect_persists_mode_only_on_success() {
+    fn connect_keeps_the_mode_and_switch_mode_saves_it() {
         let fx = Fixture::new("svc-persist");
         upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let failing = fake(vec![ssh_error(TIMED_OUT)]);
@@ -1113,12 +1142,25 @@ pub(crate) mod tests {
         let deps = fx.deps(&good, "", true, true);
         let status = connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap();
         let saved = prefs::stored().remote_server;
-        assert_eq!(saved.mode, ServerMode::Ssh);
+        assert_eq!(saved.mode, ServerMode::Local, "connecting does not switch the app to SSH mode");
         assert_eq!(saved.host, HOST);
         assert_eq!(saved.port, 22);
         assert_eq!(saved.user, "alice");
         assert_eq!(saved.key_path, KEY_PATH);
         assert_eq!(status.link, "restart_required", "the host is not in SSH mode, so the link waits for a restart");
+
+        switch_mode().unwrap();
+        assert_eq!(prefs::stored().remote_server.mode, ServerMode::Ssh, "the switch saves SSH mode");
+    }
+
+    #[test]
+    fn switch_mode_needs_a_saved_server_and_a_pinned_host_key() {
+        let fx = Fixture::new("svc-switch-refuse");
+        assert_eq!(code(switch_mode()), "invalid_host", "no server is saved");
+        prefs::set_remote_ssh(HOST.into(), 22, "alice".into(), KEY_PATH.into(), SshAuthKind::Key, ServerMode::Local).unwrap();
+        assert_eq!(code(switch_mode()), "SSH_HOST_KEY_UNCONFIRMED", "the saved server has no pinned host key");
+        assert_eq!(prefs::stored().remote_server.mode, ServerMode::Local, "a refused switch saves nothing");
+        drop(fx);
     }
 
     #[test]

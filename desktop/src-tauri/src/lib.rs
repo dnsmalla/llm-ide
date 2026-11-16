@@ -481,6 +481,7 @@ macro_rules! product_handlers {
                 ssh_cmds::remote_ssh_server_test,
                 ssh_cmds::remote_ssh_server_confirm,
                 ssh_cmds::remote_ssh_server_connect,
+                ssh_cmds::remote_ssh_switch_mode,
                 ssh_cmds::remote_ssh_server_disconnect,
                 ssh_cmds::remote_ssh_server_status,
                 ssh_cmds::remote_ssh_server_stop,
