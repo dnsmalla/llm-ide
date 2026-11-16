@@ -9,6 +9,8 @@ import {
   REPO_OP_GROUPS,
   REPO_PROVIDERS,
   addSavedRepo,
+  applyCloneResult,
+  cloneDestinationOf,
   normalizeBase,
   readRepoConfig,
   removeSavedRepo,
@@ -19,7 +21,6 @@ import {
   toggleAllowedOp,
   updateSavedRepo,
   repoKeyOf,
-  repoPathOf,
   validateRepoUrl,
   writeRepoConfig,
   type RepoConfig,
@@ -161,18 +162,8 @@ export default function RepositoriesSection() {
     }
   };
 
-  const repoFolderName = (r: SavedRepo): string | null => {
-    // The folder is the project's last path segment (GitLab: group/sub/project clones into code/project).
-    const path = repoPathOf(r.url);
-    if (path) return path.split("/").pop()!;
-    const name = r.displayName.trim();
-    return name ? name.replace(/[^A-Za-z0-9._-]+/g, "-") : null;
-  };
-  const cloneDestination = (r: SavedRepo): string | null => {
-    if (r.clonePath.trim()) return r.clonePath.trim();
-    const name = repoFolderName(r);
-    return codeDir && name ? `${codeDir}/${name}` : null;
-  };
+  const ssh = inSshMode();
+  const cloneDestination = (r: SavedRepo): string | null => cloneDestinationOf(r, codeDir, ssh);
   const addRepo = () => edit((c) => addSavedRepo(c, provider.id));
 
   /** Import a repository's open issues into the core cache, so Issues and Gantt show them with no extra step. */
@@ -211,7 +202,7 @@ export default function RepositoriesSection() {
     setCloneNotice(null);
     try {
       const result = await host.cloneRepository({ provider: provider.id, url: r.url, token: token.trim() || undefined });
-      edit((c) => updateSavedRepo(c, provider.id, r.id, { clonePath: result.path }));
+      edit((c) => applyCloneResult(c, provider.id, r.id, result.path, ssh));
       // Register the clone with the core so issues/graph may read it; Library → Sources owns this allow-list.
       await call(client, "POST", "/auth/me/repos", { path: result.path }).catch(() => undefined);
       setCloneFor(null);
@@ -395,15 +386,23 @@ export default function RepositoriesSection() {
                       spellCheck={false}
                       aria-invalid={urlError(r) !== null}
                       onChange={(e) => patchRepo(r, { url: e.target.value })}
-                      onBlur={() => { if (shouldProvision(r)) autoProvision(r); }}
+                      onBlur={() => { if (shouldProvision(r, ssh)) autoProvision(r); }}
                     />
                     {urlError(r) ? <span className="st-hint" role="alert">{urlError(r)}</span> : null}
                   </label>
-                  <div className="st-field">
-                    <span className="st-label">Local clone</span>
-                    <span className="st-pre">{r.clonePath.trim() || "Not cloned"}</span>
-                    {codeDir && cloneDestination(r) ? <span className="st-hint">Clone destination: <code>{cloneDestination(r)}</code></span> : null}
-                  </div>
+                  {/* Ssh mode: the Mac's clone path is not a server path, so only the server's destination is shown. */}
+                  {ssh ? null : (
+                    <div className="st-field">
+                      <span className="st-label">Local clone</span>
+                      <span className="st-pre">{r.clonePath.trim() || "Not cloned"}</span>
+                      {codeDir && cloneDestination(r) ? <span className="st-hint">Clone destination: <code>{cloneDestination(r)}</code></span> : null}
+                    </div>
+                  )}
+                  {ssh && codeDir && cloneDestination(r) ? (
+                    <div className="st-field">
+                      <span className="st-hint">Clone destination: <code>{cloneDestination(r)}</code></span>
+                    </div>
+                  ) : null}
                   {host.cloneRepository && codeDir && cloneDestination(r) ? (
                     cloneFor === r.id ? (
                       <div className="st-row">

@@ -196,9 +196,49 @@ export function repoKeyOf(provider: RepoProvider, raw: string): string | null {
  * Whether a repository should be cloned (and its issues imported) when its URL field loses focus: a finished, valid
  * owner/repo that is not cloned yet. A repository that already has a clone path is never re-attempted on blur.
  */
-export function shouldProvision(repo: Pick<SavedRepo, "url" | "clonePath">): boolean {
-  if (repo.clonePath.trim() !== "") return false;
+/**
+ * The clone path this computer recorded for a repository. Ssh mode ignores it: the Mac path is not a path on the
+ * server, and a server clone never writes one.
+ */
+export function recordedClonePath(repo: Pick<SavedRepo, "clonePath">, sshMode: boolean): string {
+  return sshMode ? "" : repo.clonePath.trim();
+}
+
+/**
+ * Whether a finished URL should be cloned on blur. Ssh mode asks the server instead of trusting a Mac path, so an
+ * "already exists" answer from the server is the only "already cloned" signal there.
+ */
+export function shouldProvision(repo: Pick<SavedRepo, "url" | "clonePath">, sshMode = false): boolean {
+  if (recordedClonePath(repo, sshMode) !== "") return false;
   return validateRepoUrl(repo.url) === null && repoPathOf(repo.url) !== null;
+}
+
+/** The folder a clone lands in: the repository's last path segment (GitLab: group/sub/project clones into code/project). */
+export function cloneFolderName(repo: Pick<SavedRepo, "url" | "displayName">): string | null {
+  const path = repoPathOf(repo.url);
+  if (path) return path.split("/").pop()!;
+  const name = repo.displayName.trim();
+  return name ? name.replace(/[^A-Za-z0-9._-]+/g, "-") : null;
+}
+
+/** Where a clone goes: the recorded local path (local mode only), else code/<folder> under the project's code/ folder. */
+export function cloneDestinationOf(
+  repo: Pick<SavedRepo, "url" | "displayName" | "clonePath">,
+  codeDir: string | null,
+  sshMode: boolean,
+): string | null {
+  const recorded = recordedClonePath(repo, sshMode);
+  if (recorded) return recorded;
+  const name = cloneFolderName(repo);
+  return codeDir && name ? `${codeDir}/${name}` : null;
+}
+
+/**
+ * Records a finished clone. Local mode keeps the path for the Loop, Factory and Review; a server clone leaves the
+ * saved repository alone so the Mac path that local mode uses is not overwritten.
+ */
+export function applyCloneResult(c: RepoConfig, provider: RepoProvider, id: string, clonedPath: string, sshMode: boolean): RepoConfig {
+  return sshMode ? c : updateSavedRepo(c, provider, id, { clonePath: clonedPath });
 }
 
 export function newId(): string {
