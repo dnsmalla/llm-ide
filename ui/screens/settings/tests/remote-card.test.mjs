@@ -15,7 +15,7 @@ before(async () => {
   const { build } = require("esbuild");
   const outfile = join(bundleDir("remote-card"), "entry.mjs");
   const entry = join(bundleDir("remote-card"), "entry-src.ts");
-  (await import("node:fs")).writeFileSync(entry, `export { default as RemoteServerCard } from ${JSON.stringify(join(HERE, "../sections/RemoteServerCard.tsx"))};\nexport { SettingsEnvProvider } from ${JSON.stringify(join(HERE, "../context.tsx"))};\n`);
+  (await import("node:fs")).writeFileSync(entry, `export { default as RemoteServerCard } from ${JSON.stringify(join(HERE, "../sections/RemoteServerCard.tsx"))};\nexport { ConnectionState, appliedModeFrom, localChoiceNeedsConfirm } from ${JSON.stringify(join(HERE, "../sections/RemoteServerCard.tsx"))};\nexport { SettingsEnvProvider } from ${JSON.stringify(join(HERE, "../context.tsx"))};\n`);
   await build({ entryPoints: [entry], outfile, bundle: true, format: "esm", platform: "node", packages: "external", jsx: "automatic", logLevel: "silent", alias: { "@llmide/ui-kit": join(REPO, "ui/kit/src/index.ts") } });
   m = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 });
@@ -47,4 +47,32 @@ test("the primary URL/email/password flow is visible and Advanced SSH is hidden 
     assert.doesNotMatch(html, new RegExp(hidden), `${hidden} must be behind the closed Advanced section`);
   }
   assert.doesNotMatch(html, /type="password"[^>]*value="[^"]+"/, "the password input is never pre-filled");
+});
+
+const React = require("react");
+const { renderToStaticMarkup } = require("react-dom/server");
+
+// ---- an SSH session: the live mode, not the saved one, is what the card shows ----------------------------------------
+// A launch in SSH mode writes the saved mode back to Local, so the saved mode says "local" during the session.
+
+test("the applied mode is the live mode in an SSH or hub session, and the saved mode otherwise", () => {
+  assert.equal(m.appliedModeFrom("ssh", "local"), "ssh", "SSH session with Local saved");
+  assert.equal(m.appliedModeFrom("remote", "remote"), "remote", "hub session");
+  assert.equal(m.appliedModeFrom("remote", "local"), "remote", "hub live wins over the saved mode");
+  assert.equal(m.appliedModeFrom("local", "local"), "local", "local mode is unchanged");
+  assert.equal(m.appliedModeFrom(null, "local"), "local", "no live mode: the saved mode");
+  assert.equal(m.appliedModeFrom(undefined, "remote"), "remote", "no live mode: the saved mode");
+});
+
+test("an SSH session shows the SSH server line, not Local desktop", () => {
+  const html = renderToStaticMarkup(React.createElement(m.ConnectionState, { s: { hubLogin: null }, me: null, applied: "ssh" }));
+  assert.match(html, /Using the <strong>SSH server<\/strong> below/);
+  assert.doesNotMatch(html, /Local desktop/);
+});
+
+test("choosing Local asks first in an SSH session and in a hub session, never in local mode", () => {
+  assert.equal(m.localChoiceNeedsConfirm("ssh"), true, "SSH session asks before leaving");
+  assert.equal(m.localChoiceNeedsConfirm("remote"), true, "hub session asks before leaving");
+  assert.equal(m.localChoiceNeedsConfirm("local"), false, "local mode switches without a question (unchanged)");
+  assert.equal(m.localChoiceNeedsConfirm(null), false, "before the mode is known nothing is asked");
 });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ServerHome, closeServerConnection } from "./ServerHome.tsx";
+import { ServerHome } from "./ServerHome.tsx";
+import { closeServerConnection } from "../shell/close-server.ts";
 import { goHomeAfterOpen, serverOpenDeps, serverWorkspaceIo } from "../remote-folder/wiring.ts";
 import "@llmide/ui-kit/styles.css";
 import "./welcome.css";

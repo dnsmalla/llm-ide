@@ -13,6 +13,7 @@ import { useStoreSelector } from "../shell/hooks.ts";
 import { coreStatusStore } from "../shell/runtime.ts";
 import type { RemoteProject, WorkspaceIo, OpenFlowDeps } from "../remote-folder/model.ts";
 import { ServerRecentModel } from "../remote-folder/model.ts";
+import { closeServerConnection } from "../shell/close-server.ts";
 
 /** The same sentence the dialog gives under the password field: the password is not kept. */
 export const SERVER_PASSWORD_HINT = "Used only for this connection. It is never saved.";
@@ -188,20 +189,8 @@ export function ServerHomeView(p: ServerHomeViewProps): ReactNode {
   );
 }
 
-/** The guard that every change of the active project runs through (`projectStore.guardLeave`). */
-export type LeaveGuard = <T>(cancelled: T, action: () => Promise<T>) => Promise<T>;
-
-/**
- * Close server: the unsaved-work question first, then the app restart. The restart opens the local Welcome, because a
- * launch in ssh mode already saved the mode back to Local. There is no stop here by design: the server core keeps
- * running, so the next connect is quick. Resolves false when the user stays in the open project.
- */
-export function closeServerConnection(guard: LeaveGuard, restart: () => Promise<unknown>): Promise<boolean> {
-  return guard(false, async () => {
-    await restart();
-    return true;
-  });
-}
+/** Close server lives in the shell so the Settings server card shares it. */
+export { closeServerConnection };
 
 export interface ServerHomeProps {
   io: SshServerIo;

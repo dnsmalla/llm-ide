@@ -168,7 +168,7 @@ export default function ServerSection() {
         {notice ? <p className="st-ok" role="status">{notice}</p> : null}
       </div>
 
-      <RemoteServerCard chosen={chosen} onChoose={setChosen} />
+      <RemoteServerCard chosen={chosen} onChoose={setChosen} live={serverMode} />
       {chosen === "ssh" ? <SshServerCard /> : null}
 
 

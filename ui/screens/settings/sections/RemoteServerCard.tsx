@@ -14,6 +14,24 @@ import { LOCAL_COPY, REMOTE_TEXT, RemoteServerModel, type RemoteServerIo, type R
 import type { ServerMode } from "../host.ts";
 import RemoteDeployCard from "./RemoteDeployCard.tsx";
 import { SSH_LOCAL_CONFIRM } from "../ssh-server-model.ts";
+import { projectStore } from "../../shell/project-store.ts";
+import { closeServerConnection } from "../../shell/close-server.ts";
+
+/**
+ * The mode this launch actually runs. In an SSH or hub session the live mode is the truth: a launch in SSH mode writes
+ * the saved mode back to Local, so the saved mode alone would hide the session. Otherwise the saved mode is the answer.
+ */
+export function appliedModeFrom(live: ServerMode | null | undefined, saved: ServerMode): ServerMode {
+  return live === "ssh" || live === "remote" ? live : saved;
+}
+
+/**
+ * Choosing Local leaves the hub or the SSH server, so it asks first. An SSH session asks too, but leaving it does not save
+ * a mode (the saved mode is already Local): it closes the connection like Close server does.
+ */
+export function localChoiceNeedsConfirm(applied: ServerMode | null): boolean {
+  return applied === "remote" || applied === "ssh";
+}
 
 /** `vite dev`/`tauri dev` only: release builds must use a public domain, never localhost. */
 const DEV = (() => {
@@ -90,7 +108,7 @@ export function ConnectionState({ s, me, applied }: { s: RemoteServerState; me: 
  * `chosen` / `onChoose` come from Server & Backend, which also shows the SSH server card under the choice. Without them
  * the choice follows the saved mode. Choosing a mode is a UI change only; nothing restarts or stops the core until the user acts.
  */
-export default function RemoteServerCard({ chosen, onChoose }: { chosen?: ServerMode; onChoose?: (mode: ServerMode) => void } = {}): ReactNode {
+export default function RemoteServerCard({ chosen, onChoose, live }: { chosen?: ServerMode; onChoose?: (mode: ServerMode) => void; live?: ServerMode | null } = {}): ReactNode {
   const { host, client } = useEnv();
   const available = Boolean(host.getRemoteServer && host.setRemoteServer && host.remoteHubCheck && host.remoteHubLogin);
   const io = useMemo<RemoteServerIo>(() => ({
@@ -124,8 +142,8 @@ export default function RemoteServerCard({ chosen, onChoose }: { chosen?: Server
   // to Local only restarts when the app is genuinely in remote mode.
   useEffect(() => {
     if (!s.loaded || appliedMode !== null) return;
-    setAppliedMode(s.mode);
-  }, [s.loaded, s.mode, appliedMode]);
+    setAppliedMode(appliedModeFrom(live, s.mode));
+  }, [s.loaded, s.mode, appliedMode, live]);
 
   // In remote mode the live account (email + role) comes from the hub itself.
   useEffect(() => {
@@ -167,8 +185,21 @@ export default function RemoteServerCard({ chosen, onChoose }: { chosen?: Server
       setPassword("");
     }
   };
+  // Leaving an SSH session: no mode is saved (it is Local already); the connection closes and the app restarts.
+  const closeSshSession = async () => {
+    try {
+      const left = await closeServerConnection(projectStore.guardLeave, () => (host.restartApp ? host.restartApp() : Promise.reject(new Error("Restarting needs the desktop host."))));
+      if (left) setNotice("Closing the SSH connection. Restarting into Local desktop…");
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "The app could not restart.");
+    }
+  };
   const switchLocal = async () => {
     setConfirmLocal(false);
+    if (appliedMode === "ssh") {
+      await closeSshSession();
+      return;
+    }
     const ok = await m.switchToLocal();
     if (ok) {
       setAppliedMode("local");
@@ -198,7 +229,7 @@ export default function RemoteServerCard({ chosen, onChoose }: { chosen?: Server
             checked={shown === "local"}
             onChange={() => {
               // Leaving the hub or the SSH server is explicit: it asks first, then restarts the core on this computer.
-              if (appliedMode === "remote" || appliedMode === "ssh") setConfirmLocal(true);
+              if (localChoiceNeedsConfirm(appliedMode)) setConfirmLocal(true);
               else { m.setMode("local"); onChoose?.("local"); }
             }}
           />
