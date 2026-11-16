@@ -41,10 +41,16 @@ export async function handleCloneGrant(req, res, { userId }) {
 
 /**
  * POST /internal/clone-credential { grant } with header x-llmide-redeem-key. No JWT: the loopback peer, the redeem key
- * and the single-use grant are the proof. 404 when the core has no redeem key (not server mode); every other refusal is
- * the same 403 with no reason, so a probe learns nothing about which check failed.
+ * (<data dir>/clone-redeem.key, SSH server core only) and the single-use grant are the proof. POST only (405 otherwise).
+ * 404 when the core has no redeem key; every other refusal is the same 403 with no reason, so a probe learns nothing
+ * about which check failed.
  */
 export async function handleCloneCredentialRedeem(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    sendJSON(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed' } });
+    return;
+  }
   const expected = currentCloneRedeemKey();
   if (!expected) {
     sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } });

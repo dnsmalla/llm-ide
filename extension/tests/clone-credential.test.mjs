@@ -308,6 +308,59 @@ test("no token, grant or redeem key reaches the stderr logger during issue and r
   }
 });
 
+test("server mode is an SSH server core only: the flag, not a hub, on a loopback bind", () => {
+  const on = { LLMIDE_SSH_SERVER: "1" };
+  assert.equal(redeemKey.isCloneRedeemServerMode({ env: on, hub: false, host: "127.0.0.1" }), true);
+  assert.equal(redeemKey.isCloneRedeemServerMode({ env: on, hub: false, host: "::1" }), true);
+  assert.equal(redeemKey.isCloneRedeemServerMode({ env: { LLMIDE_SSH_SERVER: "0" }, hub: false, host: "127.0.0.1" }), false);
+  assert.equal(redeemKey.isCloneRedeemServerMode({ env: {}, hub: false, host: "127.0.0.1" }), false, "a nonce alone is not the mode");
+  assert.equal(redeemKey.isCloneRedeemServerMode({ env: on, hub: true, host: "127.0.0.1" }), false, "a hub never holds the key");
+  assert.equal(redeemKey.isCloneRedeemServerMode({ env: on, hub: false, host: "0.0.0.0" }), false, "a non-loopback bind is refused");
+});
+
+test("a stale temp file from an earlier crash is replaced: the key file is 0600 and no temp file remains", () => {
+  reset();
+  fs.mkdirSync(DATA, { recursive: true });
+  const tmp = path.join(DATA, `${redeemKey.CLONE_REDEEM_KEY_FILE}.${process.pid}.tmp`);
+  fs.writeFileSync(tmp, "stale", { mode: 0o644 });
+  const key = startServerMode();
+  assert.equal(fs.existsSync(tmp), false);
+  const file = path.join(DATA, redeemKey.CLONE_REDEEM_KEY_FILE);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(fs.readFileSync(file, "utf8"), key);
+});
+
+test("a write error does not abort the boot: no key, the redeem answers 404, and the key is not logged", async () => {
+  reset();
+  // A regular file where the data directory should be makes every write fail.
+  const blocked = path.join(HERE, "_clone-credential-blocked");
+  fs.writeFileSync(blocked, "not a directory");
+  const chunks = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (c, ...rest) => { chunks.push(String(c)); return original(c, ...rest); };
+  try {
+    assert.equal(redeemKey.initCloneRedeemKey({ dataDir: blocked, serverMode: true }), null);
+  } finally {
+    process.stderr.write = original;
+    fs.rmSync(blocked, { force: true });
+  }
+  assert.equal(redeemKey.currentCloneRedeemKey(), null);
+  assert.match(chunks.join(""), /clone_redeem_key_unavailable/);
+  const out = await redeem({ grant: "e".repeat(64) }, { key: "e".repeat(64) });
+  assert.equal(out.statusCode, 404, out.body);
+});
+
+test("the redeem answers POST only: any other method is 405 and does nothing", async () => {
+  reset();
+  const key = startServerMode();
+  const out = res();
+  const req = redeemReq({ grant: "e".repeat(64) }, { key });
+  req.method = "GET";
+  await credential.handleCloneCredentialRedeem(req, out, { logger: null });
+  assert.equal(out.statusCode, 405);
+  assert.equal(out.headers.Allow, "POST");
+});
+
 test("redeem handler is exported for the dispatcher", () => {
   assert.equal(typeof credential.handleCloneCredentialRedeem, "function");
   assert.equal(typeof credential.handleCloneGrant, "function");

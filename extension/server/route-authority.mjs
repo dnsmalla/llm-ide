@@ -170,8 +170,9 @@ export const ROUTE_POLICY = Object.freeze([
     '/launch-app',
   ]),
   ...rules('public', 'POST', [
-    // SSH server helper redeems a single-use clone grant. No JWT: the handler requires a loopback peer, the core nonce
-    // (LLMIDE_CORE_NONCE, constant-time) and a live unused grant, and answers 404 when the core has no nonce.
+    // SSH server helper redeems a single-use clone grant. No JWT: the handler requires a loopback peer, the redeem key
+    // (<data dir>/clone-redeem.key, x-llmide-redeem-key, constant-time) and a live unused grant. POST only; 404 when the
+    // core is not an SSH server core (LLMIDE_SSH_SERVER=1). The /health nonce does not redeem.
     '/internal/clone-credential',
     '/auth/login',
     '/auth/refresh',
@@ -438,6 +439,8 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/google/drive/folders',
     '/kb/slack/conversations',
   ]),
+  // external.read, not external.write: the grant is minted for the signed-in member only, and it is useless without the
+  // server-side redeem key, which only the SSH server's helper can read.
   ...rules('external.read', 'POST', [
     '/auth/mcp-connector/start',
     '/kb/box/test',

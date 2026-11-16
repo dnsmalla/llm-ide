@@ -21,7 +21,7 @@ import { logger, newRequestId } from './core/logger.mjs';
 import { authenticate, requireRole } from './server/auth.mjs';
 import { enforceRouteAuthority } from './server/route-authority.mjs';
 import { handleCloneCredentialRedeem } from './routes/clone-credential.mjs';
-import { initCloneRedeemKey } from './server/clone-redeem-key.mjs';
+import { initCloneRedeemKey, isCloneRedeemServerMode } from './server/clone-redeem-key.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { handleTeamRoute, isTeamRoute } from './routes/team-routes.mjs';
@@ -472,8 +472,9 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          GET /kb/routing-tiers featureStatus always carries loop and autoTasks, with the `tier` they run on.
 //   v148 — additive: POST /kb/repos/clone-grant { provider } (JWT, external.read) answers { grant: 64 hex | null }, a
 //          single-use 60 s grant for the user's saved github/gitlab token. POST /internal/clone-credential { grant } (no JWT,
-//          loopback peer + x-llmide-core-nonce, 404 with no core nonce) redeems it to { token }; the SSH server helper
-//          is its only caller. Refusals are 403 { error: 'clone_credential_refused' }. Not in /health ENDPOINTS.
+//          POST only) redeems it to { token } when the loopback peer sends x-llmide-redeem-key equal to <data dir>/clone-redeem.key.
+//          That key exists only on an SSH server core (LLMIDE_SSH_SERVER=1, not a hub, loopback bind); otherwise 404. The SSH
+//          server helper is its only caller. Refusals are 403 { error: 'clone_credential_refused' }. Not in /health ENDPOINTS.
 const SERVER_API_VERSION = 148;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
@@ -976,7 +977,7 @@ const server = http.createServer(async (req, res) => {
   //
   // These two dispatchers run before the rate limiter, so the authority table
   // is applied here for them; the general hook below covers every other route.
-  // SSH helper clone-credential redeem (route-authority 'public'): loopback + core nonce + single-use grant, no JWT.
+  // SSH helper clone-credential redeem (route-authority 'public'): loopback + redeem key file + single-use grant, no JWT.
   if ((req.url || '').split('?')[0] === '/internal/clone-credential') {
     try { await handleCloneCredentialRedeem(req, res, { logger: reqLog }); } catch (err) { sendError(res, err, { logger: reqLog }); }
     return;
@@ -1702,8 +1703,11 @@ if (config.hub && !IS_LOOPBACK && !config.tlsTerminated) {
 // the first request, and no request pays the import cost.
 ({ handlers: featureHandlers } = await initFeatureRoutes(config.features));
 
-// Clone redeem key (server/clone-redeem-key.mjs): server mode only; written 0600 before the listener answers.
-initCloneRedeemKey({ dataDir: config.dataDir ?? path.dirname(config.dbPath), serverMode: Boolean(CORE_NONCE) });
+// Clone redeem key (server/clone-redeem-key.mjs): SSH server core only (LLMIDE_SSH_SERVER=1); written 0600 before listen.
+initCloneRedeemKey({
+  dataDir: config.dataDir ?? path.dirname(config.dbPath),
+  serverMode: isCloneRedeemServerMode({ hub: config.hub, host: HOST }),
+});
 server.listen(PORT, HOST, () => {
   // Even when remote binding is explicitly allowed, warn loudly so the
   // operator is reminded the app itself terminates no TLS.

@@ -1,5 +1,7 @@
-// End-to-end: a real `node server.mjs` writes the clone redeem key file only in server mode (LLMIDE_CORE_NONCE set),
-// and the /health identity nonce is never the redeem key. Spawns the server, so it needs local listen.
+// End-to-end: a real `node server.mjs` serves the clone redeem only on an SSH server core. The key file is written and the
+// redeem answers past the key check only when LLMIDE_SSH_SERVER=1 on a loopback, non-hub core. The local desktop core
+// also sets LLMIDE_CORE_NONCE, and must get 404 and no key file. The /health nonce never redeems. Spawns the server,
+// so it needs local listen.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,7 +22,13 @@ function freePort() {
   });
 }
 
-async function withServer({ nonce }, fn) {
+/**
+ * Boots server.mjs with the given core identity.
+ * @param {{ nonce?: string | null, sshServer?: boolean, hub?: boolean }} options The desktop nonce, the SSH server flag and
+ *   hub mode.
+ * @param {(ctx: object) => Promise<void>} fn Receives the data dir, port, /health answer and the output reader.
+ */
+async function withServer({ nonce = null, sshServer = false, hub = false }, fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-clone-key-'));
   const port = await freePort();
   const env = {
@@ -33,7 +41,12 @@ async function withServer({ nonce }, fn) {
     LLMIDE_ENGINE_PREWARM: '0',
   };
   delete env.NODE_TEST_CONTEXT;
-  if (nonce == null) delete env.LLMIDE_CORE_NONCE; else env.LLMIDE_CORE_NONCE = nonce;
+  delete env.LLMIDE_CORE_NONCE;
+  delete env.LLMIDE_SSH_SERVER;
+  delete env.LLMIDE_HUB;
+  if (nonce != null) env.LLMIDE_CORE_NONCE = nonce;
+  if (sshServer) env.LLMIDE_SSH_SERVER = '1';
+  if (hub) env.LLMIDE_HUB = '1';
   const child = spawn(process.execPath, ['server.mjs'], { cwd: EXT, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.on('data', (d) => { output += d; });
@@ -56,36 +69,47 @@ async function withServer({ nonce }, fn) {
   }
 }
 
-test('server mode: the redeem key file is written 0600 at start and is in no /health output or log', async () => {
-  await withServer({ nonce: NONCE }, async ({ dir, port, health, output }) => {
+function redeem(port, key, header = 'x-llmide-redeem-key') {
+  return fetch(`http://127.0.0.1:${port}/internal/clone-credential`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', [header]: key },
+    body: JSON.stringify({ grant: 'e'.repeat(64) }),
+  });
+}
+
+test('SSH server core (LLMIDE_SSH_SERVER=1, loopback): key file 0600, in no /health or log output, and the redeem is live', async () => {
+  await withServer({ nonce: NONCE, sshServer: true }, async ({ dir, port, health, output }) => {
     const file = path.join(dir, 'clone-redeem.key');
     assert.equal(fs.existsSync(file), true, 'key file exists after start');
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
     const key = fs.readFileSync(file, 'utf8');
     assert.match(key, /^[0-9a-f]{64}$/);
     assert.equal(health.body.includes(key), false);
-    assert.equal([...Object.values(Object.fromEntries(health.headers))].join(' ').includes(key), false);
+    assert.equal(Object.values(Object.fromEntries(health.headers)).join(' ').includes(key), false);
     assert.equal(output().includes(key), false, 'the key is never logged');
-    // The /health identity nonce is not the redeem key: a redeem with it is refused (403), not accepted.
-    const r = await fetch(`http://127.0.0.1:${port}/internal/clone-credential`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-llmide-redeem-key': NONCE },
-      body: JSON.stringify({ grant: 'e'.repeat(64) }),
-    });
-    assert.equal(r.status, 403);
-    assert.deepEqual(await r.json(), { error: 'clone_credential_refused' });
+    // The file key passes the key check: an unknown grant is then refused with the same 403, not a 404.
+    const live = await redeem(port, key);
+    assert.equal(live.status, 403);
+    assert.deepEqual(await live.json(), { error: 'clone_credential_refused' });
+    // The /health identity nonce is not the redeem key.
+    const byNonce = await redeem(port, NONCE);
+    assert.equal(byNonce.status, 403);
   });
 });
 
-test('no nonce: no key file is written and the redeem answers 404', async () => {
-  await withServer({ nonce: null }, async ({ dir, port, output }) => {
-    assert.equal(fs.existsSync(path.join(dir, 'clone-redeem.key')), false);
-    const r = await fetch(`http://127.0.0.1:${port}/internal/clone-credential`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-llmide-redeem-key': 'e'.repeat(64) },
-      body: JSON.stringify({ grant: 'e'.repeat(64) }),
-    });
+test('desktop core (LLMIDE_CORE_NONCE set, LLMIDE_SSH_SERVER unset): no key file and the redeem answers 404', async () => {
+  await withServer({ nonce: NONCE }, async ({ dir, port, output }) => {
+    assert.equal(fs.existsSync(path.join(dir, 'clone-redeem.key')), false, 'a nonce alone writes no key');
+    const r = await redeem(port, 'e'.repeat(64));
     assert.equal(r.status, 404);
     assert.equal(output().includes('e'.repeat(64)), false);
+  });
+});
+
+test('hub core (LLMIDE_SSH_SERVER=1 with LLMIDE_HUB=1): no key file and the redeem answers 404', async () => {
+  await withServer({ nonce: NONCE, sshServer: true, hub: true }, async ({ dir, port }) => {
+    assert.equal(fs.existsSync(path.join(dir, 'clone-redeem.key')), false, 'a hub never writes the key');
+    const r = await redeem(port, 'e'.repeat(64));
+    assert.equal(r.status, 404);
   });
 });
