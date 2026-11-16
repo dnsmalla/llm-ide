@@ -1,7 +1,7 @@
 //! Tests for the SSH-mode routing. They use a fake helper channel, so no ssh process starts; the fake records every
 //! request the desktop sends and can end its own channel, the way a dropped connection does.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -512,6 +512,73 @@ fn a_finished_search_gets_no_synthetic_done() {
     let got = seen.lock().unwrap().clone();
     assert_eq!(got.len(), 1, "only the helper's own done reached the page");
     assert_eq!(got[0]["type"], "done");
+}
+
+#[test]
+fn a_timed_out_call_reopens_the_folder_on_the_next_call() {
+    let remote = Remote::new();
+    let connector = FakeConnector::new(|index| {
+        FakeApi::new(move |cmd, args, confirm| {
+            if index == 0 && cmd == "fs_list_dir" {
+                return Err(FsError { code: "SSH_TIMEOUT", message: "The server did not answer in time.".into() });
+            }
+            respond(cmd, args, confirm)
+        })
+    });
+    remote.open(&connector, "/home/u/project").unwrap();
+    let err = remote.call(&connector, "fs_list_dir", json!({"req": {"path": ""}}), &no).unwrap_err();
+    assert_eq!(err.code, "SSH_TIMEOUT");
+    // WorkspaceClient ends a timed-out channel itself; the fake reproduces that end here.
+    connector.channel(0).drop_channel();
+    assert!(remote.folder().is_some(), "a timeout keeps the folder open");
+    let reply = remote.call(&connector, "fs_list_dir", json!({"req": {"path": ""}}), &no).unwrap();
+    assert_eq!(reply["entries"][0]["name"], "a.txt");
+    assert_eq!(connector.connects(), 2, "the timed-out channel is replaced");
+    assert_eq!(connector.channel(1).commands(), vec!["open", "fs_list_dir"], "the saved folder is opened again first");
+}
+
+#[test]
+fn open_without_a_usable_answer_is_refused_and_ends_the_channel() {
+    let remote = Remote::new();
+    let connector = FakeConnector::new(|_| {
+        FakeApi::new(|cmd, args, confirm| match cmd {
+            "open" => Ok(json!({"name": "", "root": ""})),
+            _ => respond(cmd, args, confirm),
+        })
+    });
+    let err = remote.open(&connector, "/home/u/project").unwrap_err();
+    assert_eq!(err.code, "invalid_path");
+    assert!(remote.folder().is_none(), "no folder is kept for an answer without a name or root");
+    assert!(connector.channel(0).is_closed(), "the helper that answered is not kept, so the next call starts a new one");
+}
+
+#[test]
+fn concurrent_opens_do_not_interleave() {
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let most_at_once = Arc::new(AtomicUsize::new(0));
+    let (flight, most) = (in_flight.clone(), most_at_once.clone());
+    let connector = FakeConnector::new(move |_| {
+        let (flight, most) = (flight.clone(), most.clone());
+        FakeApi::new(move |cmd, args, confirm| {
+            if cmd == "open" {
+                let now = flight.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(30));
+                flight.fetch_sub(1, Ordering::SeqCst);
+            }
+            respond(cmd, args, confirm)
+        })
+    });
+    let remote = Remote::new();
+    std::thread::scope(|scope| {
+        for path in ["/home/u/a", "/home/u/b"] {
+            let (remote, connector) = (&remote, &connector);
+            scope.spawn(move || {
+                remote.open(connector, path).unwrap();
+            });
+        }
+    });
+    assert_eq!(most_at_once.load(Ordering::SeqCst), 1, "the second open waits for the first to finish");
 }
 
 fn hub_root(name: &str) -> PathBuf {

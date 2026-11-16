@@ -131,6 +131,9 @@ pub struct Remote {
     /// Serialises connects, so two calls that find the channel gone do not both start one. Held around a connect
     /// and the re-open only, never while a request waits for its answer.
     connecting: Mutex<()>,
+    /// Serialises `open`. Two opens in flight could leave the helper on the folder of one and this app on the
+    /// folder of the other, so every later relative path would hit the wrong folder.
+    opening: Mutex<()>,
 }
 
 fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -270,7 +273,12 @@ impl Default for Remote {
 
 impl Remote {
     pub fn new() -> Self {
-        Self { session: Mutex::new(Session::default()), routes: Arc::new(Mutex::new(Routes::default())), connecting: Mutex::new(()) }
+        Self {
+            session: Mutex::new(Session::default()),
+            routes: Arc::new(Mutex::new(Routes::default())),
+            connecting: Mutex::new(()),
+            opening: Mutex::new(()),
+        }
     }
 
     /// The open server folder, if any. Reads only the stored value; it never touches the channel.
@@ -434,12 +442,20 @@ impl Remote {
 
     /// Opens a folder on the server and makes it the active one. The helper's canonical root is kept.
     pub fn open(&self, connector: &dyn Connector, path: &str) -> R<ProjectInfo> {
+        let _opening = locked(&self.opening);
         let client = self.ensure(connector)?;
         let answer = client.call("open", json!({"root": path}), None)?;
         let info = ProjectInfo {
             name: answer.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
             root: answer.get("root").and_then(Value::as_str).unwrap_or_default().to_string(),
         };
+        if info.name.is_empty() || info.root.is_empty() {
+            // The helper now sits on a folder this app cannot name, so neither side keeps it: the channel ends and
+            // the next call starts a helper with no folder.
+            self.forget_folder();
+            self.drop_client(&client);
+            return Err(FsError { code: "invalid_path", message: "The server did not return a usable folder.".into() });
+        }
         // The helper stopped the previous folder's watch and search when it opened this one.
         self.abort_search();
         self.clear_watch();
