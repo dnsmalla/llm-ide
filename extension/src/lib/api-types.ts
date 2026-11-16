@@ -5786,6 +5786,25 @@ export type PostKbIngestResponse400 = CommonError;
 
 export type PostKbIngestResponse401 = CommonError;
 
+/** Request parts for `POST /kb/repos/clone-grant` (schema/http/kb-sources.schema.json). */
+export type PostKbReposCloneGrantRequest = {
+  body: {
+    /** Which saved token the single-use clone grant is for: github or gitlab; any other value is answered 400. */
+    provider: string;
+  };
+};
+
+export type PostKbReposCloneGrantResponse200 = {
+  /** 64-hex single-use grant, valid 60 s; null when no token is saved for the provider. */
+  grant: string | null;
+};
+
+export type PostKbReposCloneGrantResponse400 = CommonError;
+
+export type PostKbReposCloneGrantResponse401 = CommonError;
+
+export type PostKbReposCloneGrantResponse403 = CommonError;
+
 /** Request parts for `POST /kb/repos/check-token` (schema/http/kb-sources.schema.json). */
 export type PostKbReposCheckTokenRequest = {
   body: {
@@ -10918,6 +10937,15 @@ export interface ApiEndpoints {
       200: PostKbIngestResponse200;
       400: PostKbIngestResponse400;
       401: PostKbIngestResponse401;
+    };
+  };
+  "POST /kb/repos/clone-grant": {
+    request: PostKbReposCloneGrantRequest;
+    responses: {
+      200: PostKbReposCloneGrantResponse200;
+      400: PostKbReposCloneGrantResponse400;
+      401: PostKbReposCloneGrantResponse401;
+      403: PostKbReposCloneGrantResponse403;
     };
   };
   "POST /kb/repos/check-token": {

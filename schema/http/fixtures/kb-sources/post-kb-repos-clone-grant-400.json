@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/repos/clone-grant",
+  "status": 400,
+  "request": {
+    "body": {
+      "provider": "bitbucket"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "provider must be github or gitlab"
+    }
+  }
+}

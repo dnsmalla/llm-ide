@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /kb/repos/clone-grant",
+  "status": 200,
+  "request": {
+    "body": {
+      "provider": "github"
+    }
+  },
+  "response": {
+    "grant": null
+  }
+}

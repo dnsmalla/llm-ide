@@ -14984,8 +14984,6 @@ paths:
                 "$ref": "#/components/schemas/Error"
   /kb/repos/clone-grant:
     post:
-      summary: "Issue a single-use, 60-second clone grant for the saved provider token (SSH server only)"
-      description: "The grant is redeemed on the server by the clone helper over loopback. The token never leaves the server."
       tags:
         - "kb-sources"
       requestBody:
@@ -14999,9 +14997,7 @@ paths:
               properties:
                 provider:
                   type: "string"
-                  enum:
-                    - "github"
-                    - "gitlab"
+                  description: "Which saved token the single-use clone grant is for: github or gitlab; any other value is answered 400."
       responses:
         "200":
           description: "OK"
@@ -15013,9 +15009,10 @@ paths:
                   - "grant"
                 properties:
                   grant:
-                    type: "string"
-                    nullable: true
-                    description: "64 hex characters, or null when the user has no saved token for the provider."
+                    type:
+                      - "string"
+                      - "null"
+                    description: "64-hex single-use grant, valid 60 s; null when no token is saved for the provider."
         "400":
           description: "Bad Request"
           content:
@@ -15028,8 +15025,8 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
-        "429":
-          description: "Rate limited"
+        "403":
+          description: "Forbidden"
           content:
             application/json:
               schema:

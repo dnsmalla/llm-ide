@@ -1118,6 +1118,29 @@
         }
       }
     },
+    "POST /kb/repos/clone-grant": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": ["provider"],
+          "properties": {
+            "provider": { "type": "string", "description": "Which saved token the single-use clone grant is for: github or gitlab; any other value is answered 400." }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["grant"],
+          "properties": {
+            "grant": { "type": ["string", "null"], "description": "64-hex single-use grant, valid 60 s; null when no token is saved for the provider." }
+          }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "401": { "$ref": "_common#/$defs/Error" },
+        "403": { "$ref": "_common#/$defs/Error" }
+      }
+    },
     "POST /kb/repos/check-token": {
       "request": {
         "body": {
