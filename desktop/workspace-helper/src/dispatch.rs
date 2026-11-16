@@ -434,6 +434,16 @@ mod tests {
             std::fs::canonicalize(&self.home).unwrap()
         }
 
+        /// Makes `home/project` with New project and opens it. A clone needs a real project, so the clone tests use
+        /// this instead of `open_project`, which makes a plain folder.
+        fn open_new_project(&mut self) -> PathBuf {
+            ok_of(&self.call(&create_line(1, "~", "project")));
+            let project = self.home.join("project");
+            let reply = self.call(&json!({"id": 2, "cmd": "open", "args": {"root": project.to_string_lossy()}}).to_string());
+            assert!(reply.get("ok").is_some(), "open failed: {reply}");
+            std::fs::canonicalize(&project).unwrap()
+        }
+
         /// Opens `home/project` (created here) as the session's folder.
         fn open_project(&mut self) -> PathBuf {
             let project = self.home.join("project");
@@ -963,9 +973,21 @@ mod tests {
     }
 
     #[test]
+    fn clone_refuses_plain_folder_and_writes_nothing() {
+        let mut f = Fixture::new("clone-plain");
+        let project = f.open_project();
+        std::fs::write(project.join("notes.txt"), "mine").unwrap();
+        let before = tree_listing(&project);
+        let reply = f.call(&clone_line(1, "o/r", None));
+        assert_eq!(code_of(&reply), "not_a_project");
+        assert_eq!(reply["err"]["message"], "This folder is not an LLM-IDE project.");
+        assert_eq!(tree_listing(&project), before, "no code/ folder was made in a plain folder");
+    }
+
+    #[test]
     fn missing_git_is_reported() {
         let mut f = Fixture::new("clone-no-git");
-        f.open_project();
+        f.open_new_project();
         f.session.git_lookup = Box::new(|| None);
         let reply = f.call(&clone_line(1, "o/r", None));
         assert_eq!(code_of(&reply), "git_missing");
@@ -976,7 +998,7 @@ mod tests {
     #[test]
     fn requests_are_answered_while_a_clone_runs() {
         let mut f = Fixture::new("clone-answers");
-        let project = f.open_project();
+        let project = f.open_new_project();
         use_fake_git(&mut f, SLOW_GIT);
         let id = start_clone(&mut f, 1, "o/r");
         wait_for_path(&project.join("code").join("r"));
@@ -992,7 +1014,7 @@ mod tests {
     #[test]
     fn second_clone_is_busy() {
         let mut f = Fixture::new("clone-busy");
-        f.open_project();
+        f.open_new_project();
         use_fake_git(&mut f, SLOW_GIT);
         let id = start_clone(&mut f, 1, "o/one");
         assert_eq!(code_of(&f.call(&clone_line(2, "o/two", None))), "busy");
@@ -1004,7 +1026,7 @@ mod tests {
     #[test]
     fn started_and_event_carry_the_same_id_and_ids_grow() {
         let mut f = Fixture::new("clone-ids");
-        let project = f.open_project();
+        let project = f.open_new_project();
         use_fake_git(&mut f, SLOW_GIT);
         let first = start_clone(&mut f, 1, "o/one");
         wait_for_path(&project.join("code").join("one"));
@@ -1020,7 +1042,7 @@ mod tests {
     #[test]
     fn a_stale_cancel_does_not_stop_a_newer_clone() {
         let mut f = Fixture::new("clone-stale");
-        let project = f.open_project();
+        let project = f.open_new_project();
         use_fake_git(&mut f, SLOW_GIT);
         let old = start_clone(&mut f, 1, "o/one");
         ok_of(&cancel_clone(&f, old));
@@ -1039,7 +1061,7 @@ mod tests {
     #[test]
     fn a_request_right_after_an_event_is_not_refused_as_busy() {
         let mut f = Fixture::new("clone-after-event");
-        let project = f.open_project();
+        let project = f.open_new_project();
         // Succeeds at once: creates the destination and exits 0.
         use_fake_git(&mut f, "last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"");
         let mut id = start_clone(&mut f, 1, "o/one");
@@ -1058,7 +1080,7 @@ mod tests {
     #[test]
     fn cancel_ends_with_clone_event_cancelled() {
         let mut f = Fixture::new("clone-cancel");
-        let project = f.open_project();
+        let project = f.open_new_project();
         use_fake_git(&mut f, SLOW_GIT);
         let id = start_clone(&mut f, 1, "o/r");
         let dest = project.join("code").join("r");
@@ -1075,7 +1097,7 @@ mod tests {
     #[test]
     fn token_never_appears_in_any_output() {
         let mut f = Fixture::new("clone-token");
-        f.open_project();
+        f.open_new_project();
         use_fake_git(&mut f, REFUSING_GIT);
         let marker = "ghp_TOKEN_MARKER_7731";
         // A refused token: the clone retries anonymously, fails, and the event carries git's error only.
@@ -1098,7 +1120,7 @@ mod tests {
     #[test]
     fn graph_read_stays_inside_root() {
         let mut f = Fixture::new("graph-read");
-        let project = f.open_project();
+        let project = f.open_new_project();
         let graph = project.join("graph.json");
         std::fs::write(&graph, r#"{"nodes":[]}"#).unwrap();
         assert_eq!(ok_of(&f.call(&graph_read_line(1, &graph))), r#"{"nodes":[]}"#);

@@ -13,6 +13,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use llmide_workspace_core::git::git_binary;
 use llmide_workspace_core::paths::checked_root;
+use llmide_workspace_core::project::layout;
 use llmide_workspace_core::project::clone::{self, CloneRequest};
 use llmide_workspace_core::search::{aborted_done, run_search, validate, Query, Searches, Started};
 use llmide_workspace_core::trash::{OsTrash, Trasher};
@@ -21,6 +22,7 @@ use llmide_workspace_core::{err, io_err, FsError, R};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::project_setup;
 use crate::protocol::{event, Out, PROTOCOL};
 
 /// The code and text for a folder that was open but is gone. The desktop matches the code, so both are fixed.
@@ -268,10 +270,13 @@ impl Session {
     }
 
     /// Starts a clone into the open project's `code/` folder on its own thread and returns at once. The outcome
-    /// arrives as a `clone` event. Refused before anything starts: no open folder, no git, an invalid request, or a
-    /// clone already running.
+    /// arrives as a `clone` event. Refused before anything starts: no open folder, a folder that is not a project
+    /// (a clone never makes `code/` in a plain folder), no git, an invalid request, or a clone already running.
     pub fn clone_start(&mut self, req: CloneRequest) -> R<Value> {
         let root = self.root()?;
+        if !layout::is_project(&root) {
+            return err("not_a_project", project_setup::NOT_A_PROJECT_MESSAGE);
+        }
         let Some(git) = (self.git_lookup)() else {
             return err("git_missing", GIT_MISSING_MESSAGE);
         };
