@@ -404,14 +404,14 @@ mod tests {
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         let ca_key = KeyPair::generate().unwrap();
         let ca = ca_params.self_signed(&ca_key).unwrap();
-        let mut leaf_params = CertificateParams::new(vec!["hub.example.com".to_string()]).unwrap();
+        let leaf_params = CertificateParams::new(vec!["hub.example.com".to_string()]).unwrap();
         let leaf_key = KeyPair::generate().unwrap();
         let leaf = leaf_params.signed_by(&leaf_key, &ca, &ca_key).unwrap();
         let mut other_ca_params = CertificateParams::new(Vec::new()).unwrap();
         other_ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         let other_ca_key = KeyPair::generate().unwrap();
         let other_ca = other_ca_params.self_signed(&other_ca_key).unwrap();
-        let mut other_leaf_params = CertificateParams::new(vec!["hub.example.com".to_string()]).unwrap();
+        let other_leaf_params = CertificateParams::new(vec!["hub.example.com".to_string()]).unwrap();
         let other_leaf_key = KeyPair::generate().unwrap();
         let other_leaf = other_leaf_params.signed_by(&other_leaf_key, &other_ca, &other_ca_key).unwrap();
         (ca, ca_key, leaf, leaf_key, other_ca, other_leaf)
