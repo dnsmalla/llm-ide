@@ -12,8 +12,6 @@ use crate::session::{home_path, home_root, to_value, Session};
 /// The text the desktop shows for a folder without `system/project.json`. Fixed, because the app matches the code.
 pub const NOT_A_PROJECT_MESSAGE: &str = "This folder is not an LLM-IDE project.";
 
-const TOO_BROAD_MESSAGE: &str = "that location is too broad to hold a project; choose a folder inside it";
-
 /// The reply to `project_create`: the new project's canonical root and its marker identity.
 #[derive(Serialize)]
 struct Created {
@@ -22,15 +20,13 @@ struct Created {
     name: String,
 }
 
-/// Creates `<parent>/<name>` and scaffolds it. The parent must be inside the server home and must not be the home
-/// itself, so a project is never created at the top of the home folder. Needs no open folder and opens none.
+/// Creates `<parent>/<name>` and scaffolds it. The parent must be inside the server home, and the home itself is a
+/// valid parent (`~/name` is a project, as it is locally). The core still refuses a target that is too broad.
+/// Needs no open folder and opens none.
 pub fn create(parent_raw: &str, name_raw: &str) -> R<Value> {
     let name = scaffold::validate_name(name_raw).map_err(|message| FsError { code: "invalid_name", message })?;
     let home = home_root()?;
     let parent = home_path(parent_raw)?;
-    if parent == home {
-        return err("root_too_broad", TOO_BROAD_MESSAGE);
-    }
     let (root, project) = scaffold::create_project(&parent, &name, &home).map_err(scaffold_error)?;
     to_value(&Created { root: root.to_string_lossy().into_owned(), id: project.id, name: project.display_name })
 }

@@ -536,15 +536,19 @@ mod tests {
     }
 
     #[test]
-    fn create_refuses_home_and_outside() {
+    fn create_allows_home_refuses_outside() {
         let mut f = Fixture::new("create-refused");
         std::fs::create_dir_all(f.home.join("work")).unwrap();
+        // A project in the home folder is allowed, as it is locally: `~/Alpha` is the project root.
+        let home_root = f.canonical_home();
+        let made = ok_of(&f.call(&create_line(1, "~", "Alpha"))).clone();
+        assert_eq!(made["root"], home_root.join("Alpha").to_string_lossy().as_ref());
+        assert!(home_root.join("Alpha").join("system/project.json").is_file());
         let home_before = tree_listing(&f.home);
-        assert_eq!(code_of(&f.call(&create_line(1, "~", "Alpha"))), "root_too_broad", "the home itself is no parent");
         let outside = f.outside.to_string_lossy().into_owned();
         assert_eq!(code_of(&f.call(&create_line(2, &outside, "Alpha"))), "outside_home");
         assert_eq!(code_of(&f.call(&create_line(3, "~/work", ".."))), "invalid_name");
-        assert_eq!(tree_listing(&f.home), home_before, "nothing was written in the home folder");
+        assert_eq!(tree_listing(&f.home), home_before, "a refused create wrote nothing in the home folder");
         assert!(tree_listing(&f.outside).is_empty(), "nothing was written outside the home folder");
         assert!(tree_listing(&f.home.join("work")).is_empty(), "no project folder was made");
     }
