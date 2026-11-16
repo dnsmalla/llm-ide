@@ -9,7 +9,8 @@ use std::io;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, TryLockError};
+use std::time::{Duration, Instant};
 
 use llmide_workspace_core::git::git_binary;
 use llmide_workspace_core::paths::checked_root;
@@ -96,6 +97,34 @@ impl Clones {
         }
     }
 }
+
+impl Clones {
+    /// Cancels the running clone and waits, for a short bound, until its partial folder is removed and the slot is
+    /// freed. Called when the helper is about to exit on a failed write, so git does not outlive the process.
+    /// It never blocks on the slot's lock when that lock is held: a clone's own `end` can be the failing write, and
+    /// then the clone has already finished, so this returns at once.
+    pub fn stop_for_exit(&self) {
+        let mut running = match self.running.try_lock() {
+            Ok(guard) => guard,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return,
+        };
+        let Some((_, flag)) = running.as_ref() else { return };
+        flag.store(true, Ordering::SeqCst);
+        let deadline = Instant::now() + EXIT_WAIT;
+        while running.is_some() {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else { break };
+            running = match self.ended.wait_timeout(running, left) {
+                Ok((guard, _)) => guard,
+                Err(poisoned) => poisoned.into_inner().0,
+            };
+        }
+    }
+}
+
+/// How long the exit path waits for a cancelled clone to remove its folder. A clone that is still going after this
+/// is left as it is, and the process exits anyway.
+const EXIT_WAIT: Duration = Duration::from_secs(5);
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|p| p.into_inner())

@@ -33,9 +33,12 @@ enum Job {
 }
 
 fn main() {
-    let out = Arc::new(Out::new(Box::new(io::stdout()), true));
-    let searches = Arc::new(Searches::new());
     let clones = Arc::new(Clones::new());
+    // A failed write ends the process, so the clone is stopped first: git runs in its own process group and would
+    // otherwise outlive the helper.
+    let stop_clone = Arc::clone(&clones);
+    let out = Arc::new(Out::stdout(Box::new(move || stop_clone.stop_for_exit())));
+    let searches = Arc::new(Searches::new());
     let (tx, rx) = mpsc::sync_channel::<Job>(QUEUE_CAPACITY);
     let worker = {
         let out = Arc::clone(&out);

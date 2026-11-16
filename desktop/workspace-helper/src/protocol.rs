@@ -120,11 +120,21 @@ pub struct Out {
     /// True for the real stdout: the desktop has gone away, so there is nobody left to answer and the process
     /// ends quietly instead of reporting a broken pipe.
     exit_on_failure: bool,
+    /// Runs before the process exits on a failed write, so a running clone is stopped first and git does not outlive
+    /// the helper. It runs after the sink lock is released, because a clone's own event needs that lock.
+    before_exit: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Out {
+    /// A writer over any sink, for the tests. The process uses `stdout`.
+    #[cfg(test)]
     pub fn new(sink: Box<dyn Write + Send>, exit_on_failure: bool) -> Self {
-        Self { sink: Mutex::new(sink), exit_on_failure }
+        Self { sink: Mutex::new(sink), exit_on_failure, before_exit: None }
+    }
+
+    /// The real stdout. A failed write runs `before_exit`, then ends the process.
+    pub fn stdout(before_exit: Box<dyn Fn() + Send + Sync>) -> Self {
+        Self { sink: Mutex::new(Box::new(io::stdout())), exit_on_failure: true, before_exit: Some(before_exit) }
     }
 
     /// Writes one message as one line. Returns `false` when the write failed.
@@ -136,6 +146,9 @@ impl Out {
         if written.is_err() {
             drop(sink);
             if self.exit_on_failure {
+                if let Some(before_exit) = &self.before_exit {
+                    before_exit();
+                }
                 std::process::exit(0);
             }
             return false;

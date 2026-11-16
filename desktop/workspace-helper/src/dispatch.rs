@@ -1075,6 +1075,24 @@ mod tests {
         assert!(project.join("code").join("round4").is_dir());
     }
 
+    /// The exit path (a failed write) stops a running clone: git is killed, the partial folder is removed and the slot
+    /// is freed, so nothing is left running when the process ends. `process::exit` itself is not run in a test.
+    #[cfg(unix)]
+    #[test]
+    fn stopping_for_exit_removes_the_partial_clone() {
+        let mut f = Fixture::new("clone-exit");
+        let project = f.open_new_project();
+        use_fake_git(&mut f, SLOW_GIT);
+        let id = start_clone(&mut f, 1, "o/r");
+        let dest = project.join("code").join("r");
+        wait_for_path(&dest);
+        f.session.clones.stop_for_exit();
+        assert!(!dest.exists(), "the partial folder is removed before the exit");
+        let data = clone_event(&f.captured, id);
+        assert_eq!(data["code"], "cancelled");
+        assert!(f.session.clones.begin().is_some(), "the slot is free once the clone has ended");
+    }
+
     #[cfg(unix)]
     #[test]
     fn cancel_ends_with_clone_event_cancelled() {
