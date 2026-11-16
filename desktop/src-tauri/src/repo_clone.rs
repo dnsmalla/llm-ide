@@ -8,18 +8,14 @@
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use llmide_workspace_core::project::clone::{plan, run, CloneRequest, CloneResult, Token};
+// The desktop waits as long as the clone itself may run: one constant, shared with the core and the helper.
+use llmide_workspace_core::project::clone::{plan, run, CloneRequest, CloneResult, Token, CLONE_CAP};
 use serde_json::{json, Value};
 
 use crate::workspace_backend::{self, Connector, Remote};
 
 /// The local command has no cancel control, so its flag is never set. The SSH helper is the one that cancels.
 static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
-
-/// How long a server clone may run before it is cancelled. The same 30 minutes the core gives a local clone.
-// TODO: use the core's CLONE_CAP once `llmide_workspace_core::project::clone` exports it (it is private today). Until
-// then both constants must stay 30 minutes; the helper has its own cap.
-const CLONE_CAP: Duration = Duration::from_secs(30 * 60);
 
 #[tauri::command]
 pub async fn repo_clone(provider: String, url: String, token: Option<String>, folder: Option<String>) -> Result<CloneResult, String> {
