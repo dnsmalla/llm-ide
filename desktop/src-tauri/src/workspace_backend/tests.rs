@@ -3,7 +3,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::json;
 
@@ -631,4 +631,135 @@ fn hub_mode_search_and_watch_run_on_the_active_project() {
     });
     assert!(search.is_ok(), "search had no hub refusal before SSH mode existed: {search:?}");
     assert!(watch.is_ok(), "watch had no hub refusal before SSH mode existed: {watch:?}");
+}
+
+/// A helper that answers the project-setup commands the way the real one does, on top of the usual answers.
+fn project_setup(cmd: &str, args: &Value, confirm: Option<&str>) -> Result<Value, FsError> {
+    match cmd {
+        "project_paths" => Ok(json!({"root": "/srv/home/proj", "code": "/srv/home/proj/code"})),
+        "project_rebuild" => Err(FsError { code: "not_a_project", message: "This folder is not an LLM-IDE project.".into() }),
+        "project_create" => Ok(json!({"root": "/srv/home/new", "id": "p1", "name": "new"})),
+        "repo_clone" => Ok(json!({"started": true})),
+        _ => respond(cmd, args, confirm),
+    }
+}
+
+fn project_setup_connector() -> Arc<FakeConnector> {
+    Arc::new(FakeConnector::new(|_| FakeApi::new(project_setup)))
+}
+
+fn open_folder(root: &str) -> ProjectInfo {
+    ProjectInfo { name: "proj".into(), root: root.into() }
+}
+
+#[test]
+fn ssh_project_paths_goes_to_helper() {
+    let remote = Remote::new();
+    remote.set_folder_for_test(Some(open_folder("/srv/home/proj")));
+    let connector = project_setup_connector();
+    let answer = remote.call(&*connector, "project_paths", json!({}), &no).expect("paths");
+    assert_eq!(answer["root"], "/srv/home/proj");
+    assert!(connector.channel(0).commands().contains(&"project_paths".to_string()));
+}
+
+#[test]
+fn ssh_rebuild_maps_to_project_rebuild() {
+    let remote = Remote::new();
+    remote.set_folder_for_test(Some(open_folder("/srv/home/plain")));
+    let connector = project_setup_connector();
+    let err = remote.call(&*connector, "project_rebuild", json!({}), &no).expect_err("plain folder");
+    assert_eq!(err.code, "not_a_project");
+    assert_eq!(err.message, "This folder is not an LLM-IDE project.");
+    assert_eq!(connector.channel(0).commands().last().map(String::as_str), Some("project_rebuild"));
+}
+
+#[test]
+fn project_create_then_opens() {
+    let remote = Remote::new();
+    let connector = project_setup_connector();
+    let info = remote.project_create(&*connector, "/srv/home", "new").expect("create");
+    assert_eq!(info, ProjectInfo { name: "new".into(), root: "/srv/home/new".into() });
+    assert_eq!(connector.channel(0).commands(), vec!["project_create".to_string(), "open".to_string()]);
+    assert_eq!(remote.folder(), Some(info));
+}
+
+/// Runs `clone_repo` on another thread, waits until the request is on the channel, then runs `after` on the channel.
+fn clone_while(
+    answer: fn(&str, &Value, Option<&str>) -> Result<Value, FsError>,
+    cap: Duration,
+    after: impl FnOnce(&FakeApi),
+) -> (R<Value>, Vec<String>) {
+    let remote = Arc::new(Remote::new());
+    let connector = Arc::new(FakeConnector::new(move |_| FakeApi::new(answer)));
+    let worker = {
+        let (remote, connector) = (remote.clone(), connector.clone());
+        std::thread::spawn(move || remote.clone_repo(&*connector, json!({"provider": "github", "url": "o/r"}), cap))
+    };
+    let api = loop {
+        if connector.connects() > 0 && connector.channel(0).commands().contains(&"repo_clone".to_string()) {
+            break connector.channel(0);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    after(api.as_ref());
+    let result = worker.join().expect("worker");
+    (result, api.commands())
+}
+
+#[test]
+fn clone_wait_returns_event_result() {
+    let (result, _) = clone_while(project_setup, Duration::from_secs(10), |api| {
+        api.emit(EventKind::Clone, json!({"ok": true, "path": "/srv/home/proj/code/r", "name": "r"}));
+    });
+    assert_eq!(result.expect("clone"), json!({"path": "/srv/home/proj/code/r", "name": "r"}));
+}
+
+#[test]
+fn clone_wait_returns_the_helper_error() {
+    let (result, _) = clone_while(project_setup, Duration::from_secs(10), |api| {
+        api.emit(EventKind::Clone, json!({"ok": false, "code": "clone_failed", "message": "git exited with status 128"}));
+    });
+    let err = result.expect_err("clone failure");
+    assert_eq!(err.code, "clone_failed");
+    assert_eq!(err.message, "git exited with status 128");
+}
+
+#[test]
+fn clone_wait_ends_when_channel_closes() {
+    let started = Instant::now();
+    let (result, commands) = clone_while(project_setup, Duration::from_secs(30 * 60), |api| api.drop_channel());
+    let err = result.expect_err("lost channel");
+    assert_eq!(err.code, "lost_connection");
+    assert!(started.elapsed() < Duration::from_secs(10), "the wait must not run to the cap");
+    assert!(!commands.contains(&"clone_cancel".to_string()));
+}
+
+#[test]
+fn clone_timeout_sends_cancel() {
+    let (result, commands) = clone_while(project_setup, Duration::from_millis(300), |_| {});
+    assert_eq!(result.expect_err("timeout").code, TIMEOUT_CODE);
+    assert!(commands.contains(&"clone_cancel".to_string()));
+}
+
+#[test]
+fn clone_token_is_sent_only_in_the_request() {
+    let remote = Remote::new();
+    let connector = project_setup_connector();
+    let req = json!({"provider": "github", "url": "o/r", "token": "ghp_secret"});
+    let _ = remote.clone_repo(&*connector, req, Duration::from_millis(50));
+    let sent = connector.channel(0).calls();
+    let repo_clone = sent.iter().find(|(cmd, _, _)| cmd == "repo_clone").expect("repo_clone sent");
+    assert_eq!(repo_clone.1["req"]["token"], "ghp_secret");
+    assert!(!sent.iter().filter(|(cmd, _, _)| cmd != "repo_clone").any(|(_, args, _)| args.to_string().contains("ghp_secret")));
+}
+
+#[test]
+fn local_mode_unchanged() {
+    let _mode = crate::core_host::process_mode_guard();
+    crate::core_host::set_process_mode(0);
+    assert!(!is_ssh_mode());
+    assert!(refuse_in_ssh_mode().is_ok());
+    crate::core_host::set_process_mode(2);
+    assert_eq!(refuse_in_ssh_mode().expect_err("ssh refuses").code, "ssh_mode");
+    crate::core_host::set_process_mode(0);
 }

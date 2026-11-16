@@ -66,11 +66,12 @@ const MAX_CODE_CHARS: usize = 40;
 /// Shown when a server error has no usable message.
 const NO_MESSAGE: &str = "The server reported an error.";
 
-/// The kinds of helper events. The wire names are `search` and `watch`.
+/// The kinds of helper events. The wire names are `search`, `watch` and `clone`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
     Search,
     Watch,
+    Clone,
 }
 
 impl EventKind {
@@ -78,6 +79,7 @@ impl EventKind {
         match name {
             "search" => Some(Self::Search),
             "watch" => Some(Self::Watch),
+            "clone" => Some(Self::Clone),
             _ => None,
         }
     }
@@ -393,7 +395,7 @@ fn parse_answer(value: &Value) -> Result<Value, FsError> {
 /// Rebuilds the helper's `{code, message}` as an [`FsError`] through the shared crate's deserializer, which
 /// interns the code into the same table the desktop's own errors use. The code is checked for shape first; a
 /// code that fails the check becomes [`REMOTE_CODE`]. The message is capped, not replaced.
-fn decode_error(err: &Value) -> FsError {
+pub(crate) fn decode_error(err: &Value) -> FsError {
     let raw_code = err.get("code").and_then(Value::as_str).unwrap_or_default();
     let code = if is_wire_code(raw_code) { raw_code } else { REMOTE_CODE };
     let message: String = err

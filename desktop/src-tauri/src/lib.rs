@@ -159,8 +159,13 @@ fn host_platform() -> &'static str {
 
 /// Reads a graph-kit `graph.json` from inside the active project root only
 /// (see `graph_file`); the root is host-chosen, never supplied by the webview.
+/// In SSH mode the server's graph is read through the helper (`graph_read`), off the UI thread.
 #[tauri::command]
-fn read_graph_file(path: String) -> Result<String, String> {
+async fn read_graph_file(path: String) -> Result<String, String> {
+    if workspace_backend::is_ssh_mode() {
+        let answer = workspace_backend::remote_project_call("graph_read", serde_json::json!({"path": path})).await.map_err(|e| e.message)?;
+        return answer.as_str().map(str::to_string).ok_or_else(|| "The server sent an answer this app does not understand.".to_string());
+    }
     let root = graph_file::project_root().ok_or("no project root configured")?;
     graph_file::read_within(&root, &path)
 }
@@ -495,6 +500,7 @@ macro_rules! product_handlers {
                 ssh_workspace_cmds::remote_ssh_workspace_close,
                 ssh_workspace_cmds::remote_ssh_workspace_recent,
                 ssh_workspace_cmds::remote_ssh_workspace_forget,
+                ssh_workspace_cmds::remote_ssh_project_create,
                 app_restart,
                 remote_deploy::remote_deploy_plan,
                 remote_deploy::remote_deploy_bootstrap,

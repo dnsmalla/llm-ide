@@ -194,6 +194,7 @@ const COMMANDS: &[&str] = &[
     "remote_ssh_workspace_close",
     "remote_ssh_workspace_recent",
     "remote_ssh_workspace_forget",
+    "remote_ssh_project_create",
     "app_restart",
     "remote_deploy_plan",
     "remote_deploy_bootstrap",

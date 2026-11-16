@@ -10,7 +10,9 @@
 //! and app exit reach it through the link's detach.
 
 use std::path::PathBuf;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant};
 
 use llmide_workspace_core::scm::confirm_spec;
 use llmide_workspace_core::search::aborted_done;
@@ -18,10 +20,10 @@ use llmide_workspace_core::{FsError, R};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::confirm::DialogGuard;
+use crate::confirm::{herr, DialogGuard};
 use crate::project::ProjectInfo;
 use crate::ssh_link::HelperSpawn;
-use crate::ssh_workspace::{lost, EventKind, EventSink, WorkspaceClient};
+use crate::ssh_workspace::{decode_error, lost, EventKind, EventSink, WorkspaceClient};
 
 /// The reply the helper gives when a destructive command needs the user's answer first. Its message is the question.
 const CONFIRM_REQUIRED: &str = "confirm_required";
@@ -32,6 +34,12 @@ const CHANGED_MESSAGE: &str = "the files changed while the dialog was open; noth
 /// The codes that mean the channel itself failed, so the folder stays open and the next call reconnects.
 const LOST_CODE: &str = "lost_connection";
 const TIMEOUT_CODE: &str = "SSH_TIMEOUT";
+/// A clone is already running on this channel. The helper allows one at a time too; this refuses before sending.
+const BUSY_CODE: &str = "busy";
+const BUSY_MESSAGE: &str = "A repository is already being cloned.";
+const CLONE_TIMEOUT_MESSAGE: &str = "The clone did not finish in time and was cancelled.";
+/// How often a waiting clone checks that its channel is still up. A dropped link ends the wait within this.
+const CLONE_POLL: Duration = Duration::from_millis(250);
 
 /// How many search events may arrive before the start reply names their search. The helper starts the scan before
 /// it answers, so a few events can come first; anything past this cap is dropped, which only trims the early ones.
@@ -112,6 +120,8 @@ struct Routes {
     watch: Option<Sink>,
     /// The directories the UI last asked to watch, sent again after a reconnect.
     watch_dirs: Option<Vec<String>>,
+    /// Where the running clone's `clone` event goes. Set only while one `clone_repo` call waits.
+    clone: Option<mpsc::Sender<Value>>,
 }
 
 #[derive(Default)]
@@ -188,6 +198,44 @@ fn route_search(routes: &Mutex<Routes>, data: Value) {
     };
     if let Some((sink, data)) = forward {
         sink(data);
+    }
+}
+
+fn route_clone(routes: &Mutex<Routes>, data: Value) {
+    let sender = locked(routes).clone.clone();
+    if let Some(sender) = sender {
+        // The waiting call may already have given up; then nothing is listening and the event is dropped.
+        let _ = sender.send(data);
+    }
+}
+
+/// The result of a clone from its `clone` event: `{path, name}` on success, the helper's error otherwise.
+fn clone_outcome(data: &Value) -> R<Value> {
+    if data.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(decode_error(data));
+    }
+    match (data.get("path").and_then(Value::as_str), data.get("name").and_then(Value::as_str)) {
+        (Some(path), Some(name)) => Ok(json!({"path": path, "name": name})),
+        _ => Err(FsError { code: "bad_response", message: "The server sent an answer this app does not understand.".into() }),
+    }
+}
+
+/// Waits for a clone's event. Ends at once when the channel closes, and at `cap` it sends `clone_cancel` so the
+/// helper does not keep cloning for a page that has given up.
+fn wait_for_clone(client: &dyn WorkspaceApi, events: &mpsc::Receiver<Value>, cap: Duration) -> R<Value> {
+    let deadline = Instant::now() + cap;
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            let _ = client.call("clone_cancel", json!({}), None);
+            return Err(herr(TIMEOUT_CODE, CLONE_TIMEOUT_MESSAGE));
+        }
+        match events.recv_timeout(CLONE_POLL.min(deadline - now)) {
+            Ok(data) => return clone_outcome(&data),
+            Err(RecvTimeoutError::Timeout) if client.is_closed() => return Err(lost()),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return Err(lost()),
+        }
     }
 }
 
@@ -393,6 +441,8 @@ impl Remote {
         client.subscribe(EventKind::Search, Box::new(move |data| route_search(&routes, data)));
         let routes = self.routes.clone();
         client.subscribe(EventKind::Watch, Box::new(move |data| route_watch(&routes, data)));
+        let routes = self.routes.clone();
+        client.subscribe(EventKind::Clone, Box::new(move |data| route_clone(&routes, data)));
     }
 
     /// After a reconnect: start watching again, and send the directories the UI had asked for. Best effort; the
@@ -438,6 +488,40 @@ impl Remote {
         locked(&self.session).folder = None;
         self.abort_search();
         self.clear_watch();
+    }
+
+    /// Creates a project folder under `parent` on the server, then opens it. Nothing else changes; the helper
+    /// checks the parent and the name, and the open is the same one the picker uses.
+    pub fn project_create(&self, connector: &dyn Connector, parent: &str, name: &str) -> R<ProjectInfo> {
+        let client = self.ensure(connector)?;
+        let answer = client.call("project_create", json!({"parent": parent, "name": name}), None)?;
+        let root = answer.get("root").and_then(Value::as_str).unwrap_or_default();
+        if root.is_empty() {
+            return Err(FsError { code: "invalid_path", message: "The server did not return a usable folder.".into() });
+        }
+        self.open(connector, root)
+    }
+
+    /// Runs a clone on the server and waits for its `clone` event, up to `cap`. The request carries the token, so it
+    /// is never logged here. Only one clone runs per channel at a time.
+    pub fn clone_repo(&self, connector: &dyn Connector, req: Value, cap: Duration) -> R<Value> {
+        let client = self.ensure(connector)?;
+        // The route is set before the request is sent, so an event that comes straight after the reply is kept.
+        let events = {
+            let mut r = locked(&self.routes);
+            if r.clone.is_some() {
+                return Err(herr(BUSY_CODE, BUSY_MESSAGE));
+            }
+            let (tx, rx) = mpsc::channel();
+            r.clone = Some(tx);
+            rx
+        };
+        let outcome = match client.call("repo_clone", json!({"req": req}), None) {
+            Ok(_) => wait_for_clone(&*client, &events, cap),
+            Err(e) => Err(e),
+        };
+        locked(&self.routes).clone = None;
+        outcome
     }
 
     /// Opens a folder on the server and makes it the active one. The helper's canonical root is kept.
@@ -605,6 +689,14 @@ pub fn project_info() -> Option<ProjectInfo> {
 /// Closes the helper channel and forgets the open folder. Safe to call when nothing is open.
 pub fn reset() {
     remote().reset();
+}
+
+/// Runs a project-setup command (`project_paths`, `project_memory`, `project_rebuild`, `graph_read`) on the open
+/// server folder. The answer is the JSON the local command returns, so the caller keeps its local shape.
+pub async fn remote_project_call(cmd: &'static str, args: Value) -> R<Value> {
+    tauri::async_runtime::spawn_blocking(move || remote().call(&LinkConnector, cmd, args, &native_dialog))
+        .await
+        .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?
 }
 
 /// Runs an Explorer command. In SSH mode it goes to the server: `args` builds the UI's argument object from the

@@ -3,11 +3,18 @@
 //! Every path is derived from the ACTIVE project root the host accepted (`project::active_root`); the webview
 //! never supplies one. The layout itself lives in `llmide_workspace_core::project::layout`, shared with the SSH helper.
 //! "Show in Finder" goes through the existing `reveal_in_os`, which re-checks the path against the same root.
+//!
+//! In SSH server mode the same commands run on the server through the helper (`project_paths`, `project_memory`,
+//! `project_rebuild`). Their JSON answers have the same shape as the local ones.
 
 use std::path::PathBuf;
 
-use llmide_workspace_core::project::layout::{self, Paths, ProjectMemory};
+use llmide_workspace_core::project::layout;
 use llmide_workspace_core::project::scaffold;
+use serde::Serialize;
+use serde_json::{json, Value};
+
+use crate::workspace_backend;
 
 fn active_root() -> Result<PathBuf, String> {
     crate::project::active_root().ok_or_else(|| "no project is open".to_string())
@@ -17,22 +24,41 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("project layout task failed: {e}"))
 }
 
-#[tauri::command]
-pub async fn project_paths() -> Result<Paths, String> {
-    let root = active_root()?;
-    blocking(move || layout::paths(&root)).await
+/// Runs a project-setup command on the server. The helper's error message is the page's message.
+async fn ssh_call(cmd: &'static str) -> Result<Value, String> {
+    workspace_backend::remote_project_call(cmd, json!({})).await.map_err(|e| e.message)
+}
+
+fn to_json<T: Serialize>(value: &T) -> Result<Value, String> {
+    serde_json::to_value(value).map_err(|e| format!("cannot encode the result: {e}"))
 }
 
 #[tauri::command]
-pub async fn project_memory() -> Result<ProjectMemory, String> {
+pub async fn project_paths() -> Result<Value, String> {
+    if workspace_backend::is_ssh_mode() {
+        return ssh_call("project_paths").await;
+    }
     let root = active_root()?;
-    blocking(move || layout::memory(&root)).await
+    to_json(&blocking(move || layout::paths(&root)).await?)
+}
+
+#[tauri::command]
+pub async fn project_memory() -> Result<Value, String> {
+    if workspace_backend::is_ssh_mode() {
+        return ssh_call("project_memory").await;
+    }
+    let root = active_root()?;
+    to_json(&blocking(move || layout::memory(&root)).await?)
 }
 
 /// Re-create missing canonical folders/files for the active project (the Mac's "Rebuild missing folders").
 /// Idempotent: `scaffold::scaffold` only writes files that are absent, so user edits are never replaced.
+/// In SSH mode the helper does this only for a folder that is already a project; any other folder is refused.
 #[tauri::command]
 pub async fn project_rebuild_folders() -> Result<(), String> {
+    if workspace_backend::is_ssh_mode() {
+        return ssh_call("project_rebuild").await.map(|_| ());
+    }
     let root = active_root()?;
     blocking(move || scaffold::scaffold(&root, &layout::project_meta(&root))).await?
 }

@@ -41,15 +41,32 @@ pub async fn remote_ssh_workspace_mkdir(path: String, name: String) -> R<Value> 
     blocking(move || workspace_backend::remote().mkdir(&LinkConnector, &path, &name)).await
 }
 
+/// Remembers an opened server folder under the saved server. A failure to remember it does not undo the open.
+fn remember_opened(info: &ProjectInfo) {
+    if let Err(e) = prefs::record_ssh_recent_folder(&current_server_key(), &info.root) {
+        eprintln!("ssh workspace: recent folder not saved: {}", e.code);
+    }
+}
+
 /// Opens a folder on the server as the active project and remembers it under the saved server. A failure to
 /// remember it does not undo the open.
 #[tauri::command]
 pub async fn remote_ssh_workspace_open(path: String) -> R<ProjectInfo> {
     blocking(move || {
         let info = workspace_backend::remote().open(&LinkConnector, &path)?;
-        if let Err(e) = prefs::record_ssh_recent_folder(&current_server_key(), &info.root) {
-            eprintln!("ssh workspace: recent folder not saved: {}", e.code);
-        }
+        remember_opened(&info);
+        Ok(info)
+    })
+    .await
+}
+
+/// New project on the server: creates `<parent>/<name>` on the server, then opens it like `remote_ssh_workspace_open`.
+/// The helper refuses a name that exists and a parent outside the server home, and writes nothing in either case.
+#[tauri::command]
+pub async fn remote_ssh_project_create(parent: String, name: String) -> R<ProjectInfo> {
+    blocking(move || {
+        let info = workspace_backend::remote().project_create(&LinkConnector, &parent, &name)?;
+        remember_opened(&info);
         Ok(info)
     })
     .await
@@ -83,7 +100,7 @@ pub async fn remote_ssh_workspace_forget(path: String) -> R<()> {
 mod tests {
     use std::path::Path;
 
-    /// The six commands the page calls, which must be registered in the three places a Tauri command needs.
+    /// The commands the page calls, which must be registered in the three places a Tauri command needs.
     const COMMANDS: &[&str] = &[
         "remote_ssh_workspace_list_dirs",
         "remote_ssh_workspace_mkdir",
@@ -91,6 +108,7 @@ mod tests {
         "remote_ssh_workspace_close",
         "remote_ssh_workspace_recent",
         "remote_ssh_workspace_forget",
+        "remote_ssh_project_create",
     ];
 
     #[test]

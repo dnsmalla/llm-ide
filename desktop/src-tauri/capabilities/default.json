@@ -185,6 +185,7 @@
     "allow-remote-ssh-workspace-close",
     "allow-remote-ssh-workspace-recent",
     "allow-remote-ssh-workspace-forget",
+    "allow-remote-ssh-project-create",
     "allow-app-restart",
     "allow-remote-deploy-plan",
     "allow-remote-deploy-bootstrap",

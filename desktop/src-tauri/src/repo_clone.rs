@@ -1,17 +1,31 @@
 //! The desktop's `repo_clone` command: a thin wrapper over `llmide_workspace_core::project::clone`, which holds the
 //! validation, the git invocation and the cancel handling. The token is handed to the core as a `Token` (redacted in
-//! `Debug`) and never returned. This wrapper keeps the host state: the SSH-mode refusal and the active project root.
+//! `Debug`) and never returned. This wrapper keeps the host state: the active project root.
+//!
+//! In SSH server mode the clone runs on the server: the helper gets the request on its stdin and reports through a
+//! `clone` event, which `workspace_backend::Remote::clone_repo` waits for. The token goes only into that request.
 
 use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 use llmide_workspace_core::project::clone::{plan, run, CloneRequest, CloneResult, Token};
+use serde_json::{json, Value};
+
+use crate::workspace_backend::{self, LinkConnector};
 
 /// The local command has no cancel control, so its flag is never set. The SSH helper is the one that cancels.
 static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+/// How long a server clone may run before it is cancelled. The same 30 minutes the core gives a local clone.
+const CLONE_CAP: Duration = Duration::from_secs(30 * 60);
+
 #[tauri::command]
 pub async fn repo_clone(provider: String, url: String, token: Option<String>, folder: Option<String>) -> Result<CloneResult, String> {
-    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
+    if workspace_backend::is_ssh_mode() {
+        return tauri::async_runtime::spawn_blocking(move || remote_clone(provider, url, token, folder))
+            .await
+            .map_err(|e| format!("clone task failed: {e}"))?;
+    }
     let req = CloneRequest { provider, url, token: token.map(Token::from), folder };
     let root = crate::project::active_root().ok_or_else(|| "open a project before cloning a repository".to_string())?;
     if crate::fs_ops::checked_root(&root).is_err() {
@@ -24,4 +38,18 @@ pub async fn repo_clone(provider: String, url: String, token: Option<String>, fo
     })
     .await
     .map_err(|e| format!("clone task failed: {e}"))?
+}
+
+/// SSH mode: the helper validates the request and clones into the open server folder. An unusable token is dropped,
+/// as the local command does, so the clone runs anonymously. The token is put into the request only; nothing here
+/// logs, returns or formats it.
+fn remote_clone(provider: String, url: String, token: Option<String>, folder: Option<String>) -> Result<CloneResult, String> {
+    let token = token.map(Token::from).filter(Token::is_usable);
+    let mut req: Value = json!({"provider": provider, "url": url, "folder": folder});
+    if let Some(token) = token.as_ref() {
+        req["token"] = json!(token.expose());
+    }
+    let answer = workspace_backend::remote().clone_repo(&LinkConnector, req, CLONE_CAP).map_err(|e| e.message)?;
+    let field = |key: &str| answer.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    Ok(CloneResult { path: field("path"), name: field("name") })
 }
