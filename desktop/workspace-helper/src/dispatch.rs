@@ -590,6 +590,26 @@ mod tests {
     }
 
     #[test]
+    fn deleted_root_answers_root_missing() {
+        let mut f = Fixture::new("root-missing");
+        let project = f.open_project();
+        std::fs::remove_dir_all(&project).unwrap();
+        let reply = f.call(r#"{"id":2,"cmd":"fs_list_dir","args":{"req":{"path":""}}}"#);
+        assert_eq!(code_of(&reply), "root_missing");
+        assert_eq!(reply["err"]["message"], "This folder is no longer on the server.");
+        assert_eq!(code_of(&f.call(r#"{"id":3,"cmd":"git_status","args":{}}"#)), "root_missing");
+    }
+
+    #[test]
+    fn root_replaced_by_a_file_answers_root_missing() {
+        let mut f = Fixture::new("root-file");
+        let project = f.open_project();
+        std::fs::remove_dir_all(&project).unwrap();
+        std::fs::write(&project, "not a folder\n").unwrap();
+        assert_eq!(code_of(&f.call(r#"{"id":2,"cmd":"fs_list_dir","args":{"req":{"path":""}}}"#)), "root_missing");
+    }
+
+    #[test]
     fn stale_confirm_after_the_file_set_changed_changes_nothing() {
         let mut f = Fixture::new("stale-confirm");
         let project = f.open_project();

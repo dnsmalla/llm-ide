@@ -19,6 +19,10 @@ use serde_json::{json, Value};
 
 use crate::protocol::{event, Out, PROTOCOL};
 
+/// The code and text for a folder that was open but is gone. The desktop matches the code, so both are fixed.
+pub const ROOT_MISSING_CODE: &str = "root_missing";
+pub const ROOT_MISSING_MESSAGE: &str = "This folder is no longer on the server.";
+
 pub struct Session {
     pub out: Arc<Out>,
     pub searches: Arc<Searches>,
@@ -56,7 +60,12 @@ impl Session {
     pub fn root(&self) -> R<PathBuf> {
         match &self.root {
             None => err("no_project", "no project is open"),
-            Some(root) => confined(checked_root(root)?),
+            // A folder deleted or renamed on the server (or replaced by a file) gets its own code, so the app can
+            // return to the server home with the message it shows, instead of an I/O error.
+            Some(root) => match fs::canonicalize(root) {
+                Ok(real) if real.is_dir() => confined(checked_root(&real)?),
+                _ => err(ROOT_MISSING_CODE, ROOT_MISSING_MESSAGE),
+            },
         }
     }
 

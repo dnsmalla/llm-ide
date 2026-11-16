@@ -67,7 +67,7 @@ fn yes() -> bool {
     true
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Query {
     pub query: String,
     #[serde(default)]

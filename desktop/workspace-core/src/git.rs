@@ -761,20 +761,20 @@ pub fn scm_root(root: &Path) -> ScmRoot {
     if inside { ScmRoot { repo, prefix: format!("code/{name}") } } else { here() }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct DiffReq {
     pub path: String,
     #[serde(default)]
     pub staged: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ShowReq {
     pub path: String,
     pub rev: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StageReq {
     pub paths: Vec<String>,
     pub stage: bool,

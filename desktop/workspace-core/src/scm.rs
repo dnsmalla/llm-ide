@@ -1443,7 +1443,7 @@ pub fn merge_abort(root: &Path, confirm: &dyn Fn(&str) -> bool) -> R<()> {
 
 // ---- amend ------------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct AmendReq {
     #[serde(default)]
     pub message: Option<String>,
@@ -1560,7 +1560,7 @@ pub struct DiscardAllResult {
     pub skipped: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct DiscardAllReq {
     #[serde(default)]
     pub include_untracked: bool,
@@ -1757,14 +1757,14 @@ pub fn discard_all(root: &Path, include_untracked: bool, confirm: &dyn Fn(&str) 
     discard_all_with(root, include_untracked, confirm, &crate::trash::OsTrash)
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct HunksReq {
     pub path: String,
     #[serde(default)]
     pub staged: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StageHunksReq {
     pub path: String,
     pub staged: bool,
@@ -1772,7 +1772,7 @@ pub struct StageHunksReq {
     pub hunks: Vec<usize>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct LogReq {
     #[serde(default)]
     pub skip: usize,
@@ -1784,13 +1784,13 @@ fn default_page() -> usize {
     100
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CommitDiffReq {
     pub hash: String,
     pub path: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StashPushReq {
     #[serde(default)]
     pub message: String,
@@ -1798,7 +1798,7 @@ pub struct StashPushReq {
     pub include_untracked: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct MergeReq {
     pub name: String,
     #[serde(default)]
