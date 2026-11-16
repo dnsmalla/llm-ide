@@ -13,27 +13,42 @@
 //! ```
 //!
 //! Optional: `LLMIDE_LIVE_SSH_KEY=<private key path>` uses key auth instead of the password;
-//! `LLMIDE_LIVE_SSH_INSTALL_KEY=1` (password auth only) runs step 9; `LLMIDE_LIVE_SSH_UNINSTALL=1` runs step 11.
+//! `LLMIDE_LIVE_SSH_INSTALL_KEY=1` (password auth only) runs step 16; `LLMIDE_LIVE_SSH_UNINSTALL=1` runs step 18.
+//!
+//! Steps 9 to 15 work in a random folder under the server's home folder and remove it again. The terminal step shows
+//! the app's "Allow terminal access?" dialog once, and waits for your answer: press "Allow terminal". A failed run
+//! removes the folder on a best-effort basis.
 //!
 //! Nothing this module prints includes the password, a token, a generated secret or a nonce.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use tauri::ipc::{Channel, InvokeResponseBody, Response};
 
 use crate::confirm::herr;
 use crate::core_env;
 use crate::core_host::{self, CoreHost};
-use crate::fs_ops::FsError;
+use crate::fs_ops::{fs_delete, fs_list_dir, fs_read_file, fs_rename, fs_write_file, FsError};
+use crate::fs_watch::{fs_watch_start, fs_watch_stop};
 use crate::fsutil;
+use crate::git::git_status;
+use crate::project::project_active;
+use crate::project_search::{project_search_start, Query};
 use crate::prefs::{self, prefs_guard, set_remote_server_for_test, RemoteServerPrefs, ServerMode, SshAuthKind};
 use crate::remote::temp_ssh_dir;
 use crate::ssh_cmds;
 use crate::ssh_key_install;
 use crate::ssh_service::{self, Deps, SshServerTarget, SshServerTest};
 use crate::ssh_session;
+use crate::ssh_workspace_cmds::{
+    remote_ssh_workspace_close, remote_ssh_workspace_forget, remote_ssh_workspace_list_dirs,
+    remote_ssh_workspace_mkdir, remote_ssh_workspace_open, remote_ssh_workspace_recent,
+};
+use crate::workspace_backend;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -41,6 +56,10 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_PORTS: std::ops::RangeInclusive<u16> = 3456..=3459;
 const ORIGIN_UNKNOWN: &str = "https://evil.example";
 const BUNDLE_HINT: &str = ssh_service::BUNDLE_MISSING_TEXT;
+/// How long each Explorer event, search or terminal exit may take before its step fails.
+const EVENT_WAIT: Duration = Duration::from_secs(5);
+const SEARCH_WAIT: Duration = Duration::from_secs(10);
+const TERMINAL_WAIT: Duration = Duration::from_secs(10);
 
 /// What the developer typed, read once. The login fields change only when step 9 switches to key auth.
 struct Live {
@@ -155,6 +174,10 @@ struct Run {
     observed: Option<SshServerTest>,
     before: Option<(Option<u32>, Option<String>)>,
     account: Option<Account>,
+    /// Name (under the home folder) of the test folder while it exists on the server.
+    test_folder: Option<String>,
+    /// Absolute path of the test folder once the helper has opened it.
+    folder_root: Option<String>,
 }
 
 impl Run {
@@ -181,6 +204,8 @@ impl Run {
             observed: None,
             before: None,
             account: None,
+            test_folder: None,
+            folder_root: None,
         };
         std::fs::create_dir_all(run.root.join("state"))
             .map_err(|_| failed("LIVE_SETUP", "could not create the temp folder"))?;
@@ -445,6 +470,302 @@ fn step_reconnect(run: &mut Run) -> Result<Outcome, Failed> {
     Ok(Outcome::Done)
 }
 
+/// Runs one async service call to completion on the Tauri runtime, the way the app runs its commands.
+fn block<T>(future: impl std::future::Future<Output = T>) -> T {
+    tauri::async_runtime::block_on(future)
+}
+
+/// A request for a service function, built from the same JSON shape the page sends.
+fn request<T: DeserializeOwned>(value: Value) -> Result<T, Failed> {
+    serde_json::from_value(value).map_err(|_| failed("LIVE_REQUEST", "a live check request did not match its type"))
+}
+
+/// A Tauri channel whose batches land in a queue the step reads with a timeout.
+fn queue<T>() -> (Channel<T>, mpsc::Receiver<InvokeResponseBody>) {
+    let (sender, receiver) = mpsc::channel();
+    let sender = Mutex::new(sender);
+    let channel = Channel::new(move |body| {
+        if let Ok(sender) = sender.lock() {
+            let _ = sender.send(body);
+        }
+        Ok(())
+    });
+    (channel, receiver)
+}
+
+/// The JSON a channel sent, or `None` for a raw batch that is not JSON.
+fn json_of(body: InvokeResponseBody) -> Option<Value> {
+    match body {
+        InvokeResponseBody::Json(text) => serde_json::from_str(&text).ok(),
+        InvokeResponseBody::Raw(bytes) => serde_json::from_slice(&bytes).ok(),
+    }
+}
+
+fn write_text(path: &str, text: &str) -> Result<(), Failed> {
+    block(fs_write_file(request(json!({"path": path, "text": text}))?))?;
+    Ok(())
+}
+
+/// The names in a folder of the open server folder (`""` is its root).
+fn listed_names(path: &str) -> Result<Vec<String>, Failed> {
+    let reply = block(fs_list_dir(request(json!({"path": path}))?))?;
+    Ok(reply["entries"]
+        .as_array()
+        .map(|entries| entries.iter().filter_map(|entry| entry["name"].as_str().map(str::to_string)).collect())
+        .unwrap_or_default())
+}
+
+/// The `(path, hit count)` pairs of one search chunk.
+fn chunk_files(chunk: &Value) -> Vec<(String, usize)> {
+    chunk["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|file| {
+            let path = file["path"].as_str().unwrap_or_default().to_string();
+            (path, file["hits"].as_array().map_or(0, Vec::len))
+        })
+        .collect()
+}
+
+/// A random folder under the home folder, opened as the server folder. The name is random, so it cannot collide.
+fn step_workspace_open(run: &mut Run) -> Result<Outcome, Failed> {
+    let tag: String = random_hex()?.chars().take(8).collect();
+    let name = format!(".llmide-live-{tag}");
+    let made = block(remote_ssh_workspace_mkdir("~".to_string(), name.clone()))?;
+    let path = made["path"]
+        .as_str()
+        .ok_or_else(|| failed("LIVE_REPLY", "mkdir did not return the new folder's path"))?
+        .to_string();
+    run.test_folder = Some(name.clone());
+    let home = block(remote_ssh_workspace_list_dirs("~".to_string(), false))?;
+    let listed = home["entries"]
+        .as_array()
+        .is_some_and(|entries| entries.iter().any(|entry| entry["name"].as_str() == Some(name.as_str())));
+    expect(listed, "LIST_MISSING", "the new folder is not in the home folder listing")?;
+    let info = block(remote_ssh_workspace_open(path))?;
+    expect(
+        project_active().is_some_and(|active| active.root == info.root),
+        "NOT_ACTIVE",
+        "project_active does not report the opened folder",
+    )?;
+    println!("  folder {name} created under the home folder and opened");
+    run.folder_root = Some(info.root);
+    Ok(Outcome::Done)
+}
+
+fn step_files(_run: &mut Run) -> Result<Outcome, Failed> {
+    write_text("hello.txt", "hello world\n")?;
+    expect(
+        listed_names("")?.iter().any(|name| name == "hello.txt"),
+        "LIST_MISSING",
+        "hello.txt is not in the folder listing",
+    )?;
+    let read = block(fs_read_file(request(json!({"path": "hello.txt"}))?))?;
+    expect(
+        read["text"].as_str() == Some("hello world\n"),
+        "READ_MISMATCH",
+        "the file read back differs from what was written",
+    )?;
+    block(fs_rename(request(json!({"from": "hello.txt", "to": "greeting.txt"}))?))?;
+    let names = listed_names("")?;
+    expect(
+        names.iter().any(|name| name == "greeting.txt") && !names.iter().any(|name| name == "hello.txt"),
+        "RENAME_MISMATCH",
+        "the rename is not in the folder listing",
+    )?;
+    println!("  write, list, read back and rename: ok");
+    match block(fs_delete("greeting.txt".to_string())) {
+        Ok(_) => println!("  delete: moved to the server Trash"),
+        Err(error) if error.code == "trash_unavailable" => {
+            println!("  delete: trash_unavailable (expected on servers without a desktop Trash)")
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(Outcome::Done)
+}
+
+/// The helper's `git_status` must answer `not_a_repo` for a plain folder, which proves the error code survives the
+/// channel. Without git on the server the helper reports it and the step is skipped.
+fn step_git(_run: &mut Run) -> Result<Outcome, Failed> {
+    let available = workspace_backend::remote().helper_git();
+    println!("  git: {}", match available {
+        Some(true) => "available",
+        Some(false) => "missing",
+        None => "unknown (no live helper channel)",
+    });
+    match available {
+        Some(true) => {}
+        Some(false) => return Ok(Outcome::Skipped(Some("git is not installed on this server"))),
+        None => return Err(failed("GIT_UNKNOWN", "the helper channel is not up")),
+    }
+    write_text("notes.txt", "not a repository\n")?;
+    match block(git_status()) {
+        Err(error) if error.code == "not_a_repo" => println!("  git_status: not_a_repo"),
+        Ok(_) => return Err(failed("GIT_UNEXPECTED", "git_status found a repository above the test folder")),
+        Err(error) => return Err(error.into()),
+    }
+    Ok(Outcome::Done)
+}
+
+fn step_search(_run: &mut Run) -> Result<Outcome, Failed> {
+    write_text("needle.txt", "findme\n")?;
+    let (channel, events) = queue::<Value>();
+    let started = block(project_search_start(request::<Query>(json!({"query": "findme"}))?, channel))?;
+    let deadline = Instant::now() + SEARCH_WAIT;
+    let mut files: Vec<(String, usize)> = Vec::new();
+    let done = loop {
+        let body = events
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|_| failed("SEARCH_TIMEOUT", "the search did not finish within 10 s"))?;
+        let Some(event) = json_of(body) else { continue };
+        if event["id"].as_u64() != Some(started.id) {
+            continue;
+        }
+        match event["type"].as_str() {
+            Some("chunk") => files.extend(chunk_files(&event)),
+            Some("done") => break event,
+            _ => {}
+        }
+    };
+    expect(done["matches"].as_u64() == Some(1), "SEARCH_COUNT", "the search did not find exactly one match")?;
+    expect(
+        files == [("needle.txt".to_string(), 1)],
+        "SEARCH_FILES",
+        "the one match is not in needle.txt",
+    )?;
+    println!("  search for findme: one match in needle.txt, then done");
+    Ok(Outcome::Done)
+}
+
+/// Starts the watch, writes a file, and waits for a batch that names it. The watch is stopped on every path.
+fn step_watch(_run: &mut Run) -> Result<Outcome, Failed> {
+    let (channel, batches) = queue::<Value>();
+    block(fs_watch_start(channel))?;
+    let result = watch_for_new_file(&batches);
+    let _ = block(fs_watch_stop());
+    result?;
+    println!("  watch: a batch named watched.txt arrived, then the watch stopped");
+    Ok(Outcome::Done)
+}
+
+fn watch_for_new_file(batches: &mpsc::Receiver<InvokeResponseBody>) -> Result<(), Failed> {
+    write_text("watched.txt", "seen\n")?;
+    let deadline = Instant::now() + EVENT_WAIT;
+    loop {
+        let body = batches
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|_| failed("WATCH_TIMEOUT", "no watch batch named watched.txt within 5 s"))?;
+        let Some(batch) = json_of(body) else { continue };
+        let named = batch["files"]
+            .as_array()
+            .is_some_and(|files| files.iter().any(|file| file.as_str() == Some("watched.txt")));
+        if named {
+            return Ok(());
+        }
+    }
+}
+
+/// Opens a shell through the same launch function `pty_spawn` uses in SSH mode, runs `pwd` and `exit`, and checks
+/// the opened folder's path in the output. The folder line is read by the terminal script with echo off.
+fn step_terminal(run: &mut Run) -> Result<Outcome, Failed> {
+    let root = run.folder_root.clone().ok_or_else(|| failed("LIVE_ORDER", "the workspace step did not open a folder"))?;
+    let (output_channel, output) = queue::<Response>();
+    let (exit_channel, exits) = queue::<Value>();
+    let spawned = block(crate::pty_spawn(80, 24, output_channel, exit_channel))
+        .map_err(|message| failed("TERMINAL_FAILED", message))?;
+    let session = terminal_session(spawned.id, &output, &exits);
+    let _ = crate::pty::kill(spawned.id);
+    let bytes = session?;
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    expect(text.contains(&root), "TERMINAL_FOLDER", "the terminal did not print the opened folder")?;
+    let echoed = text.find(&root).is_some_and(|at| text.find("pwd").is_none_or(|typed| at < typed));
+    println!("  terminal printed the opened folder");
+    println!("  folder echo: {}", if echoed { "yes" } else { "no" });
+    Ok(Outcome::Done)
+}
+
+/// Writes the command, then collects output until the shell reports its exit or the wait runs out.
+fn terminal_session(
+    id: u32,
+    output: &mpsc::Receiver<InvokeResponseBody>,
+    exits: &mpsc::Receiver<InvokeResponseBody>,
+) -> Result<Vec<u8>, Failed> {
+    crate::pty::write(id, "pwd; exit\n").map_err(|message| failed("TERMINAL_WRITE", message))?;
+    let deadline = Instant::now() + TERMINAL_WAIT;
+    let mut bytes = Vec::new();
+    let take = |body: InvokeResponseBody, bytes: &mut Vec<u8>| {
+        if let InvokeResponseBody::Raw(batch) = body {
+            crate::pty::ack(id, batch.len() as u64);
+            bytes.extend(batch);
+        }
+    };
+    loop {
+        if exits.try_recv().is_ok() {
+            while let Ok(body) = output.try_recv() {
+                take(body, &mut bytes);
+            }
+            return Ok(bytes);
+        }
+        if Instant::now() >= deadline {
+            return Err(failed("TERMINAL_TIMEOUT", "the terminal did not exit within 10 s"));
+        }
+        if let Ok(body) = output.recv_timeout(Duration::from_millis(100)) {
+            take(body, &mut bytes);
+        }
+    }
+}
+
+/// Deletes the test folder through the helper: the helper opens the home folder, the test folder is deleted from
+/// there, and the folder is closed again. Without a Trash the folder stays and the step says so.
+fn step_workspace_close(run: &mut Run) -> Result<Outcome, Failed> {
+    let root = run.folder_root.clone().ok_or_else(|| failed("LIVE_ORDER", "the workspace step did not open a folder"))?;
+    let name = run.test_folder.clone().ok_or_else(|| failed("LIVE_ORDER", "the test folder name is missing"))?;
+    block(remote_ssh_workspace_close())?;
+    block(remote_ssh_workspace_open("~".to_string()))?;
+    match block(fs_delete(name.clone())) {
+        Ok(_) => {
+            println!("  folder {name}: moved to the server Trash");
+            run.test_folder = None;
+        }
+        Err(error) if error.code == "trash_unavailable" => {
+            println!("  folder {name}: trash_unavailable, so it stays on the server (expected without a Trash)")
+        }
+        Err(error) => return Err(error.into()),
+    }
+    block(remote_ssh_workspace_close())?;
+    expect(project_active().is_none(), "STILL_ACTIVE", "project_active still reports a folder after close")?;
+    expect(
+        block(remote_ssh_workspace_recent()).contains(&root),
+        "NOT_RECENT",
+        "the closed folder is not in the recent folders",
+    )?;
+    block(remote_ssh_workspace_forget(root.clone()))?;
+    expect(
+        !block(remote_ssh_workspace_recent()).contains(&root),
+        "NOT_FORGOTTEN",
+        "forget did not remove the folder from the recent folders",
+    )?;
+    println!("  close, project_active none, recent list and forget: ok");
+    run.folder_root = None;
+    Ok(Outcome::Done)
+}
+
+/// After a failed run: removes the test folder if a step left it on the server. Best effort; each result is printed.
+fn remove_test_folder(run: &mut Run) {
+    let Some(name) = run.test_folder.take() else { return };
+    let _ = block(remote_ssh_workspace_close());
+    if block(remote_ssh_workspace_open("~".to_string())).is_err() {
+        println!("cleanup: could not open the home folder, so {name} may remain on the server");
+        return;
+    }
+    match block(fs_delete(name.clone())) {
+        Ok(_) => println!("cleanup: {name} moved to the server Trash"),
+        Err(error) => println!("cleanup: {name} remains on the server ({})", error.code),
+    }
+    let _ = block(remote_ssh_workspace_close());
+}
+
 fn step_install_key(run: &mut Run) -> Result<Outcome, Failed> {
     if !run.live.install_key {
         return Ok(Outcome::Skipped(None));
@@ -503,7 +824,7 @@ fn step_uninstall(run: &mut Run) -> Result<Outcome, Failed> {
 
 /// Runs the steps in order. Returns how many passed, or the failing step number with its failure.
 fn run_steps(run: &mut Run) -> Result<usize, (usize, Failed)> {
-    let steps: [(&str, StepFn); 11] = [
+    let steps: [(&str, StepFn); 18] = [
         ("test", step_test),
         ("confirm and test", step_confirm_and_test),
         ("connect", step_connect),
@@ -512,6 +833,13 @@ fn run_steps(run: &mut Run) -> Result<usize, (usize, Failed)> {
         ("account round trip", step_account),
         ("disconnect and check core", step_disconnect_and_check),
         ("connect again", step_reconnect),
+        ("workspace open", step_workspace_open),
+        ("files", step_files),
+        ("git", step_git),
+        ("search", step_search),
+        ("watch", step_watch),
+        ("terminal", step_terminal),
+        ("workspace close", step_workspace_close),
         ("install key", step_install_key),
         ("stop server", step_stop),
         ("uninstall", step_uninstall),
@@ -559,6 +887,9 @@ fn live_end_to_end() {
         }
     };
     let outcome = run_steps(&mut run);
+    if outcome.is_err() {
+        remove_test_folder(&mut run);
+    }
     // Best effort on every path: stops the forward and drops the pinned known_hosts folder. The server keeps its core.
     ssh_service::disconnect(&run.host);
     run.host.set_mode(ServerMode::Local);

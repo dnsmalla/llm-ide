@@ -53,9 +53,19 @@ pub trait WorkspaceApi: Send + Sync {
     fn subscribe(&self, kind: EventKind, sink: EventSink);
     fn is_closed(&self) -> bool;
     fn close(&self);
+    /// What the helper reported about git in `hello`. Read by the live check only.
+    #[cfg(test)]
+    fn helper_git(&self) -> Option<bool> {
+        None
+    }
 }
 
 impl WorkspaceApi for WorkspaceClient {
+    #[cfg(test)]
+    fn helper_git(&self) -> Option<bool> {
+        Some(WorkspaceClient::git_available(self))
+    }
+
     fn call(&self, cmd: &str, args: Value, confirm: Option<&str>) -> Result<Value, FsError> {
         WorkspaceClient::call(self, cmd, args, confirm)
     }
@@ -266,6 +276,12 @@ impl Remote {
     /// The open server folder, if any. Reads only the stored value; it never touches the channel.
     pub fn folder(&self) -> Option<ProjectInfo> {
         locked(&self.session).folder.clone()
+    }
+
+    /// Whether the live helper reported git, or `None` with no live channel. Only the live check reads it.
+    #[cfg(test)]
+    pub(crate) fn helper_git(&self) -> Option<bool> {
+        self.live().and_then(|client| client.helper_git())
     }
 
     /// The channel if it is up. Never connects and never checks the folder.
