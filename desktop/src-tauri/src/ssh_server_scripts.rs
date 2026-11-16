@@ -482,6 +482,7 @@ env -i "$@" LLMIDE_SECRETS_STDIN=1 LLMIDE_PORT="$PORT" LLMIDE_CORE_NONCE="$NONCE
   LLMIDE_PLUGIN_DIR="$ROOT/data/addons/plugins" \
   LLMIDE_CORS_ORIGINS='tauri://localhost,http://tauri.localhost,https://tauri.localhost' \
   LLMIDE_REGISTRATION_SINGLE_OWNER=1 \
+  LLMIDE_SSH_SERVER=1 \
   LLMIDE_EXT_ACTIVE_SET=1 \
   setsid nohup "$ROOT/current/core/node/node" "$ROOT/current/core/root/extension/server.mjs" \
   <&3 3<&- >>"$ROOT/core.log" 2>&1 &
@@ -1194,6 +1195,14 @@ mod tests {
     }
 
     #[test]
+    fn start_marks_the_core_as_an_ssh_server_only() {
+        // The core serves the clone redeem only when this flag is set, so a local desktop core (which also gets a nonce)
+        // answers 404 and writes no key file.
+        assert!(START.contains("LLMIDE_SSH_SERVER=1 "));
+        assert!(!PROBE.contains("LLMIDE_SSH_SERVER"));
+    }
+
+    #[test]
     fn install_stdin_header() {
         let sha = "ab".repeat(32);
         let out = install_stdin("1.2.3", &sha, b"T");
@@ -1788,6 +1797,7 @@ http.createServer((req, res) => {
         assert!(env["PATH"].starts_with(&path_head), "PATH was {}", env["PATH"]);
         assert_eq!(env.get("LLMIDE_CORS_ORIGINS"), Some(&START_CORS_VALUE));
         assert_eq!(env.get("LLMIDE_REGISTRATION_SINGLE_OWNER"), Some(&"1"));
+        assert_eq!(env.get("LLMIDE_SSH_SERVER"), Some(&"1"));
         assert_eq!(env.get("LLMIDE_EXT_ACTIVE_SET"), Some(&"1"));
         assert!(!env.contains_key("LLMIDE_PARENT_PID"), "the server core must outlive the desktop");
         assert!(!env.contains_key("ANTHROPIC_API_KEY"), "a provider key leaked into the core");
