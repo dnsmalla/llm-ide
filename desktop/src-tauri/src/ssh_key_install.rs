@@ -165,7 +165,7 @@ fn set_private_mode(path: &Path) -> Result<(), FsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prefs::{set_remote_server_for_test, set_ssh_host_pin};
+    use crate::prefs::{set_remote_server_for_test, upsert_ssh_known_host};
     use crate::ssh_server_scripts::{ADD_KEY, PROBE};
     use crate::ssh_service::tests::{
         fake, generated_line, has_option, pin_text, saved_key_block, saved_password_block, Fixture, GrantSpy,
@@ -179,7 +179,7 @@ mod tests {
     fn install_key_switches_auth() {
         let fx = Fixture::new("svc-install-key");
         set_remote_server_for_test(saved_password_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![ok(ADD_KEY_ADDED), probe_out("")]);
         let spy = Arc::new(GrantSpy::new(exec.clone()));
         let mut deps = fx.deps(&exec, "", true, true);
@@ -193,6 +193,8 @@ mod tests {
         let saved = prefs::stored().remote_server;
         assert_eq!(saved.ssh_auth, SshAuthKind::Key);
         assert_eq!(saved.key_path, key_text);
+        let recent = &saved.ssh_recent_servers;
+        assert_eq!((recent.len(), recent[0].auth, recent[0].key_path.as_str()), (1, SshAuthKind::Key, key_text.as_str()), "the recent entry switches to key auth too");
         assert!(key_path.exists() && public_key_path(&key_path).exists(), "the key pair is kept on success");
 
         let calls = exec.calls();
@@ -215,7 +217,7 @@ mod tests {
         for (label, outputs, expected) in cases {
             let fx = Fixture::new(label);
             set_remote_server_for_test(saved_password_block());
-            set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+            upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
             let before = prefs::stored().remote_server;
             let exec = fake(outputs);
             let deps = fx.deps(&exec, "", true, true);
@@ -231,7 +233,7 @@ mod tests {
         // The verification failure has its own fixed text, which the UI shows as-is.
         let fx = Fixture::new("svc-verify-text");
         set_remote_server_for_test(saved_password_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![ok(ADD_KEY_ADDED), ssh_error(PERMISSION_DENIED)]);
         let deps = fx.deps(&exec, "", true, true);
         let error = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
@@ -242,7 +244,7 @@ mod tests {
     fn install_key_needs_password_auth() {
         let fx = Fixture::new("svc-install-key-keyed");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, "", true, true);
         let refused = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
@@ -260,7 +262,7 @@ mod tests {
         let deps = fx.deps(&exec, "", true, true);
         let no_pin = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();
         assert_eq!(no_pin.code, "SSH_HOST_KEY_UNCONFIRMED");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let empty = install_key(&deps, &fx.host, &fx.dir.join("keys"), "").unwrap_err();
         assert_eq!(empty.code, "SSH_PASSWORD_REQUIRED");
         assert!(exec.calls().is_empty());
@@ -279,7 +281,7 @@ mod tests {
 
         let fx = Fixture::new("svc-key-leak-ok");
         set_remote_server_for_test(saved_password_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![ok(ADD_KEY_ADDED), probe_out("")]);
         let deps = fx.deps(&exec, "", true, true);
         let status = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap();
@@ -290,7 +292,7 @@ mod tests {
 
         let fx = Fixture::new("svc-key-leak-fail");
         set_remote_server_for_test(saved_password_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![ok("__LLMIDE_ADDKEY__=failed\n")]);
         let deps = fx.deps(&exec, "", true, true);
         let error = install_key(&deps, &fx.host, &fx.dir.join("keys"), PASSWORD).unwrap_err();

@@ -6,7 +6,7 @@
 //! typed schema (unknown keys and bad values are refused, nothing is stored as free text).
 //!
 //! Rules:
-//! - `prefs.json` is bounded (16 KB), written atomically with 0600 in the private data dir, and an
+//! - `prefs.json` is bounded (1 MB, see `MAX_BYTES`), written atomically with 0600 in the private data dir, and an
 //!   unreadable, oversized or hand-edited file falls back to the defaults (never a crash, never a
 //!   partially trusted value).
 //! - A change applies at the NEXT app start. `launch()` is the snapshot taken once at startup and is
@@ -25,7 +25,10 @@ use crate::confirm::{herr, RateLimit};
 use crate::fs_ops::FsError;
 
 pub const FILE_NAME: &str = "prefs.json";
-pub const MAX_BYTES: usize = 16 * 1024;
+/// Largest accepted prefs.json. The SSH lists can hold 32 host keys of up to `SSH_HOST_PIN_MAX` characters, 10
+/// servers, and 10 folders for each of them of up to `SSH_FOLDER_PATH_MAX` characters: about half a megabyte at the
+/// caps. A smaller bound would turn a legitimate file into an "unreadable" one and reset every preference.
+pub const MAX_BYTES: usize = 1024 * 1024;
 
 /// The feature keys the server knows (`FEATURE_KEYS` in `extension/core/config.mjs`). Used only to turn
 /// "everything except terminal" into an explicit list; a test pins the order and content.
@@ -75,6 +78,39 @@ pub enum SshAuthKind {
     Password,
 }
 
+/// Longest SSH host-key list, one entry per `host:port`. The oldest entry goes first when a new server is added.
+pub(crate) const SSH_KNOWN_HOSTS_MAX: usize = 32;
+/// Servers kept in the recent list, most recent first.
+pub(crate) const SSH_RECENT_SERVERS_MAX: usize = 10;
+/// Folders kept for each server.
+pub(crate) const SSH_RECENT_FOLDERS_MAX: usize = 10;
+/// Longest folder path in characters. A longer path is refused, never cut.
+pub(crate) const SSH_FOLDER_PATH_MAX: usize = 4096;
+
+/// A server SSH mode connected to, most recent first. It records the connection's shape and never a password: a
+/// password login is `auth: password` with no key path.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SshRecentServer {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub key_path: String,
+    pub auth: SshAuthKind,
+    /// Seconds since the Unix epoch of the last successful connect or key install.
+    pub last_used: u64,
+}
+
+/// A folder opened on a saved server. `server` is `ssh_server_key` for that server, so a folder is found by the same
+/// key as the server it belongs to.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SshRecentFolder {
+    pub server: String,
+    pub path: String,
+    pub last_used: u64,
+}
+
 /// Non-secret remote connection settings. The private key PATH is stored; the key's contents never are.
 /// Strings are trimmed/capped on the way in, and the SSH test re-validates the shapes before spawning ssh.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -92,14 +128,25 @@ pub struct RemoteServerPrefs {
     pub tls_pin: String,
     /// The SSH credential method. Absent in files written before SSH mode existed, which reads as `Key`.
     pub ssh_auth: SshAuthKind,
-    /// The server host key the user confirmed for SSH mode: `<host>:<port> <key-type> <key-base64>`, the same
-    /// public data a known_hosts line holds. Written only by `set_ssh_host_pin`, never by the webview.
+    /// The single host key of the first SSH build. On load it moves into `ssh_known_hosts` and is then kept empty;
+    /// the field stays so an older build still loads the file. Never written by this build.
     pub ssh_host_pin: String,
+    /// Host keys the user confirmed, one `<host>:<port> <key-type> <key-base64>` line per endpoint, the same public
+    /// data a known_hosts line holds. Written only by the host's trust path, never by the webview.
+    pub ssh_known_hosts: Vec<String>,
+    /// Servers connected to recently, most recent first. Written only by a successful connect or key install.
+    pub ssh_recent_servers: Vec<SshRecentServer>,
+    /// Folders opened on those servers, most recent first. Written only by the host's folder paths.
+    pub ssh_recent_folders: Vec<SshRecentFolder>,
 }
 
 impl Default for RemoteServerPrefs {
     fn default() -> Self {
-        Self { mode: ServerMode::Local, host: String::new(), port: 22, user: String::new(), key_path: String::new(), label: String::new(), hub_url: String::new(), tls_pin: String::new(), ssh_auth: SshAuthKind::Key, ssh_host_pin: String::new() }
+        Self {
+            mode: ServerMode::Local, host: String::new(), port: 22, user: String::new(), key_path: String::new(), label: String::new(),
+            hub_url: String::new(), tls_pin: String::new(), ssh_auth: SshAuthKind::Key, ssh_host_pin: String::new(),
+            ssh_known_hosts: Vec::new(), ssh_recent_servers: Vec::new(), ssh_recent_folders: Vec::new(),
+        }
     }
 }
 
@@ -114,6 +161,150 @@ fn bounded_ssh_host_pin(pin: &str) -> Option<String> {
     (trimmed.chars().count() <= SSH_HOST_PIN_MAX).then(|| trimmed.to_string())
 }
 
+/// One saved host key, split into the parts the SSH service compares.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct KnownHost {
+    /// `host:port` with the host lower-cased: the key a server is looked up by.
+    pub endpoint: String,
+    pub key_type: String,
+    pub key_b64: String,
+}
+
+/// The endpoint text every list is keyed by: `host:port`, host lower-cased, so one server has one spelling.
+fn endpoint_text(host: &str, port: u16) -> String {
+    format!("{}:{port}", host.to_ascii_lowercase())
+}
+
+/// Parses one saved pin with the checks the single pin always had: three fields, a host and a nonzero port, a known
+/// key type and a key blob that decodes. Text over `SSH_HOST_PIN_MAX` is refused, never cut, because a cut key could
+/// still decode and then name a different key.
+pub(crate) fn parse_known_host(entry: &str) -> Option<KnownHost> {
+    let text = bounded_ssh_host_pin(entry)?;
+    let mut fields = text.split_whitespace();
+    let (Some(host_port), Some(key_type), Some(key_b64), None) = (fields.next(), fields.next(), fields.next(), fields.next()) else {
+        return None;
+    };
+    let (host, port) = host_port.rsplit_once(':')?;
+    let port: u16 = port.parse().ok().filter(|p| *p != 0)?;
+    let shape_ok = crate::remote::valid_host(host) && crate::remote::valid_host_key_type(key_type);
+    if !shape_ok || crate::remote_deploy::fingerprint_for_key_b64(key_b64).is_none() {
+        return None;
+    }
+    Some(KnownHost { endpoint: endpoint_text(host, port), key_type: key_type.to_string(), key_b64: key_b64.to_string() })
+}
+
+/// Puts `known` in the list in place of any entry for the same endpoint, at the end. The list keeps the newest
+/// `SSH_KNOWN_HOSTS_MAX`, so the oldest pin is the one dropped; that only means the user confirms it again.
+fn put_known_host(list: &mut Vec<String>, known: &KnownHost) {
+    list.retain(|saved| !matches!(parse_known_host(saved), Some(kept) if kept.endpoint == known.endpoint));
+    list.push(format!("{} {} {}", known.endpoint, known.key_type, known.key_b64));
+    if list.len() > SSH_KNOWN_HOSTS_MAX {
+        let extra = list.len() - SSH_KNOWN_HOSTS_MAX;
+        list.drain(..extra);
+    }
+}
+
+/// The list as loaded: entries that fail `parse_known_host` are dropped, and there is one entry per endpoint.
+fn normalize_known_hosts(list: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in list {
+        if let Some(known) = parse_known_host(entry) {
+            put_known_host(&mut out, &known);
+        }
+    }
+    out
+}
+
+/// The key a saved server and its folders share: `<user>@<host>:<port>`, host lower-cased. The user is kept as typed
+/// because user names are case-sensitive on the server.
+pub(crate) fn ssh_server_key(user: &str, host: &str, port: u16) -> String {
+    format!("{user}@{}", endpoint_text(host, port))
+}
+
+fn recent_key(entry: &SshRecentServer) -> String {
+    ssh_server_key(&entry.user, &entry.host, entry.port)
+}
+
+/// Puts `entry` first, replacing the same server. Returns the keys of the servers pushed past the cap, so their
+/// folders can go with them.
+fn put_recent_server(list: &mut Vec<SshRecentServer>, entry: SshRecentServer) -> Vec<String> {
+    let key = recent_key(&entry);
+    list.retain(|saved| recent_key(saved) != key);
+    list.insert(0, entry);
+    let mut pushed_out = Vec::new();
+    while list.len() > SSH_RECENT_SERVERS_MAX {
+        if let Some(old) = list.pop() {
+            pushed_out.push(recent_key(&old));
+        }
+    }
+    pushed_out
+}
+
+/// A loaded recent entry that passes the writer's shape rules, with the host lower-cased. A password entry keeps no
+/// key path, since none is used.
+fn clean_recent_server(entry: &SshRecentServer) -> Option<SshRecentServer> {
+    let host = entry.host.trim().to_ascii_lowercase();
+    let user = entry.user.trim().to_string();
+    let key_path = match entry.auth {
+        SshAuthKind::Key => entry.key_path.trim().to_string(),
+        SshAuthKind::Password => String::new(),
+    };
+    let key_ok = entry.auth == SshAuthKind::Password || crate::remote::valid_key_path(&key_path);
+    let ok = crate::remote::valid_host(&host) && crate::remote::valid_user(&user) && entry.port != 0 && key_ok;
+    ok.then(|| SshRecentServer { host, port: entry.port, user, key_path, auth: entry.auth, last_used: entry.last_used })
+}
+
+/// The recent list as loaded, in file order (most recent first): invalid entries dropped, one entry per server.
+fn normalize_recent_servers(list: &[SshRecentServer]) -> Vec<SshRecentServer> {
+    let mut out: Vec<SshRecentServer> = Vec::new();
+    for entry in list {
+        if out.len() == SSH_RECENT_SERVERS_MAX {
+            break;
+        }
+        let Some(clean) = clean_recent_server(entry) else { continue };
+        if !out.iter().any(|kept| recent_key(kept) == recent_key(&clean)) {
+            out.push(clean);
+        }
+    }
+    out
+}
+
+/// A folder path that is safe to store and to hand to the server side: absolute, bounded, and with no line break or
+/// NUL, so it can never split a log line or a protocol line.
+fn valid_folder_path(path: &str) -> bool {
+    path.starts_with('/') && path.chars().count() <= SSH_FOLDER_PATH_MAX && !path.contains(['\0', '\n', '\r'])
+}
+
+/// Puts a folder first in its server's list, replacing the same path, and keeps that server's newest folders.
+fn put_recent_folder(list: &mut Vec<SshRecentFolder>, server: &str, path: &str, now: u64) {
+    list.retain(|folder| !(folder.server == server && folder.path == path));
+    list.insert(0, SshRecentFolder { server: server.to_string(), path: path.to_string(), last_used: now });
+    let mut kept = 0usize;
+    list.retain(|folder| {
+        if folder.server != server {
+            return true;
+        }
+        kept += 1;
+        kept <= SSH_RECENT_FOLDERS_MAX
+    });
+}
+
+/// The folder list as loaded: only folders of a server still in the recent list, with valid paths, no duplicates and
+/// at most `SSH_RECENT_FOLDERS_MAX` per server.
+fn normalize_recent_folders(list: &[SshRecentFolder], servers: &[SshRecentServer]) -> Vec<SshRecentFolder> {
+    let keys: Vec<String> = servers.iter().map(recent_key).collect();
+    let mut out: Vec<SshRecentFolder> = Vec::new();
+    for folder in list {
+        let duplicate = out.iter().any(|kept| kept.server == folder.server && kept.path == folder.path);
+        let per_server = out.iter().filter(|kept| kept.server == folder.server).count();
+        let owned = keys.contains(&folder.server);
+        if owned && !duplicate && per_server < SSH_RECENT_FOLDERS_MAX && valid_folder_path(&folder.path) {
+            out.push(folder.clone());
+        }
+    }
+    out
+}
+
 impl RemoteServerPrefs {
     /// Keeps a hand-edited or hostile prefs.json bounded. The host command still validates the exact shapes.
     pub fn normalized(mut self) -> Self {
@@ -124,7 +315,15 @@ impl RemoteServerPrefs {
         self.label = cap(self.label, 80);
         self.hub_url = cap(self.hub_url, 300);
         self.tls_pin = cap(self.tls_pin, 80);
-        self.ssh_host_pin = bounded_ssh_host_pin(&self.ssh_host_pin).unwrap_or_default();
+        // The legacy single pin is migrated after the list is normalised, so on a clash for the same endpoint the
+        // migrated key wins. Every load runs this, and the result is the same each time, so the file is not rewritten.
+        let legacy_pin = std::mem::take(&mut self.ssh_host_pin);
+        self.ssh_known_hosts = normalize_known_hosts(&self.ssh_known_hosts);
+        if let Some(known) = parse_known_host(&legacy_pin) {
+            put_known_host(&mut self.ssh_known_hosts, &known);
+        }
+        self.ssh_recent_servers = normalize_recent_servers(&self.ssh_recent_servers);
+        self.ssh_recent_folders = normalize_recent_folders(&self.ssh_recent_folders, &self.ssh_recent_servers);
         // Hand-edited prefs or a webview call must not downgrade the hub to plaintext.
         if crate::remote_tls::validate_hub_url(&self.hub_url, cfg!(debug_assertions)).is_err() { self.hub_url.clear(); }
         // Empty is the normal WebPKI case; a non-empty pin must still have the exact shape.
@@ -397,13 +596,16 @@ impl Prefs {
         if let Some(v) = p.backend_port { n.backend_port = v; }
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
         if let Some(v) = &p.remote_server {
-            // A webview may choose mode/host/user, but the hub URL, the hub pin and the SSH host pin are written
-            // only by the host's trust paths (`set_remote_pin`, `set_remote_hub`, `set_ssh_host_pin`); keep
-            // whatever this host already verified.
+            // A webview may choose mode/host/user, but the hub URL, the hub pin and every SSH trust or recent list
+            // are written only by the host's own paths (`set_remote_pin`, `set_remote_hub`, `upsert_ssh_known_host`,
+            // `set_remote_ssh`, the folder and forget writers); keep whatever this host already holds.
             let mut block = v.clone().normalized();
             block.hub_url = n.remote_server.hub_url.clone();
             block.tls_pin = n.remote_server.tls_pin.clone();
             block.ssh_host_pin = n.remote_server.ssh_host_pin.clone();
+            block.ssh_known_hosts = n.remote_server.ssh_known_hosts.clone();
+            block.ssh_recent_servers = n.remote_server.ssh_recent_servers.clone();
+            block.ssh_recent_folders = n.remote_server.ssh_recent_folders.clone();
             n.remote_server = block;
         }
         if let Some(v) = p.host_api_tls { n.host_api_tls = v; }
@@ -782,7 +984,8 @@ pub fn set_remote_hub(hub_url: String, tls_pin: String, mode: ServerMode) -> Res
 
 /// Host-side writer for the SSH connection block. Validates the same shapes `ssh_transport::prepare_endpoint` checks
 /// before any ssh runs, so a bad block is refused here instead of at connect time. The hub URL and TLS pin belong to
-/// the hub and are kept as they are.
+/// the hub and are kept as they are. The same write puts the server at the front of the recent list, because the
+/// callers reach it only after a successful connect or key install.
 ///
 pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, ssh_auth: SshAuthKind, mode: ServerMode) -> Result<PrefsView, FsError> {
     let host = host.trim().to_string();
@@ -801,32 +1004,121 @@ pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, s
     if ssh_auth == SshAuthKind::Key && !crate::remote::valid_key_path(&key_path) {
         return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
     }
-    let mut g = state();
-    let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
-    let mut next = st.stored.clone();
-    next.remote_server.host = host;
-    next.remote_server.port = port;
-    next.remote_server.user = user;
-    next.remote_server.key_path = key_path;
-    next.remote_server.ssh_auth = ssh_auth;
-    next.remote_server.mode = mode;
-    if let Some(dir) = &st.dir { save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?; }
-    st.stored = next.clone();
-    let persisted = st.dir.is_some();
-    drop(g);
-    Ok(view(next, persisted))
+    edit_remote_server(|block| {
+        block.host = host;
+        block.port = port;
+        block.user = user;
+        block.key_path = key_path;
+        block.ssh_auth = ssh_auth;
+        block.mode = mode;
+        // The server just worked, so it moves to the front of the recent list. Only key auth keeps a key path.
+        let entry = SshRecentServer {
+            host: block.host.to_ascii_lowercase(),
+            port: block.port,
+            user: block.user.clone(),
+            key_path: if ssh_auth == SshAuthKind::Key { block.key_path.clone() } else { String::new() },
+            auth: ssh_auth,
+            last_used: now_secs(),
+        };
+        let pushed_out = put_recent_server(&mut block.ssh_recent_servers, entry);
+        block.ssh_recent_folders.retain(|folder| !pushed_out.contains(&folder.server));
+        Ok(())
+    })
 }
 
-/// Host-side writer for the SSH host key the user confirmed. The webview cannot call it; the SSH service calls it
-/// only after a native yes/no dialog. Stores the pin text as given; the service builds it from validated parts.
-pub(crate) fn set_ssh_host_pin(pin: String) -> Result<PrefsView, FsError> {
-    let pin = bounded_ssh_host_pin(&pin)
-        .ok_or_else(|| herr("invalid_host_key", "the saved server host key is too long to store"))?;
+/// Host-side writer for a confirmed SSH host key: replaces any key saved for the same host and port. The webview
+/// cannot call it; the SSH service calls it only after a native yes/no dialog. Text that is not a valid pin is refused,
+/// so nothing unreadable is stored.
+pub(crate) fn upsert_ssh_known_host(pin: String) -> Result<PrefsView, FsError> {
+    let known = parse_known_host(&pin)
+        .ok_or_else(|| herr("invalid_host_key", "the saved server host key is not in a form that can be stored"))?;
+    edit_remote_server(|block| {
+        put_known_host(&mut block.ssh_known_hosts, &known);
+        Ok(())
+    })
+}
+
+/// Forgets a saved server: its recent entry and its folders, and its host key unless a saved server still needs it.
+/// The stored block (the server SSH mode is switched to) is not changed, so a forgotten server the app is switched to
+/// still connects; its key is kept for the same reason. The next connect saves the server again.
+pub(crate) fn forget_ssh_server(host: &str, port: u16, user: &str) -> Result<(), FsError> {
+    let host = host.trim();
+    let user = user.trim();
+    let key = ssh_server_key(user, host, port);
+    let endpoint = endpoint_text(host, port);
+    edit_remote_server(|block| {
+        block.ssh_recent_servers.retain(|server| recent_key(server) != key);
+        block.ssh_recent_folders.retain(|folder| folder.server != key);
+        let switched_here = block.host.trim().eq_ignore_ascii_case(host) && block.port == port;
+        let recent_here = block.ssh_recent_servers.iter().any(|server| endpoint_text(&server.host, server.port) == endpoint);
+        if !switched_here && !recent_here {
+            block.ssh_known_hosts.retain(|saved| !matches!(parse_known_host(saved), Some(kept) if kept.endpoint == endpoint));
+        }
+        Ok(())
+    })
+    .map(|_| ())
+}
+
+/// Records a folder opened on a saved server. `server` is `ssh_server_key` for that server. A folder is kept only for a
+/// server in the recent list, so the recent list's cap bounds the folder list too.
+///
+/// Errors:
+///     `invalid_path` for a path that is not absolute, is over `SSH_FOLDER_PATH_MAX`, or has a line break or NUL;
+///     `unknown_server` when the server is not in the recent list.
+// NOTE: the workspace folder commands in the next step are the first callers.
+#[allow(dead_code)]
+pub(crate) fn record_ssh_recent_folder(server: &str, path: &str) -> Result<(), FsError> {
+    if !valid_folder_path(path) {
+        return Err(herr("invalid_path", "the folder path must be absolute, at most 4096 characters, with no line break"));
+    }
+    edit_remote_server(|block| {
+        if !block.ssh_recent_servers.iter().any(|server_entry| recent_key(server_entry) == server) {
+            return Err(herr("unknown_server", "Connect to this server before opening a folder on it."));
+        }
+        put_recent_folder(&mut block.ssh_recent_folders, server, path, now_secs());
+        Ok(())
+    })
+    .map(|_| ())
+}
+
+/// The folder paths saved for one server, most recent first.
+// NOTE: the workspace folder commands in the next step are the first callers.
+#[allow(dead_code)]
+pub(crate) fn ssh_recent_folders(server: &str) -> Vec<String> {
+    stored()
+        .remote_server
+        .ssh_recent_folders
+        .iter()
+        .filter(|folder| folder.server == server)
+        .map(|folder| folder.path.clone())
+        .collect()
+}
+
+/// Removes one folder from a server's list. Removing a folder that is not saved is not an error.
+// NOTE: the workspace folder commands in the next step are the first callers.
+#[allow(dead_code)]
+pub(crate) fn forget_ssh_recent_folder(server: &str, path: &str) -> Result<(), FsError> {
+    edit_remote_server(|block| {
+        block.ssh_recent_folders.retain(|folder| !(folder.server == server && folder.path == path));
+        Ok(())
+    })
+    .map(|_| ())
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Applies one host-side edit to the stored SSH block and saves it. The edit runs on a copy, so a refused edit or a
+/// failed save leaves the stored block as it was. Nothing here is reachable from the webview.
+fn edit_remote_server(edit: impl FnOnce(&mut RemoteServerPrefs) -> Result<(), FsError>) -> Result<PrefsView, FsError> {
     let mut g = state();
     let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
     let mut next = st.stored.clone();
-    next.remote_server.ssh_host_pin = pin;
-    if let Some(dir) = &st.dir { save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?; }
+    edit(&mut next.remote_server)?;
+    if let Some(dir) = &st.dir {
+        save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?;
+    }
     st.stored = next.clone();
     let persisted = st.dir.is_some();
     drop(g);
@@ -1048,6 +1340,7 @@ mod tests {
                 tls_pin: "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
                 ssh_auth: SshAuthKind::Key,
                 ssh_host_pin: String::new(),
+                ..RemoteServerPrefs::default()
             }),
             ..Default::default()
         });
@@ -1098,6 +1391,7 @@ mod tests {
                 tls_pin: "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".into(),
                 ssh_auth: SshAuthKind::Key,
                 ssh_host_pin: String::new(),
+                ..RemoteServerPrefs::default()
             }),
             ..Default::default()
         });
@@ -1120,7 +1414,8 @@ mod tests {
         assert_eq!(patched.remote_server.ssh_host_pin, "example.com:22 ssh-ed25519 AAAA");
     }
 
-    /// A 4096-bit RSA pin is about 740 characters; it must survive a save and a load unchanged.
+    /// A 4096-bit RSA pin is about 740 characters; it must survive a save and a load unchanged. The legacy field
+    /// moves into the list on load, so the list holds it.
     #[test]
     fn a_long_rsa_pin_round_trips_through_the_file() {
         let d = tmp("pin-long");
@@ -1128,7 +1423,8 @@ mod tests {
         let p = Prefs { remote_server: RemoteServerPrefs { ssh_host_pin: pin.clone(), ..RemoteServerPrefs::default() }, ..Prefs::default() };
         save_to(&d, &p).unwrap();
         let back = load_from(&d);
-        assert_eq!(back.remote_server.ssh_host_pin, pin, "a pin longer than 512 characters must not be cut");
+        assert_eq!(back.remote_server.ssh_known_hosts, vec![pin], "a pin longer than 512 characters must not be cut");
+        assert_eq!(back.remote_server.ssh_host_pin, "");
     }
 
     /// Over the cap the pin is cleared, never truncated: a cut pin could still decode and read as another key.
@@ -1142,13 +1438,13 @@ mod tests {
     }
 
     #[test]
-    fn set_ssh_host_pin_refuses_an_over_cap_pin() {
+    fn upsert_ssh_known_host_refuses_an_over_cap_pin() {
         let _guard = prefs_guard();
         let before = stored().remote_server;
         let too_long = "A".repeat(SSH_HOST_PIN_MAX + 1);
-        let err = set_ssh_host_pin(format!("example.com:22 ssh-rsa {too_long}")).unwrap_err();
+        let err = upsert_ssh_known_host(format!("example.com:22 ssh-rsa {too_long}")).unwrap_err();
         assert_eq!(err.code, "invalid_host_key");
-        assert_eq!(stored().remote_server.ssh_host_pin, before.ssh_host_pin, "a refused pin stores nothing");
+        assert_eq!(stored().remote_server.ssh_known_hosts, before.ssh_known_hosts, "a refused pin stores nothing");
     }
 
     #[test]
@@ -1562,5 +1858,275 @@ mod loop_default_tests {
         assert!(serde_json::from_str::<PrefsPatch>(r#"{"notifications":{"approvals":false,"evil":true}}"#).is_err(), "the webview patch stays strict");
         assert!(serde_json::from_str::<PrefsPatch>(r#"{"notifications":{"approvals":"no"}}"#).is_err());
         assert!(!view(Prefs { notifications: off, ..Prefs::default() }, true).restart_needed, "applies at once");
+    }
+}
+
+#[cfg(test)]
+mod ssh_lists_tests {
+    use super::*;
+    use base64::Engine as _;
+
+    fn b64(seed: &str) -> String {
+        base64::engine::general_purpose::STANDARD.encode(seed.as_bytes())
+    }
+
+    /// The canonical saved pin for a host, port and seed.
+    fn pin(host: &str, port: u16, seed: &str) -> String {
+        format!("{host}:{port} ssh-ed25519 {}", b64(seed))
+    }
+
+    /// Clears the stored SSH block and holds the preferences lock for the whole test.
+    fn fresh() -> std::sync::MutexGuard<'static, ()> {
+        let guard = prefs_guard();
+        set_remote_server_for_test(RemoteServerPrefs::default());
+        guard
+    }
+
+    fn stored_block() -> RemoteServerPrefs {
+        stored().remote_server
+    }
+
+    /// Switches SSH mode to a server with key auth, the same write a successful connect makes.
+    fn switch_to(host: &str, port: u16, user: &str) {
+        set_remote_ssh(host.into(), port, user.into(), "/home/u/.ssh/id".into(), SshAuthKind::Key, ServerMode::Ssh).unwrap();
+    }
+
+    fn recent(host: &str, user: &str) -> SshRecentServer {
+        SshRecentServer { host: host.into(), port: 22, user: user.into(), key_path: String::new(), auth: SshAuthKind::Password, last_used: 5 }
+    }
+
+    #[test]
+    fn old_single_pin_migrates_into_the_list() {
+        let legacy = format!("Example.com:22 ssh-ed25519 {}", b64("key-a"));
+        let file = format!(r#"{{"remoteServer":{{"mode":"ssh","host":"example.com","port":22,"user":"alice","keyPath":"/k","sshHostPin":"{legacy}"}}}}"#);
+        let loaded = parse(&file);
+        assert_eq!(loaded.remote_server.ssh_known_hosts, vec![pin("example.com", 22, "key-a")]);
+        assert_eq!(loaded.remote_server.ssh_host_pin, "", "the legacy field is cleared on load");
+    }
+
+    #[test]
+    fn the_migrated_pin_replaces_a_listed_pin_for_the_same_endpoint() {
+        let legacy = format!("example.com:22 ssh-ed25519 {}", b64("new"));
+        let file = format!(r#"{{"remoteServer":{{"sshKnownHosts":["{}"],"sshHostPin":"{legacy}"}}}}"#, pin("example.com", 22, "old"));
+        let loaded = parse(&file);
+        assert_eq!(loaded.remote_server.ssh_known_hosts, vec![legacy], "one pin per host and port, the migrated one wins");
+    }
+
+    #[test]
+    fn one_pin_per_host_and_port() {
+        let _guard = fresh();
+        upsert_ssh_known_host(format!("EXAMPLE.com:22 ssh-ed25519 {}", b64("key-a"))).unwrap();
+        upsert_ssh_known_host(pin("example.com", 22, "key-b")).unwrap();
+        upsert_ssh_known_host(pin("example.com", 2222, "key-a")).unwrap();
+        assert_eq!(stored_block().ssh_known_hosts, vec![pin("example.com", 22, "key-b"), pin("example.com", 2222, "key-a")]);
+    }
+
+    #[test]
+    fn the_list_holds_at_most_32_pins_and_drops_the_oldest() {
+        let _guard = fresh();
+        for port in 1..=(SSH_KNOWN_HOSTS_MAX as u16 + 1) {
+            upsert_ssh_known_host(pin("example.com", port, "key-a")).unwrap();
+        }
+        let list = stored_block().ssh_known_hosts;
+        assert_eq!(list.len(), SSH_KNOWN_HOSTS_MAX);
+        assert!(!list.iter().any(|entry| entry.starts_with("example.com:1 ")), "the oldest pin is the one dropped");
+        assert!(list.last().unwrap().starts_with("example.com:33 "));
+    }
+
+    #[test]
+    fn an_invalid_pin_is_refused_on_write() {
+        let _guard = fresh();
+        assert_eq!(upsert_ssh_known_host("nonsense".into()).unwrap_err().code, "invalid_host_key");
+        assert_eq!(upsert_ssh_known_host(pin("example.com", 0, "key-a")).unwrap_err().code, "invalid_host_key");
+        assert_eq!(upsert_ssh_known_host("example.com:22 ssh-ed25519 !!!".into()).unwrap_err().code, "invalid_host_key");
+        assert!(stored_block().ssh_known_hosts.is_empty());
+    }
+
+    #[test]
+    fn an_invalid_or_oversized_list_entry_is_dropped_on_load_never_cut() {
+        let good = pin("example.com", 22, "key-a");
+        let over = format!("example.com:2222 ssh-rsa {}", "A".repeat(SSH_HOST_PIN_MAX));
+        let file = serde_json::json!({ "remoteServer": { "sshKnownHosts": [
+            good, "not a pin", over, "example.com:0 ssh-ed25519 AAAA", "example.com:3333 ssh-ed25519 !!!", "example.com:4444 bogus AAAA",
+        ] } })
+        .to_string();
+        assert_eq!(parse(&file).remote_server.ssh_known_hosts, vec![good]);
+    }
+
+    #[test]
+    fn recent_servers_are_capped_ordered_and_keyed_without_case() {
+        let _guard = fresh();
+        for i in 0..12 {
+            switch_to(&format!("host{i}.example.com"), 22, "alice");
+        }
+        let recent_list = stored_block().ssh_recent_servers;
+        assert_eq!(recent_list.len(), SSH_RECENT_SERVERS_MAX);
+        assert_eq!(recent_list[0].host, "host11.example.com");
+        assert_eq!(recent_list[9].host, "host2.example.com");
+        assert!(recent_list.iter().all(|server| server.last_used > 0));
+
+        // The same server typed in capitals moves to the front and is not a second entry.
+        switch_to("HOST5.example.com", 22, "alice");
+        let recent_list = stored_block().ssh_recent_servers;
+        assert_eq!(recent_list.len(), SSH_RECENT_SERVERS_MAX);
+        assert_eq!(recent_list[0].host, "host5.example.com");
+        assert_eq!(recent_list.iter().filter(|server| server.host == "host5.example.com").count(), 1);
+
+        // Another user on the same host is another server, and the oldest one is pushed out.
+        switch_to("host5.example.com", 22, "bob");
+        let recent_list = stored_block().ssh_recent_servers;
+        assert_eq!(recent_list.len(), SSH_RECENT_SERVERS_MAX);
+        assert_eq!(recent_list[0].user, "bob");
+        assert_eq!(recent_list.iter().filter(|server| server.host == "host5.example.com").count(), 2);
+    }
+
+    #[test]
+    fn a_recent_server_has_the_wire_fields_and_no_secret() {
+        let value = serde_json::to_value(SshRecentServer {
+            host: "example.com".into(), port: 22, user: "alice".into(), key_path: "/k".into(), auth: SshAuthKind::Password, last_used: 7,
+        })
+        .unwrap();
+        assert_eq!(value, serde_json::json!({ "host": "example.com", "port": 22, "user": "alice", "keyPath": "/k", "auth": "password", "lastUsed": 7 }));
+    }
+
+    #[test]
+    fn folders_are_capped_per_server_and_their_paths_checked() {
+        let _guard = fresh();
+        switch_to("example.com", 22, "alice");
+        switch_to("other.example", 22, "alice");
+        let first = "alice@example.com:22";
+        let second = "alice@other.example:22";
+        for i in 0..12 {
+            record_ssh_recent_folder(first, &format!("/home/alice/p{i}")).unwrap();
+        }
+        let paths = ssh_recent_folders(first);
+        assert_eq!(paths.len(), SSH_RECENT_FOLDERS_MAX);
+        assert_eq!(paths[0], "/home/alice/p11");
+        assert_eq!(paths[9], "/home/alice/p2");
+        record_ssh_recent_folder(second, "/srv/app").unwrap();
+        assert_eq!(ssh_recent_folders(first).len(), SSH_RECENT_FOLDERS_MAX, "another server's folder does not push these out");
+        assert_eq!(ssh_recent_folders(second), vec!["/srv/app".to_string()]);
+
+        for bad in ["relative/path", "", "/a\nb", "/a\rb", "/a\0b"] {
+            assert_eq!(record_ssh_recent_folder(first, bad).unwrap_err().code, "invalid_path", "{bad:?}");
+        }
+        let too_long = format!("/{}", "x".repeat(SSH_FOLDER_PATH_MAX));
+        assert_eq!(record_ssh_recent_folder(first, &too_long).unwrap_err().code, "invalid_path");
+        let longest = format!("/{}", "x".repeat(SSH_FOLDER_PATH_MAX - 1));
+        record_ssh_recent_folder(first, &longest).unwrap();
+        assert_eq!(ssh_recent_folders(first)[0], longest);
+        forget_ssh_recent_folder(first, &longest).unwrap();
+        assert!(!ssh_recent_folders(first).contains(&longest), "a forgotten folder is gone");
+        assert_eq!(record_ssh_recent_folder("carol@example.com:22", "/x").unwrap_err().code, "unknown_server");
+    }
+
+    #[test]
+    fn a_server_pushed_out_of_the_recent_list_takes_its_folders() {
+        let _guard = fresh();
+        switch_to("example.com", 22, "alice");
+        record_ssh_recent_folder("alice@example.com:22", "/home/alice/a").unwrap();
+        for i in 0..SSH_RECENT_SERVERS_MAX {
+            switch_to(&format!("h{i}.example.com"), 22, "alice");
+        }
+        assert!(ssh_recent_folders("alice@example.com:22").is_empty());
+        assert!(stored_block().ssh_recent_folders.is_empty());
+    }
+
+    #[test]
+    fn forget_keeps_the_pin_while_another_saved_server_uses_it() {
+        let _guard = fresh();
+        upsert_ssh_known_host(pin("example.com", 22, "key-a")).unwrap();
+        switch_to("example.com", 22, "alice");
+        switch_to("example.com", 22, "bob");
+        record_ssh_recent_folder("alice@example.com:22", "/home/alice/a").unwrap();
+        record_ssh_recent_folder("bob@example.com:22", "/home/bob/b").unwrap();
+
+        forget_ssh_server("example.com", 22, "alice").unwrap();
+        let block = stored_block();
+        assert_eq!(block.ssh_recent_servers.iter().map(|s| s.user.as_str()).collect::<Vec<_>>(), ["bob"]);
+        assert!(ssh_recent_folders("alice@example.com:22").is_empty());
+        assert_eq!(ssh_recent_folders("bob@example.com:22"), ["/home/bob/b"], "another user's folders stay");
+        assert_eq!(block.ssh_known_hosts, vec![pin("example.com", 22, "key-a")], "bob still needs the same host key");
+    }
+
+    #[test]
+    fn forget_removes_the_pin_and_folders_once_no_saved_server_uses_them() {
+        let _guard = fresh();
+        upsert_ssh_known_host(pin("example.com", 22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin("other.example", 22, "key-b")).unwrap();
+        switch_to("example.com", 22, "bob");
+        record_ssh_recent_folder("bob@example.com:22", "/home/bob/b").unwrap();
+        switch_to("elsewhere.example", 22, "carol");
+
+        forget_ssh_server("example.com", 22, "bob").unwrap();
+        let block = stored_block();
+        assert_eq!(block.ssh_known_hosts, vec![pin("other.example", 22, "key-b")], "only the unused endpoint's key goes");
+        assert!(ssh_recent_folders("bob@example.com:22").is_empty());
+        assert_eq!((block.host.as_str(), block.user.as_str()), ("elsewhere.example", "carol"), "the switch is not touched");
+    }
+
+    #[test]
+    fn forgetting_the_switched_to_server_leaves_the_switch_and_its_key() {
+        let _guard = fresh();
+        upsert_ssh_known_host(pin("example.com", 22, "key-a")).unwrap();
+        switch_to("example.com", 22, "bob");
+        forget_ssh_server("example.com", 22, "bob").unwrap();
+        let block = stored_block();
+        assert_eq!((block.mode, block.host.as_str(), block.user.as_str()), (ServerMode::Ssh, "example.com", "bob"));
+        assert!(block.ssh_recent_servers.is_empty());
+        assert_eq!(block.ssh_known_hosts, vec![pin("example.com", 22, "key-a")], "the switched-to server still needs its key");
+        forget_ssh_server("never.example", 22, "dave").unwrap();
+    }
+
+    #[test]
+    fn a_webview_patch_cannot_touch_the_three_lists() {
+        let mut base = Prefs::default();
+        base.remote_server.ssh_known_hosts = vec![pin("example.com", 22, "key-a")];
+        base.remote_server.ssh_recent_servers = vec![recent("example.com", "alice")];
+        base.remote_server.ssh_recent_folders = vec![SshRecentFolder { server: "alice@example.com:22".into(), path: "/home/alice".into(), last_used: 1 }];
+        let patched = base.patched(&PrefsPatch {
+            remote_server: Some(RemoteServerPrefs {
+                mode: ServerMode::Ssh,
+                host: "evil.example.com".into(),
+                port: 22,
+                user: "u".into(),
+                key_path: "/k".into(),
+                ssh_known_hosts: vec![pin("evil.example.com", 22, "key-b")],
+                ssh_recent_servers: Vec::new(),
+                ssh_recent_folders: vec![SshRecentFolder { server: "u@evil.example.com:22".into(), path: "/".into(), last_used: 9 }],
+                ..RemoteServerPrefs::default()
+            }),
+            ..Default::default()
+        });
+        assert_eq!(patched.remote_server.ssh_known_hosts, base.remote_server.ssh_known_hosts);
+        assert_eq!(patched.remote_server.ssh_recent_servers, base.remote_server.ssh_recent_servers);
+        assert_eq!(patched.remote_server.ssh_recent_folders, base.remote_server.ssh_recent_folders);
+    }
+
+    #[test]
+    fn a_full_set_of_lists_is_saved_and_loaded_whole() {
+        let _guard = fresh();
+        for i in 0..32u16 {
+            upsert_ssh_known_host(pin(&format!("h{i}.example.com"), 22, "key-a")).unwrap();
+        }
+        for i in 0..SSH_RECENT_SERVERS_MAX {
+            switch_to(&format!("h{i}.example.com"), 22, "alice");
+        }
+        for i in 0..SSH_RECENT_SERVERS_MAX {
+            let server = format!("alice@h{i}.example.com:22");
+            for j in 0..SSH_RECENT_FOLDERS_MAX {
+                record_ssh_recent_folder(&server, &format!("/{j:04}{}", "x".repeat(SSH_FOLDER_PATH_MAX - 5))).unwrap();
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("llmide-ssh-lists-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let before = stored().remote_server;
+        save_to(&dir, &stored()).unwrap();
+        let size = std::fs::metadata(dir.join(FILE_NAME)).unwrap().len();
+        let loaded = load_from(&dir).remote_server;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(size > 16 * 1024, "the worst case is larger than the old 16 KB bound");
+        assert_eq!(loaded, before, "nothing is dropped at the caps");
     }
 }

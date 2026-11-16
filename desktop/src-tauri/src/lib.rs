@@ -479,6 +479,8 @@ macro_rules! product_handlers {
                 ssh_cmds::remote_ssh_server_stop,
                 ssh_cmds::remote_ssh_server_uninstall,
                 ssh_cmds::remote_ssh_server_install_key,
+                ssh_cmds::remote_ssh_server_recent,
+                ssh_cmds::remote_ssh_server_forget,
                 app_restart,
                 remote_deploy::remote_deploy_plan,
                 remote_deploy::remote_deploy_bootstrap,

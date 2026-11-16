@@ -1,9 +1,9 @@
 //! SSH server mode, service layer: the plain functions the host commands call.
 //!
 //! Every function takes its outside pieces through [`Deps`], so tests replace the ssh runner, the key scan,
-//! the native dialog and the server bundle. The server's host key is pinned once, in preferences
-//! (`ssh_host_pin`). Each ssh call after that runs with `StrictHostKeyChecking=yes` against a one-line
-//! known_hosts file built from the pin, so ssh itself refuses a server whose key has changed.
+//! the native dialog and the server bundle. Each server's host key is pinned once, in preferences
+//! (`ssh_known_hosts`, one entry per host and port). Each ssh call after that runs with `StrictHostKeyChecking=yes`
+//! against a one-line known_hosts file built from that entry, so ssh itself refuses a server whose key has changed.
 //!
 //! The password is taken per call and handed only to the askpass grant inside `ssh_session::Link`. It is
 //! never stored, logged, or placed in an argv, an environment variable, a status or an error. Error messages
@@ -201,7 +201,7 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
     if !(deps.ask)(&shown, &offered.key_type, &offered.fingerprint) {
         return Err(herr("cancelled", "The server's host key was not trusted, so nothing was saved."));
     }
-    prefs::set_ssh_host_pin(pin_text(&endpoint, &offered))?;
+    prefs::upsert_ssh_known_host(pin_text(&endpoint, &offered))?;
     Ok(base_result(&offered, true, false))
 }
 
@@ -540,23 +540,17 @@ fn scan_offered(deps: &Deps, endpoint: &SshEndpoint) -> Result<Offered, FsError>
     pick_offered(&scan).ok_or_else(|| herr("SSH_UNREACHABLE", "Could not reach the server."))
 }
 
-/// The pin for this endpoint, or `None` when the saved pin names another host or port or is malformed.
+/// The saved host key for this endpoint, or `None` when no saved key names this host and port. Each saved entry is
+/// checked when it is read, so a malformed entry never counts as a pin.
 fn pin_for(endpoint: &SshEndpoint) -> Option<Pin> {
-    let saved = prefs::stored().remote_server.ssh_host_pin;
-    let mut fields = saved.split_whitespace();
-    let (Some(host_port), Some(key_type), Some(key_b64), None) =
-        (fields.next(), fields.next(), fields.next(), fields.next())
-    else {
-        return None;
-    };
-    let (host, port) = host_port.rsplit_once(':')?;
-    if host != endpoint.host.to_ascii_lowercase() || port.parse::<u16>().ok() != Some(endpoint.port) {
-        return None;
-    }
-    if !valid_host_key_type(key_type) || fingerprint_for_key_b64(key_b64).is_none() {
-        return None;
-    }
-    Some(Pin { key_type: key_type.to_string(), key_b64: key_b64.to_string() })
+    let key = endpoint_key(endpoint);
+    prefs::stored()
+        .remote_server
+        .ssh_known_hosts
+        .iter()
+        .filter_map(|entry| prefs::parse_known_host(entry))
+        .find(|known| known.endpoint == key)
+        .map(|known| Pin { key_type: known.key_type, key_b64: known.key_b64 })
 }
 
 pub(crate) fn require_pin(endpoint: &SshEndpoint) -> Result<Pin, FsError> {
@@ -685,7 +679,7 @@ fn reset_for_tests() {
 pub(crate) mod tests {
     use super::*;
     use crate::core_host::tests::mode_guard;
-    use crate::prefs::{prefs_guard, set_remote_server_for_test, set_ssh_host_pin, RemoteServerPrefs};
+    use crate::prefs::{prefs_guard, set_remote_server_for_test, upsert_ssh_known_host, RemoteServerPrefs};
     use crate::ssh_link::{supervise, KnownHostsDir, SuperviseInput};
     use crate::ssh_key_install::public_key_path;
     use crate::ssh_server_scripts::{ClaudeState, STOP, UNINSTALL};
@@ -935,7 +929,7 @@ pub(crate) mod tests {
     #[test]
     fn status_serializes_without_secrets() {
         let fx = Fixture::new("svc-secrets");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let mut seen = Vec::new();
 
         let good = fake(connect_outputs());
@@ -980,7 +974,7 @@ pub(crate) mod tests {
     #[test]
     fn test_changed_key_is_flagged() {
         let fx = Fixture::new("svc-changed");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, &scan_of("key-b"), true, true);
         let result = test(&deps, &target(22, SshAuthKind::Key), None).unwrap();
@@ -992,7 +986,7 @@ pub(crate) mod tests {
     #[test]
     fn test_trusted_key_runs_probe() {
         let fx = Fixture::new("svc-trusted");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![probe_out("2.0.0")]);
         let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
         let result = test(&deps, &target(22, SshAuthKind::Key), None).unwrap();
@@ -1009,7 +1003,7 @@ pub(crate) mod tests {
     #[test]
     fn trusted_probe_reports_the_glibc_version() {
         let fx = Fixture::new("svc-glibc");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![probe_with_glibc("2.0.0", "2.31")]);
         let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
         let result = test(&deps, &target(22, SshAuthKind::Key), None).unwrap();
@@ -1037,7 +1031,7 @@ pub(crate) mod tests {
         let result = confirm(&deps, &target(22, SshAuthKind::Key), "ssh-ed25519", &fingerprint_of("key-a"));
         assert_eq!(code(result), "cancelled");
         assert_eq!(fx.asks.load(Ordering::SeqCst), 1);
-        assert_eq!(prefs::stored().remote_server.ssh_host_pin, "", "a declined dialog stores no pin");
+        assert!(prefs::stored().remote_server.ssh_known_hosts.is_empty(), "a declined dialog stores no pin");
     }
 
     #[test]
@@ -1049,14 +1043,41 @@ pub(crate) mod tests {
         let result = confirm(&deps, &target(22, SshAuthKind::Key), "ssh-ed25519", &fingerprint_of("key-a")).unwrap();
         assert!(result.trusted);
         assert_eq!(result.os, None, "confirm never logs in, so the probe fields stay empty");
-        assert_eq!(prefs::stored().remote_server.ssh_host_pin, pin_text(22, "key-a"));
+        assert_eq!(prefs::stored().remote_server.ssh_known_hosts, vec![pin_text(22, "key-a")]);
         assert!(exec.calls().is_empty());
+    }
+
+    #[test]
+    fn pin_lookup_uses_the_list() {
+        let _fx = Fixture::new("svc-two-pins");
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(format!("other.example:2222 ssh-ed25519 {}", key_b64("key-b"))).unwrap();
+        let first = prepare_endpoint(HOST, 22, "alice", SshAuth::Password).unwrap();
+        let second = prepare_endpoint("Other.Example", 2222, "alice", SshAuth::Password).unwrap();
+        let elsewhere = prepare_endpoint(HOST, 2222, "alice", SshAuth::Password).unwrap();
+        assert_eq!(pin_for(&first).map(|p| p.key_b64), Some(key_b64("key-a")));
+        assert_eq!(pin_for(&second).map(|p| p.key_b64), Some(key_b64("key-b")));
+        assert_eq!(pin_for(&elsewhere), None, "a pin for another port is not this endpoint's pin");
+    }
+
+    #[test]
+    fn connect_records_the_recent_server() {
+        let fx = Fixture::new("svc-recent");
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let good = fake(connect_outputs());
+        let deps = fx.deps(&good, "", true, true);
+        connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap();
+        let recent = prefs::stored().remote_server.ssh_recent_servers;
+        assert_eq!(recent.len(), 1);
+        assert_eq!((recent[0].host.as_str(), recent[0].port, recent[0].user.as_str()), (HOST, 22, "alice"));
+        assert_eq!((recent[0].key_path.as_str(), recent[0].auth), (KEY_PATH, SshAuthKind::Key));
+        assert!(recent[0].last_used > 0);
     }
 
     #[test]
     fn a_pin_for_another_port_is_not_trusted() {
         let fx = Fixture::new("svc-port");
-        set_ssh_host_pin(pin_text(2222, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(2222, "key-a")).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
         let result = test(&deps, &target(22, SshAuthKind::Key), None).unwrap();
@@ -1068,7 +1089,7 @@ pub(crate) mod tests {
     #[test]
     fn connect_persists_mode_only_on_success() {
         let fx = Fixture::new("svc-persist");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let failing = fake(vec![ssh_error(TIMED_OUT)]);
         let deps = fx.deps(&failing, "", true, true);
         assert_eq!(code(connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None)), "SSH_UNREACHABLE");
@@ -1091,7 +1112,7 @@ pub(crate) mod tests {
     #[test]
     fn connect_in_ssh_mode_keeps_the_known_hosts_until_disconnect() {
         let fx = Fixture::new("svc-folder");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(connect_outputs());
         let deps = fx.deps(&exec, "", true, true);
         fx.host.set_mode(ServerMode::Ssh);
@@ -1127,7 +1148,7 @@ pub(crate) mod tests {
     #[test]
     fn connect_without_a_bundle_is_refused() {
         let fx = Fixture::new("svc-no-bundle");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, "", true, false);
         assert_eq!(code(connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None)), "SSH_BUNDLE_MISSING");
@@ -1137,7 +1158,7 @@ pub(crate) mod tests {
     #[test]
     fn password_auth_without_a_password_is_refused() {
         let fx = Fixture::new("svc-no-password");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
         let password_target = target(22, SshAuthKind::Password);
@@ -1154,7 +1175,7 @@ pub(crate) mod tests {
     fn uninstall_needs_matching_host() {
         let fx = Fixture::new("svc-uninstall");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, "", true, true);
         let refused = uninstall(&deps, &fx.host, None, "other", false).unwrap_err();
@@ -1167,7 +1188,7 @@ pub(crate) mod tests {
     fn uninstall_with_the_saved_host_runs_the_uninstall_script() {
         let fx = Fixture::new("svc-uninstall-ok");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         fx.host.set_mode(ServerMode::Ssh);
         let exec = fake(vec![ok(STOPPED_STATUS), ok(UNINSTALL_OK)]);
         let deps = fx.deps(&exec, "", true, true);
@@ -1181,7 +1202,7 @@ pub(crate) mod tests {
     fn uninstall_needs_the_removal_marker() {
         let fx = Fixture::new("svc-uninstall-partial");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         fx.host.set_mode(ServerMode::Ssh);
         // The stop ran, but the script never printed its own ok line.
         let exec = fake(vec![ok(STOPPED_STATUS), ok("__LLMIDE_STOP__=not_running\n")]);
@@ -1194,7 +1215,7 @@ pub(crate) mod tests {
     #[test]
     fn every_call_is_strict_after_connect_and_stop() {
         let fx = Fixture::new("svc-strict");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let connect_exec = fake(connect_outputs());
         let deps = fx.deps(&connect_exec, "", true, true);
         connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap();
@@ -1211,7 +1232,7 @@ pub(crate) mod tests {
     fn stop_server_detaches_then_stops() {
         let fx = Fixture::new("svc-stop");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let kills = Arc::new(AtomicUsize::new(0));
         let exec = fake(vec![ok(STOPPED_STATUS), ok(STOP_OK)]);
         fx.attach_live_link(&exec, &kills);
@@ -1249,7 +1270,7 @@ pub(crate) mod tests {
     fn stop_refuses_a_core_another_desktop_started() {
         let fx = Fixture::new("svc-stop-foreign");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let kills = Arc::new(AtomicUsize::new(0));
         let exec = fake(vec![foreign_status()]);
         fx.attach_live_link(&exec, &kills);
@@ -1265,7 +1286,7 @@ pub(crate) mod tests {
     fn stop_with_force_stops_a_core_another_desktop_started() {
         let fx = Fixture::new("svc-stop-force");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![foreign_status(), ok(STOP_OK)]);
         let deps = fx.deps(&exec, "", true, true);
         let status = stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap();
@@ -1277,7 +1298,7 @@ pub(crate) mod tests {
     fn stop_proceeds_for_our_own_core() {
         let fx = Fixture::new("svc-stop-ours");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         record_ours(&fx, NEW);
         let exec = fake(vec![state_out(3460, NEW, "2.0.0"), ok(STOP_OK)]);
         let deps = fx.deps(&exec, "", true, true);
@@ -1289,7 +1310,7 @@ pub(crate) mod tests {
     fn stop_on_a_stopped_core_needs_no_force() {
         let fx = Fixture::new("svc-stop-idle");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![ok(STOPPED_STATUS), ok(STOP_OK)]);
         let deps = fx.deps(&exec, "", true, true);
         stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, false).unwrap();
@@ -1300,7 +1321,7 @@ pub(crate) mod tests {
     fn uninstall_refuses_a_foreign_core_unless_forced() {
         let fx = Fixture::new("svc-uninstall-foreign");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![foreign_status()]);
         let deps = fx.deps(&exec, "", true, true);
         let refused = uninstall(&deps, &fx.host, None, "example.com", false).unwrap_err();
@@ -1317,7 +1338,7 @@ pub(crate) mod tests {
     fn stop_with_another_host_is_refused_before_any_ssh_call() {
         let fx = Fixture::new("svc-stop-mismatch");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, "", true, true);
         let other_host = SshServerTarget { host: "other.example".into(), ..target(22, SshAuthKind::Key) };
@@ -1333,7 +1354,7 @@ pub(crate) mod tests {
     fn key_login_survives_disconnect_as_stopped_and_reconnects() {
         let fx = Fixture::new("svc-disconnect-status");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         fx.host.set_mode(ServerMode::Ssh);
         let exec = fake(connect_outputs());
         let deps = fx.deps(&exec, "", true, true);
@@ -1353,7 +1374,7 @@ pub(crate) mod tests {
     #[test]
     fn a_timed_out_probe_is_ssh_timeout_from_test() {
         let fx = Fixture::new("svc-timeout-test");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![Err(io::Error::new(io::ErrorKind::TimedOut, "deadline"))]);
         let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
         let err = test(&deps, &target(22, SshAuthKind::Key), None).unwrap_err();
@@ -1365,7 +1386,7 @@ pub(crate) mod tests {
         {
             // Scoped: a Fixture holds process-wide guards, so the second one can only start after this one drops.
             let fx = Fixture::new("svc-timeout-connect");
-            set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+            upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
             let exec = fake(vec![Err(io::Error::new(io::ErrorKind::TimedOut, "deadline"))]);
             let deps = fx.deps(&exec, "", true, true);
             assert_eq!(code(connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None)), "SSH_TIMEOUT");
@@ -1373,7 +1394,7 @@ pub(crate) mod tests {
 
         let fx = Fixture::new("svc-timeout-stop");
         set_remote_server_for_test(saved_key_block());
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![Err(io::Error::new(io::ErrorKind::TimedOut, "deadline"))]);
         let deps = fx.deps(&exec, "", true, true);
         let err = stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, false).unwrap_err();
@@ -1385,7 +1406,7 @@ pub(crate) mod tests {
     fn two_open_links_never_interleave_their_ssh_calls() {
         // Two connects on two threads. Serialized, each call's end comes before the next call starts.
         let fx = Fixture::new("svc-serial");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let outputs = connect_outputs().into_iter().chain(connect_outputs()).collect();
         let exec = Arc::new(FakeExec::with_delay(outputs, Duration::from_millis(30)));
         let deps = fx.deps(&exec, "", true, true);
@@ -1406,7 +1427,7 @@ pub(crate) mod tests {
     #[test]
     fn a_failed_open_leaves_no_known_hosts_folder() {
         let fx = Fixture::new("svc-open-fail");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         let exec = fake(vec![ssh_error(TIMED_OUT)]);
         let deps = fx.deps(&exec, "", true, true);
         let err = open_link(&deps, &target(22, SshAuthKind::Key), None).err().expect("the open fails");
@@ -1418,7 +1439,7 @@ pub(crate) mod tests {
     #[test]
     fn a_replaced_link_takes_its_folder_with_it() {
         let fx = Fixture::new("svc-replace");
-        set_ssh_host_pin(pin_text(22, "key-a")).unwrap();
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         fx.host.set_mode(ServerMode::Ssh);
         let first = fake(connect_outputs());
         let deps = fx.deps(&first, "", true, true);

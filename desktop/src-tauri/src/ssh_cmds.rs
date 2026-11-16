@@ -14,7 +14,7 @@ use crate::core_host::{self, CoreHost, SshConnector};
 use crate::fs_ops::FsError;
 use crate::fsutil;
 use crate::host_approval;
-use crate::prefs::RemoteServerPrefs;
+use crate::prefs::{self, RemoteServerPrefs, SshRecentServer};
 use crate::secrets;
 use crate::ssh_key_install::{self, KEYGEN_FAILED, KEYGEN_MESSAGE};
 use crate::ssh_service::{self, Deps, SshServerStatus, SshServerTarget, SshServerTest};
@@ -112,6 +112,20 @@ pub async fn remote_ssh_server_install_key(host: tauri::State<'_, CoreHost>, pas
     })
     .await
     .map_err(|_| herr("internal", "the SSH key install did not finish."))?
+}
+
+/// The servers SSH mode connected to, most recent first. Holds no password and no secret.
+#[tauri::command]
+pub fn remote_ssh_server_recent() -> Vec<SshRecentServer> {
+    prefs::stored().remote_server.ssh_recent_servers
+}
+
+/// Removes a saved server from the recent list, with its folders and, when nothing else needs it, its host key.
+#[tauri::command]
+pub async fn remote_ssh_server_forget(host: String, port: u16, user: String) -> Result<(), FsError> {
+    tauri::async_runtime::spawn_blocking(move || prefs::forget_ssh_server(&host, port, &user))
+        .await
+        .map_err(|_| herr("internal", "the saved SSH server could not be removed."))?
 }
 
 /// Stops the core and removes the server's releases. `force` uninstalls even when another desktop started the core.
@@ -377,7 +391,7 @@ mod tests {
         );
     }
 
-    const COMMANDS: [&str; 8] = [
+    const COMMANDS: [&str; 10] = [
         "remote_ssh_server_test",
         "remote_ssh_server_confirm",
         "remote_ssh_server_connect",
@@ -386,6 +400,8 @@ mod tests {
         "remote_ssh_server_stop",
         "remote_ssh_server_uninstall",
         "remote_ssh_server_install_key",
+        "remote_ssh_server_recent",
+        "remote_ssh_server_forget",
     ];
 
     #[test]

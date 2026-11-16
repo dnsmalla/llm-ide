@@ -176,6 +176,8 @@
     "allow-remote-ssh-server-stop",
     "allow-remote-ssh-server-uninstall",
     "allow-remote-ssh-server-install-key",
+    "allow-remote-ssh-server-recent",
+    "allow-remote-ssh-server-forget",
     "allow-app-restart",
     "allow-remote-deploy-plan",
     "allow-remote-deploy-bootstrap",
