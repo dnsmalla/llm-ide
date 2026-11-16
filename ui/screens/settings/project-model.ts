@@ -156,7 +156,7 @@ const CLONE_MAX = 200;
 
 // NOTE: git says these when a private repo is refused (wrong or missing token). GitHub answers "Repository not found"
 // for a private repo the token cannot see, so it is treated as an access failure too.
-const CLONE_AUTH_FAILURE = /Access denied|Authentication failed|could not read Username|HTTP Basic|\b40[13]\b|Repository not found/i;
+const CLONE_AUTH_FAILURE = /Access denied|Authentication failed|could not read Username|HTTP Basic|(?:error|HTTP|returned error):? 40[13]\b|Repository not found/i;
 
 const CLONE_AUTH_TEXT =
   "The repository refused access. If it is private, paste a personal access token with read access (GitHub: repo scope; GitLab: read_repository) and press Clone again.";

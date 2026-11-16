@@ -14,7 +14,7 @@ const { createElement: h } = req("react");
 const { renderToStaticMarkup } = req("react-dom/server");
 import { bundleDir } from "../../../../desktop/scripts/test-outdir.mjs";
 
-const MAC_CLONE = "/Users/dinesh.malla/Desktop/LLM/code/web";
+const MAC_CLONE = "/Users/me/Desktop/LLM/code/web";
 const SERVER_CODE = "/srv/home/docs/code";
 const GITLAB_REPO = { displayName: "", url: "https://gitlab.com/grp/web", clonePath: MAC_CLONE, active: true };
 
