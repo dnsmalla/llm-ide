@@ -1,0 +1,20 @@
+[package]
+name = "llmide-workspace-helper"
+version = "0.0.0"
+description = "Static Linux helper that serves the Explorer's file, git, search and watch commands over stdio for SSH server mode"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+[[bin]]
+name = "llmide-workspace"
+path = "src/main.rs"
+
+[dependencies]
+llmide-workspace-core = { path = "../workspace-core" }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
+
+[dev-dependencies]
+# The recording fake trash is behind the core's `test-util` feature so release builds never carry it.
+llmide-workspace-core = { path = "../workspace-core", features = ["test-util"] }
