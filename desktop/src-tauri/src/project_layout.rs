@@ -15,7 +15,7 @@ use llmide_workspace_core::R;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::workspace_backend::{self, Connector, LinkConnector, Remote};
+use crate::workspace_backend::{self, CommandError, Connector, LinkConnector, Remote};
 
 fn active_root() -> Result<PathBuf, String> {
     crate::project::active_root().ok_or_else(|| "no project is open".to_string())
@@ -45,34 +45,32 @@ fn to_json<T: Serialize>(value: &T) -> Result<Value, String> {
 }
 
 #[tauri::command]
-pub async fn project_paths() -> Result<Value, String> {
+pub async fn project_paths() -> Result<Value, CommandError> {
     if workspace_backend::is_ssh_mode() {
-        return workspace_backend::on_blocking(|| ssh_paths(workspace_backend::remote(), &LinkConnector)).await?.map_err(|e| e.message);
+        return Ok(workspace_backend::on_blocking(|| ssh_paths(workspace_backend::remote(), &LinkConnector)).await??);
     }
     let root = active_root()?;
-    to_json(&blocking(move || layout::paths(&root)).await?)
+    Ok(to_json(&blocking(move || layout::paths(&root)).await?)?)
 }
 
 #[tauri::command]
-pub async fn project_memory() -> Result<Value, String> {
+pub async fn project_memory() -> Result<Value, CommandError> {
     if workspace_backend::is_ssh_mode() {
-        return workspace_backend::on_blocking(|| ssh_memory(workspace_backend::remote(), &LinkConnector)).await?.map_err(|e| e.message);
+        return Ok(workspace_backend::on_blocking(|| ssh_memory(workspace_backend::remote(), &LinkConnector)).await??);
     }
     let root = active_root()?;
-    to_json(&blocking(move || layout::memory(&root)).await?)
+    Ok(to_json(&blocking(move || layout::memory(&root)).await?)?)
 }
 
 /// Re-create missing canonical folders/files for the active project (the Mac's "Rebuild missing folders").
 /// Idempotent: `scaffold::scaffold` only writes files that are absent, so user edits are never replaced.
 /// In SSH mode the helper does this only for a folder that is already a project; any other folder is refused.
 #[tauri::command]
-pub async fn project_rebuild_folders() -> Result<(), String> {
+pub async fn project_rebuild_folders() -> Result<(), CommandError> {
     if workspace_backend::is_ssh_mode() {
-        return workspace_backend::on_blocking(|| ssh_rebuild(workspace_backend::remote(), &LinkConnector))
-            .await?
-            .map(|_| ())
-            .map_err(|e| e.message);
+        workspace_backend::on_blocking(|| ssh_rebuild(workspace_backend::remote(), &LinkConnector)).await??;
+        return Ok(());
     }
     let root = active_root()?;
-    blocking(move || scaffold::scaffold(&root, &layout::project_meta(&root))).await?
+    Ok(blocking(move || scaffold::scaffold(&root, &layout::project_meta(&root))).await??)
 }

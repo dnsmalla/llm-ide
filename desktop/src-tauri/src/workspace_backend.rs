@@ -37,7 +37,9 @@ const TIMEOUT_CODE: &str = "SSH_TIMEOUT";
 /// A clone is already running on this channel. The helper allows one at a time too; this refuses before sending.
 const BUSY_CODE: &str = "busy";
 const BUSY_MESSAGE: &str = "A repository is already being cloned.";
-const CLONE_TIMEOUT_MESSAGE: &str = "The clone did not finish in time and was cancelled.";
+/// A clone that runs past its cap. Its own code, so it is not read as a failed channel (`SSH_TIMEOUT`).
+const CLONE_TIMEOUT_CODE: &str = "clone_timeout";
+const CLONE_TIMEOUT_MESSAGE: &str = "The clone took longer than 30 minutes and was stopped.";
 /// How often a waiting clone checks that its channel is still up. A dropped link ends the wait within this.
 const CLONE_POLL: Duration = Duration::from_millis(250);
 
@@ -228,7 +230,7 @@ fn wait_for_clone(client: &dyn WorkspaceApi, events: &mpsc::Receiver<Value>, id:
         let now = Instant::now();
         if now >= deadline {
             let _ = client.call("clone_cancel", json!({"id": id}), None);
-            return Err(herr(TIMEOUT_CODE, CLONE_TIMEOUT_MESSAGE));
+            return Err(herr(CLONE_TIMEOUT_CODE, CLONE_TIMEOUT_MESSAGE));
         }
         match events.recv_timeout(CLONE_POLL.min(deadline - now)) {
             Ok(data) if event_id(&data) == Some(id) => return clone_outcome(&data),
@@ -520,8 +522,9 @@ impl Remote {
             rx
         };
         // A failed start has no id, so nothing can be cancelled. If the helper did start the clone and its reply was
-        // lost (a client-side timeout), that clone runs unobserved until it ends; the helper runs one clone at a time,
-        // so the next request is answered `busy` until then. The route is cleared on every path below.
+        // lost (a client-side timeout), the channel ends, and the helper cancels a clone still running when its input
+        // closes. The route is cleared on every path below. `settle` applies to a clone too, so a folder that is gone
+        // returns the app to the server home.
         let outcome = match client.call("repo_clone", json!({"req": req}), None) {
             Ok(started) => match started.get("id").and_then(Value::as_u64) {
                 Some(id) => wait_for_clone(&*client, &events, id, cap),
@@ -529,6 +532,7 @@ impl Remote {
             },
             Err(e) => Err(e),
         };
+        let outcome = self.settle(outcome);
         locked(&self.routes).clone = None;
         outcome
     }
@@ -698,6 +702,38 @@ pub fn project_info() -> Option<ProjectInfo> {
 /// Closes the helper channel and forgets the open folder. Safe to call when nothing is open.
 pub fn reset() {
     remote().reset();
+}
+
+/// The error a command returns to the webview. A local failure stays the text it always was. A server failure keeps
+/// the helper's `{code, message}`, so the app can act on `root_missing` and `no_project` as it does for the Explorer.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum CommandError {
+    Text(String),
+    Coded(FsError),
+}
+
+impl CommandError {
+    /// The text the person reads, whichever variant this is. The live check reads it; the app does not need it.
+    #[cfg(test)]
+    pub fn message(&self) -> String {
+        match self {
+            CommandError::Text(text) => text.clone(),
+            CommandError::Coded(error) => error.message.clone(),
+        }
+    }
+}
+
+impl From<String> for CommandError {
+    fn from(text: String) -> Self {
+        CommandError::Text(text)
+    }
+}
+
+impl From<FsError> for CommandError {
+    fn from(error: FsError) -> Self {
+        CommandError::Coded(error)
+    }
 }
 
 /// Runs a project-setup command (`project_paths`, `project_memory`, `project_rebuild`, `graph_read`) on the open

@@ -161,12 +161,12 @@ fn host_platform() -> &'static str {
 /// (see `graph_file`); the root is host-chosen, never supplied by the webview.
 /// In SSH mode the server's graph is read through the helper (`graph_read`), off the UI thread.
 #[tauri::command]
-async fn read_graph_file(path: String) -> Result<String, String> {
+async fn read_graph_file(path: String) -> Result<String, workspace_backend::CommandError> {
     if workspace_backend::is_ssh_mode() {
-        return workspace_backend::on_blocking(move || graph_file::ssh_read(workspace_backend::remote(), &workspace_backend::LinkConnector, &path)).await?;
+        return Ok(workspace_backend::on_blocking(move || graph_file::ssh_read(workspace_backend::remote(), &workspace_backend::LinkConnector, &path)).await??);
     }
-    let root = graph_file::project_root().ok_or("no project root configured")?;
-    graph_file::read_within(&root, &path)
+    let root = graph_file::project_root().ok_or_else(|| "no project root configured".to_string())?;
+    Ok(graph_file::read_within(&root, &path)?)
 }
 
 /// Prints one measurement as `BENCH <json>` on stdout. The line must be a

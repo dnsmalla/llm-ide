@@ -796,9 +796,35 @@ fn clone_timeout_cancels_only_this_clone() {
         |remote, connector| remote.clone_repo(connector, clone_req(), Duration::from_millis(300)),
         |_| {},
     );
-    assert_eq!(result.expect_err("timeout").code, TIMEOUT_CODE);
+    let timeout = result.expect_err("timeout");
+    // Its own code: `SSH_TIMEOUT` means the channel failed, and this is a clone that ran past its cap.
+    assert_eq!(timeout.code, "clone_timeout");
+    assert_eq!(timeout.message, "The clone took longer than 30 minutes and was stopped.");
     let cancel = commands.iter().position(|cmd| cmd == "clone_cancel").expect("clone_cancel sent");
     assert_eq!(cancel, commands.len() - 1);
+}
+
+#[test]
+fn clone_root_missing_forgets_the_folder() {
+    let remote = Remote::new();
+    remote.set_folder_for_test(Some(open_folder("/srv/home/proj")));
+    let connector = Arc::new(FakeConnector::new(|_| {
+        FakeApi::new(|cmd, args, confirm| match cmd {
+            "repo_clone" => Err(FsError { code: ROOT_MISSING_CODE, message: ROOT_MISSING_MESSAGE.into() }),
+            _ => project_setup(cmd, args, confirm),
+        })
+    }));
+    let err = remote.clone_repo(&*connector, clone_req(), Duration::from_secs(10)).expect_err("root missing");
+    assert_eq!(err.code, ROOT_MISSING_CODE);
+    assert!(locked(&remote.session).folder.is_none(), "a clone that finds the folder gone returns the app to the server home");
+}
+
+#[test]
+fn command_errors_keep_the_helper_code_for_the_webview() {
+    let coded = serde_json::to_value(CommandError::from(FsError { code: "root_missing", message: "gone".into() })).unwrap();
+    assert_eq!(coded, json!({"code": "root_missing", "message": "gone"}), "the UI branches on the code");
+    let text = serde_json::to_value(CommandError::from("a local failure".to_string())).unwrap();
+    assert_eq!(text, json!("a local failure"), "a local failure stays the text it was");
 }
 
 #[test]
@@ -866,9 +892,9 @@ fn local_mode_unchanged() {
     assert!(refuse_in_ssh_mode().is_ok());
     // The local branches run: with no local project they fail on their own local checks, not on a helper channel.
     let paths = tauri::async_runtime::block_on(crate::project_layout::project_paths());
-    assert_eq!(paths.expect_err("no local project"), "no project is open");
+    assert_eq!(paths.expect_err("no local project").message(), "no project is open");
     let clone = tauri::async_runtime::block_on(crate::repo_clone::repo_clone("github".into(), "o/r".into(), None, None));
-    assert_eq!(clone.expect_err("no local project"), "open a project before cloning a repository");
+    assert_eq!(clone.expect_err("no local project").message(), "open a project before cloning a repository");
     crate::core_host::set_process_mode(2);
     assert_eq!(refuse_in_ssh_mode().expect_err("ssh refuses").code, "ssh_mode");
     crate::core_host::set_process_mode(0);

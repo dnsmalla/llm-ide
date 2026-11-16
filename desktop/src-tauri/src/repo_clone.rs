@@ -10,6 +10,7 @@ use std::time::Duration;
 
 // The desktop waits as long as the clone itself may run: one constant, shared with the core and the helper.
 use llmide_workspace_core::project::clone::{plan, run, CloneRequest, CloneResult, Token, CLONE_CAP};
+use llmide_workspace_core::R;
 use serde_json::{json, Value};
 
 use crate::workspace_backend::{self, Connector, Remote};
@@ -18,25 +19,31 @@ use crate::workspace_backend::{self, Connector, Remote};
 static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
-pub async fn repo_clone(provider: String, url: String, token: Option<String>, folder: Option<String>) -> Result<CloneResult, String> {
+pub async fn repo_clone(
+    provider: String,
+    url: String,
+    token: Option<String>,
+    folder: Option<String>,
+) -> Result<CloneResult, workspace_backend::CommandError> {
     if workspace_backend::is_ssh_mode() {
-        return workspace_backend::on_blocking(move || {
+        return Ok(workspace_backend::on_blocking(move || {
             remote_clone_with(workspace_backend::remote(), &workspace_backend::LinkConnector, provider, url, token, folder, CLONE_CAP)
         })
-        .await?;
+        .await??);
     }
     let req = CloneRequest { provider, url, token: token.map(Token::from), folder };
     let root = crate::project::active_root().ok_or_else(|| "open a project before cloning a repository".to_string())?;
     if crate::fs_ops::checked_root(&root).is_err() {
-        return Err("the project folder is not usable".into());
+        return Err("the project folder is not usable".to_string().into());
     }
     let clone_plan = plan(&root, &req)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let done = tauri::async_runtime::spawn_blocking(move || {
         let git = llmide_workspace_core::git::git_binary().ok_or_else(|| "git was not found on PATH".to_string())?;
         run(&clone_plan, req.token.as_ref(), &NEVER_CANCELLED, &git)
     })
     .await
-    .map_err(|e| format!("clone task failed: {e}"))?
+    .map_err(|e| format!("clone task failed: {e}"))?;
+    Ok(done?)
 }
 
 /// The helper's `repo_clone` request. An unusable token is dropped, as the local command does, so the clone runs
@@ -59,8 +66,8 @@ pub(crate) fn remote_clone_with(
     token: Option<String>,
     folder: Option<String>,
     cap: Duration,
-) -> Result<CloneResult, String> {
-    let answer = remote.clone_repo(connector, clone_request(provider, url, token, folder), cap).map_err(|e| e.message)?;
+) -> R<CloneResult> {
+    let answer = remote.clone_repo(connector, clone_request(provider, url, token, folder), cap)?;
     let field = |key: &str| answer.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
     Ok(CloneResult { path: field("path"), name: field("name") })
 }

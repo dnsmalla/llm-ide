@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+use llmide_workspace_core::{FsError, R};
 use serde_json::json;
 
 use crate::workspace_backend::{self, Connector, Remote};
@@ -24,9 +25,12 @@ const DEFAULT_PROJECT_REL: &str = "Desktop/LLM/code/affiliate";
 /// opens a project.
 /// SSH branch of `read_graph_file`: the helper reads `path` under the open server folder with `graph_read`.
 /// The helper keeps the read inside that folder; the local root is never used.
-pub(crate) fn ssh_read(remote: &Remote, connector: &dyn Connector, path: &str) -> Result<String, String> {
-    let answer = workspace_backend::project_call_with(remote, connector, "graph_read", json!({"path": path})).map_err(|e| e.message)?;
-    answer.as_str().map(str::to_string).ok_or_else(|| "The server sent an answer this app does not understand.".to_string())
+pub(crate) fn ssh_read(remote: &Remote, connector: &dyn Connector, path: &str) -> R<String> {
+    let answer = workspace_backend::project_call_with(remote, connector, "graph_read", json!({"path": path}))?;
+    answer.as_str().map(str::to_string).ok_or_else(|| FsError {
+        code: "bad_response",
+        message: "The server sent an answer this app does not understand.".into(),
+    })
 }
 
 pub fn project_root() -> Option<PathBuf> {

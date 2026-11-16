@@ -764,15 +764,15 @@ fn core_post(run: &Run, path: &str, body: Value) -> Result<Reply, Failed> {
 /// Step 15: the work folder has no `system/project.json`, so Paths says it is not a project and Rebuild refuses it
 /// with `not_a_project`.
 fn step_project_plain(_run: &mut Run) -> Result<Outcome, Failed> {
-    let paths = block(project_paths()).map_err(|message| failed("PATHS_FAILED", message))?;
+    let paths = block(project_paths()).map_err(|error| failed("PATHS_FAILED", error.message()))?;
     expect(paths["isProject"] == json!(false), "PLAIN_IS_PROJECT", "a folder without system/project.json reports isProject")?;
     // The entry point returns the message text only; the helper's `not_a_project` copy is the one this matches.
     match block(project_rebuild_folders()) {
-        Err(message) if message.contains("This folder is not an LLM-IDE project.") => {
+        Err(error) if error.message().contains("This folder is not an LLM-IDE project.") => {
             println!("  paths: isProject false; rebuild: not_a_project");
         }
         Ok(()) => return Err(failed("REBUILD_PLAIN", "Rebuild ran on a folder that is not a project")),
-        Err(message) => return Err(failed("REBUILD_FAILED", message)),
+        Err(error) => return Err(failed("REBUILD_FAILED", error.message())),
     }
     Ok(Outcome::Done)
 }
@@ -800,11 +800,11 @@ fn step_project_create(run: &mut Run) -> Result<Outcome, Failed> {
 
 /// Step 17: the new project reports `isProject` and an id, and Memory lists its files.
 fn step_project_paths(_run: &mut Run) -> Result<Outcome, Failed> {
-    let paths = block(project_paths()).map_err(|message| failed("PATHS_FAILED", message))?;
+    let paths = block(project_paths()).map_err(|error| failed("PATHS_FAILED", error.message()))?;
     expect(paths["isProject"] == json!(true), "PATHS_NOT_PROJECT", "Paths does not report the new project")?;
     let id = paths["id"].as_str().unwrap_or_default();
     expect(!id.is_empty(), "PATHS_NO_ID", "Paths reports no project id")?;
-    let memory = block(project_memory()).map_err(|message| failed("MEMORY_FAILED", message))?;
+    let memory = block(project_memory()).map_err(|error| failed("MEMORY_FAILED", error.message()))?;
     expect(memory.is_object(), "MEMORY_SHAPE", "Memory did not return an object")?;
     println!("  paths: isProject true with an id; memory: ok");
     Ok(Outcome::Done)
@@ -814,7 +814,7 @@ fn step_project_paths(_run: &mut Run) -> Result<Outcome, Failed> {
 fn step_project_rebuild(_run: &mut Run) -> Result<Outcome, Failed> {
     let edited = "edited by the live check\n";
     write_text("CLAUDE.md", edited)?;
-    block(project_rebuild_folders()).map_err(|message| failed("REBUILD_FAILED", message))?;
+    block(project_rebuild_folders()).map_err(|error| failed("REBUILD_FAILED", error.message()))?;
     let read = block(fs_read_file(request(json!({"path": "CLAUDE.md"}))?))?;
     expect(read["text"].as_str() == Some(edited), "REBUILD_OVERWROTE", "Rebuild changed an existing file")?;
     println!("  rebuild missing folders: ok, the edited CLAUDE.md is unchanged");
@@ -852,7 +852,7 @@ fn step_project_clone(_run: &mut Run) -> Result<Outcome, Failed> {
         None,
         None,
     ))
-    .map_err(|message| failed("CLONE_FAILED", message))?;
+    .map_err(|error| failed("CLONE_FAILED", error.message()))?;
     expect(cloned.name == "Hello-World", "CLONE_NAME", "the clone is not named Hello-World")?;
     expect(
         listed_names("code/Hello-World")?.iter().any(|name| name == "README"),
