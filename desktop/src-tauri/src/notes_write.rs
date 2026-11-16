@@ -396,11 +396,34 @@ mod tests {
     use std::cell::RefCell;
     use std::fs;
 
-    fn scratch(name: &str) -> PathBuf {
+    /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for TempDirGuard {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    fn scratch(name: &str) -> TempDirGuard {
         let d = std::env::temp_dir().join(format!("llmide-nw-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        TempDirGuard(fs::canonicalize(&d).unwrap())
     }
 
     /// Moves the file into a scratch "trash" folder; the real Trash is never used.

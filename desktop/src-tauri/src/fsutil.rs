@@ -177,11 +177,34 @@ pub fn acquire_instance_lock(dir: &Path) -> Result<InstanceLock, String> {
 mod tests {
     use super::*;
 
+    /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for TempDirGuard {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
     #[allow(dead_code)]
-    fn scratch(name: &str) -> PathBuf {
+    fn scratch(name: &str) -> TempDirGuard {
         let d = std::env::temp_dir().join(format!("llmide-fs-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        d
+        TempDirGuard(d)
     }
 
     #[cfg(unix)]
@@ -209,7 +232,8 @@ mod tests {
     #[test]
     fn atomic_write_is_0600_and_bounded() {
         use std::os::unix::fs::PermissionsExt;
-        let d = private_dir(&scratch("w")).unwrap();
+        let root = scratch("w");
+        let d = private_dir(&root).unwrap();
         let f = d.join("x.json");
         write_private_atomic(&f, b"{}", 16).unwrap();
         assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
@@ -252,7 +276,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_second_instance_cannot_take_the_lock_until_the_first_drops_it() {
-        let d = private_dir(&scratch("lock")).unwrap();
+        let root = scratch("lock");
+        let d = private_dir(&root).unwrap();
         let first = acquire_instance_lock(&d).unwrap();
         assert!(acquire_instance_lock(&d).unwrap_err().contains("already running"));
         drop(first);

@@ -566,12 +566,38 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn scratch(name: &str) -> PathBuf {
+    /// Owns the scratch root and removes it on drop; the tests work in its `notes` folder, which derefs to.
+    struct TempDirGuard {
+        root: PathBuf,
+        notes: PathBuf,
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.notes
+        }
+    }
+
+    impl AsRef<Path> for TempDirGuard {
+        fn as_ref(&self) -> &Path {
+            &self.notes
+        }
+    }
+
+    fn scratch(name: &str) -> TempDirGuard {
         let d = std::env::temp_dir().join(format!("llmide-notes-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         // Under the real temp dir (a deep path), never "too broad".
-        fs::canonicalize(&d).unwrap().join("notes")
+        let root = fs::canonicalize(&d).unwrap();
+        TempDirGuard { notes: root.join("notes"), root }
     }
 
     #[cfg(unix)]
@@ -759,7 +785,8 @@ mod tests {
 
     #[test]
     fn a_missing_or_too_broad_root_is_refused() {
-        let root = scratch("missing").join("nope");
+        let _root_root = scratch("missing");
+        let root = _root_root.join("nope");
         assert!(read_chunk(&root, "a.md", 0, 4096).unwrap_err().starts_with("no_root:"));
         assert!(list_page(&root, None, 10).is_err());
         for broad in ["/", "/usr", "/etc"] {

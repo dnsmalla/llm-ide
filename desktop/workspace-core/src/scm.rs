@@ -1838,15 +1838,46 @@ mod tests {
     use super::*;
     use crate::git::{diff, parse_status, stage};
     use std::fs;
+    use std::ops::Deref;
     use std::process::Command;
 
-    /// Removes a scratch folder when the test ends, pass or fail. The 10k-file repository is about 118 MB, so a
-    /// failing assertion must not leave it behind (fifteen leftover copies filled the disk).
-    struct RemoveOnDrop(PathBuf);
+    /// Owns a scratch folder and removes it when dropped. Drop also runs while a panic unwinds, so a failing
+    /// assertion cleans up too. The 10k-file repository is about 118 MB; fifteen leftover copies filled the disk.
+    /// Derefs to `Path`, so a test uses the guard as the folder itself.
+    pub(super) struct RemoveOnDrop(pub(super) PathBuf);
 
     impl Drop for RemoveOnDrop {
         fn drop(&mut self) {
+            // A marker file is removed too; a folder is removed by the first call, so the second finds nothing.
             let _ = fs::remove_dir_all(&self.0);
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    impl Deref for RemoveOnDrop {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<Path> for RemoveOnDrop {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    /// A home directory holding the user's git identity (or none). The commands take `&Option<PathBuf>`, so
+    /// this derefs to that; the folder goes away with the guard.
+    pub(super) struct Home {
+        _dir: RemoveOnDrop,
+        path: Option<PathBuf>,
+    }
+
+    impl Deref for Home {
+        type Target = Option<PathBuf>;
+        fn deref(&self) -> &Option<PathBuf> {
+            &self.path
         }
     }
 
@@ -1854,11 +1885,11 @@ mod tests {
         Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
     }
 
-    fn scratch(name: &str) -> PathBuf {
+    fn scratch(name: &str) -> RemoveOnDrop {
         let d = std::env::temp_dir().join(format!("llmide-scm-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        RemoveOnDrop(fs::canonicalize(&d).unwrap())
     }
 
     fn try_g(root: &Path, args: &[&str]) -> bool {
@@ -1877,7 +1908,7 @@ mod tests {
         assert!(try_g(root, args), "git {args:?} failed");
     }
 
-    fn repo(name: &str) -> PathBuf {
+    fn repo(name: &str) -> RemoveOnDrop {
         let r = scratch(name);
         g(&r, &["init", "-q"]);
         r
@@ -1898,12 +1929,12 @@ mod tests {
     }
 
     /// A home directory holding the user's git identity (or none).
-    fn home(name: &str, ident: bool) -> Option<PathBuf> {
+    pub(super) fn home(name: &str, ident: bool) -> Home {
         let h = scratch(name);
         if ident {
             fs::write(h.join(".gitconfig"), "[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n").unwrap();
         }
-        Some(h)
+        Home { path: Some(h.to_path_buf()), _dir: h }
     }
 
     #[test]
@@ -2090,7 +2121,7 @@ mod tests {
         g(&r, &["commit", "-q", "-m", "i"]);
         fs::write(r.join("a.txt"), "edited\n").unwrap();
         fs::write(r.join("u.txt"), "u\n").unwrap();
-        let bin = r.parent().unwrap().join(format!("{}-bin", r.file_name().unwrap().to_string_lossy()));
+        let bin = RemoveOnDrop(r.parent().unwrap().join(format!("{}-bin", r.file_name().unwrap().to_string_lossy())));
         let fake = crate::trash::tests::FakeTrash::into(&bin);
         // The user keeps typing while the dialog is open.
         let edit_during = |_: &str| {
@@ -2506,7 +2537,8 @@ mod tests {
         assert_eq!(log(&outer.join("sub"), 0, 5).unwrap().entries.len(), 1);
         // Linked worktree
         g(&outer, &["commit", "-q", "-m", "add sub"]);
-        let wt = outer.parent().unwrap().join(format!("{}-wt", outer.file_name().unwrap().to_string_lossy()));
+        // A sibling of the scratch folder, so it needs its own guard: a failing assertion must not leave it behind.
+        let wt = RemoveOnDrop(outer.parent().unwrap().join(format!("{}-wt", outer.file_name().unwrap().to_string_lossy())));
         let _ = fs::remove_dir_all(&wt);
         g(&outer, &["worktree", "add", "-q", "-b", "wtb", crate::paths::plain_path(&wt).to_str().unwrap()]);
         let wst = status(&wt).unwrap();
@@ -2552,7 +2584,7 @@ mod tests {
         fs::write(signer.join(".gitconfig"), "[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n[commit]\n\tgpgsign = true\n").unwrap();
         fs::write(r.join("a.txt"), "2\n").unwrap();
         stage(&r, &["a.txt".into()], true).unwrap();
-        let res = commit(&r, "with a hook", &Some(signer)).unwrap();
+        let res = commit(&r, "with a hook", &Some(signer.to_path_buf())).unwrap();
         assert_eq!(res.skipped, vec!["hooks", "signing"]);
     }
 
@@ -2607,7 +2639,6 @@ mod tests {
             return;
         }
         let r = repo("tenk");
-        let _cleanup = RemoveOnDrop(r.clone());
         for d in 0..100 {
             fs::create_dir(r.join(format!("d{d}"))).unwrap();
             for f in 0..100 {
@@ -2644,6 +2675,7 @@ mod tests {
 #[cfg(test)]
 mod tag_tests {
     use super::*;
+    use super::tests::RemoveOnDrop;
     use std::fs;
     use std::process::Command;
 
@@ -2651,11 +2683,11 @@ mod tag_tests {
         Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
     }
 
-    fn scratch(name: &str) -> PathBuf {
+    fn scratch(name: &str) -> RemoveOnDrop {
         let d = std::env::temp_dir().join(format!("llmide-tags-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        RemoveOnDrop(fs::canonicalize(&d).unwrap())
     }
 
     /// Runs git with a fixed identity and no global config; `date` pins the committer date.
@@ -2806,6 +2838,7 @@ mod tag_tests {
 #[cfg(test)]
 mod mutate_tests {
     use super::*;
+    use super::tests::{home, RemoveOnDrop};
     use std::cell::Cell;
     use std::fs;
     use std::process::Command;
@@ -2814,11 +2847,11 @@ mod mutate_tests {
         Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
     }
 
-    fn scratch(name: &str) -> PathBuf {
+    fn scratch(name: &str) -> RemoveOnDrop {
         let d = std::env::temp_dir().join(format!("llmide-mut-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        RemoveOnDrop(fs::canonicalize(&d).unwrap())
     }
 
     fn g_at(root: &Path, args: &[&str], date: Option<&str>) {
@@ -2848,7 +2881,7 @@ mod mutate_tests {
     }
 
     /// A repository with one commit on `main` (a.txt = "base").
-    fn repo(name: &str) -> PathBuf {
+    fn repo(name: &str) -> RemoveOnDrop {
         let r = scratch(name);
         g(&r, &["init", "-q"]);
         fs::write(r.join("a.txt"), "base\n").unwrap();
@@ -2882,14 +2915,6 @@ mod mutate_tests {
         false
     }
 
-    /// A home directory holding the user's git identity (or none).
-    fn home(name: &str, ident: bool) -> Option<PathBuf> {
-        let h = scratch(name);
-        if ident {
-            fs::write(h.join(".gitconfig"), "[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n").unwrap();
-        }
-        Some(h)
-    }
 
     // ---- branch delete ----------------------------------------------------------------------
 
@@ -3364,6 +3389,7 @@ mod mutate_tests {
 #[cfg(test)]
 mod merge_amend_discard_tests {
     use super::*;
+    use super::tests::{home, Home, RemoveOnDrop};
     use crate::trash::tests::FakeTrash;
     use std::cell::{Cell, RefCell};
     use std::fs;
@@ -3373,11 +3399,11 @@ mod merge_amend_discard_tests {
         Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
     }
 
-    fn scratch(name: &str) -> PathBuf {
+    fn scratch(name: &str) -> RemoveOnDrop {
         let d = std::env::temp_dir().join(format!("llmide-mad-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        RemoveOnDrop(fs::canonicalize(&d).unwrap())
     }
 
     /// Git with a fixed identity and no global config; an optional author and pinned dates.
@@ -3410,7 +3436,7 @@ mod merge_amend_discard_tests {
     }
 
     /// A repository with one commit on `main`: a.txt = "base".
-    fn repo(name: &str) -> PathBuf {
+    fn repo(name: &str) -> RemoveOnDrop {
         let r = scratch(name);
         g(&r, &["init", "-q"]);
         fs::write(r.join("a.txt"), "base\n").unwrap();
@@ -3440,23 +3466,16 @@ mod merge_amend_discard_tests {
         false
     }
 
-    /// A home directory holding the user's git identity (or none).
-    fn home(name: &str, ident: bool) -> Option<PathBuf> {
-        let h = scratch(name);
-        if ident {
-            fs::write(h.join(".gitconfig"), "[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n").unwrap();
-        }
-        Some(h)
-    }
 
-    /// Made once: `scratch` wipes its folder, so parallel tests recreating it raced into `identity_missing`.
-    fn ada() -> Option<PathBuf> {
-        static ADA: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
-        ADA.get_or_init(|| home("mad-ada", true)).clone()
+    /// A fresh identity per call. Each home is its own folder: a shared one would be wiped by a parallel test's
+    /// `scratch` and raced into `identity_missing`, and a static would never drop its folder.
+    fn ada() -> Home {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        home(&format!("mad-ada-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)), true)
     }
 
     /// `main` at base plus a `feat` branch with one commit (b.txt), HEAD on main.
-    fn repo_with_feat(name: &str) -> PathBuf {
+    fn repo_with_feat(name: &str) -> RemoveOnDrop {
         let r = repo(name);
         g(&r, &["checkout", "-q", "-b", "feat"]);
         commit_file(&r, "b.txt", "feat\n", "feat work");
@@ -3465,7 +3484,7 @@ mod merge_amend_discard_tests {
     }
 
     /// Both branches change a.txt: merging `feat` into `main` conflicts. Leaves the merge in progress.
-    fn conflicted_merge(name: &str) -> PathBuf {
+    fn conflicted_merge(name: &str) -> RemoveOnDrop {
         let r = repo(name);
         g(&r, &["checkout", "-q", "-b", "feat"]);
         commit_file(&r, "a.txt", "feat\n", "feat edit");
@@ -3634,7 +3653,7 @@ mod merge_amend_discard_tests {
     // ---- amend ------------------------------------------------------------------------------
 
     /// A repository with two commits on `main`: a.txt = "second".
-    fn two_commits(name: &str) -> PathBuf {
+    fn two_commits(name: &str) -> RemoveOnDrop {
         let r = repo(name);
         commit_file(&r, "a.txt", "second\n", "second");
         r
@@ -4091,9 +4110,9 @@ mod merge_amend_discard_tests {
     }
 
     #[cfg(unix)]
-    fn hostile_hooks(r: &Path) -> PathBuf {
+    fn hostile_hooks(r: &Path) -> RemoveOnDrop {
         use std::os::unix::fs::PermissionsExt;
-        let marker = r.parent().unwrap().join(format!("{}-hook-ran", r.file_name().unwrap().to_string_lossy()));
+        let marker = RemoveOnDrop(r.parent().unwrap().join(format!("{}-hook-ran", r.file_name().unwrap().to_string_lossy())));
         let _ = fs::remove_file(&marker);
         for h in ["pre-commit", "commit-msg", "prepare-commit-msg", "post-commit", "pre-merge-commit", "post-merge", "post-rewrite", "post-checkout", "reference-transaction"] {
             let p = r.join(".git/hooks").join(h);
@@ -4139,7 +4158,7 @@ mod merge_amend_discard_tests {
         fs::write(r.join(".gitattributes"), "* merge=evil\n").unwrap();
         g(&r, &["add", "."]);
         g(&r, &["commit", "-q", "-m", "attrs"]);
-        let marker = r.parent().unwrap().join("rv-driver-ran");
+        let marker = RemoveOnDrop(r.parent().unwrap().join("rv-driver-ran"));
         let _ = fs::remove_file(&marker);
         let clean = fs::read_to_string(r.join(".git/config")).unwrap();
         fs::write(r.join(".git/config"), format!("{clean}[merge \"evil\"]\n\tdriver = touch {} %A\n", marker.display())).unwrap();
@@ -4182,7 +4201,7 @@ mod merge_amend_discard_tests {
             return;
         }
         let r = repo_with_feat("rv-wt");
-        let wt = r.parent().unwrap().join(format!("llmide-mad-{}-rv-wt-linked", std::process::id()));
+        let wt = RemoveOnDrop(r.parent().unwrap().join(format!("llmide-mad-{}-rv-wt-linked", std::process::id())));
         let _ = fs::remove_dir_all(&wt);
         g(&r, &["worktree", "add", "-q", crate::paths::plain_path(&wt).to_str().unwrap(), "feat"]);
         let tip = out(&r, &["rev-parse", "refs/heads/feat"]);

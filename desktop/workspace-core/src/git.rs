@@ -789,11 +789,36 @@ mod tests {
         Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
     }
 
-    fn scratch(name: &str) -> PathBuf {
+    /// Owns a scratch folder and removes it when dropped, including while a panic unwinds, so a failing
+    /// assertion leaves nothing in the temp directory. Derefs to `Path` so tests use it as the folder itself.
+    struct RemoveOnDrop(PathBuf);
+
+    impl Drop for RemoveOnDrop {
+        fn drop(&mut self) {
+            // A marker file is removed too; a folder is removed by the first call, so the second finds nothing.
+            let _ = fs::remove_dir_all(&self.0);
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for RemoveOnDrop {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<Path> for RemoveOnDrop {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    fn scratch(name: &str) -> RemoveOnDrop {
         let d = std::env::temp_dir().join(format!("llmide-git-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        RemoveOnDrop(fs::canonicalize(&d).unwrap())
     }
 
     fn g(root: &Path, args: &[&str]) {
@@ -884,25 +909,25 @@ mod tests {
         let h1 = scratch("user-data-home1");
         fs::create_dir_all(h1.join(".config/git")).unwrap();
         fs::write(h1.join(".config/git/ignore"), ".env\n").unwrap();
-        let with1 = untracked(&Opts { user_data_home: Some(h1.clone()), ..Opts::default() });
+        let with1 = untracked(&Opts { user_data_home: Some(h1.to_path_buf()), ..Opts::default() });
         assert!(!with1.contains(".env") && with1.contains("app.txt"), "{with1}");
 
         // core.excludesFile in the global config, with `~` expanded, plus the line-ending settings.
         let h2 = scratch("user-data-home2");
         fs::write(h2.join("my-ignore"), ".env\n").unwrap();
         fs::write(h2.join(".gitconfig"), "[core]\n\texcludesFile = ~/my-ignore\n\tautocrlf = input\n\teol = lf\n\tsafecrlf = bogus\n").unwrap();
-        let args = user_data_args(&r, &Some(h2.clone()));
+        let args = user_data_args(&r, &Some(h2.to_path_buf()));
         assert!(args.iter().any(|a| a.starts_with("core.excludesFile=") && a.ends_with("my-ignore")), "{args:?}");
         assert!(args.contains(&"core.autocrlf=input".to_string()) && args.contains(&"core.eol=lf".to_string()), "{args:?}");
         assert!(!args.iter().any(|a| a.starts_with("core.safecrlf=")), "an unknown value is dropped, not passed on: {args:?}");
         assert!(args.iter().step_by(2).all(|a| a == "-c"), "only -c pairs: {args:?}");
-        assert!(!untracked(&Opts { user_data_home: Some(h2.clone()), ..Opts::default() }).contains(".env"));
+        assert!(!untracked(&Opts { user_data_home: Some(h2.to_path_buf()), ..Opts::default() }).contains(".env"));
 
         // Nothing that can run a program is ever taken from the user's config.
         let h3 = scratch("user-data-home3");
         fs::write(h3.join(".gitconfig"), "[core]\n\tfsmonitor = /bin/false\n\tpager = /bin/false\n\thooksPath = /tmp\n[alias]\n\tstatus = !false\n").unwrap();
-        assert!(user_data_args(&r, &Some(h3.clone())).is_empty());
-        assert!(untracked(&Opts { user_data_home: Some(h3.clone()), ..Opts::default() }).contains(".env"));
+        assert!(user_data_args(&r, &Some(h3.to_path_buf())).is_empty());
+        assert!(untracked(&Opts { user_data_home: Some(h3.to_path_buf()), ..Opts::default() }).contains(".env"));
         for d in [&r, &h1, &h2, &h3] {
             let _ = fs::remove_dir_all(d);
         }
@@ -911,7 +936,7 @@ mod tests {
     #[test]
     fn scm_root_uses_the_first_clone_under_code_when_the_project_is_not_a_repository() {
         let root = scratch("scm-root");
-        assert_eq!(scm_root(&root).repo, root);
+        assert_eq!(scm_root(&root).repo, root.to_path_buf());
         assert_eq!(scm_root(&root).prefix, "");
         fs::create_dir_all(root.join("code/a-plain-folder")).unwrap();
         fs::create_dir_all(root.join("code/.hidden/.git")).unwrap();
@@ -926,7 +951,7 @@ mod tests {
             assert_eq!(s.to_repo(outside).unwrap_err().code, "invalid_path", "{outside}");
         }
         fs::create_dir_all(root.join(".git")).unwrap();
-        assert_eq!(scm_root(&root).repo, root, "a project that is itself a repository wins");
+        assert_eq!(scm_root(&root).repo, root.to_path_buf(), "a project that is itself a repository wins");
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -938,7 +963,7 @@ mod tests {
         fs::create_dir_all(outside.join(".git")).unwrap();
         fs::create_dir_all(root.join("code")).unwrap();
         std::os::unix::fs::symlink(&outside, root.join("code/escape")).unwrap();
-        assert_eq!(scm_root(&root).repo, root);
+        assert_eq!(scm_root(&root).repo, root.to_path_buf());
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
     }
@@ -950,7 +975,7 @@ mod tests {
         let outside = scratch("scm-code-outside");
         fs::create_dir_all(outside.join("victim/.git")).unwrap();
         std::os::unix::fs::symlink(&outside, root.join("code")).unwrap();
-        assert_eq!(scm_root(&root).repo, root);
+        assert_eq!(scm_root(&root).repo, root.to_path_buf());
         assert_eq!(scm_root(&root).prefix, "");
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
@@ -1254,7 +1279,8 @@ u UU N... 1 2 3 4 h1 h2 h3 conflict.txt\0\
         let o = Command::new("git").args(["-c", "protocol.file.allow=always", "submodule", "add", "-q", inner.to_str().unwrap(), "sub"]).current_dir(&outer).env("GIT_CONFIG_GLOBAL", NULL_DEVICE).env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         // The submodule's own config tries to run a program on any status/diff inside it.
-        let marker = scratch("sm-marker").join("pwned");
+        let _root_marker = scratch("sm-marker");
+        let marker = _root_marker.join("pwned");
         let gitfile = fs::read_to_string(outer.join("sub/.git")).unwrap();
         let gd = outer.join("sub").join(gitfile.trim().strip_prefix("gitdir:").unwrap().trim());
         let gd = fs::canonicalize(gd).unwrap();

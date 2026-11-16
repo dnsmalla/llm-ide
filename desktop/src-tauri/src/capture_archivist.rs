@@ -279,15 +279,37 @@ fn run_loop() {
 mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
-    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    pub(super) fn scratch(t: &str) -> PathBuf {
+    /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+    pub(super) struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for TempDirGuard {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    pub(super) fn scratch(t: &str) -> TempDirGuard {
         static N: AtomicUsize = AtomicUsize::new(0);
         let d = std::env::temp_dir().join(format!("llmide-arch-{t}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        d
+        TempDirGuard(d)
     }
 
     pub(super) fn md_files(dir: &Path) -> usize {
@@ -394,7 +416,8 @@ mod tests {
 
     #[test]
     fn a_failed_write_is_never_acked_and_is_retried_at_most_three_times() {
-        let root = scratch("nowrite").join("missing"); // canonicalize fails: the write cannot happen
+        let _root_guard = scratch("nowrite");
+        let root = _root_guard.join("missing"); // canonicalize fails: the write cannot happen
         let f = fake(&["cap-1"]);
         let mut a = Archivist::default();
         for _ in 0..MAX_ATTEMPTS {

@@ -394,10 +394,33 @@ mod tests {
         Pin { version: "9.9.9".into(), url: "https://cdn.jsdelivr.net/npm/mermaid@9.9.9/dist/mermaid.min.js".into(), sha256: sha256_hex(body), bytes: body.len().max(1) }
     }
 
-    fn tmp(name: &str) -> PathBuf {
+    /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for TempDirGuard {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    fn tmp(name: &str) -> TempDirGuard {
         let d = std::env::temp_dir().join(format!("llmide-mermaid-{name}-{}-{}", std::process::id(), crate::confirm::now_ms()));
         std::fs::create_dir_all(&d).unwrap();
-        d
+        TempDirGuard(d)
     }
 
     fn files(data: &Path) -> Vec<String> {

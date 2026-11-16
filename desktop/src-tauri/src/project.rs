@@ -536,11 +536,34 @@ mod tests {
         assert!(is_too_broad("", HOME));
     }
 
-    fn scratch(name: &str) -> PathBuf {
+    /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for TempDirGuard {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    fn scratch(name: &str) -> TempDirGuard {
         let d = std::env::temp_dir().join(format!("llmide-proj-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        TempDirGuard(fs::canonicalize(&d).unwrap())
     }
 
     #[test]
@@ -593,7 +616,8 @@ mod tests {
     fn activate_sets_root_persists_recent_and_revalidates() {
         let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let dir = scratch("data");
-        let proj = scratch("act").join("proj");
+        let _root_proj = scratch("act");
+        let proj = _root_proj.join("proj");
         fs::create_dir_all(&proj).unwrap();
         let info = activate(&dir, &proj).unwrap();
         assert_eq!(info.name, "proj");
@@ -614,8 +638,10 @@ mod tests {
     fn opening_a_project_stops_the_file_watcher_of_the_previous_one() {
         let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let dir = scratch("data-watch");
-        let old = scratch("watch-old").join("proj");
-        let new = scratch("watch-new").join("proj");
+        let _root_old = scratch("watch-old");
+        let old = _root_old.join("proj");
+        let _root_new = scratch("watch-new");
+        let new = _root_new.join("proj");
         fs::create_dir_all(&old).unwrap();
         fs::create_dir_all(&new).unwrap();
         activate(&dir, &old).unwrap();
@@ -634,11 +660,14 @@ mod tests {
     #[test]
     fn recent_status_marks_missing_and_refused_entries_and_numbers_open_indexes() {
         let dir = scratch("rs-data");
-        let a = scratch("rs-a").join("alpha");
-        let b = scratch("rs-b").join("beta");
+        let _root_a = scratch("rs-a");
+        let a = _root_a.join("alpha");
+        let _root_b = scratch("rs-b");
+        let b = _root_b.join("beta");
         fs::create_dir_all(&a).unwrap();
         fs::create_dir_all(&b).unwrap();
-        let gone = scratch("rs-gone").join("gone");
+        let _root_gone = scratch("rs-gone");
+        let gone = _root_gone.join("gone");
         let list = vec![
             fs::canonicalize(&a).unwrap().to_string_lossy().into_owned(),
             gone.to_string_lossy().into_owned(),
@@ -676,7 +705,8 @@ mod tests {
     #[test]
     fn forgetting_edits_the_list_only_and_ignores_stale_indexes() {
         let dir = scratch("rs-forget");
-        let keep = scratch("rs-keep").join("proj");
+        let _root_keep = scratch("rs-keep");
+        let keep = _root_keep.join("proj");
         fs::create_dir_all(&keep).unwrap();
         fs::write(keep.join("data.txt"), "precious").unwrap();
         let root = fs::canonicalize(&keep).unwrap().to_string_lossy().into_owned();
@@ -693,7 +723,8 @@ mod tests {
     fn closing_clears_the_active_root_and_keeps_the_recent_list() {
         let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let dir = scratch("close-data");
-        let proj = scratch("close").join("proj");
+        let _root_proj = scratch("close");
+        let proj = _root_proj.join("proj");
         fs::create_dir_all(&proj).unwrap();
         activate(&dir, &proj).unwrap();
         assert!(active_root().is_some());
@@ -707,7 +738,8 @@ mod tests {
     fn opening_an_empty_folder_scaffolds_it_like_the_mac_app() {
         let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let data = scratch("scaf-data");
-        let root = scratch("scaf-open").join("new_llm");
+        let _root_root = scratch("scaf-open");
+        let root = _root_root.join("new_llm");
         fs::create_dir_all(&root).unwrap();
         // The user's real case: a folder opened before it was ever scaffolded. The core refuses to register it
         // (no system/project.json), so opening it must create the project, as ProjectStore.openFolder does.
@@ -732,7 +764,8 @@ mod tests {
     fn a_non_empty_folder_without_the_marker_is_left_alone() {
         let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let data = scratch("plain-data");
-        let root = scratch("plain-open").join("repo");
+        let _root_root = scratch("plain-open");
+        let root = _root_root.join("repo");
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(root.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
         fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
@@ -750,7 +783,8 @@ mod tests {
     fn a_stray_ds_store_still_counts_as_empty() {
         let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let data = scratch("ds-data");
-        let root = scratch("ds-open").join("proj");
+        let _root_root = scratch("ds-open");
+        let root = _root_root.join("proj");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join(".DS_Store"), b"finder junk").unwrap();
         activate(&data, &root).unwrap();
@@ -764,13 +798,36 @@ mod tests {
 
 #[cfg(test)]
 mod recent_time_tests {
+    /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for TempDirGuard {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
     use super::*;
 
-    fn scratch(name: &str) -> PathBuf {
+    fn scratch(name: &str) -> TempDirGuard {
         let d = std::env::temp_dir().join(format!("llmide-recent-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        TempDirGuard(fs::canonicalize(&d).unwrap())
     }
 
     fn rec(root: &str, at: Option<&str>) -> RecentRecord {
@@ -889,7 +946,8 @@ mod recent_time_tests {
     #[test]
     fn status_list_carries_the_opened_time_for_welcome() {
         let dir = scratch("status");
-        let proj = scratch("status-proj").join("proj");
+        let _root_proj = scratch("status-proj");
+        let proj = _root_proj.join("proj");
         fs::create_dir_all(&proj).unwrap();
         let root = fs::canonicalize(&proj).unwrap().to_string_lossy().into_owned();
         save_records(&dir, &[rec(&root, Some("2026-11-02T10:00:00Z")), rec("/p/old", None)]).unwrap();
@@ -902,7 +960,8 @@ mod recent_time_tests {
     #[test]
     fn forgetting_keeps_the_times_of_the_remaining_entries() {
         let dir = scratch("forget");
-        let proj = scratch("forget-proj").join("proj");
+        let _root_proj = scratch("forget-proj");
+        let proj = _root_proj.join("proj");
         fs::create_dir_all(&proj).unwrap();
         let root = fs::canonicalize(&proj).unwrap().to_string_lossy().into_owned();
         save_records(&dir, &[rec("/p/other", Some("2026-01-01T00:00:00Z")), rec(&root, Some("2026-11-02T10:00:00Z"))]).unwrap();

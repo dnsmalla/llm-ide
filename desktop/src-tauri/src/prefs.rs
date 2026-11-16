@@ -890,11 +890,34 @@ pub(crate) fn set_remote_server_for_test(block: RemoteServerPrefs) {
 mod tests {
     use super::*;
 
-    fn tmp(tag: &str) -> PathBuf {
+    /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for TempDirGuard {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    fn tmp(tag: &str) -> TempDirGuard {
         let d = std::env::temp_dir().join(format!("llmide-prefs-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        d
+        TempDirGuard(d)
     }
 
     const DEFAULT_ON_HOST_API: [&str; 3] = ["LLMIDE_HOST_API_READ", "LLMIDE_HOST_API_COMPOSE", "LLMIDE_HOST_API_TOOL_APPROVALS"];

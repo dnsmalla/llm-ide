@@ -87,7 +87,30 @@ fn hms_secs(t:&str)->Option<i64>{let b=t.as_bytes();if b.len()!=8||!b.iter().enu
 /// read-back verify then refuses the note, so it is never acked).
 pub fn utc_times_to_local(started_at_ms:i64,rows:&mut [Row]){const DAY:i64=86_400_000;let mut day=started_at_ms.div_euclid(DAY)*DAY;let mut prev:Option<i64>=None;for r in rows.iter_mut(){let Some(secs)=hms_secs(&r.time)else{continue};let mut ms=day+secs*1000;match prev{None=>{if ms<started_at_ms-DAY/2{ms+=DAY;day+=DAY}else if ms>started_at_ms+DAY/2{ms-=DAY;day-=DAY}}Some(p)=>{if ms<p-DAY/2{ms+=DAY;day+=DAY}}}prev=Some(ms);r.time=local_hms(ms)}}
 #[cfg(test)] mod tests{use super::*;use std::sync::atomic::{AtomicUsize,Ordering};
-fn scratch(t:&str)->PathBuf{static N:AtomicUsize=AtomicUsize::new(0);let d=std::env::temp_dir().join(format!("llmide-cap-{t}-{}-{}",std::process::id(),N.fetch_add(1,Ordering::Relaxed)));let _=std::fs::remove_dir_all(&d);std::fs::create_dir_all(&d).unwrap();d}
+/// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+struct TempDirGuard(std::path::PathBuf);
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+impl std::ops::Deref for TempDirGuard {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::path::Path> for TempDirGuard {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+fn scratch(t:&str)->TempDirGuard{static N:AtomicUsize=AtomicUsize::new(0);let d=std::env::temp_dir().join(format!("llmide-cap-{t}-{}-{}",std::process::id(),N.fetch_add(1,Ordering::Relaxed)));let _=std::fs::remove_dir_all(&d);std::fs::create_dir_all(&d).unwrap();TempDirGuard(d)}
 fn row(t:&str,s:&str,x:&str)->Row{Row{time:t.into(),speaker:s.into(),text:x.into()}}
 fn header(root:&Path)->PartialHeader{PartialHeader{v:1,id:"m-abc123-xyz789".into(),started_at_ms:1_762_335_000_000,language:"en".into(),notes_root:root.display().to_string()}}
 #[test]fn ids(){let id=new_session_id(1_762_335_000_000);assert!(valid_session_id(&id));for b in["","m-","../x","m-ABC-1","m-abc-123/../../x","m-12345678901234-a"]{assert!(!valid_session_id(b),"{b}")}}

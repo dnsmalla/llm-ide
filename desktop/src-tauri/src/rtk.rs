@@ -181,11 +181,34 @@ pub async fn rtk_install() -> Result<RtkStatus, String> {
 mod tests {
     use super::*;
 
-    fn scratch(name: &str) -> PathBuf {
+    /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TempDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for TempDirGuard {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    fn scratch(name: &str) -> TempDirGuard {
         let d = std::env::temp_dir().join(format!("llmide-rtk-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        d
+        TempDirGuard(d)
     }
 
     #[test]
@@ -207,13 +230,13 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
-            assert_eq!(find_in(&[d.clone()], "rtk"), Some(tool.clone()));
+            assert_eq!(find_in(&[d.to_path_buf()], "rtk"), Some(tool.clone()));
             std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o644)).unwrap();
-            assert_eq!(find_in(&[d.clone()], "rtk"), None, "a non-executable file does not count");
+            assert_eq!(find_in(&[d.to_path_buf()], "rtk"), None, "a non-executable file does not count");
         }
         #[cfg(not(unix))]
         assert_eq!(find_in(&[d.clone()], "rtk"), None);
-        assert_eq!(find_in(&[d.clone()], "absent"), None);
+        assert_eq!(find_in(&[d.to_path_buf()], "absent"), None);
         let _ = std::fs::remove_dir_all(&d);
     }
 

@@ -127,10 +127,21 @@ pub fn pick_folder_redeem(token: String) -> Result<PickedFolder, String> {
 mod tests {
     use super::*;
 
+    /// Removes the temp folder or marker file it owns on drop, so a failing test leaves nothing behind.
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
     #[test]
     fn accepts_a_project_folder_and_canonicalises() {
         let d = std::env::temp_dir().join(format!("llmide-pick-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
+        let _cleanup = TempDirGuard(d.clone());
         std::fs::create_dir_all(d.join("repo")).unwrap();
         let p = picked(&d.join("repo")).unwrap();
         assert_eq!(p.name, "repo");
@@ -146,6 +157,7 @@ mod tests {
         }
         assert!(picked(std::path::Path::new("/definitely/not/here")).is_err());
         let f = std::env::temp_dir().join(format!("llmide-pick-file-{}", std::process::id()));
+        let _cleanup = TempDirGuard(f.clone());
         std::fs::write(&f, b"x").unwrap();
         assert!(picked(&f).is_err());
     }

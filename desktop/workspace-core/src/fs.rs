@@ -1125,11 +1125,36 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn scratch(name: &str) -> PathBuf {
+    /// Owns a scratch folder and removes it when dropped, including while a panic unwinds, so a failing
+    /// assertion leaves nothing in the temp directory. Derefs to `Path` so tests use it as the folder itself.
+    struct RemoveOnDrop(PathBuf);
+
+    impl Drop for RemoveOnDrop {
+        fn drop(&mut self) {
+            // A marker file is removed too; a folder is removed by the first call, so the second finds nothing.
+            let _ = fs::remove_dir_all(&self.0);
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for RemoveOnDrop {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<Path> for RemoveOnDrop {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    fn scratch(name: &str) -> RemoveOnDrop {
         let d = std::env::temp_dir().join(format!("llmide-fs-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        RemoveOnDrop(fs::canonicalize(&d).unwrap())
     }
     #[test]
     fn image_preview_is_root_confined_and_extension_checked() {
@@ -1149,7 +1174,7 @@ mod tests {
     #[test]
     fn hard_linked_files_are_refused_by_copy_and_image_preview() {
         let root = scratch("hardlink-fs");
-        let outside = root.parent().unwrap().join("hardlink-fs-outside.png");
+        let outside = RemoveOnDrop(root.parent().unwrap().join("hardlink-fs-outside.png"));
         std::fs::write(&outside, [0x89, b'P', b'N', b'G', 1, 2, 3]).unwrap();
         fs::hard_link(&outside, root.join("linked.png")).unwrap();
         assert!(copy(&root, &CopyReq { from: "linked.png".into(), to: "copy.png".into() }).is_err());
@@ -1289,7 +1314,7 @@ mod tests {
         assert_eq!(got.text.as_deref(), Some("x"));
         // Deep nesting stays addressable.
         let mut rel = String::new();
-        let mut p = root.clone();
+        let mut p = root.to_path_buf();
         for i in 0..30 {
             rel.push_str(&format!("d{i:02}/"));
             p.push(format!("d{i:02}"));
