@@ -166,12 +166,14 @@ installs the agent skills kit. Each step runs in that order. If registering or t
 project stays open and the error comes with **Try again**, which reruns the whole registration (register and
 install-skills), not only the failed step. Nothing is removed.
 
-**New project** refuses a name that already exists, a name with a path separator or a leading dot, and a
-parent folder at or above your server home folder. It never turns an existing folder into a project. To use an
-existing folder as a project, create a new project next to it and move the files you need.
+**New project** works in your server home folder too: with the picker at `~`, it creates `~/<name>`, as it does
+locally. It refuses a name that already exists, a name with a path separator or a leading dot, a parent folder
+outside your server home folder, and a location too broad to hold a project, such as `~/Documents`. It never turns
+an existing folder into a project. To use an existing folder as a project, create a new project next to it and move
+the files you need.
 
-**Copy path** copies the server path. In SSH server mode the buttons that reveal a
-path in Finder show **Copy path** instead, because this computer cannot open a server folder.
+**Copy server path** copies the server path. In SSH server mode the buttons that reveal a path in Finder show
+**Copy server path** instead, because this computer cannot open a server folder.
 
 In **Settings → Project**, **Paths** lists the project folders and **Memory** lists its memory files and graph.
 **Rebuild missing folders** is offered only when the open folder is a project. It creates folders and files that
@@ -181,20 +183,24 @@ folder picker." and no action button.
 
 ### Clone a repository on the server
 
-**Repositories** can clone a repository into the open server project. It needs an open project. The clone goes
-to `code/<name>` inside the project, for example `code/Hello-World`, and the app shows the server path when it
-finishes.
+**Repositories** can clone a repository into the open server project. It needs a project. In a folder that is not an
+LLM-IDE project, the Repositories card shows "Open a project to use its code/ folder as the clone destination.",
+offers no clone and never starts one, even when you finish typing a repository URL. The server also refuses a clone
+in a plain folder with "This folder is not an LLM-IDE project." and changes nothing. The clone goes to `code/<name>`
+inside the project, for example `code/Hello-World`, and the app shows the server path when it finishes.
 
 The clone runs on the server, so the server needs `git` and outbound https access. Only GitHub and GitLab
 https URLs are accepted. If `git` is missing or the network blocks the host, the clone stops with a message that
 names the cause. A clone can take up to 30 minutes. It runs in the background, so you can keep using Explorer
-while it runs. Only one clone runs at a time on a server. A second clone while one runs is refused with "a clone is already
-running on the server".
+while it runs. Only one clone runs at a time on each SSH connection. A second clone while one runs is refused with
+"A repository is already being cloned."
+
+There is no cancel button. Only the 30-minute cap stops a clone: the wait then ends with "The clone took longer than
+30 minutes and was stopped.", and the app cancels that clone by its id and no other.
 
 Each clone has an id. The server answers the start with that id, and it sends the result with the same id. The app
-accepts only the result for its own clone. Cancelling, or the 30-minute cap, cancels that clone by its id and no other.
-The server sends a clone's result before it frees the slot, so a clone can start again as soon as the previous result
-has arrived.
+accepts only the result for its own clone. The server sends a clone's result before it frees the slot, so a clone can
+start again as soon as the previous result has arrived.
 
 A token for a private repository is sent to the server over the same SSH channel as the rest of the requests.
 The server helper gives it to `git` only through `git`'s own environment, for that one clone. The token is never
@@ -342,13 +348,13 @@ work until `claude login` succeeds on the server.
   and the recent-server list. Stop and uninstall were run through the Rust live harness. Not yet verified: the
   server terminal, a full click-through of the app window, registering a project from the app window (the
   folder picker's **Open** calls the server core's project registration), key install on a real account, and
-  Windows desktops. The project steps (New project, Paths, Memory, Rebuild, register and install-skills, and a
-  clone of `octocat/Hello-World` with no token) are in the Rust live harness, but that harness has not yet run
-  against a server.
+  Windows desktops. The live harness has not run yet against a server, so the project steps (New project, Paths,
+  Memory, Rebuild, register and install-skills, and a clone of `octocat/Hello-World` with no token) are not yet
+  verified on a live server.
 - **Existing folders are never set up.** Opening a server folder never writes project files. Only New project
   creates a project, and Rebuild missing folders runs only in a folder that already is one.
 - **Notes folder, Loop and Reveal stay local.** Your local notes folder is not on the server, and Loop and Auto
-  Tasks do not run in SSH server mode. Reveal buttons show Copy path instead.
+  Tasks do not run in SSH server mode. Reveal buttons show Copy server path instead.
 - **No push, fetch or pull in Changes.** Push and pull run from the terminal on the server.
 - **Linux x86_64 only.** Other systems are refused before anything is installed.
 - **2 GB of free disk.** Test shows the free space, and Connect refuses a server with less than 2048 MB free.

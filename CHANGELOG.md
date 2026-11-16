@@ -157,6 +157,8 @@ Maintenance rules: [docs/how-to/maintain-the-changelog.md](docs/how-to/maintain-
 
 ### Fixed
 
+- **Local clones ignore inherited Git config.** A local clone now drops inherited `GIT_CONFIG_*` environment
+  pairs before it runs `git`, so settings in the launching shell cannot change how a clone runs.
 - **Remote hub deploy helper, container pass (2026-11-08).** A privileged Ubuntu 24.04 run found and
   fixed the blockers this path had only been tested against with fakes: the `env` stage rejected every
   real env on GNU grep (`\r` read as a literal `r`) and skipped a final line without a newline; the

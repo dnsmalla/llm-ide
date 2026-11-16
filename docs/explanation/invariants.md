@@ -848,26 +848,33 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
 - **No Explorer command reaches this computer's disk in SSH mode.** `workspace_backend::dispatch` calls the remote path whenever SSH mode is on, and its local closure runs only in local and hub mode. Opening a PDF (`fs_open_pdf`) and the other local-only actions stay refused in SSH mode (`refuse_in_ssh_mode`), and the webview admits only the Explorer's command set (`ui/screens/shell/host.ts`, `sshExplorerAdmitted`). `project_active` reports the server folder in SSH mode. Pinned by `workspace_backend::tests::ssh_mode_dispatch_without_folder_is_no_project`, `workspace_backend::tests::project_active_reports_server_folder`, `workspace_backend::tests::open_pdf_stays_local_only` and `ui/screens/shell/tests/ssh-explorer-guard.test.mjs`.
 - **The server part is checked before it is used.** The helper's `hello` must match this build's protocol number (`ssh_workspace::check_hello`), or the desktop answers `workspace_version`, and a `hello` that an older helper refuses counts the same way. The version text in `hello` is kept for display and logs only; it is not compared, because the bundle's SHA-256 check keeps the helper and the app in step. Pinned by `ssh_workspace::tests::hello_version_is_not_compared` and the `ssh_workspace` tests that assert `VERSION_MESSAGE`.
 - **Only New project writes project files on the server.** The helper's `project_create` scaffolds a new folder
-  inside the server home, and refuses an existing name, the home folder itself and any parent outside home. Rebuild
+  inside the server home, and refuses an existing name, a parent outside home and a target too broad to be a project
+  (the `paths` rule in `workspace-core`). The home folder itself may hold a project (`~/<name>`), as it does locally. Rebuild
   (`project_rebuild`) writes only in a folder that has `system/project.json`, and refuses any other with
   `not_a_project`. Every write is write-if-absent, so an edited file keeps its text. The core calls that New
   project makes after the scaffold (`/kb/projects/register`, `/kb/project/install-skills`) are the only other writes
   to the project. Opening a folder writes nothing. Pinned by the workspace-helper tests `create_refuses_existing_name`,
-  `create_refuses_home_and_outside` and `rebuild_refuses_plain_folder_and_writes_nothing`, and by the live harness
+  `create_allows_home_refuses_outside` and `rebuild_refuses_plain_folder_and_writes_nothing`, and by the live harness
   steps 15 to 20 in `desktop/src-tauri/src/ssh_live.rs`.
 - **The clone token exists only in git's child environment on the server.** The desktop puts the token in the
   helper request, which travels on the SSH channel's stdin. The helper passes it to git only through git's
   environment (`GIT_CONFIG_*` extra header, `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/usr/bin/true`). It is never in argv,
   a log, an error, a reply, an event, a file or `Debug` output (the type prints `<redacted>`). A rejected token gets one
   anonymous retry. Pinned by the workspace-helper test `token_never_appears_in_any_output`.
-- **Clone results arrive as events, and only one clone runs at a time.** The helper answers `repo_clone` at once and
+- **A clone needs an LLM-IDE project, and a plain folder is refused before anything is written.** The helper's
+  `clone_start` returns `not_a_project` when `layout::is_project` is false for the open folder. The desktop leaves the
+  Repositories clone destination empty in that case, so no clone is offered or started, even after a URL is typed.
+  Pinned by the workspace-helper test `clone_refuses_plain_folder_and_writes_nothing`.
+- **Clone results arrive as events, and only one clone runs at a time on each connection.** The helper answers `repo_clone` at once and
   sends the result as a `clone` event, so requests keep being answered during a clone (`requests_are_answered_while_a_clone_runs`).
   The `repo_clone` reply is `{started: true, id}`, and every `clone` event carries that `id`. The desktop accepts only
   the event with its own id, so a late event from an earlier clone is never read as this one's result. `clone_cancel {id}`
   cancels only that clone, and a stale id does nothing. The helper sends a clone's event before it frees the one-clone
   slot, under the same lock, so a request that sees the event never finds a slot that is free while the event is unsent.
-  A second clone is refused with `busy` while the slot is taken. The desktop waits up to the 30-minute cap for its event,
-  cancels its own id on timeout, and when the channel closes the wait ends with `lost_connection`
+  A second clone is refused with `busy` while the slot is taken, and the desktop refuses it first with "A repository is
+  already being cloned." The desktop waits up to the 30-minute cap for its event and cancels its own id on timeout; that
+  wait ends with `clone_timeout` ("The clone took longer than 30 minutes and was stopped."). When the channel closes the
+  wait ends with `lost_connection`
   (`clone_wait_ends_when_channel_closes` in `desktop/src-tauri/src/workspace_backend/tests.rs`).
 
 ### ❌ DO NOT
