@@ -29,6 +29,11 @@ function props(over = {}) {
     onAskStop() {},
     onConfirmStop() {},
     onCancelStop() {},
+    closeConfirm: false,
+    onAskClose() {},
+    onConfirmClose() {},
+    onCancelClose() {},
+    closeError: null,
     foreign: false,
     onStopAnyway() {},
     onDismissForeign() {},
@@ -128,4 +133,82 @@ test("WelcomeScreen shows the server home in place of the local Welcome content"
   assert.match(html, /SERVER HOME MARKER/);
   assert.doesNotMatch(html, /Open existing project/);
   assert.doesNotMatch(html, /Start fresh/);
+});
+
+// Close server: the button sits next to Stop server, asks first, and the guard runs before the restart. Stop never runs.
+function findButton(node, label) {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findButton(child, label);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!node || typeof node !== "object" || !node.props) return null;
+  if (node.props.children === label && typeof node.props.onClick === "function") return node;
+  return findButton(node.props.children, label);
+}
+
+test("Close server is in the header next to Stop server, and it only asks", () => {
+  const tree = home.ServerHomeView(props({}));
+  assert.ok(findButton(tree, "Close server"), "the button exists");
+  assert.ok(findButton(tree, "Stop server"), "Stop server stays");
+  let asked = 0;
+  findButton(home.ServerHomeView(props({ onAskClose() { asked += 1; } })), "Close server").props.onClick();
+  assert.equal(asked, 1);
+  assert.doesNotMatch(render({}), /Close the connection to/, "no question before the button is pressed");
+});
+
+test("Close server asks with the exact sentence, Close and Cancel", () => {
+  const html = render({ closeConfirm: true });
+  assert.match(html, /Close the connection to 192\.168\.100\.32 and return to the Welcome page\? The server keeps running\./);
+  const tree = home.ServerHomeView(props({ closeConfirm: true }));
+  assert.ok(findButton(tree, "Close"), "Close answers the question");
+  assert.ok(findButton(tree, "Cancel"), "Cancel keeps the server");
+});
+
+test("Cancel on the Close question calls only its own cancel handler", () => {
+  const calls = [];
+  const spies = {
+    onCancelClose() { calls.push("cancel"); },
+    onConfirmClose() { calls.push("confirm"); },
+    onConfirmStop() { calls.push("stop"); },
+    onDisconnect() { calls.push("disconnect"); },
+  };
+  findButton(home.ServerHomeView(props({ closeConfirm: true, ...spies })), "Cancel").props.onClick();
+  assert.deepEqual(calls, ["cancel"]);
+});
+
+test("closeServerConnection: the guard runs first, then the restart; stop is never part of it", async () => {
+  const order = [];
+  const guard = async (cancelled, action) => {
+    order.push("guard");
+    return action();
+  };
+  const restart = async () => { order.push("app_restart"); };
+  const done = await home.closeServerConnection(guard, restart);
+  assert.equal(done, true);
+  assert.deepEqual(order, ["guard", "app_restart"]);
+});
+
+test("closeServerConnection: when the user stays in the open project, nothing restarts", async () => {
+  const order = [];
+  const guard = async (cancelled) => {
+    order.push("guard");
+    return cancelled;
+  };
+  const done = await home.closeServerConnection(guard, async () => { order.push("app_restart"); });
+  assert.equal(done, false);
+  assert.deepEqual(order, ["guard"]);
+});
+
+test("WelcomeScreen without a server home (local mode) has no Close server", () => {
+  const html = plain(renderToStaticMarkup(h(welcome.WelcomeScreen, {
+    project: null,
+    recent: { entries: [], reset: false },
+    error: null,
+    actions: {},
+  })));
+  assert.doesNotMatch(html, /Close server/);
+  assert.doesNotMatch(html, /Stop server/);
 });

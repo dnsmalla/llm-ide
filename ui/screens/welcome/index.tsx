@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ServerHome } from "./ServerHome.tsx";
+import { ServerHome, closeServerConnection } from "./ServerHome.tsx";
 import { goHomeAfterOpen, serverOpenDeps, serverWorkspaceIo } from "../remote-folder/wiring.ts";
 import "@llmide/ui-kit/styles.css";
 import "./welcome.css";
@@ -71,6 +71,7 @@ export default function WelcomeSection({ mode, onOpenServerFolder }: SectionProp
       onOpenPicker={() => onOpenServerFolder?.()}
       onOpened={goHomeAfterOpen}
       onContinue={goHomeAfterOpen}
+      onCloseServer={() => closeServerConnection(projectStore.guardLeave, () => invokeHost<unknown>("app_restart"))}
     />
   ) : undefined;
   return <WelcomeScreen project={p.project} recent={p.recentAll} error={p.error} actions={actions} focusNew={focusNew} guideSignal={guideSignal} ssh={ssh} serverHome={serverHome} />;

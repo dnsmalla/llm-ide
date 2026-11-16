@@ -7,7 +7,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import "./server-home.css";
 import { useModel, useStore } from "../settings/context.tsx";
 import { Button, ErrorText, Field } from "../settings/ui.tsx";
-import { SshServerModel, SSH_FOREIGN_TEXT, type SshServerIo } from "../settings/ssh-server-model.ts";
+import { SshServerModel, SSH_FOREIGN_TEXT, sshServerErrorText, type SshServerIo } from "../settings/ssh-server-model.ts";
 import { StopConfirm } from "../settings/sections/SshServerParts.tsx";
 import { useStoreSelector } from "../shell/hooks.ts";
 import { coreStatusStore } from "../shell/runtime.ts";
@@ -60,6 +60,13 @@ export interface ServerHomeViewProps {
   onAskStop(): void;
   onConfirmStop(): void;
   onCancelStop(): void;
+  /** Close server: the question is open, and its two answers. Closing does not stop the server core. */
+  closeConfirm: boolean;
+  onAskClose(): void;
+  onConfirmClose(): void;
+  onCancelClose(): void;
+  /** Error of the last Close server attempt (host text, already a sentence). */
+  closeError: string | null;
   /** Another computer started the server: only an explicit "anyway" repeats the stop. */
   foreign: boolean;
   onStopAnyway(): void;
@@ -90,13 +97,24 @@ export function ServerHomeView(p: ServerHomeViewProps): ReactNode {
         </div>
         <div className="sh-home-actions">
           {linkUp ? <Button disabled={p.busy} onClick={p.onDisconnect}>Disconnect</Button> : null}
+          <Button disabled={p.busy} onClick={p.onAskClose}>Close server</Button>
           <Button tone="danger" disabled={p.busy} onClick={p.onAskStop}>Stop server</Button>
         </div>
       </header>
       {p.identity ? <p className="sh-home-identity">{p.identity}</p> : null}
       {p.statusError && p.link === "failed" ? <p className="wc-text wc-muted">{p.statusError}</p> : null}
       <ErrorText text={p.error} />
+      <ErrorText text={p.closeError} />
 
+      {p.closeConfirm ? (
+        <div className="st-dialog" role="alertdialog" aria-label="Close the connection">
+          <p>{`Close the connection to ${p.host} and return to the Welcome page? The server keeps running.`}</p>
+          <div className="st-row">
+            <Button tone="primary" disabled={p.busy} onClick={p.onConfirmClose}>Close</Button>
+            <Button disabled={p.busy} onClick={p.onCancelClose}>Cancel</Button>
+          </div>
+        </div>
+      ) : null}
       {p.stopConfirm ? (
         <StopConfirm host={p.host} busy={p.busy} onConfirm={p.onConfirmStop} onCancel={p.onCancelStop} />
       ) : null}
@@ -170,6 +188,21 @@ export function ServerHomeView(p: ServerHomeViewProps): ReactNode {
   );
 }
 
+/** The guard that every change of the active project runs through (`projectStore.guardLeave`). */
+export type LeaveGuard = <T>(cancelled: T, action: () => Promise<T>) => Promise<T>;
+
+/**
+ * Close server: the unsaved-work question first, then the app restart. The restart opens the local Welcome, because a
+ * launch in ssh mode already saved the mode back to Local. There is no stop here by design: the server core keeps
+ * running, so the next connect is quick. Resolves false when the user stays in the open project.
+ */
+export function closeServerConnection(guard: LeaveGuard, restart: () => Promise<unknown>): Promise<boolean> {
+  return guard(false, async () => {
+    await restart();
+    return true;
+  });
+}
+
 export interface ServerHomeProps {
   io: SshServerIo;
   workspace: WorkspaceIo;
@@ -180,12 +213,17 @@ export interface ServerHomeProps {
   /** Goes to the project's sections (Continue, or a folder opened from the recent list). */
   onOpened(project: RemoteProject): void;
   onContinue(): void;
+  /**
+   * Close server: runs the unsaved-work guard and restarts the app into the local Welcome. It must never stop the
+   * server core; the caller owns the guard and the restart, so this page only asks and shows a failure.
+   */
+  onCloseServer(): Promise<unknown>;
 }
 
 const basename = (path: string): string => path.split("/").filter(Boolean).pop() ?? path;
 
 /** The server home page: the models and the live link. Its state is the page's own, so a fresh mount starts clean. */
-export function ServerHome({ io, workspace, deps, folder, onOpenPicker, onOpened, onContinue }: ServerHomeProps): ReactNode {
+export function ServerHome({ io, workspace, deps, folder, onOpenPicker, onOpened, onContinue, onCloseServer }: ServerHomeProps): ReactNode {
   const m = useModel(() => new SshServerModel(io));
   const s = useStore(m);
   const recentModel = useModel(() => new ServerRecentModel(workspace, deps));
@@ -193,6 +231,8 @@ export function ServerHome({ io, workspace, deps, folder, onOpenPicker, onOpened
   const coreLink = useStoreSelector(coreStatusStore, (x) => x.status?.link ?? null);
   const [password, setPassword] = useState("");
   const [stopConfirm, setStopConfirm] = useState(false);
+  const [closeConfirm, setCloseConfirm] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   useEffect(() => {
     void m.load();
@@ -220,6 +260,15 @@ export function ServerHome({ io, workspace, deps, folder, onOpenPicker, onOpened
     const answer = await m.connectWithTest(pw);
     if (answer?.link === "connected") setPassword("");
   };
+  const closeServer = async () => {
+    setCloseConfirm(false);
+    setCloseError(null);
+    try {
+      await onCloseServer();
+    } catch (e) {
+      setCloseError(sshServerErrorText(e));
+    }
+  };
   const openRecent = (path: string) => {
     void recentModel.open(path).then((project) => {
       if (project) onOpened(project);
@@ -242,6 +291,11 @@ export function ServerHome({ io, workspace, deps, folder, onOpenPicker, onOpened
       onAskStop={() => setStopConfirm(true)}
       onConfirmStop={() => { setStopConfirm(false); void m.stopServer(pw); }}
       onCancelStop={() => setStopConfirm(false)}
+      closeConfirm={closeConfirm}
+      onAskClose={() => setCloseConfirm(true)}
+      onConfirmClose={() => void closeServer()}
+      onCancelClose={() => setCloseConfirm(false)}
+      closeError={closeError}
       foreign={s.foreign !== null}
       onStopAnyway={() => void m.stopServer(pw, { force: true })}
       onDismissForeign={() => m.dismissForeign()}
