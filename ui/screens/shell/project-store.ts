@@ -97,8 +97,9 @@ export function createProjectStore(h: ProjectHost = defaultHost, unsaved: () => 
     const labels = state.project ? unsaved() : [];
     if (labels.length === 0) return action();
     pending?.cancel(); // one question at a time: a newer request replaces the one still on screen
-    return new Promise<T>((resolve) => {
-      pending = { run: () => { void action().then(resolve); }, cancel: () => resolve(cancelled) };
+    return new Promise<T>((resolve, reject) => {
+      // A rejected action rejects the caller too, so a failed open never leaves its caller waiting (or busy) forever.
+      pending = { run: () => { action().then(resolve, reject); }, cancel: () => resolve(cancelled) };
       set({ leave: { labels } });
     });
   };

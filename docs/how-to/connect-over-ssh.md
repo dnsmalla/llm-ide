@@ -42,8 +42,8 @@ You can connect from the Welcome screen or from Settings. Both use the same form
    server and its host key, but not the mode, so the app is still local at this point. If the app is already in
    SSH server mode, Connect attaches at once and there is nothing to switch.
    - **Switch**: saves SSH server mode and restarts the app. The next start opens the server home.
-   - **Cancel**: changes nothing. The app stays local, and the next start is local too. The server stays saved,
-     so you can switch later from Settings.
+   - **Cancel**: changes nothing. The app stays local, and the next start is local too. The server stays saved.
+     To switch later, connect again (from Welcome or Settings) and choose **Switch**.
 
 ### Recent SSH servers
 

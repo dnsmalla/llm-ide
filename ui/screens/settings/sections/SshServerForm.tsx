@@ -18,7 +18,6 @@ export interface SshServerFormProps {
   readOnly?: boolean;
   /** Focus the password field when the form opens (a password server from the Welcome list). */
   focusPassword?: boolean;
-  /** Settings only: a saved change needs a restart. The Welcome dialog shows its own switch step instead. */
   /** The confirmed switch to the SSH server (save the mode, restart). Shown only for a saved link that waits for it. */
   onSwitch?: () => Promise<void>;
   /** Called after a Connect that attached the link, so the caller can close itself. */

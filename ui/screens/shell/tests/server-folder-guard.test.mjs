@@ -83,3 +83,26 @@ test("without a guard (no shell) the open runs as before", async () => {
   const project = await model.openServerFolder(io, "/home/dev/x", noDeps());
   assert.equal(project?.root, "/home/dev/x");
 });
+
+test("Discard, then the host open fails: the picker is no longer busy and shows the error", async () => {
+  const ps = store.createProjectStore(makeHost("/home/dev/old"), () => ["notes.md (unsaved)"]);
+  await ps.refresh();
+  const { FolderPickerModel } = model;
+  const io = {
+    async listDirs(path) { return { path: "/home/dev", entries: [] }; },
+    async mkdir() { throw new Error("not used"); },
+    async open() { throw Object.assign(new Error("gone"), { code: "not_found" }); },
+    async close() {},
+    async recent() { return []; },
+    async forget() {},
+  };
+  const deps = { register: async () => {}, refresh: async () => {}, announce() {}, guard: (cancelled, action) => ps.guardLeave(cancelled, action) };
+  const picker = new FolderPickerModel(io, deps);
+  await picker.start();
+  const pending = picker.openCurrent();
+  ps.confirmLeave();
+  assert.equal(await pending, null, "the failed open resolves with no project");
+  const s = picker.getState();
+  assert.equal(s.busy, false, "not stuck busy");
+  assert.match(s.error ?? "", /not found|folder/i, "the error is shown");
+});
