@@ -40,6 +40,15 @@ export function pathsIsNoticeOnly(data: ProjectPaths, sshMode: boolean): boolean
   return sshMode && !data.isProject;
 }
 
+/**
+ * The project's code/ folder: the clone destination for Repositories, or null when there is none. In ssh mode a plain
+ * server folder has none, because clone needs a project (the host refuses it there too), so the card offers no clone.
+ */
+export function codeDirOf(data: ProjectPaths, sshMode: boolean): string | null {
+  if (sshMode && !data.isProject) return null;
+  return data.folders.some((f) => f.name === "code") ? `${data.root.replace(/\/+$/, "")}/code` : null;
+}
+
 export function decodeMemory(v: unknown): ProjectMemory | null {
   if (!isRecord(v) || typeof v.root !== "string") return null;
   let graph: ProjectMemory["graph"] = null;

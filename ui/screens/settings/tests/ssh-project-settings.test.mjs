@@ -103,3 +103,27 @@ test("memory_unchanged_in_local_mode: a plain folder in local mode keeps the ful
   assert.ok(!out.includes(NOTICE()));
   assert.ok(out.includes("Ask Chat about memory"));
 });
+
+// Repositories: the clone destination follows the project. A plain server folder has no clone destination in ssh mode.
+test("codeDirOf: a plain server folder in ssh mode offers no code/ destination, even when code/ exists", () => {
+  const data = { root: "/srv/home/docs/", id: "", folders: [{ name: "code", exists: true }], isProject: false };
+  assert.equal(m.projectModel.codeDirOf(data, true), null);
+});
+
+test("codeDirOf: a project in ssh mode gives its code/ folder", () => {
+  const data = { root: "/srv/home/docs/", id: "", folders: [{ name: "code", exists: true }], isProject: true };
+  assert.equal(m.projectModel.codeDirOf(data, true), "/srv/home/docs/code");
+});
+
+test("codeDirOf: local mode is unchanged, plain folder included", () => {
+  const plain = { root: "/Users/me/docs", id: "", folders: [{ name: "code", exists: false }], isProject: false };
+  assert.equal(m.projectModel.codeDirOf(plain, false), "/Users/me/docs/code");
+  const none = { root: "/Users/me/docs", id: "", folders: [{ name: "system", exists: true }], isProject: true };
+  assert.equal(m.projectModel.codeDirOf(none, false), null, "no code/ folder, no destination");
+});
+
+test("codeDirOf: an older host that omits isProject keeps the destination (decoded as a project)", () => {
+  const old = m.projectModel.decodePaths({ root: "/srv/p", id: "x", folders: [{ name: "code", exists: true }] });
+  assert.equal(old.isProject, true);
+  assert.equal(m.projectModel.codeDirOf(old, true), "/srv/p/code");
+});

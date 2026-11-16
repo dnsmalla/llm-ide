@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { shellBus } from "../../shell/bus";
+import { inSshMode } from "../../shell/host.ts";
 import { call } from "../core-api.ts";
 import { decodeSecretNames } from "../decoders.ts";
+import { codeDirOf } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import {
   REPO_OP_GROUPS,
@@ -88,10 +90,7 @@ export default function RepositoriesSection() {
 
   useEffect(() => {
     host.projectPaths?.().then(
-      (p) => {
-        const code = p.folders.find((f) => f.name === "code");
-        if (code) setCodeDir(`${p.root.replace(/\/+$/, "")}/code`);
-      },
+      (p) => setCodeDir(codeDirOf(p, inSshMode())),
       () => setCodeDir(null),
     );
   }, [host]);

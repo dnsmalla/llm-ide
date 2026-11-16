@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { load } from "./helpers.mjs";
 
 const { serverFolderHandlerFor, setServerFolderHandler, serverFolderHandler } = await load("server-folder.ts");
-const { setHostBridge, setSshModeProvider, setRemoteModeProvider, invokeHost, subscribeRootMissing, beginServerFolderOpen, endServerFolderOpen } = await load("host.ts");
+const { setHostBridge, setSshModeProvider, setRemoteModeProvider, invokeHost, subscribeRootMissing, subscribeNoProject, beginServerFolderOpen, endServerFolderOpen } = await load("host.ts");
 const { sshBadgeText } = await load("../settings/ssh-server-model.ts");
 const { createProjectStore } = await load("project-store.ts");
 
@@ -42,6 +42,35 @@ test("root_missing from a later host call notifies once, in ssh mode, and not fo
     assert.deepEqual(seen, [ROOT_MISSING]);
   } finally {
     off();
+    setSshModeProvider(() => false);
+    setRemoteModeProvider(() => false);
+    setHostBridge(null);
+  }
+});
+
+test("project create refusals stay inline: remote_ssh_project_create never triggers root_missing or no_project", async () => {
+  const seen = [];
+  const noProject = [];
+  const offRoot = subscribeRootMissing((message) => seen.push(message));
+  const offNo = subscribeNoProject(() => noProject.push(true));
+  let reject = null;
+  setHostBridge({ async invoke() { if (reject) throw reject; return null; } });
+  setRemoteModeProvider(() => true);
+  setSshModeProvider(() => true);
+  try {
+    reject = { code: "root_missing", message: ROOT_MISSING };
+    await assert.rejects(invokeHost("remote_ssh_project_create", { parent: "/h", name: "llm" }));
+    reject = { code: "no_project", message: "no" };
+    await assert.rejects(invokeHost("remote_ssh_project_create", { parent: "/h", name: "llm" }));
+    assert.deepEqual(seen, []);
+    assert.deepEqual(noProject, []);
+    // The same codes from another command still return home.
+    reject = { code: "no_project", message: "no" };
+    await assert.rejects(invokeHost("fs_list_dir", { path: "" }));
+    assert.deepEqual(noProject, [true]);
+  } finally {
+    offRoot();
+    offNo();
     setSshModeProvider(() => false);
     setRemoteModeProvider(() => false);
     setHostBridge(null);

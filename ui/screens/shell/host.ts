@@ -251,10 +251,15 @@ export function subscribeNoProject(listener: NoProjectListener): () => void {
   return () => noProjectListeners.delete(listener);
 }
 
+/** Commands that report their own refusals inline; the root_missing and no_project hooks must not fire for them. */
+function ownsItsRefusal(command: string): boolean {
+  return command.startsWith("remote_ssh_workspace_") || command === "remote_ssh_project_create";
+}
+
 /**
  * Generic typed call for commands a slice owns. Prefer adding a wrapper to `host` for shared ones.
- * The `remote_ssh_workspace_*` commands are excluded from the root_missing hook: their own refusals (for example a
- * missing folder while opening one) are shown where they happen, not as a return home.
+ * The workspace and project-create commands are excluded from the root_missing and no_project hooks: their own refusals
+ * (for example a missing folder while opening one, or a name that exists) are shown where they happen, not as a return home.
  */
 export async function invokeHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const bridge = injected;
@@ -268,11 +273,11 @@ export async function invokeHost<T>(command: string, args?: Record<string, unkno
   } catch (e) {
     const record = typeof e === "object" && e !== null ? (e as { code?: unknown; message?: unknown }) : null;
     const current = epoch === serverFolderEpoch && !serverFolderOpening;
-    if (record?.code === "root_missing" && current && sshModeProvider() && !command.startsWith("remote_ssh_workspace_")) {
+    if (record?.code === "root_missing" && current && sshModeProvider() && !ownsItsRefusal(command)) {
       const message = typeof record.message === "string" ? record.message : "This folder is no longer on the server.";
       for (const listener of [...rootMissingListeners]) listener(message);
     }
-    if (record?.code === "no_project" && sshModeProvider() && !command.startsWith("remote_ssh_workspace_")) {
+    if (record?.code === "no_project" && sshModeProvider() && !ownsItsRefusal(command)) {
       for (const listener of [...noProjectListeners]) listener();
     }
     throw e;
