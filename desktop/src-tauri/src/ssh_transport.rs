@@ -8,9 +8,9 @@
 //! Password auth carries no secret here: [`SshAuth::Password`] holds no data, so a password can never
 //! reach an argv or an environment variable from this module.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -222,6 +222,29 @@ pub trait SshExec: Send + Sync {
 
     /// Starts a long-lived child (a port forward) and returns without waiting for it.
     fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn ForwardChild>>;
+
+    /// Starts the helper channel: a child with piped stdin and stdout, for the request and answer lines of
+    /// `llmide-workspace`. Runners that only serve one-shot calls keep this default, which refuses.
+    fn spawn_stdio(&self, _args: &[String], _askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn StdioChild>> {
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "this runner has no helper channel"))
+    }
+}
+
+/// A child with piped stdin and stdout. Only [`SshExec::spawn_stdio`] builds one.
+pub trait StdioChild: Send {
+    /// The child's stdin. A write blocks while the child does not read it.
+    fn stdin(&mut self) -> &mut dyn Write;
+
+    /// The child's stdout. It is handed out once; a second call returns an empty reader.
+    fn take_stdout(&mut self) -> Box<dyn BufRead + Send>;
+
+    /// Stops the child and waits for it, so no process is left behind. Calling it again is harmless.
+    fn kill(&mut self);
+
+    /// The exit code once the child has ended, `None` while it still runs.
+    // NOTE: Task 7 is the first caller (the channel watches the helper process); until then only tests use it.
+    #[allow(dead_code)]
+    fn try_exited(&mut self) -> Option<i32>;
 }
 
 /// A running forward. Dropping it stops the child.
@@ -250,6 +273,80 @@ impl SshExec for SystemSshExec {
     fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn ForwardChild>> {
         Ok(Box::new(spawn_program("ssh", args, askpass)?))
     }
+
+    fn spawn_stdio(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn StdioChild>> {
+        Ok(Box::new(spawn_stdio_program("ssh", args, askpass)?))
+    }
+}
+
+/// The production helper channel: the system `ssh` with stdin and stdout piped. Its stderr is drained and
+/// dropped, because ssh's error text can carry server output and must never reach a message or a log.
+struct SystemStdioChild {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: Option<ChildStdout>,
+}
+
+impl StdioChild for SystemStdioChild {
+    fn stdin(&mut self) -> &mut dyn Write {
+        &mut self.stdin
+    }
+
+    fn take_stdout(&mut self) -> Box<dyn BufRead + Send> {
+        match self.stdout.take() {
+            Some(pipe) => Box::new(BufReader::new(pipe)),
+            None => Box::new(std::io::empty()),
+        }
+    }
+
+    fn kill(&mut self) {
+        // An error here means the child has already exited, which is the state `kill` is meant to reach.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
+    fn try_exited(&mut self) -> Option<i32> {
+        match self.child.try_wait() {
+            Ok(Some(status)) => Some(exit_code(status)),
+            Ok(None) => None,
+            Err(_) => Some(-1),
+        }
+    }
+}
+
+impl Drop for SystemStdioChild {
+    fn drop(&mut self) {
+        StdioChild::kill(self);
+    }
+}
+
+/// Starts `program` with piped stdin and stdout for the helper channel. Stderr is drained by a detached thread.
+fn spawn_stdio_program(
+    program: &str,
+    args: &[String],
+    askpass: Option<&AskpassGrant>,
+) -> std::io::Result<SystemStdioChild> {
+    let mut command = child_command(program, args, askpass);
+    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    if let Some(stderr) = child.stderr.take() {
+        drain_to_sink(stderr);
+    }
+    let Some(stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(std::io::Error::other("the ssh child has no stdin pipe"));
+    };
+    let stdout = child.stdout.take();
+    Ok(SystemStdioChild { child, stdin, stdout })
+}
+
+/// Reads a pipe to its end on a detached thread and discards the bytes, so the child never blocks on a full pipe.
+/// The thread ends when the child closes the pipe. The bytes are never logged.
+fn drain_to_sink(mut pipe: impl Read + Send + 'static) {
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut pipe, &mut std::io::sink());
+    });
 }
 
 /// The production forward child. Its stderr is drained by a detached thread so ssh never blocks on a full pipe.
@@ -411,11 +508,8 @@ fn spawn_program(program: &str, args: &[String], askpass: Option<&AskpassGrant>)
     let mut command = child_command(program, args, askpass);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let mut child = command.spawn()?;
-    if let Some(mut stderr) = child.stderr.take() {
-        // Detached on purpose: the thread ends when the child closes stderr. Its bytes are never logged.
-        std::thread::spawn(move || {
-            let _ = std::io::copy(&mut stderr, &mut std::io::sink());
-        });
+    if let Some(stderr) = child.stderr.take() {
+        drain_to_sink(stderr);
     }
     Ok(SystemForwardChild { child })
 }
@@ -621,7 +715,8 @@ mod tests {
 
     #[cfg(unix)]
     mod runner {
-        use super::super::{run_program, spawn_program, ForwardChild};
+        use super::super::{run_program, spawn_program, spawn_stdio_program, ForwardChild, StdioChild};
+        use std::io::BufRead;
         use super::EnvGuard;
         use crate::ssh_askpass;
         use std::os::unix::ffi::OsStrExt;
@@ -708,6 +803,20 @@ mod tests {
                 .unwrap_err();
             assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
             assert!(started.elapsed() < Duration::from_secs(5));
+        }
+
+        #[test]
+        fn stdio_child_carries_lines_and_dies_on_kill() {
+            let mut child = spawn_stdio_program("/bin/sh", &sh("cat"), None).unwrap();
+            child.stdin().write_all(b"ping\n").unwrap();
+            let mut stdout = child.take_stdout();
+            let mut line = String::new();
+            stdout.read_line(&mut line).unwrap();
+            assert_eq!(line, "ping\n");
+            assert_eq!(child.try_exited(), None);
+            child.kill();
+            assert!(child.try_exited().is_some());
+            child.kill();
         }
 
         #[test]

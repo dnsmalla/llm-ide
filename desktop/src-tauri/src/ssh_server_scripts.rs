@@ -688,6 +688,10 @@ printf '%s\n' "$LINE" >> "$AUTH" || fail
 printf '__LLMIDE_ADDKEY__=added\n'
 "##;
 
+/// Starts the helper channel: `llmide-workspace` in stdio mode, run by the SSH user from the installed release.
+/// This literal is the only remote command the channel sends; every request travels on stdin.
+pub const WORKSPACE: &str = r#"exec "$HOME/.llmide-server/current/core/bin/llmide-workspace" --stdio"#;
+
 /// The Probe result the app decides on before uploading anything.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {

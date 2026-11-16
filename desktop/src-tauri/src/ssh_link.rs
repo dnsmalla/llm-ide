@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use crate::core_host::ct_eq;
 use crate::fs_ops::FsError;
+use crate::ssh_askpass::AskpassGrant;
 use crate::ssh_server_scripts::{parse_core_state, STATUS};
 use crate::ssh_session::{open_forward, wait_for_core, Connected, Link, NO_ANSWER_CODE};
 use crate::ssh_transport::{ForwardChild, SshEndpoint, SshExec};
@@ -140,9 +141,40 @@ impl SshLink {
     }
 }
 
+impl SshLink {
+    /// A fresh one-time grant that answers this link's password, for one new ssh child. `None` for key auth.
+    ///
+    /// Each spawn needs its own grant, because a grant answers once. The password is copied into the grant and
+    /// the copy is wiped; the password string never leaves this module. A closed link refuses, because it has
+    /// already dropped the password.
+    #[allow(dead_code)] // NOTE: Task 7 takes a grant for each helper spawn; until then nothing calls this.
+    pub fn grant(&self) -> std::io::Result<Option<AskpassGrant>> {
+        let secret = self.shared.password_copy();
+        // Checked after the copy: a stop that lands between the two checks must not read as key auth.
+        if self.shared.is_stopped() {
+            return Err(std::io::Error::other("the connection was closed"));
+        }
+        match secret {
+            None => Ok(None),
+            Some(secret) => crate::ssh_askpass::grant(secret.as_str()).map(Some),
+        }
+    }
+}
+
 impl Drop for SshLink {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// A link with no supervisor, holding `password` the way a real one does. Tests use it to check grants.
+#[cfg(test)]
+pub(crate) fn held_for_test(password: Option<&str>) -> SshLink {
+    SshLink {
+        shared: Arc::new(Shared::new(password.map(str::to_string))),
+        url: "http://127.0.0.1:3456".to_string(),
+        worker: Mutex::new(None),
+        known_hosts: Mutex::new(None),
     }
 }
 
@@ -888,6 +920,30 @@ mod tests {
         assert_eq!(observed.backoffs().len(), 5);
         assert_eq!(fake.names().iter().filter(|n| **n == "forward").count(), 5, "four failures, one success");
         assert_eq!(link.state(), LinkState::Failed { code: "SSH_LINK_STOPPED", message: "The connection was closed.".into() });
+    }
+
+    #[test]
+    fn grant_is_fresh_for_each_spawn_and_never_carries_the_password() {
+        let link = held_for_test(Some("hunter2"));
+        let first = link.grant().unwrap().expect("a password link grants");
+        let second = link.grant().unwrap().expect("a password link grants");
+        assert_ne!(first.env(), second.env(), "every spawn gets its own one-time grant");
+        for grant in [&first, &second] {
+            assert!(grant.env().iter().all(|(_, value)| !value.contains("hunter2")));
+        }
+    }
+
+    #[test]
+    fn key_link_grants_nothing() {
+        let link = held_for_test(None);
+        assert!(link.grant().unwrap().is_none());
+    }
+
+    #[test]
+    fn stopped_link_refuses_a_grant() {
+        let link = held_for_test(Some("hunter2"));
+        link.stop();
+        assert!(link.grant().is_err(), "a closed link no longer holds the password");
     }
 
     #[test]

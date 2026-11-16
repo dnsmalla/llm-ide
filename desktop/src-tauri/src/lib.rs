@@ -61,6 +61,7 @@ mod ssh_key_install;
 mod ssh_service;
 mod ssh_session;
 mod ssh_transport;
+mod ssh_workspace;
 mod remote_deploy;
 mod remote_hub;
 mod remote_session;
