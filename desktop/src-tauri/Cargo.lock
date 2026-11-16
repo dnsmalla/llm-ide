@@ -2306,6 +2306,8 @@ dependencies = [
  "base64 0.22.1",
  "ignore",
  "libc",
+ "notify",
+ "regex",
  "serde",
  "sha2",
  "trash",

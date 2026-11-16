@@ -18,8 +18,10 @@ pub mod git;
 pub mod git_config;
 pub mod scm;
 pub mod paths;
+pub mod search;
 pub mod text;
 pub mod trash;
+pub mod watch;
 
 use std::sync::Mutex;
 
@@ -71,6 +73,11 @@ const UNKNOWN_CODE: &str = "unknown_code";
 pub fn static_str<'de, D: Deserializer<'de>>(deserializer: D) -> Result<StaticStr, D::Error> {
     let raw = String::deserialize(deserializer)?;
     Ok(intern(&raw))
+}
+
+/// The optional form of `static_str`, for a field such as a search's `truncated` reason that may be null.
+pub fn opt_static_str<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<StaticStr>, D::Error> {
+    Ok(Option::<String>::deserialize(deserializer)?.map(|raw| intern(&raw)))
 }
 
 /// Each distinct code is leaked once so it can be `&'static str`. The table is capped: a misbehaving peer
