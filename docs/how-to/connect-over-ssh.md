@@ -229,6 +229,12 @@ The server helper gives it to `git` only through `git`'s own environment, for th
 put in a command line, a log, an error message, a file or the reply, and it is not stored on the server. If the
 server rejects the token, the clone retries once without it, which works for a public repository.
 
+A saved token is used on the server, and it never leaves it. If the token box is empty and no token was typed in
+this session, the app asks the server for a one-time clone grant, and the clone uses the GitHub or GitLab token you
+saved for the server. The token goes from the server's vault to the clone over the server's own loopback
+connection, and the app never receives it. A token you type always wins over the saved one. If no token is saved
+for that provider, the clone runs without one, as a public clone does.
+
 ### Explorer and terminal
 
 With a server folder open, the sidebar lists Home, Issues, Gantt, Library, Chat, Settings and Explorer. Explorer

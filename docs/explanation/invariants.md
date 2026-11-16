@@ -863,6 +863,11 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
   environment (`GIT_CONFIG_*` extra header, `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/usr/bin/true`). It is never in argv,
   a log, an error, a reply, an event, a file or `Debug` output (the type prints `<redacted>`). A rejected token gets one
   anonymous retry. Pinned by the workspace-helper test `token_never_appears_in_any_output`.
+- **A saved provider token reaches a server clone only through a single-use grant redeemed on the server.** The grant
+  lasts 60 s, is bound to the user and the provider, and is redeemed only over loopback with the core nonce from
+  `~/.llmide-server/state.json`. The token never reaches the desktop, the webview, a log, an error, an event or argv.
+  Pinned by the desktop test `workspace_backend::tests::clone_grant_is_sent_only_when_no_token_is_usable` and the core
+  test file `extension/tests/clone-credential.test.mjs`.
 - **A clone needs an LLM-IDE project, and a plain folder is refused before anything is written.** The helper's
   `clone_start` returns `not_a_project` when `layout::is_project` is false for the open folder. The desktop leaves the
   Repositories clone destination empty in that case, so no clone is offered or started, even after a URL is typed.
