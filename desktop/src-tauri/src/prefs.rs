@@ -6,7 +6,7 @@
 //! typed schema (unknown keys and bad values are refused, nothing is stored as free text).
 //!
 //! Rules:
-//! - `prefs.json` is bounded (1 MB, see `MAX_BYTES`), written atomically with 0600 in the private data dir, and an
+//! - `prefs.json` is bounded (1280 KiB, see `MAX_BYTES`), written atomically with 0600 in the private data dir, and an
 //!   unreadable, oversized or hand-edited file falls back to the defaults (never a crash, never a
 //!   partially trusted value).
 //! - A change applies at the NEXT app start. `launch()` is the snapshot taken once at startup and is
@@ -25,10 +25,16 @@ use crate::confirm::{herr, RateLimit};
 use crate::fs_ops::FsError;
 
 pub const FILE_NAME: &str = "prefs.json";
-/// Largest accepted prefs.json. The SSH lists can hold 32 host keys of up to `SSH_HOST_PIN_MAX` characters, 10
-/// servers, and 10 folders for each of them of up to `SSH_FOLDER_PATH_MAX` characters: about half a megabyte at the
-/// caps. A smaller bound would turn a legitimate file into an "unreadable" one and reset every preference.
-pub const MAX_BYTES: usize = 1024 * 1024;
+/// Largest accepted prefs.json, in bytes. Worst case, every SSH list full, the file as pretty JSON (`save_to`):
+///   - `ssh_known_hosts`: 32 x (`SSH_HOST_PIN_MAX` 2048 + ~10 JSON) = ~66 KB. Base64 and ASCII host text need no escaping.
+///   - `ssh_recent_servers`: 10 x (key path 4096 escaped to 8192 + host 253 + user 64 + ~250 JSON) = ~88 KB.
+///     The key path may hold `"` and `\`, which JSON writes as two bytes; control characters are refused.
+///   - `ssh_recent_folders`: 100 x (path 4096 escaped to 8192 + server key 324 + ~150 JSON) = ~867 KB.
+///   - everything else (current server, labels, URLs, feature flags): under 32 KB.
+///   Total about 1,053,000 bytes (a test with every list full and all paths `"` measures 1,022,199 bytes).
+///   1280 KiB is the smallest 64 KiB step with about 20 % or more headroom over that worst case (1,310,720 bytes, +24 %).
+///   A smaller bound would turn a legitimate file into an "unreadable" one and reset every preference.
+pub const MAX_BYTES: usize = 1280 * 1024;
 
 /// The feature keys the server knows (`FEATURE_KEYS` in `extension/core/config.mjs`). Used only to turn
 /// "everything except terminal" into an explicit list; a test pins the order and content.
@@ -84,7 +90,7 @@ pub(crate) const SSH_KNOWN_HOSTS_MAX: usize = 32;
 pub(crate) const SSH_RECENT_SERVERS_MAX: usize = 10;
 /// Folders kept for each server.
 pub(crate) const SSH_RECENT_FOLDERS_MAX: usize = 10;
-/// Longest folder path in characters. A longer path is refused, never cut.
+/// Longest folder path in BYTES (`str::len`), the unit the file cap is counted in. A longer path is refused, never cut.
 pub(crate) const SSH_FOLDER_PATH_MAX: usize = 4096;
 
 /// A server SSH mode connected to, most recent first. It records the connection's shape and never a password: a
@@ -150,15 +156,15 @@ impl Default for RemoteServerPrefs {
     }
 }
 
-/// Longest saved SSH host-key pin, in characters. Sized for an 8192-bit RSA key (about 1400 base64 characters)
-/// with room to spare. A longer pin is refused on write and cleared on load; it is never cut short, because a cut
-/// pin could still decode as base64 and would then read as a different key.
+/// Longest saved SSH host-key pin, in BYTES (`str::len`). Sized for an 8192-bit RSA key (about 1400 base64
+/// characters) with room to spare. A longer pin is refused on write and cleared on load; it is never cut short,
+/// because a cut pin could still decode as base64 and would then read as a different key.
 pub(crate) const SSH_HOST_PIN_MAX: usize = 2048;
 
 /// The pin if it fits `SSH_HOST_PIN_MAX`, else `None`. Shared by the load path and the writer so both agree.
 fn bounded_ssh_host_pin(pin: &str) -> Option<String> {
     let trimmed = pin.trim();
-    (trimmed.chars().count() <= SSH_HOST_PIN_MAX).then(|| trimmed.to_string())
+    (trimmed.len() <= SSH_HOST_PIN_MAX).then(|| trimmed.to_string())
 }
 
 /// One saved host key, split into the parts the SSH service compares.
@@ -269,10 +275,11 @@ fn normalize_recent_servers(list: &[SshRecentServer]) -> Vec<SshRecentServer> {
     out
 }
 
-/// A folder path that is safe to store and to hand to the server side: absolute, bounded, and with no line break or
-/// NUL, so it can never split a log line or a protocol line.
+/// A folder path that is safe to store and to hand to the server side: absolute, bounded in bytes, and with no control
+/// character (no line break, NUL or tab). Excluding every control character caps the JSON escaping of a path at two
+/// bytes per byte (`"` and `\`), which is what keeps `MAX_BYTES` a real bound.
 fn valid_folder_path(path: &str) -> bool {
-    path.starts_with('/') && path.chars().count() <= SSH_FOLDER_PATH_MAX && !path.contains(['\0', '\n', '\r'])
+    path.starts_with('/') && path.len() <= SSH_FOLDER_PATH_MAX && !path.chars().any(char::is_control)
 }
 
 /// Puts a folder first in its server's list, replacing the same path, and keeps that server's newest folders.
@@ -1063,13 +1070,13 @@ pub(crate) fn forget_ssh_server(host: &str, port: u16, user: &str) -> Result<(),
 /// server in the recent list, so the recent list's cap bounds the folder list too.
 ///
 /// Errors:
-///     `invalid_path` for a path that is not absolute, is over `SSH_FOLDER_PATH_MAX`, or has a line break or NUL;
+///     `invalid_path` for a path that is not absolute, is over `SSH_FOLDER_PATH_MAX` bytes, or has a control character;
 ///     `unknown_server` when the server is not in the recent list.
 // NOTE: the workspace folder commands in the next step are the first callers.
 #[allow(dead_code)]
 pub(crate) fn record_ssh_recent_folder(server: &str, path: &str) -> Result<(), FsError> {
     if !valid_folder_path(path) {
-        return Err(herr("invalid_path", "the folder path must be absolute, at most 4096 characters, with no line break"));
+        return Err(herr("invalid_path", "the folder path must be absolute, at most 4096 bytes, with no control character"));
     }
     edit_remote_server(|block| {
         if !block.ssh_recent_servers.iter().any(|server_entry| recent_key(server_entry) == server) {
@@ -2128,5 +2135,49 @@ mod ssh_lists_tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(size > 16 * 1024, "the worst case is larger than the old 16 KB bound");
         assert_eq!(loaded, before, "nothing is dropped at the caps");
+    }
+
+    /// The byte caps at their worst: 4-byte characters fill every folder path to the byte cap, and `"` (the
+    /// most-escaping allowed character) fills the others, so the file is as large as the caps allow.
+    #[test]
+    fn a_worst_case_of_non_ascii_and_escaped_text_is_saved_whole() {
+        let _guard = fresh();
+        let label = "a".repeat(63);
+        for i in 0..32u16 {
+            // A full-length pin: 2048 bytes of ASCII base64 on one line, the longest the cap admits.
+            let head = format!("h{i}.example.com:22 ssh-ed25519 ");
+            let blob = "A".repeat((SSH_HOST_PIN_MAX - head.len()) / 4 * 4);
+            upsert_ssh_known_host(format!("{head}{blob}")).unwrap();
+        }
+        for i in 0..SSH_RECENT_SERVERS_MAX {
+            // A 253-byte host and a 64-byte user, the longest the validators admit.
+            let host = format!("{label}.{label}.{label}.{i:02}{}", "z".repeat(59));
+            // A key path of `"` fills the 4096-byte cap; each `"` is escaped to two bytes in the file.
+            set_remote_ssh(host.clone(), 22, "a".repeat(64), format!("/{}", "\"".repeat(4095)), SshAuthKind::Key, ServerMode::Ssh).unwrap();
+            let server = format!("{}@{host}:22", "a".repeat(64));
+            for j in 0..SSH_RECENT_FOLDERS_MAX {
+                // Even folders: 4-byte characters (1 + 1023 * 4 + 1 + 2 digits = 4096 bytes). Odd: `"` (4096 bytes).
+                let path = if j % 2 == 0 {
+                    format!("/{j:02}{}x", "\u{1F600}".repeat(1023))
+                } else {
+                    format!("/{j:02}{}", "\"".repeat(4093))
+                };
+                assert_eq!(path.len(), SSH_FOLDER_PATH_MAX, "the test fills the byte cap");
+                record_ssh_recent_folder(&server, &path).unwrap();
+            }
+        }
+        // 1024 four-byte characters are 4097 bytes but only 1024 characters: the cap counts bytes.
+        let server = format!("{}@{}:22", "a".repeat(64), format!("{label}.{label}.{label}.00{}", "z".repeat(59)));
+        assert_eq!(record_ssh_recent_folder(&server, &format!("/{}", "\u{1F600}".repeat(1024))).unwrap_err().code, "invalid_path");
+        let dir = std::env::temp_dir().join(format!("llmide-ssh-worst-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let before = stored().remote_server;
+        save_to(&dir, &stored()).unwrap();
+        let size = std::fs::metadata(dir.join(FILE_NAME)).unwrap().len() as usize;
+        let loaded = load_from(&dir).remote_server;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(size > 512 * 1024 && size <= MAX_BYTES, "a worst-case file fits the cap: {size} bytes");
+        assert_eq!(loaded, before, "nothing is dropped at the byte caps");
     }
 }
