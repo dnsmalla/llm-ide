@@ -33,7 +33,7 @@ use crate::confirm::herr;
 use crate::core_env;
 use crate::core_host::{self, CoreHost};
 use crate::fs_ops::{fs_delete, fs_list_dir, fs_read_file, fs_rename, fs_write_file, FsError};
-use crate::fs_watch::{fs_watch_start, fs_watch_stop};
+use crate::fs_watch::{fs_watch_set, fs_watch_start, fs_watch_stop};
 use crate::fsutil;
 use crate::git::git_status;
 use crate::project::project_active;
@@ -194,11 +194,15 @@ impl Run {
         });
         deps.bundle = Arc::new(move || Some(bundle.clone()));
         let root = temp_ssh_dir("live-check")?;
+        // The Explorer path finds the live link through the app's one core host (`crate::CORE`), which the app
+        // registers at startup; register this run's host the same way so the workspace steps use its link.
+        let host = CoreHost::new();
+        let _ = crate::CORE.set(host.clone());
         // Built before the folder is used, so a failure below still removes the folder through Drop.
         let mut run = Self {
             live,
             deps,
-            host: CoreHost::new(),
+            host,
             root,
             local_url: String::new(),
             observed: None,
@@ -528,21 +532,28 @@ fn chunk_files(chunk: &Value) -> Vec<(String, usize)> {
         .collect()
 }
 
-/// A random folder under the home folder, opened as the server folder. The name is random, so it cannot collide.
+/// A random folder under the home folder with a `work` folder inside, which is opened as the server folder. The
+/// outer folder lets the close step delete `work` through the helper (a project root cannot delete itself); the
+/// outer folder is removed by the test-only cleanup command. The name is random, so it cannot collide.
 fn step_workspace_open(run: &mut Run) -> Result<Outcome, Failed> {
     let tag: String = random_hex()?.chars().take(8).collect();
-    let name = format!(".llmide-live-{tag}");
+    let name = format!("llmide-live-{tag}");
     let made = block(remote_ssh_workspace_mkdir("~".to_string(), name.clone()))?;
-    let path = made["path"]
+    let outer = made["path"]
         .as_str()
         .ok_or_else(|| failed("LIVE_REPLY", "mkdir did not return the new folder's path"))?
         .to_string();
-    run.test_folder = Some(name.clone());
+    run.test_folder = Some(outer.clone());
     let home = block(remote_ssh_workspace_list_dirs("~".to_string(), false))?;
     let listed = home["entries"]
         .as_array()
         .is_some_and(|entries| entries.iter().any(|entry| entry["name"].as_str() == Some(name.as_str())));
     expect(listed, "LIST_MISSING", "the new folder is not in the home folder listing")?;
+    let work = block(remote_ssh_workspace_mkdir(outer, "work".to_string()))?;
+    let path = work["path"]
+        .as_str()
+        .ok_or_else(|| failed("LIVE_REPLY", "mkdir did not return the work folder's path"))?
+        .to_string();
     let info = block(remote_ssh_workspace_open(path))?;
     expect(
         project_active().is_some_and(|active| active.root == info.root),
@@ -642,6 +653,8 @@ fn step_search(_run: &mut Run) -> Result<Outcome, Failed> {
 fn step_watch(_run: &mut Run) -> Result<Outcome, Failed> {
     let (channel, batches) = queue::<Value>();
     block(fs_watch_start(channel))?;
+    // Starting a watch watches nothing yet: the Explorer always names the folders next, as here (the root is "").
+    block(fs_watch_set(vec![String::new()]))?;
     let result = watch_for_new_file(&batches);
     let _ = block(fs_watch_stop());
     result?;
@@ -669,6 +682,11 @@ fn watch_for_new_file(batches: &mpsc::Receiver<InvokeResponseBody>) -> Result<()
 /// Opens a shell through the same launch function `pty_spawn` uses in SSH mode, runs `pwd` and `exit`, and checks
 /// the opened folder's path in the output. The folder line is read by the terminal script with echo off.
 fn step_terminal(run: &mut Run) -> Result<Outcome, Failed> {
+    // NOTE: the terminal asks for consent in a native dialog with no timeout, so an unattended run would hang;
+    // the step runs only when someone is there to press "Allow terminal".
+    if std::env::var("LLMIDE_LIVE_SSH_TERMINAL").as_deref() != Ok("1") {
+        return Ok(Outcome::Skipped(Some("set LLMIDE_LIVE_SSH_TERMINAL=1 and answer the consent dialog")));
+    }
     let root = run.folder_root.clone().ok_or_else(|| failed("LIVE_ORDER", "the workspace step did not open a folder"))?;
     let (output_channel, output) = queue::<Response>();
     let (exit_channel, exits) = queue::<Value>();
@@ -720,20 +738,18 @@ fn terminal_session(
 /// there, and the folder is closed again. Without a Trash the folder stays and the step says so.
 fn step_workspace_close(run: &mut Run) -> Result<Outcome, Failed> {
     let root = run.folder_root.clone().ok_or_else(|| failed("LIVE_ORDER", "the workspace step did not open a folder"))?;
-    let name = run.test_folder.clone().ok_or_else(|| failed("LIVE_ORDER", "the test folder name is missing"))?;
+    let outer = run.test_folder.clone().ok_or_else(|| failed("LIVE_ORDER", "the test folder name is missing"))?;
     block(remote_ssh_workspace_close())?;
-    block(remote_ssh_workspace_open("~".to_string()))?;
-    match block(fs_delete(name.clone())) {
-        Ok(_) => {
-            println!("  folder {name}: moved to the server Trash");
-            run.test_folder = None;
-        }
+    block(remote_ssh_workspace_open(outer))?;
+    match block(fs_delete("work".to_string())) {
+        Ok(_) => println!("  folder work: moved to the server Trash"),
         Err(error) if error.code == "trash_unavailable" => {
-            println!("  folder {name}: trash_unavailable, so it stays on the server (expected without a Trash)")
+            println!("  folder work: trash_unavailable (expected on servers without a desktop Trash)")
         }
         Err(error) => return Err(error.into()),
     }
     block(remote_ssh_workspace_close())?;
+    remove_test_folder(run);
     expect(project_active().is_none(), "STILL_ACTIVE", "project_active still reports a folder after close")?;
     expect(
         block(remote_ssh_workspace_recent()).contains(&root),
@@ -753,17 +769,12 @@ fn step_workspace_close(run: &mut Run) -> Result<Outcome, Failed> {
 
 /// After a failed run: removes the test folder if a step left it on the server. Best effort; each result is printed.
 fn remove_test_folder(run: &mut Run) {
-    let Some(name) = run.test_folder.take() else { return };
+    let Some(outer) = run.test_folder.take() else { return };
     let _ = block(remote_ssh_workspace_close());
-    if block(remote_ssh_workspace_open("~".to_string())).is_err() {
-        println!("cleanup: could not open the home folder, so {name} may remain on the server");
-        return;
+    match ssh_service::remove_live_check_folders(&run.deps, run.live.password()) {
+        Ok(()) => println!("  cleanup: {outer} removed from the server"),
+        Err(error) => println!("cleanup: {outer} may remain on the server ({})", error.code),
     }
-    match block(fs_delete(name.clone())) {
-        Ok(_) => println!("cleanup: {name} moved to the server Trash"),
-        Err(error) => println!("cleanup: {name} remains on the server ({})", error.code),
-    }
-    let _ = block(remote_ssh_workspace_close());
 }
 
 fn step_install_key(run: &mut Run) -> Result<Outcome, Failed> {

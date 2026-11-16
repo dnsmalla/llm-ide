@@ -337,6 +337,18 @@ pub(crate) fn server_core_state(deps: &Deps, password: Option<&str>) -> Result<c
     crate::ssh_server_scripts::parse_core_state(&output.stdout)
 }
 
+/// Removes every folder the live check created under the server's home folder (`~/llmide-live-<hex>`), with a
+/// constant command over the pinned transport. Test-only: the helper cannot delete a project root or open the home
+/// folder itself, so the live check needs this to leave the server as it found it.
+#[cfg(test)]
+pub(crate) fn remove_live_check_folders(deps: &Deps, password: Option<&str>) -> Result<(), FsError> {
+    const REMOVE: &str = r#"rm -rf -- "$HOME"/llmide-live-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]"#;
+    let endpoint = saved_endpoint(password)?;
+    let pin = require_pin(&endpoint)?;
+    let pinned = pinned_dir(&endpoint, &pin)?;
+    run_pinned(deps, &endpoint, &pinned, password, REMOVE).map(|_| ())
+}
+
 /// The bundle sha the server's current release was installed from, read with the constant PROBE script over the
 /// pinned transport. Test-only, for the live check, which compares it with the bundle this build holds. The
 /// production path reads it inside connect.
