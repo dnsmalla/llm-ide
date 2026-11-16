@@ -223,7 +223,11 @@ pub fn is_auth_failure(message: &str) -> bool {
 fn clone_with_fallback(git: &Path, remote: &str, dest: &Path, provider: &str, token: Option<&str>, cancel: &AtomicBool) -> Result<(), String> {
     let first = clone_into(git, remote, dest, provider, token, cancel, CLONE_CAP);
     let Err(err) = first else { return first };
-    if token.is_none() || !is_auth_failure(&err) || cancel.load(Ordering::SeqCst) {
+    // A cancel that lands while the first attempt is failing is reported as the cancel, not as git's error.
+    if cancel.load(Ordering::SeqCst) {
+        return Err(CANCELLED.into());
+    }
+    if token.is_none() || !is_auth_failure(&err) {
         return Err(err);
     }
     // A stale/expired token must not make a public repository unclonable. Retry with the same URL and no
@@ -346,14 +350,36 @@ mod tests {
         }
     }
 
-    /// Writes an executable `sh` script that stands in for git. `body` runs with git's arguments in `$@`.
+    /// `ETXTBSY` ("Text file busy") on macOS and Linux. A script written while another test thread forks can still
+    /// be open for writing in that child, so its exec fails until the child execs.
+    #[cfg(unix)]
+    const ETXTBSY: i32 = 26;
+
+    /// Writes an executable `sh` script that stands in for git. `body` runs with git's arguments in `$@`. The file is
+    /// synced and closed before any spawn, and a probe run (`--llmide-probe`, which exits at once) is retried on
+    /// `ETXTBSY` a bounded number of times, so the first real spawn cannot race another thread's fork.
     #[cfg(unix)]
     fn fake_git(dir: &Path, body: &str) -> PathBuf {
+        use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
         let path = dir.join("fake-git");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        {
+            let mut file = std::fs::File::create(&path).unwrap();
+            file.write_all(format!("#!/bin/sh\n[ \"$1\" = --llmide-probe ] && exit 0\n{body}\n").as_bytes()).unwrap();
+            file.sync_all().unwrap();
+        }
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path
+        for attempt in 1..=50 {
+            match Command::new(&path).arg("--llmide-probe").status() {
+                Ok(status) => {
+                    assert!(status.success(), "the fake git probe exits 0");
+                    return path;
+                }
+                Err(e) if e.raw_os_error() == Some(ETXTBSY) && attempt < 50 => std::thread::sleep(Duration::from_millis(20)),
+                Err(e) => panic!("the fake git cannot run: {e}"),
+            }
+        }
+        unreachable!("the last attempt returns or panics")
     }
 
     fn request(provider: &str, url: &str, token: Option<&str>) -> CloneRequest {
@@ -385,13 +411,29 @@ mod tests {
         // A bad provider with the token set.
         let bad_provider = plan(&s.0, &request("bitbucket", "o/r", Some(marker))).unwrap_err();
         assert!(!bad_provider.contains("SECRET"), "{bad_provider}");
-        // A refused clone: the fake git rejects the credential, retries anonymously and fails again.
+        // A refused clone: the fake git rejects the credential, retries anonymously and fails again. Each run appends
+        // the credential header it was given (or "none") to a calls file, so the test can see both attempts.
         #[cfg(unix)]
         {
-            let git = fake_git(&s.0, "echo \"fatal: Authentication failed for 'https://github.com/o/r.git/'\" >&2; exit 128");
+            let calls = s.0.join("calls.txt");
+            // The key is checked too: the test process may inherit unrelated GIT_CONFIG_* variables from its caller.
+            let body = format!(
+                "if [ \"$GIT_CONFIG_KEY_0\" = http.https://github.com.extraHeader ]; then echo \"$GIT_CONFIG_VALUE_0\" >> '{}'; else echo none >> '{}'; fi; \
+                 echo \"fatal: Authentication failed for 'https://github.com/o/r.git/'\" >&2; exit 128",
+                calls.display(),
+                calls.display()
+            );
+            let git = fake_git(&s.0, &body);
             let p = plan(&s.0, &request("github", "o/r", Some(marker))).unwrap();
             let refused = run(&p, Some(&Token::from(marker)), &AtomicBool::new(false), &git).unwrap_err();
-            assert!(!refused.contains("SECRET"), "{refused}");
+            let recorded = std::fs::read_to_string(&calls).unwrap();
+            let lines: Vec<&str> = recorded.lines().collect();
+            assert_eq!(lines.len(), 2, "one tokened attempt and one anonymous retry: {recorded:?}");
+            assert_eq!(lines[0], auth_config("github", Some(marker)).1, "the first attempt carries the header");
+            assert_eq!(lines[1], "none", "the anonymous retry carries no header");
+            let b64 = base64(format!("x-access-token:{marker}").as_bytes());
+            assert!(!refused.contains(marker), "{refused}");
+            assert!(!refused.contains(&b64), "the encoded token is not in the error: {refused}");
             assert!(refused.contains("Authentication failed"), "the clearer original error is kept: {refused}");
         }
     }
@@ -404,14 +446,21 @@ mod tests {
         let git = fake_git(&s.0, "last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"; sleep 30");
         let p = plan(&s.0, &request("github", "o/r", None)).unwrap();
         let cancel = AtomicBool::new(false);
+        let seen_dest = AtomicBool::new(false);
         let start = Instant::now();
         let result = std::thread::scope(|scope| {
             scope.spawn(|| {
-                std::thread::sleep(Duration::from_millis(300));
+                // Cancel only once git has created the destination, so the stop lands during the clone.
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !p.dest.exists() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                seen_dest.store(p.dest.exists(), Ordering::SeqCst);
                 cancel.store(true, Ordering::SeqCst);
             });
             run(&p, None, &cancel, &git)
         });
+        assert!(seen_dest.load(Ordering::SeqCst), "git created the destination before the cancel");
         assert_eq!(result.unwrap_err(), "clone cancelled");
         assert!(!p.dest.exists(), "the partial destination is removed");
         assert!(start.elapsed() < Duration::from_secs(10));
