@@ -234,15 +234,29 @@ export function cloneDestinationOf(
 }
 
 /**
+ * A grant is sent only where the clone will go. The server clones GitHub from github.com and GitLab from gitlab.com
+ * alone, so a GitLab token saved for a self-hosted instance must not be granted; a malformed base gets none either.
+ */
+export function grantHostAllowed(provider: RepoProvider, gitlabBaseUrl: string): boolean {
+  if (provider === "github") return true;
+  try {
+    const url = new URL(normalizeBase(gitlabBaseUrl));
+    return url.protocol === "https:" && url.host === "gitlab.com";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The server clone grant for one clone. Only SSH mode asks, and only when no token is typed or remembered: a typed
  * token wins and never reaches the core. The core answers `{grant}` (null without a saved token). A failed request
  * is not fatal: the clone then runs anonymously, and a private repository reports its auth failure as before.
  */
 export async function resolveCloneGrant(
-  args: { ssh: boolean; token: string; provider: RepoProvider },
+  args: { ssh: boolean; token: string; provider: RepoProvider; gitlabBaseUrl?: string },
   requestGrant: (provider: RepoProvider) => Promise<unknown>,
 ): Promise<string | null> {
-  if (!args.ssh || args.token.trim()) return null;
+  if (!args.ssh || args.token.trim() || !grantHostAllowed(args.provider, args.gitlabBaseUrl ?? DEFAULT_GITLAB_BASE)) return null;
   try {
     const body = await requestGrant(args.provider);
     const grant = body && typeof body === "object" ? (body as { grant?: unknown }).grant : null;

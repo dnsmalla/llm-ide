@@ -180,3 +180,42 @@ test("resolveCloneGrant: local mode never asks the core", async () => {
   assert.equal(grant, null);
   assert.equal(asked, 0, "local clones keep using the Mac's own git credentials");
 });
+
+test("resolveCloneGrant: a self-hosted GitLab base never gets a grant, so its token stays off gitlab.com", async () => {
+  let asked = 0;
+  const grant = await resolveCloneGrant(
+    { ssh: true, token: "", provider: "gitlab", gitlabBaseUrl: "https://git.example.corp/" },
+    async () => {
+      asked += 1;
+      return { grant: "ab12" };
+    },
+  );
+  assert.equal(grant, null);
+  assert.equal(asked, 0, "the clone targets gitlab.com, so a self-hosted token must not be granted");
+});
+
+test("resolveCloneGrant: gitlab.com (with a trailing slash) still gets a grant", async () => {
+  const grant = await resolveCloneGrant(
+    { ssh: true, token: "", provider: "gitlab", gitlabBaseUrl: "https://gitlab.com/" },
+    async () => ({ grant: "ab12" }),
+  );
+  assert.equal(grant, "ab12");
+});
+
+test("resolveCloneGrant: a non-gitlab.com base or a malformed one does not block GitHub, and a malformed GitLab base gets none", async () => {
+  const github = await resolveCloneGrant(
+    { ssh: true, token: "", provider: "github", gitlabBaseUrl: "https://git.example.corp" },
+    async () => ({ grant: "gh01" }),
+  );
+  assert.equal(github, "gh01", "the GitLab base does not apply to GitHub");
+  let asked = 0;
+  const broken = await resolveCloneGrant(
+    { ssh: true, token: "", provider: "gitlab", gitlabBaseUrl: "not a url" },
+    async () => {
+      asked += 1;
+      return { grant: "ab12" };
+    },
+  );
+  assert.equal(broken, null);
+  assert.equal(asked, 0);
+});

@@ -203,7 +203,7 @@ export default function RepositoriesSection() {
     setCloneNotice(null);
     try {
       // SSH mode with no token typed or remembered: the server redeems a grant for the saved token (null: none saved).
-      const grant = await resolveCloneGrant({ ssh, token, provider: provider.id }, (p) => call(client, "POST", "/kb/repos/clone-grant", { provider: p }));
+      const grant = await resolveCloneGrant({ ssh, token, provider: provider.id, gitlabBaseUrl: cfg.gitlabBaseUrl }, (p) => call(client, "POST", "/kb/repos/clone-grant", { provider: p }));
       const result = await host.cloneRepository({ provider: provider.id, url: r.url, token: token.trim() || undefined, grant: grant ?? undefined });
       edit((c) => applyCloneResult(c, provider.id, r.id, result.path, ssh));
       // Register the clone with the core so issues/graph may read it; Library → Sources owns this allow-list.
