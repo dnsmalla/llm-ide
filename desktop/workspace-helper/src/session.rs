@@ -362,10 +362,11 @@ impl Session {
     }
 }
 
-/// The token a clone runs with, and whether a grant was given but could not be redeemed. A typed token always wins
-/// and no grant is redeemed then. Without one, the grant is redeemed on the server core over loopback.
+/// The token a clone runs with, and whether a grant was given but could not be redeemed. A usable typed token always
+/// wins and no grant is redeemed then. A blank or unusable typed token does not count as one, so the grant is used.
+/// Without a usable typed token, the grant is redeemed on the server core over loopback.
 fn resolve_token(typed: Option<Token>, grant: Option<Token>, state_path: Option<&Path>) -> (Option<Token>, bool) {
-    if typed.is_some() {
+    if typed.as_ref().is_some_and(Token::is_usable) {
         return (typed, false);
     }
     let Some(grant) = grant else { return (None, false) };

@@ -1222,6 +1222,25 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_blank_typed_token_does_not_block_the_grant() {
+        let mut f = Fixture::new("clone-blank-typed");
+        f.open_new_project();
+        let saved = "ghp_BLANK_CASE_6610";
+        let (core, seen) = crate::clone_credential::test_server::serve_once(token_answer(saved));
+        write_state(&f.home, core.port(), "ab12cd34");
+        let calls = f.outside.join("calls.txt");
+        use_fake_git(&mut f, &recording_git(&calls));
+        let id = start_grant_clone(&mut f, 1, "o/r", Some("   "), "grant_BLANK_4");
+        let data = clone_event(&f.captured, id);
+        assert_eq!(data["ok"], true, "{data}");
+        let header = std::fs::read_to_string(&calls).unwrap();
+        let encoded = llmide_workspace_core::project::clone::base64(format!("x-access-token:{saved}").as_bytes());
+        assert!(header.contains(&encoded), "the grant was redeemed and its token used: {header}");
+        assert!(seen.join().unwrap().ends_with(r#"{"grant":"grant_BLANK_4"}"#));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn a_typed_token_skips_the_grant() {
         let mut f = Fixture::new("clone-typed-wins");
         f.open_new_project();

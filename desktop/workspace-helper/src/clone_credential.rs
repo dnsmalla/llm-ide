@@ -144,10 +144,61 @@ fn header_end(raw: &[u8]) -> Option<usize> {
     raw.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4)
 }
 
-/// True once a `Content-Length` body is complete, so the client need not wait for the core to close the socket.
+/// The lowercased header block of a raw answer, up to the blank line.
+fn head_lower(raw: &[u8], end: usize) -> String {
+    String::from_utf8_lossy(&raw[..end]).to_ascii_lowercase()
+}
+
+/// True when the headers say the body is `Transfer-Encoding: chunked`.
+fn is_chunked(head: &str) -> bool {
+    head.lines().any(|line| line.strip_prefix("transfer-encoding:").is_some_and(|v| v.trim() == "chunked"))
+}
+
+/// Where a chunked body stands: all of it decoded, still arriving, or not chunked framing at all.
+#[derive(Debug, PartialEq, Eq)]
+enum Chunks {
+    Complete(Vec<u8>),
+    Incomplete,
+    Malformed,
+}
+
+/// Decodes a chunked body. The last chunk is `0`; any trailers after it are ignored.
+fn decode_chunks(body: &[u8]) -> Chunks {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    loop {
+        let Some(line_len) = body[pos..].windows(2).position(|w| w == b"\r\n") else { return Chunks::Incomplete };
+        let Ok(size_line) = std::str::from_utf8(&body[pos..pos + line_len]) else { return Chunks::Malformed };
+        // A chunk extension (`;name=value`) after the size is allowed and ignored.
+        let size_hex = size_line.split(';').next().unwrap_or_default().trim();
+        let Ok(size) = u64::from_str_radix(size_hex, 16) else { return Chunks::Malformed };
+        pos += line_len + 2;
+        if size == 0 {
+            return Chunks::Complete(out);
+        }
+        let remaining = (body.len() - pos) as u64;
+        // The data and its closing CRLF must both be here before the chunk is complete.
+        if size + 2 > remaining {
+            return Chunks::Incomplete;
+        }
+        let size = size as usize;
+        if &body[pos + size..pos + size + 2] != b"\r\n" {
+            return Chunks::Malformed;
+        }
+        out.extend_from_slice(&body[pos..pos + size]);
+        pos += size + 2;
+    }
+}
+
+/// True once the answer's body is complete, so the client need not wait for the core to close the socket. A
+/// `Content-Length` body is complete at that length; a chunked body at its last chunk, or at a framing error, which
+/// then fails in `parse_answer`.
 fn body_complete(raw: &[u8]) -> bool {
     let Some(end) = header_end(raw) else { return false };
-    let head = String::from_utf8_lossy(&raw[..end]).to_ascii_lowercase();
+    let head = head_lower(raw, end);
+    if is_chunked(&head) {
+        return decode_chunks(&raw[end..]) != Chunks::Incomplete;
+    }
     let length = head.lines().find_map(|line| line.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok());
     length.is_some_and(|n| raw.len() - end >= n)
 }
@@ -188,7 +239,16 @@ pub fn parse_answer(raw: &[u8]) -> Result<Token, RedeemError> {
     if !is_ok {
         return Err(RedeemError::Refused);
     }
-    let answer: Answer = serde_json::from_slice(&raw[end..]).map_err(|_| RedeemError::BadAnswer)?;
+    let head = head_lower(raw, end);
+    let body = if is_chunked(&head) {
+        match decode_chunks(&raw[end..]) {
+            Chunks::Complete(body) => body,
+            Chunks::Incomplete | Chunks::Malformed => return Err(RedeemError::BadAnswer),
+        }
+    } else {
+        raw[end..].to_vec()
+    };
+    let answer: Answer = serde_json::from_slice(&body).map_err(|_| RedeemError::BadAnswer)?;
     if !answer.token.is_usable() {
         return Err(RedeemError::BadAnswer);
     }
@@ -357,6 +417,37 @@ mod tests {
     fn an_answer_over_the_cap_is_refused() {
         let body = "x".repeat(ANSWER_CAP_BYTES + 10);
         let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len()).into_bytes();
+        let (addr, seen) = test_server::serve_once(response);
+        assert_eq!(redeem_at(addr, NONCE, &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Oversize);
+        seen.join().unwrap();
+    }
+
+    #[test]
+    fn a_chunked_200_answer_yields_the_token() {
+        let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n{\"token\"\r\na\r\n:\"ghp_C1\"}\r\n0\r\n\r\n";
+        assert_eq!(parse_answer(raw).unwrap().expose(), "ghp_C1");
+    }
+
+    #[test]
+    fn a_chunked_answer_cut_short_is_a_bad_answer() {
+        let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n{\"token\"\r\n";
+        assert_eq!(parse_answer(raw).unwrap_err(), RedeemError::BadAnswer);
+        let bad_size = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nabc\r\n0\r\n\r\n";
+        assert_eq!(parse_answer(bad_size).unwrap_err(), RedeemError::BadAnswer);
+    }
+
+    #[test]
+    fn the_client_reads_a_chunked_answer_without_waiting_for_the_close() {
+        let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n{\"token\"\r\na\r\n:\"ghp_C2\"}\r\n0\r\n\r\n".to_vec();
+        let (addr, seen) = test_server::serve_once(response);
+        assert_eq!(redeem_at(addr, NONCE, &grant(), IO_TIMEOUT).unwrap().expose(), "ghp_C2");
+        seen.join().unwrap();
+    }
+
+    #[test]
+    fn a_chunked_answer_over_the_cap_is_refused() {
+        let chunk = "x".repeat(ANSWER_CAP_BYTES);
+        let response = format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{chunk}\r\n0\r\n\r\n", chunk.len()).into_bytes();
         let (addr, seen) = test_server::serve_once(response);
         assert_eq!(redeem_at(addr, NONCE, &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Oversize);
         seen.join().unwrap();
