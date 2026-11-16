@@ -157,6 +157,45 @@ You cannot go above the home folder. A symbolic link that points outside the hom
 `link`, but you cannot enter or open it. Opening a folder registers it with the server core, so the core's
 project list has it.
 
+### New project on the server
+
+Project setup works on the server the way it works locally. In the folder picker, open the folder where the
+project should go, then choose **New project…** and type a name. The app creates `<folder>/<name>` on the
+server with the same folders and files as a local project, opens it, registers it with the server core and
+installs the agent skills kit. Each step runs in that order. If registering or the skills install fails, the
+project stays open and the error comes with **Try again**, which reruns only the failed step. Nothing is
+removed.
+
+**New project** refuses a name that already exists, a name with a path separator or a leading dot, and a
+parent folder at or above your server home folder. It never turns an existing folder into a project. To use an
+existing folder as a project, create a new project next to it and move the files you need.
+
+**Copy path** copies the server path. In SSH server mode the buttons that reveal a
+path in Finder show **Copy path** instead, because this computer cannot open a server folder.
+
+In **Settings → Project**, **Paths** lists the project folders and **Memory** lists its memory files and graph.
+**Rebuild missing folders** is offered only when the open folder is a project. It creates folders and files that
+are missing and never overwrites one that exists. In a folder that is not a project, Settings → Project shows
+"This folder is not an LLM-IDE project. To use project features, create one with New project in the server
+folder picker." and no action button.
+
+### Clone a repository on the server
+
+**Repositories** can clone a repository into the open server project. It needs an open project. The clone goes
+to `code/<name>` inside the project, for example `code/Hello-World`, and the app shows the server path when it
+finishes.
+
+The clone runs on the server, so the server needs `git` and outbound https access. Only GitHub and GitLab
+https URLs are accepted. If `git` is missing or the network blocks the host, the clone stops with a message that
+names the cause. A clone can take up to 30 minutes. It runs in the background, so you can keep using Explorer
+while it runs. Only one clone runs at a time on a server. A second clone while one runs is refused with "a clone is already
+running on the server".
+
+A token for a private repository is sent to the server over the same SSH channel as the rest of the requests.
+The server helper gives it to `git` only through `git`'s own environment, for that one clone. The token is never
+put in a command line, a log, an error message, a file or the reply, and it is not stored on the server. If the
+server rejects the token, the clone retries once without it, which works for a public repository.
+
 ### Explorer and terminal
 
 With a server folder open, the sidebar lists Home, Issues, Gantt, Library, Chat, Settings and Explorer. Explorer
@@ -298,7 +337,13 @@ work until `claude login` succeeds on the server.
   and the recent-server list. Stop and uninstall were run through the Rust live harness. Not yet verified: the
   server terminal, a full click-through of the app window, registering a project from the app window (the
   folder picker's **Open** calls the server core's project registration), key install on a real account, and
-  Windows desktops.
+  Windows desktops. The project steps (New project, Paths, Memory, Rebuild, register and install-skills, and a
+  clone of `octocat/Hello-World` with no token) are in the Rust live harness, but that harness has not yet run
+  against a server.
+- **Existing folders are never set up.** Opening a server folder never writes project files. Only New project
+  creates a project, and Rebuild missing folders runs only in a folder that already is one.
+- **Notes folder, Loop and Reveal stay local.** Your local notes folder is not on the server, and Loop and Auto
+  Tasks do not run in SSH server mode. Reveal buttons show Copy path instead.
 - **No push, fetch or pull in Changes.** Push and pull run from the terminal on the server.
 - **Linux x86_64 only.** Other systems are refused before anything is installed.
 - **2 GB of free disk.** Test shows the free space, and Connect refuses a server with less than 2048 MB free.
@@ -315,7 +360,8 @@ work until `claude login` succeeds on the server.
   run in SSH server mode yet, and neither do the other screens that read this computer's files or run its
   processes.
 - **Explorer on the server.** Deletes go to the server's Trash, and nothing is deleted permanently. Opening a
-  PDF in this computer's viewer and local project create or clone are refused. Explorer has no `git init`.
+  PDF in this computer's viewer is refused. Local project create and clone are refused too: in SSH mode use New
+  project and the clone on the server instead. Explorer has no `git init`.
 - **Other users on the server.** Other users on the same server can reach the core's loopback port. The
   core lets only its first account register; later sign-ups need an invite from the owner, and every
   sign-in still needs a valid account. Until the first account exists, another account on the server could

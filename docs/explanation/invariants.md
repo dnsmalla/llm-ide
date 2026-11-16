@@ -847,6 +847,25 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
 - **The helper and terminal commands are constants, and the folder is data.** `ssh_server_scripts::WORKSPACE` is the only remote command for the helper, and it carries no path. The folder is the first request (`open`) on stdin. `ssh_server_scripts::TERMINAL` is one line that reads the folder from the terminal's first input line, and `pty::remote_terminal_launch` writes that line; `cd --` keeps a folder name that starts with `-` from being read as an option. Pinned by `ssh_workspace::tests::workspace_argv_is_strict_and_quiet`, `ssh_server_scripts::tests::terminal_script_is_one_constant_line_group`, `pty::tests::terminal_argv_is_strict_and_constant` and `pty::tests::terminal_folder_is_data`.
 - **No Explorer command reaches this computer's disk in SSH mode.** `workspace_backend::dispatch` calls the remote path whenever SSH mode is on, and its local closure runs only in local and hub mode. Opening a PDF (`fs_open_pdf`) and the other local-only actions stay refused in SSH mode (`refuse_in_ssh_mode`), and the webview admits only the Explorer's command set (`ui/screens/shell/host.ts`, `sshExplorerAdmitted`). `project_active` reports the server folder in SSH mode. Pinned by `workspace_backend::tests::ssh_mode_dispatch_without_folder_is_no_project`, `workspace_backend::tests::project_active_reports_server_folder`, `workspace_backend::tests::open_pdf_stays_local_only` and `ui/screens/shell/tests/ssh-explorer-guard.test.mjs`.
 - **The server part is checked before it is used.** The helper's `hello` must match this build's protocol number (`ssh_workspace::check_hello`), or the desktop answers `workspace_version`, and a `hello` that an older helper refuses counts the same way. The version text in `hello` is kept for display and logs only; it is not compared, because the bundle's SHA-256 check keeps the helper and the app in step. Pinned by `ssh_workspace::tests::hello_version_is_not_compared` and the `ssh_workspace` tests that assert `VERSION_MESSAGE`.
+- **Only New project writes project files on the server.** The helper's `project_create` scaffolds a new folder
+  inside the server home, and refuses an existing name, the home folder itself and any parent outside home. Rebuild
+  (`project_rebuild`) writes only in a folder that has `system/project.json`, and refuses any other with
+  `not_a_project`. Every write is write-if-absent, so an edited file keeps its text. The core calls that New
+  project makes after the scaffold (`/kb/projects/register`, `/kb/project/install-skills`) are the only other writes
+  to the project. Opening a folder writes nothing. Pinned by the workspace-helper tests `create_refuses_existing_name`,
+  `create_refuses_home_and_outside` and `rebuild_refuses_plain_folder_and_writes_nothing`, and by the live harness
+  steps 15 to 19 in `desktop/src-tauri/src/ssh_live.rs`.
+- **The clone token exists only in git's child environment on the server.** The desktop puts the token in the
+  helper request, which travels on the SSH channel's stdin. The helper passes it to git only through git's
+  environment (`GIT_CONFIG_*` extra header, `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/usr/bin/true`). It is never in argv,
+  a log, an error, a reply, an event, a file or `Debug` output (the type prints `<redacted>`). A rejected token gets one
+  anonymous retry. Pinned by the workspace-helper test `token_never_appears_in_any_output`.
+- **Clone results arrive as events, and only one clone runs at a time.** The helper answers `repo_clone` at once and
+  sends the result as a `clone` event, so requests keep being answered during a clone (`requests_are_answered_while_a_clone_runs`).
+  A second clone is refused with `busy` while the slot is taken, and `clone_cancel` stops the running one. The desktop
+  waits up to the 30-minute cap for the event, and when the channel closes the wait ends with `lost_connection`
+  (`clone_wait_ends_when_channel_closes` in `desktop/src-tauri/src/workspace_backend/tests.rs`).
+
 ### ❌ DO NOT
 
 - Build a remote command from a string at runtime, or add a second caller of `exec_args` that does not use a constant script.
@@ -861,3 +880,7 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
 - Put a folder, a file name or a search term inside `WORKSPACE` or `TERMINAL`, or add a second remote command for the workspace.
 - Route an Explorer command to the local closure in SSH mode, or admit a new `fs_`, `git_` or `pty_` command in the webview without checking that it runs on the server.
 - Run a destructive git command without its two-phase confirm, or make a delete permanent when the server's Trash refuses.
+- Write a project file from anything but New project and Rebuild on a folder that has `system/project.json`, or
+  overwrite an existing file in one of those writes.
+- Put a clone token in argv, a log, an error, an event, a reply, a file, or the server's environment outside git's
+  child process, or add a second clone slot.
