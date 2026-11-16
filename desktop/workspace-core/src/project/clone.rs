@@ -110,12 +110,17 @@ pub fn plan(root: &Path, req: &CloneRequest) -> Result<ClonePlan, String> {
             "enter owner/repo or an https github.com repository URL".to_string()
         }
     })?;
-    let name = match req.folder.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(f) => folder_name("", f).ok_or_else(|| "invalid folder name".to_string())?,
-        None => folder_name("", &repo_ref.name).ok_or_else(|| "invalid repository name".to_string())?,
-    };
+    let name = target_name(req, &repo_ref)?;
     let dest = destination(root, &name)?;
     Ok(ClonePlan { remote: remote_url(&req.provider, &repo_ref.path), dest, provider: req.provider.clone(), name })
+}
+
+/// The folder a request clones into under `code/`: the typed folder, else the repository name.
+pub fn target_name(req: &CloneRequest, repo_ref: &RepoRef) -> Result<String, String> {
+    match req.folder.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(f) => folder_name("", f).ok_or_else(|| "invalid folder name".to_string()),
+        None => folder_name("", &repo_ref.name).ok_or_else(|| "invalid repository name".to_string()),
+    }
 }
 
 /// Runs the planned clone with `git`. On a rejected token it retries once anonymously. Setting `cancel` kills git,

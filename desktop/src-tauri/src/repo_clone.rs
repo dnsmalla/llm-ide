@@ -5,11 +5,13 @@
 //! In SSH server mode the clone runs on the server: the helper gets the request on its stdin and reports through a
 //! `clone` event, which `workspace_backend::Remote::clone_repo` waits for. The token goes only into that request.
 
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 // The desktop waits as long as the clone itself may run: one constant, shared with the core and the helper.
 use llmide_workspace_core::project::clone::{plan, run, CloneRequest, CloneResult, Token, CLONE_CAP};
+use llmide_workspace_core::project::existing_clone::adopt_existing;
 use llmide_workspace_core::R;
 use serde_json::{json, Value};
 
@@ -40,14 +42,22 @@ pub async fn repo_clone(
     if crate::fs_ops::checked_root(&root).is_err() {
         return Err("the project folder is not usable".to_string().into());
     }
-    let clone_plan = plan(&root, &req)?;
     let done = tauri::async_runtime::spawn_blocking(move || {
         let git = llmide_workspace_core::git::git_binary().ok_or_else(|| "git was not found on PATH".to_string())?;
-        run(&clone_plan, req.token.as_ref(), &NEVER_CANCELLED, &git)
+        local_clone(&root, &req, &git)
     })
     .await
     .map_err(|e| format!("clone task failed: {e}"))?;
     Ok(done?)
+}
+
+/// Clones into `<root>/code/`. A destination that is already a clone of the same repository is returned as the
+/// result, so the caller records its path; any other refusal (another repository there, a bad URL) stands.
+fn local_clone(root: &Path, req: &CloneRequest, git: &Path) -> Result<CloneResult, String> {
+    match plan(root, req) {
+        Ok(clone_plan) => run(&clone_plan, req.token.as_ref(), &NEVER_CANCELLED, git),
+        Err(refusal) => adopt_existing(root, req, git).ok_or(refusal),
+    }
 }
 
 /// The helper's `repo_clone` request. An unusable token is dropped, as the local command does, so the clone runs
