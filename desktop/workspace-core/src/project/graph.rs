@@ -20,10 +20,19 @@ use crate::paths::{fd_path, home_or_empty, is_too_broad};
 /// Upper bound on a graph file the webview may load (the real graph is ~1 MB).
 pub const GRAPH_FILE_MAX_BYTES: u64 = 128 * 1024 * 1024;
 
+/// The error for a graph file over the size limit. The helper maps this text to its own `too_large` code, so the
+/// text is fixed.
+pub const GRAPH_TOO_LARGE: &str = "graph.json is larger than the size limit";
+
 /// Reads `path` if it is a regular file named like a graph file and located inside `root`
 /// and within the size limit (see the module docs for how this is made race-free).
 pub fn read_within(root: &Path, path: &str) -> Result<String, String> {
     read_within_limited(root, path, GRAPH_FILE_MAX_BYTES)
+}
+
+/// `read_within` with a caller's size limit. The SSH helper uses a lower one, so its answer fits one protocol line.
+pub fn read_within_max(root: &Path, path: &str, max: u64) -> Result<String, String> {
+    read_within_limited(root, path, max)
 }
 
 fn read_within_limited(root: &Path, path: &str, max: u64) -> Result<String, String> {
@@ -47,8 +56,11 @@ fn read_within_limited(root: &Path, path: &str, max: u64) -> Result<String, Stri
     let real = fd_path(&file).ok_or("cannot verify the opened file")?;
     check_location(&real, &root)?;
     let meta = file.metadata().map_err(|e| e.to_string())?;
-    if !meta.is_file() || meta.len() > max {
-        return Err("graph.json is not a regular file within the size limit".into());
+    if !meta.is_file() {
+        return Err("graph.json is not a regular file".into());
+    }
+    if meta.len() > max {
+        return Err(GRAPH_TOO_LARGE.into());
     }
     if nlink(&file, &meta) > 1 {
         return Err("graph file has several hard links; refusing to follow it".into());
@@ -58,7 +70,7 @@ fn read_within_limited(root: &Path, path: &str, max: u64) -> Result<String, Stri
     // `take` bounds the read even if the file grows after fstat.
     file.take(max + 1).read_to_string(&mut body).map_err(|e| format!("read failed: {e}"))?;
     if body.len() as u64 > max {
-        return Err("graph.json is not a regular file within the size limit".into());
+        return Err(GRAPH_TOO_LARGE.into());
     }
     Ok(body)
 }
@@ -259,6 +271,15 @@ mod tests {
         assert!(read_within_limited(&root, g.to_str().unwrap(), 99).is_err());
         assert_eq!(read_within_limited(&root, g.to_str().unwrap(), 100).unwrap().len(), 100);
         assert_eq!(GRAPH_FILE_MAX_BYTES, 128 * 1024 * 1024);
+    }
+
+    #[test]
+    fn a_caller_limit_refuses_with_the_too_large_text() {
+        let root = scratch("cap");
+        let g = root.join("graph.json");
+        fs::write(&g, vec![b'a'; 100]).unwrap();
+        assert_eq!(read_within_max(&root, g.to_str().unwrap(), 99).unwrap_err(), GRAPH_TOO_LARGE);
+        assert_eq!(read_within_max(&root, g.to_str().unwrap(), 100).unwrap().len(), 100);
     }
 
     #[cfg(unix)]

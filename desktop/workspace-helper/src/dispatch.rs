@@ -11,7 +11,6 @@ use llmide_workspace_core::fs::{
 };
 use llmide_workspace_core::git::{diff, git_binary, scm_root, show, stage, status, DiffReq, ScmRoot, ShowReq, StageReq};
 use llmide_workspace_core::project::clone::CloneRequest;
-use llmide_workspace_core::project::graph::read_within;
 use llmide_workspace_core::scm::{
     branch_delete, branches, checkout, commit, commit_amend, commit_diff, commit_files, create_branch, diff_hunks, discard_all_with,
     discard_with, identity, log, merge, merge_abort, merge_mode, stage_all, stage_hunks, stash_apply, stash_drop, stash_list,
@@ -114,7 +113,7 @@ fn run_command(session: &mut Session, req: &Request) -> R<Value> {
         "graph_read" => {
             let root = session.root()?;
             let path = arg::<String>(args, "path")?;
-            read_within(&root, &path).map(Value::String).map_err(|message| FsError { code: "graph_read_failed", message })
+            project_setup::graph_read(&root, &path)
         }
         "fs_watch_start" => session.watch_start(),
         "fs_watch_set" => session.watch_set(&arg::<Vec<String>>(args, "dirs")?),
@@ -1115,6 +1114,32 @@ mod tests {
         for form in [marker.to_string(), github, gitlab] {
             assert!(!text.contains(&form), "the token or its encoded form reached the helper's output: {text}");
         }
+    }
+
+    #[test]
+    fn graph_read_refuses_over_48_mib() {
+        let mut f = Fixture::new("graph-big");
+        let project = f.open_project();
+        let graph = project.join("graph.json");
+        // A sparse file: its length is over the limit, and no 48 MB is written to the disk.
+        std::fs::File::create(&graph).unwrap().set_len(48 * 1024 * 1024 + 1).unwrap();
+        let reply = f.call(&graph_read_line(1, &graph));
+        assert_eq!(code_of(&reply), "too_large");
+        assert!(reply["err"]["message"].as_str().unwrap().contains("larger than the size limit"), "{reply}");
+    }
+
+    #[test]
+    fn graph_answer_must_fit_one_protocol_line() {
+        let f = Fixture::new("graph-answer");
+        let project = f.canonical_home().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        // Eight quotes encode to 18 bytes (each `"` becomes `\"`, plus the outer pair), so a 16-byte cap refuses it.
+        std::fs::write(project.join("graph.json"), "\"\"\"\"\"\"\"\"").unwrap();
+        let file = project.join("graph.json");
+        let refused = crate::project_setup::graph_read_capped(&project, &file.to_string_lossy(), 1000, 16).unwrap_err();
+        assert_eq!(refused.code, "too_large");
+        let kept = crate::project_setup::graph_read_capped(&project, &file.to_string_lossy(), 1000, 18).unwrap();
+        assert_eq!(kept.as_str().unwrap().len(), 8);
     }
 
     #[test]
