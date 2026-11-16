@@ -168,6 +168,15 @@ impl SshLink {
         Ok(HelperSpawn { exec: parts.exec, endpoint: parts.endpoint, known_hosts, grant })
     }
 
+    /// Whether `other` reaches the same server the same way: host, port, user and login. The terminals and the helper
+    /// channel opened on one link belong to its endpoint, so a link to a different endpoint ends them.
+    pub(crate) fn same_endpoint(&self, other: &SshLink) -> bool {
+        match (&self.helper, &other.helper) {
+            (Some(mine), Some(theirs)) => mine.endpoint == theirs.endpoint,
+            _ => false,
+        }
+    }
+
     /// The known_hosts file this link reads, while the link still owns its folder. Tests use it to check the
     /// folder's lifetime.
     #[cfg(test)]
@@ -182,7 +191,6 @@ impl SshLink {
     /// Each spawn needs its own grant, because a grant answers once. The password is copied into the grant and
     /// the copy is wiped; the password string never leaves this module. A closed link refuses, because it has
     /// already dropped the password.
-    #[allow(dead_code)] // NOTE: Task 7 takes a grant for each helper spawn; until then nothing calls this.
     pub fn grant(&self) -> std::io::Result<Option<AskpassGrant>> {
         let secret = self.shared.password_copy();
         // Checked after the copy: a stop that lands between the two checks must not read as key auth.
@@ -969,6 +977,49 @@ mod tests {
         for grant in [&first, &second] {
             assert!(grant.env().iter().all(|(_, value)| !value.contains("hunter2")));
         }
+    }
+
+    /// A helper channel that reconnects starts its ssh again through `helper_spawn`. That spawn must carry a fresh grant
+    /// of the held password, because the first spawn's grant has already answered.
+    #[test]
+    fn helper_uses_held_password() {
+        let link = SshLink {
+            shared: Arc::new(Shared::new(Some("hunter2".to_string()))),
+            url: LOCAL_URL.to_string(),
+            worker: Mutex::new(None),
+            known_hosts: Mutex::new(Some(scratch_known_hosts())),
+            helper: Some(HelperSpawnParts {
+                exec: Arc::new(FakeExec::default()),
+                endpoint: crate::ssh_transport::prepare_endpoint("example.com", 22, "alice", SshAuth::Password).unwrap(),
+            }),
+        };
+        let first = link.helper_spawn().unwrap();
+        let second = link.helper_spawn().unwrap();
+        let first_grant = first.grant.expect("the first helper spawn is answered with the password");
+        let second_grant = second.grant.expect("the reconnect's helper spawn is answered with the password too");
+        assert_ne!(first_grant.env(), second_grant.env(), "each spawn gets its own one-time grant");
+        assert!(second_grant.env().iter().all(|(_, value)| !value.contains("hunter2")));
+        assert_eq!(second.endpoint.auth, SshAuth::Password);
+    }
+
+    #[test]
+    fn same_endpoint_compares_the_server_and_the_login() {
+        let link_to = |host: &str, auth: SshAuth| SshLink {
+            shared: Arc::new(Shared::new(None)),
+            url: LOCAL_URL.to_string(),
+            worker: Mutex::new(None),
+            known_hosts: Mutex::new(None),
+            helper: Some(HelperSpawnParts {
+                exec: Arc::new(FakeExec::default()),
+                endpoint: crate::ssh_transport::prepare_endpoint(host, 22, "alice", auth).unwrap(),
+            }),
+        };
+        let key = SshAuth::Key { path: "/home/alice/.ssh/id_ed25519".into() };
+        let first = link_to("example.com", key.clone());
+        assert!(first.same_endpoint(&link_to("example.com", key.clone())), "a reconnect to the same server");
+        assert!(!first.same_endpoint(&link_to("other.example.com", key.clone())), "another server");
+        assert!(!first.same_endpoint(&link_to("example.com", SshAuth::Password)), "another login");
+        assert!(!first.same_endpoint(&held_for_test(None)), "a link without a helper endpoint is never the same");
     }
 
     #[test]

@@ -394,6 +394,8 @@ struct Session {
     flow: Arc<Flow>,
     /// Consent epoch this shell was spawned under; see `Gate::session_epoch`.
     consent_epoch: u64,
+    /// An SSH terminal, whose ssh process belongs to the server link it was opened on.
+    remote: bool,
     _grant: Option<AskpassGrant>,
 }
 
@@ -507,7 +509,7 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<
         cmd.env("LANG", "en_US.UTF-8");
     }
     cmd.cwd(start_dir());
-    let started = Started { shell: shell_name(&shell), input: Vec::new(), grant: None, consent_epoch };
+    let started = Started { shell: shell_name(&shell), input: Vec::new(), grant: None, consent_epoch, remote: false };
     start(cols, rows, cmd, started, on_data, on_exit)
 }
 
@@ -529,7 +531,7 @@ pub fn spawn_remote(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: C
     for arg in launch.args {
         cmd.arg(arg);
     }
-    let started = Started { shell: launch.shell, input: launch.input, grant: launch.grant, consent_epoch };
+    let started = Started { shell: launch.shell, input: launch.input, grant: launch.grant, consent_epoch, remote: true };
     start(cols, rows, cmd, started, on_data, on_exit)
 }
 
@@ -540,6 +542,7 @@ struct Started {
     input: Vec<u8>,
     grant: Option<AskpassGrant>,
     consent_epoch: u64,
+    remote: bool,
 }
 
 /// The `ssh` process of one SSH terminal, as data, so the argv, environment and input can be checked without
@@ -698,6 +701,7 @@ fn start(cols: u16, rows: u16, cmd: CommandBuilder, started: Started, on_data: C
         child: Mutex::new(child),
         flow: Arc::new(Flow::new()),
         consent_epoch: started.consent_epoch,
+        remote: started.remote,
         // Held, not read: an SSH terminal's askpass grant must outlive the first password prompt, which ssh may send
         // long after spawn. It is dropped with the session.
         _grant: started.grant,
@@ -905,6 +909,19 @@ pub fn kill(id: u32) -> Result<(), String> {
     let session = lock_table().remove(&id).ok_or("no such terminal")?;
     dispose(&session);
     Ok(())
+}
+
+/// Ends every SSH terminal and leaves the local shells running. An SSH terminal is an ssh process to a server, so it
+/// ends with the link it was opened on: Disconnect, Stop server, Uninstall and a switch to another server all call this.
+pub fn kill_ssh_terminals() {
+    let sessions: Vec<Shared> = {
+        let mut table = lock_table();
+        let ids: Vec<u32> = table.iter().filter(|(_, session)| session.remote).map(|(id, _)| *id).collect();
+        ids.into_iter().filter_map(|id| table.remove(&id)).collect()
+    };
+    for session in &sessions {
+        dispose(session);
+    }
 }
 
 /// Kills every shell. Called on app exit, page reload, window destruction and from
@@ -1244,5 +1261,27 @@ mod tests {
     #[test]
     fn local_terminal_unchanged() {
         assert_eq!(login_shell().1, vec!["-l"], "the local shell is still a login shell");
+    }
+
+    /// Starts `sleep` in a pty as a local or an SSH terminal. No ssh and no consent check are involved.
+    #[cfg(unix)]
+    fn start_test_process(remote: bool) -> u32 {
+        let mut cmd = CommandBuilder::new("/bin/sleep");
+        cmd.arg("30");
+        let started = Started { shell: "sleep".into(), input: Vec::new(), grant: None, consent_epoch: 0, remote };
+        let on_data: Channel<Response> = Channel::new(|_| Ok(()));
+        let on_exit: Channel<serde_json::Value> = Channel::new(|_| Ok(()));
+        start(80, 24, cmd, started, on_data, on_exit).expect("the test process starts").id
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn killing_ssh_terminals_leaves_local_ones_running() {
+        let local = start_test_process(false);
+        let remote = start_test_process(true);
+        kill_ssh_terminals();
+        assert!(get(remote).is_err(), "the SSH terminal ended with its link");
+        assert!(get(local).is_ok(), "a local shell is not part of any server link");
+        kill(local).expect("the local test process is still registered");
     }
 }

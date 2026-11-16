@@ -651,14 +651,19 @@ impl CoreHost {
     /// same previous link and leak one. The replaced link is stopped after the lock is released; a link that
     /// reached `NeedsPassword` is dead and must be replaced, not resumed.
     pub fn attach_ssh_link(&self, link: SshLink) {
-        let previous = {
+        let (previous, same_server) = {
             let mut slot = lock(&self.inner.ssh_link);
             slot.connecting = false;
             slot.disconnected = false;
-            std::mem::replace(&mut slot.link, Some(link))
+            // SSH terminals stay open only for a reconnect to the same server and login; any other endpoint ends them.
+            let same_server = slot.link.as_ref().is_some_and(|old| old.same_endpoint(&link));
+            (std::mem::replace(&mut slot.link, Some(link)), same_server)
         };
         // The helper channel belongs to the link it was opened with, so a new link starts without one.
         crate::workspace_backend::reset();
+        if !same_server {
+            crate::pty::kill_ssh_terminals();
+        }
         if let Some(previous) = previous {
             previous.stop();
         }
@@ -676,8 +681,10 @@ impl CoreHost {
             slot.disconnected = true;
             slot.link.take()
         };
-        // The helper channel dies with its link: its folder and any running search or watch go with it.
+        // The helper channel dies with its link: its folder and any running search or watch go with it. So do the SSH
+        // terminals, whose ssh processes are logged in to the same server.
         crate::workspace_backend::reset();
+        crate::pty::kill_ssh_terminals();
         if let Some(link) = link {
             link.stop();
         }
