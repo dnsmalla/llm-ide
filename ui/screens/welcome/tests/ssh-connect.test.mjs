@@ -286,3 +286,77 @@ test("the Welcome page shows the card and nothing called Set up", () => {
   assert.match(html, />Connect…</);
   assert.doesNotMatch(html, />Set up</);
 });
+
+// ---- review round 1 ----------------------------------------------------------------------------------------------
+
+test("a test that cannot run (unreachable host) shows its error in the row, not the dialog", async () => {
+  const m = new model.SshServerModel(fakeIo({ test: async () => { throw new Error("Could not reach the server."); } }));
+  assert.equal(await recent.connectRecentServer(m, KEY), "failed");
+  assert.equal(m.getState().test, null, "no test result is kept");
+  assert.equal(recent.recentRowMessage(m.getState(), recent.recentKey(KEY), recent.recentKey(KEY))?.text, "Could not reach the server.");
+});
+
+test("a connect that rejects after a trusted test shows its error in the row", async () => {
+  const m = new model.SshServerModel(fakeIo({ test: async () => TRUSTED, connect: async () => { throw new Error("The server refused this login."); } }));
+  assert.equal(await recent.connectRecentServer(m, KEY), "failed");
+  assert.equal(recent.recentRowMessage(m.getState(), recent.recentKey(KEY), recent.recentKey(KEY))?.text, "The server refused this login.");
+});
+
+test("Escape closes the switch confirmation first and the dialog otherwise", () => {
+  assert.equal(recent.escapeTarget(true), "confirmation");
+  assert.equal(recent.escapeTarget(false), "dialog");
+  const m = new model.SshServerModel(fakeIo());
+  let escaped = 0;
+  const tree = dialog.SshConnectDialogView(dialogProps(m, { confirming: true, onEscape() { escaped += 1; } }));
+  findRole(tree, "dialog").props.onKeyDown({ key: "Escape", stopPropagation() {} });
+  assert.equal(escaped, 1, "Escape on the open confirmation reaches the wrapper, which closes only the confirmation");
+});
+
+test("the switch step's two containers are focus targets, so focus survives the button change", () => {
+  const base = { host: "server.example.com", switching: false, switchError: null, onAsk() {}, onCancel() {}, onSwitch() {}, askRef: { current: null }, confirmRef: { current: null } };
+  const ask = renderToStaticMarkup(h(dialog.SwitchStep, { ...base, confirming: false }));
+  assert.match(ask, /tabindex="-1"/, "the ask step container can take focus");
+  const confirm = renderToStaticMarkup(h(dialog.SwitchStep, { ...base, confirming: true }));
+  assert.match(confirm, /tabindex="-1"[^>]*role="alertdialog"/, "the confirmation container can take focus");
+});
+
+test("while the switch is offered, Test and Connect are disabled; otherwise they are not", () => {
+  const m = new model.SshServerModel(fakeIo());
+  m.loadFrom(KEY);
+  const saved = { ...m.getState(), status: status("restart_required") };
+  const offered = renderToStaticMarkup(h(dialog.SshConnectDialogView, { ...dialogProps(m), s: saved }));
+  assert.match(offered, /<button[^>]*disabled=""[^>]*>Test</, "Test is off under the switch");
+  assert.match(offered, /<button[^>]*disabled=""[^>]*>Connect</, "Connect is off under the switch");
+  // With a trusted host key and no switch offered, Connect is on: only the restart answer turns it off.
+  const trusted = { ...m.getState(), test: TRUSTED };
+  const plainHtml = renderToStaticMarkup(h(dialog.SshConnectDialogView, { ...dialogProps(m), s: trusted }));
+  assert.doesNotMatch(plainHtml, /disabled=""[^>]*>Test</);
+  assert.doesNotMatch(plainHtml, /disabled=""[^>]*>Connect</);
+});
+
+test("the Welcome dialog's password hint says the password is used only for this connection", () => {
+  const m = new model.SshServerModel(fakeIo());
+  m.setAuth("password");
+  const html = plain(renderToStaticMarkup(h(dialog.SshConnectDialogView, dialogProps(m))));
+  assert.match(html, /Used only for this connection\. It is never saved\./);
+  assert.doesNotMatch(html, /Kept only until you quit/);
+});
+
+test("the Settings form keeps its own password hint", () => {
+  const m = new model.SshServerModel(fakeIo());
+  m.setAuth("password");
+  const html = plain(renderToStaticMarkup(h(form.SshServerForm, { m, s: m.getState(), password: "", onPassword() {} })));
+  assert.match(html, /Kept only until you quit the app\. It is never saved\./);
+});
+
+test("the recent list sits inside the card, under the Connect… button", () => {
+  const html = plain(renderToStaticMarkup(h(card.SshConnectCard, { onConnect() {}, notice: null }, h("p", null, "RECENT-LIST-MARK"))));
+  assert.match(html, /<section[^>]*wc-ssh-card[^>]*>[\s\S]*Connect…[\s\S]*RECENT-LIST-MARK[\s\S]*<\/section>/);
+});
+
+test("the Welcome page has one connect card: the Remote hosts card is gone", () => {
+  const actions = { createProject: async () => null, openFolder: async () => undefined, openRecent: async () => undefined, forgetRecent: async () => undefined, closeProject: async () => undefined, goHome() {} };
+  const html = plain(renderToStaticMarkup(h(welcome.WelcomeScreen, { project: null, recent: { entries: [], reset: false }, error: null, actions, ssh: { io: fakeIo(), restartApp: async () => undefined } })));
+  assert.doesNotMatch(html, /Remote hosts/);
+  assert.equal((html.match(/wc-ssh-card/g) ?? []).length, 1);
+});

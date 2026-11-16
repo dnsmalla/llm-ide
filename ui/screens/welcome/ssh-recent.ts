@@ -48,9 +48,16 @@ export async function connectRecentServer(m: SshServerModel, entry: SshRecentSer
   if (status?.link === "connected") return "connected";
   if (status?.link === "restart_required") return "switch";
   if (status?.link === "needs_password") return "dialog";
-  // connectWithTest stops before connecting when the key is not trusted: the dialog then shows the fingerprint.
-  if (m.getState().test?.trusted !== true) return "dialog";
+  // An untrusted host key opens the dialog, which shows the fingerprint to confirm. A test that could not run at all
+  // (unreachable host, bad key path, timeout) leaves no test behind: that error stays in the row, not in the dialog.
+  const test = m.getState().test;
+  if (test !== null && test.trusted !== true) return "dialog";
   return "failed";
+}
+
+/** What Escape closes: the switch confirmation while it is open, otherwise the whole dialog. */
+export function escapeTarget(confirming: boolean): "confirmation" | "dialog" {
+  return confirming ? "confirmation" : "dialog";
 }
 
 /** The message for the row whose action is `active`. Other rows show nothing; the dialog shows its own errors. */

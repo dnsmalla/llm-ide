@@ -5,7 +5,6 @@ import { safeText } from "../shell/safe-text";
 import { openedAgo } from "../shell/relative-time";
 import { NAME_MAX, PROJECT_EXPLAINER, validateProjectName } from "./model";
 import { GuideDialog } from "./HelpGuide";
-import { RemoteCard } from "./RemoteCard.tsx";
 import { SshWelcome, type WelcomeSsh } from "./SshWelcome.tsx";
 
 export { GuideDialog };
@@ -169,7 +168,6 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
             </button>
           </section>
 
-          <RemoteCard />
           <SshWelcome ssh={ssh} />
         </div>
 

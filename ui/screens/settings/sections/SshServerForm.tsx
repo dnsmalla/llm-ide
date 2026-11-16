@@ -23,16 +23,23 @@ export interface SshServerFormProps {
   onConnected?: () => void;
   /** Takes the place of Connect while the link is up (Settings shows Disconnect there). */
   linkActions?: ReactNode;
+  /** The Welcome dialog's password hint: the password is only used for this connection. */
+  passwordHint?: string;
+  /** Test and Connect are off while the caller needs an answer first (the Welcome switch confirmation). */
+  disableActions?: boolean;
 }
 
+/** Settings' password hint. The Welcome dialog passes its own, because there the password is dropped when it closes. */
+const SETTINGS_PASSWORD_HINT = "Kept only until you quit the app. It is never saved.";
+
 /** The password field. It takes focus when the server asks for the password again, or when the caller asks for it. */
-function PasswordInput({ value, onChange, focus }: { value: string; onChange: (v: string) => void; focus: boolean }): ReactNode {
+function PasswordInput({ value, onChange, focus, hint }: { value: string; onChange: (v: string) => void; focus: boolean; hint: string }): ReactNode {
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (focus) ref.current?.focus();
   }, [focus]);
   return (
-    <Field label="Password" hint="Kept only until you quit the app. It is never saved.">
+    <Field label="Password" hint={hint}>
       <input
         ref={ref}
         className="st-input"
@@ -83,7 +90,7 @@ function LinkLine({ s, host, onRestart }: { s: SshServerState; host: string; onR
   }
 }
 
-export function SshServerForm({ m, s, password, onPassword, readOnly = false, focusPassword = false, onRestart, onConnected, linkActions }: SshServerFormProps): ReactNode {
+export function SshServerForm({ m, s, password, onPassword, readOnly = false, focusPassword = false, onRestart, onConnected, linkActions, passwordHint = SETTINGS_PASSWORD_HINT, disableActions = false }: SshServerFormProps): ReactNode {
   const busy = s.busy !== null;
   const pw = password.length > 0 ? password : undefined;
   const link = s.status?.link ?? null;
@@ -132,7 +139,7 @@ export function SshServerForm({ m, s, password, onPassword, readOnly = false, fo
             <ErrorText text={s.fieldErrors.keyPath ?? null} />
           </Field>
         ) : (
-          <PasswordInput value={password} onChange={onPassword} focus={needsPassword || focusPassword} />
+          <PasswordInput value={password} onChange={onPassword} focus={needsPassword || focusPassword} hint={passwordHint} />
         )}
       </div>
 
@@ -142,8 +149,8 @@ export function SshServerForm({ m, s, password, onPassword, readOnly = false, fo
       {s.test !== null && trusted ? <TestSummary test={s.test} /> : null}
 
       <div className="st-row">
-        <Button disabled={busy} onClick={() => void m.test(pw)}>{s.busy === "test" ? "Testing…" : "Test"}</Button>
-        {linkUp ? linkActions : <Button tone="primary" disabled={connectBlocked} onClick={() => void connect()}>Connect</Button>}
+        <Button disabled={busy || disableActions} onClick={() => void m.test(pw)}>{s.busy === "test" ? "Testing…" : "Test"}</Button>
+        {linkUp ? linkActions : <Button tone="primary" disabled={connectBlocked || disableActions} onClick={() => void connect()}>Connect</Button>}
       </div>
 
       <ErrorText text={s.error} />

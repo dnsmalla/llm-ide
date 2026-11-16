@@ -163,49 +163,20 @@
 .wc-recent-open { border-radius: 12px; }
 .wc-recent-open:hover:not(:disabled) { border-color: color-mix(in srgb, var(--tok-color-accent) 40%, var(--tok-color-border)); }
 
-.wc-remote { margin-top: 16px; }
-.wc-remote-grid { display: grid; grid-template-columns: 2fr 80px 1fr; gap: 8px; margin: 10px 0; }
-.wc-remote-wide { grid-column: 1 / -1; }
-.wc-remote-sep { height: 1px; background: var(--tok-color-border); margin: 16px 0; }
-.wc-remote-ok { color: var(--tok-color-accent3); font-size: 12px; word-break: break-all; }
-
-.wc-remote-head { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; }
-.wc-remote-list { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.wc-remote-row { display: flex; gap: 10px; justify-content: space-between; align-items: center; padding: 7px 9px; border: 1px solid var(--tok-color-border); border-radius: 8px; }
-.wc-remote-row[data-active] { border-color: var(--tok-color-accent); }
-.wc-remote-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 11px; line-height: 1.35; }
-.wc-remote-text span { color: var(--tok-color-text-muted); word-break: break-all; }
-.wc-remote-actions { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.wc-remote-actions .sh-button { padding: 4px 8px; font-size: 11px; }
-.wc-remote-pin { width: 74px; padding: 4px 6px; font-size: 11px; }
-.wc-remote-add { border-top: 1px solid var(--tok-color-border); margin-top: 8px; padding-top: 8px; }
-.wc-remote .wc-remote-grid { gap: 6px; margin: 8px 0; }
-.wc-remote .sh-field { font-size: 11px; }
-
 /* Three equal actions in one row: create, continue, connect. */
 .wc-cards-three { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
 .wc-cards-three > .wc-card { min-height: 320px; min-width: 0; padding: 20px; gap: 10px; }
 .wc-card-kicker { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--tok-color-accent); }
 .wc-card-kicker::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }
-.wc-remote { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
-.wc-remote-head { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
-.wc-remote-head .sh-button { min-height: 28px; }
-.wc-remote-head > .wc-ssh-set-up { align-self: flex-start; width: auto; }
-.wc-remote-empty { display: flex; flex-direction: column; gap: 12px; margin-top: auto; padding-top: 8px; }
-.wc-remote-empty .sh-button { width: 100%; }
-.wc-remote-list { max-height: 210px; overflow-y: auto; padding-right: 2px; }
-.wc-remote-row { flex-direction: column; align-items: stretch; gap: 7px; }
-.wc-remote-actions { justify-content: flex-start; }
-.wc-remote-add { max-height: 260px; overflow-y: auto; padding-right: 2px; }
-.wc-remote-grid { grid-template-columns: 1fr 1fr; }
+.wc-ssh-card { display: flex; flex-direction: column; align-items: stretch; gap: 10px; overflow: hidden; }
+.wc-ssh-head { display: flex; flex-direction: column; gap: 8px; }
 @media (max-width: 980px) {
   .wc-cards-three { grid-template-columns: 1fr 1fr; }
-  .wc-cards-three > .wc-remote { grid-column: 1 / -1; min-height: 0; }
-  .wc-remote-list { max-height: 240px; }
+  .wc-cards-three > .wc-ssh-card { grid-column: 1 / -1; min-height: 0; }
 }
 @media (max-width: 640px) {
   .wc-cards-three { grid-template-columns: 1fr; }
-  .wc-cards-three > .wc-remote { grid-column: auto; }
+  .wc-cards-three > .wc-ssh-card { grid-column: auto; }
   .wc-cards-three > .wc-card { min-height: 0; }
 }
 
@@ -213,13 +184,14 @@
 
 /* Connect to SSH server: the recent servers span the card grid. The dialog's form uses the Settings tokens (st-*),
  * so the scale is opened here and the box is sized by the dialog, not by the full-page Settings layout. */
-.wc-ssh-recent { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 10px; }
-.wc-ssh-recent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.wc-ssh-row { position: relative; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--tok-color-border); border-radius: 8px; }
+.wc-ssh-recent { display: flex; flex-direction: column; gap: 10px; }
+.wc-ssh-recent-list { list-style: none; margin: 0; padding: 0 2px 0 0; display: flex; flex-direction: column; gap: 8px; max-height: 210px; overflow-y: auto; }
+.wc-ssh-row { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px; border: 1px solid var(--tok-color-border); border-radius: 8px; }
 .wc-ssh-row-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .wc-ssh-name { font-size: 13px; font-weight: 600; color: var(--tok-color-text); word-break: break-all; }
 .wc-ssh-auth { font-size: 11px; color: var(--tok-color-text-muted); }
-.wc-ssh-row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.wc-ssh-row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-start; }
+.wc-ssh-row-actions .sh-button { width: auto; }
 .wc-ssh-more { min-width: 34px; }
 .wc-ssh-menu { position: absolute; right: 10px; top: calc(100% - 4px); z-index: 5; display: flex; flex-direction: column; gap: 4px; min-width: 120px; padding: 6px; border: 1px solid var(--tok-color-border); border-radius: 8px; background: var(--tok-color-surface); }
 .wc-ssh-menu .sh-button { text-align: left; }
@@ -232,4 +204,3 @@
 .wc-ssh-dialog .wc-modal-body { display: flex; flex-direction: column; gap: var(--st-gap-3); }
 .wc-ssh-form.st-root { height: auto; min-height: 0; display: flex; flex-direction: column; gap: var(--st-gap-3); background: none; }
 .wc-ssh-foot.st-root { height: auto; min-height: 0; display: flex; flex-direction: row; justify-content: flex-end; gap: var(--st-gap-2); background: none; padding: 12px 16px; border-top: 1px solid var(--tok-color-border); }
-.wc-remote-head > .wc-ssh-connect { align-self: flex-start; width: auto; }
