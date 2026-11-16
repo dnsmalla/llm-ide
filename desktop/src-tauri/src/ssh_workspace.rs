@@ -283,7 +283,8 @@ impl WorkspaceClient {
         locked(&self.shared.subscribers).push((kind, sink));
     }
 
-    /// Whether the helper reported git in `hello`.
+    /// Whether the helper reported git in `hello`. Only the tests and the live check read it.
+    #[cfg(test)]
     pub fn git_available(&self) -> bool {
         self.git
     }
