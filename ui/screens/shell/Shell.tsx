@@ -8,7 +8,7 @@ import { SectionToolbar } from "./Toolbar";
 import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
 import { host as shellHost, invokeHost, subscribeNoProject, subscribeRootMissing } from "./host";
 import { projectStore } from "./project-store";
-import { localBackgroundRoot } from "./background-scope.ts";
+import { backgroundRoot } from "./background-scope.ts";
 import { serverFolderHandlerFor, setServerFolderHandler } from "./server-folder";
 import { FolderPicker } from "../remote-folder/FolderPicker.tsx";
 import { goHomeAfterOpen, returnHomeFromMissingFolder, serverOpenDeps, serverWorkspaceIo } from "../remote-folder/wiring.ts";
@@ -253,25 +253,25 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const projectRoot = project?.root ?? null;
   // The one desktop scheduler for the open project (built-in and custom tasks), so a schedule fires while any section is
   // open. Loaded lazily and only for a usable Auto Tasks feature so an auto_tasks-off build does not ship or run it.
-  // Local mode only: in ssh mode the loops would run their files on the server while their revert guard is local.
-  const backgroundRoot = localBackgroundRoot(serverMode, projectRoot);
+  // Not in ssh mode: there the loops would run their files on the server while their revert guard is local.
+  const loopRoot = backgroundRoot(serverMode, projectRoot);
   useEffect(() => {
-    if (!backgroundRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("autotasks", features.usable)) return undefined;
+    if (!loopRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("autotasks", features.usable)) return undefined;
     if (typeof __FEATURE_AUTO_TASKS__ === "boolean" && !__FEATURE_AUTO_TASKS__) return undefined;
     let live = true;
     let stop: (() => void) | undefined;
     void import("../tasks/scheduler-host.ts").then((m) => {
-      if (live) stop = m.startDesktopScheduler(backgroundRoot);
+      if (live) stop = m.startDesktopScheduler(loopRoot);
     });
     return () => { live = false; stop?.(); };
-  }, [backgroundRoot, session.signedIn, gate, features.usable]);
+  }, [loopRoot, session.signedIn, gate, features.usable]);
   // Factory runs and the phone-command poller start with the app, not only when the Factory/Issues screen is opened.
   useEffect(() => {
-    if (!backgroundRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("conflicts", features.usable)) return undefined;
+    if (!loopRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("conflicts", features.usable)) return undefined;
     if (typeof __FEATURE_AUTO_TASKS__ === "boolean" && !__FEATURE_AUTO_TASKS__) return undefined;
     void import("../loop/native/run-manager-host.ts").then((m) => m.installRunManagerHost());
     return undefined;
-  }, [backgroundRoot, session.signedIn, gate, features.usable]);
+  }, [loopRoot, session.signedIn, gate, features.usable]);
   // The command-bus scheduler (docs/spec/command-bus.md section 9): not tied to a project or a feature, idle on a core
   // that does not see this UI as the desktop class.
   useEffect(() => {

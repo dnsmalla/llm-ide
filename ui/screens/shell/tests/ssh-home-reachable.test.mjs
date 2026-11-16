@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { load } from "./helpers.mjs";
 
 const { serverHomeReachable, keptScreensText, sectionInert, computeGate } = await load("gate.ts");
-const { localBackgroundRoot } = await load("background-scope.ts");
+const { backgroundRoot } = await load("background-scope.ts");
 
 const DOWN_LINKS = ["stopped", "needs_password", "failed"];
 
@@ -57,10 +57,10 @@ test("the restarting banner does not promise a reconnect when the link will not 
   assert.equal(keptScreensText("Core crashed", "local", null), "Core crashed. Your screens are kept and will reconnect.");
 });
 
-test("background loops run only for the local mode, with the project root", () => {
-  assert.equal(localBackgroundRoot("local", "/Users/me/proj"), "/Users/me/proj");
-  assert.equal(localBackgroundRoot("ssh", "/home/me/proj"), null, "ssh: the folder is on the server");
-  assert.equal(localBackgroundRoot("remote", "/Users/me/proj"), null, "hub: refused as the other local work is");
-  assert.equal(localBackgroundRoot(undefined, "/Users/me/proj"), null, "mode not known yet");
-  assert.equal(localBackgroundRoot("local", null), null, "no project");
+test("background loops: local and hub mode keep their project root, ssh mode turns them off, unknown mode is off", () => {
+  assert.equal(backgroundRoot("local", "/Users/me/proj"), "/Users/me/proj");
+  assert.equal(backgroundRoot("remote", "/Users/me/proj"), "/Users/me/proj", "hub keeps its loops");
+  assert.equal(backgroundRoot("ssh", "/home/me/proj"), null, "ssh: the folder is on the server");
+  assert.equal(backgroundRoot(undefined, "/Users/me/proj"), null, "mode not known yet");
+  assert.equal(backgroundRoot("local", null), null, "no project");
 });
