@@ -198,6 +198,23 @@ test("new_project_asks_about_unsaved_work", async () => {
   assert.deepEqual(leaveLog, [`registerNew:${HOME}/projects/llm`, "refresh"]);
 });
 
+test("a refresh that fails after a good create shows in the general error, not under the name field", async () => {
+  const log = [];
+  const io = fakeIo();
+  const d = { ...deps(log), async refresh() { throw new Error("shell busy") } };
+  const picker = await pickerAt(io, d);
+  picker.setNewProjectName("llm");
+  assert.equal(await picker.createProject(), null, "the picker does not hand back a project it could not refresh");
+  const s = picker.getState();
+  assert.equal(s.newProjectError, null, "the name field shows no error");
+  assert.equal(s.creatingProject, false, "the name field closes: the folder exists");
+  assert.match(s.error, /created and opened, but the app could not refresh: shell busy/);
+  assert.equal(s.pending, null);
+  assert.equal(s.busy, false);
+  assert.deepEqual(io.calls.filter((c) => c.startsWith("create")), [`create:${HOME}/projects:llm`]);
+  assert.deepEqual(log, [`registerNew:${HOME}/projects/llm`], "the registration ran before the refresh failed");
+});
+
 test("a create refused by the host leaves the picker usable and shows the host's sentence", async () => {
   const io = fakeIo({ createFail: { code: "outside_home", message: "outside" } });
   const picker = await pickerAt(io, deps([]));

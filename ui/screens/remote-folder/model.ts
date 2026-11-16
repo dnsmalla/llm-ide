@@ -286,6 +286,12 @@ export interface PendingProject {
   warnings: string[];
 }
 
+/** A created project, plus the shell refresh's failure. The project is open either way, so the refresh error is shown apart. */
+export interface CreatedProject extends PendingProject {
+  /** The refresh failure's text, or null when the shell refreshed. */
+  refreshError: string | null;
+}
+
 /** Runs the registration step. A throw becomes one warning, so the created project is never lost to it. */
 async function registerNewOrWarn(deps: NewProjectDeps, project: RemoteProject): Promise<string[]> {
   try {
@@ -298,16 +304,17 @@ async function registerNewOrWarn(deps: NewProjectDeps, project: RemoteProject): 
 /**
  * Create a project folder inside the listed folder, then open it: the unsaved-work question first (when the guard is
  * given), then the host creates it, the core registers it (warnings only), and the shell refreshes. Null when the user
- * stays. A create failure throws the host's error unchanged, and nothing is opened.
+ * stays. A create failure throws the host's error unchanged, and nothing is opened. A refresh failure does not throw:
+ * the project is already open, so it is reported in `refreshError`.
  */
 export async function createServerProject(
   io: WorkspaceIo,
   parent: string,
   name: string,
   deps: PickerDeps,
-): Promise<PendingProject | null> {
+): Promise<CreatedProject | null> {
   const guard = deps.guard ?? (<T>(_cancelled: T, action: () => Promise<T>) => action());
-  return guard<PendingProject | null>(null, async () => {
+  return guard<CreatedProject | null>(null, async () => {
     // Same gate as the open: a root_missing from a call still in flight must not close the new folder.
     beginServerFolderOpen();
     let project: RemoteProject;
@@ -317,8 +324,13 @@ export async function createServerProject(
       endServerFolderOpen();
     }
     const warnings = await registerNewOrWarn(deps, project);
-    await deps.refresh();
-    return { project, warnings };
+    let refreshError: string | null = null;
+    try {
+      await deps.refresh();
+    } catch (e) {
+      refreshError = reasonOf(e);
+    }
+    return { project, warnings, refreshError };
   });
 }
 
@@ -436,7 +448,8 @@ export class FolderPickerModel extends Store<PickerState> {
   /**
    * Creates a project folder named by the field, inside the listed folder (the server home included), and opens it.
    * Resolves the project when it is open and registered cleanly; null when the user stays, the create is refused (the
-   * error shows in the field), or registration gave warnings (see `pending`; the project is open either way).
+   * error shows in the field), registration gave warnings (see `pending`), or the refresh failed (the general `error`
+   * says so). The project is open in every case after the create succeeds.
    */
   async createProject(): Promise<RemoteProject | null> {
     const s = this.getState();
@@ -452,9 +465,15 @@ export class FolderPickerModel extends Store<PickerState> {
       const created = await createServerProject(this.#io, s.path, name, this.#deps);
       if (created === null) return null;
       this.set({ creatingProject: false, newProjectName: "" });
-      if (created.warnings.length === 0) return created.project;
-      this.set({ pending: created });
-      return null;
+      if (created.refreshError !== null) {
+        // The name field is closed: the folder exists, so another create with the same name would only be refused.
+        this.set({ error: `The project was created and opened, but the app could not refresh: ${created.refreshError}` });
+      }
+      if (created.warnings.length > 0) {
+        this.set({ pending: { project: created.project, warnings: created.warnings } });
+        return null;
+      }
+      return created.refreshError === null ? created.project : null;
     } catch (e) {
       this.set({ newProjectError: workspaceErrorText(e) });
       return null;
