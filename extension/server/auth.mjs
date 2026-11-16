@@ -41,6 +41,7 @@ const PUBLIC_PATHS = new Set([
   '/auth/slack/callback',              // Slack's OAuth redirect carries no bearer token
   '/auth/mcp-connector/callback',      // MCP connector OAuth redirect carries no bearer token
   '/launch-app',                       // Cross-client deep link → llmide://
+  '/internal/clone-credential',        // SSH helper redeems a clone grant: loopback peer + core nonce + single-use grant, no JWT
 ]);
 
 // Path prefixes that are public.  Used for routes whose URL contains

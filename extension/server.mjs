@@ -20,6 +20,7 @@ import { handleExportRoutes } from './server/export-routes.mjs';
 import { logger, newRequestId } from './core/logger.mjs';
 import { authenticate, requireRole } from './server/auth.mjs';
 import { enforceRouteAuthority } from './server/route-authority.mjs';
+import { handleCloneCredentialRedeem } from './routes/clone-credential.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { handleTeamRoute, isTeamRoute } from './routes/team-routes.mjs';
@@ -468,7 +469,11 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          invalid_role): a step that sends neither model nor provider runs on that Settings → Model routing role's
 //          tier (default loop; an unset role takes standard) when the Claude engine can run it, else the SDK default.
 //          GET /kb/routing-tiers featureStatus always carries loop and autoTasks, with the `tier` they run on.
-const SERVER_API_VERSION = 147;
+//   v148 — additive: POST /kb/repos/clone-grant { provider } (JWT, external.read) answers { grant: 64 hex | null }, a
+//          single-use 60 s grant for the user's saved github/gitlab token. POST /internal/clone-credential { grant } (no JWT,
+//          loopback peer + x-llmide-core-nonce, 404 with no core nonce) redeems it to { token }; the SSH server helper
+//          is its only caller. Refusals are 403 { error: 'clone_credential_refused' }. Not in /health ENDPOINTS.
+const SERVER_API_VERSION = 148;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -526,6 +531,7 @@ const ALL_ENDPOINTS = [
   '/kb/ingest-code-graph',
   '/kb/connect-github-issues',
   '/kb/repos/check-token',
+  '/kb/repos/clone-grant',
   '/kb/connect-tickets-json',
   '/kb/connect-qa',
   '/kb/email/test',
@@ -969,6 +975,11 @@ const server = http.createServer(async (req, res) => {
   //
   // These two dispatchers run before the rate limiter, so the authority table
   // is applied here for them; the general hook below covers every other route.
+  // SSH helper clone-credential redeem (route-authority 'public'): loopback + core nonce + single-use grant, no JWT.
+  if ((req.url || '').split('?')[0] === '/internal/clone-credential') {
+    try { await handleCloneCredentialRedeem(req, res, { logger: reqLog }); } catch (err) { sendError(res, err, { logger: reqLog }); }
+    return;
+  }
   if ((isAuthRoute(req.url || '') || isExtensionRoute(req.url || ''))
       && enforceRouteAuthority(getDb({ logger }), req, res, { logger: reqLog })) return;
   if (isAuthRoute(req.url || '')) {

@@ -170,6 +170,9 @@ export const ROUTE_POLICY = Object.freeze([
     '/launch-app',
   ]),
   ...rules('public', 'POST', [
+    // SSH server helper redeems a single-use clone grant. No JWT: the handler requires a loopback peer, the core nonce
+    // (LLMIDE_CORE_NONCE, constant-time) and a live unused grant, and answers 404 when the core has no nonce.
+    '/internal/clone-credential',
     '/auth/login',
     '/auth/refresh',
     '/auth/register',
@@ -454,6 +457,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/providers/models',
     '/kb/providers/verify',
     '/kb/repos/check-token',
+    '/kb/repos/clone-grant',
     '/kb/slack/fetch',
     '/kb/slack/test',
   ]),

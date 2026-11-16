@@ -19,6 +19,7 @@ import { listActiveSessions } from '../agents/live-sessions.mjs';
 import { listRuns } from '../agents/meeting-agent.mjs';
 // live-sessions imports moved into routes/live.mjs.
 import { handleAgentRoutes } from './agent.mjs';
+import { handleCloneGrant } from './clone-credential.mjs';
 import { handleAgentV2Routes } from './agent-v2.mjs';
 import { handleProjectRegister } from './project-register.mjs';
 import { handlePlanningRoutes } from './planning.mjs';
@@ -325,6 +326,12 @@ export async function handleKB(req, res) {
       const projectId = projIdRaw && SAFE_ID.test(projIdRaw) ? projIdRaw : undefined;
       const results = kb.search(userId, { q, kind, limit, projectId });
       sendJSON(res, 200, { results });
+      return true;
+    }
+
+    // Single-use clone grant for the SSH server helper (server/clone-grants.mjs). The token itself is never returned.
+    if (req.method === 'POST' && url.split('?')[0] === '/kb/repos/clone-grant') {
+      await handleCloneGrant(req, res, { userId });
       return true;
     }
 
