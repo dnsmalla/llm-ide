@@ -5,29 +5,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import { NeedsHost } from "../ui.tsx";
-import { SshServerModel, type SshServerIo } from "../ssh-server-model.ts";
+import { SshServerModel, UNAVAILABLE_SSH_IO } from "../ssh-server-model.ts";
 import { SshServerView, type SshDialog } from "./SshServerView.tsx";
-
-const rejectNoHost = async (): Promise<never> => {
-  throw new Error("The SSH server needs the desktop host, which is not connected in this build.");
-};
-/** Stands in for the host when there is none, so the model exists on every render (hooks cannot be conditional). */
-const NO_HOST: SshServerIo = {
-  saved: rejectNoHost,
-  installKey: rejectNoHost,
-  test: rejectNoHost,
-  confirm: rejectNoHost,
-  connect: rejectNoHost,
-  disconnect: rejectNoHost,
-  status: rejectNoHost,
-  stop: rejectNoHost,
-  uninstall: rejectNoHost,
-};
 
 export default function SshServerCard(): ReactNode {
   const { host } = useEnv();
   const available = Boolean(host.sshServer);
-  const m = useModel(() => new SshServerModel(host.sshServer ?? NO_HOST));
+  // The model exists on every render (hooks cannot be conditional); without a host it is never asked anything.
+  const m = useModel(() => new SshServerModel(host.sshServer ?? UNAVAILABLE_SSH_IO));
   const s = useStore(m);
   const [password, setPassword] = useState("");
   const [dialog, setDialog] = useState<SshDialog | null>(null);

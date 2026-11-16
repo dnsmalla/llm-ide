@@ -6,7 +6,7 @@ import { openedAgo } from "../shell/relative-time";
 import { NAME_MAX, PROJECT_EXPLAINER, validateProjectName } from "./model";
 import { GuideDialog } from "./HelpGuide";
 import { RemoteCard } from "./RemoteCard.tsx";
-import { SshServerEntry } from "./SshServerEntry.tsx";
+import { SshWelcome, type WelcomeSsh } from "./SshWelcome.tsx";
 
 export { GuideDialog };
 
@@ -34,6 +34,8 @@ export interface WelcomeProps {
   guideOpen?: boolean;
   /** Bumps when something asks for the guide (the account menu's "Help & Guide"). */
   guideSignal?: number;
+  /** The SSH connect dialog and recent servers talk to the host through this; without it they show no servers. */
+  ssh?: WelcomeSsh;
 }
 
 const dateless = (s: string, max: number) => safeText(s, max);
@@ -62,7 +64,7 @@ function RecentRow({ entry, busy, onOpen, onForget }: { entry: RecentEntry; busy
   );
 }
 
-export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, guideOpen = false, guideSignal = 0 }: WelcomeProps) {
+export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, guideOpen = false, guideSignal = 0, ssh }: WelcomeProps) {
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"create" | "open" | null>(null);
@@ -168,7 +170,7 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
           </section>
 
           <RemoteCard />
-          <SshServerEntry />
+          <SshWelcome ssh={ssh} />
         </div>
 
         <aside className="wc-explainer" aria-label="What is a project">

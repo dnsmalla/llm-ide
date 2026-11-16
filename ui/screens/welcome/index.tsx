@@ -9,12 +9,20 @@ import { readHome } from "../shell/landing";
 import { useActiveProject } from "../shell/use-shell";
 import { registerNewProject } from "./model";
 import { WelcomeScreen, type WelcomeActions } from "./WelcomeScreen";
+import type { WelcomeSsh } from "./SshWelcome.tsx";
+import { invokeHost } from "../shell/host";
+import { createSshServerIo } from "../settings/ssh-server-model";
 
 /** The Home section: shown while no project is open (and reachable any time from the nav). */
 export default function WelcomeSection(_props: SectionProps) {
   const p = useActiveProject();
   const [focusNew, setFocusNew] = useState(0);
   const [guideSignal, setGuideSignal] = useState(0);
+  // The SSH connect card talks to the host through the same commands as Settings' SSH card.
+  const ssh = useMemo<WelcomeSsh>(
+    () => ({ io: createSshServerIo(invokeHost), restartApp: async () => { await invokeHost<unknown>("app_restart"); } }),
+    [],
+  );
   // "New project" buttons elsewhere (the no-project cards) ask for the form via the shell bus.
   useEffect(() => {
     const take = (ev: { section: string; anchor?: string } | null) => {
@@ -41,5 +49,5 @@ export default function WelcomeSection(_props: SectionProps) {
     }),
     [],
   );
-  return <WelcomeScreen project={p.project} recent={p.recentAll} error={p.error} actions={actions} focusNew={focusNew} guideSignal={guideSignal} />;
+  return <WelcomeScreen project={p.project} recent={p.recentAll} error={p.error} actions={actions} focusNew={focusNew} guideSignal={guideSignal} ssh={ssh} />;
 }

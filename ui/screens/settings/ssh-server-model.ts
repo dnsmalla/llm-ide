@@ -149,8 +149,47 @@ export function sshBadgeText(link: string | null, host: string): string | null {
   return null;
 }
 
+/** One server the Welcome screen remembers. Never a password; the key path only, never key contents. */
+export interface SshRecentServer {
+  host: string;
+  port: number;
+  user: string;
+  keyPath: string;
+  auth: SshAuth;
+  /** Epoch milliseconds of the last successful connect. The list is already sorted, most recent first. */
+  lastUsed: number;
+}
+/** The fields that identify one saved server (its login), which is what Forget removes. */
+export type SshRecentRef = Pick<SshRecentServer, "host" | "port" | "user">;
+/** The recent list shows at most this many servers; the host keeps no more than this for the list. */
+export const SSH_RECENT_MAX = 10;
+
+/**
+ * Strict decode of `remote_ssh_server_recent`. One malformed entry makes the whole answer unreadable: a partly
+ * readable list would show rows the host did not vouch for.
+ */
+export function decodeSshRecentList(raw: unknown): SshRecentServer[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: SshRecentServer[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) return null;
+    const { host, port, user, keyPath, auth, lastUsed } = item;
+    if (typeof host !== "string" || host.length === 0) return null;
+    if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+    if (typeof user !== "string" || typeof keyPath !== "string") return null;
+    if (auth !== "key" && auth !== "password") return null;
+    if (typeof lastUsed !== "number" || !Number.isFinite(lastUsed)) return null;
+    out.push({ host, port, user, keyPath, auth, lastUsed });
+  }
+  return out;
+}
+
 export interface SshServerIo {
   saved(): Promise<SshSavedSettings>;
+  /** The saved servers, most recent first. Rejects when the host does not know the command (an older desktop build). */
+  recent(): Promise<SshRecentServer[]>;
+  /** Remove one saved server and its saved host-key pin. */
+  forget(entry: SshRecentRef): Promise<void>;
   installKey(password: string): Promise<SshServerStatus>;
   test(target: SshServerTarget, password?: string): Promise<SshServerTest>;
   confirm(target: SshServerTarget, hostKeyType: string, fingerprint: string): Promise<SshServerTest>;
@@ -204,8 +243,32 @@ export function createSshServerIo(invoke: SshInvoke): SshServerIo {
     async installKey(password) {
       return decodeOrThrow(await invoke<unknown>("remote_ssh_server_install_key", { password }), decodeSshServerStatus);
     },
+    async recent() {
+      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_recent"), decodeSshRecentList).slice(0, SSH_RECENT_MAX);
+    },
+    async forget(entry) {
+      await invoke<unknown>("remote_ssh_server_forget", { host: entry.host, port: entry.port, user: entry.user });
+    },
   };
 }
+
+const rejectNoHost = async (): Promise<never> => {
+  throw new Error("The SSH server needs the desktop host, which is not connected in this build.");
+};
+/** Stands in for the host when there is none (a plain browser or a test without a host), so a model always exists. */
+export const UNAVAILABLE_SSH_IO: SshServerIo = {
+  saved: rejectNoHost,
+  recent: rejectNoHost,
+  forget: rejectNoHost,
+  installKey: rejectNoHost,
+  test: rejectNoHost,
+  confirm: rejectNoHost,
+  connect: rejectNoHost,
+  disconnect: rejectNoHost,
+  status: rejectNoHost,
+  stop: rejectNoHost,
+  uninstall: rejectNoHost,
+};
 
 export interface SshServerState {
   host: string;
@@ -268,6 +331,27 @@ export class SshServerModel extends Store<SshServerState> {
     const fieldErrors = { ...this.getState().fieldErrors };
     delete fieldErrors.keyPath;
     this.set({ auth, fieldErrors, error: null, foreign: null });
+  }
+
+  /**
+   * Fill the form from a remembered server. The last test goes: its host key was about the server the form showed
+   * before. No password is taken here; the dialog holds it for one call.
+   */
+  loadFrom(entry: SshRecentServer): void {
+    this.#generation += 1;
+    this.set({
+      host: entry.host, port: String(entry.port), user: entry.user, keyPath: entry.keyPath, auth: entry.auth,
+      fieldErrors: {}, test: null, error: null, foreign: null,
+    });
+  }
+
+  /**
+   * Empty the form for a new server. `busy` is kept on purpose: an action still running finishes on its own, and a
+   * second one must not start beside it.
+   */
+  reset(): void {
+    this.#generation += 1;
+    this.set({ ...SSH_SERVER_INITIAL, fieldErrors: {}, busy: this.getState().busy });
   }
 
   /** The target the host receives: exactly the non-secret fields. */

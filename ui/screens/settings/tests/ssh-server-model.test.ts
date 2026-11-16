@@ -31,6 +31,8 @@ function fakeIo(over: Partial<SshServerIo> = {}): SshServerIo & { targets: SshSe
     async uninstall() { return { ...status, link: "off" }; },
     async saved() { return savedSettings; },
     async installKey() { return status; },
+    async recent() { return []; },
+    async forget() {},
     ...over,
   };
 }
