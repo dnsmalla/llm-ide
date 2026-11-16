@@ -10,6 +10,7 @@ import {
   removeSavedRepo,
   repoPathOf,
   repoSlugOf,
+  resolveCloneGrant,
   shouldProvision,
   repoTitle,
   setActiveRepo,
@@ -136,4 +137,46 @@ test("GitLab nested groups: shorthand and URLs validate, provision on blur, and 
   assert.equal(repoPathOf("a//b"), null, "an empty segment is not a path");
   assert.equal(shouldProvision({ url: "https://gitlab.com/group/sub/project", clonePath: "" }), true, "a nested GitLab project is cloned on blur");
   assert.equal(repoSlugOf("https://gitlab.com/group/sub/project"), null, "the GitHub issue import still reads owner/repo only");
+});
+
+test("resolveCloneGrant: a typed or remembered token skips the grant call", async () => {
+  let asked = 0;
+  const grant = await resolveCloneGrant({ ssh: true, token: "ghp_typed", provider: "github" }, async () => {
+    asked += 1;
+    return { grant: "ab12" };
+  });
+  assert.equal(grant, null);
+  assert.equal(asked, 0, "a typed token never reaches the core");
+});
+
+test("resolveCloneGrant: ssh with no token asks for the provider's grant and returns it", async () => {
+  const asked: string[] = [];
+  const grant = await resolveCloneGrant({ ssh: true, token: "  ", provider: "gitlab" }, async (provider) => {
+    asked.push(provider);
+    return { grant: "cd34" };
+  });
+  assert.equal(grant, "cd34");
+  assert.deepEqual(asked, ["gitlab"]);
+});
+
+test("resolveCloneGrant: a null grant (no saved token) clones plainly", async () => {
+  const grant = await resolveCloneGrant({ ssh: true, token: "", provider: "github" }, async () => ({ grant: null }));
+  assert.equal(grant, null);
+});
+
+test("resolveCloneGrant: a failed grant call falls back to a plain clone", async () => {
+  const grant = await resolveCloneGrant({ ssh: true, token: "", provider: "github" }, async () => {
+    throw new Error("UNREACHABLE");
+  });
+  assert.equal(grant, null);
+});
+
+test("resolveCloneGrant: local mode never asks the core", async () => {
+  let asked = 0;
+  const grant = await resolveCloneGrant({ ssh: false, token: "", provider: "github" }, async () => {
+    asked += 1;
+    return { grant: "ab12" };
+  });
+  assert.equal(grant, null);
+  assert.equal(asked, 0, "local clones keep using the Mac's own git credentials");
 });

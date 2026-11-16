@@ -15,6 +15,7 @@ import {
   readRepoConfig,
   removeSavedRepo,
   repoTitle,
+  resolveCloneGrant,
   setActiveRepo,
   setPrimary,
   shouldProvision,
@@ -201,7 +202,9 @@ export default function RepositoriesSection() {
     setError(null);
     setCloneNotice(null);
     try {
-      const result = await host.cloneRepository({ provider: provider.id, url: r.url, token: token.trim() || undefined });
+      // SSH mode with no token typed or remembered: the server redeems a grant for the saved token (null: none saved).
+      const grant = await resolveCloneGrant({ ssh, token, provider: provider.id }, (p) => call(client, "POST", "/kb/repos/clone-grant", { provider: p }));
+      const result = await host.cloneRepository({ provider: provider.id, url: r.url, token: token.trim() || undefined, grant: grant ?? undefined });
       edit((c) => applyCloneResult(c, provider.id, r.id, result.path, ssh));
       // Register the clone with the core so issues/graph may read it; Library → Sources owns this allow-list.
       await call(client, "POST", "/auth/me/repos", { path: result.path }).catch(() => undefined);
@@ -410,7 +413,7 @@ export default function RepositoriesSection() {
                           className="st-input st-grow"
                           type="password"
                           value={cloneToken}
-                          placeholder={memoryTokens[provider.id] ? "Saved token will be used" : "Token (optional for public repositories)"}
+                          placeholder={(memoryTokens[provider.id] || (ssh && secrets?.has(provider.tokenKey))) ? "Saved token will be used" : "Token (optional for public repositories)"}
                           onChange={(e) => setCloneToken(e.target.value)}
                           aria-label={`${provider.label} token for clone`}
                         />

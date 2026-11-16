@@ -261,8 +261,11 @@ export interface SettingsHost {
   coreStop?(): Promise<void>;
   coreStart?(): Promise<void>;
   coreRestart?(): Promise<void>;
-  /** Clones a saved repository into the active project's code/ folder (token optional for public repos). */
-  cloneRepository?(args: { provider: "github" | "gitlab"; url: string; token?: string }): Promise<{ path: string; name: string }>;
+  /**
+   * Clones a saved repository into the active project's code/ folder (token optional for public repos). `grant` is the
+   * SSH server's single-use clone grant; the server redeems it for the saved token, so the token never reaches here.
+   */
+  cloneRepository?(args: { provider: "github" | "gitlab"; url: string; token?: string; grant?: string }): Promise<{ path: string; name: string }>;
   /** Active project folder, if the shell has one. */
   activeProjectPath?(): string | null;
   notesFolderPath?(): Promise<string | null>;

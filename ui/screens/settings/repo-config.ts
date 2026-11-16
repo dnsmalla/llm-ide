@@ -234,6 +234,25 @@ export function cloneDestinationOf(
 }
 
 /**
+ * The server clone grant for one clone. Only SSH mode asks, and only when no token is typed or remembered: a typed
+ * token wins and never reaches the core. The core answers `{grant}` (null without a saved token). A failed request
+ * is not fatal: the clone then runs anonymously, and a private repository reports its auth failure as before.
+ */
+export async function resolveCloneGrant(
+  args: { ssh: boolean; token: string; provider: RepoProvider },
+  requestGrant: (provider: RepoProvider) => Promise<unknown>,
+): Promise<string | null> {
+  if (!args.ssh || args.token.trim()) return null;
+  try {
+    const body = await requestGrant(args.provider);
+    const grant = body && typeof body === "object" ? (body as { grant?: unknown }).grant : null;
+    return typeof grant === "string" && grant.length > 0 ? grant : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Records a finished clone. Local mode keeps the path for the Loop, Factory and Review; a server clone leaves the
  * saved repository alone so the Mac path that local mode uses is not overwritten.
  */

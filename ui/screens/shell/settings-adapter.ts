@@ -224,7 +224,8 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           await d.invoke<unknown>("core_restart");
         },
         async cloneRepository(args) {
-          const raw = await d.invoke<unknown>("repo_clone", args);
+          // grant is read by the host only in SSH mode; local mode ignores it.
+          const raw = await d.invoke<unknown>("repo_clone", { provider: args.provider, url: args.url, token: args.token, grant: args.grant });
           const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
           if (typeof o.path !== "string" || typeof o.name !== "string") throw new Error("the host returned no cloned path");
           return { path: o.path, name: o.name };
