@@ -7,6 +7,7 @@ import { GuideDialog } from "../welcome/WelcomeScreen";
 import { SectionToolbar } from "./Toolbar";
 import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
 import { host as shellHost, invokeHost } from "./host";
+import { setServerFolderHandler } from "./server-folder";
 import { SectionErrorBoundary } from "./ErrorBoundary";
 import { CoreDownPanel, LoginPanel } from "./Panels";
 import { CrashReportBanner } from "./CrashReportBanner";
@@ -50,6 +51,8 @@ declare const __FEATURE_AUTO_TASKS__: boolean | undefined;
 export interface ShellProps {
   /** Section to open (launch override); otherwise the shell lands on Welcome, or the home section once a project is open. */
   initialSection?: SectionId | null;
+  /** The SSH server folder picker (ssh mode). Unset until the picker ships: no server folder action is offered then. */
+  onOpenServerFolder?: () => void;
   /** Theme for this launch only (screenshot tooling); not persisted. */
   themeOverride?: ThemeId | null;
   /** The Spike route: Phase 0 bench/graph/terminal/editor views (lazy). Receives no props. */
@@ -57,20 +60,25 @@ export interface ShellProps {
 }
 
 /** One mounted section: lazy screen inside its own error boundary and Suspense. */
-export const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, mode, inert, spike: Spike }: { def: SectionDef; active: boolean; projectRoot: string | null; mode: NavMode; inert: boolean; spike: ComponentType }) {
+export const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, mode, onOpenServerFolder, inert, spike: Spike }: { def: SectionDef; active: boolean; projectRoot: string | null; mode: NavMode; onOpenServerFolder?: () => void; inert: boolean; spike: ComponentType }) {
   const Screen = def.id === "spike" ? null : screenFor(def.id, def.label);
   return (
     <div className="sh-section" hidden={!active} inert={inert || !active} data-section={def.id}>
       <SectionErrorBoundary name={def.label}>
         <Suspense fallback={<div className="sh-panel" role="status" aria-busy="true"><span className="sh-spinner" aria-hidden="true" /><p className="sh-panel-text sh-muted">Loading {def.label}…</p></div>}>
-          {def.id === "spike" ? <Spike /> : Screen ? <Screen active={active} projectRoot={projectRoot} mode={mode} /> : <MissingScreen name={def.label} />}
+          {def.id === "spike" ? <Spike /> : Screen ? <Screen active={active} projectRoot={projectRoot} mode={mode} onOpenServerFolder={onOpenServerFolder} /> : <MissingScreen name={def.label} />}
         </Suspense>
       </SectionErrorBoundary>
     </div>
   );
 });
 
-export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
+export function Shell({ initialSection, themeOverride, spike, onOpenServerFolder }: ShellProps) {
+  // Screens far from the shell (a chat or graph card without a project) read the picker from the registry.
+  useEffect(() => {
+    setServerFolderHandler(onOpenServerFolder ?? null);
+    return () => setServerFolderHandler(null);
+  }, [onOpenServerFolder]);
   const [nav, rawDispatch] = useReducer(navReducer, undefined, () => {
     if (initialSection === "spike") enableDevToolsForSession(); // a spike launch needs its own item
     return initialNav(initialSection ?? null);
@@ -433,7 +441,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           )}
           {mount &&
             visibleSections.filter((s) => nav.visited.includes(s.id)).map((def) => (
-              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} mode={navMode} inert={sectionInert(gate, def.id, settingsReachable)} spike={spike} />
+              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} mode={navMode} onOpenServerFolder={onOpenServerFolder} inert={sectionInert(gate, def.id, settingsReachable)} spike={spike} />
             ))}
           {gate === "core" && settingsReachable && (
             <div className="sh-notice" role="status" data-testid="core-down-notice">
@@ -480,6 +488,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
         onChat={() => setSideChat((v) => !v)}
         onHelp={() => setGuideOpen(true)}
         terminalItem={<ShellTerminalItem built={TERMINAL_BUILT} open={terminalOpen} onToggle={toggleTerminalDock} />}
+        ssh={navMode === "ssh"}
+        openServerFolder={onOpenServerFolder ?? null}
       /> : null}
       {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} onNavigate={(section, anchor) => { setGuideOpen(false); if (anchor) shellBus.publish({ type: "goto-section", section, anchor }); else onSelect(section); }} /> : null}
       {permissionsOpen ? <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-permissions-title"><div className="sh-modal-card"><h2 id="sh-permissions-title" className="sh-panel-title">Permissions</h2><p className="sh-panel-text">Accessibility, Screen Recording and Microphone permissions belong to the Mac app’s live-capture engine. The desktop has no capture engine, so there is nothing to grant here.</p><div className="sh-form-actions"><button type="button" className="sh-button" onClick={() => setPermissionsOpen(false)}>Close</button></div></div></div> : null}

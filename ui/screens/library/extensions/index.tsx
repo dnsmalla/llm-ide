@@ -9,9 +9,10 @@ import { createExtensionsApi, type ExtCore, type ExtensionsApi } from "./api.ts"
 import { ExtensionsScreen } from "./ExtensionsScreen";
 import { createLegacyApi, LegacyScreen } from "./LegacyPane";
 import type { LegacyApi } from "./legacy.ts";
-import { projectRelativeOf, type LocationReveal } from "./legacy-labels.ts";
-import { host as shellHost, invokeHost, projectStore } from "@llmide/screens/shell";
+import type { LocationReveal } from "./legacy-labels.ts";
+import { host as shellHost, inSshMode, invokeHost, projectStore } from "@llmide/screens/shell";
 import { publicHttpsUrl } from "../safe-url.ts";
+import { projectLocationReveal } from "../local-actions.ts";
 import { loadExtensionCounts, type ExtensionCounts } from "./counts.ts";
 
 /** The shell's core client as the Extensions screen's request function. It keeps error bodies (the screen maps codes). */
@@ -24,14 +25,15 @@ export function extCoreFrom(client: Pick<CoreClient, "requestRaw">): ExtCore {
   };
 }
 
-/** Reveal in the file manager: only a source folder inside the open project (the host resolves paths against the project root). */
-const projectReveal: LocationReveal = {
-  canReveal: (location) => projectRelativeOf(location, projectStore.getSnapshot().project?.root ?? null) !== null,
-  reveal: (location) => {
-    const rel = projectRelativeOf(location, projectStore.getSnapshot().project?.root ?? null);
-    if (rel !== null) void invokeHost("reveal_in_os", { relPath: rel }).catch(() => undefined);
-  },
-};
+/**
+ * Reveal in the file manager: only a source folder inside the open project (the host resolves paths against the project
+ * root). Read at render time, so the server mode is current; in ssh mode nothing is revealed.
+ */
+const projectReveal = (): LocationReveal => projectLocationReveal(
+  inSshMode(),
+  () => projectStore.getSnapshot().project?.root ?? null,
+  (rel) => void invokeHost("reveal_in_os", { relPath: rel }).catch(() => undefined),
+);
 
 /** Opens a catalog repository link through the host (it asks the user once per site). Only public https addresses. */
 export function openRepository(url: string): void {
@@ -60,7 +62,7 @@ export function libraryExtensions(client: Pick<CoreClient, "requestRaw">, base: 
   const renderers: Record<string, () => ReactNode> = {
     extensions: () => <ExtensionsScreen api={getApi()} openRepository={openRepository} />,
     plugins: () => <LegacyScreen api={getLegacy()} kind="plugins" />,
-    "llm-sources": () => <LegacyScreen api={getLegacy()} kind="llm-sources" revealer={projectReveal} />,
+    "llm-sources": () => <LegacyScreen api={getLegacy()} kind="llm-sources" revealer={projectReveal()} />,
     "mcp-plugins": () => <LegacyScreen api={getLegacy()} kind="mcp-plugins" />,
   };
   return base.map((e) => (renderers[e.id] ? { ...e, render: renderers[e.id] } : e));

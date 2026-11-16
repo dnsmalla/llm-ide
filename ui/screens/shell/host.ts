@@ -176,6 +176,11 @@ export function setSshModeProvider(provider: () => boolean): void {
   sshModeProvider = provider;
 }
 
+/** True in ssh server mode: the project is a folder on the server, so local project actions are not offered. */
+export function inSshMode(): boolean {
+  return sshModeProvider();
+}
+
 function remoteSafe(command: string): boolean {
   return REMOTE_SAFE_COMMANDS.has(command) || REMOTE_SAFE_PREFIXES.some((p) => command.startsWith(p));
 }
@@ -330,9 +335,12 @@ export const host = {
     await invokeHost<unknown>("project_close");
   },
 
-  /** Recent list with a status per entry (missing/moved folders are reported, not dropped). */
+  /**
+   * Recent list with a status per entry (missing/moved folders are reported, not dropped). In ssh mode the list is the
+   * desktop's local one, which the host refuses there; it is empty instead, so the project refresh still works.
+   */
   async projectRecentAll(): Promise<RecentList> {
-    if (!isHostAvailable()) return { entries: [], reset: false };
+    if (!isHostAvailable() || inSshMode()) return { entries: [], reset: false };
     return decodeRecentList(await invokeHost<unknown>("project_recent_all"));
   },
 
@@ -342,9 +350,9 @@ export const host = {
     return (await invokeHost<unknown>("project_forget_recent", { index: storedIndex, root })) === true;
   },
 
-  /** Recent projects, newest first (host-owned list). */
+  /** Recent projects, newest first (host-owned list). Empty in ssh mode (see `projectRecentAll`). */
   async projectRecent(): Promise<ProjectInfo[]> {
-    if (!isHostAvailable()) return [];
+    if (!isHostAvailable() || inSshMode()) return [];
     return invokeHost<ProjectInfo[]>("project_recent");
   },
 

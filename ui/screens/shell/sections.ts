@@ -187,6 +187,8 @@ export interface SectionProps {
   projectRoot: string | null;
   /** The server mode the shell runs in. Absent means local. A screen hides actions that only make sense on this computer. */
   mode?: NavMode;
+  /** The SSH server folder picker. Absent until it ships: a screen then offers no "open server folder" action. */
+  onOpenServerFolder?: () => void;
 }
 
 export interface KeyLike {

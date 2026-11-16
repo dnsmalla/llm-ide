@@ -22,6 +22,7 @@ import { withCreatedHook } from "./sources/created-hook.ts";
 import { sourceConnections } from "./sources/SourcePanes";
 import { createWriteHost } from "./write/write-host.ts";
 import { projectMutations } from "./project-ops.ts";
+import { fileManagerRevealFor } from "./local-actions.ts";
 
 export { LibraryScreen, type LibraryScreenProps } from "./LibraryScreen";
 export { EXTENSION_PLACEHOLDERS, type LibraryExtension } from "./LibraryNav";
@@ -56,7 +57,7 @@ async function openAuth(url: string): Promise<boolean> {
   return (await invokeHost<boolean>("open_external_url", { url })) === true;
 }
 
-export default function Library({ active, projectRoot }: SectionProps) {
+export default function Library({ active, projectRoot, mode }: SectionProps) {
   const { store, host, writeHost } = useMemo(app, []);
   const runRebuild = useCallback(
     (records: Parameters<typeof rebuildIndex>[0], report: Parameters<typeof rebuildIndex>[2], signal: AbortSignal) =>
@@ -114,7 +115,7 @@ export default function Library({ active, projectRoot }: SectionProps) {
     hostAvailable={available}
     projectOpen={projectRoot !== null}
     onCopyPath={async (text) => { await navigator.clipboard?.writeText(text); }}
-    onRevealPath={async (path) => { await invokeHost("reveal_in_os", { relPath: path }); }}
+    onRevealPath={fileManagerRevealFor(mode === "ssh", (relPath) => invokeHost("reveal_in_os", { relPath }))}
     onExportFile={async (name, text) => {
       const path = await invokeHost<unknown>("export_note", { name, text });
       return typeof path === "string" ? path : null;

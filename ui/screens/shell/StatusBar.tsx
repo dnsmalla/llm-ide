@@ -21,10 +21,27 @@ export interface ProjectMenuActions {
 }
 
 /**
+ * What the switcher offers for the server mode. In ssh mode the project is on the server: the local recent list, New
+ * project and Reveal in Finder are not offered (their commands are refused there), and Open Folder becomes the server
+ * folder picker, only when the shell has one.
+ */
+export interface ProjectSwitcherContext {
+  ssh: boolean;
+  openServerFolder?: (() => void) | null;
+}
+
+/**
  * The project switcher's rows (Mac `ProjectSwitcher`): recent projects, New, Open Folder, then "Reveal in Finder"
  * only while a project is open (the Mac shows it only for the active project), then Close. Pure, so tests need no DOM.
  */
-export function projectSwitcherItems(project: ProjectInfo | null, recent: readonly ProjectInfo[], a: ProjectMenuActions): MenuItem[] {
+export function projectSwitcherItems(project: ProjectInfo | null, recent: readonly ProjectInfo[], a: ProjectMenuActions, context: ProjectSwitcherContext = { ssh: false }): MenuItem[] {
+  if (context.ssh) {
+    const openServer = context.openServerFolder ?? null;
+    return [
+      ...(openServer ? [{ id: "open", label: "Open server folder…", onSelect: openServer }] : []),
+      { id: "close", label: "Close project", title: "Back to the Welcome page. Nothing is deleted.", disabled: !project, onSelect: () => void a.closeProject() },
+    ];
+  }
   return [
     ...recent.map((p, i) => ({
       id: `recent-${i}`,
@@ -40,7 +57,7 @@ export function projectSwitcherItems(project: ProjectInfo | null, recent: readon
   ];
 }
 
-const ProjectSwitcher = memo(function ProjectSwitcher() {
+const ProjectSwitcher = memo(function ProjectSwitcher({ ssh, openServerFolder }: ProjectSwitcherContext) {
   const { project, recent, openFolder, openRecent, closeProject, error, refresh } = useActiveProject();
   const [revealError, setRevealError] = useState<string | null>(null);
   const items = projectSwitcherItems(project, recent, {
@@ -51,7 +68,7 @@ const ProjectSwitcher = memo(function ProjectSwitcher() {
       setRevealError(null);
       host.projectReveal().catch((e: unknown) => setRevealError(safeText(e instanceof Error ? e.message : String(e), 200)));
     },
-  });
+  }, { ssh, openServerFolder });
   return (
     <>
       <MenuButton
@@ -196,14 +213,18 @@ interface Props {
   onTheme: (id: ThemeId) => void;
   /** Opens Help & Support (bottom bar, always visible). */
   onHelp?: () => void;
+  /** Ssh server mode: the project switcher offers the server folder picker instead of local project actions. */
+  ssh?: boolean;
+  /** The SSH server folder picker; absent until it ships, and then no server folder action is offered. */
+  openServerFolder?: (() => void) | null;
 }
 
-export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onTheme, chatActive = false, onChat, terminalItem = null, onHelp }: Props) {
+export const StatusBar = memo(function StatusBar({ apiWarning = null, theme, onTheme, chatActive = false, onChat, terminalItem = null, onHelp, ssh = false, openServerFolder = null }: Props) {
   const { signedIn } = useCoreSession();
   const themeLabel = THEMES.find((t) => t.id === theme)?.label ?? theme;
   return (
     <footer className="sh-statusbar" aria-label="Status">
-      <ProjectSwitcher />
+      <ProjectSwitcher ssh={ssh} openServerFolder={openServerFolder} />
       <CoreChip />
       {apiWarning && <ServerOutdatedChip warning={apiWarning} />}
       <span className="sh-spacer" />
