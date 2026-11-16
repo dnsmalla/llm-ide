@@ -851,6 +851,7 @@ fn step_project_clone(_run: &mut Run) -> Result<Outcome, Failed> {
         "https://github.com/octocat/Hello-World".to_string(),
         None,
         None,
+        None,
     ))
     .map_err(|error| failed("CLONE_FAILED", error.message()))?;
     expect(cloned.name == "Hello-World", "CLONE_NAME", "the clone is not named Hello-World")?;

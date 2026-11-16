@@ -18,20 +18,24 @@ use crate::workspace_backend::{self, Connector, Remote};
 /// The local command has no cancel control, so its flag is never set. The SSH helper is the one that cancels.
 static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+/// `grant` is the server's single-use clone grant. It is used only in SSH mode, where the helper redeems it for the
+/// saved token; local mode ignores it because the Mac's own git credentials are used there.
 #[tauri::command]
 pub async fn repo_clone(
     provider: String,
     url: String,
     token: Option<String>,
     folder: Option<String>,
+    grant: Option<String>,
 ) -> Result<CloneResult, workspace_backend::CommandError> {
     if workspace_backend::is_ssh_mode() {
         return Ok(workspace_backend::on_blocking(move || {
-            remote_clone_with(workspace_backend::remote(), &workspace_backend::LinkConnector, provider, url, token, folder, CLONE_CAP)
+            remote_clone_with(workspace_backend::remote(), &workspace_backend::LinkConnector, provider, url, token, folder, grant, CLONE_CAP)
         })
         .await??);
     }
-    let req = CloneRequest { provider, url, token: token.map(Token::from), folder };
+    // Local mode never redeems a grant: the Mac's own git credentials are used, so `grant` stays unset here.
+    let req = CloneRequest { provider, url, token: token.map(Token::from), folder, grant: None };
     let root = crate::project::active_root().ok_or_else(|| "open a project before cloning a repository".to_string())?;
     if crate::fs_ops::checked_root(&root).is_err() {
         return Err("the project folder is not usable".to_string().into());
@@ -48,11 +52,20 @@ pub async fn repo_clone(
 
 /// The helper's `repo_clone` request. An unusable token is dropped, as the local command does, so the clone runs
 /// anonymously; `folder` is sent as `null` when absent. The token is placed here and nowhere else in the desktop.
-pub(crate) fn clone_request(provider: String, url: String, token: Option<String>, folder: Option<String>) -> Value {
+/// The grant is sent only when no usable token was typed: a typed token always wins, and the helper never sees both.
+pub(crate) fn clone_request(
+    provider: String,
+    url: String,
+    token: Option<String>,
+    folder: Option<String>,
+    grant: Option<String>,
+) -> Value {
     let token = token.map(Token::from).filter(Token::is_usable);
     let mut req: Value = json!({"provider": provider, "url": url, "folder": folder});
     if let Some(token) = token.as_ref() {
         req["token"] = json!(token.expose());
+    } else if let Some(grant) = grant {
+        req["grant"] = json!(grant);
     }
     req
 }
@@ -65,9 +78,10 @@ pub(crate) fn remote_clone_with(
     url: String,
     token: Option<String>,
     folder: Option<String>,
+    grant: Option<String>,
     cap: Duration,
 ) -> R<CloneResult> {
-    let answer = remote.clone_repo(connector, clone_request(provider, url, token, folder), cap)?;
+    let answer = remote.clone_repo(connector, clone_request(provider, url, token, folder, grant), cap)?;
     let field = |key: &str| answer.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
     Ok(CloneResult { path: field("path"), name: field("name") })
 }

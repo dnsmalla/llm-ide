@@ -846,23 +846,49 @@ fn clone_start_failure_sends_no_cancel_and_clears_the_route() {
 fn remote_clone_request_carries_the_token_only_when_usable() {
     let remote = Remote::new();
     let connector = project_setup_connector();
-    let _ = crate::repo_clone::remote_clone_with(&remote, &*connector, "github".into(), "o/r".into(), Some("ghp_secret".into()), None, Duration::from_millis(50));
+    let _ = crate::repo_clone::remote_clone_with(&remote, &*connector, "github".into(), "o/r".into(), Some("ghp_secret".into()), None, None, Duration::from_millis(50));
     let repo_clone = connector.channel(0).calls().into_iter().find(|(cmd, _, _)| cmd == "repo_clone").expect("repo_clone sent");
     assert_eq!(repo_clone.1["req"]["provider"], "github");
     assert_eq!(repo_clone.1["req"]["url"], "o/r");
     assert_eq!(repo_clone.1["req"]["token"], "ghp_secret");
     assert!(repo_clone.1["req"]["folder"].is_null());
 
-    let blank = crate::repo_clone::clone_request("github".into(), "o/r".into(), Some("   ".into()), None);
+    let blank = crate::repo_clone::clone_request("github".into(), "o/r".into(), Some("   ".into()), None, None);
     assert!(blank.get("token").is_none(), "a blank token is dropped, as the local command does");
-    assert!(crate::repo_clone::clone_request("github".into(), "o/r".into(), None, Some("sub".into())).get("token").is_none());
+    assert!(crate::repo_clone::clone_request("github".into(), "o/r".into(), None, Some("sub".into()), None).get("token").is_none());
+}
+
+#[test]
+fn clone_grant_is_sent_only_when_no_token_is_usable() {
+    let granted = crate::repo_clone::clone_request("github".into(), "o/r".into(), None, None, Some("ab12".into()));
+    assert_eq!(granted["grant"], "ab12", "with no typed token the grant goes to the helper");
+
+    let blank = crate::repo_clone::clone_request("github".into(), "o/r".into(), Some("   ".into()), None, Some("ab12".into()));
+    assert_eq!(blank["grant"], "ab12", "a blank token is not usable, so the grant is sent");
+
+    let typed = crate::repo_clone::clone_request("github".into(), "o/r".into(), Some("ghp_secret".into()), None, Some("ab12".into()));
+    assert_eq!(typed["token"], "ghp_secret");
+    assert!(typed.get("grant").is_none(), "a typed token wins and the grant is not sent");
+
+    let plain = crate::repo_clone::clone_request("github".into(), "o/r".into(), None, None, None);
+    assert!(plain.get("grant").is_none(), "without a grant the request is a plain clone");
+}
+
+#[test]
+fn remote_clone_forwards_the_grant_into_the_helper_request() {
+    let remote = Remote::new();
+    let connector = project_setup_connector();
+    let _ = crate::repo_clone::remote_clone_with(&remote, &*connector, "gitlab".into(), "g/p".into(), None, None, Some("ab12".into()), Duration::from_millis(50));
+    let repo_clone = connector.channel(0).calls().into_iter().find(|(cmd, _, _)| cmd == "repo_clone").expect("repo_clone sent");
+    assert_eq!(repo_clone.1["req"]["grant"], "ab12");
+    assert!(repo_clone.1["req"].get("token").is_none());
 }
 
 #[test]
 fn remote_clone_returns_the_path_and_name_from_the_event() {
     let (result, _) = with_clone_in_flight(
         project_setup,
-        |remote, connector| crate::repo_clone::remote_clone_with(remote, connector, "gitlab".into(), "g/p".into(), None, None, Duration::from_secs(10)),
+        |remote, connector| crate::repo_clone::remote_clone_with(remote, connector, "gitlab".into(), "g/p".into(), None, None, None, Duration::from_secs(10)),
         |api| api.emit(EventKind::Clone, json!({"id": CLONE_ID, "ok": true, "path": "/srv/home/proj/code/p", "name": "p"})),
     );
     let done = result.expect("clone");
@@ -893,7 +919,7 @@ fn local_mode_unchanged() {
     // The local branches run: with no local project they fail on their own local checks, not on a helper channel.
     let paths = tauri::async_runtime::block_on(crate::project_layout::project_paths());
     assert_eq!(paths.expect_err("no local project").message(), "no project is open");
-    let clone = tauri::async_runtime::block_on(crate::repo_clone::repo_clone("github".into(), "o/r".into(), None, None));
+    let clone = tauri::async_runtime::block_on(crate::repo_clone::repo_clone("github".into(), "o/r".into(), None, None, None));
     assert_eq!(clone.expect_err("no local project").message(), "open a project before cloning a repository");
     crate::core_host::set_process_mode(2);
     assert_eq!(refuse_in_ssh_mode().expect_err("ssh refuses").code, "ssh_mode");
