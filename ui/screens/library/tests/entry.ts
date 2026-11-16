@@ -5,6 +5,7 @@ export { NoteList, rowOffsets, rowAt } from "../NoteList";
 export { MarkdownView } from "../MarkdownView";
 export { MeetingDetail, Transcript } from "../MeetingDetail";
 export { NoFolder, LoadError } from "../States";
+export { NoteMenuItems } from "../NoteMenuItems";
 export { LibraryStore } from "../library-store.ts";
 export { describeNote } from "../note-view.ts";
 export { parseMeetingBody } from "../meeting.ts";

@@ -2,6 +2,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileManagerRevealFor, projectLocationReveal } from "../local-actions.ts";
+import { loadEntry, react, server } from "./helpers.mjs";
+
+const L = await loadEntry();
+const h = react().createElement;
+const html = (el) => server().renderToStaticMarkup(el);
 
 test("Library reveal: offered outside ssh mode and sends the project-relative path", async () => {
   const sent = [];
@@ -11,8 +16,26 @@ test("Library reveal: offered outside ssh mode and sends the project-relative pa
   assert.deepEqual(sent, ["llm-doc/notes/a.md"]);
 });
 
-test("Library reveal: left out in ssh mode, so the menu item is not drawn", () => {
+test("Library reveal: no handler in ssh mode", () => {
   assert.equal(fileManagerRevealFor(true, async () => { throw new Error("must not run"); }), undefined);
+});
+
+// The note menu is rendered through the component that draws it, so the check is on the markup a user sees.
+const menu = (over = {}) => html(h(L.NoteMenuItems, { rel: "a.md", hidden: false, onOpen() {}, onUnhide() {}, onRemove() {}, onClose() {}, ...over }));
+
+test("note menu: Reveal in Finder is drawn in local mode and absent in ssh mode", async () => {
+  const local = menu({ onRevealPath: fileManagerRevealFor(false, async () => undefined) });
+  assert.match(local, /role="menuitem"[^>]*>Reveal in Finder</);
+  const ssh = menu({ onRevealPath: fileManagerRevealFor(true, async () => undefined) });
+  assert.doesNotMatch(ssh, /Reveal in Finder/);
+  // The other items stay.
+  for (const label of ["Open", "Copy relative path", "Remove from List"]) assert.match(ssh, new RegExp(`>${label}<`));
+});
+
+test("note menu: a hidden note offers Unhide, and the reveal item follows the same rule", () => {
+  const hidden = menu({ hidden: true });
+  assert.match(hidden, />Unhide</);
+  assert.doesNotMatch(hidden, /Reveal in Finder/, "no handler, no item");
 });
 
 test("extension reveal: a location inside the project reveals outside ssh mode; ssh mode reveals nothing", () => {

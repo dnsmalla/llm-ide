@@ -14,10 +14,12 @@ test("copy path and reveal hand the host a project-relative path (llm-doc/<rel>)
   const ws = at("write/NoteWorkspace.tsx");
   assert.match(ws, /onCopyPath!\(`llm-doc\/\$\{rel\}`\)/);
   assert.match(ws, /onRevealPath!\(`llm-doc\/\$\{rel\}`\)/);
+  // The note menu's buttons live in NoteMenuItems.tsx (LibraryScreen renders them).
   const screen = at("LibraryScreen.tsx");
-  assert.match(screen, /onCopyPath\?\.\(`llm-doc\/\$\{noteMenu\.rel\}`\)/);
-  assert.match(screen, /onRevealPath\?\.\(`llm-doc\/\$\{noteMenu\.rel\}`\)/);
-  for (const [file, src] of [["write/NoteWorkspace.tsx", ws], ["LibraryScreen.tsx", screen]]) {
+  const menuItems = at("NoteMenuItems.tsx");
+  assert.match(menuItems, /onCopyPath\?\.\(`llm-doc\/\$\{rel\}`\)/);
+  assert.match(menuItems, /onRevealPath\(`llm-doc\/\$\{rel\}`\)/);
+  for (const [file, src] of [["write/NoteWorkspace.tsx", ws], ["LibraryScreen.tsx", screen], ["NoteMenuItems.tsx", menuItems]]) {
     assert.ok(!/onRevealPath[!?]*\.?\((noteMenu\.)?rel\)/.test(src), `${file} must not reveal a bare notes-root rel`);
   }
 });

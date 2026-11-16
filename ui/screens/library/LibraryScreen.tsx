@@ -13,6 +13,7 @@ import { ProjectFilesNav, ProjectFileView, type ProjectFilesDeps } from "./Proje
 import { MEETINGS_REVEAL_PATHS, revealFirst } from "./project-files.ts";
 import { refusedMessage } from "./hidden-notes.ts";
 import { NoteViewer } from "./NoteViewer";
+import { NoteMenuItems } from "./NoteMenuItems";
 import { DiscardDialog, NewNoteDialog } from "./write/WriteDialogs";
 import { NoteWorkspace } from "./write/NoteWorkspace";
 import { initialNoteText, newNoteRel } from "./write/note-ops.ts";
@@ -335,16 +336,16 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
       )}
       {noteMenu ? (
         <Floating anchor={{ x: noteMenu.x, y: noteMenu.y }} onDismiss={() => setNoteMenu(null)} className="lib-context" role="menu" data-lib-menu onMouseLeave={() => setNoteMenu(null)}>
-          <button type="button" role="menuitem" className="lib-context-close" aria-label="Close menu" onClick={() => setNoteMenu(null)}>×</button>
-          <button type="button" role="menuitem" onClick={() => { store.select(noteMenu.rel); setNoteMenu(null); }}>Open</button>
-          <button type="button" role="menuitem" onClick={() => { void onCopyPath?.(`llm-doc/${noteMenu.rel}`); setNoteMenu(null); }}>Copy relative path</button>
-          <button type="button" role="menuitem" onClick={() => { void onRevealPath?.(`llm-doc/${noteMenu.rel}`); setNoteMenu(null); }}>Reveal in Finder</button>
-          {/* Hides from this list only: the note file stays where it is. */}
-          {state.hidden.has(noteMenu.rel) ? (
-            <button type="button" role="menuitem" onClick={() => { store.unhideNotes([noteMenu.rel]); setNoteMenu(null); }}>Unhide</button>
-          ) : (
-            <button type="button" role="menuitem" onClick={() => { const msg = refusedMessage(store.hideNotes([noteMenu.rel]).refused); if (msg) setLinkNotice(msg); setNoteMenu(null); }}>Remove from List</button>
-          )}
+          <NoteMenuItems
+            rel={noteMenu.rel}
+            hidden={state.hidden.has(noteMenu.rel)}
+            onOpen={() => store.select(noteMenu.rel)}
+            onCopyPath={onCopyPath}
+            onRevealPath={onRevealPath}
+            onUnhide={() => store.unhideNotes([noteMenu.rel])}
+            onRemove={() => { const msg = refusedMessage(store.hideNotes([noteMenu.rel]).refused); if (msg) setLinkNotice(msg); }}
+            onClose={() => setNoteMenu(null)}
+          />
         </Floating>
       ) : null}
       {newNote && (
