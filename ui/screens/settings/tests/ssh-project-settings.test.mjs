@@ -127,3 +127,23 @@ test("codeDirOf: an older host that omits isProject keeps the destination (decod
   assert.equal(old.isProject, true);
   assert.equal(m.projectModel.codeDirOf(old, true), "/srv/p/code");
 });
+
+// Server errors reach the sentence: a string, an Error and the SSH { code, message } object all keep the host's text.
+test("projectError: string, Error and { code, message } keep the host's message; no_project maps to its text", () => {
+  const pe = m.projectModel.projectError;
+  assert.equal(pe("permission denied"), "permission denied");
+  assert.equal(pe(new Error("disk full")), "disk full");
+  assert.equal(pe({ code: "invalid_path", message: "That path is not valid on the server." }), "That path is not valid on the server.");
+  assert.equal(pe({ code: "no_project", message: "No project is open." }), m.projectModel.PATHS_TEXT.noProject);
+  assert.equal(pe("No project is open on this server."), m.projectModel.PATHS_TEXT.noProject);
+  assert.equal(pe({ code: "weird" }), "The project folders could not be read.");
+});
+
+test("cloneError: clone_timeout shows its own message; no_project maps to the no-project text", () => {
+  const ce = m.projectModel.cloneError;
+  const timeout = "The clone took longer than 30 minutes and was stopped.";
+  assert.equal(ce({ code: "clone_timeout", message: timeout }), timeout);
+  assert.equal(ce({ code: "no_project", message: "not a project" }), m.projectModel.PATHS_TEXT.noProject);
+  assert.equal(ce("already exists"), "already exists");
+  assert.equal(ce({}), "The clone failed.");
+});

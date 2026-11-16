@@ -3,7 +3,7 @@ import { shellBus } from "../../shell/bus";
 import { inSshMode } from "../../shell/host.ts";
 import { call } from "../core-api.ts";
 import { decodeSecretNames } from "../decoders.ts";
-import { codeDirOf } from "../project-model.ts";
+import { cloneError, codeDirOf } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import {
   REPO_OP_GROUPS,
@@ -222,7 +222,7 @@ export default function RepositoriesSection() {
       await importIssuesFor(r, true);
       return true;
     } catch (e) {
-      const msg = sourcesError(e);
+      const msg = cloneError(e);
       if (opts.quiet && /already exists/i.test(msg)) return true;
       if (!opts.silent) setError(msg);
       return false;

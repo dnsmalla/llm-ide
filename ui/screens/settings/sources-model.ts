@@ -1,3 +1,4 @@
+import { hostErrorText } from "../shell/host-error.ts";
 // Pure parts of the "Connections" and "Repositories" groups: decode the core's catalog and repo allow-list,
 // keep untrusted text inert, and turn error codes into plain sentences. Selection is a visibility setting
 // (the core says so); credentials and fetching stay in the Library's Connector panes.
@@ -129,6 +130,6 @@ export function sourcesError(e: unknown): string {
     case "TOKEN_RESPONSE_INVALID":
       return "The provider answered, but without a user for this token.";
     default:
-      return typeof e === "string" && e.trim() ? e.slice(0, 200) : e instanceof Error && e.message ? e.message : "The action failed.";
+      return hostErrorText(e) ? hostErrorText(e).slice(0, 200) : "The action failed.";
   }
 }

@@ -58,3 +58,9 @@ test("errors become plain sentences, never server text", () => {
   assert.equal(sourcesError("boom"), "boom");
   assert.equal(sourcesError("x".repeat(500)).length, 200);
 });
+
+test("sourcesError: a { code, message } host error shows its message, not the generic text", () => {
+  const timeout = "The clone took longer than 30 minutes and was stopped.";
+  assert.equal(sourcesError({ code: "clone_timeout", message: timeout }), timeout);
+  assert.equal(sourcesError({ code: "clone_timeout" }), "The action failed.");
+});

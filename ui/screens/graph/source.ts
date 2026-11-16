@@ -3,6 +3,7 @@
 // builds absolute candidate paths from the project root the shell gave it; the host re-checks every one
 // and refuses anything outside the root or not named graph.json.
 import { relativePath } from "./decode.ts";
+import { hostErrorCode, hostErrorText } from "../shell/host-error.ts";
 
 /** Where graph-kit writes it (ProjectLayout.graphDir = system/graph), then the flat legacy spot. */
 export const GRAPH_CANDIDATES: readonly string[] = ["system/graph/graph.json", "system/graph.json"];
@@ -18,9 +19,11 @@ export type ReadResult = { ok: true; text: string; path: string } | { ok: false;
 
 export type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
-export function classifyReadError(message: string): ReadFailure {
-  if (/no project root/i.test(message)) return "no-project";
-  if (/size limit/i.test(message)) return "too-large";
+/** The read failure's kind: the host's code first (`no_project`, `too_large`, `root_missing`, `not_found`), then its text. */
+export function classifyReadError(message: string, code = ""): ReadFailure {
+  if (code === "no_project" || /no project root/i.test(message)) return "no-project";
+  if (code === "too_large" || /size limit/i.test(message)) return "too-large";
+  if (code === "root_missing" || code === "not_found") return "not-found";
   if (/no such file|cannot resolve|not found|does not exist/i.test(message)) return "not-found";
   return "error";
 }
@@ -46,8 +49,8 @@ export async function readProjectGraph(invoke: Invoke, root: string | null, rels
       if (typeof text !== "string") return { ok: false, kind: "error", message: "The host returned something that is not text.", tried };
       return { ok: true, text, path: rel };
     } catch (e) {
-      const message = e instanceof Error ? e.message : typeof e === "string" ? e : "read failed";
-      const kind = classifyReadError(message);
+      const message = hostErrorText(e) || "read failed";
+      const kind = classifyReadError(message, hostErrorCode(e));
       last = { ok: false, kind, message, tried };
       if (kind !== "not-found") return last; // a real failure (too large, host refusal) must not be masked by the next candidate
     }

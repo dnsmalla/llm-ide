@@ -1,5 +1,6 @@
 // Pure parts of the project "Paths" and "Memory" groups (read-only host listings of the active project).
 import type { ProjectFolder, ProjectMemory, ProjectMemoryFile, ProjectPaths } from "./host.ts";
+import { hostErrorCode, hostErrorText } from "../shell/host-error.ts";
 
 const clean = (v: unknown, max: number): string => {
   if (typeof v !== "string") return "";
@@ -146,8 +147,14 @@ export const MEMORY_TEXT = {
 } as const;
 
 export function projectError(e: unknown): string {
-  const code = (e as { code?: unknown } | null)?.code;
-  const text = typeof e === "string" ? e : e instanceof Error ? e.message : "";
-  if (/no project is open/i.test(text) || code === "no_project") return PATHS_TEXT.noProject;
+  const text = hostErrorText(e);
+  if (/no project is open/i.test(text) || hostErrorCode(e) === "no_project") return PATHS_TEXT.noProject;
   return text ? text.slice(0, 200) : "The project folders could not be read.";
+}
+
+/** A clone failure's sentence: the no-project text, the host's message (clone_timeout included), or a generic one. */
+export function cloneError(e: unknown): string {
+  if (hostErrorCode(e) === "no_project") return PATHS_TEXT.noProject;
+  const text = hostErrorText(e);
+  return text ? text.slice(0, 200) : "The clone failed.";
 }
