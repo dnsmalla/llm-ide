@@ -226,9 +226,15 @@ fn decode_chunks(body: &[u8]) -> Chunks {
         if size == 0 {
             return Chunks::Complete(out);
         }
+        // A chunk larger than the whole answer cap cannot be a real answer, so it is malformed, not "wait for more".
+        // Checking first keeps the sum below from wrapping.
+        if size > ANSWER_CAP_BYTES as u64 {
+            return Chunks::Malformed;
+        }
         let remaining = (body.len() - pos) as u64;
         // The data and its closing CRLF must both be here before the chunk is complete.
-        if size + 2 > remaining {
+        let Some(needed) = size.checked_add(2) else { return Chunks::Malformed };
+        if needed > remaining {
             return Chunks::Incomplete;
         }
         let size = size as usize;
@@ -527,6 +533,17 @@ mod tests {
         assert!(request.contains(&format!("\r\nx-llmide-redeem-key: {KEY_HEX}\r\n")), "{request}");
         assert!(!request.to_ascii_lowercase().contains("x-llmide-core-nonce"), "the health nonce is never sent: {request}");
         assert!(request.ends_with(r#"{"grant":"grant_abc123"}"#), "{request}");
+    }
+
+    #[test]
+    fn a_hostile_chunk_size_is_malformed_and_never_panics() {
+        // A size one below u64::MAX wraps when 2 is added to it; it must be refused, not overflow.
+        let wrapping = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nfffffffffffffffe\r\nabc\r\n0\r\n\r\n";
+        assert_eq!(parse_answer(wrapping).unwrap_err(), RedeemError::BadAnswer);
+        // A size far above the cap is malformed even when the body is short and no overflow is involved.
+        let huge = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n10000000000\r\nabc";
+        assert_eq!(parse_answer(huge).unwrap_err(), RedeemError::BadAnswer);
+        assert_eq!(decode_chunks(b"fffffffffffffffe\r\nabc"), Chunks::Malformed);
     }
 
     #[test]

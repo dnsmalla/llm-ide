@@ -1267,6 +1267,21 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_panic_in_the_redeem_still_ends_the_clone_and_frees_the_slot() {
+        let mut f = Fixture::new("clone-panic");
+        f.open_new_project();
+        use_fake_git(&mut f, "last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"");
+        let id = start_grant_clone(&mut f, 1, "o/r", None, crate::session::PANIC_GRANT_FOR_TEST);
+        let data = clone_event(&f.captured, id);
+        assert_eq!(data["ok"], false, "{data}");
+        assert_eq!(data["code"], "internal", "{data}");
+        // The slot is free again: a later clone starts and finishes.
+        let next = start_clone(&mut f, 2, "o/r");
+        assert_eq!(clone_event(&f.captured, next)["ok"], true, "the slot was freed");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn a_typed_token_skips_the_grant() {
         let mut f = Fixture::new("clone-typed-wins");
         f.open_new_project();

@@ -38,6 +38,10 @@ pub const GIT_MISSING_MESSAGE: &str = "git is not installed on the server.";
 /// the person what to do, and names no token, grant or git text.
 pub const SAVED_TOKEN_REFUSED_MESSAGE: &str = "The saved token could not be used; paste a token to clone a private repository.";
 
+/// The grant text that makes `resolve_token` panic in tests. It exists only in test builds.
+#[cfg(test)]
+pub const PANIC_GRANT_FOR_TEST: &str = "grant_PANIC_SEAM";
+
 /// The message of a clone whose thread panicked. The panic text is never sent, since it could name a path or a value.
 const CLONE_INTERNAL_MESSAGE: &str = "the clone stopped unexpectedly on the server";
 
@@ -325,12 +329,15 @@ impl Session {
         let clones = Arc::clone(&self.clones);
         let release = Arc::clone(&self.clones);
         let started = std::thread::Builder::new().name("repo-clone".into()).spawn(move || {
-            // The redeem runs here, not before the reply, so the started answer is not held up by it.
-            let (token, redeem_failed) = resolve_token(typed, grant, files.as_ref());
-            let ran = catch_unwind(AssertUnwindSafe(|| clone::run(&plan, token.as_ref(), &cancel, &git)));
+            // The redeem runs here, not before the reply, so the started answer is not held up by it. It is inside
+            // the same guard as the clone, so a panic in either still sends the event and frees the slot.
+            let ran = catch_unwind(AssertUnwindSafe(|| {
+                let (token, redeem_failed) = resolve_token(typed, grant, files.as_ref());
+                clone::run(&plan, token.as_ref(), &cancel, &git).map_err(|message| refused_message(message, redeem_failed))
+            }));
             let data = match ran {
                 Ok(Ok(done)) => json!({"id": id, "ok": true, "path": done.path, "name": done.name}),
-                Ok(Err(message)) => clone_failure(id, &refused_message(message, redeem_failed)),
+                Ok(Err(message)) => clone_failure(id, &message),
                 Err(_) => json!({"id": id, "ok": false, "code": "internal", "message": CLONE_INTERNAL_MESSAGE}),
             };
             clones.end(id, || {
@@ -366,6 +373,11 @@ impl Session {
 /// wins and no grant is redeemed then. A blank or unusable typed token does not count as one, so the grant is used.
 /// Without a usable typed token, the grant is redeemed on the server core over loopback.
 fn resolve_token(typed: Option<Token>, grant: Option<Token>, files: Option<&RedeemFiles>) -> (Option<Token>, bool) {
+    // Test seam: a grant with this text makes the redeem panic, to prove the clone guard still reports and frees.
+    #[cfg(test)]
+    if grant.as_ref().is_some_and(|g| g.expose() == PANIC_GRANT_FOR_TEST) {
+        panic!("injected panic in resolve_token");
+    }
     if typed.as_ref().is_some_and(Token::is_usable) {
         return (typed, false);
     }
