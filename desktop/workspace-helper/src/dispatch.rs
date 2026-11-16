@@ -10,6 +10,8 @@ use llmide_workspace_core::fs::{
     ListReq, ReadReq, RangeReq, RenameReq, WriteReq,
 };
 use llmide_workspace_core::git::{diff, git_binary, scm_root, show, stage, status, DiffReq, ScmRoot, ShowReq, StageReq};
+use llmide_workspace_core::project::clone::CloneRequest;
+use llmide_workspace_core::project::graph::read_within;
 use llmide_workspace_core::scm::{
     branch_delete, branches, checkout, commit, commit_amend, commit_diff, commit_files, create_branch, diff_hunks, discard_all_with,
     discard_with, identity, log, merge, merge_abort, merge_mode, stage_all, stage_hunks, stash_apply, stash_drop, stash_list,
@@ -23,7 +25,7 @@ use serde_json::Value;
 
 use crate::project_setup;
 use crate::protocol::{arg, arg_or_false, err_response, ok_response, Request};
-use crate::session::{to_value, Session};
+use crate::session::{to_value, Clones, Session};
 
 /// Set by the test-only `__two_questions` command when its action runs.
 #[cfg(test)]
@@ -66,13 +68,17 @@ pub fn handle_request(session: &mut Session, req: &Request) -> Value {
     }
 }
 
-/// `project_search_cancel` is answered at once by the reader, even while a slow command is running, so a search
-/// can be stopped without waiting behind it.
+/// `project_search_cancel` and `clone_cancel` are answered at once by the reader, even while a slow command is running,
+/// so a search or a clone can be stopped without waiting behind it.
 pub fn is_immediate(req: &Request) -> bool {
-    req.cmd == "project_search_cancel"
+    req.cmd == "project_search_cancel" || req.cmd == "clone_cancel"
 }
 
-pub fn cancel_now(searches: &Searches, req: &Request) -> Value {
+pub fn cancel_now(searches: &Searches, clones: &Clones, req: &Request) -> Value {
+    if req.cmd == "clone_cancel" {
+        clones.cancel();
+        return ok_response(req.id, Value::Null);
+    }
     match arg::<u64>(&req.args, "id") {
         Ok(id) => {
             searches.cancel(id);
@@ -94,6 +100,16 @@ fn run_command(session: &mut Session, req: &Request) -> R<Value> {
         "project_search_cancel" => {
             session.searches.cancel(arg(args, "id")?);
             Ok(Value::Null)
+        }
+        "repo_clone" => session.clone_start(arg::<CloneRequest>(args, "req")?),
+        "clone_cancel" => {
+            session.clones.cancel();
+            Ok(Value::Null)
+        }
+        "graph_read" => {
+            let root = session.root()?;
+            let path = arg::<String>(args, "path")?;
+            read_within(&root, &path).map(Value::String).map_err(|message| FsError { code: "graph_read_failed", message })
         }
         "fs_watch_start" => session.watch_start(),
         "fs_watch_set" => session.watch_set(&arg::<Vec<String>>(args, "dirs")?),
@@ -400,7 +416,7 @@ mod tests {
             let captured = Arc::new(Mutex::new(Vec::new()));
             let out = Arc::new(Out::new(Box::new(Capture(captured.clone())), false));
             let searches = Arc::new(Searches::new());
-            let session = Session::with_trasher(out, searches, Box::new(FakeTrash::into(&trash)));
+            let session = Session::with_trasher(out, searches, Arc::new(Clones::new()), Box::new(FakeTrash::into(&trash)));
             Self { _tree: tree, _env: env, old_home, home, outside, trash, captured, session }
         }
 
@@ -830,5 +846,198 @@ mod tests {
         assert_eq!(reply["id"], 9);
         assert_eq!(code_of(&reply), "internal");
         assert!(ok_of(&f.call(r#"{"id":10,"cmd":"hello","args":{}}"#))["protocol"] == 2);
+    }
+
+    /// `ETXTBSY` ("Text file busy") on macOS and Linux. A script written while another thread forks can still be open
+    /// for writing in that child, so its exec fails until the child execs.
+    #[cfg(unix)]
+    const ETXTBSY: i32 = 26;
+
+    /// A stand-in git. `body` runs with git's arguments in `$@`. The file is synced and closed before any spawn, and
+    /// the probe run (`--llmide-probe`, which exits at once) is retried on `ETXTBSY` a bounded number of times.
+    #[cfg(unix)]
+    fn fake_git(dir: &Path, body: &str) -> PathBuf {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("fake-git");
+        {
+            let mut file = std::fs::File::create(&path).unwrap();
+            file.write_all(format!("#!/bin/sh\n[ \"$1\" = --llmide-probe ] && exit 0\n{body}\n").as_bytes()).unwrap();
+            file.sync_all().unwrap();
+        }
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for attempt in 1..=50 {
+            match std::process::Command::new(&path).arg("--llmide-probe").status() {
+                Ok(status) => {
+                    assert!(status.success(), "the fake git probe exits 0");
+                    return path;
+                }
+                Err(e) if e.raw_os_error() == Some(ETXTBSY) && attempt < 50 => std::thread::sleep(std::time::Duration::from_millis(20)),
+                Err(e) => panic!("the fake git cannot run: {e}"),
+            }
+        }
+        unreachable!("the last attempt returns or panics")
+    }
+
+    /// Creates the destination (the last argument, as a real clone does), then hangs until it is cancelled.
+    #[cfg(unix)]
+    const SLOW_GIT: &str = "last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"; sleep 30";
+
+    /// Rejects every credential, so the clone fails after its anonymous retry.
+    #[cfg(unix)]
+    const REFUSING_GIT: &str = "echo \"fatal: Authentication failed for 'https://github.com/o/r.git/'\" >&2; exit 128";
+
+    #[cfg(unix)]
+    fn use_fake_git(f: &mut Fixture, body: &str) {
+        let git = fake_git(&f.outside, body);
+        f.session.git_lookup = Box::new(move || Some(git.clone()));
+    }
+
+    fn clone_line(id: u64, url: &str, token: Option<&str>) -> String {
+        json!({"id": id, "cmd": "repo_clone", "args": {"req": {"provider": "github", "url": url, "token": token}}}).to_string()
+    }
+
+    fn graph_read_line(id: u64, path: &Path) -> String {
+        json!({"id": id, "cmd": "graph_read", "args": {"path": path.to_string_lossy()}}).to_string()
+    }
+
+    /// The reply to `clone_cancel`, taken the way the reader answers it: outside the serial worker.
+    fn cancel_clone(f: &Fixture) -> Value {
+        let req = parse_request(br#"{"id":90,"cmd":"clone_cancel","args":{}}"#).unwrap();
+        cancel_now(&f.session.searches, &f.session.clones, &req)
+    }
+
+    /// Waits for the `clone` event that ends a clone, and returns its data.
+    fn clone_event(captured: &Arc<Mutex<Vec<u8>>>) -> Value {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let text = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+            let found = text.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).find(|v| v["event"] == "clone");
+            if let Some(v) = found {
+                return v["data"].clone();
+            }
+            assert!(std::time::Instant::now() < deadline, "no clone event in: {text}");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// Waits until git has created `path`, so a cancel lands while the clone is running.
+    #[cfg(unix)]
+    fn wait_for_path(path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !path.exists() {
+            assert!(std::time::Instant::now() < deadline, "{} was never created", path.display());
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn clone_needs_an_open_folder() {
+        let mut f = Fixture::new("clone-no-project");
+        assert_eq!(code_of(&f.call(&clone_line(1, "o/r", None))), "no_project");
+    }
+
+    #[test]
+    fn missing_git_is_reported() {
+        let mut f = Fixture::new("clone-no-git");
+        f.open_project();
+        f.session.git_lookup = Box::new(|| None);
+        let reply = f.call(&clone_line(1, "o/r", None));
+        assert_eq!(code_of(&reply), "git_missing");
+        assert_eq!(reply["err"]["message"], "git is not installed on the server.");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn requests_are_answered_while_a_clone_runs() {
+        let mut f = Fixture::new("clone-answers");
+        let project = f.open_project();
+        use_fake_git(&mut f, SLOW_GIT);
+        let started = ok_of(&f.call(&clone_line(1, "o/r", None))).clone();
+        assert_eq!(started["started"], true);
+        wait_for_path(&project.join("code").join("r"));
+        let timer = std::time::Instant::now();
+        let listed = f.call(r#"{"id":2,"cmd":"fs_list_dir","args":{"req":{"path":""}}}"#);
+        assert!(timer.elapsed() < std::time::Duration::from_millis(500), "a listing during a clone took {:?}", timer.elapsed());
+        ok_of(&listed);
+        ok_of(&cancel_clone(&f));
+        assert_eq!(clone_event(&f.captured)["code"], "cancelled");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn second_clone_is_busy() {
+        let mut f = Fixture::new("clone-busy");
+        f.open_project();
+        use_fake_git(&mut f, SLOW_GIT);
+        ok_of(&f.call(&clone_line(1, "o/one", None)));
+        assert_eq!(code_of(&f.call(&clone_line(2, "o/two", None))), "busy");
+        ok_of(&cancel_clone(&f));
+        assert_eq!(clone_event(&f.captured)["code"], "cancelled");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_ends_with_clone_event_cancelled() {
+        let mut f = Fixture::new("clone-cancel");
+        let project = f.open_project();
+        use_fake_git(&mut f, SLOW_GIT);
+        ok_of(&f.call(&clone_line(1, "o/r", None)));
+        let dest = project.join("code").join("r");
+        wait_for_path(&dest);
+        ok_of(&cancel_clone(&f));
+        let data = clone_event(&f.captured);
+        assert_eq!(data["ok"], false);
+        assert_eq!(data["code"], "cancelled");
+        assert_eq!(data["message"], "clone cancelled");
+        assert!(!dest.exists(), "the partial folder is removed before the event");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn token_never_appears_in_any_output() {
+        let mut f = Fixture::new("clone-token");
+        f.open_project();
+        use_fake_git(&mut f, REFUSING_GIT);
+        let marker = "ghp_TOKEN_MARKER_7731";
+        // A refused token: the clone retries anonymously, fails, and the event carries git's error only.
+        ok_of(&f.call(&clone_line(1, "o/r", Some(marker))));
+        let refused = clone_event(&f.captured);
+        assert_eq!(refused["ok"], false);
+        assert_eq!(refused["code"], "clone_failed");
+        // A bad URL with the token set is refused synchronously.
+        assert_eq!(code_of(&f.call(&clone_line(2, "https://evil.example/o/r", Some(marker)))), "clone_refused");
+        // Every byte the helper wrote, replies and events alike, must lack the token in both forms.
+        let text = String::from_utf8(f.captured.lock().unwrap().clone()).unwrap();
+        assert!(text.contains("Authentication failed"), "the refused run really ran: {text}");
+        let github = llmide_workspace_core::project::clone::base64(format!("x-access-token:{marker}").as_bytes());
+        let gitlab = llmide_workspace_core::project::clone::base64(format!("oauth2:{marker}").as_bytes());
+        for form in [marker.to_string(), github, gitlab] {
+            assert!(!text.contains(&form), "the token or its encoded form reached the helper's output: {text}");
+        }
+    }
+
+    #[test]
+    fn graph_read_stays_inside_root() {
+        let mut f = Fixture::new("graph-read");
+        let project = f.open_project();
+        let graph = project.join("graph.json");
+        std::fs::write(&graph, r#"{"nodes":[]}"#).unwrap();
+        assert_eq!(ok_of(&f.call(&graph_read_line(1, &graph))), r#"{"nodes":[]}"#);
+        // A graph file outside the root, and a path that climbs out of it.
+        let outside = std::fs::canonicalize(&f.outside).unwrap();
+        std::fs::write(outside.join("graph.json"), "outside").unwrap();
+        let climbing = project.join("..").join("..").join("outside").join("graph.json");
+        assert_eq!(code_of(&f.call(&graph_read_line(2, &outside.join("graph.json")))), "graph_read_failed");
+        assert_eq!(code_of(&f.call(&graph_read_line(3, &climbing))), "graph_read_failed");
+        // A link inside the root that points at a graph file outside it.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.join("graph.json"), project.join("graph-code.json")).unwrap();
+            assert_eq!(code_of(&f.call(&graph_read_line(4, &project.join("graph-code.json")))), "graph_read_failed");
+        }
+        // Only the known graph file names are read.
+        std::fs::write(project.join("notes.json"), "x").unwrap();
+        assert_eq!(code_of(&f.call(&graph_read_line(5, &project.join("notes.json")))), "graph_read_failed");
     }
 }

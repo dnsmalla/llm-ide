@@ -6,11 +6,14 @@
 
 use std::fs;
 use std::io;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use llmide_workspace_core::git::git_binary;
 use llmide_workspace_core::paths::checked_root;
+use llmide_workspace_core::project::clone::{self, CloneRequest};
 use llmide_workspace_core::search::{aborted_done, run_search, validate, Query, Searches, Started};
 use llmide_workspace_core::trash::{OsTrash, Trasher};
 use llmide_workspace_core::watch::{Watch, WatchBatch, WatchStarted};
@@ -24,9 +27,73 @@ use crate::protocol::{event, Out, PROTOCOL};
 pub const ROOT_MISSING_CODE: &str = "root_missing";
 pub const ROOT_MISSING_MESSAGE: &str = "This folder is no longer on the server.";
 
+/// The text the desktop shows when the server has no git. Fixed, because the app shows it as is.
+pub const GIT_MISSING_MESSAGE: &str = "git is not installed on the server.";
+
+/// The message of a clone whose thread panicked. The panic text is never sent, since it could name a path or a value.
+const CLONE_INTERNAL_MESSAGE: &str = "the clone stopped unexpectedly on the server";
+
+/// The one clone the helper runs at a time: the cancel flag of the running clone, and a signal for when it ends.
+/// The reader cancels it directly, so a cancel never waits behind the worker queue, as a search cancel does not.
+#[derive(Default)]
+pub struct Clones {
+    running: Mutex<Option<Arc<AtomicBool>>>,
+    ended: Condvar,
+}
+
+impl Clones {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Claims the slot for a new clone and returns its cancel flag. `None` when a clone is already running.
+    pub fn begin(&self) -> Option<Arc<AtomicBool>> {
+        let mut running = lock(&self.running);
+        if running.is_some() {
+            return None;
+        }
+        let flag = Arc::new(AtomicBool::new(false));
+        *running = Some(Arc::clone(&flag));
+        Some(flag)
+    }
+
+    /// Frees the slot. It is called before the clone's event is sent, so a request sent after the event is never
+    /// refused as busy.
+    pub fn finish(&self) {
+        *lock(&self.running) = None;
+        self.ended.notify_all();
+    }
+
+    /// Sets the cancel flag of the running clone. Does nothing when no clone is running.
+    pub fn cancel(&self) {
+        if let Some(flag) = lock(&self.running).as_ref() {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Cancels the running clone and waits until its thread has removed the partial folder and freed the slot. Used
+    /// at end of input, so the process never exits in the middle of a clone.
+    pub fn stop_and_wait(&self) {
+        let mut running = lock(&self.running);
+        if let Some(flag) = running.as_ref() {
+            flag.store(true, Ordering::SeqCst);
+        }
+        while running.is_some() {
+            running = self.ended.wait(running).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 pub struct Session {
     pub out: Arc<Out>,
     pub searches: Arc<Searches>,
+    pub clones: Arc<Clones>,
+    /// Where the clone's `git` comes from. The helper uses the core lookup; tests replace it with a fake or with none.
+    pub(crate) git_lookup: Box<dyn Fn() -> Option<PathBuf>>,
     trasher: Box<dyn Trasher>,
     root: Option<PathBuf>,
     watch: Option<Watch>,
@@ -43,13 +110,13 @@ pub fn to_value<T: Serialize>(value: &T) -> R<Value> {
 }
 
 impl Session {
-    pub fn new(out: Arc<Out>, searches: Arc<Searches>) -> Self {
-        Self::with_trasher(out, searches, Box::new(OsTrash))
+    pub fn new(out: Arc<Out>, searches: Arc<Searches>, clones: Arc<Clones>) -> Self {
+        Self::with_trasher(out, searches, clones, Box::new(OsTrash))
     }
 
     /// The trash is injected so tests never move anything into a real Trash.
-    pub fn with_trasher(out: Arc<Out>, searches: Arc<Searches>, trasher: Box<dyn Trasher>) -> Self {
-        Self { out, searches, trasher, root: None, watch: None }
+    pub fn with_trasher(out: Arc<Out>, searches: Arc<Searches>, clones: Arc<Clones>, trasher: Box<dyn Trasher>) -> Self {
+        Self { out, searches, clones, git_lookup: Box::new(git_binary), trasher, root: None, watch: None }
     }
 
     pub fn trasher(&self) -> &dyn Trasher {
@@ -189,8 +256,37 @@ impl Session {
         to_value(&Started { id })
     }
 
-    /// Stops the watcher and any running search, and waits for the search to wind down. Used at end of input.
+    /// Starts a clone into the open project's `code/` folder on its own thread and returns at once. The outcome
+    /// arrives as a `clone` event. Refused before anything starts: no open folder, no git, an invalid request, or a
+    /// clone already running.
+    pub fn clone_start(&mut self, req: CloneRequest) -> R<Value> {
+        let root = self.root()?;
+        let Some(git) = (self.git_lookup)() else {
+            return err("git_missing", GIT_MISSING_MESSAGE);
+        };
+        let plan = clone::plan(&root, &req).map_err(|message| FsError { code: "clone_refused", message })?;
+        let Some(cancel) = self.clones.begin() else {
+            return err("busy", "a clone is already running on the server");
+        };
+        let out = Arc::clone(&self.out);
+        let clones = Arc::clone(&self.clones);
+        std::thread::spawn(move || {
+            let ran = catch_unwind(AssertUnwindSafe(|| clone::run(&plan, req.token.as_ref(), &cancel, &git)));
+            let data = match ran {
+                Ok(Ok(done)) => json!({"ok": true, "path": done.path, "name": done.name}),
+                Ok(Err(message)) => clone_failure(&message),
+                Err(_) => json!({"ok": false, "code": "internal", "message": CLONE_INTERNAL_MESSAGE}),
+            };
+            clones.finish();
+            out.send(&event("clone", data));
+        });
+        Ok(json!({"started": true}))
+    }
+
+    /// Stops the watcher, any running clone and any running search, and waits for them to wind down. Used at end of
+    /// input, so the process never exits with a partial clone folder behind.
     pub fn shutdown(&mut self) {
+        self.clones.stop_and_wait();
         self.stop_folder_work();
         // `begin` cancels the current search; taking the run lock then waits until its scan has stopped.
         let _ = self.searches.begin();
@@ -202,6 +298,13 @@ impl Session {
         // A new id cancels the search that belongs to the previous folder.
         let _ = self.searches.begin();
     }
+}
+
+/// The `clone` event for a clone that ended with an error. A cancel is its own code, so the desktop can tell a stop
+/// the person asked for from a failure. Git's text is the only external text here, and it never carries the token.
+fn clone_failure(message: &str) -> Value {
+    let code = if message == clone::CANCELLED { "cancelled" } else { "clone_failed" };
+    json!({"ok": false, "code": code, "message": message})
 }
 
 /// Whether `git --version` runs. The core's git lookup only finds the binary, and the desktop wants to know that
