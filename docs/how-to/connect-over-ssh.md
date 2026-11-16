@@ -233,7 +233,9 @@ A saved token is used on the server, and it never leaves it. If the token box is
 this session, the app asks the server for a one-time clone grant, and the clone uses the GitHub or GitLab token you
 saved for the server. The token goes from the server's vault to the clone over the server's own loopback
 connection, and the app never receives it. A token you type always wins over the saved one. If no token is saved
-for that provider, the clone runs without one, as a public clone does.
+for that provider, the clone runs without one, as a public clone does. A saved GitLab token is used only for
+gitlab.com; a clone from a self-hosted GitLab runs without it. The server's core keeps the key that protects this
+exchange in a file in its data folder, readable only by your server user.
 
 ### Explorer and terminal
 

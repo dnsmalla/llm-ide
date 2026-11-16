@@ -14982,6 +14982,58 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/repos/clone-grant:
+    post:
+      summary: "Issue a single-use, 60-second clone grant for the saved provider token (SSH server only)"
+      description: "The grant is redeemed on the server by the clone helper over loopback. The token never leaves the server."
+      tags:
+        - "kb-sources"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "provider"
+              properties:
+                provider:
+                  type: "string"
+                  enum:
+                    - "github"
+                    - "gitlab"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "grant"
+                properties:
+                  grant:
+                    type: "string"
+                    nullable: true
+                    description: "64 hex characters, or null when the user has no saved token for the provider."
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "429":
+          description: "Rate limited"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/review/approve:
     post:
       summary: "Execute an approved review item (re-runs guardrails)"

@@ -864,10 +864,14 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
   a log, an error, a reply, an event, a file or `Debug` output (the type prints `<redacted>`). A rejected token gets one
   anonymous retry. Pinned by the workspace-helper test `token_never_appears_in_any_output`.
 - **A saved provider token reaches a server clone only through a single-use grant redeemed on the server.** The grant
-  lasts 60 s, is bound to the user and the provider, and is redeemed only over loopback with the core nonce from
-  `~/.llmide-server/state.json`. The token never reaches the desktop, the webview, a log, an error, an event or argv.
-  Pinned by the desktop test `workspace_backend::tests::clone_grant_is_sent_only_when_no_token_is_usable` and the core
-  test file `extension/tests/clone-credential.test.mjs`.
+  lasts 60 s, is bound to the user and the provider, and is redeemed only over loopback, with the file-only key. The
+  core writes `<data dir>/clone-redeem.key` (0600) only when it starts as an SSH server core (`LLMIDE_SSH_SERVER=1`),
+  and the helper sends that key as `x-llmide-redeem-key`. The key is never in `/health` or `state.json`, and a local
+  desktop core answers the redeem with 404 and writes no key. The token never reaches the desktop, the webview, a log,
+  an error, an event or argv. A GitLab grant is made only for gitlab.com. Pinned by the desktop tests
+  `workspace_backend::tests::clone_grant_is_sent_only_when_no_token_is_usable` and
+  `ssh_server_scripts::tests::start_marks_the_core_as_an_ssh_server_only`, and by the core tests
+  `extension/tests/clone-credential.test.mjs` and `extension/tests/clone-redeem-key-server.test.mjs`.
 - **A clone needs an LLM-IDE project, and a plain folder is refused before anything is written.** The helper's
   `clone_start` returns `not_a_project` when `layout::is_project` is false for the open folder. The desktop leaves the
   Repositories clone destination empty in that case, so no clone is offered or started, even after a URL is typed.
