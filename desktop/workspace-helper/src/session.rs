@@ -56,7 +56,7 @@ impl Session {
     pub fn root(&self) -> R<PathBuf> {
         match &self.root {
             None => err("no_project", "no project is open"),
-            Some(root) => checked_root(root),
+            Some(root) => confined(checked_root(root)?),
         }
     }
 
@@ -71,7 +71,7 @@ impl Session {
     /// Opens a folder. Replaces the open one, and stops its watcher and any running search, which belong to it.
     pub fn open(&mut self, raw: &str) -> R<Value> {
         let real = home_path(raw)?;
-        let root = checked_root(&real)?;
+        let root = confined(checked_root(&real)?)?;
         self.stop_folder_work();
         let name = root.file_name().map_or_else(|| root.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
         let reply = json!({"name": name, "root": root.to_string_lossy()});
@@ -201,6 +201,17 @@ pub fn git_runs() -> bool {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+/// Re-checks an open folder against the home folder. The first check ran when the folder was opened; the folder can
+/// be replaced afterwards (a symlink swapped in by the SSH user or a process running as them), and every later
+/// request must still resolve inside the home folder.
+fn confined(root: PathBuf) -> R<PathBuf> {
+    let home = home_root()?;
+    if !root.starts_with(&home) {
+        return err("outside_home", "the project folder is no longer inside the server user's home folder");
+    }
+    Ok(root)
 }
 
 /// The home folder from `$HOME`, canonical. Unset or unusable is `no_home`: the rules cannot be applied without it.

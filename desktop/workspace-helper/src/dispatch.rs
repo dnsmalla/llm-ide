@@ -24,6 +24,10 @@ use serde_json::Value;
 use crate::protocol::{arg, arg_or_false, err_response, ok_response, Request};
 use crate::session::{to_value, Session};
 
+/// Set by the test-only `__two_questions` command when its action runs.
+#[cfg(test)]
+pub static TWO_QUESTIONS_RAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 const INTERNAL_MESSAGE: &str = "the helper hit an internal error; the request was not completed";
 
 /// The fs commands that need an open folder. Each one is the body of its Tauri wrapper in `fs_ops.rs`.
@@ -93,6 +97,17 @@ fn run_command(session: &mut Session, req: &Request) -> R<Value> {
         "fs_watch_start" => session.watch_start(),
         "fs_watch_set" => session.watch_set(&arg::<Vec<String>>(args, "dirs")?),
         "fs_watch_stop" => Ok(session.watch_stop()),
+        #[cfg(test)]
+        "__two_questions" => confirmed(req, |ask| {
+            if !ask("first question") {
+                return err("cancelled", "stopped at the first question");
+            }
+            if !ask("second question") {
+                return err("cancelled", "stopped at the second question");
+            }
+            TWO_QUESTIONS_RAN.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(Value::Null)
+        }),
         "fs_open_pdf" => err("unsupported", "opening a PDF in this computer's viewer is not available for a server folder"),
         "reveal_in_os" => err("unsupported", "showing a file in this computer's file manager is not available for a server folder"),
         #[cfg(test)]
@@ -562,6 +577,55 @@ mod tests {
         let wrong = json!({"id": 1, "cmd": "git_discard", "args": {"paths": ["f.txt"]}, "confirm": "not the question"}).to_string();
         assert_eq!(code_of(&f.call(&wrong)), "confirm_required");
         assert_eq!(std::fs::read_to_string(project.join("f.txt")).unwrap(), "two\n");
+    }
+
+    #[test]
+    fn root_swapped_for_a_link_outside_home_is_refused() {
+        let mut f = Fixture::new("swap-root");
+        let project = f.open_project();
+        std::fs::remove_dir_all(&project).unwrap();
+        std::os::unix::fs::symlink(&f.outside, &project).unwrap();
+        let reply = f.call(r#"{"id":2,"cmd":"fs_list_dir","args":{"req":{"path":""}}}"#);
+        assert_eq!(code_of(&reply), "outside_home");
+    }
+
+    #[test]
+    fn stale_confirm_after_the_file_set_changed_changes_nothing() {
+        let mut f = Fixture::new("stale-confirm");
+        let project = f.open_project();
+        std::fs::write(project.join("f.txt"), "one\n").unwrap();
+        std::fs::write(project.join("g.txt"), "one\n").unwrap();
+        git(&project, &["init", "-q"]);
+        git(&project, &["add", "f.txt", "g.txt"]);
+        git(&project, &["commit", "-q", "-m", "init"]);
+        std::fs::write(project.join("f.txt"), "two\n").unwrap();
+        let old = f.call(r#"{"id":1,"cmd":"git_discard","args":{"paths":["f.txt"]}}"#);
+        let old_question = old["err"]["message"].as_str().unwrap().to_string();
+        // The set changes after the dialog text was shown: a second file is now part of the discard.
+        std::fs::write(project.join("g.txt"), "two\n").unwrap();
+        let stale = json!({"id": 2, "cmd": "git_discard", "args": {"paths": ["f.txt", "g.txt"]}, "confirm": old_question}).to_string();
+        let reply = f.call(&stale);
+        assert_eq!(code_of(&reply), "confirm_required");
+        assert_ne!(reply["err"]["message"], old_question.as_str(), "the new set has its own question");
+        assert_eq!(std::fs::read_to_string(project.join("f.txt")).unwrap(), "two\n");
+        assert_eq!(std::fs::read_to_string(project.join("g.txt")).unwrap(), "two\n");
+    }
+
+    #[test]
+    fn a_command_asking_two_questions_stops_at_the_first_unanswered_one() {
+        let mut f = Fixture::new("two-questions");
+        TWO_QUESTIONS_RAN.store(false, std::sync::atomic::Ordering::SeqCst);
+        let none = f.call(r#"{"id":1,"cmd":"__two_questions","args":{}}"#);
+        assert_eq!(code_of(&none), "confirm_required");
+        assert_eq!(none["err"]["message"], "first question");
+        let after_first = json!({"id": 2, "cmd": "__two_questions", "args": {}, "confirm": "first question"}).to_string();
+        let second = f.call(&after_first);
+        assert_eq!(code_of(&second), "confirm_required");
+        assert_eq!(second["err"]["message"], "second question");
+        let wrong_first = json!({"id": 3, "cmd": "__two_questions", "args": {}, "confirm": "second question"}).to_string();
+        let wrong = f.call(&wrong_first);
+        assert_eq!(wrong["err"]["message"], "first question");
+        assert!(!TWO_QUESTIONS_RAN.load(std::sync::atomic::Ordering::SeqCst), "the second action never ran");
     }
 
     #[test]
