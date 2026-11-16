@@ -12,10 +12,10 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -54,36 +54,15 @@ const BAD_ANSWER_CODE: &str = "bad_response";
 const BAD_ANSWER_MESSAGE: &str = "The server sent an answer this app does not understand.";
 const REMOTE_CODE: &str = "remote_error";
 
-/// Error codes the helper and the core send. A code outside this list becomes [`REMOTE_CODE`], because
-/// `FsError::code` is a static string and a server-chosen string must never be stored as one.
-const KNOWN_CODES: &[&str] = &[
-    "bad_request",
-    "changed_since_confirm",
-    "confirm_required",
-    "conflict",
-    "conflicts",
-    "dirty_conflict",
-    "dirty_stash",
-    "exists",
-    "git_missing",
-    "git_unavailable",
-    "internal",
-    "invalid_path",
-    "invalid_query",
-    "io",
-    "no_home",
-    "no_project",
-    "no_watch",
-    "not_a_directory",
-    "not_found",
-    "outside_home",
-    "outside_root",
-    "too_large",
-    "trash_unavailable",
-    "unsupported",
-    "untrusted_repo_config",
-    "would_overwrite",
-];
+/// The longest server message kept. The message is shown to the user, so a broken or hostile helper cannot flood it.
+const MAX_MESSAGE_CHARS: usize = 2_000;
+
+/// The longest server error code kept. Codes are short lowercase words. Anything else is replaced before the
+/// shared decoder interns it, so a hostile helper cannot fill the process-wide code table with junk.
+const MAX_CODE_CHARS: usize = 40;
+
+/// Shown when a server error has no usable message.
+const NO_MESSAGE: &str = "The server reported an error.";
 
 /// The kinds of helper events. The wire names are `search` and `watch`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -178,13 +157,17 @@ impl Shared {
     }
 }
 
-/// A connection to one server's helper. One reader thread routes the answers and events; calls write their
-/// request lines under the child lock, so each line reaches the helper whole.
+/// A connection to one server's helper. A writer thread owns the child's stdin and a reader thread owns its
+/// stdout. Calls hand their request lines to the writer over a queue, so no caller waits on a pipe, and the child
+/// lock is held only for a kill, which therefore never waits on a write.
 pub struct WorkspaceClient {
     child: Arc<Mutex<Box<dyn StdioChild>>>,
     shared: Arc<Shared>,
     next_id: AtomicU64,
     git: bool,
+    /// The request queue. Taken by `close`, which ends the writer once the queue drains.
+    outbound: Mutex<Option<Sender<String>>>,
+    writer: Mutex<Option<JoinHandle<()>>>,
     reader: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -206,7 +189,10 @@ impl WorkspaceClient {
             .spawn_stdio(&args, grant.as_ref())
             .map_err(|_| herr(CHANNEL_CODE, CHANNEL_MESSAGE))?;
         let mut client = Self::start(child);
-        let git = client.call_with_timeout(HELLO, json!({}), None, CALL_TIMEOUT).and_then(|v| check_hello(&v));
+        let git = client
+            .call_with_timeout(HELLO, json!({}), None, CALL_TIMEOUT)
+            .map_err(refused_hello)
+            .and_then(|value| check_hello(&value));
         drop(grant);
         match git {
             Ok(git) => {
@@ -223,9 +209,15 @@ impl WorkspaceClient {
     /// Takes the child's stdout and starts the reader thread. The child is shared with the reader, which kills it
     /// when the channel breaks.
     fn start(mut child: Box<dyn StdioChild>) -> Self {
+        let stdin = child.take_stdin();
         let stdout = child.take_stdout();
         let child = Arc::new(Mutex::new(child));
         let shared = Arc::new(Shared::default());
+        let (outbound, lines) = mpsc::channel();
+        let writer = {
+            let (shared, child) = (shared.clone(), child.clone());
+            std::thread::spawn(move || write_loop(stdin, lines, &shared, &child))
+        };
         let reader = {
             let (shared, child) = (shared.clone(), child.clone());
             std::thread::spawn(move || read_loop(stdout, &shared, &child))
@@ -235,6 +227,8 @@ impl WorkspaceClient {
             shared,
             next_id: AtomicU64::new(1),
             git: false,
+            outbound: Mutex::new(Some(outbound)),
+            writer: Mutex::new(Some(writer)),
             reader: Mutex::new(Some(reader)),
         }
     }
@@ -257,8 +251,10 @@ impl WorkspaceClient {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (waiter, answer) = mpsc::channel();
         self.shared.register(id, waiter)?;
+        // Registered and queued before the wait starts, so the timeout also covers a write that never completes.
         let line = request_line(id, cmd, args, confirm);
-        if write_line(&self.child, &line).is_err() {
+        let queued = locked(&self.outbound).as_ref().is_some_and(|queue| queue.send(line).is_ok());
+        if !queued {
             break_channel(&self.shared, &self.child);
             return Err(lost());
         }
@@ -290,9 +286,11 @@ impl WorkspaceClient {
     /// Ends the channel: the waiting calls fail, the child is killed and the reader thread is joined. Calling
     /// it again changes nothing.
     pub fn close(&self) {
+        // Killing first is what unblocks a writer stuck in a write; dropping the queue then ends it.
         break_channel(&self.shared, &self.child);
-        let reader = locked(&self.reader).take();
-        if let Some(handle) = reader {
+        drop(locked(&self.outbound).take());
+        let handles = [locked(&self.writer).take(), locked(&self.reader).take()];
+        for handle in handles.into_iter().flatten() {
             join_briefly(handle);
         }
     }
@@ -331,13 +329,21 @@ fn break_channel(shared: &Shared, child: &Mutex<Box<dyn StdioChild>>) {
     locked(child).kill();
 }
 
-/// Writes one request line under the child lock. A write blocks while the helper does not read its stdin; a
-/// blocked write therefore delays `close` as well, which is the trade-off of a single writer.
-fn write_line(child: &Mutex<Box<dyn StdioChild>>, line: &str) -> io::Result<()> {
-    let mut guard = locked(child);
-    let stdin = guard.stdin();
-    stdin.write_all(line.as_bytes())?;
-    stdin.flush()
+/// The writer thread: writes queued request lines in order. A write that fails, or a queue that is closed, ends
+/// the channel the same way the reader does. A write that blocks is ended by the kill in `break_channel`.
+fn write_loop(
+    mut stdin: Box<dyn Write + Send>,
+    lines: Receiver<String>,
+    shared: &Shared,
+    child: &Mutex<Box<dyn StdioChild>>,
+) {
+    for line in lines {
+        if stdin.write_all(line.as_bytes()).and_then(|()| stdin.flush()).is_err() {
+            break;
+        }
+    }
+    drop(stdin);
+    break_channel(shared, child);
 }
 
 /// One request as a single JSON line. `confirm` is sent only when the user answered a dialog.
@@ -368,16 +374,40 @@ fn parse_answer(value: &Value) -> Result<Value, FsError> {
         return Ok(ok.clone());
     }
     if let Some(err) = value.get("err") {
-        let code = err.get("code").and_then(Value::as_str).unwrap_or_default();
-        let message = err.get("message").and_then(Value::as_str).unwrap_or("The server reported an error.");
-        return Err(FsError { code: known_code(code), message: message.to_string() });
+        return Err(decode_error(err));
     }
     Err(herr(BAD_ANSWER_CODE, BAD_ANSWER_MESSAGE))
 }
 
-/// The static form of a server error code, or [`REMOTE_CODE`] when the code is not one this build knows.
-fn known_code(code: &str) -> &'static str {
-    KNOWN_CODES.iter().find(|known| **known == code).copied().unwrap_or(REMOTE_CODE)
+/// Rebuilds the helper's `{code, message}` as an [`FsError`] through the shared crate's deserializer, which
+/// interns the code into the same table the desktop's own errors use. The code is checked for shape first; a
+/// code that fails the check becomes [`REMOTE_CODE`]. The message is capped, not replaced.
+fn decode_error(err: &Value) -> FsError {
+    let raw_code = err.get("code").and_then(Value::as_str).unwrap_or_default();
+    let code = if is_wire_code(raw_code) { raw_code } else { REMOTE_CODE };
+    let message: String = err
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or(NO_MESSAGE)
+        .chars()
+        .take(MAX_MESSAGE_CHARS)
+        .collect();
+    serde_json::from_value::<FsError>(json!({"code": code, "message": message}))
+        .unwrap_or_else(|_| FsError { code: REMOTE_CODE, message: NO_MESSAGE.to_string() })
+}
+
+/// A server code this client will carry: 1 to [`MAX_CODE_CHARS`] lowercase ASCII letters or underscores.
+fn is_wire_code(code: &str) -> bool {
+    (1..=MAX_CODE_CHARS).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+}
+
+/// A helper that predates `hello` answers an unknown command, so a refused `hello` with these codes means the
+/// server part is too old, not that the channel is broken.
+fn refused_hello(error: FsError) -> FsError {
+    if matches!(error.code, "unsupported" | "bad_request") {
+        return herr(VERSION_CODE, VERSION_MESSAGE);
+    }
+    error
 }
 
 fn lost() -> FsError {
@@ -486,8 +516,11 @@ mod tests {
     /// An in-memory helper child. Requests travel on one socket pair and answers on another; a thread plays the
     /// server, so a test can hold a reply and release it later.
     struct FakeStdio {
-        stdin: UnixStream,
+        stdin: Option<UnixStream>,
         stdout: Option<UnixStream>,
+        /// The helper's end of the request pipe. Kept here so a silent helper's pipe stays open, and shut down
+        /// on kill, which fails a blocked write from the client the way a dead ssh does.
+        server_in: Arc<UnixStream>,
         answers: Arc<UnixStream>,
         kills: Arc<AtomicUsize>,
         stopped: bool,
@@ -495,14 +528,35 @@ mod tests {
 
     impl FakeStdio {
         fn new(behave: Behave) -> (Self, Remote) {
+            Self::build(Some(behave))
+        }
+
+        /// A helper that never reads its stdin and never answers. A write to it blocks once the pipe is full.
+        fn silent() -> (Self, Remote) {
+            Self::build(None)
+        }
+
+        fn build(behave: Option<Behave>) -> (Self, Remote) {
             let (desk_in, server_in) = UnixStream::pair().unwrap();
             let (server_out, desk_out) = UnixStream::pair().unwrap();
+            let server_in = Arc::new(server_in);
             let answers = Arc::new(server_out.try_clone().unwrap());
             let (seen, requests) = mpsc::channel();
-            std::thread::spawn(move || serve(server_in, server_out, behave, seen));
+            if let Some(behave) = behave {
+                let input = server_in.try_clone().unwrap();
+                std::thread::spawn(move || serve(input, server_out, behave, seen));
+            }
             let kills = Arc::new(AtomicUsize::new(0));
             let remote = Remote { requests, answers: answers.clone(), kills: kills.clone() };
-            (Self { stdin: desk_in, stdout: Some(desk_out), answers, kills, stopped: false }, remote)
+            let child = Self {
+                stdin: Some(desk_in),
+                stdout: Some(desk_out),
+                server_in,
+                answers,
+                kills,
+                stopped: false,
+            };
+            (child, remote)
         }
     }
 
@@ -521,8 +575,11 @@ mod tests {
     }
 
     impl StdioChild for FakeStdio {
-        fn stdin(&mut self) -> &mut dyn Write {
-            &mut self.stdin
+        fn take_stdin(&mut self) -> Box<dyn Write + Send> {
+            match self.stdin.take() {
+                Some(pipe) => Box::new(pipe),
+                None => Box::new(io::sink()),
+            }
         }
 
         fn take_stdout(&mut self) -> Box<dyn BufRead + Send> {
@@ -538,7 +595,7 @@ mod tests {
             }
             self.stopped = true;
             self.kills.fetch_add(1, Ordering::SeqCst);
-            let _ = self.stdin.shutdown(Shutdown::Both);
+            let _ = self.server_in.shutdown(Shutdown::Both);
             let _ = self.answers.shutdown(Shutdown::Write);
         }
 
@@ -837,7 +894,7 @@ mod tests {
         let behave: Behave = Box::new(|request: &Value| match request["cmd"].as_str() {
             Some("hello") => vec![hello_reply(&request["id"], true)],
             Some("escape") => vec![json!({"id": request["id"], "err": {"code": "outside_home", "message": "m"}}).to_string()],
-            _ => vec![json!({"id": request["id"], "err": {"code": "made_up_by_server", "message": "x"}}).to_string()],
+            _ => vec![json!({"id": request["id"], "err": {"code": "Made-Up!", "message": "x"}}).to_string()],
         });
         let (client, _remote) = connect_ok(behave);
         let known = client.call("escape", json!({}), None).err().expect("an error");
@@ -864,6 +921,108 @@ mod tests {
             WORKSPACE,
             "exec \"$HOME/.llmide-server/current/core/bin/llmide-workspace\" --stdio"
         );
+    }
+
+    /// A helper that answers `hello` normally and every other request with the given error code.
+    fn failing_with(code: &str) -> Behave {
+        let code = code.to_string();
+        Box::new(move |request: &Value| match request["cmd"].as_str() {
+            Some("hello") => vec![hello_reply(&request["id"], true)],
+            _ => vec![json!({"id": request["id"], "err": {"code": code, "message": "m"}}).to_string()],
+        })
+    }
+
+    /// A helper that refuses every request, `hello` included, with the given error code.
+    fn refusing_everything(code: &str) -> Behave {
+        let code = code.to_string();
+        Box::new(move |request: &Value| vec![json!({"id": request["id"], "err": {"code": code, "message": "m"}}).to_string()])
+    }
+
+    #[test]
+    fn ui_branch_codes_survive_the_round_trip() {
+        let codes = [
+            "not_a_repo",
+            "identity_missing",
+            "nothing_staged",
+            "confirm_required",
+            "conflict",
+            "git_missing",
+            "root_missing",
+            "outside_home",
+            "root_too_broad",
+        ];
+        for code in codes {
+            let (client, _remote) = connect_ok(failing_with(code));
+            let error = client.call("fail", json!({}), None).err().expect("an error");
+            assert_eq!(error.code, code, "the UI branches on this code, so it must not change");
+        }
+    }
+
+    #[test]
+    fn malformed_or_long_codes_become_remote_error() {
+        let too_long = "a".repeat(41);
+        for code in ["Bad-Code!", too_long.as_str()] {
+            let (client, _remote) = connect_ok(failing_with(code));
+            let error = client.call("fail", json!({}), None).err().expect("an error");
+            assert_eq!(error.code, "remote_error", "{code} is not a wire code");
+        }
+    }
+
+    #[test]
+    fn long_server_message_is_capped_not_replaced() {
+        let long = "w".repeat(10_000);
+        let behave: Behave = Box::new(move |request: &Value| match request["cmd"].as_str() {
+            Some("hello") => vec![hello_reply(&request["id"], true)],
+            _ => vec![json!({"id": request["id"], "err": {"code": "conflict", "message": long}}).to_string()],
+        });
+        let (client, _remote) = connect_ok(behave);
+        let error = client.call("fail", json!({}), None).err().expect("an error");
+        assert_eq!(error.message.chars().count(), 2_000);
+        assert!(error.message.chars().all(|c| c == 'w'));
+    }
+
+    #[test]
+    fn hello_refused_by_an_older_helper_is_a_version_mismatch() {
+        for code in ["unsupported", "bad_request"] {
+            let (exec, _remote) = exec_with(refusing_everything(code));
+            let error = WorkspaceClient::connect(&exec, &endpoint(), Path::new(KNOWN), None).err().expect("refused");
+            assert_eq!(error.code, "workspace_version", "an old helper answers hello with {code}");
+            assert_eq!(error.message, VERSION_MESSAGE);
+        }
+    }
+
+    #[test]
+    fn stdin_that_never_drains_does_not_hold_up_close() {
+        let (child, _remote) = FakeStdio::silent();
+        let client = Arc::new(WorkspaceClient::start(Box::new(child)));
+        let big = "x".repeat(8 * 1024 * 1024);
+        let waiting = {
+            let client = client.clone();
+            std::thread::spawn(move || client.call_with_timeout("big", json!({"data": big}), None, Duration::from_secs(30)))
+        };
+        std::thread::sleep(Duration::from_millis(200));
+        let started = Instant::now();
+        client.close();
+        assert!(started.elapsed() < Duration::from_secs(2), "close returned while a write was blocked");
+        let error = waiting.join().unwrap().err().expect("the blocked call fails");
+        assert_eq!(error.code, "lost_connection");
+        assert!(client.is_closed());
+    }
+
+    #[test]
+    fn a_write_that_never_completes_times_out() {
+        let (child, _remote) = FakeStdio::silent();
+        let client = WorkspaceClient::start(Box::new(child));
+        let big = "x".repeat(8 * 1024 * 1024);
+        let error = client
+            .call_with_timeout("big", json!({"data": big}), None, Duration::from_millis(200))
+            .err()
+            .expect("the call times out");
+        assert_eq!(error.code, "SSH_TIMEOUT", "the 60 s budget covers the write, not only the wait for the answer");
+        assert_eq!(pending_len(&client), 0);
+        let started = Instant::now();
+        client.close();
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

@@ -232,8 +232,10 @@ pub trait SshExec: Send + Sync {
 
 /// A child with piped stdin and stdout. Only [`SshExec::spawn_stdio`] builds one.
 pub trait StdioChild: Send {
-    /// The child's stdin. A write blocks while the child does not read it.
-    fn stdin(&mut self) -> &mut dyn Write;
+    /// The child's stdin, handed out once so a writer thread can own it. A write blocks while the child does not
+    /// read it; killing the child makes that write fail, so nothing that kills waits on the writer. A second call
+    /// returns an empty sink.
+    fn take_stdin(&mut self) -> Box<dyn Write + Send>;
 
     /// The child's stdout. It is handed out once; a second call returns an empty reader.
     fn take_stdout(&mut self) -> Box<dyn BufRead + Send>;
@@ -283,13 +285,16 @@ impl SshExec for SystemSshExec {
 /// dropped, because ssh's error text can carry server output and must never reach a message or a log.
 struct SystemStdioChild {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     stdout: Option<ChildStdout>,
 }
 
 impl StdioChild for SystemStdioChild {
-    fn stdin(&mut self) -> &mut dyn Write {
-        &mut self.stdin
+    fn take_stdin(&mut self) -> Box<dyn Write + Send> {
+        match self.stdin.take() {
+            Some(pipe) => Box::new(pipe),
+            None => Box::new(std::io::sink()),
+        }
     }
 
     fn take_stdout(&mut self) -> Box<dyn BufRead + Send> {
@@ -338,7 +343,7 @@ fn spawn_stdio_program(
         return Err(std::io::Error::other("the ssh child has no stdin pipe"));
     };
     let stdout = child.stdout.take();
-    Ok(SystemStdioChild { child, stdin, stdout })
+    Ok(SystemStdioChild { child, stdin: Some(stdin), stdout })
 }
 
 /// Reads a pipe to its end on a detached thread and discards the bytes, so the child never blocks on a full pipe.
@@ -808,7 +813,8 @@ mod tests {
         #[test]
         fn stdio_child_carries_lines_and_dies_on_kill() {
             let mut child = spawn_stdio_program("/bin/sh", &sh("cat"), None).unwrap();
-            child.stdin().write_all(b"ping\n").unwrap();
+            let mut stdin = child.take_stdin();
+            stdin.write_all(b"ping\n").unwrap();
             let mut stdout = child.take_stdout();
             let mut line = String::new();
             stdout.read_line(&mut line).unwrap();
