@@ -609,6 +609,21 @@ mod tests {
         assert_eq!(code_of(&f.call(r#"{"id":2,"cmd":"fs_list_dir","args":{"req":{"path":""}}}"#)), "root_missing");
     }
 
+    /// Only a folder that is really gone counts as missing. A folder the server cannot read right now (a permission
+    /// change, a flaky network mount) must not close the page's folder, because the app would then drop unsaved work.
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_root_is_not_reported_as_missing() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut f = Fixture::new("root-denied");
+        f.open_project();
+        let home = f.home.clone();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let reply = f.call(r#"{"id":2,"cmd":"fs_list_dir","args":{"req":{"path":""}}}"#);
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_ne!(code_of(&reply), "root_missing", "an unreadable folder is not a missing one: {reply}");
+    }
+
     #[test]
     fn stale_confirm_after_the_file_set_changed_changes_nothing() {
         let mut f = Fixture::new("stale-confirm");

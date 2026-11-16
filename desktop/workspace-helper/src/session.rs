@@ -5,6 +5,7 @@
 //! request cannot reach outside it, even through a symlink.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -64,7 +65,13 @@ impl Session {
             // return to the server home with the message it shows, instead of an I/O error.
             Some(root) => match fs::canonicalize(root) {
                 Ok(real) if real.is_dir() => confined(checked_root(&real)?),
-                _ => err(ROOT_MISSING_CODE, ROOT_MISSING_MESSAGE),
+                Ok(_) => err(ROOT_MISSING_CODE, ROOT_MISSING_MESSAGE),
+                // Only "gone" and "no longer a folder" mean the folder is missing. Any other failure (a permission
+                // change, a flaky mount) is reported as such, so the app keeps the folder and its unsaved work.
+                Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => {
+                    err(ROOT_MISSING_CODE, ROOT_MISSING_MESSAGE)
+                }
+                Err(e) => Err(io_err("cannot read the folder", e)),
             },
         }
     }
