@@ -854,7 +854,7 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
   project makes after the scaffold (`/kb/projects/register`, `/kb/project/install-skills`) are the only other writes
   to the project. Opening a folder writes nothing. Pinned by the workspace-helper tests `create_refuses_existing_name`,
   `create_refuses_home_and_outside` and `rebuild_refuses_plain_folder_and_writes_nothing`, and by the live harness
-  steps 15 to 19 in `desktop/src-tauri/src/ssh_live.rs`.
+  steps 15 to 20 in `desktop/src-tauri/src/ssh_live.rs`.
 - **The clone token exists only in git's child environment on the server.** The desktop puts the token in the
   helper request, which travels on the SSH channel's stdin. The helper passes it to git only through git's
   environment (`GIT_CONFIG_*` extra header, `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/usr/bin/true`). It is never in argv,
@@ -862,8 +862,12 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
   anonymous retry. Pinned by the workspace-helper test `token_never_appears_in_any_output`.
 - **Clone results arrive as events, and only one clone runs at a time.** The helper answers `repo_clone` at once and
   sends the result as a `clone` event, so requests keep being answered during a clone (`requests_are_answered_while_a_clone_runs`).
-  A second clone is refused with `busy` while the slot is taken, and `clone_cancel` stops the running one. The desktop
-  waits up to the 30-minute cap for the event, and when the channel closes the wait ends with `lost_connection`
+  The `repo_clone` reply is `{started: true, id}`, and every `clone` event carries that `id`. The desktop accepts only
+  the event with its own id, so a late event from an earlier clone is never read as this one's result. `clone_cancel {id}`
+  cancels only that clone, and a stale id does nothing. The helper sends a clone's event before it frees the one-clone
+  slot, under the same lock, so a request that sees the event never finds a slot that is free while the event is unsent.
+  A second clone is refused with `busy` while the slot is taken. The desktop waits up to the 30-minute cap for its event,
+  cancels its own id on timeout, and when the channel closes the wait ends with `lost_connection`
   (`clone_wait_ends_when_channel_closes` in `desktop/src-tauri/src/workspace_backend/tests.rs`).
 
 ### ❌ DO NOT

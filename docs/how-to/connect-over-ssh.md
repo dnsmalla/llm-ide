@@ -163,8 +163,8 @@ Project setup works on the server the way it works locally. In the folder picker
 project should go, then choose **New project…** and type a name. The app creates `<folder>/<name>` on the
 server with the same folders and files as a local project, opens it, registers it with the server core and
 installs the agent skills kit. Each step runs in that order. If registering or the skills install fails, the
-project stays open and the error comes with **Try again**, which reruns only the failed step. Nothing is
-removed.
+project stays open and the error comes with **Try again**, which reruns the whole registration (register and
+install-skills), not only the failed step. Nothing is removed.
 
 **New project** refuses a name that already exists, a name with a path separator or a leading dot, and a
 parent folder at or above your server home folder. It never turns an existing folder into a project. To use an
@@ -190,6 +190,11 @@ https URLs are accepted. If `git` is missing or the network blocks the host, the
 names the cause. A clone can take up to 30 minutes. It runs in the background, so you can keep using Explorer
 while it runs. Only one clone runs at a time on a server. A second clone while one runs is refused with "a clone is already
 running on the server".
+
+Each clone has an id. The server answers the start with that id, and it sends the result with the same id. The app
+accepts only the result for its own clone. Cancelling, or the 30-minute cap, cancels that clone by its id and no other.
+The server sends a clone's result before it frees the slot, so a clone can start again as soon as the previous result
+has arrived.
 
 A token for a private repository is sent to the server over the same SSH channel as the rest of the requests.
 The server helper gives it to `git` only through `git`'s own environment, for that one clone. The token is never
