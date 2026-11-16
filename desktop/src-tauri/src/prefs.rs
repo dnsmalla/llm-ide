@@ -875,6 +875,25 @@ pub fn launch() -> Prefs {
     LAUNCH.get().cloned().unwrap_or_default()
 }
 
+/// The mode this launch runs in, for the host to act on. SSH is per session: a launch in SSH mode runs in SSH, and
+/// the saved mode goes back to `Local` at once, so the next start (also one after a crash) opens the local Welcome.
+/// Call once, after `init`. Hub (`Remote`) and local launches change nothing.
+pub fn take_launch_mode() -> ServerMode {
+    end_ssh_session_at_launch(launch().remote_server.mode)
+}
+
+/// Saves `Local` as the start mode when `mode` is SSH, and returns `mode`. Only the mode field is written, so the
+/// saved server (host, port, user, key path, pins, recents) stays as it was. A failed save is logged and does not
+/// stop this session: it still runs in SSH, and the next start may come back to SSH.
+fn end_ssh_session_at_launch(mode: ServerMode) -> ServerMode {
+    if mode == ServerMode::Ssh {
+        if let Err(e) = set_remote_server_mode(ServerMode::Local) {
+            eprintln!("prefs: could not save the local start mode after an SSH session ({}); the next start may open SSH", e.code);
+        }
+    }
+    mode
+}
+
 pub fn stored() -> Prefs {
     state().as_ref().map(|s| s.stored.clone()).unwrap_or_default()
 }
@@ -2073,6 +2092,58 @@ mod ssh_lists_tests {
         assert_eq!(block.ssh_known_hosts, vec![pin("other.example", 22, "key-b")], "only the unused endpoint's key goes");
         assert!(ssh_recent_folders("bob@example.com:22").is_empty());
         assert_eq!((block.host.as_str(), block.user.as_str()), ("elsewhere.example", "carol"), "the switch is not touched");
+    }
+
+    /// A saved SSH server with every field set, so a test can see each one survive a launch.
+    fn saved_ssh_server() -> RemoteServerPrefs {
+        RemoteServerPrefs {
+            mode: ServerMode::Ssh,
+            host: "example.com".into(),
+            port: 2222,
+            user: "alice".into(),
+            key_path: "/home/alice/.ssh/id".into(),
+            ssh_auth: SshAuthKind::Password,
+            ssh_known_hosts: vec![pin("example.com", 2222, "key-a")],
+            ssh_recent_servers: vec![recent("example.com", "alice")],
+            ssh_recent_folders: vec![SshRecentFolder { server: "alice@example.com:2222".into(), path: "/home/alice".into(), last_used: 3 }],
+            ..RemoteServerPrefs::default()
+        }
+    }
+
+    #[test]
+    fn a_launch_in_ssh_mode_runs_ssh_and_saves_local_with_the_server_intact() {
+        let _guard = fresh();
+        let saved = saved_ssh_server();
+        set_remote_server_for_test(saved.clone());
+        assert_eq!(end_ssh_session_at_launch(ServerMode::Ssh), ServerMode::Ssh, "this session runs in SSH");
+        assert_eq!(
+            stored().remote_server,
+            RemoteServerPrefs { mode: ServerMode::Local, ..saved },
+            "the next start is local; host, port, user, pins and recents are untouched",
+        );
+    }
+
+    #[test]
+    fn a_launch_in_hub_mode_stays_remote() {
+        let _guard = fresh();
+        let hub = RemoteServerPrefs {
+            mode: ServerMode::Remote,
+            hub_url: "https://hub.example.com".into(),
+            tls_pin: "sha256:AAAA".into(),
+            ..RemoteServerPrefs::default()
+        };
+        set_remote_server_for_test(hub.clone());
+        assert_eq!(end_ssh_session_at_launch(ServerMode::Remote), ServerMode::Remote);
+        assert_eq!(stored().remote_server, hub, "hub mode is persistent and changes nothing");
+    }
+
+    #[test]
+    fn a_launch_in_local_mode_stays_local_and_keeps_a_saved_server() {
+        let _guard = fresh();
+        let saved = RemoteServerPrefs { mode: ServerMode::Local, ..saved_ssh_server() };
+        set_remote_server_for_test(saved.clone());
+        assert_eq!(end_ssh_session_at_launch(ServerMode::Local), ServerMode::Local);
+        assert_eq!(stored().remote_server, saved, "a local start changes nothing");
     }
 
     #[test]

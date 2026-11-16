@@ -706,7 +706,8 @@ pub fn run() {
             }
             // Host prefs are read once, before the core is spawned: they decide its environment.
             prefs::init(fsutil::desktop_data_dir().ok().and_then(|d| fsutil::private_dir(&d).ok()));
-            setup_host.set_mode(prefs::launch().remote_server.mode);
+            // SSH lasts one session: this launch runs in SSH and the saved mode goes back to local (see take_launch_mode).
+            setup_host.set_mode(prefs::take_launch_mode());
             graph_gen::start_auto(app.handle().clone());
             if let Ok(res) = app.path().resource_dir() {
                 core_host::set_resource_dir(res);
