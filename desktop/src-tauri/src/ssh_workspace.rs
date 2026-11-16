@@ -2,14 +2,9 @@
 //! Explorer's file, git, search and watch commands as JSON lines.
 //!
 //! [`WorkspaceClient::connect`] starts the helper with the constant [`WORKSPACE`] command, checks its
-//! version with `hello`, and then answers each request by its id on one reader thread. Events go to the
+//! protocol with `hello`, and then answers each request by its id on one reader thread. Events go to the
 //! subscribers of their kind. Every spawn takes its own one-time password grant, so a reconnect never
 //! reuses an answered grant.
-//!
-//! NOTE: nothing calls this module yet. Task 7 (the Explorer commands over the helper) wires it in; until
-//! then the module-wide allowance keeps the build free of dead-code warnings.
-
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Read, Write};
@@ -28,7 +23,8 @@ use crate::ssh_askpass::AskpassGrant;
 use crate::ssh_server_scripts::WORKSPACE;
 use crate::ssh_transport::{exec_args, SshEndpoint, SshExec, StdioChild};
 
-/// The protocol version the helper must report in `hello`. Bumped together with the helper's `PROTOCOL`.
+/// The protocol the helper must report in `hello`. Bumped together with the helper's `PROTOCOL`. The helper's
+/// build version is not checked: the bundle's sha check already pins the helper to this app's release.
 const PROTOCOL: u64 = 1;
 
 /// How long a call waits for its answer. A silent helper must not leave the Explorer spinning forever.
@@ -37,6 +33,12 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// The longest answer line accepted: the same 64 MB cap the helper puts on its requests. A large file read
 /// is the biggest legitimate answer.
 const MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
+
+/// The longest request body (the line without its newline) this client sends. It is the helper's own cap, so a
+/// larger request would only be answered by the helper with an id-0 error that nothing waits for.
+const MAX_REQUEST_BYTES: usize = 64 * 1024 * 1024;
+const TOO_LARGE_CODE: &str = "too_large";
+const TOO_LARGE_MESSAGE: &str = "This change is too large to send to the server.";
 
 /// How long `close` waits for the reader thread once the child is killed.
 const READER_WAIT: Duration = Duration::from_secs(1);
@@ -249,10 +251,15 @@ impl WorkspaceClient {
         timeout: Duration,
     ) -> Result<Value, FsError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let line = request_line(id, cmd, args, confirm);
+        // Refused before anything is registered or sent, so the channel stays up. The line ends with its newline,
+        // which the helper's cap does not count.
+        if line.len().saturating_sub(1) > MAX_REQUEST_BYTES {
+            return Err(herr(TOO_LARGE_CODE, TOO_LARGE_MESSAGE));
+        }
         let (waiter, answer) = mpsc::channel();
         self.shared.register(id, waiter)?;
         // Registered and queued before the wait starts, so the timeout also covers a write that never completes.
-        let line = request_line(id, cmd, args, confirm);
         let queued = locked(&self.outbound).as_ref().is_some_and(|queue| queue.send(line).is_ok());
         if !queued {
             break_channel(&self.shared, &self.child);
@@ -262,6 +269,9 @@ impl WorkspaceClient {
             Ok(result) => result,
             Err(RecvTimeoutError::Timeout) => {
                 self.shared.forget(id);
+                // The helper may still be working on this request and would answer late, out of step with the
+                // calls after it. The channel is ended, so the next call starts a fresh helper.
+                break_channel(&self.shared, &self.child);
                 Err(herr(TIMEOUT_CODE, TIMEOUT_MESSAGE))
             }
             Err(RecvTimeoutError::Disconnected) => Err(lost()),
@@ -358,11 +368,11 @@ fn request_line(id: u64, cmd: &str, args: Value, confirm: Option<&str>) -> Strin
     format!("{}\n", Value::Object(request))
 }
 
-/// Reads the answer to `hello`: the protocol and version must match this build, and `git` is optional.
+/// Reads the answer to `hello`: the protocol must match this build, and `git` is optional. The helper's `version`
+/// is left out of the check on purpose; it is kept in the reply for logs.
 fn check_hello(value: &Value) -> Result<bool, FsError> {
-    let version = value.get("version").and_then(Value::as_str);
     let protocol = value.get("protocol").and_then(Value::as_u64);
-    if protocol != Some(PROTOCOL) || version != Some(env!("CARGO_PKG_VERSION")) {
+    if protocol != Some(PROTOCOL) {
         return Err(herr(VERSION_CODE, VERSION_MESSAGE));
     }
     Ok(value.get("git").and_then(Value::as_bool).unwrap_or(false))
@@ -454,7 +464,9 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-#[cfg(test)]
+// The fake helper below talks over Unix socket pairs, so the whole test module is Unix-only. The build on Windows
+// still compiles without it, which is what the desktop's Windows CI needs.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::ssh_transport::{prepare_endpoint, ForwardChild, SshAuth};
@@ -598,10 +610,6 @@ mod tests {
             let _ = self.server_in.shutdown(Shutdown::Both);
             let _ = self.answers.shutdown(Shutdown::Write);
         }
-
-        fn try_exited(&mut self) -> Option<i32> {
-            self.stopped.then_some(0)
-        }
     }
 
     /// Hands out the queued fake helpers in order, and records each spawn's argv and whether it got a grant.
@@ -668,16 +676,18 @@ mod tests {
         locked(&client.shared.pending).calls.len()
     }
 
+    /// The version is shown in logs, not compared: the release copies the helper from the same bundle as the app,
+    /// and the bundle's sha check already guarantees the helper is the shipped one. Comparing versions would make
+    /// every release that moves the desktop's version refuse its own helper.
     #[test]
-    fn hello_version_mismatch_refused() {
+    fn hello_version_is_not_compared() {
         let behave: Behave = Box::new(|request: &Value| {
-            vec![reply(&request["id"], json!({"version": "0.0.1-other-build", "protocol": 1, "git": true}))]
+            vec![reply(&request["id"], json!({"version": "9.9.9", "protocol": 1, "git": true}))]
         });
         let (exec, remote) = exec_with(behave);
-        let error = WorkspaceClient::connect(&exec, &endpoint(), Path::new(KNOWN), None).err().expect("refused");
-        assert_eq!(error.code, "workspace_version");
-        assert_eq!(error.message, VERSION_MESSAGE);
-        assert_eq!(remote.kills(), 1, "the refused helper is killed");
+        let client = WorkspaceClient::connect(&exec, &endpoint(), Path::new(KNOWN), None).expect("the protocol matches");
+        assert!(client.git_available());
+        assert_eq!(remote.kills(), 0, "an accepted helper is kept");
     }
 
     #[test]
@@ -811,18 +821,14 @@ mod tests {
     }
 
     #[test]
-    fn timeout_removes_pending_entry_and_late_answer_is_ignored() {
-        let mut slow_id = Value::Null;
-        let behave: Behave = Box::new(move |request: &Value| match request["cmd"].as_str() {
+    fn timeout_ends_the_channel_so_the_next_call_reconnects() {
+        // The helper may still be working on the timed-out request, and its answer would then match nothing. A
+        // channel that timed out cannot be trusted to still be in step, so it is ended, not reused.
+        let silent: Behave = Box::new(|request: &Value| match request["cmd"].as_str() {
             Some("hello") => vec![hello_reply(&request["id"], true)],
-            Some("slow") => {
-                slow_id = request["id"].clone();
-                vec![]
-            }
-            Some("after") => vec![reply(&slow_id, json!("late")), reply(&request["id"], json!("after"))],
             _ => vec![],
         });
-        let (client, _remote) = connect_ok(behave);
+        let (client, remote) = connect_ok(silent);
         let error = client
             .call_with_timeout("slow", json!({}), None, Duration::from_millis(50))
             .err()
@@ -830,9 +836,21 @@ mod tests {
         assert_eq!(error.code, "SSH_TIMEOUT");
         assert_eq!(error.message, "The server did not answer in time.");
         assert_eq!(pending_len(&client), 0, "the timed-out entry is removed");
-        assert_eq!(client.call("after", json!({}), None).unwrap(), json!("after"));
-        assert_eq!(pending_len(&client), 0, "the late answer for the timed-out id matched nothing");
-        assert!(!client.is_closed(), "a late answer does not break the channel");
+        assert!(client.is_closed(), "the timed-out channel is ended");
+        assert_eq!(remote.kills(), 1, "its helper is killed");
+        let later = client.call("after", json!({}), None).err().expect("a later call on this client fails");
+        assert_eq!(later.code, "lost_connection");
+    }
+
+    #[test]
+    fn request_over_the_helper_cap_is_refused_before_it_is_sent() {
+        let (client, remote) = connect_ok(echo());
+        let big = "x".repeat(MAX_REQUEST_BYTES);
+        let error = client.call("big", json!({"data": big}), None).err().expect("refused");
+        assert_eq!(error.code, "too_large");
+        assert!(!client.is_closed(), "nothing was sent, so the channel stays up");
+        assert!(client.call("small", json!({}), None).is_ok());
+        assert_eq!(remote.requests.try_iter().filter(|request| request["cmd"] == "big").count(), 0);
     }
 
     #[test]

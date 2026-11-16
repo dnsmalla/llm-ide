@@ -257,11 +257,6 @@ pub trait StdioChild: Send {
 
     /// Stops the child and waits for it, so no process is left behind. Calling it again is harmless.
     fn kill(&mut self);
-
-    /// The exit code once the child has ended, `None` while it still runs.
-    // NOTE: Task 7 is the first caller (the channel watches the helper process); until then only tests use it.
-    #[allow(dead_code)]
-    fn try_exited(&mut self) -> Option<i32>;
 }
 
 /// A running forward. Dropping it stops the child.
@@ -323,14 +318,6 @@ impl StdioChild for SystemStdioChild {
         // An error here means the child has already exited, which is the state `kill` is meant to reach.
         let _ = self.child.kill();
         let _ = self.child.wait();
-    }
-
-    fn try_exited(&mut self) -> Option<i32> {
-        match self.child.try_wait() {
-            Ok(Some(status)) => Some(exit_code(status)),
-            Ok(None) => None,
-            Err(_) => Some(-1),
-        }
     }
 }
 
@@ -852,9 +839,10 @@ mod tests {
             let mut line = String::new();
             stdout.read_line(&mut line).unwrap();
             assert_eq!(line, "ping\n");
-            assert_eq!(child.try_exited(), None);
             child.kill();
-            assert!(child.try_exited().is_some());
+            // The child is dead once its stdout reaches end of file, so nothing is left reading or writing.
+            let mut rest = String::new();
+            assert_eq!(stdout.read_line(&mut rest).unwrap(), 0, "the child closed its stdout");
             child.kill();
         }
 
