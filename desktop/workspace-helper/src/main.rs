@@ -5,6 +5,7 @@
 //! and a clone cancel are answered at once. A clone runs on its own thread, so the other requests are answered while
 //! it runs. The process ends when stdin closes, after the watcher, any search and any clone have stopped.
 
+mod clone_credential;
 mod dispatch;
 mod project_setup;
 mod protocol;

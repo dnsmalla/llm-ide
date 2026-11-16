@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use llmide_workspace_core::git::git_binary;
 use llmide_workspace_core::paths::checked_root;
 use llmide_workspace_core::project::layout;
-use llmide_workspace_core::project::clone::{self, CloneRequest};
+use llmide_workspace_core::project::clone::{self, CloneRequest, Token};
 use llmide_workspace_core::search::{aborted_done, run_search, validate, Query, Searches, Started};
 use llmide_workspace_core::trash::{OsTrash, Trasher};
 use llmide_workspace_core::watch::{Watch, WatchBatch, WatchStarted};
@@ -23,6 +23,7 @@ use llmide_workspace_core::{err, io_err, FsError, R};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::clone_credential::{self, RedeemError};
 use crate::project_setup;
 use crate::protocol::{event, Out, PROTOCOL};
 
@@ -32,6 +33,10 @@ pub const ROOT_MISSING_MESSAGE: &str = "This folder is no longer on the server."
 
 /// The text the desktop shows when the server has no git. Fixed, because the app shows it as is.
 pub const GIT_MISSING_MESSAGE: &str = "git is not installed on the server.";
+
+/// The message of a clone that ran without the saved token because the redeem failed, and was then refused. It tells
+/// the person what to do, and names no token, grant or git text.
+pub const SAVED_TOKEN_REFUSED_MESSAGE: &str = "The saved token could not be used; paste a token to clone a private repository.";
 
 /// The message of a clone whose thread panicked. The panic text is never sent, since it could name a path or a value.
 const CLONE_INTERNAL_MESSAGE: &str = "the clone stopped unexpectedly on the server";
@@ -313,14 +318,19 @@ impl Session {
         let Some((id, cancel)) = self.clones.begin() else {
             return err("busy", "a clone is already running on the server");
         };
+        let typed = req.token.clone();
+        let grant = req.grant.clone();
+        let state_path = default_state_path();
         let out = Arc::clone(&self.out);
         let clones = Arc::clone(&self.clones);
         let release = Arc::clone(&self.clones);
         let started = std::thread::Builder::new().name("repo-clone".into()).spawn(move || {
-            let ran = catch_unwind(AssertUnwindSafe(|| clone::run(&plan, req.token.as_ref(), &cancel, &git)));
+            // The redeem runs here, not before the reply, so the started answer is not held up by it.
+            let (token, redeem_failed) = resolve_token(typed, grant, state_path.as_deref());
+            let ran = catch_unwind(AssertUnwindSafe(|| clone::run(&plan, token.as_ref(), &cancel, &git)));
             let data = match ran {
                 Ok(Ok(done)) => json!({"id": id, "ok": true, "path": done.path, "name": done.name}),
-                Ok(Err(message)) => clone_failure(id, &message),
+                Ok(Err(message)) => clone_failure(id, &refused_message(message, redeem_failed)),
                 Err(_) => json!({"id": id, "ok": false, "code": "internal", "message": CLONE_INTERNAL_MESSAGE}),
             };
             clones.end(id, || {
@@ -349,6 +359,34 @@ impl Session {
         self.watch = None;
         // A new id cancels the search that belongs to the previous folder.
         let _ = self.searches.begin();
+    }
+}
+
+/// The token a clone runs with, and whether a grant was given but could not be redeemed. A typed token always wins
+/// and no grant is redeemed then. Without one, the grant is redeemed on the server core over loopback.
+fn resolve_token(typed: Option<Token>, grant: Option<Token>, state_path: Option<&Path>) -> (Option<Token>, bool) {
+    if typed.is_some() {
+        return (typed, false);
+    }
+    let Some(grant) = grant else { return (None, false) };
+    let redeemed = state_path.ok_or(RedeemError::State).and_then(|path| clone_credential::redeem(path, &grant));
+    match redeemed {
+        Ok(token) => (Some(token), false),
+        Err(_) => (None, true),
+    }
+}
+
+/// The server core's state file under the server user's home. `None` when the home folder is unusable.
+fn default_state_path() -> Option<PathBuf> {
+    home_root().ok().map(|home| home.join(clone_credential::STATE_FILE_REL))
+}
+
+/// Git's refusal of a clone that ran without the saved token says so in plain words. Any other message is kept.
+fn refused_message(message: String, redeem_failed: bool) -> String {
+    if redeem_failed && clone::is_auth_failure(&message) {
+        SAVED_TOKEN_REFUSED_MESSAGE.to_string()
+    } else {
+        message
     }
 }
 

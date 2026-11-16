@@ -339,6 +339,7 @@ dependencies = [
 name = "llmide-workspace-helper"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "llmide-workspace-core",
  "serde",
  "serde_json",

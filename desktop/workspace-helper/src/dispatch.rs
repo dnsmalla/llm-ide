@@ -360,6 +360,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::protocol::{parse_request, Capture, Out, PROTOCOL};
+    use crate::session::SAVED_TOKEN_REFUSED_MESSAGE;
     use llmide_workspace_core::project::layout;
     use llmide_workspace_core::trash::tests::FakeTrash;
     use serde_json::json;
@@ -1117,21 +1118,124 @@ mod tests {
         f.open_new_project();
         use_fake_git(&mut f, REFUSING_GIT);
         let marker = "ghp_TOKEN_MARKER_7731";
+        let grant_marker = "grant_GRANT_MARKER_4412";
         // A refused token: the clone retries anonymously, fails, and the event carries git's error only.
         let started = start_clone(&mut f, 1, "o/r");
         let refused = clone_event(&f.captured, started);
         assert_eq!(refused["ok"], false);
         assert_eq!(refused["code"], "clone_failed");
+        // A refused grant: with no state file the redeem fails, the clone runs anonymously and is refused, and the
+        // event says the saved token could not be used. The grant itself is never echoed.
+        let granted = start_grant_clone(&mut f, 3, "o/r", None, grant_marker);
+        let granted = clone_event(&f.captured, granted);
+        assert_eq!(granted["code"], "clone_failed");
+        assert_eq!(granted["message"], SAVED_TOKEN_REFUSED_MESSAGE);
         // A bad URL with the token set is refused synchronously.
         assert_eq!(code_of(&f.call(&clone_line(2, "https://evil.example/o/r", Some(marker)))), "clone_refused");
-        // Every byte the helper wrote, replies and events alike, must lack the token in both forms.
+        // Every byte the helper wrote, replies and events alike, must lack the token in both forms, and the grant.
         let text = String::from_utf8(f.captured.lock().unwrap().clone()).unwrap();
         assert!(text.contains("Authentication failed"), "the refused run really ran: {text}");
         let github = llmide_workspace_core::project::clone::base64(format!("x-access-token:{marker}").as_bytes());
         let gitlab = llmide_workspace_core::project::clone::base64(format!("oauth2:{marker}").as_bytes());
-        for form in [marker.to_string(), github, gitlab] {
-            assert!(!text.contains(&form), "the token or its encoded form reached the helper's output: {text}");
+        for form in [marker.to_string(), github, gitlab, grant_marker.to_string()] {
+            assert!(!text.contains(&form), "the token, its encoded form or the grant reached the helper's output: {text}");
         }
+    }
+
+    /// The `repo_clone` line for a request that carries a grant, and optionally a typed token.
+    fn grant_clone_line(id: u64, url: &str, token: Option<&str>, grant: &str) -> String {
+        json!({"id": id, "cmd": "repo_clone", "args": {"req": {"provider": "github", "url": url, "token": token, "grant": grant}}}).to_string()
+    }
+
+    /// Starts a clone with a grant and returns its id from the `started` reply.
+    fn start_grant_clone(f: &mut Fixture, id: u64, url: &str, token: Option<&str>, grant: &str) -> u64 {
+        let started = ok_of(&f.call(&grant_clone_line(id, url, token, grant))).clone();
+        started["id"].as_u64().expect("started carries the clone id")
+    }
+
+    /// Writes the server's state file the way the start script does: owner-only, naming the core's port and nonce.
+    #[cfg(unix)]
+    fn write_state(home: &Path, port: u16, nonce: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = home.join(".llmide-server");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json");
+        let text = format!(r#"{{"running":true,"port":{port},"pid":1,"nonce":"{nonce}","version":"test"}}"#);
+        std::fs::write(&path, text).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    /// A stand-in git that appends the auth header it was given (or `none`) to `calls`, then creates the destination.
+    #[cfg(unix)]
+    fn recording_git(calls: &Path) -> String {
+        format!(
+            "if [ \"$GIT_CONFIG_KEY_0\" = http.https://github.com.extraHeader ]; then echo \"$GIT_CONFIG_VALUE_0\" >> '{0}'; else echo none >> '{0}'; fi; \
+             last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"",
+            calls.display()
+        )
+    }
+
+    /// A 200 answer that carries `token` as the redeem body.
+    fn token_answer(token: &str) -> Vec<u8> {
+        let body = format!(r#"{{"token":"{token}"}}"#);
+        format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).into_bytes()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_grant_is_redeemed_and_the_saved_token_reaches_git_and_no_output() {
+        let mut f = Fixture::new("clone-grant-ok");
+        f.open_new_project();
+        let saved = "ghp_SAVED_TOKEN_5521";
+        let (core, seen) = crate::clone_credential::test_server::serve_once(token_answer(saved));
+        write_state(&f.home, core.port(), "ab12cd34");
+        let calls = f.outside.join("calls.txt");
+        use_fake_git(&mut f, &recording_git(&calls));
+        let id = start_grant_clone(&mut f, 1, "o/r", None, "grant_OK_1");
+        let data = clone_event(&f.captured, id);
+        assert_eq!(data["ok"], true, "{data}");
+        let header = std::fs::read_to_string(&calls).unwrap();
+        let encoded = llmide_workspace_core::project::clone::base64(format!("x-access-token:{saved}").as_bytes());
+        assert!(header.contains(&encoded), "git got the saved token in its header: {header}");
+        let request = seen.join().unwrap();
+        assert!(request.contains("x-llmide-core-nonce: ab12cd34"), "{request}");
+        assert!(request.ends_with(r#"{"grant":"grant_OK_1"}"#), "{request}");
+        let text = String::from_utf8(f.captured.lock().unwrap().clone()).unwrap();
+        assert!(!text.contains(saved) && !text.contains(&encoded), "the saved token is in no helper output: {text}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_redeem_clones_anonymously() {
+        let mut f = Fixture::new("clone-grant-refused");
+        f.open_new_project();
+        let (core, seen) = crate::clone_credential::test_server::serve_once(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 2\r\n\r\n{}".to_vec());
+        write_state(&f.home, core.port(), "ab12cd34");
+        let calls = f.outside.join("calls.txt");
+        use_fake_git(&mut f, &recording_git(&calls));
+        let id = start_grant_clone(&mut f, 1, "o/r", None, "grant_BAD_2");
+        let data = clone_event(&f.captured, id);
+        assert_eq!(data["ok"], true, "the anonymous clone succeeds: {data}");
+        assert_eq!(std::fs::read_to_string(&calls).unwrap(), "none\n", "git got no credential");
+        seen.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_typed_token_skips_the_grant() {
+        let mut f = Fixture::new("clone-typed-wins");
+        f.open_new_project();
+        let (core, seen) = crate::clone_credential::test_server::serve_once(token_answer("ghp_NOT_USED"));
+        write_state(&f.home, core.port(), "ab12cd34");
+        let calls = f.outside.join("calls.txt");
+        use_fake_git(&mut f, &recording_git(&calls));
+        let id = start_grant_clone(&mut f, 1, "o/r", Some("ghp_TYPED_8"), "grant_IGNORED_3");
+        let data = clone_event(&f.captured, id);
+        assert_eq!(data["ok"], true, "{data}");
+        let header = std::fs::read_to_string(&calls).unwrap();
+        let typed = llmide_workspace_core::project::clone::base64(b"x-access-token:ghp_TYPED_8");
+        assert!(header.contains(&typed), "git got the typed token: {header}");
+        assert!(!seen.is_finished(), "no redeem was sent when a token was typed");
     }
 
     #[test]

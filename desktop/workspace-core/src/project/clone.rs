@@ -23,7 +23,8 @@ pub const CANCELLED: &str = "clone cancelled";
 pub struct Token(String);
 
 impl Token {
-    /// The raw token. Only `auth_config` may use it, to build git's environment.
+    /// The raw text. Only `auth_config` may use it, to build git's environment, and the helper's redeem request,
+    /// which must send a grant to the core. Nothing else may print or store it.
     pub fn expose(&self) -> &str {
         &self.0
     }
@@ -66,6 +67,10 @@ pub struct CloneRequest {
     pub url: String,
     pub token: Option<Token>,
     pub folder: Option<String>,
+    /// A single-use grant the server helper redeems for the saved provider token. Only the helper reads it, and
+    /// only when no typed `token` is set. Absent from requests that come from an older desktop.
+    #[serde(default)]
+    pub grant: Option<Token>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -422,7 +427,7 @@ mod tests {
     }
 
     fn request(provider: &str, url: &str, token: Option<&str>) -> CloneRequest {
-        CloneRequest { provider: provider.into(), url: url.into(), token: token.map(Token::from), folder: None }
+        CloneRequest { provider: provider.into(), url: url.into(), token: token.map(Token::from), folder: None, grant: None }
     }
 
     #[test]
@@ -438,6 +443,16 @@ mod tests {
         let req: CloneRequest = serde_json::from_str(r#"{"provider":"github","url":"o/r","token":"tok","folder":null}"#).unwrap();
         assert_eq!(req.token.as_ref().map(Token::expose), Some("tok"));
         assert!(serde_json::from_str::<CloneRequest>(r#"{"provider":"github","url":"o/r","token":5}"#).is_err());
+    }
+
+    #[test]
+    fn a_grant_is_optional_redacted_and_read_from_json() {
+        let with: CloneRequest = serde_json::from_str(r#"{"provider":"github","url":"o/r","grant":"g_GRANT_9"}"#).unwrap();
+        let grant = with.grant.as_ref().expect("the grant is read");
+        assert_eq!(grant.expose(), "g_GRANT_9");
+        assert!(!format!("{grant:?}").contains("GRANT_9"), "a grant never shows in Debug");
+        let without: CloneRequest = serde_json::from_str(r#"{"provider":"github","url":"o/r"}"#).unwrap();
+        assert!(without.grant.is_none(), "an older desktop sends no grant");
     }
 
     #[test]
