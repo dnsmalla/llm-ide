@@ -16,9 +16,10 @@ import { PartialNote } from "./NoticeSections.tsx";
  * Finder, the notes folder's sync badge, Rebuild missing folders, and a link to Library for the index rebuild.
  * The layout itself stays read-only in the desktop (the Mac edits it with a native dialog).
  */
-export default function PathsSection() {
+export default function PathsSection({ initial }: { initial?: ProjectPaths | null } = {}) {
   const { host, client } = useEnv();
-  const [data, setData] = useState<ProjectPaths | null>(null);
+  // NOTE: `initial` seeds the first render for tests (server rendering runs no effects); the app never passes it.
+  const [data, setData] = useState<ProjectPaths | null>(initial ?? null);
   const [notes, setNotes] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -97,6 +98,7 @@ export default function PathsSection() {
 
   // A plain server folder (ssh mode) has no project layout, so the card is the notice alone.
   const noticeOnly = Boolean(data && pathsIsNoticeOnly(data, inSshMode()));
+  if (noticeOnly) return <div className="st-stack"><p className="st-hint" role="status">{PATHS_TEXT.plainFolder}</p></div>;
   const sync = notes ? syncProviderFor(notes) : null;
   const notesInProject = Boolean(data && notes && notes.startsWith(`${data.root.replace(/\/+$/, "")}/`));
   const notesRel = data && notesInProject && notes ? notes.slice(data.root.replace(/\/+$/, "").length + 1) : null;
@@ -106,8 +108,7 @@ export default function PathsSection() {
       <p className="st-hint">{PATHS_TEXT.hint}</p>
       <ErrorText text={error} />
       {data === null && !error ? <p className="st-hint" role="status">Loading the project folders...</p> : null}
-      {noticeOnly ? <p className="st-hint" role="status">{PATHS_TEXT.plainFolder}</p> : null}
-      {data && !noticeOnly ? (
+      {data ? (
         <>
           <div className="st-row">
             <span className="st-label">Project root</span>
