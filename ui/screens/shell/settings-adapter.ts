@@ -8,6 +8,7 @@
 //  - pickFolder: `pick_folder` (no side effect) then a single-use `pick_folder_redeem`; confirmTrust: `trust_confirm`.
 // Still not provided: nothing blocks a macOS build; Windows/Linux hosts share the same commands.
 import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings/core-api";
+import { switchToSshMode } from "./host.ts";
 import { decodeComponentStatus, decodeCoreLog, decodeRtkStatus } from "../settings/components-model";
 import { decodeMemory, decodePaths } from "../settings/project-model";
 import { decodeHubCheck, decodeHubLogin, decodeRemoteServerConfig, decodeRemoteSshResult } from "../settings/remote-model";
@@ -189,6 +190,11 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         },
         sshServer: createSshServerIo(d.invoke),
         async restartApp() { await d.invoke("app_restart"); },
+        async switchSshServer() {
+          // The confirmed switch: save the SSH mode, then restart so the app works on the server.
+          await switchToSshMode(d.invoke);
+          await d.invoke("app_restart");
+        },
         async remoteSessionClear() { await d.invoke("remote_session_clear"); },
         async remoteUpdate(target, version, confirmation, hubUrl) { await d.invoke("remote_update", { target, version, confirmation, hubUrl }); },
         async remoteBackupNow(target) { await d.invoke("remote_backup_now", { target }); },

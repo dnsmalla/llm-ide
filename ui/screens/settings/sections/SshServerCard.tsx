@@ -41,9 +41,10 @@ export default function SshServerCard(): ReactNode {
       onPassword={setPassword}
       dialog={dialog}
       onDialog={(kind) => setDialog(kind === null ? null : { kind, host: s.host.trim() })}
-      onRestart={() => {
-        // Restart only when the user asks: a saved change applies at the next start.
-        if (host.restartApp) void host.restartApp();
+      onSwitch={async () => {
+        // Only the confirmed Switch calls this: the host saves the SSH mode, then the app restarts onto the server.
+        if (!host.switchSshServer) throw new Error("Switching to the server needs the desktop host, which is not connected in this build.");
+        await host.switchSshServer();
       }}
     />
   );

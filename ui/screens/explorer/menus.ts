@@ -20,6 +20,21 @@ export function findEntry(snap: ExplorerSnapshot, path: string) {
   return null;
 }
 
+/** Where a server folder's deleted items go: the server's own XDG Trash, not this computer's. */
+export const SERVER_TRASH_PATH = "~/.local/share/Trash";
+
+/** The menu label for Move to Trash. On a server the label names the server's Trash, as the confirmation does. */
+export function deleteLabel(count: number, serverFiles: boolean): string {
+  const where = serverFiles ? "Server Trash" : "Trash";
+  return count > 1 ? `Move ${count} Items to ${where}` : `Move to ${where}`;
+}
+
+/** The question the Move to Trash confirmation asks. A server folder's items go to the Trash on the server. */
+export function deleteQuestion(count: number, serverFiles: boolean): string {
+  if (!serverFiles) return count === 1 ? "Move this item to the system trash?" : `Move these ${count} items to the system trash?`;
+  return count === 1 ? `Move this item to the Trash on the server (${SERVER_TRASH_PATH})?` : `Move these ${count} items to the Trash on the server (${SERVER_TRASH_PATH})?`;
+}
+
 /** The tree's context menu for `path` (null = the empty space of the tree). */
 export function treeMenuItems(snap: ExplorerSnapshot, path: string | null, ctx: TreeMenuContext): MenuItem[] {
   const sel = path !== null && snap.selection.paths.has(path) ? topLevel(snap.selection.paths) : path !== null ? [path] : [];
@@ -35,7 +50,7 @@ export function treeMenuItems(snap: ExplorerSnapshot, path: string | null, ctx: 
     { id: "new-file", label: "New File…", separator: isFile && single },
     { id: "new-dir", label: "New Folder…" },
     { id: "rename", label: "Rename…", disabled: !single, separator: true },
-    { id: "delete", label: sel.length > 1 ? `Move ${sel.length} Items to Trash` : "Move to Trash", disabled: sel.length === 0, danger: true },
+    { id: "delete", label: deleteLabel(sel.length, ctx.serverFiles), disabled: sel.length === 0, danger: true },
     { id: "copy-path", label: "Copy Relative Path", disabled: sel.length === 0 },
     { id: "copy-abs", label: "Copy Absolute Path", disabled: sel.length === 0 || !ctx.projectRoot, separator: true },
     ...reveal,

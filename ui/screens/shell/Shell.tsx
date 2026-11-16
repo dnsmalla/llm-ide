@@ -6,7 +6,9 @@ import { disconnectAll, readDisconnectPlan } from "./disconnect-all";
 import { GuideDialog } from "../welcome/WelcomeScreen";
 import { SectionToolbar } from "./Toolbar";
 import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
-import { host as shellHost, invokeHost, subscribeRootMissing } from "./host";
+import { host as shellHost, invokeHost, subscribeNoProject, subscribeRootMissing } from "./host";
+import { projectStore } from "./project-store";
+import { localBackgroundRoot } from "./background-scope.ts";
 import { serverFolderHandlerFor, setServerFolderHandler } from "./server-folder";
 import { FolderPicker } from "../remote-folder/FolderPicker.tsx";
 import { goHomeAfterOpen, returnHomeFromMissingFolder, serverOpenDeps, serverWorkspaceIo } from "../remote-folder/wiring.ts";
@@ -26,7 +28,7 @@ import { menuAction } from "./menu-model";
 import { useSyncExternalStore } from "react";
 import { TERMINAL_BUILT } from "../explorer/terminal/shared";
 import { setTerminalDockOpen, toggleTerminalDock, useTerminalDockOpen } from "../explorer/terminal/dock-state.ts";
-import { computeGate, sectionInert, settingsReachableOverCoreDown, shouldMountSections } from "./gate";
+import { computeGate, keptScreensText, sectionInert, serverHomeReachable, settingsReachableOverCoreDown, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
 import { deepLinkSection } from "./deep-link.ts";
 import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, isSelectable, isSelectableFor, localOnlyNotice, navReducer, sectionForShortcut, subscribeDevTools, visibleSectionsFor, type NavAction, type NavMode, type SectionDef, type SectionId } from "./sections";
@@ -126,6 +128,13 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   }, [sshServer, openPicker]);
   // The open server folder vanished (any later host call said so): back to the server home with the reason.
   useEffect(() => subscribeRootMissing((message) => { void returnHomeFromMissingFolder(message); }), []);
+  // The active project is read again when the server link changes (disconnect, stop, uninstall, a connect or a reconnect
+  // all change it, and the host resets the open folder with it) and when a server call answers no_project.
+  const sshLink = coreStatusStore.getSnapshot().status?.link ?? null;
+  useEffect(() => {
+    if (serverMode === "ssh") void projectStore.refresh();
+  }, [serverMode, sshLink]);
+  useEffect(() => subscribeNoProject(() => { void projectStore.refresh(); }), []);
   const pickerIo = useMemo(() => serverWorkspaceIo(), []);
   const pickerDeps = useMemo(() => serverOpenDeps(), []);
   // Until the first status poll the mode is unknown: render no section rather than briefly mounting local ones.
@@ -212,12 +221,13 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   }, [view.down]);
   const gate = computeGate({ view, signedIn: session.signedIn, everUsable: everUsable.current, bypass });
   if (gate === "open" && !bypass) everUsable.current = true;
-  // ssh mode, core down, Settings open: the user must be able to type the password or change the server, so Settings
-  // is mounted and interactive under a slim notice. `overlayHidden` lets the user bring the core-down panel back.
+  // ssh mode, link down: the server home (Welcome) and Settings stay mounted and interactive, because that is where the
+  // user connects again, switches, or fixes the server or password. Under the core gate they sit under a slim notice.
+  // `overlayHidden` lets the user bring the core-down panel back.
   const [overlayHidden, setOverlayHidden] = useState(false);
   useEffect(() => { setOverlayHidden(false); }, [nav.active]);
-  const settingsReachable = settingsReachableOverCoreDown(serverMode, gate, nav.active) && !overlayHidden;
-  const mount = (shouldMountSections(gate, everUsable.current) || settingsReachable) && (projectLoaded || bypass);
+  const homeReachable = (serverHomeReachable(serverMode, sshLink, nav.active) || settingsReachableOverCoreDown(serverMode, gate, nav.active)) && !overlayHidden;
+  const mount = (shouldMountSections(gate, everUsable.current) || homeReachable) && (projectLoaded || bypass);
 
   useEffect(() => {
     coreStatusStore.start();
@@ -243,23 +253,25 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const projectRoot = project?.root ?? null;
   // The one desktop scheduler for the open project (built-in and custom tasks), so a schedule fires while any section is
   // open. Loaded lazily and only for a usable Auto Tasks feature so an auto_tasks-off build does not ship or run it.
+  // Local mode only: in ssh mode the loops would run their files on the server while their revert guard is local.
+  const backgroundRoot = localBackgroundRoot(serverMode, projectRoot);
   useEffect(() => {
-    if (!projectRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("autotasks", features.usable)) return undefined;
+    if (!backgroundRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("autotasks", features.usable)) return undefined;
     if (typeof __FEATURE_AUTO_TASKS__ === "boolean" && !__FEATURE_AUTO_TASKS__) return undefined;
     let live = true;
     let stop: (() => void) | undefined;
     void import("../tasks/scheduler-host.ts").then((m) => {
-      if (live) stop = m.startDesktopScheduler(projectRoot);
+      if (live) stop = m.startDesktopScheduler(backgroundRoot);
     });
     return () => { live = false; stop?.(); };
-  }, [projectRoot, session.signedIn, gate, features.usable]);
+  }, [backgroundRoot, session.signedIn, gate, features.usable]);
   // Factory runs and the phone-command poller start with the app, not only when the Factory/Issues screen is opened.
   useEffect(() => {
-    if (!projectRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("conflicts", features.usable)) return undefined;
+    if (!backgroundRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("conflicts", features.usable)) return undefined;
     if (typeof __FEATURE_AUTO_TASKS__ === "boolean" && !__FEATURE_AUTO_TASKS__) return undefined;
     void import("../loop/native/run-manager-host.ts").then((m) => m.installRunManagerHost());
     return undefined;
-  }, [projectRoot, session.signedIn, gate, features.usable]);
+  }, [backgroundRoot, session.signedIn, gate, features.usable]);
   // The command-bus scheduler (docs/spec/command-bus.md section 9): not tied to a project or a feature, idle on a core
   // that does not see this UI as the desktop class.
   useEffect(() => {
@@ -437,7 +449,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           {remoteMode && hubBanner ? <StatusBanner severity="warning" message={hubError ? `${hubBanner.title}. ${hubBanner.body}` : hubBanner.title} /> : null}
           <LiveBanner activeSection={nav.active} onOpen={() => dispatch({ type: "select", id: "live" })} />
           {crash && <CrashReportBanner notice={crash} onDismiss={dismissCrash} />}
-          {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
+          {gate === "restarting" && <StatusBanner severity="warning" message={keptScreensText(view.label, serverMode, sshLink)} />}
           {keepSectionNotice(sectionNotice, nav.active) && (
             <div className="sh-notice" role="status" data-testid="section-notice">
               <p>{safeText(sectionNotice!.text, 300)}</p>
@@ -452,15 +464,15 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           )}
           {mount &&
             visibleSections.filter((s) => nav.visited.includes(s.id)).map((def) => (
-              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} mode={navMode} onOpenServerFolder={serverOpener} inert={sectionInert(gate, def.id, settingsReachable)} spike={spike} />
+              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} mode={navMode} onOpenServerFolder={serverOpener} inert={sectionInert(gate, def.id, homeReachable)} spike={spike} />
             ))}
-          {gate === "core" && settingsReachable && (
+          {gate === "core" && homeReachable && (
             <div className="sh-notice" role="status" data-testid="core-down-notice">
-              <p>{safeText(`${view.label}. ${view.detail ?? "The server settings stay open so you can fix the connection."}`, 300)}</p>
+              <p>{safeText(`${view.label}. ${view.detail ?? (nav.active === "settings" ? "The server settings stay open so you can fix the connection." : "Connect to the server again from this page.")}`, 300)}</p>
               <button type="button" className="sh-button" onClick={() => setOverlayHidden(true)}>Show core status</button>
             </div>
           )}
-          {gate === "core" && !settingsReachable && (
+          {gate === "core" && !homeReachable && (
             <div className="sh-overlay">
               <CoreDownPanel
                 view={view}

@@ -12,17 +12,17 @@ import { connectRecentServer, loadRecent, recentKey, recentRowMessage } from "./
 /** What the Welcome page needs from the desktop host to connect to an SSH server. */
 export interface WelcomeSsh {
   io: SshServerIo;
-  /** Restarts the app. Called only when the user confirms the switch. */
-  restartApp: () => Promise<void>;
+  /** Saves the SSH mode and restarts the app. Called only when the user confirms the switch. */
+  switchToServer: () => Promise<void>;
 }
 
-const NO_HOST_RESTART = async (): Promise<void> => {
+const NO_HOST_SWITCH = async (): Promise<void> => {
   throw new Error("Switching to the server needs the desktop host, which is not connected in this build.");
 };
 
 export function SshWelcome({ ssh }: { ssh?: WelcomeSsh }): ReactNode {
   const io = ssh?.io ?? UNAVAILABLE_SSH_IO;
-  const restartApp = ssh?.restartApp ?? NO_HOST_RESTART;
+  const switchToServer = ssh?.switchToServer ?? NO_HOST_SWITCH;
   const m = useModel(() => new SshServerModel(io));
   const s = useStore(m);
   const [recent, setRecent] = useState<SshRecentServer[]>([]);
@@ -107,7 +107,7 @@ export function SshWelcome({ ssh }: { ssh?: WelcomeSsh }): ReactNode {
             setNotice(`Connected to ${m.target().host}.`);
             reloadRecent();
           }}
-          onSwitch={restartApp}
+          onSwitch={switchToServer}
         />
       ) : null}
     </>

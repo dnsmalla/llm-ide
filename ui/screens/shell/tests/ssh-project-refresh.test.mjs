@@ -33,3 +33,30 @@ test("project refresh in ssh mode: the server folder is the project, no error, n
     setHostBridge(null);
   }
 });
+
+// A server call that finds no open folder (the host reset its backend on a disconnect or stop) tells the shell to read
+// the active project again. Only in ssh mode, and never for the workspace commands, which answer their own errors.
+test("no_project in ssh mode notifies the project listeners; other modes and the workspace commands do not", async () => {
+  const hostMod = await load("host.ts");
+  let calls = 0;
+  const off = hostMod.subscribeNoProject(() => { calls += 1; });
+  const fail = (code) => ({ async invoke() { throw Object.assign(new Error("no folder"), { code }); } });
+  try {
+    hostMod.setHostBridge(fail("no_project"));
+    hostMod.setSshModeProvider(() => true);
+    await assert.rejects(hostMod.invokeHost("fs_list_dir", { path: "" }));
+    assert.equal(calls, 1, "ssh: the explorer's no_project refreshes the project");
+
+    hostMod.setSshModeProvider(() => false);
+    await assert.rejects(hostMod.invokeHost("fs_list_dir", { path: "" }));
+    assert.equal(calls, 1, "local: no refresh");
+
+    hostMod.setSshModeProvider(() => true);
+    await assert.rejects(hostMod.invokeHost("remote_ssh_workspace_open", { path: "/x" }));
+    assert.equal(calls, 1, "workspace commands answer their own errors");
+  } finally {
+    off();
+    hostMod.setSshModeProvider(() => false);
+    hostMod.setHostBridge(null);
+  }
+});

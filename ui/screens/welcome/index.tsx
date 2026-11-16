@@ -12,7 +12,7 @@ import { useActiveProject } from "../shell/use-shell";
 import { registerNewProject } from "./model";
 import { WelcomeScreen, type WelcomeActions } from "./WelcomeScreen";
 import type { WelcomeSsh } from "./SshWelcome.tsx";
-import { invokeHost } from "../shell/host";
+import { invokeHost, switchToSshMode } from "../shell/host";
 import { createSshServerIo } from "../settings/ssh-server-model";
 
 /** The Home section: shown while no project is open (and reachable any time from the nav). */
@@ -22,7 +22,14 @@ export default function WelcomeSection({ mode, onOpenServerFolder }: SectionProp
   const [guideSignal, setGuideSignal] = useState(0);
   // The SSH connect card talks to the host through the same commands as Settings' SSH card.
   const ssh = useMemo<WelcomeSsh>(
-    () => ({ io: createSshServerIo(invokeHost), restartApp: async () => { await invokeHost<unknown>("app_restart"); } }),
+    () => ({
+      io: createSshServerIo(invokeHost),
+      // The confirmed Switch: save the SSH mode, then restart. Connect alone saves no mode.
+      switchToServer: async () => {
+        await switchToSshMode();
+        await invokeHost<unknown>("app_restart");
+      },
+    }),
     [],
   );
   // "New project" buttons elsewhere (the no-project cards) ask for the form via the shell bus.

@@ -229,6 +229,17 @@ export function endServerFolderOpen(): void {
   serverFolderEpoch += 1;
 }
 
+// ssh mode: the open server folder is gone from the host (the backend was reset, for example by a disconnect or a stop).
+// Listeners re-read the active project, so the shell does not keep showing a folder the Explorer can no longer reach.
+type NoProjectListener = () => void;
+const noProjectListeners = new Set<NoProjectListener>();
+
+/** Called when a host call in ssh mode answers `no_project`. Returns the unsubscribe function. */
+export function subscribeNoProject(listener: NoProjectListener): () => void {
+  noProjectListeners.add(listener);
+  return () => noProjectListeners.delete(listener);
+}
+
 /**
  * Generic typed call for commands a slice owns. Prefer adding a wrapper to `host` for shared ones.
  * The `remote_ssh_workspace_*` commands are excluded from the root_missing hook: their own refusals (for example a
@@ -250,8 +261,19 @@ export async function invokeHost<T>(command: string, args?: Record<string, unkno
       const message = typeof record.message === "string" ? record.message : "This folder is no longer on the server.";
       for (const listener of [...rootMissingListeners]) listener(message);
     }
+    if (record?.code === "no_project" && sshModeProvider() && !command.startsWith("remote_ssh_workspace_")) {
+      for (const listener of [...noProjectListeners]) listener();
+    }
     throw e;
   }
+}
+
+/**
+ * Saves ssh as the server mode for the next start. Only the Switch confirmation calls it (Cancel saves nothing). The host
+ * refuses with `invalid_host` when no SSH server is saved, or with the pin code when its host key is not trusted yet.
+ */
+export async function switchToSshMode(call: <T>(command: string, args?: Record<string, unknown>) => Promise<T> = invokeHost): Promise<void> {
+  await call<unknown>("remote_ssh_switch_mode");
 }
 
 const STATES: readonly CoreState[] = ["starting", "ready", "restarting", "failed", "stopped", "remote", "ssh"];

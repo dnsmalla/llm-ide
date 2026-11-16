@@ -90,3 +90,16 @@ test("project folders button: hidden for a server folder (it lists this computer
   assert.doesNotMatch(ssh, /aria-label="Project folders"/);
   assert.match(ssh, /aria-label="New file"/, "the rest of the toolbar is unchanged");
 });
+
+// Move to Trash on a server folder names the server's Trash: the menu, the confirmation and the path it goes to.
+test("Move to Trash names the server's Trash for a server folder, and this computer's Trash otherwise", async () => {
+  const menus = await load("menus.ts");
+  assert.equal(menus.deleteLabel(1, true), "Move to Server Trash");
+  assert.equal(menus.deleteLabel(3, true), "Move 3 Items to Server Trash");
+  assert.equal(menus.deleteLabel(1, false), "Move to Trash");
+  assert.equal(menus.deleteLabel(2, false), "Move 2 Items to Trash");
+  assert.equal(menus.deleteQuestion(1, true), "Move this item to the Trash on the server (~/.local/share/Trash)?");
+  assert.equal(menus.deleteQuestion(2, true), "Move these 2 items to the Trash on the server (~/.local/share/Trash)?");
+  assert.equal(menus.deleteQuestion(1, false), "Move this item to the system trash?");
+  assert.equal(menus.deleteQuestion(2, false), "Move these 2 items to the system trash?");
+});

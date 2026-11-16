@@ -44,7 +44,30 @@ export function settingsReachableOverCoreDown(mode: string | undefined, gate: Ga
   return mode === "ssh" && gate === "core" && active === "settings";
 }
 
-/** A section is inert under a gate, except Settings while `settingsReachable` holds (the rest of the app stays inert). */
-export function sectionInert(gate: Gate, sectionId: string, settingsReachable: boolean): boolean {
-  return isInert(gate) && !(gate === "core" && settingsReachable && sectionId === "settings");
+/**
+ * ssh mode with the link down and not on its way back by itself (stopped, needs a password, failed): the server home
+ * (Welcome) and Settings stay usable under any gate, because they are where the user connects again, switches, or
+ * changes the server. While the link is connecting or reconnecting the screens stay as they are.
+ */
+export function serverHomeReachable(mode: string | undefined, link: string | null, active: string): boolean {
+  if (mode !== "ssh" || link === null) return false;
+  if (link === "connected" || link === "connecting" || link === "reconnecting") return false;
+  return active === "welcome" || active === "settings";
+}
+
+/** The banner under a `restarting` gate. A link that will not come back by itself must not promise a reconnect. */
+export function keptScreensText(label: string, mode: string | undefined, link: string | null): string {
+  if (mode === "ssh" && link !== null && link !== "connecting" && link !== "reconnecting") {
+    return `${label}. Your screens are kept. Connect to the server again from the server home.`;
+  }
+  return `${label}. Your screens are kept and will reconnect.`;
+}
+
+/**
+ * A section is inert under a gate, except Welcome and Settings while `reachable` holds under a core-down gate (the rest of
+ * the app stays inert). The login gate is never exempt: `reachable` only comes from a down link.
+ */
+export function sectionInert(gate: Gate, sectionId: string, reachable: boolean): boolean {
+  const downGate = gate === "core" || gate === "restarting";
+  return isInert(gate) && !(reachable && downGate && (sectionId === "settings" || sectionId === "welcome"));
 }

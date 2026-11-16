@@ -107,7 +107,7 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
           type="button"
           className="ex-tool"
           aria-label="Discard all changes"
-          title="Restores every change to HEAD, staged and unstaged. Untracked files go to the Trash only when ticked."
+          title={serverFiles ? "Restores every change to HEAD, staged and unstaged. Untracked files go to the Trash on the server only when ticked." : "Restores every change to HEAD, staged and unstaged. Untracked files go to the Trash only when ticked."}
           disabled={busy || total === 0 || c.conflicts > 0 || merging}
           onClick={() => void controller.discardAll(withUntracked)}
         >

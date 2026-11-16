@@ -47,6 +47,11 @@ export interface ProjectStore {
   dismissNotice(): void;
   /** Shows a notice on the shell without changing the project (for example a registration warning after an open). */
   announce(text: string): void;
+  /**
+   * Runs `action` only after the unsaved-work question is answered "leave" (or at once when nothing is unsaved). Resolves
+   * `cancelled` when the user stays. Every change of the active project goes through it, local or server.
+   */
+  guardLeave<T>(cancelled: T, action: () => Promise<T>): Promise<T>;
   /** Answers the pending `leave` question: go ahead and lose the unsaved work. */
   confirmLeave(): void;
   /** Answers the pending `leave` question: stay in this project; nothing changes. */
@@ -112,6 +117,7 @@ export function createProjectStore(h: ProjectHost = defaultHost, unsaved: () => 
       return () => listeners.delete(l);
     },
     refresh,
+    guardLeave: (cancelled, action) => leaving(cancelled, action),
     confirmLeave: () => answerLeave(true),
     cancelLeave: () => answerLeave(false),
     openFolder: () => leaving(false, async () => {

@@ -200,6 +200,11 @@ function reasonOf(e: unknown): string {
 
 /** The three steps that make a server folder the project. Each is injected, so the order is tested directly. */
 export interface OpenFlowDeps {
+  /**
+   * Asks the unsaved-work question before the folder changes (the shell's project store). Resolves `cancelled` when the
+   * user stays. Omitted in tests: the action then runs at once.
+   */
+  guard?<T>(cancelled: T, action: () => Promise<T>): Promise<T>;
   /** Registers the root with the server core. Throws when the core refuses. */
   register(root: string): Promise<void>;
   /** Re-reads the active project from the host. */
@@ -209,25 +214,29 @@ export interface OpenFlowDeps {
 }
 
 /**
- * Open a folder on the server as the project: the host opens it, then the core registers it, then the shell refreshes.
- * A registration failure is announced and the open stands. An open failure throws the host's error unchanged.
+ * Open a folder on the server as the project: the unsaved-work question first (when the guard is given), then the host
+ * opens it, the core registers it, and the shell refreshes. Null when the user stays in the current folder. A
+ * registration failure is announced and the open stands. An open failure throws the host's error unchanged.
  */
-export async function openServerFolder(io: WorkspaceIo, path: string, deps: OpenFlowDeps): Promise<RemoteProject> {
-  // The host gate ignores a root_missing from a call still in flight while the folder changes (see host.ts).
-  beginServerFolderOpen();
-  let project: RemoteProject;
-  try {
-    project = await io.open(path);
-  } finally {
-    endServerFolderOpen();
-  }
-  try {
-    await deps.register(project.root);
-  } catch (e) {
-    deps.announce(`Opened, but the server did not register the project: ${reasonOf(e)}`);
-  }
-  await deps.refresh();
-  return project;
+export async function openServerFolder(io: WorkspaceIo, path: string, deps: OpenFlowDeps): Promise<RemoteProject | null> {
+  const guard = deps.guard ?? (<T>(_cancelled: T, action: () => Promise<T>) => action());
+  return guard<RemoteProject | null>(null, async () => {
+    // The host gate ignores a root_missing from a call still in flight while the folder changes (see host.ts).
+    beginServerFolderOpen();
+    let project: RemoteProject;
+    try {
+      project = await io.open(path);
+    } finally {
+      endServerFolderOpen();
+    }
+    try {
+      await deps.register(project.root);
+    } catch (e) {
+      deps.announce(`Opened, but the server did not register the project: ${reasonOf(e)}`);
+    }
+    await deps.refresh();
+    return project;
+  });
 }
 
 /** What "the server folder is gone" needs: close the folder on the host, say why, and re-read the project. */
@@ -373,7 +382,7 @@ export class FolderPickerModel extends Store<PickerState> {
     }
   }
 
-  /** Makes the listed folder the project. Returns it, or null when the open failed (the error is shown). */
+  /** Makes the listed folder the project. Returns it, or null when the open failed or was not confirmed (see `error`). */
   openCurrent(): Promise<RemoteProject | null> {
     const s = this.getState();
     if (s.path === null) return Promise.resolve(null);

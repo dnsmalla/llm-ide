@@ -28,8 +28,8 @@ export interface SwitchStepProps {
 }
 
 /**
- * The switch step: a button, then the confirmation. Only the confirmation's Switch restarts the app; pressing the
- * button alone changes nothing on this computer.
+ * The switch step: a button, then the confirmation. Connect has already saved the server (not the mode). Only the
+ * confirmation's Switch saves the SSH mode and restarts the app; Cancel saves nothing, so the next start stays local.
  */
 export function SwitchStep({ host, confirming, switching, switchError, onAsk, onCancel, onSwitch, askRef, confirmRef }: SwitchStepProps): ReactNode {
   return (
@@ -145,7 +145,7 @@ export interface SshConnectDialogProps {
   passwordOnly: boolean;
   onClose: () => void;
   onConnected: () => void;
-  /** Restarts the app to work on the server. Called only after the user confirms the switch. */
+  /** Saves the SSH mode and restarts the app to work on the server. Called only after the user confirms the switch. */
   onSwitch: () => Promise<void>;
 }
 

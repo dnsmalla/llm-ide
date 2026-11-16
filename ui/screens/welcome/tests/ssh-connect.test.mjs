@@ -281,7 +281,7 @@ test("the dialog's form is the shared SSH form, with the same fields as Settings
 
 test("the Welcome page shows the card and nothing called Set up", () => {
   const actions = { createProject: async () => null, openFolder: async () => undefined, openRecent: async () => undefined, forgetRecent: async () => undefined, closeProject: async () => undefined, goHome() {} };
-  const html = plain(renderToStaticMarkup(h(welcome.WelcomeScreen, { project: null, recent: { entries: [], reset: false }, error: null, actions, ssh: { io: fakeIo(), restartApp: async () => undefined } })));
+  const html = plain(renderToStaticMarkup(h(welcome.WelcomeScreen, { project: null, recent: { entries: [], reset: false }, error: null, actions, ssh: { io: fakeIo(), switchToServer: async () => undefined } })));
   assert.match(html, /Connect to SSH server/);
   assert.match(html, />Connect…</);
   assert.doesNotMatch(html, />Set up</);
@@ -356,7 +356,7 @@ test("the recent list sits inside the card, under the Connect… button", () => 
 
 test("the Welcome page has one connect card: the Remote hosts card is gone", () => {
   const actions = { createProject: async () => null, openFolder: async () => undefined, openRecent: async () => undefined, forgetRecent: async () => undefined, closeProject: async () => undefined, goHome() {} };
-  const html = plain(renderToStaticMarkup(h(welcome.WelcomeScreen, { project: null, recent: { entries: [], reset: false }, error: null, actions, ssh: { io: fakeIo(), restartApp: async () => undefined } })));
+  const html = plain(renderToStaticMarkup(h(welcome.WelcomeScreen, { project: null, recent: { entries: [], reset: false }, error: null, actions, ssh: { io: fakeIo(), switchToServer: async () => undefined } })));
   assert.doesNotMatch(html, /Remote hosts/);
   assert.equal((html.match(/wc-ssh-card/g) ?? []).length, 1);
 });

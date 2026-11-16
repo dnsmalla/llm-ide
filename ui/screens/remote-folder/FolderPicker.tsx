@@ -115,7 +115,8 @@ export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
         <div className="wc-modal-foot rf-foot">
           <div className="st-root rf-actions">
             <Button disabled={busy || selectedEntry === null || selectedEntry.outsideHome} onClick={p.onOpenSelected}>Open</Button>
-            <Button tone="primary" disabled={busy || s.path === null} onClick={p.onOpenCurrent}>Open this folder</Button>
+            {/* The home folder is not a project: the host refuses it, so the button is off there rather than failing. */}
+            <Button tone="primary" disabled={busy || s.path === null || s.path === s.home} onClick={p.onOpenCurrent}>Open this folder</Button>
             <Button disabled={busy} onClick={p.onClose}>Cancel</Button>
           </div>
         </div>

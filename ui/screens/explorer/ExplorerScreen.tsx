@@ -12,7 +12,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { EditorPane } from "./EditorPane";
 import type { EditorHost } from "./editor-types";
 import { FileTree } from "./FileTree";
-import { findEntry, treeMenuItems } from "./menus";
+import { deleteQuestion, findEntry, treeMenuItems } from "./menus";
 import { absolutePathUnder, createHostFs, baseName, nativeBaseName, parentOf, toFsError, type Encoding, type FsApi, type WatchBatch } from "./fs";
 import { defaultKv, type KV } from "./session";
 import { ChatDockSlot } from "../shell/chat-dock";
@@ -566,10 +566,10 @@ export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, 
       )}
       {dialog?.type === "delete" && (
         <ConfirmDialog
-          title="Move to Trash"
-          message={dialog.paths.length === 1 ? "Move this item to the system trash?" : `Move these ${dialog.paths.length} items to the system trash?`}
+          title={serverFiles ? "Move to Server Trash" : "Move to Trash"}
+          message={deleteQuestion(dialog.paths.length, serverFiles)}
           items={dialog.paths}
-          confirmLabel="Move to Trash"
+          confirmLabel={serverFiles ? "Move to Server Trash" : "Move to Trash"}
           danger
           onCancel={() => setDialog(null)}
           onConfirm={() => {

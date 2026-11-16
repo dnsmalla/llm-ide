@@ -22,6 +22,7 @@ export function serverOpenDeps(): OpenFlowDeps {
     register: (root) => registerProject(root, { core }),
     refresh: () => projectStore.refresh(),
     announce: (text) => projectStore.announce(text),
+    guard: (cancelled, action) => projectStore.guardLeave(cancelled, action),
   };
 }
 

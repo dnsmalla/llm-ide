@@ -29,7 +29,7 @@ test("the Settings card renders the shared form unchanged", () => {
   const m = filled();
   const s = m.getState();
   const formHtml = renderToStaticMarkup(h(form.SshServerForm, { m, s, password: "", onPassword() {} }));
-  const viewHtml = renderToStaticMarkup(h(view.SshServerView, { m, s, password: "", onPassword() {}, dialog: null, onDialog() {}, onRestart() {} }));
+  const viewHtml = renderToStaticMarkup(h(view.SshServerView, { m, s, password: "", onPassword() {}, dialog: null, onDialog() {}, onSwitch: async () => {} }));
   assert.ok(viewHtml.includes(formHtml), "the card's markup contains the form's markup");
 });
 

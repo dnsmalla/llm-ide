@@ -6,6 +6,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { ErrorText, Field, Button } from "../ui.tsx";
 import { sshBadgeText, type SshServerModel, type SshServerState } from "../ssh-server-model.ts";
 import { FingerprintBlock, TestSummary } from "./SshServerParts.tsx";
+import { SshSwitchPrompt } from "./SshSwitchPrompt.tsx";
 
 export interface SshServerFormProps {
   m: SshServerModel;
@@ -18,7 +19,8 @@ export interface SshServerFormProps {
   /** Focus the password field when the form opens (a password server from the Welcome list). */
   focusPassword?: boolean;
   /** Settings only: a saved change needs a restart. The Welcome dialog shows its own switch step instead. */
-  onRestart?: () => void;
+  /** The confirmed switch to the SSH server (save the mode, restart). Shown only for a saved link that waits for it. */
+  onSwitch?: () => Promise<void>;
   /** Called after a Connect that attached the link, so the caller can close itself. */
   onConnected?: () => void;
   /** Takes the place of Connect while the link is up (Settings shows Disconnect there). */
@@ -58,9 +60,9 @@ function PasswordInput({ value, onChange, focus, hint }: { value: string; onChan
 
 /**
  * The live link as one line (or the error the host gave). `restart_required` is a saved change, not an error: the
- * Settings card offers the restart here; the Welcome dialog has no `onRestart` and shows its own switch step.
+ * Settings card offers the switch here; the Welcome dialog has no `onSwitch` and shows its own switch step.
  */
-function LinkLine({ s, host, onRestart }: { s: SshServerState; host: string; onRestart?: () => void }): ReactNode {
+function LinkLine({ s, host, onSwitch }: { s: SshServerState; host: string; onSwitch?: () => Promise<void> }): ReactNode {
   const link = s.status?.link ?? null;
   switch (link) {
     case "connected":
@@ -76,21 +78,14 @@ function LinkLine({ s, host, onRestart }: { s: SshServerState; host: string; onR
     case "failed":
       return <ErrorText text={s.status?.error ?? "The SSH connection could not be opened."} />;
     case "restart_required":
-      if (!onRestart) return null;
-      return (
-        <div className="st-note">
-          <p className="st-ok" role="status">Saved. Restart the app to switch to this server.</p>
-          <div className="st-row">
-            <Button onClick={onRestart}>Restart the app</Button>
-          </div>
-        </div>
-      );
+      if (!onSwitch) return null;
+      return <SshSwitchPrompt host={host} onSwitch={onSwitch} />;
     default:
       return null;
   }
 }
 
-export function SshServerForm({ m, s, password, onPassword, readOnly = false, focusPassword = false, onRestart, onConnected, linkActions, passwordHint = SETTINGS_PASSWORD_HINT, disableActions = false }: SshServerFormProps): ReactNode {
+export function SshServerForm({ m, s, password, onPassword, readOnly = false, focusPassword = false, onSwitch, onConnected, linkActions, passwordHint = SETTINGS_PASSWORD_HINT, disableActions = false }: SshServerFormProps): ReactNode {
   const busy = s.busy !== null;
   const pw = password.length > 0 ? password : undefined;
   const link = s.status?.link ?? null;
@@ -143,7 +138,7 @@ export function SshServerForm({ m, s, password, onPassword, readOnly = false, fo
         )}
       </div>
 
-      <LinkLine s={s} host={host} onRestart={onRestart} />
+      <LinkLine s={s} host={host} onSwitch={onSwitch} />
 
       {s.test !== null && !trusted ? <FingerprintBlock test={s.test} busy={busy} onTrust={() => void m.trustAndTest(pw)} /> : null}
       {s.test !== null && trusted ? <TestSummary test={s.test} /> : null}

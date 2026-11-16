@@ -246,6 +246,8 @@ export interface SettingsHost {
   remoteTlsUnpin?(hubUrl: string): Promise<void>;
   /** Restart the app so a saved mode change takes effect. */
   restartApp?(): Promise<void>;
+  /** The confirmed "Switch to this server now": saves the SSH mode, then restarts. Never called by Cancel. */
+  switchSshServer?(): Promise<void>;
   /** Settings → Server & Backend → SSH server: the `remote_ssh_server_*` commands. Absent in a plain browser. */
   sshServer?: SshServerIo;
   remoteUpdate?(target: { host: string; port: number; user: string; keyPath: string }, version: string, confirmation: string, hubUrl: string): Promise<void>;

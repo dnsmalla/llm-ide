@@ -60,7 +60,7 @@ async function model(over = {}, steps = async () => {}) {
   return model;
 }
 
-const VIEW = (model, extra = {}) => h(m.SshServerView, { m: model, s: model.getState(), password: "", onPassword() {}, dialog: null, onDialog() {}, onRestart() {}, ...extra });
+const VIEW = (model, extra = {}) => h(m.SshServerView, { m: model, s: model.getState(), password: "", onPassword() {}, dialog: null, onDialog() {}, onSwitch: async () => {}, ...extra });
 const PASSWORD = (model, extra = {}) => VIEW(model, { password: "hunter2", ...extra });
 
 test("renders the three server choices", () => {
@@ -135,11 +135,19 @@ test("needs_password status shows the password prompt, not an error", async () =
   assert.doesNotMatch(text, /Could not reach|refused this login/);
 });
 
-test("restart_required shows the restart note", async () => {
+test("restart_required offers the switch: the question shows only after Switch to this server now", async () => {
   const saved = await model({ status: async () => status("restart_required") }, async (x) => { await x.refreshStatus(); });
   const text = plain(renderToStaticMarkup(VIEW(saved)));
-  assert.match(text, /Saved\. Restart the app to switch to this server\./);
-  assert.match(text, /Restart the app/);
+  assert.match(text, /The connection works\. Switch to this server to work on it in the app\./);
+  assert.match(text, /Switch to this server now/);
+  assert.doesNotMatch(text, /Restart the app/, "no bare restart: the switch saves the mode first");
+  assert.doesNotMatch(text, /The app restarts and works on/, "the question waits for the first button");
+});
+
+test("restart_required without a switch handler shows no switch step (the Welcome dialog has its own)", async () => {
+  const saved = await model({ status: async () => status("restart_required") }, async (x) => { await x.refreshStatus(); });
+  const text = plain(renderToStaticMarkup(VIEW(saved, { onSwitch: undefined })));
+  assert.doesNotMatch(text, /Switch to this server now/);
 });
 
 test("Use a key from now on appears only for Password auth while connected", async () => {
@@ -239,7 +247,7 @@ test("the SSH to Local switch names the SSH server; the hub text is unchanged", 
 
 // The view is a plain function over the model (no hooks), so its element tree can be walked and a button's handler
 // called without a DOM: this is how the forced retries are exercised.
-const TREE = (model, extra = {}) => m.SshServerView({ m: model, s: model.getState(), password: "", onPassword() {}, dialog: null, onDialog() {}, onRestart() {}, ...extra });
+const TREE = (model, extra = {}) => m.SshServerView({ m: model, s: model.getState(), password: "", onPassword() {}, dialog: null, onDialog() {}, onSwitch: async () => {}, ...extra });
 function findButton(node, label) {
   if (Array.isArray(node)) {
     for (const child of node) {

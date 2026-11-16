@@ -110,6 +110,14 @@ test("Open this folder opens the folder being listed", () => {
   assert.deepEqual(log, [["onOpenCurrent"]]);
 });
 
+test("Open this folder is off at the home folder (the host refuses it there) and on below it", () => {
+  const atHome = view.FolderPickerView({ state: state({ path: HOME }), ...handlers([]) });
+  const home = findNode(atHome, (n) => n.props.children === "Open this folder");
+  assert.equal(home.props.disabled, true, "disabled at home");
+  const below = view.FolderPickerView({ state: state(), ...handlers([]) });
+  assert.equal(findNode(below, (n) => n.props.children === "Open this folder").props.disabled, false, "enabled below home");
+});
+
 test("New folder shows an inline name field with its error", () => {
   const html = render(state({ creating: true, newName: "a/b", newNameError: "A folder name cannot contain /." }));
   assert.match(html, /aria-label="New folder name"/);

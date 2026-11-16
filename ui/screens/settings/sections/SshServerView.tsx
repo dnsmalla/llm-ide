@@ -24,10 +24,10 @@ export interface SshServerViewProps {
   onPassword: (value: string) => void;
   dialog: SshDialog | null;
   onDialog: (kind: SshDialog["kind"] | null) => void;
-  onRestart: () => void;
+  onSwitch: () => Promise<void>;
 }
 
-export function SshServerView({ m, s, password, onPassword, dialog, onDialog, onRestart }: SshServerViewProps): ReactNode {
+export function SshServerView({ m, s, password, onPassword, dialog, onDialog, onSwitch }: SshServerViewProps): ReactNode {
   const busy = s.busy !== null;
   const pw = password.length > 0 ? password : undefined;
   const link = s.status?.link ?? null;
@@ -47,7 +47,7 @@ export function SshServerView({ m, s, password, onPassword, dialog, onDialog, on
         s={s}
         password={password}
         onPassword={onPassword}
-        onRestart={onRestart}
+        onSwitch={onSwitch}
         linkActions={<Button disabled={busy} onClick={() => void m.disconnect()}>Disconnect</Button>}
       />
 
