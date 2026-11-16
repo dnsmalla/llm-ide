@@ -58,10 +58,15 @@ export interface LibraryScreenProps {
   onRevealPath?: (projectRelative: string) => Promise<void> | void;
   /** Host save panel for Export; absent writes a copy into the notes folder. */
   onExportFile?: (name: string, text: string) => Promise<string | null>;
+  /** "Choose folder…": undefined keeps the notes-folder chooser; null hides it (ssh mode: the folder is on this computer). */
+  chooseFolder?: (() => void) | null;
+  /** False in ssh mode: the Export action would write to this computer, so it is not offered. */
+  exportAvailable?: boolean;
   initialHeight?: number;
 }
 
-export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, loadExtensionCounts, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, onExportFile, initialHeight }: LibraryScreenProps): ReactNode {
+export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, loadExtensionCounts, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, onExportFile, chooseFolder, exportAvailable = true, initialHeight }: LibraryScreenProps): ReactNode {
+  const chooseAction = chooseFolder === undefined ? () => void store.chooseRoot() : chooseFolder;
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
   // Reloaded when the user opens or leaves a pane (not while a pane stays open), so a toggle shows on the way out.
@@ -221,14 +226,14 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
   if (state.rootStatus === "none") {
     return (
       <div className="lib-screen lib-screen-single" hidden={!active}>
-        <NoFolder onChoose={() => void store.chooseRoot()} error={state.error} hostAvailable={hostAvailable} canWrite={write !== null} />
+        <NoFolder onChoose={chooseAction} error={state.error} hostAvailable={hostAvailable} canWrite={write !== null} />
       </div>
     );
   }
   if (state.rootStatus === "error" && state.records.length === 0) {
     return (
       <div className="lib-screen lib-screen-single" hidden={!active}>
-        <NoFolder onChoose={() => void store.chooseRoot()} error={state.error} hostAvailable={hostAvailable} canWrite={write !== null} />
+        <NoFolder onChoose={chooseAction} error={state.error} hostAvailable={hostAvailable} canWrite={write !== null} />
       </div>
     );
   }
@@ -271,7 +276,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
                   else open();
                 }}
                 onRefresh={refresh}
-                onChangeFolder={projectOpen ? null : () => void store.chooseRoot()}
+                onChangeFolder={projectOpen || chooseAction === null ? null : chooseAction}
                 onRevealMeetings={onRevealPath ? () => void revealMeetings() : undefined}
                 rebuild={rebuild}
                 onRebuild={runRebuild ? startRebuild : null}
@@ -321,6 +326,7 @@ export function LibraryScreen({ store, host, write = null, connections, files, r
               onCopyPath={onCopyPath}
               onRevealPath={onRevealPath}
               onExportFile={onExportFile}
+              exportable={exportAvailable}
               active={active}
             />
           ) : selected ? (

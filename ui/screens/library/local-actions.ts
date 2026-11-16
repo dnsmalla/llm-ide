@@ -10,6 +10,16 @@ export function fileManagerRevealFor(ssh: boolean, reveal: (relPath: string) => 
   };
 }
 
+/** The Library's "Choose folder…" action, or null in ssh mode: the notes folder is on this computer. */
+export function libraryChooseFor(ssh: boolean, choose: () => void): (() => void) | null {
+  return ssh ? null : choose;
+}
+
+/** Export a note through the save panel, or undefined in ssh mode: the save panel and its file are this computer's. */
+export function exportFileFor<T extends (name: string, text: string) => Promise<string | null>>(ssh: boolean, exportNote: T): T | undefined {
+  return ssh ? undefined : exportNote;
+}
+
 /** Reveal for the extension panes: only a location inside the open project, and never in ssh mode. */
 export function projectLocationReveal(ssh: boolean, rootOf: () => string | null, reveal: (relPath: string) => void): LocationReveal {
   return {

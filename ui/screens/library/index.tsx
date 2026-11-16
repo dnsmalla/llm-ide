@@ -22,7 +22,7 @@ import { withCreatedHook } from "./sources/created-hook.ts";
 import { sourceConnections } from "./sources/SourcePanes";
 import { createWriteHost } from "./write/write-host.ts";
 import { projectMutations } from "./project-ops.ts";
-import { fileManagerRevealFor } from "./local-actions.ts";
+import { exportFileFor, fileManagerRevealFor, libraryChooseFor } from "./local-actions.ts";
 
 export { LibraryScreen, type LibraryScreenProps } from "./LibraryScreen";
 export { EXTENSION_PLACEHOLDERS, type LibraryExtension } from "./LibraryNav";
@@ -101,6 +101,11 @@ export default function Library({ active, projectRoot, mode }: SectionProps) {
       : undefined),
     [available],
   );
+  // ssh mode: the save panel and the notes folder are on this computer, so neither is offered (see local-actions.ts).
+  const exportNote = exportFileFor(mode === "ssh", async (name: string, text: string) => {
+    const path = await invokeHost<unknown>("export_note", { name, text });
+    return typeof path === "string" ? path : null;
+  });
   return <LibraryScreen
     store={store}
     host={host}
@@ -116,9 +121,8 @@ export default function Library({ active, projectRoot, mode }: SectionProps) {
     projectOpen={projectRoot !== null}
     onCopyPath={async (text) => { await navigator.clipboard?.writeText(text); }}
     onRevealPath={fileManagerRevealFor(mode === "ssh", (relPath) => invokeHost("reveal_in_os", { relPath }))}
-    onExportFile={async (name, text) => {
-      const path = await invokeHost<unknown>("export_note", { name, text });
-      return typeof path === "string" ? path : null;
-    }}
+    onExportFile={exportNote}
+    exportAvailable={exportNote !== undefined}
+    chooseFolder={libraryChooseFor(mode === "ssh", () => void store.chooseRoot())}
   />;
 }

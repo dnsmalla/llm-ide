@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { notesErrorText, type NotesErrorCode } from "./host.ts";
 
-export function NoFolder({ onChoose, error, hostAvailable, canWrite = false }: { onChoose: () => void; error: NotesErrorCode | null; hostAvailable: boolean; canWrite?: boolean }): ReactNode {
+export function NoFolder({ onChoose, error, hostAvailable, canWrite = false }: { onChoose: (() => void) | null | undefined; error: NotesErrorCode | null; hostAvailable: boolean; canWrite?: boolean }): ReactNode {
   return (
     <div className="lib-nofolder" role="region" aria-label="Choose a notes folder">
       <h2>Choose your notes folder</h2>
@@ -11,10 +11,12 @@ export function NoFolder({ onChoose, error, hostAvailable, canWrite = false }: {
         Mac app writes to, or any folder of Markdown notes.
       </p>
       {error && <StatusBanner severity={error === "invalid_root" ? "error" : "warning"} message={notesErrorText(error)} />}
-      {hostAvailable ? (
+      {hostAvailable && onChoose ? (
         <button type="button" className="lib-btn lib-btn-primary" onClick={onChoose}>
           Choose folder…
         </button>
+      ) : hostAvailable ? (
+        <p className="lib-muted">The notes folder is on this computer. It cannot be chosen while the app works on an SSH server.</p>
       ) : (
         <StatusBanner severity="info" message={notesErrorText("unavailable")} />
       )}

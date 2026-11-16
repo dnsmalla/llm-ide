@@ -52,3 +52,25 @@ test("extension reveal: a location inside the project reveals outside ssh mode; 
   ssh.reveal("/Users/me/proj/src/a.md");
   assert.deepEqual(sent, ["src/a.md"], "ssh mode sent nothing");
 });
+
+// SSH server mode: "Choose folder…" and "Export" act on this computer, so the Library does not offer them.
+import { libraryChooseFor, exportFileFor } from "../local-actions.ts";
+
+test("Library folder choice: offered outside ssh mode; ssh mode offers none", () => {
+  const choose = () => undefined;
+  assert.equal(libraryChooseFor(false, choose), choose);
+  assert.equal(libraryChooseFor(true, choose), null);
+});
+
+test("Library export: offered outside ssh mode; ssh mode offers none", () => {
+  const exportNote = async () => "/x.md";
+  assert.equal(exportFileFor(false, exportNote), exportNote);
+  assert.equal(exportFileFor(true, exportNote), undefined);
+});
+
+test("no-folder card: the Choose folder button is drawn only when a choice is offered", () => {
+  const withChoice = html(h(L.NoFolder, { onChoose() {}, error: null, hostAvailable: true }));
+  assert.match(withChoice, />Choose folder…</);
+  const ssh = html(h(L.NoFolder, { onChoose: undefined, error: null, hostAvailable: true }));
+  assert.doesNotMatch(ssh, /Choose folder/);
+});

@@ -140,12 +140,16 @@ export function uninstallConfirmed(typed: string, host: string): boolean {
   return name.length > 0 && typed.trim().toLowerCase() === name;
 }
 
-/** The one line the toolbar and the card show for a live link; null when there is nothing to show for it. */
-export function sshBadgeText(link: string | null, host: string): string | null {
+/**
+ * The one line the toolbar and the card show for a live link; null when there is nothing to show for it. `folder` is the
+ * open server folder's name: it follows the host, as in VS Code's remote indicator.
+ */
+export function sshBadgeText(link: string | null, host: string, folder?: string): string | null {
   const name = host.trim();
   if (name.length === 0) return null;
-  if (link === "connected") return `SSH: ${name}`;
-  if (link === "reconnecting") return `Reconnecting to ${name}…`;
+  const at = folder?.trim() ? ` · ${folder.trim()}` : "";
+  if (link === "connected") return `SSH: ${name}${at}`;
+  if (link === "reconnecting") return `Reconnecting to ${name}…${at}`;
   return null;
 }
 

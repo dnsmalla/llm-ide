@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { ServerHome } from "./ServerHome.tsx";
+import { goHomeAfterOpen, serverOpenDeps, serverWorkspaceIo } from "../remote-folder/wiring.ts";
 import "@llmide/ui-kit/styles.css";
 import "./welcome.css";
 import type { SectionProps } from "../shell/sections";
@@ -14,7 +16,7 @@ import { invokeHost } from "../shell/host";
 import { createSshServerIo } from "../settings/ssh-server-model";
 
 /** The Home section: shown while no project is open (and reachable any time from the nav). */
-export default function WelcomeSection(_props: SectionProps) {
+export default function WelcomeSection({ mode, onOpenServerFolder }: SectionProps) {
   const p = useActiveProject();
   const [focusNew, setFocusNew] = useState(0);
   const [guideSignal, setGuideSignal] = useState(0);
@@ -49,5 +51,20 @@ export default function WelcomeSection(_props: SectionProps) {
     }),
     [],
   );
-  return <WelcomeScreen project={p.project} recent={p.recentAll} error={p.error} actions={actions} focusNew={focusNew} guideSignal={guideSignal} ssh={ssh} />;
+  // ssh mode: the Home page is the server's home (its own connection, recent folders and Open folder…). The local
+  // actions here (New project, Open folder, the local recents) act on this computer and are refused over ssh.
+  const workspace = useMemo(() => serverWorkspaceIo(), []);
+  const serverDeps = useMemo(() => serverOpenDeps(), []);
+  const serverHome = mode === "ssh" ? (
+    <ServerHome
+      io={ssh.io}
+      workspace={workspace}
+      deps={serverDeps}
+      folder={p.project}
+      onOpenPicker={() => onOpenServerFolder?.()}
+      onOpened={goHomeAfterOpen}
+      onContinue={goHomeAfterOpen}
+    />
+  ) : undefined;
+  return <WelcomeScreen project={p.project} recent={p.recentAll} error={p.error} actions={actions} focusNew={focusNew} guideSignal={guideSignal} ssh={ssh} serverHome={serverHome} />;
 }

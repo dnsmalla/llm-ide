@@ -1,0 +1,155 @@
+// SSH server folder picker: a modal over the shell that lists folders on the server, starting at the home folder. The
+// view is a plain function over the model's state, so it renders to markup and its handlers are called in tests; the
+// wrapper only creates the model and listens for Escape. Modal classes come from the Welcome page (wc-modal).
+import { useEffect, type ReactNode } from "react";
+import "../welcome/welcome.css";
+import "./remote-folder.css";
+import { useModel, useStore } from "../settings/context.tsx";
+import { Button, ErrorText } from "../settings/ui.tsx";
+import { breadcrumbsFor, FolderPickerModel, type OpenFlowDeps, type PickerState, type RemoteProject, type WorkspaceIo } from "./model.ts";
+
+export const OUTSIDE_HOME_TEXT = "Outside your home folder";
+
+export interface FolderPickerViewProps {
+  state: PickerState;
+  onGo(path: string): void;
+  onEnter(name: string): void;
+  onSelect(name: string): void;
+  onToggleHidden(): void;
+  onStartNew(): void;
+  onCancelNew(): void;
+  onNewName(value: string): void;
+  onCreate(): void;
+  onOpenCurrent(): void;
+  onClose(): void;
+}
+
+export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
+  const s = p.state;
+  const busy = s.busy;
+  const crumbs = s.path === null ? [] : breadcrumbsFor(s.path, s.home);
+  const selectedEntry = s.entries.find((e) => e.name === s.selected) ?? null;
+  return (
+    <div className="wc-modal rf-modal">
+      <div className="wc-modal-card rf-card" role="dialog" aria-modal="true" aria-labelledby="rf-title">
+        <div className="wc-modal-head">
+          <h2 id="rf-title" className="wc-h2">Open a folder on this server</h2>
+        </div>
+        <div className="wc-modal-body rf-body">
+          {/* st-root gives the settings scale (gaps, rows, buttons). It sets height: 100%, so it is only used here, on an inner wrapper that remote-folder.css resets. */}
+          <div className="st-root rf-inner">
+            <nav className="rf-crumbs" aria-label="Folder path">
+              {crumbs.map((c, i) => (
+                <span key={c.path} className="rf-crumb">
+                  {i > 0 ? <span className="rf-sep" aria-hidden="true">/</span> : null}
+                  <button type="button" className="wc-link" disabled={busy || c.path === s.path} onClick={() => p.onGo(c.path)}>{c.label}</button>
+                </span>
+              ))}
+            </nav>
+
+            <div className="rf-toolbar">
+              <label className="rf-check">
+                <input type="checkbox" checked={s.showHidden} disabled={busy} onChange={() => p.onToggleHidden()} />
+                <span>Show hidden</span>
+              </label>
+              <Button disabled={busy || s.path === null || s.creating} onClick={p.onStartNew}>New folder</Button>
+            </div>
+
+            {s.creating ? (
+              <form className="rf-new" onSubmit={(e) => { e.preventDefault(); p.onCreate(); }} noValidate>
+                <label className="st-field">
+                  <span className="st-label">Folder name</span>
+                  <input
+                    className="st-input"
+                    aria-label="New folder name"
+                    value={s.newName}
+                    disabled={busy}
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-invalid={s.newNameError ? true : undefined}
+                    onChange={(e) => p.onNewName(e.currentTarget.value)}
+                  />
+                </label>
+                <ErrorText text={s.newNameError} />
+                <div className="st-row">
+                  <Button tone="primary" disabled={busy} onClick={p.onCreate}>Create</Button>
+                  <Button disabled={busy} onClick={p.onCancelNew}>Cancel</Button>
+                </div>
+              </form>
+            ) : null}
+
+            <ErrorText text={s.error} />
+            {s.loading ? <p className="rf-status" role="status">Loading…</p> : null}
+
+            <ul className="rf-list" aria-label="Folders">
+              {s.entries.map((e) => (
+                <li key={e.name} className="rf-item">
+                  <button
+                    type="button"
+                    className="rf-entry"
+                    data-entry={e.name}
+                    aria-selected={s.selected === e.name}
+                    aria-disabled={e.outsideHome ? true : undefined}
+                    disabled={e.outsideHome || busy}
+                    title={e.outsideHome ? OUTSIDE_HOME_TEXT : undefined}
+                    onClick={() => p.onSelect(e.name)}
+                    onDoubleClick={e.outsideHome ? undefined : () => p.onEnter(e.name)}
+                  >
+                    <span className="rf-name">{e.name}</span>
+                    {e.isLink ? <span className="rf-tag">link</span> : null}
+                  </button>
+                </li>
+              ))}
+              {!s.loading && s.path !== null && s.entries.length === 0 ? <li className="rf-empty">No folders here.</li> : null}
+            </ul>
+          </div>
+        </div>
+        <div className="wc-modal-foot rf-foot">
+          <div className="st-root rf-actions">
+            <Button disabled={busy || selectedEntry === null || selectedEntry.outsideHome} onClick={() => { if (selectedEntry) p.onEnter(selectedEntry.name); }}>Open</Button>
+            <Button tone="primary" disabled={busy || s.path === null} onClick={p.onOpenCurrent}>Open this folder</Button>
+            <Button disabled={busy} onClick={p.onClose}>Cancel</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export interface FolderPickerProps {
+  io: WorkspaceIo;
+  deps: OpenFlowDeps;
+  /** The folder is open as the project; the shell closes the picker and goes home. */
+  onOpened(project: RemoteProject): void;
+  onClose(): void;
+}
+
+export function FolderPicker({ io, deps, onOpened, onClose }: FolderPickerProps): ReactNode {
+  const m = useModel(() => new FolderPickerModel(io, deps));
+  const s = useStore(m);
+  useEffect(() => {
+    void m.start();
+  }, [m]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    globalThis.addEventListener?.("keydown", onKey);
+    return () => globalThis.removeEventListener?.("keydown", onKey);
+  }, [onClose]);
+  return (
+    <FolderPickerView
+      state={s}
+      onGo={(path) => void m.goTo(path)}
+      onEnter={(name) => void m.enter(name)}
+      onSelect={(name) => m.select(name)}
+      onToggleHidden={() => void m.toggleHidden()}
+      onStartNew={() => m.startNewFolder()}
+      onCancelNew={() => m.cancelNewFolder()}
+      onNewName={(value) => m.setNewName(value)}
+      onCreate={() => void m.createFolder()}
+      onOpenCurrent={() => void m.openCurrent().then((project) => { if (project) onOpened(project); })}
+      onClose={onClose}
+    />
+  );
+}

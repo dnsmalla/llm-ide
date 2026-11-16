@@ -1,0 +1,29 @@
+/* SSH server folder picker. The modal shell (wc-modal, wc-modal-card) comes from the Welcome page's CSS. Theme tokens only. */
+.rf-card { width: min(620px, 100%); }
+/* The body takes its natural height; only the list scrolls. The footer keeps its height so its buttons never stretch. */
+.rf-body { display: flex; flex-direction: column; }
+/* The settings scope (.st-root) is a full-height flex row by default; here it is a plain column inside the body. */
+.rf-inner { display: flex; flex-direction: column; gap: var(--tok-space-md, 12px); height: auto; min-height: 0; background: none; }
+.rf-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 0.95rem; }
+.rf-crumb { display: inline-flex; align-items: center; gap: 2px; }
+.rf-sep { color: var(--tok-color-text-muted); padding: 0 2px; }
+.rf-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--tok-space-sm, 8px); }
+.rf-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.rf-new { display: flex; flex-direction: column; gap: var(--tok-space-sm, 8px); padding: var(--tok-space-sm, 8px) 0; }
+.rf-status { margin: 0; color: var(--tok-color-text-muted); }
+.rf-list { list-style: none; margin: 0; padding: 0; min-height: 96px; max-height: 240px; overflow-y: auto; border: 1px solid var(--tok-color-border); border-radius: 8px; }
+.rf-item + .rf-item { border-top: 1px solid var(--tok-color-border); }
+.rf-entry { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.rf-entry:hover:not(:disabled) { background: var(--tok-color-row-alt, transparent); }
+.rf-entry[aria-selected="true"] { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }
+.rf-entry:disabled { color: var(--tok-color-text-muted); cursor: not-allowed; }
+.rf-name { overflow-wrap: anywhere; }
+.rf-tag { font-size: 0.75rem; color: var(--tok-color-text-muted); border: 1px solid var(--tok-color-border); border-radius: 4px; padding: 0 5px; }
+.rf-empty { padding: 12px; color: var(--tok-color-text-muted); }
+.rf-foot { display: flex; flex: none; align-items: center; padding: var(--tok-space-md, 12px) var(--tok-space-lg, 16px); border-top: 1px solid var(--tok-color-border); }
+/* The footer's buttons are in the settings scope, laid out as a row on the right. */
+.rf-actions { height: auto; min-height: 0; background: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--st-gap-2, 8px); width: 100%; }
+@media (max-width: 560px) {
+  .rf-modal { padding: 8px; }
+  .rf-foot { justify-content: stretch; }
+}

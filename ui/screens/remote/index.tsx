@@ -10,7 +10,7 @@ export default function RemoteScreen(_: SectionProps) {
   return (
     <div className="remote-connect">
       <h2>No remote workspace is open</h2>
-      <p>Add or open a remote host from the Welcome page.</p>
+      <p>No remote hosts yet.</p>
       <button type="button" onClick={() => shellBus.publish({ type: "goto-section", section: "welcome" })}>Go to Welcome</button>
     </div>
   );

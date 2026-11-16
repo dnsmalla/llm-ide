@@ -199,14 +199,39 @@ function sshExplorerAdmitted(command: string): boolean {
   return SSH_EXPLORER_EXACT.has(command) || command.startsWith("fs_") || command.startsWith("git_") || command.startsWith("pty_");
 }
 
-/** Generic typed call for commands a slice owns. Prefer adding a wrapper to `host` for shared ones. */
+// The server folder vanished (ssh mode): listeners return the app to the server home. One hook here covers every
+// Explorer, git, search and watch call, because they all pass through invokeHost; the Explorer's own error views
+// would otherwise each need the same check.
+type RootMissingListener = (message: string) => void;
+const rootMissingListeners = new Set<RootMissingListener>();
+
+/** Called when a host call in ssh mode answers `root_missing`. Returns the unsubscribe function. */
+export function subscribeRootMissing(listener: RootMissingListener): () => void {
+  rootMissingListeners.add(listener);
+  return () => rootMissingListeners.delete(listener);
+}
+
+/**
+ * Generic typed call for commands a slice owns. Prefer adding a wrapper to `host` for shared ones.
+ * The `remote_ssh_workspace_*` commands are excluded from the root_missing hook: their own refusals (for example a
+ * missing folder while opening one) are shown where they happen, not as a return home.
+ */
 export async function invokeHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const bridge = injected;
   if (!bridge) throw new HostUnavailableError(command);
   if (remoteModeProvider() && !remoteSafe(command) && !(sshModeProvider() && sshExplorerAdmitted(command))) {
     throw new RemoteModeError(command);
   }
-  return bridge.invoke<T>(command, args);
+  try {
+    return await bridge.invoke<T>(command, args);
+  } catch (e) {
+    const record = typeof e === "object" && e !== null ? (e as { code?: unknown; message?: unknown }) : null;
+    if (record?.code === "root_missing" && sshModeProvider() && !command.startsWith("remote_ssh_workspace_")) {
+      const message = typeof record.message === "string" ? record.message : "This folder is no longer on the server.";
+      for (const listener of [...rootMissingListeners]) listener(message);
+    }
+    throw e;
+  }
 }
 
 const STATES: readonly CoreState[] = ["starting", "ready", "restarting", "failed", "stopped", "remote", "ssh"];

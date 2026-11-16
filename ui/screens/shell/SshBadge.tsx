@@ -5,6 +5,7 @@ import { invokeHost } from "./host";
 import { useStoreSelector } from "./hooks";
 import { coreStatusStore } from "./runtime";
 import { decodeSshServerStatus, sshBadgeText } from "../settings/ssh-server-model.ts";
+import { useActiveProject } from "./use-shell";
 
 export function SshBadge() {
   const status = useStoreSelector(coreStatusStore, (s) => s.status);
@@ -21,7 +22,9 @@ export function SshBadge() {
     }, () => undefined);
     return () => { live = false; };
   }, [link]);
-  const text = sshBadgeText(link, host);
+  // The open server folder's name follows the host, as VS Code's remote indicator shows the folder.
+  const folder = useActiveProject().project?.name ?? "";
+  const text = sshBadgeText(link, host, folder);
   if (text === null) return null;
   return (
     <span className="sh-ssh-badge" data-level={link === "connected" ? "ok" : "warn"} role="status" title="The app is connected to this SSH server. Settings → Server & Backend shows its details.">

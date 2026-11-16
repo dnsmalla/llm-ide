@@ -45,6 +45,8 @@ export interface ProjectStore {
   /** Drop one entry from the recent list only. */
   forgetRecent(entry: RecentEntry): Promise<void>;
   dismissNotice(): void;
+  /** Shows a notice on the shell without changing the project (for example a registration warning after an open). */
+  announce(text: string): void;
   /** Answers the pending `leave` question: go ahead and lose the unsaved work. */
   confirmLeave(): void;
   /** Answers the pending `leave` question: stay in this project; nothing changes. */
@@ -195,6 +197,9 @@ export function createProjectStore(h: ProjectHost = defaultHost, unsaved: () => 
     },
     dismissNotice() {
       set({ notice: null });
+    },
+    announce(text) {
+      set({ notice: text });
     },
   };
 }

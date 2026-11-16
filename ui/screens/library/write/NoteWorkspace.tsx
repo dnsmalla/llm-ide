@@ -37,6 +37,8 @@ export interface NoteWorkspaceProps extends LinkHandlers {
   active?: boolean;
   /** Host save panel: returns the chosen path, or null when cancelled. Absent: write a copy into the notes folder. */
   onExportFile?: (name: string, text: string) => Promise<string | null>;
+  /** False in ssh mode: Export is not drawn and does nothing (it would write to this computer). */
+  exportable?: boolean;
 }
 
 export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
@@ -112,7 +114,7 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
   }, [p, rel, write, store]);
 
   const doExport = useCallback(async () => {
-    if (exporting) return;
+    if (exporting || p.exportable === false) return;
     setExporting(true);
     setExportNotice(null);
     try {
@@ -141,7 +143,7 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
     } finally {
       setExporting(false);
     }
-  }, [exporting, p.onExportFile, p.record?.title, rel, write]);
+  }, [exporting, p.exportable, p.onExportFile, p.record?.title, rel, write]);
 
   const titles = useMemo(() => new Map([[rel, p.record?.title ?? rel]]), [rel, p.record?.title]);
   const isMeeting = p.record?.sourceId === "meeting" && p.summarize !== null;
@@ -204,7 +206,7 @@ export function NoteWorkspace(p: NoteWorkspaceProps): ReactNode {
             </button>
           </>
         )}
-        <button type="button" className="lib-btn" onClick={() => void doExport()} disabled={exporting}>{exporting ? "Exporting…" : "Export"}</button>
+        {p.exportable === false ? null : <button type="button" className="lib-btn" onClick={() => void doExport()} disabled={exporting}>{exporting ? "Exporting…" : "Export"}</button>}
         {p.onCopyPath ? <button type="button" className="lib-btn" onClick={() => void p.onCopyPath!(`llm-doc/${rel}`)}>Copy path</button> : null}
         {p.onRevealPath ? <button type="button" className="lib-btn" onClick={() => void p.onRevealPath!(`llm-doc/${rel}`)}>Reveal</button> : null}
         <button type="button" className="lib-btn lib-btn-danger" onClick={() => { setDel(null); setDialog("delete"); }}>

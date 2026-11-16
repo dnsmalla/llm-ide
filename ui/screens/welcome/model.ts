@@ -37,11 +37,19 @@ const reason = (e: unknown) => safeText(e instanceof Error ? e.message : String(
  * both agree) and install the agent skills kit. Both are best effort, like the Mac app: failures become warnings,
  * never errors, because the project itself is already usable.
  */
+/**
+ * Registers a project root with the core under the id Doc Gen derives from it. Throws when the core refuses. Opening an
+ * existing folder uses this alone: unlike a new project it installs no agent skills into the folder.
+ */
+export async function registerProject(root: string, deps: RegisterDeps): Promise<void> {
+  const id = await (deps.idFor ?? projectIdFor)(root);
+  await deps.core.request("/kb/projects/register", { method: "POST", body: { id, root } });
+}
+
 export async function registerNewProject(project: ProjectInfo, deps: RegisterDeps): Promise<string[]> {
   const warnings: string[] = [];
   try {
-    const id = await (deps.idFor ?? projectIdFor)(project.root);
-    await deps.core.request("/kb/projects/register", { method: "POST", body: { id, root: project.root } });
+    await registerProject(project.root, deps);
   } catch (e) {
     warnings.push(`It could not be registered with the core yet (${reason(e)}). Doc Gen registers it when you open it.`);
   }

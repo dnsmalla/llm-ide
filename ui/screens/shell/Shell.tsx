@@ -6,8 +6,10 @@ import { disconnectAll, readDisconnectPlan } from "./disconnect-all";
 import { GuideDialog } from "../welcome/WelcomeScreen";
 import { SectionToolbar } from "./Toolbar";
 import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
-import { host as shellHost, invokeHost } from "./host";
-import { setServerFolderHandler } from "./server-folder";
+import { host as shellHost, invokeHost, subscribeRootMissing } from "./host";
+import { serverFolderHandlerFor, setServerFolderHandler } from "./server-folder";
+import { FolderPicker } from "../remote-folder/FolderPicker.tsx";
+import { goHomeAfterOpen, returnHomeFromMissingFolder, serverOpenDeps, serverWorkspaceIo } from "../remote-folder/wiring.ts";
 import { SectionErrorBoundary } from "./ErrorBoundary";
 import { CoreDownPanel, LoginPanel } from "./Panels";
 import { CrashReportBanner } from "./CrashReportBanner";
@@ -51,8 +53,6 @@ declare const __FEATURE_AUTO_TASKS__: boolean | undefined;
 export interface ShellProps {
   /** Section to open (launch override); otherwise the shell lands on Welcome, or the home section once a project is open. */
   initialSection?: SectionId | null;
-  /** The SSH server folder picker (ssh mode). Unset until the picker ships: no server folder action is offered then. */
-  onOpenServerFolder?: () => void;
   /** Theme for this launch only (screenshot tooling); not persisted. */
   themeOverride?: ThemeId | null;
   /** The Spike route: Phase 0 bench/graph/terminal/editor views (lazy). Receives no props. */
@@ -73,12 +73,7 @@ export const SectionSlot = memo(function SectionSlot({ def, active, projectRoot,
   );
 });
 
-export function Shell({ initialSection, themeOverride, spike, onOpenServerFolder }: ShellProps) {
-  // Screens far from the shell (a chat or graph card without a project) read the picker from the registry.
-  useEffect(() => {
-    setServerFolderHandler(onOpenServerFolder ?? null);
-    return () => setServerFolderHandler(null);
-  }, [onOpenServerFolder]);
+export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const [nav, rawDispatch] = useReducer(navReducer, undefined, () => {
     if (initialSection === "spike") enableDevToolsForSession(); // a spike launch needs its own item
     return initialNav(initialSection ?? null);
@@ -117,6 +112,20 @@ export function Shell({ initialSection, themeOverride, spike, onOpenServerFolder
   // `navMode`, where ssh lists the same screens as a hub because the project lives on the server.
   const remoteMode = serverMode === "remote";
   const navMode: NavMode = serverMode === "remote" || serverMode === "ssh" ? serverMode : "local";
+  // The SSH server folder picker: opened from the Explorer, the status bar, the no-project card and the server home.
+  // Only ssh mode has a server to browse, so the opener exists only there (the registry is read by screens far away).
+  const sshServer = navMode === "ssh";
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const openPicker = useCallback(() => setPickerOpen(true), []);
+  const serverOpener = sshServer ? openPicker : undefined;
+  useEffect(() => {
+    setServerFolderHandler(serverFolderHandlerFor(sshServer, openPicker));
+    return () => setServerFolderHandler(null);
+  }, [sshServer, openPicker]);
+  // The open server folder vanished (any later host call said so): back to the server home with the reason.
+  useEffect(() => subscribeRootMissing((message) => { void returnHomeFromMissingFolder(message); }), []);
+  const pickerIo = useMemo(() => serverWorkspaceIo(), []);
+  const pickerDeps = useMemo(() => serverOpenDeps(), []);
   // Until the first status poll the mode is unknown: render no section rather than briefly mounting local ones.
   const visibleSections = modeKnown ? visibleSectionsFor(navMode) : [];
   // Next-launch crash notice (Mac CrashReportBanner): read once; Dismiss deletes the host's records.
@@ -441,7 +450,7 @@ export function Shell({ initialSection, themeOverride, spike, onOpenServerFolder
           )}
           {mount &&
             visibleSections.filter((s) => nav.visited.includes(s.id)).map((def) => (
-              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} mode={navMode} onOpenServerFolder={onOpenServerFolder} inert={sectionInert(gate, def.id, settingsReachable)} spike={spike} />
+              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} mode={navMode} onOpenServerFolder={serverOpener} inert={sectionInert(gate, def.id, settingsReachable)} spike={spike} />
             ))}
           {gate === "core" && settingsReachable && (
             <div className="sh-notice" role="status" data-testid="core-down-notice">
@@ -489,8 +498,11 @@ export function Shell({ initialSection, themeOverride, spike, onOpenServerFolder
         onHelp={() => setGuideOpen(true)}
         terminalItem={<ShellTerminalItem built={TERMINAL_BUILT} open={terminalOpen} onToggle={toggleTerminalDock} />}
         ssh={navMode === "ssh"}
-        openServerFolder={onOpenServerFolder ?? null}
+        openServerFolder={serverOpener ?? null}
       /> : null}
+      {pickerOpen && sshServer ? (
+        <FolderPicker io={pickerIo} deps={pickerDeps} onOpened={() => { setPickerOpen(false); goHomeAfterOpen(); }} onClose={() => setPickerOpen(false)} />
+      ) : null}
       {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} onNavigate={(section, anchor) => { setGuideOpen(false); if (anchor) shellBus.publish({ type: "goto-section", section, anchor }); else onSelect(section); }} /> : null}
       {permissionsOpen ? <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-permissions-title"><div className="sh-modal-card"><h2 id="sh-permissions-title" className="sh-panel-title">Permissions</h2><p className="sh-panel-text">Accessibility, Screen Recording and Microphone permissions belong to the Mac app’s live-capture engine. The desktop has no capture engine, so there is nothing to grant here.</p><div className="sh-form-actions"><button type="button" className="sh-button" onClick={() => setPermissionsOpen(false)}>Close</button></div></div></div> : null}
       {leave ? <LeaveProjectDialog labels={leave.labels} onStay={cancelLeave} onLeave={confirmLeave} /> : null}

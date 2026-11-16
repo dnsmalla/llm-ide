@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { FolderIcon, ChatIcon } from "@llmide/ui-kit";
 import type { ProjectInfo, RecentEntry, RecentList } from "../shell/host";
 import { safeText } from "../shell/safe-text";
@@ -35,6 +35,8 @@ export interface WelcomeProps {
   guideSignal?: number;
   /** The SSH connect dialog and recent servers talk to the host through this; without it they show no servers. */
   ssh?: WelcomeSsh;
+  /** ssh mode: the server home page, shown in place of the local Welcome content (the local actions are refused there). */
+  serverHome?: ReactNode;
 }
 
 const dateless = (s: string, max: number) => safeText(s, max);
@@ -63,7 +65,7 @@ function RecentRow({ entry, busy, onOpen, onForget }: { entry: RecentEntry; busy
   );
 }
 
-export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, guideOpen = false, guideSignal = 0, ssh }: WelcomeProps) {
+export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, guideOpen = false, guideSignal = 0, ssh, serverHome }: WelcomeProps) {
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"create" | "open" | null>(null);
@@ -103,6 +105,15 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
     setNameError(null);
     void run("create", async () => (await actions.createProject(check.name)) !== null);
   };
+
+  // Hooks are all above this point: the server page replaces the local content without changing the hook order.
+  if (serverHome !== undefined) {
+    return (
+      <div className="wc" data-testid="welcome">
+        <div className="wc-inner">{serverHome}</div>
+      </div>
+    );
+  }
 
   const shownError = localError ?? (error ? safeText(error, 240) : null);
   const disabled = busy !== null;
