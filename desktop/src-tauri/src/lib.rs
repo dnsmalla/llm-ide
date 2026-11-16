@@ -163,8 +163,7 @@ fn host_platform() -> &'static str {
 #[tauri::command]
 async fn read_graph_file(path: String) -> Result<String, String> {
     if workspace_backend::is_ssh_mode() {
-        let answer = workspace_backend::remote_project_call("graph_read", serde_json::json!({"path": path})).await.map_err(|e| e.message)?;
-        return answer.as_str().map(str::to_string).ok_or_else(|| "The server sent an answer this app does not understand.".to_string());
+        return workspace_backend::on_blocking(move || graph_file::ssh_read(workspace_backend::remote(), &workspace_backend::LinkConnector, &path)).await?;
     }
     let root = graph_file::project_root().ok_or("no project root configured")?;
     graph_file::read_within(&root, &path)

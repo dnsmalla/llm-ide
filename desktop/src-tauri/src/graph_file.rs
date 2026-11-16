@@ -4,6 +4,11 @@
 
 use std::path::{Path, PathBuf};
 
+use serde_json::json;
+
+use crate::workspace_backend::{self, Connector, Remote};
+
+
 pub(crate) use llmide_workspace_core::paths::fd_path;
 pub(crate) use llmide_workspace_core::project::graph::read_within;
 
@@ -17,6 +22,13 @@ const DEFAULT_PROJECT_REL: &str = "Desktop/LLM/code/affiliate";
 /// `LLMIDE_POC_GRAPH`, then the spike's default project under `$HOME`; a release
 /// build has no environment or default root, so nothing is readable until the user
 /// opens a project.
+/// SSH branch of `read_graph_file`: the helper reads `path` under the open server folder with `graph_read`.
+/// The helper keeps the read inside that folder; the local root is never used.
+pub(crate) fn ssh_read(remote: &Remote, connector: &dyn Connector, path: &str) -> Result<String, String> {
+    let answer = workspace_backend::project_call_with(remote, connector, "graph_read", json!({"path": path})).map_err(|e| e.message)?;
+    answer.as_str().map(str::to_string).ok_or_else(|| "The server sent an answer this app does not understand.".to_string())
+}
+
 pub fn project_root() -> Option<PathBuf> {
     if let Some(active) = crate::project::active_root() {
         return Some(active);

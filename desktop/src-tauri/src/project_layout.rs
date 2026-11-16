@@ -11,10 +11,11 @@ use std::path::PathBuf;
 
 use llmide_workspace_core::project::layout;
 use llmide_workspace_core::project::scaffold;
+use llmide_workspace_core::R;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::workspace_backend;
+use crate::workspace_backend::{self, Connector, LinkConnector, Remote};
 
 fn active_root() -> Result<PathBuf, String> {
     crate::project::active_root().ok_or_else(|| "no project is open".to_string())
@@ -24,9 +25,19 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("project layout task failed: {e}"))
 }
 
-/// Runs a project-setup command on the server. The helper's error message is the page's message.
-async fn ssh_call(cmd: &'static str) -> Result<Value, String> {
-    workspace_backend::remote_project_call(cmd, json!({})).await.map_err(|e| e.message)
+/// SSH branch of `project_paths`: the helper's `project_paths` on the open server folder.
+pub(crate) fn ssh_paths(remote: &Remote, connector: &dyn Connector) -> R<Value> {
+    workspace_backend::project_call_with(remote, connector, "project_paths", json!({}))
+}
+
+/// SSH branch of `project_memory`: the helper's `project_memory` on the open server folder.
+pub(crate) fn ssh_memory(remote: &Remote, connector: &dyn Connector) -> R<Value> {
+    workspace_backend::project_call_with(remote, connector, "project_memory", json!({}))
+}
+
+/// SSH branch of Rebuild: the helper's `project_rebuild`, which refuses a folder that is not a project.
+pub(crate) fn ssh_rebuild(remote: &Remote, connector: &dyn Connector) -> R<Value> {
+    workspace_backend::project_call_with(remote, connector, "project_rebuild", json!({}))
 }
 
 fn to_json<T: Serialize>(value: &T) -> Result<Value, String> {
@@ -36,7 +47,7 @@ fn to_json<T: Serialize>(value: &T) -> Result<Value, String> {
 #[tauri::command]
 pub async fn project_paths() -> Result<Value, String> {
     if workspace_backend::is_ssh_mode() {
-        return ssh_call("project_paths").await;
+        return workspace_backend::on_blocking(|| ssh_paths(workspace_backend::remote(), &LinkConnector)).await?.map_err(|e| e.message);
     }
     let root = active_root()?;
     to_json(&blocking(move || layout::paths(&root)).await?)
@@ -45,7 +56,7 @@ pub async fn project_paths() -> Result<Value, String> {
 #[tauri::command]
 pub async fn project_memory() -> Result<Value, String> {
     if workspace_backend::is_ssh_mode() {
-        return ssh_call("project_memory").await;
+        return workspace_backend::on_blocking(|| ssh_memory(workspace_backend::remote(), &LinkConnector)).await?.map_err(|e| e.message);
     }
     let root = active_root()?;
     to_json(&blocking(move || layout::memory(&root)).await?)
@@ -57,7 +68,10 @@ pub async fn project_memory() -> Result<Value, String> {
 #[tauri::command]
 pub async fn project_rebuild_folders() -> Result<(), String> {
     if workspace_backend::is_ssh_mode() {
-        return ssh_call("project_rebuild").await.map(|_| ());
+        return workspace_backend::on_blocking(|| ssh_rebuild(workspace_backend::remote(), &LinkConnector))
+            .await?
+            .map(|_| ())
+            .map_err(|e| e.message);
     }
     let root = active_root()?;
     blocking(move || scaffold::scaffold(&root, &layout::project_meta(&root))).await?

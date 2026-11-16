@@ -220,18 +220,20 @@ fn clone_outcome(data: &Value) -> R<Value> {
     }
 }
 
-/// Waits for a clone's event. Ends at once when the channel closes, and at `cap` it sends `clone_cancel` so the
-/// helper does not keep cloning for a page that has given up.
-fn wait_for_clone(client: &dyn WorkspaceApi, events: &mpsc::Receiver<Value>, cap: Duration) -> R<Value> {
+/// Waits for the `clone` event with this clone's `id`. Events for other ids are ignored. Ends at once when the channel
+/// closes, and at `cap` it sends `clone_cancel {id}`, which stops this clone and no other.
+fn wait_for_clone(client: &dyn WorkspaceApi, events: &mpsc::Receiver<Value>, id: u64, cap: Duration) -> R<Value> {
     let deadline = Instant::now() + cap;
     loop {
         let now = Instant::now();
         if now >= deadline {
-            let _ = client.call("clone_cancel", json!({}), None);
+            let _ = client.call("clone_cancel", json!({"id": id}), None);
             return Err(herr(TIMEOUT_CODE, CLONE_TIMEOUT_MESSAGE));
         }
         match events.recv_timeout(CLONE_POLL.min(deadline - now)) {
-            Ok(data) => return clone_outcome(&data),
+            Ok(data) if event_id(&data) == Some(id) => return clone_outcome(&data),
+            // Another clone's event (a late one from an earlier request): not this clone's result.
+            Ok(_) => {}
             Err(RecvTimeoutError::Timeout) if client.is_closed() => return Err(lost()),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return Err(lost()),
@@ -502,8 +504,9 @@ impl Remote {
         self.open(connector, root)
     }
 
-    /// Runs a clone on the server and waits for its `clone` event, up to `cap`. The request carries the token, so it
-    /// is never logged here. Only one clone runs per channel at a time.
+    /// Runs a clone on the server and waits for its `clone` event, up to `cap`. The helper answers the start with
+    /// the clone's `id`; only the event with that id is this clone's result. The request carries the token, so it is
+    /// never logged here. Only one clone runs per channel at a time.
     pub fn clone_repo(&self, connector: &dyn Connector, req: Value, cap: Duration) -> R<Value> {
         let client = self.ensure(connector)?;
         // The route is set before the request is sent, so an event that comes straight after the reply is kept.
@@ -516,8 +519,14 @@ impl Remote {
             r.clone = Some(tx);
             rx
         };
+        // A failed start has no id, so nothing can be cancelled. If the helper did start the clone and its reply was
+        // lost (a client-side timeout), that clone runs unobserved until it ends; the helper runs one clone at a time,
+        // so the next request is answered `busy` until then. The route is cleared on every path below.
         let outcome = match client.call("repo_clone", json!({"req": req}), None) {
-            Ok(_) => wait_for_clone(&*client, &events, cap),
+            Ok(started) => match started.get("id").and_then(Value::as_u64) {
+                Some(id) => wait_for_clone(&*client, &events, id, cap),
+                None => Err(FsError { code: "bad_response", message: "The server sent an answer this app does not understand.".into() }),
+            },
             Err(e) => Err(e),
         };
         locked(&self.routes).clone = None;
@@ -692,11 +701,14 @@ pub fn reset() {
 }
 
 /// Runs a project-setup command (`project_paths`, `project_memory`, `project_rebuild`, `graph_read`) on the open
-/// server folder. The answer is the JSON the local command returns, so the caller keeps its local shape.
-pub async fn remote_project_call(cmd: &'static str, args: Value) -> R<Value> {
-    tauri::async_runtime::spawn_blocking(move || remote().call(&LinkConnector, cmd, args, &native_dialog))
-        .await
-        .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?
+/// server folder through `remote` and `connector`. The answer is the JSON the local command returns.
+pub(crate) fn project_call_with(remote: &Remote, connector: &dyn Connector, cmd: &'static str, args: Value) -> R<Value> {
+    remote.call(connector, cmd, args, &native_dialog)
+}
+
+/// Runs `f` on a blocking thread, which SSH calls need so the UI thread never waits on the server.
+pub async fn on_blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("task failed: {e}"))
 }
 
 /// Runs an Explorer command. In SSH mode it goes to the server: `args` builds the UI's argument object from the

@@ -637,12 +637,17 @@ fn hub_mode_search_and_watch_run_on_the_active_project() {
 fn project_setup(cmd: &str, args: &Value, confirm: Option<&str>) -> Result<Value, FsError> {
     match cmd {
         "project_paths" => Ok(json!({"root": "/srv/home/proj", "code": "/srv/home/proj/code"})),
+        "project_memory" => Ok(json!({"files": []})),
         "project_rebuild" => Err(FsError { code: "not_a_project", message: "This folder is not an LLM-IDE project.".into() }),
         "project_create" => Ok(json!({"root": "/srv/home/new", "id": "p1", "name": "new"})),
-        "repo_clone" => Ok(json!({"started": true})),
+        "graph_read" => Ok(json!("{\"nodes\": []}")),
+        "repo_clone" => Ok(json!({"started": true, "id": CLONE_ID})),
         _ => respond(cmd, args, confirm),
     }
 }
+
+/// The id the fake helper gives every clone it starts.
+const CLONE_ID: u64 = 7;
 
 fn project_setup_connector() -> Arc<FakeConnector> {
     Arc::new(FakeConnector::new(|_| FakeApi::new(project_setup)))
@@ -652,25 +657,50 @@ fn open_folder(root: &str) -> ProjectInfo {
     ProjectInfo { name: "proj".into(), root: root.into() }
 }
 
+/// The commands the fake channel received, in order, for the connector's first channel.
+fn sent(connector: &FakeConnector) -> Vec<String> {
+    connector.channel(0).commands()
+}
+
 #[test]
 fn ssh_project_paths_goes_to_helper() {
     let remote = Remote::new();
     remote.set_folder_for_test(Some(open_folder("/srv/home/proj")));
     let connector = project_setup_connector();
-    let answer = remote.call(&*connector, "project_paths", json!({}), &no).expect("paths");
+    let answer = crate::project_layout::ssh_paths(&remote, &*connector).expect("paths");
     assert_eq!(answer["root"], "/srv/home/proj");
-    assert!(connector.channel(0).commands().contains(&"project_paths".to_string()));
+    assert_eq!(sent(&connector).last().map(String::as_str), Some("project_paths"));
 }
 
 #[test]
-fn ssh_rebuild_maps_to_project_rebuild() {
+fn ssh_memory_goes_to_project_memory() {
+    let remote = Remote::new();
+    remote.set_folder_for_test(Some(open_folder("/srv/home/proj")));
+    let connector = project_setup_connector();
+    crate::project_layout::ssh_memory(&remote, &*connector).expect("memory");
+    assert_eq!(sent(&connector).last().map(String::as_str), Some("project_memory"));
+}
+
+#[test]
+fn ssh_rebuild_folders_maps_to_project_rebuild() {
     let remote = Remote::new();
     remote.set_folder_for_test(Some(open_folder("/srv/home/plain")));
     let connector = project_setup_connector();
-    let err = remote.call(&*connector, "project_rebuild", json!({}), &no).expect_err("plain folder");
+    let err = crate::project_layout::ssh_rebuild(&remote, &*connector).expect_err("plain folder");
     assert_eq!(err.code, "not_a_project");
     assert_eq!(err.message, "This folder is not an LLM-IDE project.");
-    assert_eq!(connector.channel(0).commands().last().map(String::as_str), Some("project_rebuild"));
+    assert_eq!(sent(&connector).last().map(String::as_str), Some("project_rebuild"));
+}
+
+#[test]
+fn read_graph_file_goes_to_graph_read_with_the_path() {
+    let remote = Remote::new();
+    remote.set_folder_for_test(Some(open_folder("/srv/home/proj")));
+    let connector = project_setup_connector();
+    let text = crate::graph_file::ssh_read(&remote, &*connector, "graph/graph.json").expect("graph");
+    assert_eq!(text, "{\"nodes\": []}");
+    let graph_read = connector.channel(0).calls().into_iter().find(|(cmd, _, _)| cmd == "graph_read").expect("graph_read sent");
+    assert_eq!(graph_read.1, json!({"path": "graph/graph.json"}));
 }
 
 #[test]
@@ -679,21 +709,22 @@ fn project_create_then_opens() {
     let connector = project_setup_connector();
     let info = remote.project_create(&*connector, "/srv/home", "new").expect("create");
     assert_eq!(info, ProjectInfo { name: "new".into(), root: "/srv/home/new".into() });
-    assert_eq!(connector.channel(0).commands(), vec!["project_create".to_string(), "open".to_string()]);
+    assert_eq!(sent(&connector), vec!["project_create".to_string(), "open".to_string()]);
     assert_eq!(remote.folder(), Some(info));
 }
 
-/// Runs `clone_repo` on another thread, waits until the request is on the channel, then runs `after` on the channel.
-fn clone_while(
+/// Runs `work` on another thread while a clone is in flight on the fake channel, then runs `after` on that channel
+/// once the request has been sent. Returns what `work` gave and the commands the channel received.
+fn with_clone_in_flight<T: Send + 'static>(
     answer: fn(&str, &Value, Option<&str>) -> Result<Value, FsError>,
-    cap: Duration,
+    work: impl FnOnce(&Remote, &dyn Connector) -> T + Send + 'static,
     after: impl FnOnce(&FakeApi),
-) -> (R<Value>, Vec<String>) {
+) -> (T, Vec<String>) {
     let remote = Arc::new(Remote::new());
     let connector = Arc::new(FakeConnector::new(move |_| FakeApi::new(answer)));
     let worker = {
         let (remote, connector) = (remote.clone(), connector.clone());
-        std::thread::spawn(move || remote.clone_repo(&*connector, json!({"provider": "github", "url": "o/r"}), cap))
+        std::thread::spawn(move || work(&*remote, &*connector))
     };
     let api = loop {
         if connector.connects() > 0 && connector.channel(0).commands().contains(&"repo_clone".to_string()) {
@@ -706,19 +737,40 @@ fn clone_while(
     (result, api.commands())
 }
 
+fn clone_req() -> Value {
+    json!({"provider": "github", "url": "o/r"})
+}
+
 #[test]
 fn clone_wait_returns_event_result() {
-    let (result, _) = clone_while(project_setup, Duration::from_secs(10), |api| {
-        api.emit(EventKind::Clone, json!({"ok": true, "path": "/srv/home/proj/code/r", "name": "r"}));
-    });
+    let (result, _) = with_clone_in_flight(
+        project_setup,
+        |remote, connector| remote.clone_repo(connector, clone_req(), Duration::from_secs(10)),
+        |api| api.emit(EventKind::Clone, json!({"id": CLONE_ID, "ok": true, "path": "/srv/home/proj/code/r", "name": "r"})),
+    );
+    assert_eq!(result.expect("clone"), json!({"path": "/srv/home/proj/code/r", "name": "r"}));
+}
+
+#[test]
+fn clone_wait_ignores_an_event_with_another_id() {
+    let (result, _) = with_clone_in_flight(
+        project_setup,
+        |remote, connector| remote.clone_repo(connector, clone_req(), Duration::from_secs(10)),
+        |api| {
+            api.emit(EventKind::Clone, json!({"id": CLONE_ID + 1, "ok": true, "path": "/srv/home/old", "name": "old"}));
+            api.emit(EventKind::Clone, json!({"id": CLONE_ID, "ok": true, "path": "/srv/home/proj/code/r", "name": "r"}));
+        },
+    );
     assert_eq!(result.expect("clone"), json!({"path": "/srv/home/proj/code/r", "name": "r"}));
 }
 
 #[test]
 fn clone_wait_returns_the_helper_error() {
-    let (result, _) = clone_while(project_setup, Duration::from_secs(10), |api| {
-        api.emit(EventKind::Clone, json!({"ok": false, "code": "clone_failed", "message": "git exited with status 128"}));
-    });
+    let (result, _) = with_clone_in_flight(
+        project_setup,
+        |remote, connector| remote.clone_repo(connector, clone_req(), Duration::from_secs(10)),
+        |api| api.emit(EventKind::Clone, json!({"id": CLONE_ID, "ok": false, "code": "clone_failed", "message": "git exited with status 128"})),
+    );
     let err = result.expect_err("clone failure");
     assert_eq!(err.code, "clone_failed");
     assert_eq!(err.message, "git exited with status 128");
@@ -727,18 +779,69 @@ fn clone_wait_returns_the_helper_error() {
 #[test]
 fn clone_wait_ends_when_channel_closes() {
     let started = Instant::now();
-    let (result, commands) = clone_while(project_setup, Duration::from_secs(30 * 60), |api| api.drop_channel());
-    let err = result.expect_err("lost channel");
-    assert_eq!(err.code, "lost_connection");
+    let (result, commands) = with_clone_in_flight(
+        project_setup,
+        |remote, connector| remote.clone_repo(connector, clone_req(), Duration::from_secs(30 * 60)),
+        |api| api.drop_channel(),
+    );
+    assert_eq!(result.expect_err("lost channel").code, "lost_connection");
     assert!(started.elapsed() < Duration::from_secs(10), "the wait must not run to the cap");
     assert!(!commands.contains(&"clone_cancel".to_string()));
 }
 
 #[test]
-fn clone_timeout_sends_cancel() {
-    let (result, commands) = clone_while(project_setup, Duration::from_millis(300), |_| {});
+fn clone_timeout_cancels_only_this_clone() {
+    let (result, commands) = with_clone_in_flight(
+        project_setup,
+        |remote, connector| remote.clone_repo(connector, clone_req(), Duration::from_millis(300)),
+        |_| {},
+    );
     assert_eq!(result.expect_err("timeout").code, TIMEOUT_CODE);
-    assert!(commands.contains(&"clone_cancel".to_string()));
+    let cancel = commands.iter().position(|cmd| cmd == "clone_cancel").expect("clone_cancel sent");
+    assert_eq!(cancel, commands.len() - 1);
+}
+
+#[test]
+fn clone_start_failure_sends_no_cancel_and_clears_the_route() {
+    let remote = Remote::new();
+    let connector = Arc::new(FakeConnector::new(|_| {
+        FakeApi::new(|cmd, args, confirm| match cmd {
+            "repo_clone" => Err(FsError { code: "busy", message: "a clone is already running on the server".into() }),
+            _ => project_setup(cmd, args, confirm),
+        })
+    }));
+    let err = remote.clone_repo(&*connector, clone_req(), Duration::from_secs(10)).expect_err("busy");
+    assert_eq!(err.code, "busy");
+    assert!(!sent(&connector).contains(&"clone_cancel".to_string()));
+    assert!(locked(&remote.routes).clone.is_none(), "the route is cleared when the start fails");
+}
+
+#[test]
+fn remote_clone_request_carries_the_token_only_when_usable() {
+    let remote = Remote::new();
+    let connector = project_setup_connector();
+    let _ = crate::repo_clone::remote_clone_with(&remote, &*connector, "github".into(), "o/r".into(), Some("ghp_secret".into()), None, Duration::from_millis(50));
+    let repo_clone = connector.channel(0).calls().into_iter().find(|(cmd, _, _)| cmd == "repo_clone").expect("repo_clone sent");
+    assert_eq!(repo_clone.1["req"]["provider"], "github");
+    assert_eq!(repo_clone.1["req"]["url"], "o/r");
+    assert_eq!(repo_clone.1["req"]["token"], "ghp_secret");
+    assert!(repo_clone.1["req"]["folder"].is_null());
+
+    let blank = crate::repo_clone::clone_request("github".into(), "o/r".into(), Some("   ".into()), None);
+    assert!(blank.get("token").is_none(), "a blank token is dropped, as the local command does");
+    assert!(crate::repo_clone::clone_request("github".into(), "o/r".into(), None, Some("sub".into())).get("token").is_none());
+}
+
+#[test]
+fn remote_clone_returns_the_path_and_name_from_the_event() {
+    let (result, _) = with_clone_in_flight(
+        project_setup,
+        |remote, connector| crate::repo_clone::remote_clone_with(remote, connector, "gitlab".into(), "g/p".into(), None, None, Duration::from_secs(10)),
+        |api| api.emit(EventKind::Clone, json!({"id": CLONE_ID, "ok": true, "path": "/srv/home/proj/code/p", "name": "p"})),
+    );
+    let done = result.expect("clone");
+    assert_eq!(done.path, "/srv/home/proj/code/p");
+    assert_eq!(done.name, "p");
 }
 
 #[test]
@@ -747,18 +850,25 @@ fn clone_token_is_sent_only_in_the_request() {
     let connector = project_setup_connector();
     let req = json!({"provider": "github", "url": "o/r", "token": "ghp_secret"});
     let _ = remote.clone_repo(&*connector, req, Duration::from_millis(50));
-    let sent = connector.channel(0).calls();
-    let repo_clone = sent.iter().find(|(cmd, _, _)| cmd == "repo_clone").expect("repo_clone sent");
+    let sent_calls = connector.channel(0).calls();
+    let repo_clone = sent_calls.iter().find(|(cmd, _, _)| cmd == "repo_clone").expect("repo_clone sent");
     assert_eq!(repo_clone.1["req"]["token"], "ghp_secret");
-    assert!(!sent.iter().filter(|(cmd, _, _)| cmd != "repo_clone").any(|(_, args, _)| args.to_string().contains("ghp_secret")));
+    assert!(!sent_calls.iter().filter(|(cmd, _, _)| cmd != "repo_clone").any(|(_, args, _)| args.to_string().contains("ghp_secret")));
 }
 
 #[test]
 fn local_mode_unchanged() {
+    let _active = crate::project::ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
     let _mode = crate::core_host::process_mode_guard();
+    crate::project::set_active_for_test(None);
     crate::core_host::set_process_mode(0);
     assert!(!is_ssh_mode());
     assert!(refuse_in_ssh_mode().is_ok());
+    // The local branches run: with no local project they fail on their own local checks, not on a helper channel.
+    let paths = tauri::async_runtime::block_on(crate::project_layout::project_paths());
+    assert_eq!(paths.expect_err("no local project"), "no project is open");
+    let clone = tauri::async_runtime::block_on(crate::repo_clone::repo_clone("github".into(), "o/r".into(), None, None));
+    assert_eq!(clone.expect_err("no local project"), "open a project before cloning a repository");
     crate::core_host::set_process_mode(2);
     assert_eq!(refuse_in_ssh_mode().expect_err("ssh refuses").code, "ssh_mode");
     crate::core_host::set_process_mode(0);
