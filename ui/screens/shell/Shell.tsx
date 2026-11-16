@@ -120,6 +120,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const serverOpener = sshServer ? openPicker : undefined;
   useEffect(() => {
     setServerFolderHandler(serverFolderHandlerFor(sshServer, openPicker));
+    // A picker open when the mode leaves ssh would otherwise stay on screen with no server behind it.
+    if (!sshServer) setPickerOpen(false);
     return () => setServerFolderHandler(null);
   }, [sshServer, openPicker]);
   // The open server folder vanished (any later host call said so): back to the server home with the reason.

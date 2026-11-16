@@ -211,6 +211,24 @@ export function subscribeRootMissing(listener: RootMissingListener): () => void 
   return () => rootMissingListeners.delete(listener);
 }
 
+// A folder change (an open in progress, or a folder opened or refused) starts a new epoch. A root_missing answer counts
+// only for a call that started in the current epoch, and never while an open is in progress: a late answer about the
+// previous folder must not close the one that was just opened.
+let serverFolderEpoch = 0;
+let serverFolderOpening = false;
+
+/** Called by the picker's open flow before the host opens a folder. */
+export function beginServerFolderOpen(): void {
+  serverFolderOpening = true;
+  serverFolderEpoch += 1;
+}
+
+/** Called when the open answered, either way. */
+export function endServerFolderOpen(): void {
+  serverFolderOpening = false;
+  serverFolderEpoch += 1;
+}
+
 /**
  * Generic typed call for commands a slice owns. Prefer adding a wrapper to `host` for shared ones.
  * The `remote_ssh_workspace_*` commands are excluded from the root_missing hook: their own refusals (for example a
@@ -222,11 +240,13 @@ export async function invokeHost<T>(command: string, args?: Record<string, unkno
   if (remoteModeProvider() && !remoteSafe(command) && !(sshModeProvider() && sshExplorerAdmitted(command))) {
     throw new RemoteModeError(command);
   }
+  const epoch = serverFolderEpoch;
   try {
     return await bridge.invoke<T>(command, args);
   } catch (e) {
     const record = typeof e === "object" && e !== null ? (e as { code?: unknown; message?: unknown }) : null;
-    if (record?.code === "root_missing" && sshModeProvider() && !command.startsWith("remote_ssh_workspace_")) {
+    const current = epoch === serverFolderEpoch && !serverFolderOpening;
+    if (record?.code === "root_missing" && current && sshModeProvider() && !command.startsWith("remote_ssh_workspace_")) {
       const message = typeof record.message === "string" ? record.message : "This folder is no longer on the server.";
       for (const listener of [...rootMissingListeners]) listener(message);
     }

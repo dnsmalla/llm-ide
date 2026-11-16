@@ -33,7 +33,7 @@ const state = (over = {}) => ({
 
 /** Every handler the view gives, recorded by name, so a test can press one. */
 function handlers(log) {
-  const names = ["onGo", "onEnter", "onSelect", "onToggleHidden", "onStartNew", "onCancelNew", "onNewName", "onCreate", "onOpenCurrent", "onClose"];
+  const names = ["onGo", "onEnter", "onSelect", "onToggleHidden", "onStartNew", "onCancelNew", "onNewName", "onCreate", "onOpenSelected", "onOpenCurrent", "onClose"];
   return Object.fromEntries(names.map((n) => [n, (...args) => log.push([n, ...args])]));
 }
 const render = (s, log = []) => plain(renderToStaticMarkup(h(view.FolderPickerView, { state: s, ...handlers(log) })));
@@ -86,14 +86,21 @@ test("double-clicking an entry enters it; an outside-home entry has no double-cl
   assert.equal(api.props.onDoubleClick, undefined);
 });
 
-test("Open enters the selected entry; disabled with no selection", () => {
+test("Open opens the selected entry (not navigate); disabled with no selection", () => {
   const log = [];
   const none = view.FolderPickerView({ state: state(), ...handlers(log) });
   assert.equal(findNode(none, (n) => n.props.children === "Open" && n.props.onClick)?.props.disabled, true);
   const withSel = view.FolderPickerView({ state: state({ selected: "alpha" }), ...handlers(log) });
   const open = findNode(withSel, (n) => n.props.children === "Open" && n.props.onClick);
+  assert.equal(open.props.disabled, false);
   open.props.onClick();
-  assert.deepEqual(log, [["onEnter", "alpha"]]);
+  assert.deepEqual(log, [["onOpenSelected"]]);
+});
+
+test("the listing takes initial focus (tabindex on the list) and Escape closes only when nothing is running", () => {
+  assert.match(render(state()), /<ul[^>]*tabindex="-1"[^>]*class="rf-list"|<ul[^>]*class="rf-list"[^>]*tabindex="-1"/);
+  assert.equal(view.pickerEscapeCloses(false), true);
+  assert.equal(view.pickerEscapeCloses(true), false, "Escape is ignored while an open runs");
 });
 
 test("Open this folder opens the folder being listed", () => {

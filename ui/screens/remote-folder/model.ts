@@ -9,6 +9,7 @@
 // - a folder that is outside the home folder is listed but never entered or selected (the host refuses it too).
 
 import { Store } from "../settings/store.ts";
+import { beginServerFolderOpen, endServerFolderOpen } from "../shell/host.ts";
 
 /** One folder as the host lists it. The host lists folders only. */
 export interface RemoteEntry {
@@ -49,11 +50,12 @@ export const LOST_CONNECTION_TEXT = "The connection to the server was lost.";
 const DECODE_TEXT = "the desktop host returned a server folder answer this app cannot read";
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const validName = (v: unknown): v is string => typeof v === "string" && v.length > 0 && !v.includes("/");
+// "." and ".." are not folders the picker can list or enter; a name with a slash is not a single path segment.
+const validName = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v !== "." && v !== ".." && !v.includes("/");
 
 /** Strict decode of `remote_ssh_workspace_list_dirs`; one malformed entry makes the whole answer unreadable. */
 export function decodeListing(raw: unknown): RemoteListing | null {
-  if (!isRecord(raw) || typeof raw.path !== "string" || !Array.isArray(raw.entries)) return null;
+  if (!isRecord(raw) || typeof raw.path !== "string" || !raw.path.startsWith("/") || !Array.isArray(raw.entries)) return null;
   const entries: RemoteEntry[] = [];
   for (const item of raw.entries) {
     if (!isRecord(item) || !validName(item.name) || typeof item.isLink !== "boolean" || typeof item.outsideHome !== "boolean") return null;
@@ -211,7 +213,14 @@ export interface OpenFlowDeps {
  * A registration failure is announced and the open stands. An open failure throws the host's error unchanged.
  */
 export async function openServerFolder(io: WorkspaceIo, path: string, deps: OpenFlowDeps): Promise<RemoteProject> {
-  const project = await io.open(path);
+  // The host gate ignores a root_missing from a call still in flight while the folder changes (see host.ts).
+  beginServerFolderOpen();
+  let project: RemoteProject;
+  try {
+    project = await io.open(path);
+  } finally {
+    endServerFolderOpen();
+  }
   try {
     await deps.register(project.root);
   } catch (e) {
@@ -365,12 +374,28 @@ export class FolderPickerModel extends Store<PickerState> {
   }
 
   /** Makes the listed folder the project. Returns it, or null when the open failed (the error is shown). */
-  async openCurrent(): Promise<RemoteProject | null> {
+  openCurrent(): Promise<RemoteProject | null> {
     const s = this.getState();
-    if (s.busy || s.path === null) return null;
+    if (s.path === null) return Promise.resolve(null);
+    return this.#open(s.path);
+  }
+
+  /**
+   * Makes the selected entry the project (Open). Double-click navigates instead; this is the only way to open an entry.
+   * Null with no selection, or when the selected folder cannot be opened (the error is shown).
+   */
+  openSelected(): Promise<RemoteProject | null> {
+    const s = this.getState();
+    const entry = s.entries.find((e) => e.name === s.selected);
+    if (s.path === null || !entry || entry.outsideHome) return Promise.resolve(null);
+    return this.#open(joinPath(s.path, entry.name));
+  }
+
+  async #open(path: string): Promise<RemoteProject | null> {
+    if (this.getState().busy) return null;
     this.set({ busy: true, error: null });
     try {
-      return await openServerFolder(this.#io, s.path, this.#deps);
+      return await openServerFolder(this.#io, path, this.#deps);
     } catch (e) {
       this.set({ error: workspaceErrorText(e) });
       return null;

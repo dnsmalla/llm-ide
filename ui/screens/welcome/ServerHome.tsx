@@ -29,6 +29,11 @@ export function serverLinkLabel(link: string | null): { tone: "ok" | "busy" | "w
   }
 }
 
+/** The header's first line: "Connected to <host>" only while the link is up, "SSH server <host>" otherwise. */
+export function headerText(link: string | null, host: string): string {
+  return link === "connected" || link === "reconnecting" ? `Connected to ${host}` : `SSH server ${host}`;
+}
+
 /** One recent folder as a row shows it. */
 export interface RecentRow {
   path: string;
@@ -76,7 +81,8 @@ export function ServerHomeView(p: ServerHomeViewProps): ReactNode {
     <div className="sh-home st-root" aria-label="SSH server">
       <header className="sh-home-head">
         <div className="sh-home-title">
-          <h2 className="wc-h2">{`Connected to ${p.host}`}</h2>
+          {/* "Connected to" only when the link is up; otherwise the header names the server and the state label says the rest. */}
+          <h2 className="wc-h2">{headerText(p.link, p.host)}</h2>
           <p className="sh-home-state" data-tone={label.tone}>
             <span className="sh-home-dot" aria-hidden="true" />
             <span role="status">{label.text}</span>
@@ -105,21 +111,23 @@ export function ServerHomeView(p: ServerHomeViewProps): ReactNode {
       ) : null}
 
       {p.link === "needs_password" ? (
-        <section className="sh-home-section sh-home-password" aria-label="Server password">
-          <Field label="Password" hint={SERVER_PASSWORD_HINT}>
-            <input
-              className="st-input"
-              type="password"
-              value={p.password}
-              onChange={(e) => p.onPassword(e.currentTarget.value)}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-            />
-          </Field>
-          <div className="st-row">
-            <Button tone="primary" disabled={p.busy || p.password.length === 0} onClick={p.onConnectPassword}>Connect</Button>
+        <section className="sh-home-section" aria-label="Server password">
+          <div className="sh-home-password-body">
+            <Field label="Password" hint={SERVER_PASSWORD_HINT}>
+              <input
+                className="st-input"
+                type="password"
+                value={p.password}
+                onChange={(e) => p.onPassword(e.currentTarget.value)}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+            </Field>
+            <div className="st-row">
+              <Button tone="primary" disabled={p.busy || p.password.length === 0} onClick={p.onConnectPassword}>Connect</Button>
+            </div>
           </div>
         </section>
       ) : null}

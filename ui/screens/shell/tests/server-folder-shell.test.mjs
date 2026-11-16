@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { load } from "./helpers.mjs";
 
 const { serverFolderHandlerFor, setServerFolderHandler, serverFolderHandler } = await load("server-folder.ts");
-const { setHostBridge, setSshModeProvider, setRemoteModeProvider, invokeHost, subscribeRootMissing } = await load("host.ts");
+const { setHostBridge, setSshModeProvider, setRemoteModeProvider, invokeHost, subscribeRootMissing, beginServerFolderOpen, endServerFolderOpen } = await load("host.ts");
 const { sshBadgeText } = await load("../settings/ssh-server-model.ts");
 const { createProjectStore } = await load("project-store.ts");
 
@@ -70,4 +70,42 @@ test("project store: announce sets the notice without touching the project", asy
   assert.equal(s.project?.root, "/x/llm");
   store.dismissNotice();
   assert.equal(store.getSnapshot().notice, null);
+});
+
+// The root_missing gate: a late answer about the previous folder, or one during an open, must not close the folder.
+test("root_missing gate: a call started before the folder changed is ignored; a call started after it counts", async () => {
+  const seen = [];
+  const off = subscribeRootMissing((message) => seen.push(message));
+  let rejectLater = null;
+  setHostBridge({ invoke(cmd) { if (cmd === "fs_list_dir") return new Promise((_, rej) => { rejectLater = rej; }); return Promise.resolve(null); } });
+  setRemoteModeProvider(() => true);
+  setSshModeProvider(() => true);
+  try {
+    // Started on the old folder, answered after a new folder was opened.
+    const old = invokeHost("fs_list_dir", { path: "" });
+    beginServerFolderOpen();
+    endServerFolderOpen();
+    rejectLater({ code: "root_missing", message: ROOT_MISSING });
+    await assert.rejects(old);
+    assert.deepEqual(seen, [], "the late answer for the previous folder is ignored");
+
+    // Started while an open is in progress: ignored too.
+    beginServerFolderOpen();
+    const during = invokeHost("fs_list_dir", { path: "" });
+    rejectLater({ code: "root_missing", message: ROOT_MISSING });
+    await assert.rejects(during);
+    endServerFolderOpen();
+    assert.deepEqual(seen, []);
+
+    // Started after the open finished, on the current folder: it counts.
+    const current = invokeHost("fs_list_dir", { path: "" });
+    rejectLater({ code: "root_missing", message: ROOT_MISSING });
+    await assert.rejects(current);
+    assert.deepEqual(seen, [ROOT_MISSING]);
+  } finally {
+    off();
+    setSshModeProvider(() => false);
+    setRemoteModeProvider(() => false);
+    setHostBridge(null);
+  }
 });

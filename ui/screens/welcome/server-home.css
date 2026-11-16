@@ -12,7 +12,8 @@
 .sh-home-identity { margin: 0; color: var(--tok-color-text-muted); font-size: 0.9rem; }
 .sh-home-section { display: flex; flex-direction: column; gap: var(--tok-space-sm, 8px); padding: var(--tok-space-md, 12px) 0; border-top: 1px solid var(--tok-color-border); }
 .sh-home-section > h3 { margin: 0; }
-.sh-home-password { max-width: 420px; }
+/* The section keeps the full-width divider; only its controls are narrowed. */
+.sh-home-password-body { display: flex; flex-direction: column; gap: var(--tok-space-sm, 8px); max-width: 420px; }
 .sh-home-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .sh-home-row { display: flex; align-items: center; gap: var(--tok-space-sm, 8px); }
 .sh-home-row[data-missing="true"] { opacity: 0.6; }

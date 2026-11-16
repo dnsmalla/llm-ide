@@ -292,3 +292,25 @@ test("recent folders: opening a working row runs open, register, refresh", async
   assert.deepEqual(log, [`register:${HOME}/projects/llm`, "refresh"]);
   assert.deepEqual(recent.getState().missing, []);
 });
+
+test("Open opens the selected entry through the open flow; no selection opens nothing", async () => {
+  const log = [];
+  const io = fakeIo();
+  const picker = new m.FolderPickerModel(io, deps(log));
+  await picker.start();
+  assert.equal(await picker.openSelected(), null, "no selection: nothing opens");
+  assert.equal(io.calls.some((c) => c.startsWith("open:")), false);
+  picker.select("projects");
+  const project = await picker.openSelected();
+  assert.deepEqual(project, { name: "projects", root: `${HOME}/projects` });
+  assert.ok(io.calls.includes(`open:${HOME}/projects`));
+  assert.deepEqual(log, [`register:${HOME}/projects`, "refresh"]);
+  assert.equal(io.calls.some((c) => c === `list:${HOME}/projects:false`), false, "Open does not navigate");
+});
+
+test("decodeListing refuses '.' and '..' entry names and a relative listing path", () => {
+  assert.equal(m.decodeListing({ path: HOME, entries: [{ name: ".", isLink: false, outsideHome: false }] }), null);
+  assert.equal(m.decodeListing({ path: HOME, entries: [{ name: "..", isLink: false, outsideHome: false }] }), null);
+  assert.equal(m.decodeListing({ path: "home/dev", entries: [] }), null);
+  assert.deepEqual(m.decodeListing({ path: "/", entries: [] }), { path: "/", entries: [] });
+});

@@ -45,6 +45,15 @@ function props(over = {}) {
 }
 const render = (over) => plain(renderToStaticMarkup(h(home.ServerHomeView, props(over))));
 
+test("header: 'Connected to <host>' only while the link is up; otherwise 'SSH server <host>'", () => {
+  assert.equal(home.headerText("connected", "h"), "Connected to h");
+  assert.equal(home.headerText("reconnecting", "h"), "Connected to h");
+  for (const link of ["connecting", "needs_password", "failed", "stopped", null]) {
+    assert.equal(home.headerText(link, "h"), "SSH server h", String(link));
+    assert.doesNotMatch(render({ link }), /Connected to/, String(link));
+  }
+});
+
 test("connected: the header names the host, shows the state and the identity line", () => {
   const html = render({});
   assert.match(html, />Connected to 192\.168\.100\.32</);

@@ -1,7 +1,7 @@
 // SSH server folder picker: a modal over the shell that lists folders on the server, starting at the home folder. The
 // view is a plain function over the model's state, so it renders to markup and its handlers are called in tests; the
 // wrapper only creates the model and listens for Escape. Modal classes come from the Welcome page (wc-modal).
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import "../welcome/welcome.css";
 import "./remote-folder.css";
 import { useModel, useStore } from "../settings/context.tsx";
@@ -9,6 +9,11 @@ import { Button, ErrorText } from "../settings/ui.tsx";
 import { breadcrumbsFor, FolderPickerModel, type OpenFlowDeps, type PickerState, type RemoteProject, type WorkspaceIo } from "./model.ts";
 
 export const OUTSIDE_HOME_TEXT = "Outside your home folder";
+
+/** Escape closes the picker only when no open or create is running: closing mid-open would hide its outcome. */
+export function pickerEscapeCloses(busy: boolean): boolean {
+  return !busy;
+}
 
 export interface FolderPickerViewProps {
   state: PickerState;
@@ -20,8 +25,11 @@ export interface FolderPickerViewProps {
   onCancelNew(): void;
   onNewName(value: string): void;
   onCreate(): void;
+  onOpenSelected(): void;
   onOpenCurrent(): void;
   onClose(): void;
+  /** Takes the initial focus when the picker opens. */
+  listRef?: RefObject<HTMLUListElement | null>;
 }
 
 export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
@@ -81,7 +89,7 @@ export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
             <ErrorText text={s.error} />
             {s.loading ? <p className="rf-status" role="status">Loading…</p> : null}
 
-            <ul className="rf-list" aria-label="Folders">
+            <ul ref={p.listRef} tabIndex={-1} className="rf-list" aria-label="Folders">
               {s.entries.map((e) => (
                 <li key={e.name} className="rf-item">
                   <button
@@ -106,7 +114,7 @@ export function FolderPickerView(p: FolderPickerViewProps): ReactNode {
         </div>
         <div className="wc-modal-foot rf-foot">
           <div className="st-root rf-actions">
-            <Button disabled={busy || selectedEntry === null || selectedEntry.outsideHome} onClick={() => { if (selectedEntry) p.onEnter(selectedEntry.name); }}>Open</Button>
+            <Button disabled={busy || selectedEntry === null || selectedEntry.outsideHome} onClick={p.onOpenSelected}>Open</Button>
             <Button tone="primary" disabled={busy || s.path === null} onClick={p.onOpenCurrent}>Open this folder</Button>
             <Button disabled={busy} onClick={p.onClose}>Cancel</Button>
           </div>
@@ -127,16 +135,18 @@ export interface FolderPickerProps {
 export function FolderPicker({ io, deps, onOpened, onClose }: FolderPickerProps): ReactNode {
   const m = useModel(() => new FolderPickerModel(io, deps));
   const s = useStore(m);
+  const listRef = useRef<HTMLUListElement>(null);
   useEffect(() => {
     void m.start();
+    listRef.current?.focus();
   }, [m]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && pickerEscapeCloses(s.busy)) onClose();
     };
     globalThis.addEventListener?.("keydown", onKey);
     return () => globalThis.removeEventListener?.("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, s.busy]);
   return (
     <FolderPickerView
       state={s}
@@ -148,8 +158,10 @@ export function FolderPicker({ io, deps, onOpened, onClose }: FolderPickerProps)
       onCancelNew={() => m.cancelNewFolder()}
       onNewName={(value) => m.setNewName(value)}
       onCreate={() => void m.createFolder()}
+      onOpenSelected={() => void m.openSelected().then((project) => { if (project) onOpened(project); })}
       onOpenCurrent={() => void m.openCurrent().then((project) => { if (project) onOpened(project); })}
       onClose={onClose}
+      listRef={listRef}
     />
   );
 }

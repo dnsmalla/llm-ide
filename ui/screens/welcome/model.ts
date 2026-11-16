@@ -33,11 +33,6 @@ export interface RegisterDeps {
 const reason = (e: unknown) => safeText(e instanceof Error ? e.message : String(e), 160) || "unknown error";
 
 /**
- * After the host created the project: register it with the core (the same id Doc Gen derives from the root, so
- * both agree) and install the agent skills kit. Both are best effort, like the Mac app: failures become warnings,
- * never errors, because the project itself is already usable.
- */
-/**
  * Registers a project root with the core under the id Doc Gen derives from it. Throws when the core refuses. Opening an
  * existing folder uses this alone: unlike a new project it installs no agent skills into the folder.
  */
@@ -46,6 +41,11 @@ export async function registerProject(root: string, deps: RegisterDeps): Promise
   await deps.core.request("/kb/projects/register", { method: "POST", body: { id, root } });
 }
 
+/**
+ * After the host created the project: register it with the core (the same id Doc Gen derives from the root, so
+ * both agree) and install the agent skills kit. Both are best effort, like the Mac app: failures become warnings,
+ * never errors, because the project itself is already usable.
+ */
 export async function registerNewProject(project: ProjectInfo, deps: RegisterDeps): Promise<string[]> {
   const warnings: string[] = [];
   try {
