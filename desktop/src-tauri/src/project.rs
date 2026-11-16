@@ -305,6 +305,7 @@ fn data_dir(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// Opens the native folder dialog; `None` when the user cancels.
 #[tauri::command]
 pub async fn project_open(app: tauri::AppHandle) -> Result<Option<ProjectInfo>, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let picked = rfd::AsyncFileDialog::new()
         .set_title("Open project folder")
         .pick_folder()
@@ -318,6 +319,7 @@ pub async fn project_open(app: tauri::AppHandle) -> Result<Option<ProjectInfo>, 
 /// Re-opens recent project `index` (as listed by `project_recent`).
 #[tauri::command]
 pub async fn project_open_recent(app: tauri::AppHandle, index: usize) -> Result<ProjectInfo, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     tauri::async_runtime::spawn_blocking(move || open_recent_now(&app, index))
         .await
         .map_err(|e| format!("open project task failed: {e}"))?
@@ -334,6 +336,10 @@ fn open_recent_now(app: &tauri::AppHandle, index: usize) -> Result<ProjectInfo, 
 
 #[tauri::command]
 pub fn project_active() -> Option<ProjectInfo> {
+    // SSH mode: the project is the server folder the Explorer opened, not this computer's active root.
+    if crate::workspace_backend::is_ssh_mode() {
+        return crate::workspace_backend::project_info();
+    }
     active_root().map(|r| info(&r))
 }
 
@@ -446,7 +452,13 @@ pub fn project_forget_recent(app: tauri::AppHandle, index: usize, root: String) 
 
 /// Closes the active project: back to "no project". Never deletes or changes any file.
 #[tauri::command]
-pub fn project_close(app: tauri::AppHandle) {
+pub async fn project_close(app: tauri::AppHandle) {
+    // SSH mode closes the server folder; this computer's active root is not touched. Closing the helper channel
+    // waits for its threads, so it runs off the UI thread.
+    if crate::workspace_backend::is_ssh_mode() {
+        let _ = tauri::async_runtime::spawn_blocking(crate::workspace_backend::reset).await;
+        return;
+    }
     deactivate();
     crate::tray::set_project_label(&app, None);
 }
@@ -455,6 +467,7 @@ pub fn project_close(app: tauri::AppHandle) {
 /// scaffolds it like the Mac app and makes it the active project. `None` when the user cancels.
 #[tauri::command]
 pub async fn project_create(app: tauri::AppHandle, name: String) -> Result<Option<ProjectInfo>, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let name = crate::project_scaffold::validate_name(&name)?;
     let picked = rfd::AsyncFileDialog::new()
         .set_title(format!("Choose where to create \"{name}\""))

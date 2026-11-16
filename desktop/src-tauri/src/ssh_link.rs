@@ -108,6 +108,26 @@ pub struct SshLink {
     /// Taken by [`SshLink::stop`] once the supervisor has had its chance to finish, so the folder is removed on
     /// every path that ends the link: disconnect, replace, shutdown, panic cleanup and a failed open.
     known_hosts: Mutex<Option<KnownHostsDir>>,
+    /// What the helper channel needs to start its own ssh process to the same server. `None` for a test link.
+    helper: Option<HelperSpawnParts>,
+}
+
+/// The ssh runner and endpoint of a supervised link. The helper channel reuses them, so it talks to the same
+/// server with the same pinned host key and the same auth as the forward.
+#[derive(Clone)]
+pub(crate) struct HelperSpawnParts {
+    pub(crate) exec: Arc<dyn SshExec>,
+    pub(crate) endpoint: SshEndpoint,
+}
+
+/// Everything one helper spawn needs, taken in one step while the link is connected.
+pub(crate) struct HelperSpawn {
+    pub(crate) exec: Arc<dyn SshExec>,
+    pub(crate) endpoint: SshEndpoint,
+    /// The pinned known_hosts file. The link still owns its folder, so the file exists until the link stops.
+    pub(crate) known_hosts: PathBuf,
+    /// A fresh one-time grant for this spawn, `None` for key auth.
+    pub(crate) grant: Option<AskpassGrant>,
 }
 
 impl SshLink {
@@ -131,6 +151,21 @@ impl SshLink {
         // Taken out of the lock first, so the folder is removed without holding it.
         let held = locked(&self.known_hosts).take();
         drop(held);
+    }
+
+    /// Everything the helper channel needs to start one more ssh process to this server. Refused unless the forward
+    /// is up: a helper started while the link is down would only fail later, with a less useful error.
+    pub(crate) fn helper_spawn(&self) -> Result<HelperSpawn, FsError> {
+        if !matches!(self.state(), LinkState::Connected) {
+            return Err(crate::ssh_workspace::lost());
+        }
+        let parts = self.helper.clone().ok_or(crate::ssh_workspace::lost())?;
+        let known_hosts = locked(&self.known_hosts)
+            .as_ref()
+            .map(|held| held.file.clone())
+            .ok_or(crate::ssh_workspace::lost())?;
+        let grant = self.grant().map_err(|_| crate::ssh_workspace::lost())?;
+        Ok(HelperSpawn { exec: parts.exec, endpoint: parts.endpoint, known_hosts, grant })
     }
 
     /// The known_hosts file this link reads, while the link still owns its folder. Tests use it to check the
@@ -175,6 +210,7 @@ pub(crate) fn held_for_test(password: Option<&str>) -> SshLink {
         url: "http://127.0.0.1:3456".to_string(),
         worker: Mutex::new(None),
         known_hosts: Mutex::new(None),
+        helper: None,
     }
 }
 
@@ -184,6 +220,7 @@ pub(crate) fn held_for_test(password: Option<&str>) -> SshLink {
 /// Postconditions: the state is `Connected` until the forward drops. A stop kills the forward.
 pub fn supervise(input: SuperviseInput) -> SshLink {
     let SuperviseInput { exec, connected, endpoint, password, known_hosts, health } = input;
+    let helper = HelperSpawnParts { exec: exec.clone(), endpoint: endpoint.clone() };
     let shared = Arc::new(Shared::new(password));
     let url = connected.local_url.clone();
     let worker_shared = shared.clone();
@@ -203,7 +240,7 @@ pub fn supervise(input: SuperviseInput) -> SshLink {
         let mut pause = |pause: Pause| sleep_unless_stopped(&worker_shared, pause);
         supervise_loop(&sup, forward, &mut pause);
     });
-    SshLink { shared, url, worker: Mutex::new(Some(worker)), known_hosts: Mutex::new(Some(known_hosts)) }
+    SshLink { shared, url, worker: Mutex::new(Some(worker)), known_hosts: Mutex::new(Some(known_hosts)), helper: Some(helper) }
 }
 
 /// One wait the loop asks for. The production waits sleep; tests record them.
@@ -633,6 +670,7 @@ mod tests {
             url: LOCAL_URL.to_string(),
             worker: Mutex::new(None),
             known_hosts: Mutex::new(Some(held)),
+            helper: None,
         };
         let endpoint = match password {
             Some(_) => crate::ssh_transport::prepare_endpoint("example.com", 22, "alice", SshAuth::Password).unwrap(),

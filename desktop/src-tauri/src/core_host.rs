@@ -378,6 +378,36 @@ pub fn require_local_mode() -> Result<(), crate::fs_ops::FsError> {
     }
 }
 
+/// Whether SSH server mode is on. The Explorer then runs on the server, and the local project is not used.
+pub fn is_ssh_mode() -> bool {
+    MODE.load(Ordering::SeqCst) == 2
+}
+
+/// The helper channel's ssh inputs from the attached link. Fails with `lost_connection` when no link is attached
+/// or the forward is not up.
+pub(crate) fn attached_helper_spawn() -> Result<crate::ssh_link::HelperSpawn, crate::fs_ops::FsError> {
+    let Some(host) = crate::CORE.get() else {
+        return Err(crate::ssh_workspace::lost());
+    };
+    let slot = lock(&host.inner.ssh_link);
+    match slot.link.as_ref() {
+        Some(link) => link.helper_spawn(),
+        None => Err(crate::ssh_workspace::lost()),
+    }
+}
+
+/// Lets a test outside this module take the lock the mode tests share, so no other test changes `MODE` meanwhile.
+#[cfg(test)]
+pub(crate) fn process_mode_guard() -> MutexGuard<'static, ()> {
+    tests::mode_guard()
+}
+
+/// Sets `MODE` directly, for tests of commands that read it without a host.
+#[cfg(test)]
+pub(crate) fn set_process_mode(ssh: bool) {
+    MODE.store(if ssh { 2 } else { 0 }, Ordering::SeqCst);
+}
+
 /// The value `MODE` and `Inner::mode` store for a server mode: 0 local, 1 remote, 2 ssh.
 fn mode_value(mode: ServerMode) -> u8 {
     match mode {
@@ -627,6 +657,8 @@ impl CoreHost {
             slot.disconnected = false;
             std::mem::replace(&mut slot.link, Some(link))
         };
+        // The helper channel belongs to the link it was opened with, so a new link starts without one.
+        crate::workspace_backend::reset();
         if let Some(previous) = previous {
             previous.stop();
         }
@@ -644,6 +676,8 @@ impl CoreHost {
             slot.disconnected = true;
             slot.link.take()
         };
+        // The helper channel dies with its link: its folder and any running search or watch go with it.
+        crate::workspace_backend::reset();
         if let Some(link) = link {
             link.stop();
         }
@@ -2780,6 +2814,7 @@ process.on('SIGTERM', () => process.exit(0));
     pub(crate) fn mode_guard() -> MutexGuard<'static, ()> {
         MODE_TESTS.lock().unwrap_or_else(|e| e.into_inner())
     }
+
 
     /// A forward that never exits on its own and counts its kills, so a test can see the link was stopped.
     struct StubForward {

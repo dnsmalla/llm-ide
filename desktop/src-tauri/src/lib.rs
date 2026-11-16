@@ -62,6 +62,8 @@ mod ssh_service;
 mod ssh_session;
 mod ssh_transport;
 mod ssh_workspace;
+mod workspace_backend;
+mod ssh_workspace_cmds;
 mod remote_deploy;
 mod remote_hub;
 mod remote_session;
@@ -482,6 +484,12 @@ macro_rules! product_handlers {
                 ssh_cmds::remote_ssh_server_install_key,
                 ssh_cmds::remote_ssh_server_recent,
                 ssh_cmds::remote_ssh_server_forget,
+                ssh_workspace_cmds::remote_ssh_workspace_list_dirs,
+                ssh_workspace_cmds::remote_ssh_workspace_mkdir,
+                ssh_workspace_cmds::remote_ssh_workspace_open,
+                ssh_workspace_cmds::remote_ssh_workspace_close,
+                ssh_workspace_cmds::remote_ssh_workspace_recent,
+                ssh_workspace_cmds::remote_ssh_workspace_forget,
                 app_restart,
                 remote_deploy::remote_deploy_plan,
                 remote_deploy::remote_deploy_bootstrap,

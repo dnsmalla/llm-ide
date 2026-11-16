@@ -338,6 +338,7 @@ pub fn resolve_reveal(root: &Path, rel: &str) -> Result<(PathBuf, bool), FsError
 /// Shows a project entry in the OS file manager (Finder / Explorer / the parent folder).
 #[tauri::command]
 pub async fn reveal_in_os(rel_path: String) -> Result<(), FsError> {
+    crate::workspace_backend::refuse_in_ssh_mode()?;
     if !REVEAL_LIMIT.allow() {
         return Err(herr("rate_limited", "too many requests"));
     }

@@ -12,6 +12,8 @@ pub use llmide_workspace_core::fs::*;
 pub use llmide_workspace_core::paths::checked_root;
 pub use llmide_workspace_core::{FsError, R};
 
+use crate::workspace_backend::dispatch;
+
 /// The canonical active root, re-validated now. The active project is host state, so it is read here
 /// and only the root check itself is shared.
 pub fn active_root() -> R<PathBuf> {
@@ -21,7 +23,8 @@ pub fn active_root() -> R<PathBuf> {
     checked_root(&root)
 }
 
-async fn blocking<T, F>(f: F) -> R<T>
+/// Runs a local-only command (a PDF in this computer's viewer). It refuses in SSH mode, and it never reaches the server.
+async fn local_only<T, F>(f: F) -> R<T>
 where
     T: Send + 'static,
     F: FnOnce(PathBuf) -> R<T> + Send + 'static,
@@ -35,47 +38,56 @@ where
     .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?
 }
 
+/// The Explorer file commands. Local and hub run them on this computer's project; SSH mode runs the same command on
+/// the server (`workspace_backend::dispatch`). The argument object is what the UI sends, so the helper reads the same keys.
 #[tauri::command]
-pub async fn fs_list_dir(req: ListReq) -> R<ListResult> {
-    blocking(move |root| list_dir(&root, &req)).await
+pub async fn fs_list_dir(req: ListReq) -> R<serde_json::Value> {
+    let args = serde_json::json!({"req": req});
+    dispatch("fs_list_dir", args, move |root| list_dir(&root, &req)).await
 }
 
 #[tauri::command]
-pub async fn fs_read_file(req: ReadReq) -> R<ReadResult> {
-    blocking(move |root| read_file(&root, &req)).await
+pub async fn fs_read_file(req: ReadReq) -> R<serde_json::Value> {
+    let args = serde_json::json!({"req": req});
+    dispatch("fs_read_file", args, move |root| read_file(&root, &req)).await
 }
 
 #[tauri::command]
-pub async fn fs_read_image(path: String) -> R<ImageResult> {
-    blocking(move |root| read_image(&root, &path)).await
+pub async fn fs_read_image(path: String) -> R<serde_json::Value> {
+    let args = serde_json::json!({"path": path});
+    dispatch("fs_read_image", args, move |root| read_image(&root, &path)).await
 }
 
 #[tauri::command]
-pub async fn fs_read_range(req: RangeReq) -> R<RangeResult> {
-    blocking(move |root| read_range(&root, &req)).await
+pub async fn fs_read_range(req: RangeReq) -> R<serde_json::Value> {
+    let args = serde_json::json!({"req": req});
+    dispatch("fs_read_range", args, move |root| read_range(&root, &req)).await
 }
 
 #[tauri::command]
-pub async fn fs_write_file(req: WriteReq) -> R<WriteResult> {
-    blocking(move |root| write_file(&root, &req)).await
+pub async fn fs_write_file(req: WriteReq) -> R<serde_json::Value> {
+    let args = serde_json::json!({"req": req});
+    dispatch("fs_write_file", args, move |root| write_file(&root, &req)).await
 }
 
 #[tauri::command]
-pub async fn fs_create(req: CreateReq) -> R<String> {
-    blocking(move |root| create(&root, &req)).await
+pub async fn fs_create(req: CreateReq) -> R<serde_json::Value> {
+    let args = serde_json::json!({"req": req});
+    dispatch("fs_create", args, move |root| create(&root, &req)).await
 }
 
 #[tauri::command]
-pub async fn fs_rename(req: RenameReq) -> R<String> {
-    blocking(move |root| rename(&root, &req)).await
+pub async fn fs_rename(req: RenameReq) -> R<serde_json::Value> {
+    let args = serde_json::json!({"req": req});
+    dispatch("fs_rename", args, move |root| rename(&root, &req)).await
 }
 
 /// Opens a PDF inside the active project with the OS viewer. The page never supplies an arbitrary path and
 /// only `.pdf` is accepted; the host resolves/confines it first. This is the desktop's Quick Look equivalent —
-/// the webview does not embed PDFs.
+/// the webview does not embed PDFs. SSH mode refuses it: the viewer would open on this computer, not the server.
 #[tauri::command]
 pub async fn fs_open_pdf(path: String) -> R<()> {
-    blocking(move |root| {
+    local_only(move |root| {
         let p = resolve_existing(&root, &path)?;
         if p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("pdf")) != Some(true) {
             return err("invalid_path", "only PDF files can be opened in the system viewer");
@@ -90,11 +102,13 @@ pub async fn fs_open_pdf(path: String) -> R<()> {
 }
 
 #[tauri::command]
-pub async fn fs_copy(req: CopyReq) -> R<String> {
-    blocking(move |root| copy(&root, &req)).await
+pub async fn fs_copy(req: CopyReq) -> R<serde_json::Value> {
+    let args = serde_json::json!({"req": req});
+    dispatch("fs_copy", args, move |root| copy(&root, &req)).await
 }
 
 #[tauri::command]
-pub async fn fs_delete(path: String) -> R<()> {
-    blocking(move |root| delete(&root, &path)).await
+pub async fn fs_delete(path: String) -> R<serde_json::Value> {
+    let args = serde_json::json!({"path": path});
+    dispatch("fs_delete", args, move |root| delete(&root, &path)).await
 }

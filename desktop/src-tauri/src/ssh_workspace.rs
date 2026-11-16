@@ -410,7 +410,7 @@ fn refused_hello(error: FsError) -> FsError {
     error
 }
 
-fn lost() -> FsError {
+pub(crate) fn lost() -> FsError {
     herr(LOST_CODE, LOST_MESSAGE)
 }
 

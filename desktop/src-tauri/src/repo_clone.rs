@@ -120,6 +120,7 @@ pub fn destination(root: &Path, name: &str) -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub async fn repo_clone(provider: String, url: String, token: Option<String>, folder: Option<String>) -> Result<CloneResult, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     if provider != "github" && provider != "gitlab" {
         return Err("provider must be github or gitlab".into());
     }
