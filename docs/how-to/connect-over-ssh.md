@@ -53,6 +53,9 @@ for the session you switch into: the app saves the start mode back to local as i
 next start, including one after a crash, opens the local Welcome screen again. To return to the Welcome screen
 during an SSH session, use **Close server** (see [Disconnect, stop and uninstall](#disconnect-stop-and-uninstall)).
 
+If you used a team hub (Remote server) before switching to SSH, the next start is local too, not the hub. The hub
+URL and its pin stay saved; choose the hub again in **Settings → Server & Backend → Remote server**.
+
 Caveat: if the app cannot save `Local` at start (for example the preferences file is not writable), the saved mode
 stays SSH. The next start then opens the server again, and **Close server** does too, until the file can be written.
 
@@ -143,8 +146,9 @@ name you type in its confirmation with the saved host, and refuses another name 
 offer **Stop it anyway** or **Uninstall anyway**. Use those only when you know the other desktop's work can
 stop.
 
-The core also keeps running after you quit the desktop app. When you open the app again with key login, it
-reconnects to the running core without a new upload. With password login it asks for the password first.
+The core also keeps running after you quit the desktop app. The next start opens the local Welcome screen (see
+[Start screen](#start-screen)). Choose the server under **Recent SSH servers**, press **Connect** (password login
+asks for the password), then **Switch to this server now**: the app reaches the running core without a new upload.
 
 To delete the server's data after Uninstall, remove the folder by hand on the server:
 `rm -rf ~/.llmide-server`. The app keeps it on purpose, so the database survives a reinstall.
@@ -185,7 +189,8 @@ install-skills), not only the failed step. Nothing is removed.
 
 **New project** works in your server home folder too: with the picker at `~`, it creates `~/<name>`, as it does
 locally. It refuses a name that already exists, a name with a path separator or a leading dot, a parent folder
-outside your server home folder, and a location too broad to hold a project, such as `~/Documents`. It never turns
+outside your server home folder, and a project folder that would itself be a broad folder such as `~/Documents`
+(a project created inside `~/Documents` is fine). It never turns
 an existing folder into a project. To use an existing folder as a project, create a new project next to it and move
 the files you need.
 

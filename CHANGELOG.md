@@ -5,6 +5,19 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### SSH server mode (desktop)
+
+- **Connect to your own Linux server over SSH**, like VS Code Remote-SSH: the desktop installs the core
+  under `~/.llmide-server/` (no sudo), forwards it over one `ssh -L`, and pins the server's host key. Key or
+  password login; the password is never stored. Guide: [connect over SSH](docs/how-to/connect-over-ssh.md).
+- **Work on server folders**: Explorer, Changes (git) and Terminal run on the server through a static helper;
+  deletes go to the server's Trash.
+- **Project setup on the server**: New project in the server folder picker, Settings → Project (Paths, Memory,
+  Rebuild), repository clone into `code/` (the token reaches only git's environment on the server), and Copy
+  server path instead of Reveal in Finder. Existing folders are never set up as projects.
+- **Every start opens the local Welcome screen**; SSH lasts for the session you switch into, and **Close
+  server** returns to Welcome while the server keeps running.
+
 ### Remote server: URL-first connection
 
 - **Settings → Server & Backend → Remote server** is URL-first: enter a running hub's https URL,
