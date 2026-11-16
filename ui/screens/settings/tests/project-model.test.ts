@@ -1,6 +1,50 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATHS_TEXT, bytesLabel, decodeMemory, decodePaths, folderNote, parseBackendUrl, pathsIsNoticeOnly, projectError, safeRelativePath, syncProviderFor } from "../project-model.ts";
+import { PATHS_TEXT, bytesLabel, cloneError, decodeMemory, decodePaths, folderNote, parseBackendUrl, pathsIsNoticeOnly, projectError, safeRelativePath, syncProviderFor } from "../project-model.ts";
+
+const CLONE_AUTH_SENTENCE =
+  "The repository refused access. If it is private, paste a personal access token with read access (GitHub: repo scope; GitLab: read_repository) and press Clone again.";
+
+test("clone: auth refusals map to one actionable sentence for string and {code,message} inputs", () => {
+  const texts = [
+    "Cloning into '/home/u/LLM_new/code/smart-input'...\nremote: HTTP Basic: Access denied. If a password was provided for Git authentication, the password was incorrect",
+    "fatal: Authentication failed for 'https://gitlab.com/g/r.git/'",
+    "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    "remote: Repository not found.",
+    "fatal: unable to access 'https://x/': The requested URL returned error: 403",
+    "fatal: unable to access 'https://x/': The requested URL returned error: 401",
+  ];
+  for (const text of texts) {
+    assert.equal(cloneError(text), CLONE_AUTH_SENTENCE, text);
+    assert.equal(cloneError({ code: "clone_failed", message: text }), CLONE_AUTH_SENTENCE, text);
+  }
+  // An auth marker past the 200-character limit still counts, because the match runs on the full text.
+  assert.equal(cloneError(`fatal: ${"slow network ".repeat(20)} Access denied`), CLONE_AUTH_SENTENCE);
+});
+
+test("clone: a long non-auth text ends at a whole word with an ellipsis", () => {
+  const long = `fatal: ${"unable to reach the remote because the network path was slow ".repeat(5)}`;
+  const got = cloneError(long);
+  assert.ok(got.endsWith("…"), got);
+  const body = got.slice(0, -1);
+  assert.ok(body.length <= 200, String(body.length));
+  assert.ok(long.startsWith(body), "the kept text is a prefix of the original");
+  assert.match(long.charAt(body.length), /\s/, "the cut falls on a word boundary");
+  assert.doesNotMatch(body, /\s$/);
+  // A single word longer than the limit has no boundary, so it is hard-cut.
+  assert.equal(cloneError("x".repeat(300)), `${"x".repeat(200)}…`);
+});
+
+test("clone: other errors are unchanged", () => {
+  const exact = `${"a".repeat(198)} b`;
+  assert.equal(exact.length, 200);
+  assert.equal(cloneError(exact), exact, "exactly at the limit is not cut");
+  assert.equal(cloneError("fatal: destination path already exists and is not an empty directory."), "fatal: destination path already exists and is not an empty directory.");
+  assert.equal(cloneError({ code: "clone_timeout", message: "The clone timed out." }), "The clone timed out.");
+  assert.equal(cloneError({ code: "no_project" }), PATHS_TEXT.noProject);
+  assert.equal(cloneError({}), "The clone failed.");
+  assert.equal(cloneError("   "), "The clone failed.");
+});
 
 test("safeRelativePath: project-relative only (no absolute, drive, .., controls)", () => {
   assert.equal(safeRelativePath("system/graph/graph.json"), "system/graph/graph.json");

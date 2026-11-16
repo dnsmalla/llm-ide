@@ -152,9 +152,32 @@ export function projectError(e: unknown): string {
   return text ? text.slice(0, 200) : "The project folders could not be read.";
 }
 
-/** A clone failure's sentence: the no-project text, the host's message (clone_timeout included), or a generic one. */
+const CLONE_MAX = 200;
+
+// NOTE: git says these when a private repo is refused (wrong or missing token). GitHub answers "Repository not found"
+// for a private repo the token cannot see, so it is treated as an access failure too.
+const CLONE_AUTH_FAILURE = /Access denied|Authentication failed|could not read Username|HTTP Basic|\b40[13]\b|Repository not found/i;
+
+const CLONE_AUTH_TEXT =
+  "The repository refused access. If it is private, paste a personal access token with read access (GitHub: repo scope; GitLab: read_repository) and press Clone again.";
+
+/** Cut text to at most `max` characters, ending at the last whole word, with "…" when it was cut. */
+function cutAtWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  // NOTE: when the character after the cut is a space, the head already ends on a whole word.
+  if (/\s/.test(text.charAt(max))) return `${head.trimEnd()}…`;
+  const lastSpace = head.search(/\s\S*$/);
+  // A single word longer than the limit has no boundary to cut at, so it is hard-cut.
+  return `${(lastSpace > 0 ? head.slice(0, lastSpace) : head).trimEnd()}…`;
+}
+
+/** A clone failure's sentence: the no-project text, a friendly auth refusal, the host's message, or a generic one. */
 export function cloneError(e: unknown): string {
   if (hostErrorCode(e) === "no_project") return PATHS_TEXT.noProject;
   const text = hostErrorText(e);
-  return text ? text.slice(0, 200) : "The clone failed.";
+  if (!text) return "The clone failed.";
+  // Checked on the full text, before cutting, so a marker past the limit still counts.
+  if (CLONE_AUTH_FAILURE.test(text)) return CLONE_AUTH_TEXT;
+  return cutAtWord(text, CLONE_MAX);
 }
