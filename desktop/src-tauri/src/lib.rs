@@ -27,7 +27,6 @@ mod foreign_core;
 mod fs_ops;
 mod fs_watch;
 mod git;
-mod git_config;
 mod git_scm;
 mod host_approval;
 mod fsutil;

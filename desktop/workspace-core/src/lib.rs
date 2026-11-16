@@ -6,11 +6,17 @@
 //! wrappers.
 //!
 //! - `fs`: list, read, write, create, rename, copy and delete inside one root (see that module's docs).
-//! - `paths`: root validation, the "too broad" rule and the real-path check of an open descriptor.
+//! - `paths`: root validation, the "too broad" rule, the real-path check of an open descriptor and the Windows
+//!   verbatim-prefix rule that git and cmd.exe need.
+//! - `git`, `git_config`: the hardened git runner, status, diff and stage; `scm`: the Changes actions (discard, commit,
+//!   branches, stash, merge, amend) and `confirm_spec`, the one table of their native dialog wording.
 //! - `text`: single-line sanitising for text the user reads.
 //! - `trash`: the only removal path. It moves to the OS trash and never deletes permanently.
 
 pub mod fs;
+pub mod git;
+pub mod git_config;
+pub mod scm;
 pub mod paths;
 pub mod text;
 pub mod trash;
