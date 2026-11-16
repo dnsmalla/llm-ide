@@ -822,6 +822,9 @@ fn step_project_rebuild(_run: &mut Run) -> Result<Outcome, Failed> {
 }
 
 /// Step 19: the same register and install-skills calls the welcome page makes, through the forward.
+// NOTE: the registration row lives in the server core's database, not in the test folder. The folder cleanup
+// (`rm -rf` of llmide-live-<hex>) does not remove it; uninstall (step 25) does. A run that fails before step 25 leaves
+// the row behind as a stale project entry on the server.
 fn step_project_register(run: &mut Run) -> Result<Outcome, Failed> {
     let root = open_project_root()?;
     let registered = core_post(run, "/kb/projects/register", json!({"id": project_id_for(&root), "root": root}))?;
