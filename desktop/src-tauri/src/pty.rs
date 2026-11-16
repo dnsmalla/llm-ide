@@ -31,6 +31,12 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::Serialize;
 use tauri::ipc::{Channel, Response};
 
+use crate::confirm::herr;
+use crate::fs_ops::FsError;
+use crate::ssh_askpass::AskpassGrant;
+use crate::ssh_server_scripts::TERMINAL;
+use crate::ssh_transport::{exec_args_tty, ssh_child_env, SshEndpoint};
+
 #[cfg(debug_assertions)]
 use crate::core_host;
 
@@ -388,6 +394,7 @@ struct Session {
     flow: Arc<Flow>,
     /// Consent epoch this shell was spawned under; see `Gate::session_epoch`.
     consent_epoch: u64,
+    _grant: Option<AskpassGrant>,
 }
 
 type Shared = Arc<Session>;
@@ -483,18 +490,7 @@ fn get(id: u32) -> Result<Shared, String> {
 /// `on_data` as raw bytes (see `Response`): one message per batch.
 pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<serde_json::Value>) -> Result<Spawned, String> {
     let consent_epoch = authorize()?;
-    if lock_table().len() >= MAX_SESSIONS {
-        return Err(format!("too many terminals (max {MAX_SESSIONS})"));
-    }
-    let pair = native_pty_system()
-        .openpty(PtySize {
-            rows: rows.max(1),
-            cols: cols.max(1),
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| format!("openpty failed: {e}"))?;
-
+    ensure_capacity()?;
     let (shell, shell_args) = login_shell();
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env_clear();
@@ -511,10 +507,162 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<
         cmd.env("LANG", "en_US.UTF-8");
     }
     cmd.cwd(start_dir());
+    let started = Started { shell: shell_name(&shell), input: Vec::new(), grant: None, consent_epoch };
+    start(cols, rows, cmd, started, on_data, on_exit)
+}
+
+/// Starts an SSH terminal: `ssh -tt` to the server, in the open server folder. It uses the same session table, output
+/// channels and cap as a local shell; only the process and what is written to its pty first differ.
+pub fn spawn_remote(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<serde_json::Value>) -> Result<Spawned, String> {
+    // The folder is checked before the consent dialog, so a request without one never shows it.
+    let folder = crate::workspace_backend::project_info().ok_or_else(|| "no project is open".to_string())?;
+    let consent_epoch = authorize()?;
+    ensure_capacity()?;
+    let helper = crate::core_host::attached_helper_spawn().map_err(|e| e.message)?;
+    let launch = remote_terminal_launch(&helper.endpoint, &helper.known_hosts, helper.grant, &folder.root)
+        .map_err(|e| e.message)?;
+    let mut cmd = CommandBuilder::new(&launch.program);
+    cmd.env_clear();
+    for (key, value) in launch.env {
+        cmd.env(key, value);
+    }
+    for arg in launch.args {
+        cmd.arg(arg);
+    }
+    let started = Started { shell: launch.shell, input: launch.input, grant: launch.grant, consent_epoch };
+    start(cols, rows, cmd, started, on_data, on_exit)
+}
+
+/// What a new terminal process needs besides its command: the label shown on the tab, the bytes written to its pty
+/// before any output is read, the askpass grant that answers its password prompt, and the consent epoch it runs under.
+struct Started {
+    shell: String,
+    input: Vec<u8>,
+    grant: Option<AskpassGrant>,
+    consent_epoch: u64,
+}
+
+/// The `ssh` process of one SSH terminal, as data, so the argv, environment and input can be checked without
+/// starting ssh. The folder is in `input` only: argv is quoted into the remote command line and is visible to other
+/// local processes, and a folder name can hold any character, so it must not be spliced into either.
+struct Launch {
+    program: String,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+    input: Vec<u8>,
+    shell: String,
+    grant: Option<AskpassGrant>,
+}
+
+fn remote_terminal_launch(ep: &SshEndpoint, known_hosts: &Path, grant: Option<AskpassGrant>, root: &str) -> Result<Launch, FsError> {
+    // A line break would end the folder line early, so the script would read a truncated path and then run the rest
+    // as input to the shell. An empty folder has nothing to enter.
+    if root.is_empty() || root.contains(['\n', '\r', '\0']) {
+        return Err(herr("invalid_path", "the folder path cannot be used in a terminal"));
+    }
+    let args = exec_args_tty(ep, known_hosts, true, TERMINAL);
+    let mut env = ssh_child_env(grant.as_ref());
+    // The remote shell takes its terminal type from ssh's TERM, so it must be set to what xterm.js can render.
+    env.retain(|(key, _)| key != "TERM");
+    env.push(("TERM".to_string(), "xterm-256color".to_string()));
+    let mut input = root.as_bytes().to_vec();
+    input.push(b'\n');
+    Ok(Launch { program: "ssh".to_string(), args, env, input, shell: format!("ssh: {}", ep.host), grant })
+}
+
+/// Turns the pty's local echo on or off through its slave device.
+///
+/// Why this is needed for SSH terminals: ssh switches its own local terminal to raw mode only after login, so until
+/// then the kernel echoes every byte written to the pty. The remote `stty -echo` changes the server's line discipline,
+/// not this one, so the folder line would show on screen without it. The slave is opened only for this call and
+/// closed at once; O_NOCTTY keeps it from becoming this process's controlling terminal.
+#[cfg(unix)]
+fn set_local_echo(tty_path: &Path, on: bool) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let name = std::ffi::CString::new(tty_path.as_os_str().as_bytes()).map_err(std::io::Error::other)?;
+    // SAFETY: `name` is a valid NUL-terminated path for the duration of the call; the fd is checked before use and closed.
+    let fd = unsafe { libc::open(name.as_ptr(), libc::O_RDWR | libc::O_NOCTTY) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `term` is a plain C struct that tcgetattr fills in full before it is read.
+    let result = unsafe {
+        let mut term: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(fd, &mut term) != 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            if on {
+                term.c_lflag |= libc::ECHO;
+            } else {
+                term.c_lflag &= !libc::ECHO;
+            }
+            if libc::tcsetattr(fd, libc::TCSANOW, &term) != 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        }
+    };
+    // SAFETY: `fd` was opened above and is closed exactly once.
+    unsafe {
+        libc::close(fd);
+    }
+    result
+}
+
+/// Whether local echo is on for the pty's slave device. Used by tests to read back what `set_local_echo` did.
+#[cfg(all(unix, test))]
+fn local_echo_is_on(tty_path: &Path) -> std::io::Result<bool> {
+    use std::os::unix::ffi::OsStrExt;
+    let name = std::ffi::CString::new(tty_path.as_os_str().as_bytes()).map_err(std::io::Error::other)?;
+    // SAFETY: as in `set_local_echo`.
+    let fd = unsafe { libc::open(name.as_ptr(), libc::O_RDWR | libc::O_NOCTTY) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: as in `set_local_echo`; `term` is filled by tcgetattr before it is read.
+    let result = unsafe {
+        let mut term: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(fd, &mut term) != 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(term.c_lflag & libc::ECHO != 0)
+        }
+    };
+    // SAFETY: `fd` was opened above and is closed exactly once.
+    unsafe {
+        libc::close(fd);
+    }
+    result
+}
+
+/// Whether one more terminal would exceed `MAX_SESSIONS`. Local and SSH terminals share the table, so one cap covers both.
+fn capacity_error(count: usize) -> Option<String> {
+    (count >= MAX_SESSIONS).then(|| format!("too many terminals (max {MAX_SESSIONS})"))
+}
+
+fn ensure_capacity() -> Result<(), String> {
+    match capacity_error(lock_table().len()) {
+        Some(message) => Err(message),
+        None => Ok(()),
+    }
+}
+
+/// Opens a pty, starts `cmd` in it and registers the session. Shared by the local shell and the SSH terminal.
+fn start(cols: u16, rows: u16, cmd: CommandBuilder, started: Started, on_data: Channel<Response>, on_exit: Channel<serde_json::Value>) -> Result<Spawned, String> {
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("openpty failed: {e}"))?;
+
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| format!("cannot start {shell}: {e}"))?;
+        .map_err(|e| format!("cannot start {}: {e}", started.shell))?;
     // The parent must not keep the slave open, or the reader never sees EOF.
     drop(pair.slave);
 
@@ -522,10 +670,26 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<
         .master
         .try_clone_reader()
         .map_err(|e| format!("pty reader: {e}"))?;
-    let writer = pair
+    let mut writer = pair
         .master
         .take_writer()
         .map_err(|e| format!("pty writer: {e}"))?;
+    // Written before the reader thread exists, so no output is forwarded before the folder line is in place.
+    // A failed write ends the new process: a terminal that cannot take its folder must not open in the wrong one.
+    let mut child = child;
+    if !started.input.is_empty() {
+        // Ignored on failure: the terminal still works, only the folder line may show once on screen.
+        #[cfg(unix)]
+        {
+            if let Some(path) = pair.master.tty_name() {
+                let _ = set_local_echo(&path, false);
+            }
+        }
+        if let Err(e) = writer.write_all(&started.input).and_then(|()| writer.flush()) {
+            let _ = child.kill();
+            return Err(format!("cannot give the terminal its folder: {e}"));
+        }
+    }
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let session: Shared = Arc::new(Session {
@@ -533,7 +697,10 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<
         writer: Mutex::new(writer),
         child: Mutex::new(child),
         flow: Arc::new(Flow::new()),
-        consent_epoch,
+        consent_epoch: started.consent_epoch,
+        // Held, not read: an SSH terminal's askpass grant must outlive the first password prompt, which ssh may send
+        // long after spawn. It is dropped with the session.
+        _grant: started.grant,
     });
     let flow = Arc::clone(&session.flow);
 
@@ -550,7 +717,7 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<
     }
 
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(QUEUE_DEPTH);
-    let started = thread::Builder::new()
+    let threads = thread::Builder::new()
         .name(format!("pty-read-{id}"))
         .spawn(move || read_loop(id, reader, tx))
         .and_then(|_| {
@@ -558,7 +725,7 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<
                 .name(format!("pty-flush-{id}"))
                 .spawn(move || flush_loop(rx, on_data, flow, on_exit))
         });
-    if let Err(e) = started {
+    if let Err(e) = threads {
         if let Some(s) = lock_table().remove(&id) {
             dispose(&s);
         }
@@ -567,7 +734,7 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<
 
     Ok(Spawned {
         id,
-        shell: shell_name(&shell),
+        shell: started.shell,
     })
 }
 
@@ -997,5 +1164,85 @@ mod tests {
         let src = env(&[("PATH", "/usr/bin"), ("HOME", "/h"), ("DISPLAY", ":0"), ("DBUS_SESSION_BUS_ADDRESS", "u"), ("DYLD_INSERT_LIBRARIES", "x"), ("NODE_OPTIONS", "x"), ("GITHUB_TOKEN", "x"), ("GIT_DIR", "/x")]);
         let kept: Vec<String> = scrubbed_env(src.into_iter()).into_iter().map(|(k, _)| k).collect();
         assert_eq!(kept, ["PATH", "HOME", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS"], "the opener keeps the desktop-session variables xdg-open needs");
+    }
+
+    const KNOWN: &str = "/tmp/llmide-terminal-known-hosts-test";
+
+    fn ssh_endpoint() -> crate::ssh_transport::SshEndpoint {
+        crate::ssh_transport::prepare_endpoint("server.example", 22, "alice", crate::ssh_transport::SshAuth::Password)
+            .unwrap()
+    }
+
+    #[test]
+    fn terminal_argv_is_strict_and_constant() {
+        let launch = remote_terminal_launch(&ssh_endpoint(), Path::new(KNOWN), None, "/srv/app").unwrap();
+        assert_eq!(launch.program, "ssh");
+        assert!(launch.args.iter().any(|a| a == "-tt"), "the remote shell needs a pty");
+        assert!(launch.args.iter().any(|a| a == "StrictHostKeyChecking=yes"));
+        assert!(launch.args.iter().any(|a| a == &format!("UserKnownHostsFile=\"{KNOWN}\"")));
+        assert_eq!(launch.args.last().map(String::as_str), Some(TERMINAL), "the remote command is the constant");
+        assert_eq!(launch.args[launch.args.len() - 2], "alice@server.example");
+        assert!(!launch.args.iter().any(|a| a.contains("/srv/app")), "the folder is never in argv");
+    }
+
+    #[test]
+    fn terminal_folder_is_data() {
+        let folder = "a b'; rm -rf ~";
+        let launch = remote_terminal_launch(&ssh_endpoint(), Path::new(KNOWN), None, folder).unwrap();
+        assert!(launch.args.iter().all(|a| !a.contains("rm -rf")), "the folder reached argv");
+        assert!(launch.env.iter().all(|(k, v)| !k.contains("rm -rf") && !v.contains("rm -rf")), "the folder reached env");
+        assert_eq!(launch.input, format!("{folder}\n").into_bytes(), "the folder is written to the pty as one line");
+        for bad in ["a\nb", "a\rb", "a\0b", ""] {
+            let err = remote_terminal_launch(&ssh_endpoint(), Path::new(KNOWN), None, bad).err().expect("refused");
+            assert_eq!(err.code, "invalid_path", "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn terminal_uses_held_password() {
+        let link = crate::ssh_link::held_for_test(Some("terminal-test-secret"));
+        let grant = link.grant().unwrap().expect("a password link grants");
+        let expected = grant.env();
+        let launch = remote_terminal_launch(&ssh_endpoint(), Path::new(KNOWN), Some(grant), "/srv/app").unwrap();
+        for pair in &expected {
+            assert!(launch.env.contains(pair), "{} missing from the ssh environment", pair.0);
+        }
+        assert!(launch.grant.is_some(), "the grant lives in the launch until the session ends");
+        let everything = format!("{:?} {:?}", launch.args, launch.env);
+        assert!(!everything.contains("terminal-test-secret"), "the password reached argv or env");
+    }
+
+    #[test]
+    fn remote_terminal_sets_term_for_the_remote_shell() {
+        let launch = remote_terminal_launch(&ssh_endpoint(), Path::new(KNOWN), None, "/srv/app").unwrap();
+        assert!(launch.env.contains(&("TERM".to_string(), "xterm-256color".to_string())));
+    }
+
+    #[test]
+    fn capacity_counts_every_terminal() {
+        // Local and SSH terminals share one table, so one cap covers both.
+        assert!(capacity_error(MAX_SESSIONS - 1).is_none());
+        assert!(capacity_error(MAX_SESSIONS).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ssh_terminal_turns_local_echo_off_before_the_folder_line() {
+        // A real pty pair, no ssh: the folder line written to it must not be echoed by this side's line discipline.
+        let pair = native_pty_system()
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .expect("openpty");
+        let path = pair.master.tty_name().expect("a unix pty has a device name");
+        assert!(local_echo_is_on(&path).unwrap(), "a new pty echoes by default");
+        set_local_echo(&path, false).expect("echo turned off");
+        assert!(!local_echo_is_on(&path).unwrap(), "echo must be off for the folder line");
+        set_local_echo(&path, true).expect("echo turned back on");
+        assert!(local_echo_is_on(&path).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_terminal_unchanged() {
+        assert_eq!(login_shell().1, vec!["-l"], "the local shell is still a login shell");
     }
 }

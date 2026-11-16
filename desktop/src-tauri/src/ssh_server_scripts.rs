@@ -692,6 +692,15 @@ printf '__LLMIDE_ADDKEY__=added\n'
 /// This literal is the only remote command the channel sends; every request travels on stdin.
 pub const WORKSPACE: &str = r#"exec "$HOME/.llmide-server/current/core/bin/llmide-workspace" --stdio"#;
 
+/// The remote command of an SSH terminal. The app writes the folder to the pty as one line before any output is
+/// read, and this script reads it: the folder is data, never part of the command text.
+///
+/// Why `stty -echo` first: the folder line is typed into the remote pty, so without it the path would be echoed
+/// onto the terminal. Echo is switched back on after the read, before the shell starts. `cd --` keeps a folder
+/// name that starts with `-` from being read as an option; a folder that cannot be entered falls back to the home
+/// folder, and the shell still starts.
+pub const TERMINAL: &str = r#"stty -echo; IFS= read -r LLMIDE_DIR; stty echo; cd -- "$LLMIDE_DIR" 2>/dev/null || cd; unset LLMIDE_DIR; exec "${SHELL:-/bin/sh}" -l"#;
+
 /// The Probe result the app decides on before uploading anything.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
@@ -2475,5 +2484,33 @@ mod uninstall_marker_tests {
         assert_eq!(stop_only.message, "The server files could not be removed.");
         // A marker must start its line.
         assert!(parse_uninstall("noise __LLMIDE_UNINSTALL__=ok\n").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_script_starts_the_shell_in_the_folder() {
+        // The folder arrives as one line on stdin; the rest of stdin is the shell's own input. `/usr` exists on
+        // macOS and Linux, and `pwd` shows where the shell really started.
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", TERMINAL])
+            .env("SHELL", "/bin/sh")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("sh starts");
+        child.stdin.take().expect("stdin").write_all(b"/usr\npwd\nexit\n").expect("stdin written");
+        let out = child.wait_with_output().expect("sh finishes");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.lines().any(|l| l == "/usr"), "the shell did not start in the folder: {stdout}");
+    }
+
+    #[test]
+    fn terminal_script_is_one_constant_line_group() {
+        assert!(TERMINAL.contains("IFS= read -r LLMIDE_DIR"));
+        assert!(TERMINAL.contains("cd -- \"$LLMIDE_DIR\""));
+        assert!(!TERMINAL.contains('\n'), "one line: the folder is read by the script, never spliced in");
     }
 }

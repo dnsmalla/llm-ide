@@ -95,8 +95,23 @@ pub fn prepare_endpoint(host: &str, port: u16, user: &str, auth: SshAuth) -> Res
 /// Returns:
 ///     The argv, to be passed to `Command::new("ssh").args(...)` with no shell.
 pub fn exec_args(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'static str) -> Vec<String> {
+    exec_args_with(ep, known_hosts, strict, command, false)
+}
+
+/// The same argv as [`exec_args`] with `-tt`, for a remote command that needs a pty (the SSH terminal).
+///
+/// Why a separate function: the helper channel is a plain pipe, and a pty on it would turn the JSON lines into
+/// echoed, line-edited text. Everything else is identical, so the terminal keeps the same host-key and auth rules.
+pub fn exec_args_tty(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'static str) -> Vec<String> {
+    exec_args_with(ep, known_hosts, strict, command, true)
+}
+
+fn exec_args_with(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'static str, tty: bool) -> Vec<String> {
     // No `-v`: nothing reads ssh's debug output, and it would only add noise to a captured stderr.
     let mut args = vec!["-a".to_string(), "-x".to_string()];
+    if tty {
+        args.push("-tt".to_string());
+    }
     push_option(&mut args, "ForwardAgent=no");
     push_option(&mut args, "ClearAllForwardings=yes");
     push_option(&mut args, "PermitLocalCommand=no");
@@ -404,15 +419,20 @@ fn exit_code(status: ExitStatus) -> i32 {
 fn child_command(program: &str, args: &[String], askpass: Option<&AskpassGrant>) -> Command {
     let mut command = Command::new(program);
     command.args(args).env_clear();
-    for (key, value) in shell_env(inherited_env()) {
+    for (key, value) in ssh_child_env(askpass) {
         command.env(key, value);
     }
-    if let Some(grant) = askpass {
-        for (key, value) in grant.env() {
-            command.env(key, value);
-        }
-    }
     command
+}
+
+/// The environment of every ssh child: the terminal allowlist of the host's environment, then the askpass
+/// variables of one grant. The SSH terminal reuses it, so both paths scrub the same way.
+pub(crate) fn ssh_child_env(askpass: Option<&AskpassGrant>) -> Vec<(String, String)> {
+    let mut env = shell_env(inherited_env());
+    if let Some(grant) = askpass {
+        env.extend(grant.env());
+    }
+    env
 }
 
 /// The inherited environment as UTF-8 pairs. `std::env::vars()` panics on the first entry that is not UTF-8.
@@ -561,6 +581,19 @@ mod tests {
         assert!(has_option(&args, "NumberOfPasswordPrompts=1"));
         assert!(!args.iter().any(|a| a == "-i"), "password auth must not name a key file");
         assert!(!has_option(&args, "BatchMode=yes"));
+    }
+
+    #[test]
+    fn exec_args_tty_adds_only_the_tty_flags() {
+        // The terminal runs ssh with a pty, so it needs `-tt`; every other option is the helper's own, unchanged.
+        let plain = exec_args(&key_endpoint(), Path::new(KNOWN), true, COMMAND);
+        let tty = exec_args_tty(&key_endpoint(), Path::new(KNOWN), true, COMMAND);
+        assert!(!plain.iter().any(|a| a == "-tt"), "the helper channel must not ask for a pty");
+        assert!(tty.iter().any(|a| a == "-tt"));
+        assert!(!tty.iter().any(|a| a == "-T"));
+        let without_tt: Vec<String> = tty.iter().filter(|a| *a != "-tt").cloned().collect();
+        assert_eq!(without_tt, plain, "apart from -tt the terminal argv is the strict helper argv");
+        assert_eq!(tty.last().map(String::as_str), Some(COMMAND));
     }
 
     #[test]

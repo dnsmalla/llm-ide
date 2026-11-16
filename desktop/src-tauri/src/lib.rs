@@ -252,6 +252,10 @@ where
 /// Starts `$SHELL -l` in a pty; output arrives on `on_data` as raw batches.
 #[tauri::command]
 async fn pty_spawn(cols: u16, rows: u16, on_data: Channel<Response>, on_exit: Channel<serde_json::Value>) -> Result<pty::Spawned, String> {
+    // In SSH mode the terminal is a shell on the server, in the open server folder; the local shell is never started.
+    if workspace_backend::is_ssh_mode() {
+        return pty_blocking(move || pty::spawn_remote(cols, rows, on_data, on_exit)).await;
+    }
     crate::core_host::require_local_mode().map_err(|e| e.message)?;
     pty_blocking(move || pty::spawn(cols, rows, on_data, on_exit)).await
 }
