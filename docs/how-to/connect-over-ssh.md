@@ -13,10 +13,11 @@ the server.
 This is the third server mode. The other two are **Local desktop** (the core runs on this computer)
 and **Remote server** (an LLM-IDE hub you connect to, see [Connect the desktop to a server](configure-remote-server.md)).
 
-> The connect path was run end to end against one Ubuntu 20.04 server: password login, install, start,
-> forward, sign-up and sign-in, disconnect and reconnect, stop, and uninstall. Clicking through the app
-> window, key install on a real account, and Windows desktops have not been verified. Read the
-> [limits](#limits) before you rely on it.
+> The connect path, the Explorer's files, git status, search, watching, and the recent-server list were run
+> live against one Ubuntu 20.04 server. Stop and uninstall were run through the Rust live harness. The
+> server terminal, a full click-through of the app window, project registration from the app window, key
+> install on a real account, and Windows desktops have not been verified. Read the [limits](#limits)
+> before you rely on it.
 
 ## What you need
 
@@ -37,8 +38,12 @@ You can connect from the Welcome screen or from Settings. Both use the same form
 1. Press **Connect to SSH server**, then **Connect…**. The dialog opens over the Welcome screen.
 2. Enter the server's details and choose the login method, as described below. The dialog runs the same
    Test and Connect steps as Settings.
-3. When the connection works, press **Switch to this server now**, then **Switch** in the confirmation. Only
-   that confirmation restarts the app; pressing the first button changes nothing on this computer.
+3. When the connection works, the dialog asks **Switch to this server now?**. Connect has already saved the
+   server and its host key, but not the mode, so the app is still local at this point. If the app is already in
+   SSH server mode, Connect attaches at once and there is nothing to switch.
+   - **Switch**: saves SSH server mode and restarts the app. The next start opens the server home.
+   - **Cancel**: changes nothing. The app stays local, and the next start is local too. The server stays saved,
+     so you can switch later from Settings.
 
 ### Recent SSH servers
 
@@ -66,8 +71,10 @@ server uses the same host.
    checks the upload's SHA-256 on the server, starts the core, opens the forward and checks that the core
    it reached is the one it started.
 
-If the app was in **Local desktop** or **Remote server** mode, Connect saves SSH server mode and asks you
-to restart. The new mode applies at the next start of the app.
+Connect saves the server, its host key and its entry in the recent list. It does not change the mode. To use
+the server, choose **Switch to this server now** (Welcome screen) or the same switch in Settings. That saves SSH
+server mode and restarts the app. The new mode applies at the next start, and the app restarts only after you
+confirm the switch. If you cancel, the app keeps its current mode.
 
 ## Login methods
 
@@ -105,9 +112,16 @@ connect after an app update replaces it with the new version (see [Updates](#upd
 
 | Action | Effect on this computer | Effect on the server |
 |---|---|---|
-| **Disconnect** | Closes the forward. | Nothing. The core keeps running. |
-| **Stop server** | Closes the forward. | Stops the core. |
-| **Uninstall…** | Closes the forward. | Stops the core and removes the installed releases. Your data is kept. You must type the server's host name to confirm. |
+| **Disconnect** | Closes the forward, the file-helper channel and the server terminals. | Nothing. The core keeps running. |
+| **Stop server** | Closes the forward, the file-helper channel and the server terminals. | Stops the core. |
+| **Uninstall…** | Closes the forward, the file-helper channel and the server terminals. | Stops the core and removes the installed releases. Your data is kept. You must type the server's host name to confirm. |
+
+Switching to another server also closes the server terminals and the file-helper channel, so a terminal never
+stays open on the old server. The same happens when you connect to a different host or port.
+
+When the link is down (failed, stopped, or waiting for a password), the server home and Settings stay usable,
+so you can press **Connect** or type the password again. The other sections stay unavailable until the link is
+back.
 
 Stop server and Uninstall act on the saved server. Stop server refuses a form whose Host, Port or User differ
 from the saved server, with `Those are not the saved server's details.` Uninstall compares only the host
@@ -148,7 +162,9 @@ project list has it.
 With a server folder open, the sidebar lists Home, Issues, Gantt, Library, Chat, Settings and Explorer. Explorer
 reads and writes files, searches, watches for changes and shows **Changes** (git) on the server. Its terminal
 opens your login shell on the server, in the open folder. Each terminal tab is its own SSH session, so a
-tab keeps running while the file commands reconnect.
+tab keeps running while the file commands reconnect. The terminal closes when you disconnect, stop the server,
+uninstall, or switch to another server (see [Disconnect, stop and uninstall](#disconnect-stop-and-uninstall)).
+The terminal has not yet been run against a live server; see [Limits](#limits).
 
 When no approval is active, opening a terminal asks **Allow terminal access?**. Press **Allow terminal**. That
 approval lets new terminals open for 30 minutes. A terminal is a real shell with your server user's permissions.
@@ -159,15 +175,18 @@ SSH mode.
 
 ### Deleting files
 
-Deleting in Explorer moves the item to the server's Trash. On Linux the helper uses the freedesktop Trash
-(normally `~/.local/share/Trash` on the server). If the server has no usable Trash, the delete fails with
-`cannot move to trash` and the item stays where it was. Nothing is deleted permanently.
+Deleting in Explorer moves the item to the server's Trash. The confirmation says so, and names
+`~/.local/share/Trash`. On Linux the helper uses the freedesktop Trash on the server. If the server has no
+usable Trash, the delete fails with `cannot move to trash` and the item stays where it was. Nothing is deleted
+permanently.
 
 ### git on the server
 
-**Changes** uses the server's `git`, with the server user's identity and credentials. If `git` is not installed
-on the server, the panel shows `git is not installed on this server.` The rest of Explorer still works. Explorer
-has no `git init`, so run it in the terminal.
+**Changes** uses the server's `git` to show the state of the open folder. It has no push, fetch or pull. Git runs
+with credential helpers and `ssh` turned off, so git in the panel cannot reach a remote. To push or pull, open the
+terminal in the folder and run `git push` or `git pull` there. If `git` is not installed on the server, the
+panel shows `git is not installed on this server.` The rest of Explorer still works. Explorer has no `git init`,
+so run it in the terminal.
 
 ### The helper
 
@@ -178,6 +197,10 @@ It has no network listener, and it ends when the channel closes. It refuses any 
 home folder, and it checks that again on every request. If the server part is a different version from the
 desktop, the desktop shows `The server part is a different version. Connect again to update it.`; Connect
 installs the matching release.
+
+The desktop compares the helper's protocol number with its own. It does not compare the version text. The
+helper comes from the same bundle as the app, and the app checks that bundle's SHA-256 on the server, so a
+matching protocol means the helper is the one this app shipped with.
 
 ## What happens on the server
 
@@ -270,9 +293,13 @@ work until `claude login` succeeds on the server.
 
 ## Limits
 
-- **Verification.** The connect path was run end to end against one Ubuntu 20.04 server: password login,
-  install, start, forward, sign-up and sign-in, disconnect and reconnect, stop, and uninstall. Clicking
-  through the app window, key install on a real account, and Windows desktops have not been verified.
+- **Verification.** Live against one Ubuntu 20.04 server: the connect path (password login, install, start,
+  forward, sign-up and sign-in, disconnect and reconnect), the Explorer's files, git status, search, watching,
+  and the recent-server list. Stop and uninstall were run through the Rust live harness. Not yet verified: the
+  server terminal, a full click-through of the app window, registering a project from the app window (the
+  folder picker's **Open** calls the server core's project registration), key install on a real account, and
+  Windows desktops.
+- **No push, fetch or pull in Changes.** Push and pull run from the terminal on the server.
 - **Linux x86_64 only.** Other systems are refused before anything is installed.
 - **2 GB of free disk.** Test shows the free space, and Connect refuses a server with less than 2048 MB free.
 - **glibc version.** The standard server bundle needs glibc 2.34 or newer. Servers such as Ubuntu 20.04
@@ -284,8 +311,9 @@ work until `claude login` succeeds on the server.
   there. It is not downloaded and it is not shipped inside the installer. A build without a bundle shows
   `This build has no Linux server bundle.`
 - **Sections.** In SSH server mode the app shows Home, Issues, Gantt, Library, Chat, Settings and Explorer.
-  Explorer's files, search, Changes (git), watching and terminal run on the server. Loop on the server is not
-  available yet, and neither are the other screens that read this computer's files or run its processes.
+  Explorer's files, search, Changes (git), watching and terminal run on the server. Loop and Auto Tasks do not
+  run in SSH server mode yet, and neither do the other screens that read this computer's files or run its
+  processes.
 - **Explorer on the server.** Deletes go to the server's Trash, and nothing is deleted permanently. Opening a
   PDF in this computer's viewer and local project create or clone are refused. Explorer has no `git init`.
 - **Other users on the server.** Other users on the same server can reach the core's loopback port. The
@@ -324,7 +352,7 @@ Each row starts with the exact sentence the app shows.
 | `This server's system libraries are too old for the standard server bundle (glibc <x.y>; 2.34 needed). Build the compatible bundle and try again.` | The server's glibc is older than 2.34, so the standard bundle cannot load there. | Build the compat bundle (see `desktop/PACKAGING.md`), then try again. |
 | `This folder is no longer on the server.` | The open folder was deleted, renamed or replaced on the server. The app shows the server home. | Open the folder again from the picker, or remove it from the recent folders. |
 | `The connection to the server was lost.` | The channel to the server's helper ended, so a file, git, search or watch request failed. The folder stays open. | Try the action again; the app reconnects on the next request. If it keeps failing, press **Connect** again. |
-| `The server part is a different version. Connect again to update it.` | The helper on the server is not the version this desktop was built with. | Press **Connect**. It installs the matching release and then works as usual. |
+| `The server part is a different version. Connect again to update it.` | The helper on the server speaks a different protocol from this desktop. | Press **Connect**. It installs the matching release and then works as usual. |
 | `git is not installed on this server.` | The server has no `git`, so **Changes** cannot run. | Install `git` on the server, then reopen the folder. |
 | `cannot move to trash: <reason>` | The server has no usable Trash, so the delete was refused and nothing was removed. | Remove the item in a terminal on the server, or from the server's own tools. |
 | `The upload was damaged. Try again.` | The core upload did not match its checksum on the server. | Connect again. |
