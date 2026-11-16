@@ -40,7 +40,7 @@ export function projectSwitcherItems(project: ProjectInfo | null, recent: readon
     const openServer = context.openServerFolder ?? null;
     return [
       ...(openServer ? [{ id: "open", label: "Open server folder…", onSelect: openServer }] : []),
-      // The project is on the server: Reveal in Finder becomes Copy path, which copies the server root.
+      // The project is on the server: Reveal in Finder becomes Copy server path, which copies the server root.
       ...(project ? [{ id: "copy-path", label: COPY_SERVER_PATH_LABEL, title: "Copy the project folder's path on the server.", onSelect: () => copyText(project.root) }] : []),
       { id: "close", label: "Close project", title: "Back to the Welcome page. Nothing is deleted.", disabled: !project, onSelect: () => void a.closeProject() },
     ];

@@ -46,45 +46,34 @@ test("paths_copy_path_in_ssh_mode: a folder row copies its absolute server path"
   assert.equal(action.label, COPY_SERVER_PATH_LABEL);
 });
 
-// Every file under ui/screens that shows or wires a reveal. A new reveal caller must be added here with the marker that
-// shows it is SSH-aware (it reads the server mode or builds the server path); a file that drops its marker fails.
-const SSH_MARKER = /serverPathOf|fileManagerActionFor|COPY_SERVER_PATH_LABEL|inSshMode\(\)|serverFiles|mode === "ssh"|revealLabel|revealMeetingsLabel|revealer\?\.label/;
-const REVEAL_CALLERS = {
-  "explorer/ExplorerScreen.tsx": "serverPathOf",
-  "explorer/menus.ts": "COPY_SERVER_PATH_LABEL",
-  "explorer/scm/ChangesView.tsx": "serverFiles",
-  "explorer/scm/ScmPanel.tsx": "serverFiles",
-  "docgen/section.tsx": "serverFiles",
-  "docgen/DocGenScreen.tsx": "revealLabel",
-  "docgen/ResultPanel.tsx": "revealLabel",
-  "docgen/SourcePanel.tsx": "revealLabel",
-  "library/index.tsx": "fileManagerActionFor",
-  "library/local-actions.ts": "fileManagerActionFor",
-  "library/LibraryScreen.tsx": "revealLabel",
-  "library/LibraryNav.tsx": "revealMeetingsLabel",
-  "library/NoteMenuItems.tsx": "revealLabel",
-  "library/write/NoteWorkspace.tsx": "revealLabel",
-  "library/extensions/index.tsx": "inSshMode()",
-  "library/extensions/LegacyDetail.tsx": "revealer",
-  "loop/native/NativeLoopScreen.tsx": "serverFiles",
-  "settings/sections/PathsSection.tsx": "fileManagerActionFor",
-  "settings/sections/MemorySection.tsx": "fileManagerActionFor",
-  "shell/StatusBar.tsx": "COPY_SERVER_PATH_LABEL",
+// The reveal sinks are the host command (reveal_in_os) and the host method (revealPath). Every code line that names one
+// is counted per file, and the counts are pinned: a new sink, anywhere, fails this test until the table is updated on
+// purpose. Each UI sink must sit within SSH_WINDOW lines of an SSH branch (the server-mode flag, the ssh copy helper or
+// its label). Host plumbing is pinned per file as well, so each of its sites is listed, not the file as a whole.
+// The entry points (fileManagerActionFor, projectLocationReveal) are pinned the same way; each must receive the mode.
+const SSH_WINDOW = 12;
+const SSH_BRANCH = /serverFiles|mode === "ssh"|inSshMode\(\)|serverPathOf|fileManagerActionFor|revealLabel|COPY_SERVER_PATH_LABEL/;
+const SINK = /reveal_in_os|\brevealPath\b/;
+const ENTRY = /(?<!function )\bfileManagerActionFor\(|(?<!function )\bprojectLocationReveal\(/;
+
+// file -> pinned count of sink lines and entry lines (code only, comments excluded).
+const UI_PINNED = {
+  "docgen/section.tsx": { sinks: 1, entries: 0 },
+  "explorer/ExplorerScreen.tsx": { sinks: 2, entries: 0 },
+  "explorer/scm/ChangesView.tsx": { sinks: 1, entries: 0 },
+  "library/extensions/index.tsx": { sinks: 1, entries: 1 },
+  "library/index.tsx": { sinks: 1, entries: 1 },
+  "library/local-actions.ts": { sinks: 0, entries: 1 },
+  "loop/native/NativeLoopScreen.tsx": { sinks: 1, entries: 1 },
+  "settings/sections/MemorySection.tsx": { sinks: 2, entries: 1 },
+  "settings/sections/PathsSection.tsx": { sinks: 2, entries: 1 },
 };
-// Not callers: the host plumbing (the command and its types), label text, pass-through props, comments, and the one
-// helper module. Each one's button lives in a listed caller above.
-const HOST_PLUMBING = new Set([
-  "shell/host.ts", "shell/settings-adapter.ts", "settings/host.ts", "docgen/reveal.ts", "shell/server-path.ts",
-  "settings/project-model.ts", // the "Show in Finder" label text; PathsSection draws the button
-  "library/extensions/LegacyPane.tsx", // passes the LocationReveal through to LegacyDetail
-  "library/extensions/legacy-labels.ts", // the LocationReveal type; local-actions.ts builds it
-  "library/project-files.ts", // a comment and the meetings candidate list; LibraryScreen draws the button
-  "shell/Shell.tsx", // the chat approval badge, unrelated to file reveal
-  "welcome/help.ts", // help text
-]);
-// Reveal buttons that exist only outside ssh mode: the caller hides them there, and the check reads that gate.
-const HIDDEN_IN_SSH = { "explorer/Dialogs.tsx": { gate: "explorer/ExplorerScreen.tsx", pattern: /shellHost\.isAvailable\(\) && !serverFiles/ } };
-const REVEAL_WORDS = /reveal_in_os|revealPath|Reveal in Finder|Show in Finder|Reveal meetings folder|Reveal JSON|>Reveal<|\bReveal\b|onRevealPath|onReveal\b|projectLocationReveal/;
+// Host plumbing: the command wrappers and the method type. Not buttons; pinned per site.
+const PLUMBING_PINNED = {
+  "shell/host.ts": { sinks: 1, entries: 0 },
+  "shell/settings-adapter.ts": { sinks: 2, entries: 0 },
+  "settings/host.ts": { sinks: 1, entries: 0 },
+};
 
 function sourceFiles(dir) {
   const out = [];
@@ -100,22 +89,39 @@ function sourceFiles(dir) {
   return out;
 }
 
+/** Line indexes (0-based) of code lines matching `pattern`; comment lines are not code. */
+function codeHits(lines, pattern) {
+  const hits = [];
+  lines.forEach((line, i) => {
+    const t = line.trim();
+    if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return;
+    if (pattern.test(line)) hits.push(i);
+  });
+  return hits;
+}
+
 test("every_reveal_caller_is_ssh_aware", () => {
-  const callers = [];
+  const counted = {};
   for (const file of sourceFiles(SCREENS)) {
     const rel = relative(SCREENS, file).split(sep).join("/");
-    if (HOST_PLUMBING.has(rel)) continue;
-    if (REVEAL_WORDS.test(readFileSync(file, "utf8"))) callers.push(rel);
+    const lines = readFileSync(file, "utf8").split("\n");
+    const sinks = codeHits(lines, SINK);
+    const entries = codeHits(lines, ENTRY);
+    if (sinks.length === 0 && entries.length === 0) continue;
+    counted[rel] = { sinks: sinks.length, entries: entries.length };
+    const pinned = UI_PINNED[rel] ?? PLUMBING_PINNED[rel];
+    assert.ok(pinned, `${rel} has reveal sites but is not in the pinned table (sinks ${sinks.length}, entries ${entries.length})`);
+    assert.deepEqual({ sinks: sinks.length, entries: entries.length }, pinned, `${rel}: reveal site count changed; review it and update the table`);
+    if (UI_PINNED[rel]) {
+      for (const i of [...sinks, ...entries]) {
+        const from = Math.max(0, i - SSH_WINDOW);
+        const to = Math.min(lines.length, i + SSH_WINDOW + 1);
+        const near = lines.slice(from, to).join("\n");
+        assert.match(near, SSH_BRANCH, `${rel}:${i + 1} reveal site has no SSH branch within ${SSH_WINDOW} lines`);
+      }
+    }
   }
-  const unknown = callers.filter((rel) => !(rel in REVEAL_CALLERS) && !(rel in HIDDEN_IN_SSH));
-  assert.deepEqual(unknown, [], "a new reveal caller must be SSH-aware and listed in REVEAL_CALLERS");
-  for (const [rel, { gate, pattern }] of Object.entries(HIDDEN_IN_SSH)) {
-    assert.match(readFileSync(join(SCREENS, gate), "utf8"), pattern, `${gate} must hide ${rel} in ssh mode`);
-  }
-  for (const rel of Object.keys(REVEAL_CALLERS)) {
-    const text = readFileSync(join(SCREENS, rel), "utf8");
-    assert.ok(callers.includes(rel) || REVEAL_CALLERS[rel], `${rel} is listed but no longer a reveal caller`);
-    assert.match(text, SSH_MARKER, `${rel} has no SSH-aware marker`);
-    assert.ok(text.includes(REVEAL_CALLERS[rel]), `${rel} lost its ${REVEAL_CALLERS[rel]} wiring`);
+  for (const rel of [...Object.keys(UI_PINNED), ...Object.keys(PLUMBING_PINNED)]) {
+    assert.ok(rel in counted, `${rel} is pinned but has no reveal sites any more; remove it from the table`);
   }
 });

@@ -34,7 +34,7 @@ export interface DocGenScreenProps {
   onOpenFile: (path: string) => void;
   /** Reveal a project-relative path in the OS file manager (desktop only). */
   onReveal?: (path: string) => void;
-  /** The reveal buttons' label: "Reveal", or "Copy path" in ssh mode. */
+  /** The reveal buttons' label: "Reveal", or "Copy server path" in ssh mode. */
   revealLabel?: string;
   /** A failed reveal, shown as a banner until the next reveal (null when none). */
   revealNotice?: string | null;

@@ -12,7 +12,8 @@ const noop = () => undefined;
 const { ExplorerController } = await load("controller.ts");
 const { EditorPane } = await load("EditorPane.tsx");
 const { ExplorerScreen } = await load("ExplorerScreen.tsx");
-const { treeMenuItems } = await load("menus.ts");
+const { treeMenuItems, copyAbsolutePaths } = await load("menus.ts");
+import { serverPathOf } from "../../shell/server-path.ts";
 const { changeMenu } = await load("scm/ChangesView.tsx");
 
 async function ctl(files) {
@@ -27,26 +28,32 @@ async function ctl(files) {
 
 const ids = (items) => items.map((m) => m.id);
 
-test("tree menu: Reveal in Finder on this computer, Copy path for a server folder, same place in the menu", async () => {
+test("tree menu: Reveal in Finder on this computer; a server folder has no reveal item and keeps Copy Absolute Path", async () => {
   const { c } = await ctl({ "a.txt": "x" });
   c.select("a.txt", { shift: false, toggle: false });
   const snap = c.getSnapshot();
   const local = { projectRoot: "/proj", clipboardSet: false, serverFiles: false };
-  const labelOf = (items) => items.find((m) => m.id === "reveal")?.label;
-  assert.equal(labelOf(treeMenuItems(snap, "a.txt", local)), "Reveal in Finder");
-  assert.equal(labelOf(treeMenuItems(snap, "a.txt", { ...local, serverFiles: true })), "Copy path");
-  // The item keeps its place: only its label changes between the two modes.
-  assert.deepEqual(
-    ids(treeMenuItems(snap, "a.txt", { ...local, serverFiles: true })),
-    ids(treeMenuItems(snap, "a.txt", local)),
-  );
+  const labelOf = (items, id) => items.find((m) => m.id === id)?.label;
+  assert.equal(labelOf(treeMenuItems(snap, "a.txt", local), "reveal"), "Reveal in Finder");
+  const sshItems = treeMenuItems(snap, "a.txt", { ...local, serverFiles: true });
+  assert.equal(ids(sshItems).includes("reveal"), false, "no reveal item for a server folder");
+  assert.equal(labelOf(sshItems, "copy-abs"), "Copy Absolute Path", "the one absolute-path copy stays");
+  // The other items keep their place: only the local-only reveal goes.
+  assert.deepEqual(ids(sshItems), ids(treeMenuItems(snap, "a.txt", local)).filter((id) => id !== "reveal"));
 });
 
-test("Changes menu: Reveal in Finder on this computer, Copy path for a server folder", () => {
+test("explorer_copy_path_in_ssh_mode: Copy Absolute Path writes the server path of each selected item", () => {
+  const written = [];
+  copyAbsolutePaths("/srv/work/proj", ["src/a.ts", "llm-doc"], (text) => written.push(text));
+  assert.deepEqual(written, [["src/a.ts", "llm-doc"].map((p) => serverPathOf("/srv/work/proj", p)).join("\n")]);
+  assert.equal(written[0], "/srv/work/proj/src/a.ts\n/srv/work/proj/llm-doc");
+});
+
+test("Changes menu: Reveal in Finder on this computer, Copy server path for a server folder", () => {
   const item = { group: "changes", entry: { path: "src/a.ts", index: ".", worktree: "M", kind: "changed", orig_path: null, submodule: false } };
   const labelOf = (menu) => menu.find((m) => m.id === "reveal")?.label;
   assert.equal(labelOf(changeMenu(item)), "Reveal in Finder");
-  assert.equal(labelOf(changeMenu(item, true)), "Copy path");
+  assert.equal(labelOf(changeMenu(item, true)), "Copy server path");
   assert.ok(changeMenu(item, true).some((m) => m.id === "copy"), "copy path still works for a server folder");
 });
 

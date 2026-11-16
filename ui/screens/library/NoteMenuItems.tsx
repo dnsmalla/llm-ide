@@ -11,7 +11,7 @@ export interface NoteMenuItemsProps {
   onCopyPath?(text: string): unknown;
   /** Absent when this screen cannot reveal (ssh mode): the item is not drawn, so it cannot be clicked. */
   onRevealPath?(projectRelative: string): unknown;
-  /** The reveal item's label: "Reveal in Finder", or "Copy path" in ssh mode. */
+  /** The reveal item's label: "Reveal in Finder", or "Copy server path" in ssh mode. */
   revealLabel?: string;
   onUnhide(): void;
   onRemove(): void;

@@ -17,7 +17,7 @@ export interface ChangesProps {
   onOpenDiff: (path: string, staged: boolean) => void;
   /** Initial viewport height before the first measurement (tests, first paint). */
   initialViewport?: number;
-  /** The repository is on an SSH server: Reveal becomes Copy path, which copies the absolute server path under this root. */
+  /** The repository is on an SSH server: Reveal becomes Copy server path, which copies the absolute server path under this root. */
   serverFiles?: boolean;
   projectRoot?: string | null;
 }

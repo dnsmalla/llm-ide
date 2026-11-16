@@ -41,7 +41,7 @@ export interface LibraryNavProps {
   onChangeFolder: (() => void) | null;
   /** Reveals the meetings folder in the OS file manager (Mac "Reveal Folder in Finder"); absent when the host cannot. */
   onRevealMeetings?: () => void;
-  /** The meetings button's label; absent means "Reveal meetings folder" (ssh mode passes "Copy path"). */
+  /** The meetings button's label; absent means "Reveal meetings folder" (ssh mode passes "Copy server path"). */
   revealMeetingsLabel?: string;
   rebuild: RebuildProgress | null;
   onRebuild: (() => void) | null;

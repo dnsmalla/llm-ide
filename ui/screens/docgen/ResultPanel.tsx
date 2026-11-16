@@ -27,7 +27,7 @@ export interface ResultPanelProps {
   onOpenSaved: (path: string) => void;
   /** Shows the saved file in the OS file manager. Absent outside the desktop app: no Reveal button. */
   onReveal?: (path: string) => void;
-  /** The reveal button's label: "Reveal", or "Copy path" in ssh mode (the file is on the server). */
+  /** The reveal button's label: "Reveal", or "Copy server path" in ssh mode (the file is on the server). */
   revealLabel?: string;
   onDiscard: () => void;
   onOpenExternal: (url: string) => void;

@@ -57,7 +57,7 @@ export interface LibraryScreenProps {
   projectOpen?: boolean;
   onCopyPath?: (text: string) => Promise<void> | void;
   onRevealPath?: (projectRelative: string) => Promise<void> | void;
-  /** The label of the reveal buttons: "Reveal in Finder" here, "Copy path" in ssh mode (the file is on the server). */
+  /** The label of the reveal buttons: "Reveal in Finder" here, "Copy server path" in ssh mode (the file is on the server). */
   revealLabel?: string;
   /** Host save panel for Export; absent writes a copy into the notes folder. */
   onExportFile?: (name: string, text: string) => Promise<string | null>;

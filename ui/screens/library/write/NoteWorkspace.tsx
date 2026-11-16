@@ -33,7 +33,7 @@ export interface NoteWorkspaceProps extends LinkHandlers {
   onChanged: () => void;
   onCopyPath?: (text: string) => Promise<void> | void;
   onRevealPath?: (projectRelative: string) => Promise<void> | void;
-  /** The reveal button's label: "Reveal" here, "Copy path" in ssh mode (the file is on the server). */
+  /** The reveal button's label: "Reveal" here, "Copy server path" in ssh mode (the file is on the server). */
   revealLabel?: string;
   /** False while the Library section is hidden (the shell keeps it mounted): shortcuts are off. */
   active?: boolean;

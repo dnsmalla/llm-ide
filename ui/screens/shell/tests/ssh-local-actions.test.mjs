@@ -17,10 +17,10 @@ test("switcher, local mode: New, Open Folder, Reveal, recents and Close, as befo
   assert.deepEqual(ids(projectSwitcherItems(null, [], actions())), ["new", "open", "close"]);
 });
 
-test("switcher, ssh mode without a server folder picker: Copy path and Close, and no local recents", () => {
+test("switcher, ssh mode without a server folder picker: Copy server path and Close, and no local recents", () => {
   const items = projectSwitcherItems(project, recent, actions(), { ssh: true });
   assert.deepEqual(ids(items), ["copy-path", "close"]);
-  assert.equal(items[0].label, "Copy path", "Reveal in Finder becomes Copy path for the server root");
+  assert.equal(items[0].label, "Copy server path", "Reveal in Finder becomes Copy server path for the server root");
   assert.deepEqual(ids(projectSwitcherItems(project, recent, actions(), { ssh: true, openServerFolder: null })), ["copy-path", "close"]);
   assert.deepEqual(ids(projectSwitcherItems(null, [], actions(), { ssh: true })), ["close"], "no project, nothing to copy");
 });

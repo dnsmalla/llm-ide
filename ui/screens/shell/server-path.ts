@@ -1,8 +1,8 @@
 // SSH server mode: the project lives on the server, so "Reveal in Finder" (this computer's file manager cannot open a
-// server file) becomes "Copy path", which copies the absolute path on the server. One rule for every reveal button.
+// server file) becomes "Copy server path", which copies the absolute path on the server. One rule for every reveal button.
 
 export const REVEAL_LABEL = "Reveal in Finder";
-export const COPY_SERVER_PATH_LABEL = "Copy path";
+export const COPY_SERVER_PATH_LABEL = "Copy server path";
 
 /**
  * The absolute server path of a project-relative path: the open root joined with '/'. An empty relative path is the

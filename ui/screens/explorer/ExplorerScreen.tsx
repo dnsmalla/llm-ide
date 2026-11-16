@@ -3,7 +3,6 @@
 import { shellBus } from "../shell/bus";
 import { unsavedWork } from "../shell/unsaved-work.ts";
 import { chatApprovalStore } from "../shell/chat-approvals";
-import { serverPathOf } from "../shell/server-path.ts";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Chip, Icon, ResizableDivider, StatusBanner } from "@llmide/ui-kit";
 import type { SectionProps } from "../shell/sections";
@@ -13,8 +12,8 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { EditorPane } from "./EditorPane";
 import type { EditorHost } from "./editor-types";
 import { FileTree } from "./FileTree";
-import { deleteQuestion, findEntry, treeMenuItems } from "./menus";
-import { absolutePathUnder, createHostFs, baseName, nativeBaseName, parentOf, toFsError, type Encoding, type FsApi, type WatchBatch } from "./fs";
+import { copyAbsolutePaths, deleteQuestion, findEntry, treeMenuItems } from "./menus";
+import { createHostFs, baseName, nativeBaseName, parentOf, toFsError, type Encoding, type FsApi, type WatchBatch } from "./fs";
 import { defaultKv, type KV } from "./session";
 import { ChatDockSlot } from "../shell/chat-dock";
 import { host as shellHost, invokeHost } from "../shell/host";
@@ -277,13 +276,11 @@ export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, 
     else if (id === "rename" && path) setDialog({ type: "prompt", kind: "rename", path });
     else if (id === "delete" && sel.length) setDialog({ type: "delete", paths: sel });
     else if (id === "copy-path" && sel.length) copy(sel.join("\n"));
-    else if (id === "copy-abs" && sel.length && projectRoot) copy(sel.map((p) => absolutePathUnder(projectRoot, p)).join("\n"));
+    else if (id === "copy-abs" && sel.length && projectRoot) copyAbsolutePaths(projectRoot, sel, copy);
     // One reveal only: the host rate-limits reveal_in_os (300 ms gap), so a loop would open the first item and
     // silently drop the rest. Revealing several items in one Finder window needs a host command that takes a list.
-    else if (id === "reveal" && sel.length && serverFiles) {
-      if (projectRoot) copy(sel.map((p) => serverPathOf(projectRoot, p)).join("\n"));
-    }
-    else if (id === "reveal" && sel.length) void invokeHost("reveal_in_os", { relPath: path && sel.includes(path) ? path : sel[0] }).catch(() => undefined);
+    // The menu has no reveal item on a server folder, so this branch is for this computer only.
+    else if (id === "reveal" && sel.length && !serverFiles) void invokeHost("reveal_in_os", { relPath: path && sel.includes(path) ? path : sel[0] }).catch(() => undefined);
     else if (id === "find-in" && path) {
       // The Mac's "Find in Folder": scope the project search to the folder and show the Search panel.
       search.setOptions({ include: folderIncludeGlob(path) });
@@ -418,6 +415,8 @@ export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, 
     void loadFolders();
   };
   const revealFolder = (relPath: string) => {
+    // The Project folders button is not offered on a server folder (see its gate above), so this never runs there.
+    if (serverFiles) return;
     void invokeHost("reveal_in_os", { relPath }).catch(() => undefined);
   };
 

@@ -1,5 +1,5 @@
 // Library actions that open this computer's file manager. In ssh mode the Library's project files are on the server, so
-// "Reveal in Finder" becomes "Copy path" (see shell/server-path.ts); the actions that need this computer are left out.
+// "Reveal in Finder" becomes "Copy server path" (see shell/server-path.ts); the actions that need this computer are left out.
 import { projectRelativeOf, type LocationReveal } from "./extensions/legacy-labels.ts";
 import { COPY_SERVER_PATH_LABEL, copyText, fileManagerActionFor } from "../shell/server-path.ts";
 

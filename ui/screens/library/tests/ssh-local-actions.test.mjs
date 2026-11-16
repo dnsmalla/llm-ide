@@ -20,7 +20,7 @@ test("Library reveal: offered outside ssh mode and sends the project-relative pa
 test("Library reveal: ssh mode copies the absolute server path instead of revealing", async () => {
   const copied = [];
   const action = fileManagerActionFor(true, "/home/me/proj", async () => { throw new Error("must not reveal"); }, (text) => copied.push(text));
-  assert.equal(action?.label, "Copy path");
+  assert.equal(action?.label, "Copy server path");
   await action.run("llm-doc/notes/a.md");
   assert.deepEqual(copied, ["/home/me/proj/llm-doc/notes/a.md"]);
 });
@@ -32,14 +32,14 @@ test("Library reveal: ssh mode without an open root offers nothing", () => {
 // The note menu is rendered through the component that draws it, so the check is on the markup a user sees.
 const menu = (over = {}) => html(h(L.NoteMenuItems, { rel: "a.md", hidden: false, onOpen() {}, onUnhide() {}, onRemove() {}, onClose() {}, ...over }));
 
-test("note menu: Reveal in Finder is drawn in local mode; ssh mode draws Copy path", async () => {
+test("note menu: Reveal in Finder is drawn in local mode; ssh mode draws Copy server path", async () => {
   const local = fileManagerActionFor(false, "/proj", async () => undefined);
   const localMenu = menu({ onRevealPath: local.run, revealLabel: local.label });
   assert.match(localMenu, /role="menuitem"[^>]*>Reveal in Finder</);
   const sshAction = fileManagerActionFor(true, "/proj", async () => undefined);
   const ssh = menu({ onRevealPath: sshAction.run, revealLabel: sshAction.label });
   assert.doesNotMatch(ssh, /Reveal in Finder/);
-  assert.match(ssh, /role="menuitem"[^>]*>Copy path</);
+  assert.match(ssh, /role="menuitem"[^>]*>Copy server path</);
   // The other items stay.
   for (const label of ["Open", "Copy relative path", "Remove from List"]) assert.match(ssh, new RegExp(`>${label}<`));
 });
@@ -62,7 +62,7 @@ test("extension reveal: a location inside the project reveals outside ssh mode; 
   assert.equal(local.canReveal("/etc/passwd"), false);
 
   const ssh = projectLocationReveal(true, root, (rel) => sent.push(rel), (text) => copied.push(text));
-  assert.equal(ssh.label, "Copy path");
+  assert.equal(ssh.label, "Copy server path");
   assert.equal(ssh.canReveal("/Users/me/proj/src/a.md"), true);
   ssh.reveal("/Users/me/proj/src/a.md");
   assert.deepEqual(sent, ["src/a.md"], "ssh mode revealed nothing");

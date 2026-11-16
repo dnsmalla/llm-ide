@@ -20,7 +20,7 @@ export interface SourceEnv {
   readImage?: (path: string) => Promise<string | null>;
   /** Shows a project-relative path in the OS file manager (the host's reveal_in_os). Absent outside the desktop app. */
   reveal?: (path: string) => void;
-  /** The reveal button's label: "Reveal", or "Copy path" in ssh mode (the file is on the server). */
+  /** The reveal button's label: "Reveal", or "Copy server path" in ssh mode (the file is on the server). */
   revealLabel?: string;
 }
 

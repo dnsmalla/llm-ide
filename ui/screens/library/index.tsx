@@ -107,7 +107,7 @@ export default function Library({ active, projectRoot, mode }: SectionProps) {
     const path = await invokeHost<unknown>("export_note", { name, text });
     return typeof path === "string" ? path : null;
   });
-  // ssh mode: "Copy path" copies the server path under the open project root; local mode reveals the note.
+  // ssh mode: "Copy server path" copies the server path under the open project root; local mode reveals the note.
   const revealAction = fileManagerActionFor(mode === "ssh", projectRoot, (relPath) => invokeHost("reveal_in_os", { relPath }));
   return <LibraryScreen
     store={store}
