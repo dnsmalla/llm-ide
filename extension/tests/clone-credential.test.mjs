@@ -1,6 +1,6 @@
 // Single-use clone grant (POST /kb/repos/clone-grant) and its loopback redeem (POST /internal/clone-credential).
-// The saved provider token leaves the vault only over loopback, only with the core nonce, only once per grant.
-import { test } from "node:test";
+// The redeem needs the file-only redeem key (server/clone-redeem-key.mjs), never the /health identity nonce.
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
@@ -12,6 +12,7 @@ process.env.NODE_ENV = "test";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DB = path.join(HERE, "_clone-credential-test.db");
+const DATA = path.join(HERE, "_clone-credential-data");
 process.env.LLMIDE_DB_PATH = DB;
 
 const NONCE = "c".repeat(64);
@@ -23,15 +24,30 @@ const { setSecret } = await import("../server/vault.mjs");
 const users = await import("../server/users.mjs");
 const grants = await import("../server/clone-grants.mjs");
 const credential = await import("../routes/clone-credential.mjs");
+const redeemKey = await import("../server/clone-redeem-key.mjs");
 const { ROUTE_POLICY, routeAuthorityFor } = await import("../server/route-authority.mjs");
 const { isPublicPath } = await import("../server/auth.mjs");
+
+after(() => {
+  db.closeDb();
+  for (const f of [DB, `${DB}-shm`, `${DB}-wal`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
+  fs.rmSync(DATA, { recursive: true, force: true });
+});
 
 function reset() {
   db.closeDb();
   for (const f of [DB, `${DB}-shm`, `${DB}-wal`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
+  fs.rmSync(DATA, { recursive: true, force: true });
   db.getDb();
   grants._resetCloneGrantsForTests();
   grants._setCloneGrantClockForTests(null);
+  redeemKey.initCloneRedeemKey({ dataDir: DATA, serverMode: false });
+}
+/** Server mode: writes the redeem key file and returns the key. */
+function startServerMode() {
+  const key = redeemKey.initCloneRedeemKey({ dataDir: DATA, serverMode: true });
+  assert.match(key, /^[0-9a-f]{64}$/);
+  return key;
 }
 function newUser(tag) {
   return users.registerUser(db.getDb(), { email: `${tag}-${Date.now()}-${Math.random()}@example.com`, password: "CorrectHorseBattery", displayName: tag });
@@ -44,8 +60,8 @@ function bodyReq(method, url, userId, body, extra = {}) {
   const r = { method, url, user: userId ? { id: userId } : undefined, headers: { ...(extra.headers || {}) }, socket: { remoteAddress: extra.remoteAddress ?? "127.0.0.1" }, on(ev, cb) { if (ev === "data") chunks.forEach(cb); else if (ev === "end") cb(); return r; } };
   return r;
 }
-function redeemReq(body, { remoteAddress = "127.0.0.1", nonce = NONCE } = {}) {
-  const headers = nonce === null ? {} : { "x-llmide-core-nonce": nonce };
+function redeemReq(body, { remoteAddress = "127.0.0.1", key = null, header = "x-llmide-redeem-key" } = {}) {
+  const headers = key === null ? {} : { [header]: key };
   return bodyReq("POST", "/internal/clone-credential", null, body, { remoteAddress, headers });
 }
 function auditRowsFor(userId) {
@@ -144,38 +160,39 @@ test("grant route: an unknown provider is a validation error", async () => {
   assert.equal(JSON.parse(out.body).error.code, "VALIDATION_FAILED");
 });
 
-test("redeem: a valid grant, the nonce and loopback give { token } once", async () => {
+test("redeem: a valid grant and the redeem key over loopback give { token } once", async () => {
   reset();
-  process.env.LLMIDE_CORE_NONCE = NONCE;
+  const key = startServerMode();
   const u = newUser("redeem");
   setSecret(db.getDb(), u.id, "github.token", TOKEN);
   const { grant } = JSON.parse((await issue(u.id, "github")).body);
-  const out = await redeem({ grant });
+  const out = await redeem({ grant }, { key });
   assert.equal(out.statusCode, 200, out.body);
   assert.deepEqual(JSON.parse(out.body), { token: TOKEN });
   assert.equal(out.headers["Cache-Control"], "no-store");
-  const again = await redeem({ grant });
+  const again = await redeem({ grant }, { key });
   assert.equal(again.statusCode, 403);
   assert.deepEqual(JSON.parse(again.body), { error: "clone_credential_refused" });
   const rows = auditRowsFor(u.id).filter((r) => r.action === "repos.clone_credential");
   assert.equal(rows.length, 1, "only the successful redeem is audited with its grant user");
   assert.deepEqual(JSON.parse(rows[0].detail), { provider: "github", ok: true });
   assert.equal(JSON.stringify(auditRowsFor(u.id)).includes(TOKEN), false);
-  delete process.env.LLMIDE_CORE_NONCE;
+  assert.equal(JSON.stringify(auditRowsFor(u.id)).includes(key), false);
 });
 
-test("redeem refuses a non-loopback peer, a wrong nonce, a missing nonce and a bad body with the same 403", async () => {
+test("redeem refuses a non-loopback peer, a wrong key, a missing key and a bad body with the same 403", async () => {
   reset();
-  process.env.LLMIDE_CORE_NONCE = NONCE;
+  const key = startServerMode();
   const u = newUser("refuse");
   setSecret(db.getDb(), u.id, "github.token", TOKEN);
   const cases = [
-    { name: "remote peer", opts: { remoteAddress: "192.168.1.20" }, body: null },
-    { name: "wrong nonce", opts: { nonce: "d".repeat(64) }, body: null },
-    { name: "short nonce", opts: { nonce: NONCE.slice(1) }, body: null },
-    { name: "missing nonce", opts: { nonce: null }, body: null },
-    { name: "bad grant shape", opts: {}, body: { grant: "not-a-grant" } },
-    { name: "missing body grant", opts: {}, body: {} },
+    { name: "remote peer", opts: { remoteAddress: "192.168.1.20", key }, body: null },
+    { name: "wrong key", opts: { key: "d".repeat(64) }, body: null },
+    { name: "short key", opts: { key: key.slice(1) }, body: null },
+    { name: "missing key", opts: { key: null }, body: null },
+    { name: "key in the wrong header", opts: { key, header: "x-llmide-core-nonce" }, body: null },
+    { name: "bad grant shape", opts: { key }, body: { grant: "not-a-grant" } },
+    { name: "missing body grant", opts: { key }, body: {} },
   ];
   for (const c of cases) {
     const { grant } = JSON.parse((await issue(u.id, "github")).body);
@@ -184,34 +201,74 @@ test("redeem refuses a non-loopback peer, a wrong nonce, a missing nonce and a b
     assert.deepEqual(JSON.parse(out.body), { error: "clone_credential_refused" }, c.name);
     assert.equal(out.body.includes(TOKEN), false, c.name);
   }
-  delete process.env.LLMIDE_CORE_NONCE;
+});
+
+test("the /health identity nonce no longer redeems a grant", async () => {
+  reset();
+  process.env.LLMIDE_CORE_NONCE = NONCE;
+  try {
+    startServerMode();
+    const u = newUser("healthnonce");
+    setSecret(db.getDb(), u.id, "github.token", TOKEN);
+    const { grant } = JSON.parse((await issue(u.id, "github")).body);
+    const out = await redeem({ grant }, { key: NONCE });
+    assert.equal(out.statusCode, 403, out.body);
+    assert.equal(out.body.includes(TOKEN), false);
+  } finally {
+    delete process.env.LLMIDE_CORE_NONCE;
+  }
 });
 
 test("redeem refuses an expired grant", async () => {
   reset();
-  process.env.LLMIDE_CORE_NONCE = NONCE;
+  const key = startServerMode();
   const u = newUser("expired");
   setSecret(db.getDb(), u.id, "github.token", TOKEN);
   let now = 5_000_000;
   grants._setCloneGrantClockForTests(() => now);
   const { grant } = JSON.parse((await issue(u.id, "github")).body);
   now += 60_001;
-  const out = await redeem({ grant });
+  const out = await redeem({ grant }, { key });
   assert.equal(out.statusCode, 403, out.body);
   assert.equal(out.body.includes(TOKEN), false);
   grants._setCloneGrantClockForTests(null);
-  delete process.env.LLMIDE_CORE_NONCE;
 });
 
-test("a core with no nonce (a desktop-spawned local core) answers 404 to the redeem", async () => {
+test("no redeem key (not server mode) answers 404 to the redeem, and no key file is left behind", async () => {
   reset();
-  delete process.env.LLMIDE_CORE_NONCE;
-  const u = newUser("nononce");
+  startServerMode();
+  assert.equal(fs.existsSync(path.join(DATA, redeemKey.CLONE_REDEEM_KEY_FILE)), true);
+  // A later start without LLMIDE_CORE_NONCE clears the key and removes the stale file.
+  assert.equal(redeemKey.initCloneRedeemKey({ dataDir: DATA, serverMode: false }), null);
+  assert.equal(redeemKey.currentCloneRedeemKey(), null);
+  assert.equal(fs.existsSync(path.join(DATA, redeemKey.CLONE_REDEEM_KEY_FILE)), false);
+  const u = newUser("nokey");
   setSecret(db.getDb(), u.id, "github.token", TOKEN);
   const { grant } = JSON.parse((await issue(u.id, "github")).body);
-  const out = await redeem({ grant }, { nonce: NONCE });
+  const out = await redeem({ grant }, { key: "e".repeat(64) });
   assert.equal(out.statusCode, 404, out.body);
   assert.equal(out.body.includes(TOKEN), false);
+});
+
+test("the key file is written 0600 with the in-memory key, and replaced on each server-mode start", () => {
+  reset();
+  const first = startServerMode();
+  const file = path.join(DATA, redeemKey.CLONE_REDEEM_KEY_FILE);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(fs.readFileSync(file, "utf8"), first);
+  const second = startServerMode();
+  assert.notEqual(second, first);
+  assert.equal(fs.readFileSync(file, "utf8"), second);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.deepEqual(fs.readdirSync(DATA).filter((f) => f.endsWith(".tmp")), [], "no temp file is left behind");
+});
+
+test("the key is compared in constant time (timingSafeEqual) and rejects any length mismatch", () => {
+  const key = "f".repeat(64);
+  assert.equal(redeemKey.redeemKeyMatches(key, key), true);
+  assert.equal(redeemKey.redeemKeyMatches(key.slice(1), key), false);
+  assert.equal(redeemKey.redeemKeyMatches(undefined, key), false);
+  assert.equal(redeemKey.redeemKeyMatches(key, null), false);
 });
 
 test("the redeem route is public for auth but has its own explicit route-policy entry, and the grant route is in external.read", () => {
@@ -231,9 +288,9 @@ test("the endpoint list advertises the grant route and not the redeem route", ()
   assert.match(src, /const SERVER_API_VERSION = 148;/);
 });
 
-test("no token or grant reaches the stderr logger during issue and redeem", async () => {
+test("no token, grant or redeem key reaches the stderr logger during issue and redeem", async () => {
   reset();
-  process.env.LLMIDE_CORE_NONCE = NONCE;
+  const key = startServerMode();
   const u = newUser("logs");
   setSecret(db.getDb(), u.id, "github.token", TOKEN);
   const chunks = [];
@@ -241,13 +298,13 @@ test("no token or grant reaches the stderr logger during issue and redeem", asyn
   process.stderr.write = (c, ...rest) => { chunks.push(String(c)); return original(c, ...rest); };
   try {
     const { grant } = JSON.parse((await issue(u.id, "github")).body);
-    await redeem({ grant });
-    await redeem({ grant: "e".repeat(64) });
-    assert.equal(chunks.join("").includes(TOKEN), false);
-    assert.equal(chunks.join("").includes(grant), false);
+    const ok = await redeem({ grant }, { key });
+    const bad = await redeem({ grant: "e".repeat(64) }, { key: "d".repeat(64) });
+    const logged = chunks.join("");
+    for (const secret of [TOKEN, grant, key]) assert.equal(logged.includes(secret), false);
+    for (const body of [ok.body, bad.body]) assert.equal(body.includes(key), false);
   } finally {
     process.stderr.write = original;
-    delete process.env.LLMIDE_CORE_NONCE;
   }
 });
 

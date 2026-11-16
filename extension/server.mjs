@@ -21,6 +21,7 @@ import { logger, newRequestId } from './core/logger.mjs';
 import { authenticate, requireRole } from './server/auth.mjs';
 import { enforceRouteAuthority } from './server/route-authority.mjs';
 import { handleCloneCredentialRedeem } from './routes/clone-credential.mjs';
+import { initCloneRedeemKey } from './server/clone-redeem-key.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { handleTeamRoute, isTeamRoute } from './routes/team-routes.mjs';
@@ -1701,6 +1702,8 @@ if (config.hub && !IS_LOOPBACK && !config.tlsTerminated) {
 // the first request, and no request pays the import cost.
 ({ handlers: featureHandlers } = await initFeatureRoutes(config.features));
 
+// Clone redeem key (server/clone-redeem-key.mjs): server mode only; written 0600 before the listener answers.
+initCloneRedeemKey({ dataDir: config.dataDir ?? path.dirname(config.dbPath), serverMode: Boolean(CORE_NONCE) });
 server.listen(PORT, HOST, () => {
   // Even when remote binding is explicitly allowed, warn loudly so the
   // operator is reminded the app itself terminates no TLS.

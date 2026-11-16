@@ -1,35 +1,23 @@
 // Clone credential for the SSH server helper. POST /kb/repos/clone-grant (JWT) mints a single-use grant for the user's
-// saved GitHub/GitLab token; POST /internal/clone-credential redeems it over loopback with the core nonce and answers
-// { token }. The token never reaches the desktop, a log, an audit row or an error. Only the redeem answer carries it.
+// saved GitHub/GitLab token; POST /internal/clone-credential redeems it over loopback with the redeem key (the file-only
+// key in server/clone-redeem-key.mjs) and answers { token }. The token never reaches the desktop, a log, an audit row or
+// an error. Only the redeem answer carries it.
 import * as kb from '../kb/db.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { issueCloneGrant, redeemCloneGrant } from '../server/clone-grants.mjs';
+import { currentCloneRedeemKey, redeemKeyMatches } from '../server/clone-redeem-key.mjs';
 import { recordAudit } from '../server/audit.mjs';
 import { safeAudit, clientIp } from '../server/route-http.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
-import { timingSafeEqual } from 'node:crypto';
 
 const GRANT_SHAPE = /^[0-9a-f]{64}$/;
-const NONCE_SHAPE = /^[0-9a-f]{32,128}$/;
 const PROVIDERS = new Set(['github', 'gitlab']);
 const REFUSED = { error: 'clone_credential_refused' };
-
-/** The core's identity nonce (LLMIDE_CORE_NONCE), or '' when the core has none. Read per call so tests can set it. */
-function coreNonce() {
-  const raw = process.env.LLMIDE_CORE_NONCE || '';
-  return NONCE_SHAPE.test(raw) ? raw : '';
-}
 
 /** Loopback peers only: the socket address, never a forwarded header. */
 function isLoopbackPeer(req) {
   const addr = String(req?.socket?.remoteAddress || '');
   return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
-}
-
-/** Constant-time equality of two hex strings of any length (a length mismatch is a plain refusal). */
-function nonceMatches(given, expected) {
-  if (typeof given !== 'string' || given.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(given), Buffer.from(expected));
 }
 
 /** POST /kb/repos/clone-grant { provider } -> { grant } | { grant: null } when the user has no saved token. */
@@ -52,12 +40,12 @@ export async function handleCloneGrant(req, res, { userId }) {
 }
 
 /**
- * POST /internal/clone-credential { grant } with header x-llmide-core-nonce. No JWT: the loopback peer, the core
- * nonce and the single-use grant are the proof. 404 when the core has no nonce; every other refusal is the same
- * 403 with no reason, so a probe learns nothing about which check failed.
+ * POST /internal/clone-credential { grant } with header x-llmide-redeem-key. No JWT: the loopback peer, the redeem key
+ * and the single-use grant are the proof. 404 when the core has no redeem key (not server mode); every other refusal is
+ * the same 403 with no reason, so a probe learns nothing about which check failed.
  */
 export async function handleCloneCredentialRedeem(req, res) {
-  const expected = coreNonce();
+  const expected = currentCloneRedeemKey();
   if (!expected) {
     sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
     return;
@@ -67,7 +55,7 @@ export async function handleCloneCredentialRedeem(req, res) {
     sendJSON(res, 403, REFUSED);
   };
   if (!isLoopbackPeer(req)) { refuse(); return; }
-  if (!nonceMatches(req.headers?.['x-llmide-core-nonce'], expected)) { refuse(); return; }
+  if (!redeemKeyMatches(req.headers?.['x-llmide-redeem-key'], expected)) { refuse(); return; }
   let body;
   try { body = parseJSON(await readBody(req, 4 * 1024)); } catch { body = null; }
   const grant = body?.grant;
