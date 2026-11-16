@@ -25,7 +25,7 @@ use crate::ssh_transport::{exec_args, SshEndpoint, SshExec, StdioChild};
 
 /// The protocol the helper must report in `hello`. Bumped together with the helper's `PROTOCOL`. The helper's
 /// build version is not checked: the bundle's sha check already pins the helper to this app's release.
-const PROTOCOL: u64 = 1;
+const PROTOCOL: u64 = 2;
 
 /// How long a call waits for its answer. A silent helper must not leave the Explorer spinning forever.
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -489,7 +489,7 @@ mod tests {
     }
 
     fn hello_reply(id: &Value, git: bool) -> String {
-        reply(id, json!({"version": env!("CARGO_PKG_VERSION"), "protocol": 1, "git": git}))
+        reply(id, json!({"version": env!("CARGO_PKG_VERSION"), "protocol": 2, "git": git}))
     }
 
     fn event(name: &str, data: Value) -> String {
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn hello_version_is_not_compared() {
         let behave: Behave = Box::new(|request: &Value| {
-            vec![reply(&request["id"], json!({"version": "9.9.9", "protocol": 1, "git": true}))]
+            vec![reply(&request["id"], json!({"version": "9.9.9", "protocol": 2, "git": true}))]
         });
         let (exec, remote) = exec_with(behave);
         let client = WorkspaceClient::connect(&exec, &endpoint(), Path::new(KNOWN), None).expect("the protocol matches");
@@ -694,7 +694,7 @@ mod tests {
     #[test]
     fn hello_protocol_mismatch_refused() {
         let behave: Behave = Box::new(|request: &Value| {
-            vec![reply(&request["id"], json!({"version": env!("CARGO_PKG_VERSION"), "protocol": 2, "git": true}))]
+            vec![reply(&request["id"], json!({"version": env!("CARGO_PKG_VERSION"), "protocol": 3, "git": true}))]
         });
         let (exec, remote) = exec_with(behave);
         let error = WorkspaceClient::connect(&exec, &endpoint(), Path::new(KNOWN), None).err().expect("refused");

@@ -5,6 +5,7 @@
 //! is answered at once. The process ends when stdin closes, after the watcher and any search have stopped.
 
 mod dispatch;
+mod project_setup;
 mod protocol;
 mod session;
 

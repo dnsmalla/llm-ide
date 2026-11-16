@@ -21,6 +21,7 @@ use llmide_workspace_core::trash::Trasher;
 use llmide_workspace_core::{err, FsError, R};
 use serde_json::Value;
 
+use crate::project_setup;
 use crate::protocol::{arg, arg_or_false, err_response, ok_response, Request};
 use crate::session::{to_value, Session};
 
@@ -97,6 +98,10 @@ fn run_command(session: &mut Session, req: &Request) -> R<Value> {
         "fs_watch_start" => session.watch_start(),
         "fs_watch_set" => session.watch_set(&arg::<Vec<String>>(args, "dirs")?),
         "fs_watch_stop" => Ok(session.watch_stop()),
+        "project_create" => project_setup::create(&arg::<String>(args, "parent")?, &arg::<String>(args, "name")?),
+        "project_paths" => project_setup::paths(session),
+        "project_memory" => project_setup::memory(session),
+        "project_rebuild" => project_setup::rebuild(session),
         #[cfg(test)]
         "__two_questions" => confirmed(req, |ask| {
             if !ask("first question") {
@@ -334,7 +339,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
-    use crate::protocol::{parse_request, Capture, Out};
+    use crate::protocol::{parse_request, Capture, Out, PROTOCOL};
+    use llmide_workspace_core::project::layout;
     use llmide_workspace_core::trash::tests::FakeTrash;
     use serde_json::json;
 
@@ -445,8 +451,130 @@ mod tests {
         let ok = ok_of(&reply);
         assert_eq!(reply["id"], 7);
         assert_eq!(ok["version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(ok["protocol"], 1);
+        assert_eq!(ok["protocol"], 2);
         assert!(ok["git"].is_boolean());
+    }
+
+    #[test]
+    fn hello_reports_protocol_2() {
+        let mut f = Fixture::new("protocol-2");
+        assert_eq!(PROTOCOL, 2);
+        assert_eq!(ok_of(&f.call(r#"{"id":1,"cmd":"hello","args":{}}"#))["protocol"], 2);
+    }
+
+    /// Every path under `dir`, relative and sorted, with a trailing `/` on folders: the state a refused request
+    /// must leave exactly as it found it.
+    fn tree_listing(dir: &Path) -> Vec<String> {
+        fn walk(base: &Path, dir: &Path, out: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                let rel = path.strip_prefix(base).unwrap().to_string_lossy().into_owned();
+                if path.is_dir() {
+                    out.push(format!("{rel}/"));
+                    walk(base, &path, out);
+                } else {
+                    out.push(rel);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(dir, dir, &mut out);
+        out.sort();
+        out
+    }
+
+    fn create_line(id: u64, parent: &str, name: &str) -> String {
+        json!({"id": id, "cmd": "project_create", "args": {"parent": parent, "name": name}}).to_string()
+    }
+
+    #[test]
+    fn create_scaffolds_and_returns_root() {
+        let mut f = Fixture::new("create");
+        std::fs::create_dir_all(f.home.join("work")).unwrap();
+        let reply = f.call(&create_line(1, "~/work", "Alpha"));
+        let ok = ok_of(&reply).clone();
+        let root = f.canonical_home().join("work").join("Alpha");
+        assert_eq!(ok["root"], root.to_string_lossy().as_ref());
+        assert_eq!(ok["name"], "Alpha");
+        assert!(!ok["id"].as_str().unwrap().is_empty());
+        assert!(root.join("system/project.json").is_file());
+        assert!(root.join("code").is_dir());
+        assert!(root.join("CLAUDE.md").is_file());
+    }
+
+    #[test]
+    fn create_refuses_existing_name() {
+        let mut f = Fixture::new("create-exists");
+        let dir = f.home.join("work").join("Taken");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("keep.txt"), "mine").unwrap();
+        let reply = f.call(&create_line(1, "~/work", "Taken"));
+        assert_eq!(code_of(&reply), "already_exists");
+        assert_eq!(tree_listing(&dir), ["keep.txt"], "the existing folder holds the same single file");
+        assert_eq!(std::fs::read_to_string(dir.join("keep.txt")).unwrap(), "mine");
+    }
+
+    #[test]
+    fn create_refuses_home_and_outside() {
+        let mut f = Fixture::new("create-refused");
+        std::fs::create_dir_all(f.home.join("work")).unwrap();
+        let home_before = tree_listing(&f.home);
+        assert_eq!(code_of(&f.call(&create_line(1, "~", "Alpha"))), "root_too_broad", "the home itself is no parent");
+        let outside = f.outside.to_string_lossy().into_owned();
+        assert_eq!(code_of(&f.call(&create_line(2, &outside, "Alpha"))), "outside_home");
+        assert_eq!(code_of(&f.call(&create_line(3, "~/work", ".."))), "invalid_name");
+        assert_eq!(tree_listing(&f.home), home_before, "nothing was written in the home folder");
+        assert!(tree_listing(&f.outside).is_empty(), "nothing was written outside the home folder");
+        assert!(tree_listing(&f.home.join("work")).is_empty(), "no project folder was made");
+    }
+
+    #[test]
+    fn rebuild_refuses_plain_folder_and_writes_nothing() {
+        let mut f = Fixture::new("rebuild-plain");
+        let project = f.open_project();
+        std::fs::write(project.join("notes.txt"), "x").unwrap();
+        let before = tree_listing(&project);
+        let reply = f.call(r#"{"id":1,"cmd":"project_rebuild","args":{}}"#);
+        assert_eq!(code_of(&reply), "not_a_project");
+        assert_eq!(reply["err"]["message"], "This folder is not an LLM-IDE project.");
+        assert_eq!(tree_listing(&project), before, "the folder listing is identical before and after");
+    }
+
+    #[test]
+    fn rebuild_fills_only_missing_files() {
+        let mut f = Fixture::new("rebuild-fill");
+        std::fs::create_dir_all(f.home.join("work")).unwrap();
+        ok_of(&f.call(&create_line(1, "~/work", "Beta")));
+        let root = f.canonical_home().join("work").join("Beta");
+        std::fs::write(root.join("CLAUDE.md"), "my edits").unwrap();
+        std::fs::remove_file(root.join("README.md")).unwrap();
+        std::fs::remove_dir(root.join("code")).unwrap();
+        let root_text = root.to_string_lossy().into_owned();
+        ok_of(&f.call(&json!({"id": 2, "cmd": "open", "args": {"root": root_text}}).to_string()));
+        ok_of(&f.call(r#"{"id":3,"cmd":"project_rebuild","args":{}}"#));
+        assert_eq!(std::fs::read_to_string(root.join("CLAUDE.md")).unwrap(), "my edits", "an edited file is kept");
+        assert!(root.join("README.md").is_file(), "a missing file comes back");
+        assert!(root.join("code").is_dir(), "a missing folder comes back");
+    }
+
+    #[test]
+    fn paths_and_memory_on_open_folder() {
+        let mut f = Fixture::new("paths-memory");
+        std::fs::create_dir_all(f.home.join("work")).unwrap();
+        ok_of(&f.call(&create_line(1, "~/work", "Gamma")));
+        let root = f.canonical_home().join("work").join("Gamma");
+        let root_text = root.to_string_lossy().into_owned();
+        assert_eq!(code_of(&f.call(r#"{"id":2,"cmd":"project_paths","args":{}}"#)), "no_project");
+        ok_of(&f.call(&json!({"id": 3, "cmd": "open", "args": {"root": root_text}}).to_string()));
+        let paths = ok_of(&f.call(r#"{"id":4,"cmd":"project_paths","args":{}}"#)).clone();
+        assert_eq!(paths["root"], root_text.as_str());
+        assert_eq!(paths["isProject"], true);
+        assert_eq!(paths["folders"].as_array().unwrap().len(), layout::LAYOUT.len());
+        let memory = ok_of(&f.call(r#"{"id":5,"cmd":"project_memory","args":{}}"#)).clone();
+        assert_eq!(memory["root"], root_text.as_str());
+        assert!(memory["graph"].is_null());
+        let names: Vec<&str> = memory["files"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"project.json"), "the marker is listed under system/: {names:?}");
     }
 
     #[test]
@@ -701,6 +829,6 @@ mod tests {
         let reply = f.call(r#"{"id":9,"cmd":"__panic","args":{}}"#);
         assert_eq!(reply["id"], 9);
         assert_eq!(code_of(&reply), "internal");
-        assert!(ok_of(&f.call(r#"{"id":10,"cmd":"hello","args":{}}"#))["protocol"] == 1);
+        assert!(ok_of(&f.call(r#"{"id":10,"cmd":"hello","args":{}}"#))["protocol"] == 2);
     }
 }

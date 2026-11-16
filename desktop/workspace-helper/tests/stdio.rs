@@ -33,11 +33,11 @@ fn bad_and_oversized_lines_are_answered_and_the_helper_keeps_running() {
     let replies: Vec<serde_json::Value> = lines.iter().map(|l| serde_json::from_str(l).expect("one JSON object per line")).collect();
     assert_eq!(replies.len(), 4, "{lines:?}");
     assert_eq!(replies[0]["id"], 1);
-    assert_eq!(replies[0]["ok"]["protocol"], 1);
+    assert_eq!(replies[0]["ok"]["protocol"], 2);
     assert_eq!(replies[1]["id"], 0);
     assert_eq!(replies[1]["err"]["code"], "bad_request");
     assert_eq!(replies[2]["id"], 0);
     assert_eq!(replies[2]["err"]["code"], "bad_request");
     assert_eq!(replies[3]["id"], 3);
-    assert_eq!(replies[3]["ok"]["protocol"], 1);
+    assert_eq!(replies[3]["ok"]["protocol"], 2);
 }

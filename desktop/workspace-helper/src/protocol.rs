@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 /// Version of this wire format, reported by `hello`. Bump it when a message changes shape.
-pub const PROTOCOL: u64 = 1;
+pub const PROTOCOL: u64 = 2;
 
 /// The longest request line accepted. The largest legitimate request is a write of a 64 MB file; the cap is the
 /// line size, so a JSON-escaped write near that size can be refused (see the report's concerns).
