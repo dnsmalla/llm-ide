@@ -298,6 +298,9 @@ export function describeError(code: string, message: string): ErrorInfo {
       return { code, title: "Not a git repository", detail: "This project folder is not a git repository (or is a bare repository). Run git init in a terminal to start one.", steps: [] };
     case "git_unavailable":
       return { code, title: "git was not found", detail: "Install git and make sure it is on your PATH, then reopen the project.", steps: [] };
+    case "git_missing":
+      // The server wording is the panel's empty state text; it is not an error, so no toast is shown.
+      return { code, title: "git is not installed on this server.", detail: "Install git on the server, then reopen the folder to see its changes.", steps: [] };
     case "git_timeout":
       return { code, title: "git took too long", detail: "The command was stopped after its time limit. Try again, or run it in a terminal for very large changes.", steps: [] };
     case "changed":

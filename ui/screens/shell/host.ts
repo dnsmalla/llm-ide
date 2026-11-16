@@ -162,20 +162,45 @@ export class RemoteModeError extends Error {
 }
 
 let remoteModeProvider: () => boolean = () => false;
+let sshModeProvider: () => boolean = () => false;
 /** Wired by `runtime.ts` to the live core status; a plain browser/test leaves it local. */
 export function setRemoteModeProvider(provider: () => boolean): void {
   remoteModeProvider = provider;
+}
+
+/**
+ * Wired by `runtime.ts`: true only in ssh mode, where the host runs the Explorer's commands on the server. Hub mode is
+ * also "remote" but has no server folder to browse, so it keeps refusing them.
+ */
+export function setSshModeProvider(provider: () => boolean): void {
+  sshModeProvider = provider;
 }
 
 function remoteSafe(command: string): boolean {
   return REMOTE_SAFE_COMMANDS.has(command) || REMOTE_SAFE_PREFIXES.some((p) => command.startsWith(p));
 }
 
+/**
+ * Commands ssh mode admits on top of the remote-safe set: the Explorer's files, git, search, watch, project and terminal
+ * commands, which the host runs on the server while a server folder is open. `fs_open_pdf` stays refused: it opens the
+ * file in this computer's viewer. Everything else that touches this computer stays refused, as in hub mode.
+ */
+const SSH_EXPLORER_EXACT = new Set([
+  "project_search_start", "project_search_cancel", "project_active", "project_close",
+  "fs_watch_start", "fs_watch_set", "fs_watch_stop",
+]);
+function sshExplorerAdmitted(command: string): boolean {
+  if (command === "fs_open_pdf") return false;
+  return SSH_EXPLORER_EXACT.has(command) || command.startsWith("fs_") || command.startsWith("git_") || command.startsWith("pty_");
+}
+
 /** Generic typed call for commands a slice owns. Prefer adding a wrapper to `host` for shared ones. */
 export async function invokeHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const bridge = injected;
   if (!bridge) throw new HostUnavailableError(command);
-  if (remoteModeProvider() && !remoteSafe(command)) throw new RemoteModeError(command);
+  if (remoteModeProvider() && !remoteSafe(command) && !(sshModeProvider() && sshExplorerAdmitted(command))) {
+    throw new RemoteModeError(command);
+  }
   return bridge.invoke<T>(command, args);
 }
 

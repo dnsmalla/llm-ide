@@ -57,13 +57,13 @@ export interface ShellProps {
 }
 
 /** One mounted section: lazy screen inside its own error boundary and Suspense. */
-export const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, inert, spike: Spike }: { def: SectionDef; active: boolean; projectRoot: string | null; inert: boolean; spike: ComponentType }) {
+export const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, mode, inert, spike: Spike }: { def: SectionDef; active: boolean; projectRoot: string | null; mode: NavMode; inert: boolean; spike: ComponentType }) {
   const Screen = def.id === "spike" ? null : screenFor(def.id, def.label);
   return (
     <div className="sh-section" hidden={!active} inert={inert || !active} data-section={def.id}>
       <SectionErrorBoundary name={def.label}>
         <Suspense fallback={<div className="sh-panel" role="status" aria-busy="true"><span className="sh-spinner" aria-hidden="true" /><p className="sh-panel-text sh-muted">Loading {def.label}…</p></div>}>
-          {def.id === "spike" ? <Spike /> : Screen ? <Screen active={active} projectRoot={projectRoot} /> : <MissingScreen name={def.label} />}
+          {def.id === "spike" ? <Spike /> : Screen ? <Screen active={active} projectRoot={projectRoot} mode={mode} /> : <MissingScreen name={def.label} />}
         </Suspense>
       </SectionErrorBoundary>
     </div>
@@ -433,7 +433,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           )}
           {mount &&
             visibleSections.filter((s) => nav.visited.includes(s.id)).map((def) => (
-              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} inert={sectionInert(gate, def.id, settingsReachable)} spike={spike} />
+              <SectionSlot key={`${def.id}:${def.id === "spike" ? "" : (project?.root ?? "")}`} def={def} active={nav.active === def.id} projectRoot={project?.root ?? null} mode={navMode} inert={sectionInert(gate, def.id, settingsReachable)} spike={spike} />
             ))}
           {gate === "core" && settingsReachable && (
             <div className="sh-notice" role="status" data-testid="core-down-notice">

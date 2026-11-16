@@ -1,7 +1,7 @@
 // Process-wide singletons the screens share: the core status store and the core client.
 import { createCoreClient } from "./core";
 import { createChatBinding } from "./chat-binding";
-import { coreBaseUrl, host, invokeHost, isHostAvailable, isRemoteCoreMode, setRemoteModeProvider } from "./host";
+import { coreBaseUrl, host, invokeHost, isHostAvailable, isRemoteCoreMode, setRemoteModeProvider, setSshModeProvider } from "./host";
 import { createTrustGate } from "./trust-gate";
 import { createStatusStore } from "./status-store";
 import { createBusProofStore } from "./bus-proof";
@@ -12,6 +12,7 @@ import { createActivityStore } from "./activity-store";
 export const coreStatusStore = createStatusStore({ fetchStatus: () => host.coreStatus() });
 // R-034 #12: every host command goes through invokeHost; remote mode allows only its safe subset.
 setRemoteModeProvider(() => isRemoteCoreMode(coreStatusStore.getSnapshot().status?.mode));
+setSshModeProvider(() => coreStatusStore.getSnapshot().status?.mode === "ssh");
 
 /** Credentials only go to a core the host spawned, or one the user confirmed in the login modal (memory only). */
 export const trustGate = createTrustGate({

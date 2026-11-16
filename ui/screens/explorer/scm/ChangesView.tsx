@@ -16,13 +16,15 @@ export interface ChangesProps {
   onOpenDiff: (path: string, staged: boolean) => void;
   /** Initial viewport height before the first measurement (tests, first paint). */
   initialViewport?: number;
+  /** The repository is on an SSH server: "Reveal in Finder" is left out of the file menu. */
+  serverFiles?: boolean;
 }
 
 const GROUP_HINT: Partial<Record<keyof typeof GROUP_LABEL, string>> = {
   conflicts: "Resolve by editing the file, then stage it to mark it resolved.",
 };
 
-export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialViewport = 480 }: ChangesProps) {
+export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialViewport = 480, serverFiles = false }: ChangesProps) {
   const scroller = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(initialViewport);
@@ -138,7 +140,7 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
           x={menu.x}
           y={menu.y}
           label="Change actions"
-          items={changeMenu(menu.item)}
+          items={changeMenu(menu.item, serverFiles)}
           onPick={(id) => {
             const item = menu.item;
             setMenu(null);
@@ -157,13 +159,15 @@ export function ChangesView({ controller, snap, onOpenFile, onOpenDiff, initialV
 }
 
 /** The per-file menu. Discard is offered only where the Mac offers it (working-tree and untracked files). */
-export function changeMenu(item: FileItem): MenuItem[] {
+export function changeMenu(item: FileItem, serverFiles = false): MenuItem[] {
   const { group, entry } = item;
   const staging: MenuItem = group === "staged"
     ? { id: "unstage", label: "Unstage" }
     : { id: "stage", label: group === "conflicts" ? "Mark resolved (stage)" : "Stage" };
   const discard = (group === "changes" || group === "untracked") && !entry.submodule ? [{ id: "discard", label: "Discard Changes", danger: true }] : [];
-  return [staging, ...discard, { id: "copy", label: "Copy Path", separator: true }, { id: "reveal", label: "Reveal in Finder" }];
+  // Reveal opens this computer's file manager, which cannot show a file that lives on the server.
+  const reveal: MenuItem[] = serverFiles ? [] : [{ id: "reveal", label: "Reveal in Finder" }];
+  return [staging, ...discard, { id: "copy", label: "Copy Path", separator: true }, ...reveal];
 }
 
 interface RowProps {

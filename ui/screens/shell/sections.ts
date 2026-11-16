@@ -159,10 +159,11 @@ export const REMOTE_SECTIONS: readonly SectionId[] = ["welcome", "issues", "gant
 /** Settings groups that are local-only in remote mode. */
 export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "build", "token-saving", "paths", "repositories", "memory", "code-graph", "doc-gen", "optional-components", "self-heal"];
 /**
- * Sections the ssh server mode lists: the same screens as a hub, because the project lives on the server and anything
- * that reads this computer's files, git or terminal is refused. Its own list, so the two can diverge later.
+ * Sections the ssh server mode lists: the hub screens plus the Explorer. The project lives on the server, so the Explorer's
+ * files, git, search, watch and terminal commands run there (host.ts admits them in ssh mode only); the other
+ * local-only screens stay out. Its own list, so the two can diverge later.
  */
-export const SSH_SECTIONS: readonly SectionId[] = REMOTE_SECTIONS;
+export const SSH_SECTIONS: readonly SectionId[] = [...REMOTE_SECTIONS, "explorer"];
 export const LOCAL_ONLY_NOTICE = "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to a hub.";
 const LOCAL_ONLY_NOTICE_SSH = "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to an SSH server.";
 /** The notice for a section the current mode cannot serve: hub mode keeps its text, ssh mode names the server instead. */
@@ -184,6 +185,8 @@ export interface SectionProps {
   active: boolean;
   /** Root of the open project, or null. The host owns the path; never edit it. */
   projectRoot: string | null;
+  /** The server mode the shell runs in. Absent means local. A screen hides actions that only make sense on this computer. */
+  mode?: NavMode;
 }
 
 export interface KeyLike {

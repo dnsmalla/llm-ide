@@ -16,7 +16,8 @@ export { ExplorerScreen, type ExplorerDeps } from "./ExplorerScreen";
 export { ExplorerController, type ExplorerSnapshot } from "./controller";
 export { createHostFs, type FsApi } from "./fs";
 
-export default function Explorer(props: SectionProps) {
+// `onOpenServerFolder` is the SSH server folder picker; without it the Explorer offers no way to open a server folder.
+export default function Explorer(props: SectionProps & { onOpenServerFolder?: () => void }) {
   const ctl = useRef<ExplorerController | null>(null);
   const deps = useMemo<ExplorerDeps>(() => ({ onController: (c) => { ctl.current = c; } }), []);
   useEffect(() => {

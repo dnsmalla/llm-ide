@@ -43,10 +43,13 @@ test("the Cmd+N shortcut only resolves to sections the mode can show", () => {
   }
 });
 
-test("sections: ssh mode lists the same sections as remote mode", () => {
-  assert.deepEqual(visibleSectionsFor("ssh").map((s) => s.id), visibleSectionsFor("remote").map((s) => s.id));
+test("sections: ssh mode lists the hub screens plus the Explorer, which runs on the server", () => {
+  assert.deepEqual(visibleSectionsFor("ssh").map((s) => s.id), ["welcome", "explorer", "issues", "gantt", "library", "chat", "settings"]);
   assert.equal(isSelectableFor("chat", "ssh"), true);
-  assert.equal(isSelectableFor("explorer", "ssh"), false);
+  assert.equal(isSelectableFor("explorer", "ssh"), true);
+  // A hub has no server folder to browse: its list is unchanged.
+  assert.equal(isSelectableFor("explorer", "remote"), false);
+  assert.deepEqual(visibleSectionsFor("remote").map((s) => s.id), ["welcome", "issues", "gantt", "library", "chat", "settings"]);
 });
 
 test("the local-only notice names a hub in hub mode and an SSH server in ssh mode", () => {

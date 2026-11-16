@@ -17,6 +17,8 @@ export interface ScmPanelProps {
   onOpenDiff: (path: string, staged: boolean) => void;
   /** Called after discard / checkout changed files on disk, so open editors and the tree can reload. */
   onFilesChanged?: () => void;
+  /** The repository is on an SSH server (passed to the file menu, which then has no Reveal in Finder). */
+  serverFiles?: boolean;
   /** Tests inject a fake host or a prepared controller. */
   api?: ScmApi;
   controller?: ScmController;
@@ -28,7 +30,7 @@ const TABS: { id: ScmTab; label: string }[] = [
   { id: "branches", label: "Branches" },
 ];
 
-export function ScmPanel({ projectRoot, onOpenFile, onOpenDiff, onFilesChanged, api, controller: injected }: ScmPanelProps) {
+export function ScmPanel({ projectRoot, onOpenFile, onOpenDiff, onFilesChanged, serverFiles = false, api, controller: injected }: ScmPanelProps) {
   const controller = useMemo(() => injected ?? new ScmController({ api: api ?? createHostScm(), onFilesChanged }), [injected, api, onFilesChanged]);
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
 
@@ -90,7 +92,7 @@ export function ScmPanel({ projectRoot, onOpenFile, onOpenDiff, onFilesChanged, 
           <div id="scm-tabpanel" role="tabpanel" aria-labelledby={`scm-tab-${snap.tab}`} className="scm-tabpanel">
             {snap.tab === "changes" && (
               <>
-                <ChangesView controller={controller} snap={snap} onOpenFile={onOpenFile} onOpenDiff={onOpenDiff} />
+                <ChangesView controller={controller} snap={snap} onOpenFile={onOpenFile} onOpenDiff={onOpenDiff} serverFiles={serverFiles} />
                 <HunkPane controller={controller} snap={snap} />
               </>
             )}

@@ -12,6 +12,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { EditorPane } from "./EditorPane";
 import type { EditorHost } from "./editor-types";
 import { FileTree } from "./FileTree";
+import { findEntry, treeMenuItems } from "./menus";
 import { absolutePathUnder, createHostFs, baseName, nativeBaseName, parentOf, toFsError, type Encoding, type FsApi, type WatchBatch } from "./fs";
 import { defaultKv, type KV } from "./session";
 import { ChatDockSlot } from "../shell/chat-dock";
@@ -77,7 +78,9 @@ const copy = (text: string) => {
 /** Line breaks cannot be in a name (the Mac refuses them too: a wrapped line pasted into a name is invisible). */
 const LINE_BREAK = /[\r\n\v\f\u0085\u2028\u2029]/;
 
-export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { deps?: ExplorerDeps }) {
+export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, deps }: SectionProps & { deps?: ExplorerDeps; onOpenServerFolder?: () => void }) {
+  // SSH mode: the project is a folder on the server. Actions that open this computer's file manager, viewer or folder dialogs are left out.
+  const serverFiles = mode === "ssh";
   const editorRef = useRef<EditorHost | null>(null);
   const fs = useMemo(() => deps?.fs ?? createHostFs(defaultChannel), []);
   const controller = useMemo(
@@ -236,26 +239,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     return e?.kind === "dir" ? path : parentOf(path);
   };
 
-  const treeMenu = (path: string | null): MenuItem[] => {
-    const sel = path !== null && snap.selection.paths.has(path) ? topLevel(snap.selection.paths) : path !== null ? [path] : [];
-    const single = sel.length === 1;
-    const isFile = path !== null && findEntry(snap, path)?.kind === "file";
-    return [
-      ...(isFile && single ? [{ id: "open", label: "Open" }] : []),
-      { id: "cut", label: sel.length > 1 ? `Cut ${sel.length} Items` : "Cut", disabled: sel.length === 0 },
-      { id: "copy", label: sel.length > 1 ? `Copy ${sel.length} Items` : "Copy", disabled: sel.length === 0 },
-      { id: "paste", label: "Paste", disabled: controller.getClipboard() === null, separator: true },
-      { id: "new-file", label: "New File…", separator: isFile && single },
-      { id: "new-dir", label: "New Folder…" },
-      { id: "rename", label: "Rename…", disabled: !single, separator: true },
-      { id: "delete", label: sel.length > 1 ? `Move ${sel.length} Items to Trash` : "Move to Trash", disabled: sel.length === 0, danger: true },
-      { id: "copy-path", label: "Copy Relative Path", disabled: sel.length === 0 },
-      { id: "copy-abs", label: "Copy Absolute Path", disabled: sel.length === 0 || !projectRoot, separator: true },
-      { id: "reveal", label: "Reveal in Finder", disabled: sel.length === 0 || !projectRoot },
-      ...(path !== null && single && findEntry(snap, path)?.kind === "dir" ? [{ id: "find-in", label: "Find in Folder", separator: true }] : []),
-      { id: "refresh", label: "Refresh" },
-    ];
-  };
+  const treeMenu = (path: string | null): MenuItem[] => treeMenuItems(snap, path, { projectRoot, clipboardSet: controller.getClipboard() !== null, serverFiles });
 
   const tabMenu = (id: string): MenuItem[] => {
     const t = snap.tabs.tabs.find((x) => x.id === id);
@@ -372,6 +356,18 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
     }
   };
 
+  if (!projectRoot && serverFiles) {
+    // A server folder is picked by the server folder picker (the shell's handler); with no handler the card has no action.
+    return (
+      <div className="ex-root" data-active={active}>
+        <NoProjectCard
+          title="Open a server folder to browse files."
+          hint="The files are on the SSH server. Choose a folder there to browse and edit them."
+          actions={onOpenServerFolder ? { openProject: onOpenServerFolder, openLabel: "Open server folder…" } : {}}
+        />
+      </div>
+    );
+  }
   if (!projectRoot) {
     return (
       <div className="ex-root" data-active={active}>
@@ -431,7 +427,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           <span className="ex-project" title={projectRoot}>{name}</span>
           {snap.git?.branch && <Chip label={snap.git.branch + (snap.git.ahead ? ` ↑${snap.git.ahead}` : "") + (snap.git.behind ? ` ↓${snap.git.behind}` : "")} compact />}
           <span className="ex-spacer" />
-          {shellHost.isAvailable() ? (
+          {shellHost.isAvailable() && !serverFiles ? (
             <button type="button" className="ui-icon-button" aria-label="Project folders" title="Project folders" onClick={openFolders}>
               <Icon name="folder-cog" size={14} />
             </button>
@@ -472,6 +468,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
                 onOpenFile={(p) => void controller.openFile(p, false)}
                 onOpenDiff={(p) => void openDiff(p)}
                 onFilesChanged={() => void refreshAll()}
+                serverFiles={serverFiles}
               />
             </Suspense>
           </div>
@@ -496,7 +493,7 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
           onMove={(id, to) => controller.moveTab(id, to)}
           onContextMenu={(id, x, y) => setMenu({ x, y, target: { kind: "tab", id } })}
         />
-        <EditorPane controller={controller} snap={snap} loadEditor={loadEditor} editorRef={editorRef} onCloseTab={closeTab} />
+        <EditorPane controller={controller} snap={snap} loadEditor={loadEditor} editorRef={editorRef} onCloseTab={closeTab} serverFiles={serverFiles} />
         {TERMINAL_BUILT && dockEver && runtime && (
           <TerminalDock
             manager={terminal}
@@ -615,14 +612,6 @@ export function ExplorerScreen({ active, projectRoot, deps }: SectionProps & { d
       )}
     </div>
   );
-}
-
-function findEntry(snap: ReturnType<ExplorerController["getSnapshot"]>, path: string) {
-  const dir = parentOf(path);
-  const d = snap.tree.dirs.get(dir);
-  if (!d) return null;
-  for (const page of d.pages.values()) for (const e of page) if (e.path === path) return e;
-  return null;
 }
 
 export default ExplorerScreen;

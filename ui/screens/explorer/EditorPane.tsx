@@ -16,9 +16,11 @@ interface Props {
   /** Mutable slot the screen's controller reads the live editor from. */
   editorRef: { current: EditorHost | null };
   onCloseTab(id: string): void;
+  /** The file is on an SSH server: "Open in Preview" (this computer's viewer) is left out. */
+  serverFiles?: boolean;
 }
 
-export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab }: Props) {
+export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab, serverFiles = false }: Props) {
   const mountEl = useRef<HTMLDivElement>(null);
   const started = useRef(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -173,13 +175,13 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
           </div>
         ) : image && activeId && (!d || d.status === "binary") ? (
           <ImagePreview path={activeId} size={d?.size ?? 0} />
-        ) : !showEditor ? <Placeholder doc={d} controller={controller} activeId={activeId} hasTabs={snap.tabs.tabs.length > 0} /> : null}
+        ) : !showEditor ? <Placeholder doc={d} controller={controller} activeId={activeId} hasTabs={snap.tabs.tabs.length > 0} serverFiles={serverFiles} /> : null}
       </div>
     </section>
   );
 }
 
-function Placeholder({ doc, controller, activeId, hasTabs }: { doc: ReturnType<ExplorerSnapshot["docs"]["get"]>; controller: ExplorerController; activeId: string | null; hasTabs: boolean }) {
+function Placeholder({ doc, controller, activeId, hasTabs, serverFiles }: { doc: ReturnType<ExplorerSnapshot["docs"]["get"]>; controller: ExplorerController; activeId: string | null; hasTabs: boolean; serverFiles: boolean }) {
   if (!activeId || !hasTabs) {
     return (
       <div className="ex-empty" role="status">
@@ -193,8 +195,14 @@ function Placeholder({ doc, controller, activeId, hasTabs }: { doc: ReturnType<E
     return (
       <div className="ex-empty" role="status">
         <p className="ex-empty-title">PDF</p>
-        <p className="ex-empty-hint">PDFs are not embedded in the desktop webview. Open this one in Preview.</p>
-        <button type="button" className="ex-tool" onClick={() => void invokeHost("fs_open_pdf", { path: activeId }).catch(() => undefined)}>Open in Preview</button>
+        {serverFiles ? (
+          <p className="ex-empty-hint">PDFs are not embedded in the desktop webview, and this one is on the SSH server, so it cannot be opened here.</p>
+        ) : (
+          <>
+            <p className="ex-empty-hint">PDFs are not embedded in the desktop webview. Open this one in Preview.</p>
+            <button type="button" className="ex-tool" onClick={() => void invokeHost("fs_open_pdf", { path: activeId }).catch(() => undefined)}>Open in Preview</button>
+          </>
+        )}
       </div>
     );
   }

@@ -69,7 +69,8 @@ export interface ScmSnapshot {
 }
 
 const EMPTY_GROUPS: Groups = { conflicts: [], staged: [], changes: [], untracked: [] };
-const REPO_LEVEL = new Set(["not_a_repo", "untrusted_repo_config", "git_unavailable", "unavailable"]);
+// git_missing: the server has no git. It is the Changes panel's empty state, like a folder that is not a repository.
+const REPO_LEVEL = new Set(["not_a_repo", "untrusted_repo_config", "git_unavailable", "git_missing", "unavailable"]);
 const LOG_PAGE = 100;
 
 export interface ScmOptions {
