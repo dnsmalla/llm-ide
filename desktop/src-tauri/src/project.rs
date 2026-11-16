@@ -480,6 +480,18 @@ pub async fn project_create(app: tauri::AppHandle, name: String) -> Result<Optio
     Ok(Some(info))
 }
 
+/// `ACTIVE` is process-global: tests that open projects, or set the active root, take turns on this lock.
+#[cfg(test)]
+pub(crate) static ACTIVE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Sets the active root directly, for tests of commands that read it.
+#[cfg(test)]
+pub(crate) fn set_active_for_test(root: Option<PathBuf>) {
+    if let Ok(mut g) = ACTIVE.lock() {
+        *g = root;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -622,8 +634,6 @@ mod tests {
         assert_eq!(parse_recent(&many, MAX_RECENT).len(), MAX_RECENT);
     }
 
-    /// `ACTIVE` is process-global: tests that open projects take turns.
-    static ACTIVE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn activate_sets_root_persists_recent_and_revalidates() {

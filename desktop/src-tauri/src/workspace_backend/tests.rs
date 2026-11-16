@@ -2,8 +2,12 @@
 //! request the desktop sends and can end its own channel, the way a dropped connection does.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use serde_json::json;
+
+use std::path::PathBuf;
 
 use super::*;
 use crate::project::ProjectInfo;
@@ -349,21 +353,21 @@ fn reset_closes_the_channel_and_forgets_the_folder() {
 #[test]
 fn project_active_reports_server_folder() {
     let _mode = crate::core_host::process_mode_guard();
-    crate::core_host::set_process_mode(true);
+    crate::core_host::set_process_mode(2);
     remote().set_folder_for_test(Some(ProjectInfo { name: "api".into(), root: "/home/u/work/api".into() }));
     let active = crate::project::project_active();
     remote().set_folder_for_test(None);
-    crate::core_host::set_process_mode(false);
+    crate::core_host::set_process_mode(0);
     assert_eq!(active, Some(ProjectInfo { name: "api".into(), root: "/home/u/work/api".into() }));
 }
 
 #[test]
 fn ssh_mode_dispatch_without_folder_is_no_project() {
     let _mode = crate::core_host::process_mode_guard();
-    crate::core_host::set_process_mode(true);
+    crate::core_host::set_process_mode(2);
     remote().set_folder_for_test(None);
-    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", json!({"req": {"path": ""}}), |_root: PathBuf| Ok(0u8)));
-    crate::core_host::set_process_mode(false);
+    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, (), |_| json!({"req": {"path": ""}}), |_root, ()| Ok(0u8)));
+    crate::core_host::set_process_mode(0);
     assert_eq!(result.unwrap_err().code, "no_project");
 }
 
@@ -371,8 +375,8 @@ fn ssh_mode_dispatch_without_folder_is_no_project() {
 fn local_mode_without_a_project_is_no_project() {
     // The local branch is unchanged: it still asks for the active project root, and never the server.
     let _mode = crate::core_host::process_mode_guard();
-    crate::core_host::set_process_mode(false);
-    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", json!({"req": {"path": ""}}), |_root: PathBuf| Ok(0u8)));
+    crate::core_host::set_process_mode(0);
+    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, (), |_| json!({}), |_root, ()| Ok(0u8)));
     if let Err(e) = &result {
         assert_eq!(e.code, "no_project");
     }
@@ -381,8 +385,183 @@ fn local_mode_without_a_project_is_no_project() {
 #[test]
 fn open_pdf_stays_local_only() {
     let _mode = crate::core_host::process_mode_guard();
-    crate::core_host::set_process_mode(true);
+    crate::core_host::set_process_mode(2);
     let result = tauri::async_runtime::block_on(crate::fs_ops::fs_open_pdf("a.pdf".into()));
-    crate::core_host::set_process_mode(false);
+    crate::core_host::set_process_mode(0);
     assert_eq!(result.unwrap_err().code, "ssh_mode");
+}
+
+/// A connector whose connect waits until the test releases it, so a reset can run while a connect is in progress.
+struct GatedConnector {
+    started: Mutex<mpsc::Sender<()>>,
+    release: Mutex<mpsc::Receiver<()>>,
+    api: Arc<FakeApi>,
+}
+
+impl Connector for GatedConnector {
+    fn connect(&self) -> R<Arc<dyn WorkspaceApi>> {
+        let _ = self.started.lock().unwrap().send(());
+        let _ = self.release.lock().unwrap().recv();
+        let dynamic: Arc<dyn WorkspaceApi> = self.api.clone();
+        Ok(dynamic)
+    }
+}
+
+#[test]
+fn reset_during_a_connect_closes_the_late_channel() {
+    let remote = Arc::new(Remote::new());
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let api = FakeApi::new(respond);
+    let connector = Arc::new(GatedConnector { started: Mutex::new(started_tx), release: Mutex::new(release_rx), api: api.clone() });
+    let worker = {
+        let (remote, connector) = (remote.clone(), connector.clone());
+        std::thread::spawn(move || remote.list_dirs(&*connector, "~", false))
+    };
+    started_rx.recv().unwrap();
+    // The reset must return while the connect is still blocked: it takes no connect gate.
+    let (done_tx, done_rx) = mpsc::channel();
+    let resetter = {
+        let remote = remote.clone();
+        std::thread::spawn(move || {
+            remote.reset();
+            let _ = done_tx.send(());
+        })
+    };
+    done_rx.recv_timeout(Duration::from_secs(5)).expect("reset returned while the connect was blocked");
+    release_tx.send(()).unwrap();
+    let result = worker.join().unwrap();
+    resetter.join().unwrap();
+    assert_eq!(result.unwrap_err().code, "lost_connection");
+    assert!(api.is_closed(), "the late channel is closed");
+    assert!(remote.live().is_none(), "and it is never stored");
+}
+
+#[test]
+fn a_channel_error_during_the_reopen_is_not_kept() {
+    let remote = Remote::new();
+    let connector = FakeConnector::new(|index| {
+        FakeApi::new(move |cmd, args, confirm| {
+            if index == 1 && cmd == "open" {
+                return Err(FsError { code: "SSH_TIMEOUT", message: "The server did not answer in time.".into() });
+            }
+            respond(cmd, args, confirm)
+        })
+    });
+    remote.open(&connector, "/home/u/project").unwrap();
+    connector.channel(0).drop_channel();
+    let err = remote.call(&connector, "fs_list_dir", json!({"req": {"path": ""}}), &no).unwrap_err();
+    assert_eq!(err.code, "SSH_TIMEOUT");
+    assert!(connector.channel(1).is_closed(), "the channel that failed the re-open is closed");
+    assert!(remote.live().is_none(), "and it is not kept, so the next call reconnects");
+    assert!(remote.folder().is_some(), "the folder stays open for that reconnect");
+}
+
+#[test]
+fn a_vanished_folder_on_reconnect_does_not_fail_the_next_open() {
+    let remote = Remote::new();
+    let connector = FakeConnector::new(|index| {
+        FakeApi::new(move |cmd, args, confirm| {
+            if index == 1 && cmd == "open" && args["root"] == "/home/u/project" {
+                return Err(FsError { code: "root_missing", message: "This folder is no longer on the server.".into() });
+            }
+            respond(cmd, args, confirm)
+        })
+    });
+    remote.open(&connector, "/home/u/project").unwrap();
+    connector.channel(0).drop_channel();
+    let info = remote.open(&connector, "/home/u/other").unwrap();
+    assert_eq!(info.root, "/home/u/other", "the user's open carries on");
+    assert_eq!(remote.folder().map(|f| f.root), Some("/home/u/other".to_string()));
+    assert!(remote.list_dirs(&connector, "~", false).is_ok());
+}
+
+#[test]
+fn root_missing_from_search_and_watch_forgets_the_folder() {
+    let remote = Remote::new();
+    let connector = FakeConnector::new(|_| {
+        FakeApi::new(|cmd, args, confirm| {
+            if cmd == "project_search_start" || cmd == "fs_watch_start" {
+                return Err(FsError { code: "root_missing", message: "This folder is no longer on the server.".into() });
+            }
+            respond(cmd, args, confirm)
+        })
+    });
+    remote.open(&connector, "/home/u/project").unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let err = remote.search_start(&connector, json!({"query": "x"}), sink_into(seen)).unwrap_err();
+    assert_eq!(err.code, "root_missing");
+    assert!(remote.folder().is_none(), "a search answer clears the folder like any other request");
+
+    remote.open(&connector, "/home/u/project").unwrap();
+    let err = remote.watch_start(&connector, Arc::new(|_| {})).unwrap_err();
+    assert_eq!(err.code, "root_missing");
+    assert!(remote.folder().is_none(), "a watch answer clears the folder too");
+}
+
+#[test]
+fn a_finished_search_gets_no_synthetic_done() {
+    let remote = Remote::new();
+    let connector = healthy();
+    remote.open(&connector, "/home/u/project").unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    remote.search_start(&connector, json!({"query": "x"}), sink_into(seen.clone())).unwrap();
+    connector.channel(0).emit(EventKind::Search, json!({"type": "done", "id": 7, "cancelled": false}));
+    connector.channel(0).drop_channel();
+    remote.call(&connector, "fs_list_dir", json!({"req": {"path": ""}}), &no).unwrap();
+    let got = seen.lock().unwrap().clone();
+    assert_eq!(got.len(), 1, "only the helper's own done reached the page");
+    assert_eq!(got[0]["type"], "done");
+}
+
+fn hub_root(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("llmide-ws-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+    dir
+}
+
+/// Hub mode with a local project open: the file commands stay refused, and the git, search and watch commands run on
+/// the project exactly as they did before the SSH work.
+fn in_hub_mode_with_project<T>(name: &str, body: impl FnOnce(&PathBuf) -> T) -> T {
+    let _turn = crate::project::ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+    let _mode = crate::core_host::process_mode_guard();
+    let dir = hub_root(name);
+    crate::project::set_active_for_test(Some(dir.clone()));
+    crate::core_host::set_process_mode(1);
+    let out = body(&dir);
+    crate::core_host::set_process_mode(0);
+    crate::project::set_active_for_test(None);
+    let _ = std::fs::remove_dir_all(&dir);
+    out
+}
+
+#[test]
+fn hub_mode_file_commands_stay_refused() {
+    let result = in_hub_mode_with_project("hub-fs", |_| tauri::async_runtime::block_on(crate::fs_ops::fs_list_dir(crate::fs_ops::ListReq::default())));
+    assert_eq!(result.unwrap_err().code, "remote_mode");
+}
+
+#[test]
+fn hub_mode_git_runs_on_the_active_project() {
+    let result = in_hub_mode_with_project("hub-git", |dir| {
+        let init = std::process::Command::new("git").args(["init", "-q"]).current_dir(dir).status();
+        assert!(init.is_ok_and(|s| s.success()), "git init for the test");
+        tauri::async_runtime::block_on(crate::git::git_status())
+    });
+    assert!(result.is_ok(), "git had no hub refusal before SSH mode existed: {result:?}");
+}
+
+#[test]
+fn hub_mode_search_and_watch_run_on_the_active_project() {
+    let (search, watch) = in_hub_mode_with_project("hub-search", |_| {
+        let query: crate::project_search::Query = serde_json::from_value(json!({"query": "one"})).unwrap();
+        let search = tauri::async_runtime::block_on(crate::project_search::project_search_start(query, tauri::ipc::Channel::new(|_| Ok(()))));
+        let watch = tauri::async_runtime::block_on(crate::fs_watch::fs_watch_start(tauri::ipc::Channel::new(|_| Ok(()))));
+        let _ = tauri::async_runtime::block_on(crate::fs_watch::fs_watch_stop());
+        (search, watch)
+    });
+    assert!(search.is_ok(), "search had no hub refusal before SSH mode existed: {search:?}");
+    assert!(watch.is_ok(), "watch had no hub refusal before SSH mode existed: {watch:?}");
 }

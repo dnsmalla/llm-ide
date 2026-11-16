@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use crate::confirm::DialogGuard;
 use crate::project::ProjectInfo;
 use crate::ssh_link::HelperSpawn;
-use crate::ssh_workspace::{EventKind, EventSink, WorkspaceClient};
+use crate::ssh_workspace::{lost, EventKind, EventSink, WorkspaceClient};
 
 /// The reply the helper gives when a destructive command needs the user's answer first. Its message is the question.
 const CONFIRM_REQUIRED: &str = "confirm_required";
@@ -109,6 +109,9 @@ struct Session {
     client: Option<Arc<dyn WorkspaceApi>>,
     /// The open server folder, as the helper canonicalised it.
     folder: Option<ProjectInfo>,
+    /// Bumped by every `reset`. A connect that started under an older value belongs to a link that is gone, so
+    /// the channel it made is closed instead of stored.
+    generation: u64,
 }
 
 /// The SSH-mode state: the helper channel, the open server folder and the event routes.
@@ -140,8 +143,14 @@ fn event_id(data: &Value) -> Option<u64> {
     data.get("id").and_then(Value::as_u64)
 }
 
+/// Whether a search event ends its search.
+fn is_done(data: &Value) -> bool {
+    data.get("type").and_then(Value::as_str) == Some("done")
+}
+
 /// The search events for the current search go to its sink. Events that arrive before the start reply wait in
-/// `early`, and any other search's events are dropped.
+/// `early`, and any other search's events are dropped. The search's own `done` ends it: its sink is cleared, so
+/// no later reconnect or new search sends a second, synthetic `done` for it.
 fn route_search(routes: &Mutex<Routes>, data: Value) {
     let forward = {
         let mut r = locked(routes);
@@ -153,7 +162,14 @@ fn route_search(routes: &Mutex<Routes>, data: Value) {
                 }
                 None
             }
-            Some(id) if event_id(&data) == Some(id) => r.search.clone().map(|sink| (sink, data)),
+            Some(id) if event_id(&data) == Some(id) => {
+                let sink = r.search.clone();
+                if is_done(&data) {
+                    r.search = None;
+                    r.search_id = None;
+                }
+                sink.map(|sink| (sink, data))
+            }
             Some(_) => None,
         }
     };
@@ -272,12 +288,17 @@ impl Remote {
         self.connect_locked(connector)
     }
 
-    /// A live channel for a request that needs the open folder. Without a folder it fails before any connect.
+    /// A live channel for a request that needs the open folder. Without a folder it fails before any connect, and a
+    /// folder that a reconnect found gone fails the same way as a root_missing answer.
     fn folder_client(&self, connector: &dyn Connector) -> R<Arc<dyn WorkspaceApi>> {
         if locked(&self.session).folder.is_none() {
             return Err(no_project());
         }
-        self.ensure(connector)
+        let client = self.ensure(connector)?;
+        if locked(&self.session).folder.is_none() {
+            return Err(root_missing());
+        }
+        Ok(client)
     }
 
     /// Starts a new channel. Called with the connect gate held. A channel that was open before has ended, so its
@@ -288,22 +309,57 @@ impl Remote {
             dead.close();
         }
         self.abort_search();
+        // Read before the connect, which can take up to a minute. A reset in between makes this channel stale.
+        let started_in = locked(&self.session).generation;
         let fresh = connector.connect()?;
         self.subscribe_routes(&*fresh);
-        locked(&self.session).client = Some(fresh.clone());
+        {
+            let mut session = locked(&self.session);
+            if session.generation != started_in {
+                drop(session);
+                fresh.close();
+                return Err(lost());
+            }
+            session.client = Some(fresh.clone());
+        }
         let folder = locked(&self.session).folder.clone();
         if let Some(folder) = folder {
             match fresh.call("open", json!({"root": folder.root}), None) {
                 Ok(_) => self.reregister_watch(&*fresh),
-                Err(e) if is_channel_error(&e) => return Err(e),
-                // The folder was deleted or renamed while the link was down: the app returns to the server home.
-                Err(_) => {
-                    self.forget_folder();
-                    return Err(root_missing());
+                // The channel failed again: this one is not kept, so the next call reconnects.
+                Err(e) if is_channel_error(&e) => {
+                    self.drop_client(&fresh);
+                    return Err(e);
                 }
+                // The old folder is gone (or no longer reachable). It is forgotten, and the request that caused the
+                // reconnect decides what the page sees: folder_client answers root_missing for a folder request, and
+                // an open or a picker request carries on.
+                Err(_) => self.forget_folder(),
             }
         }
         Ok(fresh)
+    }
+
+    /// Closes and forgets `client` if it is still the stored channel.
+    fn drop_client(&self, client: &Arc<dyn WorkspaceApi>) {
+        let taken = {
+            let mut session = locked(&self.session);
+            match session.client.as_ref() {
+                Some(stored) if Arc::ptr_eq(stored, client) => session.client.take(),
+                _ => None,
+            }
+        };
+        if let Some(taken) = taken {
+            taken.close();
+        }
+    }
+
+    /// Makes a root_missing answer from any request forget the folder, so every request behaves the same way.
+    fn settle<T>(&self, result: R<T>) -> R<T> {
+        if matches!(&result, Err(e) if e.code == ROOT_MISSING_CODE) {
+            self.forget_folder();
+        }
+        result
     }
 
     /// Both subscriptions are made once per channel. They read the routes at each event, so a start or a stop
@@ -389,11 +445,7 @@ impl Remote {
     /// Runs one Explorer command on the open folder. `root_missing` from the helper clears the folder.
     pub fn call(&self, connector: &dyn Connector, cmd: &str, args: Value, ask: Ask<'_>) -> R<Value> {
         let client = self.folder_client(connector)?;
-        let result = call_confirmed(&*client, cmd, args, ask);
-        if matches!(&result, Err(e) if e.code == ROOT_MISSING_CODE) {
-            self.forget_folder();
-        }
-        result
+        self.settle(call_confirmed(&*client, cmd, args, ask))
     }
 
     /// Starts a search on the server. Its events go to `sink` as they arrive, with the search's own id.
@@ -401,7 +453,7 @@ impl Remote {
         let client = self.folder_client(connector)?;
         self.abort_search();
         locked(&self.routes).search = Some(sink.clone());
-        let answer = match client.call("project_search_start", json!({"req": req}), None) {
+        let answer = match self.settle(client.call("project_search_start", json!({"req": req}), None)) {
             Ok(answer) => answer,
             Err(e) => {
                 self.abort_search();
@@ -412,14 +464,22 @@ impl Remote {
             self.abort_search();
             return Err(FsError { code: "bad_response", message: "The server sent an answer this app does not understand.".into() });
         };
-        // Events that came before the reply, for this search only, are delivered now and in order.
+        // Events that came before the reply, for this search only, are delivered now and in order. One that is
+        // already the search's `done` ends it here, as it would in route_search.
         let early = {
             let mut r = locked(&self.routes);
             r.search_id = Some(id);
             std::mem::take(&mut r.early)
         };
         for data in early.into_iter().filter(|data| event_id(data) == Some(id)) {
+            let done = is_done(&data);
             sink(data);
+            if done {
+                let mut r = locked(&self.routes);
+                r.search = None;
+                r.search_id = None;
+                break;
+            }
         }
         Ok(answer)
     }
@@ -439,7 +499,7 @@ impl Remote {
             r.watch = Some(sink);
             r.watch_dirs = None;
         }
-        let answer = client.call("fs_watch_start", json!({}), None);
+        let answer = self.settle(client.call("fs_watch_start", json!({}), None));
         if answer.is_err() {
             self.clear_watch();
         }
@@ -448,7 +508,7 @@ impl Remote {
 
     pub fn watch_set(&self, connector: &dyn Connector, dirs: Vec<String>) -> R<Value> {
         let client = self.folder_client(connector)?;
-        let answer = client.call("fs_watch_set", json!({"dirs": dirs}), None)?;
+        let answer = self.settle(client.call("fs_watch_set", json!({"dirs": dirs}), None))?;
         locked(&self.routes).watch_dirs = Some(dirs);
         Ok(answer)
     }
@@ -461,11 +521,13 @@ impl Remote {
         }
     }
 
-    /// Forgets the open folder and closes the channel. Blocks while the channel's threads wind down, so callers
-    /// off the UI thread use it.
+    /// Forgets the open folder and closes the channel. It takes no connect gate and never waits for a connect in
+    /// progress: a connect that is still running sees the new generation and closes its own channel. Blocks only
+    /// while the channel that existed is wound down, so callers off the UI thread use it.
     pub fn reset(&self) {
         let client = {
             let mut session = locked(&self.session);
+            session.generation += 1;
             session.folder = None;
             session.client.take()
         };
@@ -513,20 +575,30 @@ pub fn reset() {
     remote().reset();
 }
 
-/// Runs an Explorer command. In SSH mode it goes to the server; otherwise `local` runs with the active project
-/// root, exactly as before. The result is the command's JSON either way.
-pub async fn dispatch<T, F>(cmd: &'static str, args: Value, local: F) -> R<Value>
+/// Runs an Explorer command. In SSH mode it goes to the server: `args` builds the UI's argument object from the
+/// request, and only on this branch. Otherwise `local` runs with the active project root, exactly as before. The
+/// request is moved into whichever branch runs. `needs_local_mode` keeps the file commands' hub-mode refusal; the git,
+/// search and watch commands never had it, so they pass `false`.
+pub async fn dispatch<Q, T>(
+    cmd: &'static str,
+    needs_local_mode: bool,
+    req: Q,
+    args: impl FnOnce(&Q) -> Value + Send + 'static,
+    local: impl FnOnce(PathBuf, Q) -> R<T> + Send + 'static,
+) -> R<Value>
 where
+    Q: Send + 'static,
     T: Serialize,
-    F: FnOnce(PathBuf) -> R<T> + Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(move || {
         if is_ssh_mode() {
-            return remote().call(&LinkConnector, cmd, args, &native_dialog);
+            return remote().call(&LinkConnector, cmd, args(&req), &native_dialog);
         }
-        crate::core_host::require_local_mode()?;
+        if needs_local_mode {
+            crate::core_host::require_local_mode()?;
+        }
         let root = crate::fs_ops::active_root()?;
-        to_json(&local(root)?)
+        to_json(&local(root, req)?)
     })
     .await
     .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?

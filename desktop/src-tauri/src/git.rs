@@ -13,28 +13,33 @@ use serde_json::Value;
 
 use crate::workspace_backend::dispatch;
 
-/// Runs a Source Control command against the repository the project resolves to. `args` is the UI's argument object,
-/// sent unchanged in SSH mode; the local closure gets the repository root and never runs there.
-pub(crate) async fn blocking_scm<T, F>(cmd: &'static str, args: Value, f: F) -> R<Value>
+/// Runs a Source Control command against the repository the project resolves to. `req` is the request the UI's
+/// arguments describe; `args` builds that argument object, and runs only in SSH mode. The local closure gets the
+/// repository and the request. Git never had the hub-mode refusal, so none is added here.
+pub(crate) async fn blocking_scm<Q, T, A, F>(cmd: &'static str, req: Q, args: A, f: F) -> R<Value>
 where
+    Q: Send + 'static,
     T: Serialize + Send + 'static,
-    F: FnOnce(ScmRoot) -> R<T> + Send + 'static,
+    A: FnOnce(&Q) -> Value + Send + 'static,
+    F: FnOnce(ScmRoot, Q) -> R<T> + Send + 'static,
 {
-    dispatch(cmd, args, move |root| f(scm_root(&root))).await
+    dispatch(cmd, false, req, args, move |root, req| f(scm_root(&root), req)).await
 }
 
 /// For commands that carry no file path: they run in the repository root.
-pub(crate) async fn blocking<T, F>(cmd: &'static str, args: Value, f: F) -> R<Value>
+pub(crate) async fn blocking<Q, T, A, F>(cmd: &'static str, req: Q, args: A, f: F) -> R<Value>
 where
+    Q: Send + 'static,
     T: Serialize + Send + 'static,
-    F: FnOnce(PathBuf) -> R<T> + Send + 'static,
+    A: FnOnce(&Q) -> Value + Send + 'static,
+    F: FnOnce(PathBuf, Q) -> R<T> + Send + 'static,
 {
-    blocking_scm(cmd, args, move |s| f(s.repo)).await
+    blocking_scm(cmd, req, args, move |s, req| f(s.repo, req)).await
 }
 
 #[tauri::command]
 pub async fn git_status() -> R<Value> {
-    blocking_scm("git_status", serde_json::json!({}), |s| {
+    blocking_scm("git_status", (), |_| serde_json::json!({}), |s, ()| {
         let mut st = status(&s.repo)?;
         for e in &mut st.entries {
             e.path = s.to_project(&e.path);
@@ -47,18 +52,15 @@ pub async fn git_status() -> R<Value> {
 
 #[tauri::command]
 pub async fn git_diff(req: DiffReq) -> R<Value> {
-    let args = serde_json::json!({"req": req});
-    blocking_scm("git_diff", args, move |s| diff(&s.repo, &s.to_repo(&req.path)?, req.staged)).await
+    blocking_scm("git_diff", req, |r| serde_json::json!({"req": r}), |s, req| diff(&s.repo, &s.to_repo(&req.path)?, req.staged)).await
 }
 
 #[tauri::command]
 pub async fn git_show(req: ShowReq) -> R<Value> {
-    let args = serde_json::json!({"req": req});
-    blocking_scm("git_show", args, move |s| show(&s.repo, &s.to_repo(&req.path)?, &req.rev)).await
+    blocking_scm("git_show", req, |r| serde_json::json!({"req": r}), |s, req| show(&s.repo, &s.to_repo(&req.path)?, &req.rev)).await
 }
 
 #[tauri::command]
 pub async fn git_stage(req: StageReq) -> R<Value> {
-    let args = serde_json::json!({"req": req});
-    blocking_scm("git_stage", args, move |s| stage(&s.repo, &s.to_repo_all(&req.paths)?, req.stage)).await
+    blocking_scm("git_stage", req, |r| serde_json::json!({"req": r}), |s, req| stage(&s.repo, &s.to_repo_all(&req.paths)?, req.stage)).await
 }

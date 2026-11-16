@@ -402,10 +402,10 @@ pub(crate) fn process_mode_guard() -> MutexGuard<'static, ()> {
     tests::mode_guard()
 }
 
-/// Sets `MODE` directly, for tests of commands that read it without a host.
+/// Sets `MODE` directly to a server mode value (0 local, 1 remote, 2 ssh), for tests of commands that read it.
 #[cfg(test)]
-pub(crate) fn set_process_mode(ssh: bool) {
-    MODE.store(if ssh { 2 } else { 0 }, Ordering::SeqCst);
+pub(crate) fn set_process_mode(value: u8) {
+    MODE.store(value, Ordering::SeqCst);
 }
 
 /// The value `MODE` and `Inner::mode` store for a server mode: 0 local, 1 remote, 2 ssh.
