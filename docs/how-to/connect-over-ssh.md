@@ -41,13 +41,24 @@ You can connect from the Welcome screen or from Settings. Both use the same form
 3. When the connection works, the dialog asks **Switch to this server now?**. Connect has already saved the
    server and its host key, but not the mode, so the app is still local at this point. If the app is already in
    SSH server mode, Connect attaches at once and there is nothing to switch.
-   - **Switch**: saves SSH server mode and restarts the app. The next start opens the server home.
+   - **Switch**: restarts the app into SSH server mode for this session, and the server home opens. SSH mode
+     lasts for this session only (see [Start screen](#start-screen)).
    - **Cancel**: changes nothing. The app stays local, and the next start is local too. The server stays saved.
      To switch later, connect again (from Welcome or Settings) and choose **Switch**.
 
+### Start screen
+
+Every start of the app opens the local Welcome screen, with your local recent projects on top. SSH mode is
+for the session you switch into: the app saves the start mode back to local as it starts in SSH mode, so the
+next start, including one after a crash, opens the local Welcome screen again. To return to the Welcome screen
+during an SSH session, use **Close server** (see [Disconnect, stop and uninstall](#disconnect-stop-and-uninstall)).
+
 ### Recent SSH servers
 
-The Welcome screen lists up to 10 saved servers, most recent first. **Connect** on a row connects at once for
+The Welcome screen lists up to 10 saved servers, most recent first, under **Connect to SSH server**. **Connect**
+on a row opens the connect flow for that server: a key login connects at once, and a password login asks for
+the password first. Then the dialog offers **Switch to this server now**. **Connect to SSH server…** opens the
+dialog for a new server. **Connect** on a row connects at once for
 a key login. A password login opens the dialog and asks only for the password. **Edit** opens the dialog
 filled in. **Forget** removes the server, its recent folders, and its saved host key, unless another saved
 server uses the same host.
@@ -73,8 +84,8 @@ server uses the same host.
 
 Connect saves the server, its host key and its entry in the recent list. It does not change the mode. To use
 the server, choose **Switch to this server now** (Welcome screen) or the same switch in Settings. That saves SSH
-server mode and restarts the app. The new mode applies at the next start, and the app restarts only after you
-confirm the switch. If you cancel, the app keeps its current mode.
+server mode and restarts the app into SSH mode for this session. The app restarts only after you confirm the
+switch. If you cancel, the app keeps its current mode. The next start after that opens the local Welcome screen.
 
 ## Login methods
 
@@ -107,12 +118,13 @@ on this computer. The server may keep the public line, which does nothing withou
 
 ## Disconnect, stop and uninstall
 
-These three actions do different things. The server core keeps running until you stop it, or until a
-connect after an app update replaces it with the new version (see [Updates](#updates)).
+These actions do different things. The server core keeps running until you stop it, or until a connect after an
+app update replaces it with the new version (see [Updates](#updates)).
 
 | Action | Effect on this computer | Effect on the server |
 |---|---|---|
 | **Disconnect** | Closes the forward, the file-helper channel and the server terminals. | Nothing. The core keeps running. |
+| **Close server** | Closes the connection as Disconnect does, then restarts the app. The app opens the local Welcome screen. Unsaved work in the open folder is checked first. | Nothing. The core keeps running, so connecting again is quick. |
 | **Stop server** | Closes the forward, the file-helper channel and the server terminals. | Stops the core. |
 | **Uninstall…** | Closes the forward, the file-helper channel and the server terminals. | Stops the core and removes the installed releases. Your data is kept. You must type the server's host name to confirm. |
 
@@ -138,15 +150,19 @@ To delete the server's data after Uninstall, remove the folder by hand on the se
 
 ## Work on the server
 
-After you switch to the server, the Welcome screen shows the server home instead of the local project list.
+During an SSH session, the Welcome screen shows the server home instead of the local project list. The next start
+opens the local Welcome screen again.
 
 ### Server home
 
-The server home shows the connection state, with **Disconnect** and **Stop server**, and the server's user, the
+The server home shows the connection state, with **Disconnect**, **Close server** and **Stop server**, and the server's user, the
 core version and the Claude CLI version. When the link needs a password, a password field appears on this
 screen. **Open folder…** is available only while the link is connected. Below it, the page lists up to 10
 recent folders on this server. A folder that is no longer there is marked `This folder is no longer on the server.`
 and has a **Remove** button. **Continue** appears when a folder is open and returns you to the app's home section.
+
+**Close server** asks `Close the connection to <host> and return to the Welcome page? The server keeps running.`
+Choose **Close** to return to the local Welcome screen, or **Cancel** to stay. It does not stop the server core.
 
 ### Folder picker
 
