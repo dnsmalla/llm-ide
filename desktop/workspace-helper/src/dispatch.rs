@@ -1119,6 +1119,8 @@ mod tests {
         use_fake_git(&mut f, REFUSING_GIT);
         let marker = "ghp_TOKEN_MARKER_7731";
         let grant_marker = "grant_GRANT_MARKER_4412";
+        let key_marker = "fe".repeat(32);
+        let key_marker = key_marker.as_str();
         // A refused token: the clone retries anonymously, fails, and the event carries git's error only.
         let started = start_clone(&mut f, 1, "o/r");
         let refused = clone_event(&f.captured, started);
@@ -1126,8 +1128,14 @@ mod tests {
         assert_eq!(refused["code"], "clone_failed");
         // A refused grant: with no state file the redeem fails, the clone runs anonymously and is refused, and the
         // event says the saved token could not be used. The grant itself is never echoed.
+        // The key marker is a real key here: the core refuses the redeem, so the key was sent but must not be echoed.
+        let (core, sent) = crate::clone_credential::test_server::serve_once(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 2\r\n\r\n{}".to_vec());
+        write_state(&f.home, core.port());
+        write_key(&f.home, key_marker);
         let granted = start_grant_clone(&mut f, 3, "o/r", None, grant_marker);
         let granted = clone_event(&f.captured, granted);
+        let sent = sent.join().unwrap();
+        assert!(sent.contains(&format!("x-llmide-redeem-key: {key_marker}")), "the key was sent to the core: {sent}");
         assert_eq!(granted["code"], "clone_failed");
         assert_eq!(granted["message"], SAVED_TOKEN_REFUSED_MESSAGE);
         // A bad URL with the token set is refused synchronously.
@@ -1137,7 +1145,7 @@ mod tests {
         assert!(text.contains("Authentication failed"), "the refused run really ran: {text}");
         let github = llmide_workspace_core::project::clone::base64(format!("x-access-token:{marker}").as_bytes());
         let gitlab = llmide_workspace_core::project::clone::base64(format!("oauth2:{marker}").as_bytes());
-        for form in [marker.to_string(), github, gitlab, grant_marker.to_string()] {
+        for form in [marker.to_string(), github, gitlab, grant_marker.to_string(), key_marker.to_string()] {
             assert!(!text.contains(&form), "the token, its encoded form or the grant reached the helper's output: {text}");
         }
     }
@@ -1153,15 +1161,29 @@ mod tests {
         started["id"].as_u64().expect("started carries the clone id")
     }
 
-    /// Writes the server's state file the way the start script does: owner-only, naming the core's port and nonce.
+    /// The redeem key the core writes, as hex. The tests send it to a loopback server and check it reaches the header.
+    const KEY_HEX: &str = "9a8b7c6d5e4f30291a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081";
+
+    /// Writes the server's state file the way the start script does: owner-only, naming the core's port.
     #[cfg(unix)]
-    fn write_state(home: &Path, port: u16, nonce: &str) {
+    fn write_state(home: &Path, port: u16) {
         use std::os::unix::fs::PermissionsExt;
         let dir = home.join(".llmide-server");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("state.json");
-        let text = format!(r#"{{"running":true,"port":{port},"pid":1,"nonce":"{nonce}","version":"test"}}"#);
+        let text = format!(r#"{{"running":true,"port":{port},"pid":1,"nonce":"health-nonce-is-not-used","version":"test"}}"#);
         std::fs::write(&path, text).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    /// Writes the core's redeem key file: owner-only, one line of 64 hex characters.
+    #[cfg(unix)]
+    fn write_key(home: &Path, key: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = home.join(".llmide-server").join("data");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("clone-redeem.key");
+        std::fs::write(&path, format!("{key}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
 
@@ -1188,7 +1210,8 @@ mod tests {
         f.open_new_project();
         let saved = "ghp_SAVED_TOKEN_5521";
         let (core, seen) = crate::clone_credential::test_server::serve_once(token_answer(saved));
-        write_state(&f.home, core.port(), "ab12cd34");
+        write_state(&f.home, core.port());
+        write_key(&f.home, KEY_HEX);
         let calls = f.outside.join("calls.txt");
         use_fake_git(&mut f, &recording_git(&calls));
         let id = start_grant_clone(&mut f, 1, "o/r", None, "grant_OK_1");
@@ -1198,7 +1221,8 @@ mod tests {
         let encoded = llmide_workspace_core::project::clone::base64(format!("x-access-token:{saved}").as_bytes());
         assert!(header.contains(&encoded), "git got the saved token in its header: {header}");
         let request = seen.join().unwrap();
-        assert!(request.contains("x-llmide-core-nonce: ab12cd34"), "{request}");
+        assert!(request.contains(&format!("x-llmide-redeem-key: {KEY_HEX}")), "{request}");
+        assert!(!request.to_ascii_lowercase().contains("x-llmide-core-nonce"), "the health nonce is never sent: {request}");
         assert!(request.ends_with(r#"{"grant":"grant_OK_1"}"#), "{request}");
         let text = String::from_utf8(f.captured.lock().unwrap().clone()).unwrap();
         assert!(!text.contains(saved) && !text.contains(&encoded), "the saved token is in no helper output: {text}");
@@ -1210,7 +1234,8 @@ mod tests {
         let mut f = Fixture::new("clone-grant-refused");
         f.open_new_project();
         let (core, seen) = crate::clone_credential::test_server::serve_once(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 2\r\n\r\n{}".to_vec());
-        write_state(&f.home, core.port(), "ab12cd34");
+        write_state(&f.home, core.port());
+        write_key(&f.home, KEY_HEX);
         let calls = f.outside.join("calls.txt");
         use_fake_git(&mut f, &recording_git(&calls));
         let id = start_grant_clone(&mut f, 1, "o/r", None, "grant_BAD_2");
@@ -1227,7 +1252,8 @@ mod tests {
         f.open_new_project();
         let saved = "ghp_BLANK_CASE_6610";
         let (core, seen) = crate::clone_credential::test_server::serve_once(token_answer(saved));
-        write_state(&f.home, core.port(), "ab12cd34");
+        write_state(&f.home, core.port());
+        write_key(&f.home, KEY_HEX);
         let calls = f.outside.join("calls.txt");
         use_fake_git(&mut f, &recording_git(&calls));
         let id = start_grant_clone(&mut f, 1, "o/r", Some("   "), "grant_BLANK_4");
@@ -1245,7 +1271,8 @@ mod tests {
         let mut f = Fixture::new("clone-typed-wins");
         f.open_new_project();
         let (core, seen) = crate::clone_credential::test_server::serve_once(token_answer("ghp_NOT_USED"));
-        write_state(&f.home, core.port(), "ab12cd34");
+        write_state(&f.home, core.port());
+        write_key(&f.home, KEY_HEX);
         let calls = f.outside.join("calls.txt");
         use_fake_git(&mut f, &recording_git(&calls));
         let id = start_grant_clone(&mut f, 1, "o/r", Some("ghp_TYPED_8"), "grant_IGNORED_3");

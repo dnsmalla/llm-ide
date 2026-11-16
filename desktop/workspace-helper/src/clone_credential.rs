@@ -1,40 +1,48 @@
 //! Redeems a clone grant for the saved provider token. The desktop passes only the grant; the token comes from the
-//! server core over loopback, and only this helper holds it. The core's port and nonce come from the 0600 state
-//! file the server start script writes under the server user's home.
+//! server core over loopback, and only this helper holds it. The helper reads the core's port from the 0600 state
+//! file and the redeem key from its own 0600 key file, both under the server user's home.
 //!
-//! The client is std-only HTTP/1.1: one request, one answer, `Connection: close`, a 5 s bound and a 64 KiB cap.
-//! Every failure is a fixed `RedeemError` variant, so no answer text or grant can reach a message.
+//! The redeem key is a secret; the health nonce is not (the core serves it unauthenticated), so it is never used
+//! here. The client is std-only HTTP/1.1: one request, one answer, `Connection: close`, a 5 s bound and a 64 KiB cap.
+//! Every failure is a fixed `RedeemError` variant, so no answer text, grant or key can reach a message.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::os::unix::fs::MetadataExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use llmide_workspace_core::project::clone::Token;
 use serde::Deserialize;
 
-/// Where the server start script keeps the core's port and nonce, relative to the server user's home.
+/// Where the server start script keeps the core's port, relative to the server user's home.
 pub const STATE_FILE_REL: &str = ".llmide-server/state.json";
+/// Where the core keeps the redeem key, relative to the server user's home. One line of 64 hex characters.
+pub const KEY_FILE_REL: &str = ".llmide-server/data/clone-redeem.key";
 /// The core's redeem route. It is never listed in `/health` and carries no JWT.
 pub const REDEEM_PATH: &str = "/internal/clone-credential";
-/// The header that carries the core nonce.
-pub const NONCE_HEADER: &str = "x-llmide-core-nonce";
+/// The header that carries the redeem key.
+pub const REDEEM_KEY_HEADER: &str = "x-llmide-redeem-key";
 /// The longest answer the client reads. A token is a few hundred bytes, so this only bounds a bad core.
 pub const ANSWER_CAP_BYTES: usize = 64 * 1024;
 /// The bound on connecting, on each read and on the whole exchange.
 pub const IO_TIMEOUT: Duration = Duration::from_secs(5);
 /// The longest state file the helper reads. The real file is a few hundred bytes.
 const STATE_CAP_BYTES: u64 = 64 * 1024;
-/// The longest nonce accepted. A hex nonce from the core is 64 characters.
-const NONCE_MAX_CHARS: usize = 256;
+/// The longest key file the helper reads. The key is 64 hex characters plus a line end.
+const KEY_CAP_BYTES: u64 = 256;
+/// The length of a redeem key: 64 hex characters.
+const KEY_HEX_LEN: usize = 64;
 
-/// Why a redeem did not yield a token. None of the variants carries text from the state file or the answer.
+/// Why a redeem did not yield a token. None of the variants carries text from the files, the grant, the key or the
+/// answer.
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedeemError {
-    /// The state file is missing, not a plain file, too large, not JSON, or lacks a usable port or nonce.
+    /// The state file is missing, not a plain file, too large, not JSON, or lacks a usable port.
     State,
-    /// The state file is not owned by the helper's user, or group or other can read it.
+    /// The key file is missing, not a plain file, too large, or not one line of 64 hex characters.
+    Key,
+    /// A file is not owned by the helper's user, or group or other can read it.
     Unsafe,
     /// The core could not be reached on loopback.
     Unreachable,
@@ -44,21 +52,33 @@ pub enum RedeemError {
     Oversize,
     /// The core answered something other than 200.
     Refused,
-    /// A 200 whose body is not `{"token": "..."}` with a usable token.
+    /// A 200 whose body is not `{"token": "..."}` with a usable token, or whose chunked framing is broken.
     BadAnswer,
 }
 
-/// The core's port and nonce, read from the state file.
+/// The core's port, read from the state file.
 #[derive(Debug, PartialEq, Eq)]
 pub struct CoreState {
     pub port: u16,
-    pub nonce: String,
+}
+
+/// The two files a redeem reads, under the server user's home.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedeemFiles {
+    pub state: PathBuf,
+    pub key: PathBuf,
+}
+
+impl RedeemFiles {
+    /// The state and key files under `home`, where the server start script and the core put them.
+    pub fn under_home(home: &Path) -> Self {
+        Self { state: home.join(STATE_FILE_REL), key: home.join(KEY_FILE_REL) }
+    }
 }
 
 #[derive(Deserialize)]
 struct StateFile {
     port: u16,
-    nonce: String,
 }
 
 #[derive(Deserialize)]
@@ -66,62 +86,92 @@ struct Answer {
     token: Token,
 }
 
-/// The helper's own effective user. The state file must belong to it.
+/// The helper's own effective user. The files must belong to it.
 fn effective_uid() -> u32 {
     // SAFETY: geteuid reads no memory and cannot fail.
     unsafe { libc::geteuid() }
 }
 
-/// Reads the core's port and nonce from the state file at `path`. `expected_uid` is the helper's own user.
+/// Reads a file that must be a plain file owned by `expected_uid`, readable by nobody else, and no longer than `cap`.
 /// A symlink is refused: the owner and mode checks must apply to the file the helper actually reads.
-pub fn read_state(path: &Path, expected_uid: u32) -> Result<CoreState, RedeemError> {
+fn read_private_file(path: &Path, expected_uid: u32, cap: u64) -> Result<String, RedeemError> {
     let meta = std::fs::symlink_metadata(path).map_err(|_| RedeemError::State)?;
     if !meta.file_type().is_file() {
         return Err(RedeemError::State);
     }
-    check_state_owner(meta.uid(), meta.mode(), expected_uid)?;
-    let file = std::fs::File::open(path).map_err(|_| RedeemError::State)?;
-    let mut text = String::new();
-    file.take(STATE_CAP_BYTES + 1).read_to_string(&mut text).map_err(|_| RedeemError::State)?;
-    if text.len() as u64 > STATE_CAP_BYTES {
+    check_private_file(meta.uid(), meta.mode(), expected_uid)?;
+    if meta.len() > cap {
         return Err(RedeemError::State);
     }
-    parse_state(&text)
+    let file = std::fs::File::open(path).map_err(|_| RedeemError::State)?;
+    let mut text = String::new();
+    file.take(cap + 1).read_to_string(&mut text).map_err(|_| RedeemError::State)?;
+    if text.len() as u64 > cap {
+        return Err(RedeemError::State);
+    }
+    Ok(text)
 }
 
-/// Checks the owner and permission bits of a state file: the helper's user must own it, and no group or other bits
+/// Reads the core's port from the state file at `path`. `expected_uid` is the helper's own user.
+pub fn read_state(path: &Path, expected_uid: u32) -> Result<CoreState, RedeemError> {
+    parse_state(&read_private_file(path, expected_uid, STATE_CAP_BYTES)?)
+}
+
+/// Reads the redeem key from the key file at `path`. Its text is returned only inside a redacting `Token`.
+pub fn read_key(path: &Path, expected_uid: u32) -> Result<Token, RedeemError> {
+    let text = read_private_file(path, expected_uid, KEY_CAP_BYTES).map_err(|e| match e {
+        RedeemError::State => RedeemError::Key,
+        other => other,
+    })?;
+    parse_key(&text)
+}
+
+/// Checks the owner and permission bits of a private file: `expected_uid` must own it, and no group or other bits
 /// may be set. Pure, so the refusal can be tested without a file owned by someone else.
-pub fn check_state_owner(file_uid: u32, mode: u32, expected_uid: u32) -> Result<(), RedeemError> {
+pub fn check_private_file(file_uid: u32, mode: u32, expected_uid: u32) -> Result<(), RedeemError> {
     if file_uid != expected_uid || mode & 0o077 != 0 {
         return Err(RedeemError::Unsafe);
     }
     Ok(())
 }
 
-/// Parses the state file's JSON. Extra fields are ignored; the nonce must be non-empty hex, and the port non-zero.
+/// Parses the state file's JSON. Extra fields are ignored; the port must be non-zero.
 pub fn parse_state(text: &str) -> Result<CoreState, RedeemError> {
     let file: StateFile = serde_json::from_str(text).map_err(|_| RedeemError::State)?;
-    let nonce_ok = !file.nonce.is_empty() && file.nonce.len() <= NONCE_MAX_CHARS && file.nonce.chars().all(|c| c.is_ascii_hexdigit());
-    if file.port == 0 || !nonce_ok {
+    if file.port == 0 {
         return Err(RedeemError::State);
     }
-    Ok(CoreState { port: file.port, nonce: file.nonce })
+    Ok(CoreState { port: file.port })
 }
 
-/// Redeems `grant` with the core named by the state file at `state_path`: reads the state, then calls the core.
-pub fn redeem(state_path: &Path, grant: &Token) -> Result<Token, RedeemError> {
-    let state = read_state(state_path, effective_uid())?;
+/// Parses the key file's text: one line, trimmed, exactly 64 hex characters.
+fn parse_key(text: &str) -> Result<Token, RedeemError> {
+    let key = text.trim();
+    if key.len() != KEY_HEX_LEN || !key.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(RedeemError::Key);
+    }
+    Ok(Token::from(key))
+}
+
+/// Redeems `grant` with the core: reads the key and the port from `files`, then calls the core on loopback.
+pub fn redeem(files: &RedeemFiles, grant: &Token) -> Result<Token, RedeemError> {
+    let uid = effective_uid();
+    let key = read_key(&files.key, uid)?;
+    let state = read_state(&files.state, uid)?;
     let addr = SocketAddr::from(([127, 0, 0, 1], state.port));
-    redeem_at(addr, &state.nonce, grant, IO_TIMEOUT)
+    redeem_at(addr, &key, grant, IO_TIMEOUT)
 }
 
-/// Sends one redeem request to `addr` with `nonce` and reads the answer. `timeout` bounds the whole exchange.
-pub fn redeem_at(addr: SocketAddr, nonce: &str, grant: &Token, timeout: Duration) -> Result<Token, RedeemError> {
-    // The grant goes only into the request body; the core is the one that checks it.
+/// Sends one redeem request to `addr`, authenticated by `key`, and reads the answer. `timeout` bounds the whole
+/// exchange.
+pub fn redeem_at(addr: SocketAddr, key: &Token, grant: &Token, timeout: Duration) -> Result<Token, RedeemError> {
+    // The grant and the key go only into the request; the core is the one that checks them. The key is hex-checked
+    // when it is read, so it cannot break the header line.
     let body = serde_json::json!({ "grant": grant.expose() }).to_string();
     let request = format!(
-        "POST {REDEEM_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{NONCE_HEADER}: {nonce}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
+        "POST {REDEEM_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{REDEEM_KEY_HEADER}: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len(),
+        key.expose()
     );
     let deadline = Instant::now() + timeout;
     let mut stream = TcpStream::connect_timeout(&addr, timeout).map_err(|_| RedeemError::Unreachable)?;
@@ -298,67 +348,140 @@ pub mod test_server {
 mod tests {
     use super::*;
 
-    const NONCE: &str = "00ff11ee22dd33cc44bb55aa66998877aabbccddeeff00112233445566778899";
+    /// A 64-hex key, the shape the core writes to the key file. Its text must never show in any output.
+    const KEY_HEX: &str = "9a8b7c6d5e4f30291a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081";
 
-    fn state_json(port: &str, nonce: &str) -> String {
-        format!(r#"{{"running":true,"port":{port},"pid":4242,"nonce":"{nonce}","version":"1.2.3"}}"#)
+    fn key() -> Token {
+        Token::from(KEY_HEX)
+    }
+
+    fn grant() -> Token {
+        Token::from("grant_abc123")
+    }
+
+    fn state_json(port: &str) -> String {
+        format!(r#"{{"running":true,"port":{port},"pid":4242,"nonce":"unused-by-the-helper","version":"1.2.3"}}"#)
+    }
+
+    /// A private scratch folder for the file tests, named by the test.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("llmide-redeem-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_private(path: &Path, text: &str, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, text).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
     }
 
     #[test]
-    fn the_state_file_gives_the_port_and_nonce_and_extra_fields_are_ignored() {
-        let state = parse_state(&state_json("3456", NONCE)).unwrap();
-        assert_eq!(state, CoreState { port: 3456, nonce: NONCE.into() });
+    fn the_state_file_gives_the_port_and_extra_fields_are_ignored() {
+        assert_eq!(parse_state(&state_json("3456")).unwrap(), CoreState { port: 3456 });
     }
 
     #[test]
-    fn a_state_file_without_a_usable_port_or_nonce_is_refused() {
+    fn a_state_file_without_a_usable_port_is_refused() {
         assert_eq!(parse_state("not json"), Err(RedeemError::State));
         assert_eq!(parse_state(r#"{"nonce":"ab"}"#), Err(RedeemError::State), "no port");
-        assert_eq!(parse_state(&state_json("0", NONCE)), Err(RedeemError::State), "port zero");
-        assert_eq!(parse_state(&state_json("70000", NONCE)), Err(RedeemError::State), "port out of range");
-        assert_eq!(parse_state(&state_json("3456", "")), Err(RedeemError::State), "empty nonce");
-        assert_eq!(parse_state(&state_json("3456", "zz")), Err(RedeemError::State), "nonce not hex");
-        let long = "a".repeat(NONCE_MAX_CHARS + 1);
-        assert_eq!(parse_state(&state_json("3456", &long)), Err(RedeemError::State), "nonce too long");
+        assert_eq!(parse_state(&state_json("0")), Err(RedeemError::State), "port zero");
+        assert_eq!(parse_state(&state_json("70000")), Err(RedeemError::State), "port out of range");
     }
 
     #[test]
-    fn a_nonce_with_a_line_break_cannot_reach_a_header() {
-        assert_eq!(parse_state(&state_json("3456", "ab\\r\\nx-evil: 1")), Err(RedeemError::State));
-    }
-
-    #[test]
-    fn the_state_file_must_belong_to_the_helper_user_and_be_private() {
-        assert_eq!(check_state_owner(501, 0o600, 501), Ok(()));
-        assert_eq!(check_state_owner(0, 0o600, 501), Err(RedeemError::Unsafe), "another owner");
-        assert_eq!(check_state_owner(501, 0o640, 501), Err(RedeemError::Unsafe), "group can read");
-        assert_eq!(check_state_owner(501, 0o604, 501), Err(RedeemError::Unsafe), "others can read");
-        assert_eq!(check_state_owner(501, 0o700, 501), Ok(()), "owner-only bits are fine");
+    fn the_files_must_belong_to_the_helper_user_and_be_private() {
+        assert_eq!(check_private_file(501, 0o600, 501), Ok(()));
+        assert_eq!(check_private_file(0, 0o600, 501), Err(RedeemError::Unsafe), "another owner");
+        assert_eq!(check_private_file(501, 0o640, 501), Err(RedeemError::Unsafe), "group can read");
+        assert_eq!(check_private_file(501, 0o604, 501), Err(RedeemError::Unsafe), "others can read");
+        assert_eq!(check_private_file(501, 0o700, 501), Ok(()), "owner-only bits are fine");
     }
 
     #[test]
     fn read_state_refuses_a_missing_file_a_symlink_and_a_public_file() {
-        let dir = std::env::temp_dir().join(format!("llmide-redeem-state-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let uid = unsafe { libc::geteuid() };
+        let dir = scratch("state");
+        let uid = effective_uid();
         assert_eq!(read_state(&dir.join("missing.json"), uid), Err(RedeemError::State));
         let public = dir.join("public.json");
-        std::fs::write(&public, state_json("3456", NONCE)).unwrap();
-        std::fs::set_permissions(&public, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+        write_private(&public, &state_json("3456"), 0o644);
         assert_eq!(read_state(&public, uid), Err(RedeemError::Unsafe));
         let private = dir.join("state.json");
-        std::fs::write(&private, state_json("3456", NONCE)).unwrap();
-        std::fs::set_permissions(&private, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
-        assert_eq!(read_state(&private, uid).unwrap(), CoreState { port: 3456, nonce: NONCE.into() });
+        write_private(&private, &state_json("3456"), 0o600);
+        assert_eq!(read_state(&private, uid).unwrap(), CoreState { port: 3456 });
         let link = dir.join("link.json");
         std::os::unix::fs::symlink(&private, &link).unwrap();
         assert_eq!(read_state(&link, uid), Err(RedeemError::State), "a symlink is not the state file");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    fn grant() -> Token {
-        Token::from("grant_abc123")
+    #[test]
+    fn the_key_file_is_one_64_hex_line_read_trimmed() {
+        let dir = scratch("key-ok");
+        let path = dir.join("clone-redeem.key");
+        write_private(&path, &format!("{KEY_HEX}\n"), 0o600);
+        let read = read_key(&path, effective_uid()).unwrap();
+        assert_eq!(read.expose(), KEY_HEX);
+        assert!(!format!("{read:?}{read}").contains(KEY_HEX), "the key never shows in Debug or Display");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_key_file_is_a_key_error() {
+        let dir = scratch("key-missing");
+        assert_eq!(read_key(&dir.join("clone-redeem.key"), effective_uid()).unwrap_err(), RedeemError::Key);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_key_file_with_wrong_permissions_is_unsafe() {
+        let dir = scratch("key-perms");
+        let path = dir.join("clone-redeem.key");
+        write_private(&path, KEY_HEX, 0o640);
+        assert_eq!(read_key(&path, effective_uid()).unwrap_err(), RedeemError::Unsafe, "group can read");
+        write_private(&path, KEY_HEX, 0o644);
+        assert_eq!(read_key(&path, effective_uid()).unwrap_err(), RedeemError::Unsafe, "others can read");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_key_that_is_not_one_64_hex_line_is_refused() {
+        let dir = scratch("key-bad");
+        let path = dir.join("clone-redeem.key");
+        let uid = effective_uid();
+        let refused = |text: String| {
+            write_private(&path, &text, 0o600);
+            read_key(&path, uid).unwrap_err()
+        };
+        assert_eq!(refused(KEY_HEX.replacen('9', "z", 1)), RedeemError::Key, "not hex");
+        assert_eq!(refused(KEY_HEX[1..].to_string()), RedeemError::Key, "63 characters");
+        assert_eq!(refused(format!("{KEY_HEX}{KEY_HEX}")), RedeemError::Key, "128 characters");
+        assert_eq!(refused(format!("{KEY_HEX}\n{KEY_HEX}\n")), RedeemError::Key, "two lines");
+        assert_eq!(refused("a".repeat(300)), RedeemError::Key, "over 256 bytes");
+        assert_eq!(refused(String::new()), RedeemError::Key, "empty");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_symlinked_key_file_is_refused() {
+        let dir = scratch("key-link");
+        let real = dir.join("real.key");
+        write_private(&real, KEY_HEX, 0o600);
+        let link = dir.join("clone-redeem.key");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(read_key(&link, effective_uid()).unwrap_err(), RedeemError::Key);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn redeem_without_a_key_file_is_a_key_error_and_sends_nothing() {
+        let dir = scratch("redeem-nokey");
+        let state = dir.join("state.json");
+        write_private(&state, &state_json("9"), 0o600);
+        let files = RedeemFiles { state, key: dir.join("clone-redeem.key") };
+        assert_eq!(redeem(&files, &grant()).unwrap_err(), RedeemError::Key);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -379,50 +502,6 @@ mod tests {
     }
 
     #[test]
-    fn the_client_sends_the_nonce_header_and_the_grant_then_reads_the_token() {
-        let body = r#"{"token":"ghp_OK"}"#;
-        let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len()).into_bytes();
-        let (addr, seen) = test_server::serve_once(response);
-        let token = redeem_at(addr, NONCE, &grant(), IO_TIMEOUT).unwrap();
-        assert_eq!(token.expose(), "ghp_OK");
-        let request = seen.join().unwrap();
-        assert!(request.starts_with("POST /internal/clone-credential HTTP/1.1\r\n"), "{request}");
-        assert!(request.contains(&format!("\r\nx-llmide-core-nonce: {NONCE}\r\n")), "{request}");
-        assert!(request.ends_with(r#"{"grant":"grant_abc123"}"#), "{request}");
-    }
-
-    #[test]
-    fn a_refused_redeem_is_refused() {
-        let (addr, seen) = test_server::serve_once(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 40\r\n\r\n{\"error\":\"clone_credential_refused\"}".to_vec());
-        assert_eq!(redeem_at(addr, NONCE, &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Refused);
-        seen.join().unwrap();
-    }
-
-    #[test]
-    fn a_core_that_never_answers_times_out() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let hold = std::thread::spawn(move || {
-            let (_conn, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_millis(1500));
-        });
-        let started = std::time::Instant::now();
-        let result = redeem_at(addr, NONCE, &grant(), Duration::from_millis(300));
-        assert_eq!(result.unwrap_err(), RedeemError::Timeout);
-        assert!(started.elapsed() < Duration::from_secs(1), "the bound holds");
-        hold.join().unwrap();
-    }
-
-    #[test]
-    fn an_answer_over_the_cap_is_refused() {
-        let body = "x".repeat(ANSWER_CAP_BYTES + 10);
-        let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len()).into_bytes();
-        let (addr, seen) = test_server::serve_once(response);
-        assert_eq!(redeem_at(addr, NONCE, &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Oversize);
-        seen.join().unwrap();
-    }
-
-    #[test]
     fn a_chunked_200_answer_yields_the_token() {
         let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n{\"token\"\r\na\r\n:\"ghp_C1\"}\r\n0\r\n\r\n";
         assert_eq!(parse_answer(raw).unwrap().expose(), "ghp_C1");
@@ -437,10 +516,24 @@ mod tests {
     }
 
     #[test]
-    fn the_client_reads_a_chunked_answer_without_waiting_for_the_close() {
+    fn the_client_sends_the_key_header_and_the_grant_and_never_the_nonce_header() {
+        let body = r#"{"token":"ghp_OK"}"#;
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len()).into_bytes();
+        let (addr, seen) = test_server::serve_once(response);
+        let token = redeem_at(addr, &key(), &grant(), IO_TIMEOUT).unwrap();
+        assert_eq!(token.expose(), "ghp_OK");
+        let request = seen.join().unwrap();
+        assert!(request.starts_with("POST /internal/clone-credential HTTP/1.1\r\n"), "{request}");
+        assert!(request.contains(&format!("\r\nx-llmide-redeem-key: {KEY_HEX}\r\n")), "{request}");
+        assert!(!request.to_ascii_lowercase().contains("x-llmide-core-nonce"), "the health nonce is never sent: {request}");
+        assert!(request.ends_with(r#"{"grant":"grant_abc123"}"#), "{request}");
+    }
+
+    #[test]
+    fn a_chunked_answer_is_read_without_waiting_for_the_close() {
         let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n{\"token\"\r\na\r\n:\"ghp_C2\"}\r\n0\r\n\r\n".to_vec();
         let (addr, seen) = test_server::serve_once(response);
-        assert_eq!(redeem_at(addr, NONCE, &grant(), IO_TIMEOUT).unwrap().expose(), "ghp_C2");
+        assert_eq!(redeem_at(addr, &key(), &grant(), IO_TIMEOUT).unwrap().expose(), "ghp_C2");
         seen.join().unwrap();
     }
 
@@ -449,7 +542,38 @@ mod tests {
         let chunk = "x".repeat(ANSWER_CAP_BYTES);
         let response = format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{chunk}\r\n0\r\n\r\n", chunk.len()).into_bytes();
         let (addr, seen) = test_server::serve_once(response);
-        assert_eq!(redeem_at(addr, NONCE, &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Oversize);
+        assert_eq!(redeem_at(addr, &key(), &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Oversize);
+        seen.join().unwrap();
+    }
+
+    #[test]
+    fn a_refused_redeem_is_refused() {
+        let (addr, seen) = test_server::serve_once(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 40\r\n\r\n{\"error\":\"clone_credential_refused\"}".to_vec());
+        assert_eq!(redeem_at(addr, &key(), &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Refused);
+        seen.join().unwrap();
+    }
+
+    #[test]
+    fn a_core_that_never_answers_times_out() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hold = std::thread::spawn(move || {
+            let (_conn, _) = listener.accept().unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+        });
+        let started = std::time::Instant::now();
+        let result = redeem_at(addr, &key(), &grant(), Duration::from_millis(300));
+        assert_eq!(result.unwrap_err(), RedeemError::Timeout);
+        assert!(started.elapsed() < Duration::from_secs(1), "the bound holds");
+        hold.join().unwrap();
+    }
+
+    #[test]
+    fn an_answer_over_the_cap_is_refused() {
+        let body = "x".repeat(ANSWER_CAP_BYTES + 10);
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len()).into_bytes();
+        let (addr, seen) = test_server::serve_once(response);
+        assert_eq!(redeem_at(addr, &key(), &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Oversize);
         seen.join().unwrap();
     }
 
@@ -460,6 +584,6 @@ mod tests {
             probe.local_addr().unwrap().port()
         };
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        assert_eq!(redeem_at(addr, NONCE, &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Unreachable);
+        assert_eq!(redeem_at(addr, &key(), &grant(), IO_TIMEOUT).unwrap_err(), RedeemError::Unreachable);
     }
 }

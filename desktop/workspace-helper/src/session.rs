@@ -23,7 +23,7 @@ use llmide_workspace_core::{err, io_err, FsError, R};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::clone_credential::{self, RedeemError};
+use crate::clone_credential::{self, RedeemError, RedeemFiles};
 use crate::project_setup;
 use crate::protocol::{event, Out, PROTOCOL};
 
@@ -320,13 +320,13 @@ impl Session {
         };
         let typed = req.token.clone();
         let grant = req.grant.clone();
-        let state_path = default_state_path();
+        let files = default_redeem_files();
         let out = Arc::clone(&self.out);
         let clones = Arc::clone(&self.clones);
         let release = Arc::clone(&self.clones);
         let started = std::thread::Builder::new().name("repo-clone".into()).spawn(move || {
             // The redeem runs here, not before the reply, so the started answer is not held up by it.
-            let (token, redeem_failed) = resolve_token(typed, grant, state_path.as_deref());
+            let (token, redeem_failed) = resolve_token(typed, grant, files.as_ref());
             let ran = catch_unwind(AssertUnwindSafe(|| clone::run(&plan, token.as_ref(), &cancel, &git)));
             let data = match ran {
                 Ok(Ok(done)) => json!({"id": id, "ok": true, "path": done.path, "name": done.name}),
@@ -365,21 +365,21 @@ impl Session {
 /// The token a clone runs with, and whether a grant was given but could not be redeemed. A usable typed token always
 /// wins and no grant is redeemed then. A blank or unusable typed token does not count as one, so the grant is used.
 /// Without a usable typed token, the grant is redeemed on the server core over loopback.
-fn resolve_token(typed: Option<Token>, grant: Option<Token>, state_path: Option<&Path>) -> (Option<Token>, bool) {
+fn resolve_token(typed: Option<Token>, grant: Option<Token>, files: Option<&RedeemFiles>) -> (Option<Token>, bool) {
     if typed.as_ref().is_some_and(Token::is_usable) {
         return (typed, false);
     }
     let Some(grant) = grant else { return (None, false) };
-    let redeemed = state_path.ok_or(RedeemError::State).and_then(|path| clone_credential::redeem(path, &grant));
+    let redeemed = files.ok_or(RedeemError::State).and_then(|files| clone_credential::redeem(files, &grant));
     match redeemed {
         Ok(token) => (Some(token), false),
         Err(_) => (None, true),
     }
 }
 
-/// The server core's state file under the server user's home. `None` when the home folder is unusable.
-fn default_state_path() -> Option<PathBuf> {
-    home_root().ok().map(|home| home.join(clone_credential::STATE_FILE_REL))
+/// The server core's state and key files under the server user's home. `None` when the home folder is unusable.
+fn default_redeem_files() -> Option<RedeemFiles> {
+    home_root().ok().map(|home| RedeemFiles::under_home(&home))
 }
 
 /// Git's refusal of a clone that ran without the saved token says so in plain words. Any other message is kept.
