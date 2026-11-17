@@ -235,7 +235,7 @@
         "order": 8
       }
     ],
-    "maxIterations": 10,
+    "maxIterations": 3,
     "consecutiveFailureStop": 2,
     "wallClockBudgetSeconds": 7200,
     "pauseTimeoutSeconds": 1800,

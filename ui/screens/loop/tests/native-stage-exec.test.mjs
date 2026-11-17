@@ -1069,3 +1069,94 @@ test("the Factory Review message carries unresolved step reviews only when the n
   const without = await reviewed({});
   assert.doesNotMatch(without, /Unresolved step reviews/);
 });
+
+const LOOPBACK = { round: 2, maxRounds: 3, findings: "Round 1 (tests)\nboom" };
+const skillStage = () => stage({ id: "s9", name: "Implement", kind: "skill", command: null, skillId: "skills/writing-plans" });
+
+test("a skill stage re-run after a failed round is told the round and the fenced findings", async () => {
+  const { core, calls } = fakeCore({ reply: "ok", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+  const { ctx } = ctxOf({ core });
+  const s = skillStage();
+  const deps = createStageDeps(ctx, loopOf([s]));
+  await deps.runStage(s, [], LOOPBACK);
+  const message = calls[0][1].body.message;
+  assert.match(message, /Round 2 of 3/);
+  assert.ok(message.includes("```markdown\nRound 1 (tests)\nboom\n```"));
+  await deps.runStage(s, []);
+  assert.doesNotMatch(calls[1][1].body.message, /Round 2 of 3|boom/);
+});
+
+test("a shellCommand stage ignores the loopback context", async () => {
+  const { host, calls } = fakeHost({ loop_run_stage: { exitCode: 0, stdout: "ok", stderr: "", timedOut: false } });
+  const { ctx } = ctxOf({ host });
+  const s = stage();
+  assert.deepEqual(await createStageDeps(ctx, loopOf([s])).runStage(s, [], LOOPBACK), { ok: true, output: "ok" });
+  assert.equal(calls.length, 1);
+});
+
+/** An fs that remembers writes so appended notes can be read back. */
+function notesFs(files) {
+  const writes = [];
+  return {
+    writes,
+    fs: {
+      async read(path) {
+        if (!(path in files)) throw Object.assign(new Error(`not found: ${path}`), { code: "not_found" });
+        return { status: "ok", text: files[path], hash: "h" };
+      },
+      async write(path, text, opts) { writes.push([path, text, opts]); files[path] = text; return { hash: "h2" }; },
+      async list() { return { entries: [] }; },
+      async create() { return {}; },
+    },
+  };
+}
+
+test("recordFindings appends each round to the Factory PLAN.md", async () => {
+  const path = "system/loop-worktrees/r1/.factory/PLAN.md";
+  const files = { [path]: "# Plan\n" };
+  const w = notesFs(files);
+  const { ctx } = ctxOf({ fs: w.fs });
+  const s = skillStage();
+  const deps = createStageDeps(ctx, loopOf([s]));
+  await deps.recordFindings(s, { round: 1, source: "tests", text: "boom" });
+  assert.equal(files[path], "# Plan\n\n## Findings to fix (round 1, tests)\n\nboom\n");
+  await deps.recordFindings(s, { round: 2, source: "review", text: "fix x" });
+  assert.equal(files[path], "# Plan\n\n## Findings to fix (round 1, tests)\n\nboom\n\n## Findings to fix (round 2, review)\n\nfix x\n");
+});
+
+test("recordFindings writes .factory/FINDINGS.md (forced) for a non-Factory loop or a Factory without a plan", async () => {
+  for (const loop of [{ ...loopOf([skillStage()]), defaultKey: "regression" }, loopOf([skillStage()])]) {
+    const w = notesFs({});
+    const { ctx } = ctxOf({ fs: w.fs });
+    await createStageDeps(ctx, loop).recordFindings(skillStage(), { round: 1, source: "tests", text: "boom" });
+    assert.equal(w.writes.length, 1);
+    assert.equal(w.writes[0][0], "system/loop-worktrees/r1/.factory/FINDINGS.md");
+    assert.equal(w.writes[0][1], "## Findings to fix (round 1, tests)\n\nboom\n");
+    assert.equal(w.writes[0][2].force, true);
+  }
+});
+
+test("recordFindings logs a failed write and does not throw", async () => {
+  const fs = { async read() { throw Object.assign(new Error("nf"), { code: "not_found" }); }, async write() { throw new Error("disk full"); }, async list() { return { entries: [] }; }, async create() { return {}; } };
+  const { ctx, log } = ctxOf({ fs });
+  await createStageDeps(ctx, loopOf([skillStage()])).recordFindings(skillStage(), { round: 1, source: "tests", text: "boom" });
+  assert.ok(log.some((line) => /findings notes not written/.test(line)));
+});
+
+test("recordFindings never writes over a PLAN.md it could not read", async () => {
+  const writes = [];
+  const fs = {
+    async read(path) {
+      if (path.endsWith(".factory/PLAN.md")) throw new Error("EIO");
+      throw Object.assign(new Error("nf"), { code: "not_found" });
+    },
+    async write(path, text) { writes.push(path); return {}; },
+    async list() { return { entries: [] }; },
+    async create() { return {}; },
+  };
+  const { ctx, log } = ctxOf({ fs });
+  await createStageDeps(ctx, loopOf([skillStage()])).recordFindings(skillStage(), { round: 1, source: "tests", text: "boom" });
+  assert.equal(writes.some((path) => path.endsWith("PLAN.md")), false);
+  assert.deepEqual(writes, ["system/loop-worktrees/r1/.factory/FINDINGS.md"]);
+  assert.ok(log.some((line) => /PLAN\.md could not be read/.test(line)));
+});

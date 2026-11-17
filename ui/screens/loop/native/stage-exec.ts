@@ -8,7 +8,8 @@ import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { guardedAgentCall, type AgentWrites, type GuardedCallOutcome } from "./agent-call.ts";
 import { evaluateArtifact } from "./artifact.ts";
 import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
-import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, REFACTOR_MOVE_SKILLS, agentRunBody, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
+import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, agentRunBody, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
+import type { FindingsEntry, LoopbackContext } from "./loopback.ts";
 import { importOnlyFiles } from "./import-only.ts";
 import { followsRegistry, registrySource, stagePromptText } from "./default-stage.ts";
 import { graphDigest, rulesDigest } from "./graph-digest.ts";
@@ -182,7 +183,7 @@ function factoryReportPath(s: LoopStage): string | null {
 }
 
 
-async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinition, halt: HaltState): Promise<StageRunResult> {
+async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinition, halt: HaltState, loopback?: LoopbackContext): Promise<StageRunResult> {
   if (!s.skillId) return { ok: false, output: "This skill stage has no skill id." };
   const report = factoryReportPath(s);
   if (report) {
@@ -218,6 +219,11 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   if (s.skillId === FACTORY_REVIEW_SKILL) {
     const notes = await readRunFile(ctx, STEP_REVIEWS_FILE);
     if (notes !== null && notes.trim() !== "") parts.push(unresolvedStepReviewsSection(notes));
+  }
+  // A code stage re-run after a failed round gets the findings inline too (data-fenced), so no registry prompt changes.
+  if (loopback && loopback.findings.trim() !== "") {
+    parts.push(`Round ${loopback.round} of ${loopback.maxRounds}.`);
+    parts.push(findingsSection(loopback.findings));
   }
   const before = await dirtyBefore(ctx);
   // The batch's file list as planned, read BEFORE the agent runs: apply edits the plan itself (it marks the batch done),
@@ -417,11 +423,11 @@ async function runArtifact(ctx: StageExecContext, s: LoopStage, target: LoopDefi
 }
 
 /** Runs one stage once, without the run log wrapper (the screen's "Run stage" button uses it directly). */
-export async function runOneStage(ctx: StageExecContext, s: LoopStage, target: LoopDefinition, prior: Prior, halt: HaltState): Promise<StageRunResult> {
+export async function runOneStage(ctx: StageExecContext, s: LoopStage, target: LoopDefinition, prior: Prior, halt: HaltState, loopback?: LoopbackContext): Promise<StageRunResult> {
   const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
   if (s.kind === "shellCommand") return runShell(ctx, s, target);
   if (s.kind === "regressionSweep") return runRegressionStage(ctx, s, prefix);
-  if (s.kind === "skill") return runSkill(ctx, s, target, halt);
+  if (s.kind === "skill") return runSkill(ctx, s, target, halt, loopback);
   if (s.kind === "testMap" && s.testOp === "ledger") return runLedger(ctx, prior, prefix, target);
   if (s.kind === "testMap") return runTestMap(ctx, s, prefix, prior, target);
   if (s.kind === "testPrune") return runTestPruneStage(ctx, prefix, target);
@@ -458,14 +464,53 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
   return { ok: agentRunSucceeded(g.result), output: g.result.reply ?? "", ...(typeof g.result.usage?.costUsd === "number" ? { usage: { costUsd: g.result.usage.costUsd } } : {}) };
 }
 
+type ExistingFile = { state: "ok"; text: string } | { state: "missing" } | { state: "error"; message: string };
+
+async function readExisting(ctx: StageExecContext, rel: string): Promise<ExistingFile> {
+  const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
+  try {
+    const r = await ctx.fs.read(prefix ? `${prefix}/${rel}` : rel, 200_000);
+    return r.status === "ok" && typeof r.text === "string" ? { state: "ok", text: r.text } : { state: "missing" };
+  } catch (e) {
+    if ((e as { code?: string })?.code === "not_found") return { state: "missing" };
+    return { state: "error", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Appends one round's findings to the plan notes (Factory with a plan) or .factory/FINDINGS.md, keeping every earlier
+ * round. A failed write is only logged: the code stage also gets the findings inline, so the run can still go on.
+ */
+async function recordRoundFindings(ctx: StageExecContext, loop: LoopDefinition, entry: FindingsEntry): Promise<void> {
+  try {
+    // A read ERROR is not a missing file: a forced write over an unreadable PLAN.md would destroy it.
+    let file = FINDINGS_FILE;
+    if (isFactoryLoop(loop)) {
+      const plan = await readExisting(ctx, PLAN_FILE);
+      if (plan.state === "error") ctx.log(`findings notes: ${PLAN_FILE} could not be read (${plan.message}); writing ${FINDINGS_FILE} instead`);
+      else if (plan.state === "ok") file = PLAN_FILE;
+    }
+    const current = await readExisting(ctx, file);
+    if (current.state === "error") throw new Error(`${file} could not be read (${current.message}); not overwriting it`);
+    const previous = current.state === "ok" ? current.text : "";
+    const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
+    const rel = prefix ? `${prefix}/${file}` : file;
+    const separator = previous === "" || previous.endsWith("\n\n") ? "" : previous.endsWith("\n") ? "\n" : "\n\n";
+    await ensureDir(ctx.fs, rel);
+    await ctx.fs.write(rel, `${previous}${separator}## Findings to fix (round ${entry.round}, ${entry.source})\n\n${entry.text.trim()}\n`, { expected_hash: null, force: true });
+  } catch (e) {
+    ctx.log(`findings notes not written: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 /** The runner deps that execute stages for one run. Each call has its own halt state. */
-export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError" | "snapshotBefore" | "reviewStep" | "noteUnresolvedReview"> {
+export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError" | "snapshotBefore" | "reviewStep" | "noteUnresolvedReview"> & { recordFindings(stage: LoopStage, entry: FindingsEntry): Promise<void> } {
   const halt: HaltState = { reason: null, isError: false };
   return {
-    async runStage(s, prior) {
+    async runStage(s, prior, loopback) {
       let r: StageRunResult;
       try {
-        r = await runOneStage(ctx, s, loop, prior, halt);
+        r = await runOneStage(ctx, s, loop, prior, halt, loopback);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         r = { ok: false, output: `${s.name} failed: ${message}` };
@@ -483,5 +528,6 @@ export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pi
     snapshotBefore: () => takeStepSnapshot(ctx),
     reviewStep: (s, snapshot) => reviewStepOnce(ctx, loop, s, snapshot, halt),
     noteUnresolvedReview: (s, findings) => noteUnresolvedStep(ctx, s, findings),
+    recordFindings: (_stage, entry) => recordRoundFindings(ctx, loop, entry),
   };
 }

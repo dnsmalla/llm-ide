@@ -345,3 +345,7 @@ test("Review Focus 5: applying the default twice is the same loop, and the pinne
     assert.equal(r.ok, true, `${f}: ${JSON.stringify(r.errors)}`);
   }
 });
+
+test("the default template budget allows 3 rounds", () => {
+  assert.equal(defaultFactoryTemplate().budget.maxIterations, 3);
+});
