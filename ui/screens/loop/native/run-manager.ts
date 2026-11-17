@@ -11,6 +11,7 @@ import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } f
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
 import { readPending, writePending, type PendingRecord } from "./pending-records.ts";
+import { LOOPBACK_STOPPED_CODE, loopbackRecord } from "./loopback.ts";
 import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent } from "./runner.ts";
 import { autoShipKind, holdsForHuman, type AutoShipKind } from "./ship-model.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
@@ -42,6 +43,8 @@ export interface LiveRun {
     stageIndex: number;
     stageCount: number;
     iteration: number;
+    /** The run's round budget, so the board can show "round N of M". */
+    maxIterations: number;
     repairs: number;
     stages: { id: string; name: string; state: "running" | "passed" | "failed" | "repaired" | "skipped" }[];
     startedAt: string | null;
@@ -421,7 +424,8 @@ async function execute(run: ManagedRun): Promise<void> {
     // Only a record written now can carry the MR. A held record (project closed) is not auto-shipped: its card keeps
     // the manual Ship. The run stays live meanwhile, so the board hides Ship and cannot ship it twice.
     let shipLine = "";
-    if (entry && d.autoShip) {
+    // A stopped run opens no MR, so there is nothing to ship and no "Opening the MR" note.
+    if (entry && d.autoShip && runStatusCode(finished.outcome) !== LOOPBACK_STOPPED_CODE) {
       run.live.note = "Opening the MR";
       emit();
       const f = finished;
@@ -486,7 +490,7 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     isCancelled: () => run.cancelled, markCancelled: () => { run.cancelled = true; },
   };
   log(`▶ ${loop.name} (${run.live.mode})`);
-  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null };
+  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, maxIterations: Math.max(1, config.maxIterations), repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null };
   run.live.progress = progress;
   const onProgress = (e: RunProgressEvent) => {
     if (e.type === "iteration") progress.iteration = e.iteration;
@@ -512,6 +516,11 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       progress.substate = e.phase === "fixing" ? "fixing review" : "reviewing";
     } else if (e.type === "step-review-result") {
       progress.substate = null;
+    } else if (e.type === "loopback") {
+      // The run goes back to the code step, so the check that failed must not keep showing as running or reviewing.
+      const row = progress.stages.find((r) => r.id === e.stage.id);
+      if (row) row.state = "failed";
+      progress.substate = null;
     } else if (e.type === "repair") {
       progress.repairs += 1;
       const row = progress.stages.find((r) => r.id === e.stage.id);
@@ -523,7 +532,11 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   log(outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`);
   // Human review mode: a finished run that would auto-ship waits for a person instead. runStatusCode reads the flag.
   const held = holdsForHuman(config, { mode: run.live.mode, statusCode: runStatusCode(outcome), needsDecision: needsDecisionSummary(outcome) !== null, failedRole: outcome.failedStage ? factoryRole(outcome.failedStage) : null });
-  return { loop, info, config, outcome: held ? { ...outcome, awaitingReview: true } : outcome };
+  if (held) return { loop, info, config, outcome: { ...outcome, awaitingReview: true } };
+  // Every other failure (tests, review, final gate, check mode, cost or time) is the warning state, not a draft MR;
+  // cancel, guard block, error and an intake decision keep their own states.
+  const stopped = !outcome.passed && !outcome.cancelled && !outcome.blocked && !outcome.errored && needsDecisionSummary(outcome) === null && run.live.mode !== "intakeOnly";
+  return { loop, info, config, outcome: stopped ? { ...outcome, stoppedAtLimit: true } : outcome };
 }
 
 /** Runs whose Approve is shipping right now. */
@@ -608,7 +621,7 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
   const entry: LoopRunIndexEntry & { factoryRunId: string; factoryMode: RunMode } = { id: d.newId(), loopId: f.loop.id, loopName: f.loop.name, startedAt: started.toISOString(), durationSeconds: (ended.getTime() - started.getTime()) / 1000, iterationsUsed: f.outcome.iterationsUsed, statusCode: runStatusCode(f.outcome), statusSummary: f.outcome.statusSummary, trigger: "manual", factoryRunId: live.runId, factoryMode: live.mode };
   const stages = f.outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, costUsd: o.usage?.costUsd ?? null, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: o.durationMs ?? 0 } }));
   const record = {
-    ...entry, endedAt: ended.toISOString(), gitRoot: f.info.worktree, config: f.config, changedPaths, summaryPath: null, stages, ...stepReviewRecords(f.outcome.stepReviews),
+    ...entry, endedAt: ended.toISOString(), gitRoot: f.info.worktree, config: f.config, changedPaths, summaryPath: null, stages, ...stepReviewRecords(f.outcome.stepReviews), ...loopbackRecord(f.outcome.loopback),
     iterations: iterationRecordsWithScores(f.outcome.iterations),
     workItem: { source: item.source, id: item.id, title: item.title },
     worktree: { runId: live.runId, branch: f.info.branch, baseCommit: f.info.baseCommit, repo: f.info.repo },
