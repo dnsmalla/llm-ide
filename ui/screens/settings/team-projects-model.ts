@@ -4,8 +4,8 @@
 // the core re-checks every call.
 import { ApiError, call, type CoreClient } from "./core-api.ts";
 import {
-  MAX_MODES, MAX_USD_CAP_MONTH, ROLE_RANK, TEAM_ROLES, canManageTeam, isMaxMode, isTeamRole,
-  roleAtLeast, type MaxMode, type TeamMember, type TeamRole,
+  MAX_MODES, MAX_USD_CAP_MONTH, TEAM_ROLES, canManageTeam, isMaxMode, isTeamRole,
+  roleAtLeast, type MaxMode, type TeamRole,
 } from "./team-model.ts";
 
 // The project picker speaks the same role vocabulary as the team screen; re-export so its sections import one module.
@@ -27,7 +27,6 @@ const readCap = (v: unknown): number => {
 
 /** The project roles, in the same order as the team roles. */
 export const PROJECT_ROLES = TEAM_ROLES;
-export const PROJECT_ROLE_RANK = ROLE_RANK;
 
 export interface ProjectSummary {
   id: string;
@@ -225,19 +224,7 @@ export function buildAddProjectMemberBody(
   return { email: email.trim(), role, maxMode, usdCapMonth: Number(usdCapMonth) };
 }
 
-/**
- * The global team member rows a global admin may add. The project routes add by email so a project
- * admin never needs the team list; this only filters rows the caller already has.
- */
-export function addableTeamMembers(members: readonly TeamMember[], current: readonly ProjectMember[]): TeamMember[] {
-  const present = new Set(current.map((m) => m.userId));
-  return members.filter((m) => !present.has(m.userId) && m.status === "active");
-}
 
-/** The picker is for anyone with a project; the global team panels stay owner/admin only. */
-export function showProjectPicker(projects: readonly ProjectSummary[] | null): boolean {
-  return Array.isArray(projects) && projects.length > 0;
-}
 
 /** Whether the selected project unlocks project-member management, or the global team panels too. */
 export function teamPanelVisible(teamRole: TeamRole | null, projectRole: TeamRole | null): boolean {

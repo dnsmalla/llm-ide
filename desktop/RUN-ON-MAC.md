@@ -138,8 +138,7 @@ Try these in order. Note anything that differs in the bug-report template at the
 ## Known gaps
 
 Built and tested, but not yet exercised in a real window by anyone (the checklist rows are marked built, not
-verified): everything above. Not built yet, from the parity checklist
-(`docs/superpowers/plans/2026-10-31-tauri-parity-checklist.md`):
+verified): everything above. Not built yet, from the parity checklist (no longer in the repo):
 
 - Every section in the toolbar is now enabled (Home, Explorer, Graph, Auto Tasks, Factory, Issues, Gantt, Loop,
   Doc Gen, Visual, Library, Live, Chat, Settings); none shows "Soon" any more. What is still missing inside them:

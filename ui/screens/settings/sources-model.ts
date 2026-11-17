@@ -75,17 +75,6 @@ export function repoTitle(r: RepoEntry): string {
   return parts[parts.length - 1] ?? r.path;
 }
 
-export const CONNECTIONS_TEXT = {
-  hint:
-    "Selecting a connector only shows or hides its card in the Library. Credentials, tokens and fetching are " +
-    "managed in Library → Connections, not here.",
-  empty: "The core returned no connectors.",
-  add: "Add to Library",
-  remove: "Remove from Library",
-  partial:
-    "On the Mac this group also holds each connector's credentials and fetch actions. On the desktop those live in " +
-    "Library → Connections; this group mirrors the catalog and its selection.",
-} as const;
 
 export const REPOS_TEXT = {
   hint: "GitLab and GitHub tokens, the automation allow-list, and saved repositories.",

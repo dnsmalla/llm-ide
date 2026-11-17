@@ -1,6 +1,6 @@
 //! Host-signed approval tokens (HOST HALF only).
 //!
-//! `bypass_confirm` is advisory: a compromised webview that never calls it can still ask the core for
+//! A confirmation dialog is advisory on its own: a compromised webview that never shows one can still ask the core for
 //! `permission-mode=bypass`, because the core cannot tell that a human clicked. This module lets the host PROVE the
 //! click: after the native Cancel-first dialog is accepted the host mints a short-lived, single-use token signed with a
 //! per-launch random key that only the host and the core it spawned know (`LLMIDE_HOST_APPROVAL_KEY`, passed to the

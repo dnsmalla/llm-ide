@@ -70,56 +70,6 @@ export interface GuideSection {
   steps?: readonly string[];
 }
 
-/** Condensed from the Mac app's Help & Guide (capture, notes, projects), adapted to what the desktop app has today. */
-export const GUIDE: readonly GuideSection[] = [
-  {
-    id: "overview",
-    title: "What LLM-IDE does",
-    paragraphs: [
-      "LLM-IDE captures meeting captions, turns them into structured notes, action items and summaries, and keeps them next to your documents and code so you can search, plan and generate from one place.",
-      "Everything runs on this computer: the account, the notes and the server are local.",
-    ],
-  },
-  {
-    id: "capture",
-    title: "Capture",
-    paragraphs: [
-      "Live capture reads captions from your meeting. Zoom and Teams desktop apps are captured by the Mac app; Google Meet, Teams web and Zoom web use the Chrome extension. Both share this account and server.",
-    ],
-    steps: [
-      "Join a meeting and turn on captions or subtitles.",
-      "Start capture in the Mac app or the Chrome extension.",
-      "When the meeting ends, stop capture. Notes are generated for you.",
-      "Find the notes in Library.",
-    ],
-  },
-  {
-    id: "notes",
-    title: "Notes and the Library",
-    paragraphs: [
-      "The Library is your home base for notes. It lists every meeting note, document and plugin of the current project in one searchable list. Each meeting note is a markdown file with a summary, action items and the transcript.",
-    ],
-  },
-  {
-    id: "projects",
-    title: "Projects",
-    paragraphs: [
-      "A project is a folder on your computer. Inside it, system/ holds the data LLM-IDE manages for itself (settings, caches, the code graph) and llm-doc/ holds the notes and plans it writes for you, next to your own source/, code/ and data/ folders.",
-      "Create a new project to start fresh: pick where it should live and give it a name, and LLM-IDE sets up the folders. Open an existing project to continue, or pick a folder you already have: LLM-IDE adds what it needs and does not overwrite your files.",
-      "Closing a project or removing it from the recent list never deletes anything on disk.",
-    ],
-  },
-  {
-    id: "first",
-    title: "First steps",
-    paragraphs: [],
-    steps: [
-      "Sign in with your LLM-IDE account (create one the first time).",
-      "Create or open a project.",
-      "Browse its files in Explorer, ask questions in Chat, find notes in Library.",
-    ],
-  },
-];
 
 export const PROJECT_EXPLAINER =
   "A project is a folder. system/ holds the data LLM-IDE manages and llm-doc/ holds the notes it writes for you, next to your own source, code and data. Choose a new folder to start, an existing project to resume, or a cloned code repo: LLM-IDE adds what it needs without overwriting your files.";

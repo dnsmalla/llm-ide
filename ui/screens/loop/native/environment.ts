@@ -52,9 +52,6 @@ export async function detectTestCommand(fs: DetectFs, prefix = ""): Promise<{ co
   return { command: null, reason: "No test command could be detected from package.json, Package.swift, Python config or Makefile." };
 }
 
-export function applyDetected(command: string | null, configured: string | null): string | null {
-  return configured === DETECTED_TEST ? command : configured;
-}
 
 /** A command that checks the code's structure without running it: lint script, TypeScript, or Ruff. */
 export async function detectStructureCommand(fs: DetectFs, prefix = ""): Promise<{ command: string | null; reason: string }> {

@@ -982,6 +982,7 @@ impl ChatStore {
         self.read_pending().deletes.into_iter().filter(|d| d.owner_user_id.as_deref() == Some(self.user_id())).collect()
     }
 
+    #[cfg(test)]
     pub fn pending_delete_count(&self) -> usize {
         self.my_pending_deletes().len()
     }
@@ -1603,6 +1604,7 @@ impl ChatStore {
     }
 
     /// How many `*.corrupt-*` files sit in the store (never deleted by this module).
+    #[cfg(test)]
     pub fn quarantined_count(&self) -> usize {
         std::fs::read_dir(&self.inner.layout.sessions)
             .map(|rd| rd.flatten().filter(|e| e.file_name().to_str().is_some_and(|n| n.contains(".corrupt-"))).count())

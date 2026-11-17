@@ -43,10 +43,6 @@ export async function saveLoops(fs: LoopFs, store: LoopProjectStore, expectedHas
   return { hash: r.hash };
 }
 
-/** The loop containing a stage, across every loop (the Mac's "run just this stage" lookup). */
-export function loopContaining(store: LoopProjectStore, stageId: string) {
-  return store.loops.find((l) => l.config.stages.some((s) => s.id === stageId)) ?? null;
-}
 
 /** The Primary loop, or the first loop when none is marked (the Mac's fallback). */
 export function primaryLoop(store: LoopProjectStore) {

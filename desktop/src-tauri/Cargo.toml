@@ -38,13 +38,11 @@ libc = "=0.2.191"
 portable-pty = "=0.9.0"
 getrandom = "=0.3.4"
 # Explorer host (S-C): file watching (CC0-1.0), gitignore matching (MIT/Unlicense), OS trash (MIT).
-notify = "=8.2.1"
 ignore = "=0.4.25"
 trash = "=5.2.9"
 sha2 = "=0.10.9"
 # Remote hub: pinned TLS for the loopback proxy (same rustls already in the lock via ureq).
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-pki-types = "=1.15.1"
 webpki-roots = "=1.0.11"
 base64 = "=0.22.1"
 # Host-run link opening (S-E/S-G): strict URL parsing; already in the lock via tauri (MIT OR Apache-2.0).

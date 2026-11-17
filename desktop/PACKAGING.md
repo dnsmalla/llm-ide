@@ -35,9 +35,10 @@ Plan §6 target is ≤ 150 MB per installer: the self-contained build misses it
 
 ## Node single-executable (SEA) — works, small win
 
-`scripts/sea-spike.mjs`: esbuild bundles `server.mjs` to one CommonJS file,
-`postject` injects it into the official node binary, ad-hoc signed. The server
-answered `/health` and prewarmed the engine. Blockers worked around:
+An earlier spike (script removed; see git history) bundled `server.mjs` to one
+CommonJS file with esbuild, injected it into the official node binary with
+`postject`, ad-hoc signed. The server answered `/health` and prewarmed the
+engine. Blockers worked around:
 
 - SEA accepts CommonJS only; ESM entry rejected.
 - Top-level `await` (server.mjs:1118 and three handler self-test guards) must

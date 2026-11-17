@@ -2,7 +2,7 @@
 // whether a task can run and which prompt it uses.
 import { ALIASES, TASKS, TASK_BY_ID } from "./registry.generated.ts";
 import { PROMPTS, PROMPT_PARTS } from "./prompts.generated.ts";
-import type { Availability, TaskDef, TaskEnv, TaskGroup } from "./types.ts";
+import type { Availability, TaskDef, TaskEnv } from "./types.ts";
 
 export { ALIASES, PROMPTS, TASKS, TASK_BY_ID };
 
@@ -87,6 +87,3 @@ export function taskPrompt(idOrAlias: string): string {
   return text;
 }
 
-export function taskGroup(idOrAlias: string): TaskGroup {
-  return taskById(idOrAlias)?.group ?? "Automation";
-}

@@ -1,7 +1,6 @@
 // The honest card for a Mac group (or part of one) the desktop cannot do yet: what the Mac offers there, where it
 // stands here, what to do meanwhile, and what blocks it. There is never a control behind these: a notice that
-// looked like a setting but did nothing would be worse than none. `blockedBy` feeds docs/superpowers/plans/
-// 2026-10-31-settings-mirror-map.md (a test keeps the two in step).
+// looked like a setting but did nothing would be worse than none. `blockedBy` feeds the settings mirror map (a test keeps the two in step).
 import type { Health } from "./decoders.ts";
 import type { DiagnosticsInfo } from "./host.ts";
 import { coreTrustLabel, coreTrustTone } from "./misc-model.ts";

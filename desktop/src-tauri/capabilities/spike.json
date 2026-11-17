@@ -14,7 +14,6 @@
     "allow-sse-replay-start",
     "allow-sse-replay-stop",
     "allow-sse-channel-stream",
-    "allow-ax-probe",
-    "allow-capture-dump-tree"
+    "allow-ax-probe"
   ]
 }

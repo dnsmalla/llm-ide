@@ -3,7 +3,6 @@
 // heartbeat) and write the one terminal event. Pure: every host, core, file and run-manager call is injected, so node
 // tests load this module without the shell. `ship` is never honoured: the run stops at Ready to ship and a desktop
 // click is still the only Ship.
-import type { RunMode } from "./run-manager.ts";
 
 export interface ClaimedCommand { id: string; kind: string; args: { projectId?: string; issueIds?: string[]; ship?: boolean }; /** The registered folder of args.projectId (the desktop only starts a command in the open project). */ projectRoot: string | null }
 
@@ -216,5 +215,3 @@ export function issueRowsFor(body: unknown, issueIds: readonly string[]): { rows
   return { rows, missing };
 }
 
-/** The `RunMode` a claimed command starts with. Kept here so the semantics are testable without the run manager. */
-export const CLAIM_RUN_MODE: RunMode = "full";

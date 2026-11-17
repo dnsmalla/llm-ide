@@ -1,5 +1,4 @@
-//! Desktop archivist for Chrome-extension captures (live-then-archive 3.6 B; plan
-//! docs/superpowers/plans/2026-11-07-desktop-capture-archivist.md).
+//! Desktop archivist for Chrome-extension captures (live-then-archive 3.6 B).
 //!
 //! The extension finalizes a capture on the core (`POST /kb/live/:id/finalize`); with `LLMIDE_LIVE_ACK=1` (set on the
 //! core this app spawns) the core holds it until an archivist acks. This module is that archivist, in the host:

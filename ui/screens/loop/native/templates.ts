@@ -217,10 +217,6 @@ export function repairDefaultLoop(loop: LoopDefinition, testCommand: string | nu
   return { ...loop, config: { ...loop.config, ...isolation, stages: stages.map((s, i) => ({ ...s, order: i })) } };
 }
 
-/** The Refactoring-only form of `repairDefaultLoop`, kept for existing callers. */
-export function repairRefactorLoop(loop: LoopDefinition, testCommand: string | null): LoopDefinition | null {
-  return loop.defaultKey === REFACTOR_KEY ? repairDefaultLoop(loop, testCommand) : null;
-}
 
 /** Apply the host's app-wide Loop defaults to a loop that is being added. Existing loops are never touched. */
 export function applyLoopDefaults(config: LoopEngineConfig, defaults: LoopDefaults | undefined): LoopEngineConfig {

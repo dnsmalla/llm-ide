@@ -16,9 +16,6 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
-
-use serde::Serialize;
 
 pub const SERVICE: &str = "com.llmide.desktop";
 pub const ACCOUNT_JWT: &str = "jwt-secret";
@@ -152,15 +149,6 @@ impl fmt::Debug for Secrets {
     }
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq, Clone)]
-pub struct SecretsStatus {
-    pub backend: &'static str,
-    pub available: bool,
-    pub jwt_secret: bool,
-    pub vault_key: bool,
-    pub hub_session: bool,
-}
-
 fn generate() -> Result<String, SecretError> {
     let mut buf = [0u8; SECRET_BYTES];
     getrandom::fill(&mut buf).map_err(|e| SecretError::Random(e.to_string()))?;
@@ -190,65 +178,7 @@ pub fn load_or_create(b: &dyn SecretBackend) -> Result<Secrets, SecretError> {
         jwt_secret: get_or_create(b, ACCOUNT_JWT)?,
         vault_key: get_or_create(b, ACCOUNT_VAULT)?,
     };
-    invalidate_status_cache();
     Ok(secrets)
-}
-
-/// Read-only: reports presence, creates nothing.
-pub fn status(b: &dyn SecretBackend) -> SecretsStatus {
-    let probe = |a| b.get(a).map(|v| v.is_some_and(|v| usable(&v)));
-    let (jwt, vault) = (probe(ACCOUNT_JWT), probe(ACCOUNT_VAULT));
-    let hub = b.get(ACCOUNT_HUB_SESSION).map(|v| v.is_some_and(|v| !v.is_empty())).unwrap_or(false);
-    SecretsStatus {
-        backend: b.name(),
-        available: jwt.is_ok() && vault.is_ok(),
-        jwt_secret: jwt.unwrap_or(false),
-        vault_key: vault.unwrap_or(false),
-        hub_session: hub,
-    }
-}
-
-/// How long a `secrets_status` answer is reused. Each uncached call reads the OS
-/// store (a keychain prompt or a securityd round trip), and the webview may poll.
-const STATUS_TTL: Duration = Duration::from_secs(60);
-
-type StatusCache = Mutex<Option<(Instant, SecretsStatus)>>;
-static STATUS_CACHE: StatusCache = Mutex::new(None);
-
-/// Forget the cached status (the secrets just changed).
-pub fn invalidate_status_cache() {
-    *STATUS_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
-}
-
-/// `fetch` runs only when `cache` holds nothing younger than `ttl`; errors are not cached.
-fn cached_status(
-    cache: &StatusCache,
-    ttl: Duration,
-    fetch: impl FnOnce() -> Result<SecretsStatus, String>,
-) -> Result<SecretsStatus, String> {
-    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((at, st)) = guard.as_ref() {
-        if at.elapsed() < ttl {
-            return Ok(st.clone());
-        }
-    }
-    let fresh = fetch()?;
-    *guard = Some((Instant::now(), fresh.clone()));
-    Ok(fresh)
-}
-
-/// Webview-visible: booleans only, never a value. Cached for `STATUS_TTL` so a polling
-/// page does not touch the OS credential store on every call.
-#[tauri::command]
-pub async fn secrets_status() -> Result<SecretsStatus, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        cached_status(&STATUS_CACHE, STATUS_TTL, || {
-            let b = default_backend().map_err(|e| e.to_string())?;
-            Ok(status(b.as_ref()))
-        })
-    })
-    .await
-    .map_err(|e| format!("secrets task failed: {e}"))?
 }
 
 #[cfg(test)]
@@ -296,21 +226,6 @@ mod tests {
     }
 
     #[test]
-    fn status_reports_booleans_and_creates_nothing() {
-        let b = MemoryBackend::default();
-        let s = status(&b);
-        assert_eq!(s, SecretsStatus { backend: "memory", available: true, jwt_secret: false, vault_key: false, hub_session: false });
-        assert!(b.get(ACCOUNT_JWT).unwrap().is_none());
-        load_or_create(&b).unwrap();
-        let s = status(&b);
-        assert!(s.jwt_secret && s.vault_key && s.available);
-        let json = serde_json::to_string(&s).unwrap();
-        assert!(!json.contains(&b.get(ACCOUNT_JWT).unwrap().unwrap()));
-        let locked = status(&Locked);
-        assert!(!locked.available && !locked.jwt_secret);
-    }
-
-    #[test]
     fn backend_selection_from_env_value() {
         assert_eq!(backend_from_env(Some("memory")).unwrap().name(), "memory");
         assert!(matches!(backend_from_env_with(Some("memory"), false), Err(SecretError::BadBackend(_))), "release builds refuse memory");
@@ -336,24 +251,4 @@ mod tests {
         assert!(!msg.contains(&s.jwt_secret));
     }
 
-    #[test]
-    fn status_is_cached_until_invalidated_and_errors_are_not_cached() {
-        let cache: StatusCache = Mutex::new(None);
-        let st = |jwt| SecretsStatus { backend: "t", available: true, jwt_secret: jwt, vault_key: jwt, hub_session: false };
-        let mut calls = 0;
-        let ttl = Duration::from_secs(60);
-        for _ in 0..3 {
-            let got = cached_status(&cache, ttl, || { calls += 1; Ok(st(true)) }).unwrap();
-            assert!(got.jwt_secret);
-        }
-        assert_eq!(calls, 1, "the store is read once, not per call");
-        *cache.lock().unwrap() = None;
-        assert!(cached_status(&cache, ttl, || { calls += 1; Ok(st(false)) }).is_ok());
-        assert_eq!(calls, 2);
-        let cache: StatusCache = Mutex::new(None);
-        assert!(cached_status(&cache, ttl, || Err("locked".into())).is_err());
-        assert!(cached_status(&cache, ttl, || Ok(st(true))).is_ok(), "a failure does not poison the cache");
-        assert!(cached_status(&cache, Duration::ZERO, || { calls += 1; Ok(st(true)) }).is_ok());
-        assert_eq!(calls, 3, "ttl expiry refetches");
-    }
 }

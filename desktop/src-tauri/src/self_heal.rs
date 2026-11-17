@@ -1,4 +1,4 @@
-//! Self-Heal capture, host side (plan A of docs/superpowers/plans/2026-11-07-self-heal-a-incidents.md).
+//! Self-Heal capture, host side (plan A).
 //!
 //! Debug builds only:
 //! - `enabled()` is false in a release build whatever the environment. A release build therefore records nothing,

@@ -3,7 +3,6 @@
 import { rank, bestIndex } from "./rank";
 import { SECTION_TITLES, type MenuItem } from "./items";
 import type { CatalogSnapshot } from "./loader";
-import { safeLine } from "./sanitize";
 import { draftRemovingLastToken } from "./trigger";
 
 export interface MenuView {
@@ -88,4 +87,3 @@ export interface SkillChip { id: string; name: string; kind: "directive" | "libr
 
 export const MAX_SKILL_CHIPS = 5; // the server accepts at most 5 invoked skill ids
 
-export function skillChipLabel(c: SkillChip): string { return safeLine(c.name, 60); }

@@ -74,22 +74,6 @@ mod macos {
     #[cfg(test)] mod tests{use super::*; #[test]fn unknown_app(){assert_eq!(running_pid("com.llmide.no-such-app"),None);assert!(matches!(read_app_tree("com.llmide.no-such-app"),Ok(None)|Err(AxReadError::PermissionDenied)))} #[test]fn trust_no_prompt(){let _=is_trusted();} #[test]fn cf_roundtrip(){let s=cf_string("AXStaticText 字幕").unwrap();assert_eq!(string_of(s.0).as_deref(),Some("AXStaticText 字幕"))}}
 }
 
-/// Spike-only: one app's tree as pretty JSON under `<desktop data dir>/capture-fixtures/`.
-#[cfg(feature = "spike")]
-#[tauri::command]
-pub async fn capture_dump_tree(bundle_id: String) -> Result<String, String> {
-    if !matches!(bundle_id.as_str(), "us.zoom.xos" | "com.microsoft.teams2") { return Err("invalid_app: only the meeting apps the readers know".into()); }
-    tauri::async_runtime::spawn_blocking(move || {
-        let tree = read_app_tree(&bundle_id).map_err(|e| format!("ax: {e:?}"))?.ok_or("not_running")?;
-        let dir = crate::fsutil::desktop_data_dir()?.join("capture-fixtures");
-        std::fs::create_dir_all(&dir).map_err(|e| format!("io: {e}"))?;
-        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-        let path = dir.join(format!("{bundle_id}-{ms}.json"));
-        std::fs::write(&path, serde_json::to_vec_pretty(&tree).map_err(|e| format!("io: {e}"))?).map_err(|e| format!("io: {e}"))?;
-        Ok(path.display().to_string())
-    }).await.map_err(|e| format!("io: {e}"))?
-}
-
 #[cfg(test)]
 mod budget_tests {
     use super::*;

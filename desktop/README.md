@@ -1,7 +1,6 @@
 # LLM-IDE Desktop PoC (throwaway)
 
-Tauri 2 + React 19 + Vite + TypeScript spike for the Phase 0 measurements in
-`docs/superpowers/plans/2026-10-25-tauri-phase0-implementation.md`. Not a
+Tauri 2 + React 19 + Vite + TypeScript spike for the Phase 0 measurements (plan no longer in the repo; see [ADR 0018](../docs/decisions/0018-tauri-desktop-node-core-relay.md)). Not a
 product; nothing here is wired to the Node core yet (that is T2).
 
 ## Run

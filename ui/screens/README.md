@@ -2,7 +2,7 @@
 
 Screen code for the Tauri desktop app (Phase 3), consumed from source by `desktop/` through the
 alias `@llmide/screens/<name>` (Vite alias + tsconfig `paths`). One folder per screen, one owner per
-folder (see `docs/superpowers/plans/2026-10-31-tauri-phase3-plan.md` section 8):
+folder (the Phase 3 plan's section 8, no longer in the repo):
 
 | Folder | Slice |
 |---|---|

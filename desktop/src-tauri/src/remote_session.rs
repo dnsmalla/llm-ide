@@ -79,8 +79,6 @@ pub async fn remote_session_store(hub: String, pin: String, refresh: String) -> 
     tauri::async_runtime::spawn_blocking(move || {
         let b = crate::secrets::default_backend().map_err(|e| herr("keychain_unavailable", e.to_string()))?;
         let result = store(b.as_ref(), &hub, &pin, &refresh);
-        // `secrets_status` reports hub_session presence and caches it for a minute.
-        crate::secrets::invalidate_status_cache();
         result
     })
     .await
@@ -102,7 +100,6 @@ pub async fn remote_session_clear() -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(|| {
         let b = crate::secrets::default_backend().map_err(|e| herr("keychain_unavailable", e.to_string()))?;
         let result = clear(b.as_ref());
-        crate::secrets::invalidate_status_cache();
         result
     })
     .await

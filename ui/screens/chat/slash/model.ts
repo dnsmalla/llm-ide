@@ -273,7 +273,4 @@ export class ComposerModel {
   }
 }
 
-export function createComposerModel(deps: Omit<ModelDeps, "catalog"> & { catalog: CatalogLoader }): ComposerModel {
-  return new ComposerModel(deps);
-}
 export { createCatalogLoader };

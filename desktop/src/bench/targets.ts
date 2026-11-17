@@ -1,4 +1,4 @@
-// Pass/fail targets from the parent plan §6 (docs/superpowers/plans/2026-10-24-tauri-desktop-and-relay.md),
+// Pass/fail targets from the parent plan §6 (plan no longer in the repo),
 // applied to the BENCH records the runner collects. Records without a target are shown as info.
 import type { BenchRecord } from "./records";
 

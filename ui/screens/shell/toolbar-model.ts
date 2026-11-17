@@ -23,20 +23,6 @@ export function writeHiddenToolbar(hidden: Iterable<SectionId>, storage: Storage
   try { storage?.setItem(HIDDEN_KEY, JSON.stringify([...hidden])); } catch { /* session only */ }
 }
 
-/** Mac `ShellSection` case name -> desktop section id. `null` = the Mac item has no desktop counterpart (yet). */
-export const MAC_CASE_TO_ID: Readonly<Record<string, SectionId | null>> = {
-  explorer: "explorer",
-  codeGraph: "graph",
-  autoCode: "autotasks",
-  conflicts: "conflicts",
-  issues: "issues",
-  gantt: "gantt",
-  loopEngine: "loop",
-  docGen: "docgen",
-  visual: "visual",
-  library: "library",
-  live: "live",
-};
 
 const BY_ID = new Map<string, SectionDef>(SECTIONS.map((s) => [s.id, s]));
 

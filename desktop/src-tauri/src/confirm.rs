@@ -1,6 +1,6 @@
 //! Host-run native confirmation dialogs and the small guards the new host commands share.
 //!
-//! - `bypass_confirm(summary)`: the chat screen must get `true` here before it turns on
+//! - `bypass_confirm_signed(chatId, summary)`: the chat screen must get a host-signed token here before it turns on
 //!   Bypass permissions mode (and fails closed without it). The dialog text is a FIXED
 //!   template; the webview's `summary` is only quoted as a capped, single-line detail with
 //!   control and bidi characters removed.
@@ -179,13 +179,6 @@ async fn bypass_dialog(summary: Option<String>) -> Result<bool, FsError> {
     let text = bypass_text(summary.as_deref().unwrap_or(""));
     let out = tauri::async_runtime::spawn_blocking(move || ask("Turn on Bypass permissions?", &text, "Turn on Bypass", true)).await;
     out.map_err(|e| herr("io", format!("task failed: {e}")))
-}
-
-/// Native, modal confirmation for turning on Bypass permissions. Default button: Cancel.
-/// Advisory (UX): see `bypass_confirm_signed` for the host-signed variant.
-#[tauri::command]
-pub async fn bypass_confirm(summary: Option<String>) -> Result<bool, FsError> {
-    bypass_dialog(summary).await
 }
 
 /// The signed variant, as a pure step after the dialog: validates the chat id and mints the chat-bound token.

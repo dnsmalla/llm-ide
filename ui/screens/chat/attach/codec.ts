@@ -1,5 +1,4 @@
 // Pure byte/text helpers for attachments: image sniffing, UTF-8 decoding of a possibly cut chunk, base64.
-import { IMAGE_MIMES } from "./limits";
 
 /** The image type by magic bytes, or null. The extension-based mime from the host is only a hint. */
 export function sniffImage(b: Uint8Array): string | null {
@@ -10,7 +9,6 @@ export function sniffImage(b: Uint8Array): string | null {
   return null;
 }
 
-export const isSupportedImageMime = (m: string): boolean => IMAGE_MIMES.has(m);
 
 export type TextDecode = { ok: true; text: string; cutMidCharacter: boolean } | { ok: false; reason: "binary" | "not_utf8" };
 

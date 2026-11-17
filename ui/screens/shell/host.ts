@@ -1,7 +1,7 @@
 // Typed client for the Rust host commands (Tauri `invoke`), with a non-Tauri fallback so
 // components render and test in a plain browser, `vite dev` or `node --test`.
 //
-// Rules (docs/superpowers/plans/2026-10-31-tauri-phase3-plan.md, sections 3.2, 5):
+// Rules (from the Phase 3 plan, sections 3.2 and 5; the plan is no longer in the repo):
 //  - The webview never supplies filesystem paths: project open/recent go through the host's
 //    native dialog and its own recent list (indexes only).
 //  - This module holds no secrets. Anything secret stays in the host or the core process.

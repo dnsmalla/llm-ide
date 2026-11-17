@@ -99,9 +99,6 @@ export function visibleSections(): readonly SectionDef[] {
 
 const BY_ID = new Map<string, SectionDef>(SECTIONS.map((s) => [s.id, s]));
 
-export function isSectionId(v: unknown): v is SectionId {
-  return typeof v === "string" && BY_ID.has(v);
-}
 
 export function isSelectable(id: string): id is SectionId {
   const d = BY_ID.get(id);
@@ -256,11 +253,3 @@ export function readStoredSection(): SectionId | null {
   }
 }
 
-export function storeSection(id: SectionId): void {
-  if (id === "spike") return;
-  try {
-    globalThis.localStorage?.setItem(STORAGE_KEY, id);
-  } catch {
-    // storage unavailable: the choice applies for this session only
-  }
-}

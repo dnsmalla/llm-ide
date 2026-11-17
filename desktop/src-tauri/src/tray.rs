@@ -105,16 +105,6 @@ pub fn tray_status() -> TrayStatus {
     TrayStatus { available: TRAY_READY.load(Ordering::Relaxed), close_to_tray: CLOSE_TO_TRAY.load(Ordering::Relaxed), icon_visible: ICON_VISIBLE.load(Ordering::Relaxed) }
 }
 
-#[tauri::command]
-pub fn tray_set_close_to_tray(app: AppHandle, enabled: bool) -> Result<TrayStatus, String> {
-    if enabled && (!TRAY_READY.load(Ordering::Relaxed) || !ICON_VISIBLE.load(Ordering::Relaxed)) {
-        return Err("no tray icon is available on this desktop".into());
-    }
-    CLOSE_TO_TRAY.store(enabled, Ordering::Relaxed);
-    save_settings(&app, current());
-    Ok(tray_status())
-}
-
 /// Shows or hides the menu-bar icon. Hiding it also turns close-to-tray off: with no icon the window would be
 /// unreachable after a close. The Settings page is still open, so the icon can be brought back.
 #[tauri::command]

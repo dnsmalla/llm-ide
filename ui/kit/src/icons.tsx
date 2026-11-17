@@ -44,12 +44,9 @@ export const TerminalIcon = make("terminal", 14);
 export const ChatIcon = make("message-square", 14);
 export const BenchIcon = make("gauge", 14);
 export const ChevronIcon = make("chevron-right", 10);
-export const ChevronDownIcon = make("chevron-down", 10);
 export const XIcon = make("x", 9);
-export const SidebarIcon = make("panel-left", 14);
 export const AlertIcon = make("triangle-alert", 14);
 export const InfoIcon = make("info", 14);
-export const CheckIcon = make("check", 12);
 
 // Library sidebar and toolbar glyphs.
 export const HomeIcon = make("house", 16);
@@ -66,5 +63,4 @@ export const PuzzleIcon = make("puzzle", 10);
 export const ChartIcon = make("chart-column", 10);
 export const DocLargeIcon = make("file-text", 46);
 export const MicWaveIcon = make("audio-lines", 22);
-export const DoubleChevronIcon = make("chevrons-right", 14);
 export const ChatBubbleIcon = make("message-circle", 13);

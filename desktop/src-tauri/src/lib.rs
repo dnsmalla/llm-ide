@@ -33,7 +33,6 @@ mod fsutil;
 mod graph_file;
 mod mermaid_runtime;
 mod menu;
-mod legacy_import;
 mod retired_leftovers;
 mod loop_approval;
 mod loop_runner;
@@ -342,14 +341,11 @@ macro_rules! product_handlers {
                 backend_pick::backend_detect,
                 graph_gen::graph_generate,
                 graph_gen::graph_cancel,
-                legacy_import::legacy_import_status,
-                legacy_import::legacy_import_run,
                 loop_approval::loop_approve_loop,
                 loop_approval::loop_approve_stage,
                 loop_approval::loop_approval_status,
                 loop_approval::loop_revoke_approvals,
                 loop_runner::loop_run_stage,
-                loop_runner::loop_run_loop,
                 loop_runner::loop_work_root,
                 loop_runner::loop_run_fault_verify,
                 loop_runner::loop_environment_check,
@@ -369,7 +365,6 @@ macro_rules! product_handlers {
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,
                 core_log::core_log_clear,
-                secrets::secrets_status,
                 read_graph_file,
                 project::project_open,
                 project::project_open_recent,
@@ -443,7 +438,6 @@ macro_rules! product_handlers {
                 notify::notify_focus,
                 tray::tray_report,
                 tray::tray_status,
-                tray::tray_set_close_to_tray,
                 tray::tray_set_icon_visible,
                 pty_status,
                 pty_retry_consent,
@@ -460,7 +454,6 @@ macro_rules! product_handlers {
                 chat_cmds::chat_drop_message,
                 chat_cmds::chat_delete,
                 chat_cmds::chat_confirm_truncate,
-                chat_cmds::chat_archive_status,
                 notes_fs::notes_root_get,
                 notes_fs::notes_root_choose,
                 notes_fs::notes_root_clear,
@@ -479,7 +472,6 @@ macro_rules! product_handlers {
                 prefs::get_prefs,
                 prefs::set_prefs,
                 remote::remote_ssh_test,
-                remote::remote_ssh_project,
                 remote::remote_ssh_loop,
                 remote::remote_ssh_worktree,
                 remote::remote_ssh_confirm,
@@ -528,7 +520,6 @@ macro_rules! product_handlers {
                 attach::attach_pick_files,
                 attach::attach_read,
                 attach::attach_release,
-                confirm::bypass_confirm,
                 confirm::bypass_confirm_signed,
                 confirm::trust_confirm,
                 host_approval::host_bus_proof,
@@ -558,7 +549,6 @@ macro_rules! app_handler {
                 sse_replay::sse_replay_stop,
                 sse_replay::sse_channel_stream,
                 ax_probe::ax_probe,
-                capture_ax_macos::capture_dump_tree
         ]
     };
 }

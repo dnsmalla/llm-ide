@@ -3,7 +3,6 @@
 import type { ShellEvent } from "./bus";
 import type { RecentEntry } from "./host";
 
-export type MenuCommand = "menu_quick_switch" | "menu_chat" | "menu_help";
 
 export function menuAction(id: string): ShellEvent | null {
   switch (id) {

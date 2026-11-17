@@ -62,13 +62,9 @@
 @media (max-width: 760px) { .iss-detail-grid { grid-template-columns: minmax(0, 1fr); } }
 
 /* Inline issue editor: title, description and provider settings. */
-.iss-edit-form { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-surface2); }
-.iss-input, .iss-edit-form textarea, .iss-edit-form select { width: 100%; box-sizing: border-box; font: inherit; color: var(--tok-color-text); background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: 6px; padding: 7px 9px; }
-.iss-edit-form textarea { resize: vertical; }
-.iss-edit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.iss-input { width: 100%; box-sizing: border-box; font: inherit; color: var(--tok-color-text); background: var(--tok-color-body); border: 1px solid var(--tok-color-border); border-radius: 6px; padding: 7px 9px; }
 .iss-edit-set { margin: 0; padding: 8px 10px; border: 1px solid var(--tok-color-border); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .iss-edit-set legend { padding: 0 4px; color: var(--tok-color-text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; }
-@media (max-width: 760px) { .iss-edit-grid { grid-template-columns: 1fr; } }
 
 /* GitLab-style per-field editors in the settings sidebar. */
 .iss-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

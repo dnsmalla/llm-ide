@@ -43,7 +43,7 @@
 }
 
 /* Compact uppercase group headers inside screens. */
-:root :is(.scm-title, .gr-section-title, .atn-section-title, .loop-section-title) {
+:root :is(.scm-title) {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: .07em;

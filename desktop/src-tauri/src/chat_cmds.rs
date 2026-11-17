@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
 
-use crate::chat_archive::{ArchiveReport, Archiver, HttpRemote, JournalDoc, LifecycleRemote, RemoteError, QUIT_CAP, SWEEP_CAP};
+use crate::chat_archive::{ArchiveReport, Archiver, HttpRemote, LifecycleRemote, RemoteError, QUIT_CAP, SWEEP_CAP};
 use crate::chat_store::{layout_here, valid_user_id, ChatStore, DropOutcome, ListPage, ListQuery, LoadedChat, SaveMode, SaveOutcome, StoreError, StoreLayout, MAX_LIST_PAGE, MAX_PAGE};
 use crate::confirm::RateLimit;
 use crate::core_host::{CoreHost, Phase};
@@ -31,7 +31,6 @@ fn err(code: &'static str, message: &str) -> StoreError {
 pub type CoreProvider = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
 struct Bound {
-    user_id: String,
     token: String,
     core: CoreProvider,
     store: ChatStore,
@@ -122,7 +121,7 @@ impl ChatService {
         let store = ChatStore::open(layout, &user_id, index)?;
         {
             let mut b = lock(&self.0.bound);
-            *b = Some(Bound { user_id: user_id.clone(), token: token.to_string(), core: core.clone(), store: store.clone(), journal_path: journal_path.clone() });
+            *b = Some(Bound { token: token.to_string(), core: core.clone(), store: store.clone(), journal_path: journal_path.clone() });
         }
         // The same verified session archives finished extension captures (capture_archivist.rs).
         crate::capture_archivist::bind(core.clone(), token);
@@ -231,20 +230,6 @@ pub struct DeleteResult {
     pub existed: bool,
     /// `done` (server confirmed) | `queued` (the sweep or the Mac app retries) | `unreachable` | `none` (nothing to send).
     pub tombstone: &'static str,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ArchiveStatus {
-    pub bound: bool,
-    pub user_id: Option<String>,
-    /// `reliable` | `best_effort`: how dependable the quit hook is on this OS (docs/how-to/desktop-chat-store.md).
-    pub quit_hook: &'static str,
-    pub journal: Option<JournalDoc>,
-    pub last_sweep: Option<ArchiveReport>,
-    pub last_quit: Option<ArchiveReport>,
-    pub pending_deletes: usize,
-    pub quarantined: usize,
 }
 
 // ---- commands ----------------------------------------------------------------------------------
@@ -453,28 +438,6 @@ pub async fn chat_delete(svc: State<'_, ChatService>, args: DeleteArgs) -> Resul
         // Resolved now; an unverified core simply means the tombstone is sent later by the sweep.
         let url = core();
         svc.delete_confirmed(&args.id, &ask, url.as_deref(), &token)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn chat_archive_status(svc: State<'_, ChatService>) -> Result<ArchiveStatus, StoreError> {
-    let svc = svc.inner().clone();
-    blocking(move || {
-        let b = lock(&svc.0.bound);
-        let hook = if cfg!(target_os = "macos") { "reliable" } else { "best_effort" };
-        let (user, journal, pending, quarantined) = match b.as_ref() {
-            Some(b) => (
-                Some(b.user_id.clone()),
-                crate::chat_archive::Journal::new(Some(b.journal_path.clone())).read(),
-                b.store.pending_delete_count(),
-                b.store.quarantined_count(),
-            ),
-            None => (None, None, 0, 0),
-        };
-        let bound = b.is_some();
-        drop(b);
-        Ok(ArchiveStatus { bound, user_id: user, quit_hook: hook, journal, last_sweep: lock(&svc.0.last_sweep).clone(), last_quit: lock(&svc.0.last_quit).clone(), pending_deletes: pending, quarantined })
     })
     .await
 }

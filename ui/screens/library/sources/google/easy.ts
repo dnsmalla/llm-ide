@@ -63,9 +63,6 @@ export const ADVANCED_SUMMARY = "Advanced: connect with your own Google Cloud cl
 
 // ---- gmail app password ----------------------------------------------------------------------
 
-export interface GmailEasyForm {
-  address: string;
-}
 
 const ADDRESS_RE = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,200}\.[A-Za-z]{2,24}$/;
 

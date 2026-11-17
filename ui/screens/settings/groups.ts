@@ -62,10 +62,6 @@ export function settingsMatch(title: string, keywords: string | undefined, query
 /** Settings groups that read the local filesystem or run local host processes: hidden in remote mode. */
 export const REMOTE_GROUP_HIDDEN: readonly string[] = ["workspace", "paths", "repositories", "memory", "optional-components", "self-heal", "trust"];
 
-/** Mac cards that are not groups on the desktop because the desktop folds them into another group. */
-export const MERGED_MAC_CARDS: Readonly<Record<string, string>> = {
-  "Chat archive": "agent-history", // the archiving mode lives inside Agent history
-};
 
 /** Anchors the app used before the Mac layout (and short forms the shell may send) -> group id. */
 const LEGACY_ANCHORS: Readonly<Record<string, string>> = {

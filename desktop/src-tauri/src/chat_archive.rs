@@ -300,6 +300,7 @@ impl Journal {
         Self { path }
     }
 
+    #[cfg(test)]
     pub fn read(&self) -> Option<JournalDoc> {
         let p = self.path.as_ref()?;
         let mut v = Vec::new();

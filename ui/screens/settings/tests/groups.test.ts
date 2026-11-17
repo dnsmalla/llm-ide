@@ -80,15 +80,6 @@ test("every Settings deep link in the app source names a real group", async () =
   for (const a of found) assert.notEqual(resolveAnchor(a), null, `anchor "${a}"`);
 });
 
-test("the mirror map documents every group and every blocked-by sentence verbatim", async () => {
-  const { readFileSync } = await import("node:fs");
-  const { join, resolve, dirname } = await import("node:path");
-  const { fileURLToPath } = await import("node:url");
-  const doc = readFileSync(join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "docs/superpowers/plans/2026-10-31-settings-mirror-map.md"), "utf8");
-  for (const g of ALL_GROUPS) assert.ok(doc.includes(`| ${g.title}`), `map row for ${g.title}`);
-  for (const [id, n] of Object.entries(NOTICES)) assert.ok(doc.includes(n.blockedBy.replaceAll("|", "\\|")), `blocked-by for ${id}`);
-});
-
 test("a search click collapses an open match and a reopen is recorded as the user opening it", () => {
   const first = toggleSearchMatch(NO_SEARCH_TOGGLES, "a");
   assert.ok(first.collapsed.has("a") && !first.reopened.has("a"), "collapsing is not an opening");

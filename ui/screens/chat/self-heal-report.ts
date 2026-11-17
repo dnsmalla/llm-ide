@@ -3,8 +3,6 @@
 // run in Settings → Self-Heal, which shows its cost first. Pure apart from the injected `report`, so it is tested with node.
 import type { Message } from "./state";
 
-/** The incident category of a report made from Chat; the core never treats it as an environment problem. */
-export const CHAT_REPORT_CATEGORY = "chat report";
 const DESCRIPTION_MAX = 600;
 const USER_MAX = 500;
 const ASSISTANT_MAX = 800;

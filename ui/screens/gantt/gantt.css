@@ -31,7 +31,6 @@
 .gnt-dep { margin-right: 4px; }
 .gnt-undated { border-top: 1px solid var(--tok-color-border); padding-top: var(--tok-space-sm); }
 .gnt-sub { margin: 0 0 var(--tok-space-xs); font-size: var(--tok-type-caption-size); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-color-text-muted); }
-.gnt-ulist { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow: auto; }
 .gnt-link { border: 0; background: none; color: var(--tok-color-accent); font: inherit; cursor: pointer; padding: 0; }
 .gnt-editor { border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-surface); padding: 14px; display: flex; flex-direction: column; gap: var(--tok-space-sm); }
 .gnt-editor-head { display: flex; align-items: baseline; gap: var(--tok-space-sm); }
@@ -42,7 +41,6 @@
 .gnt-foot { margin-top: auto; padding-top: var(--tok-space-sm); }
 
 .gnt-schedule { margin-left: auto; }
-.gnt-empty-dates { margin: 0 0 var(--tok-space-sm); }
 .gnt-grow { flex: 1; min-width: 160px; }
 .gnt-legend { display: flex; gap: var(--tok-space-md); align-items: center; flex-wrap: wrap; padding: var(--tok-space-xs) var(--tok-space-lg); color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .gnt-today { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tok-color-accent); z-index: 5; pointer-events: none; }
@@ -89,7 +87,6 @@
 .gnt-months, .gnt-header, .gnt-labels-head, .gnt-month-pad, .gnt-track, .gnt-rowlabel, .gnt-day, .gnt-month { box-sizing: border-box; }
 .gnt-month-pad { flex: none; height: 20px; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface2); }
 .gnt-head .gnt-field:has(> .gnt-sr) select { min-width: 160px; }
-.gnt-empty-dates { display: none; }
 .gnt-day { font-size: 10px; white-space: nowrap; overflow: hidden; }
 .gnt-chart { position: relative; }
 .gnt-no-bars { position: absolute; z-index: 2; top: 80px; right: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px; color: var(--tok-color-text-muted); pointer-events: none; }

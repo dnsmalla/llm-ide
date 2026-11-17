@@ -9,9 +9,6 @@ export const THEME_CHOICES: readonly { id: ThemeChoice; label: string }[] = [
   { id: "midnight", label: "Midnight" },
 ];
 
-export function isThemeChoice(v: unknown): v is ThemeChoice {
-  return v === "dark" || v === "light" || v === "midnight";
-}
 
 // ---- menu-bar icon (host tray; General) --------------------------------------------------------
 

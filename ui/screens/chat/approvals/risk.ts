@@ -54,14 +54,9 @@ export function pathProblem(path: string, root: string | null): string | null {
   return joined === r || joined.startsWith(`${r}/`) ? null : "touches a path outside the open project";
 }
 
-/** True when `path` is inside `root` (see `pathProblem`). */
-export function insideRoot(path: string, root: string | null): boolean {
-  return pathProblem(path, root) === null;
-}
 
 const PATH_KEYS = ["filePath", "file_path", "path", "notebook_path"] as const;
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit", "update-file"]);
-export const isEditTool = (tool: string | undefined): boolean => !!tool && (EDIT_TOOLS.has(tool) || tool === "Write");
 
 export function classifyApproval(a: Pick<PendingApproval, "toolName" | "args" | "argsSummary">, projectRoot: string | null): Risk {
   const tool = a.toolName ?? "";

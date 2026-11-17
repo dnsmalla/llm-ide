@@ -1,4 +1,4 @@
-//! Self-Heal fix runs, host side (plan B: docs/superpowers/plans/2026-11-07-self-heal-b-fix-loop.md).
+//! Self-Heal fix runs, host side (plan B).
 //!
 //! Debug builds only: every command refuses unless `self_heal::enabled()`. The webview drives one manual run:
 //! 1. the core picks the batch (`POST /kb/self-heal/runs`);

@@ -1,4 +1,4 @@
-// Self-Heal capture, webview side (plan A of docs/superpowers/plans/2026-11-07-self-heal-a-incidents.md).
+// Self-Heal capture, webview side (plan A).
 // Debug desktop builds only: the host's `self_heal_take` answers `enabled: false` in a release build, and then
 // nothing is kept, posted or shown. In a debug build, every 15 s the pump:
 //   1. drains the host's reports (core stderr, panic records);

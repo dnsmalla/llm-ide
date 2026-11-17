@@ -1,4 +1,4 @@
-// Self-Heal "Try to fix" (plan B, docs/superpowers/plans/2026-11-07-self-heal-b-fix-loop.md): one manual fix run,
+// Self-Heal "Try to fix" (plan B): one manual fix run,
 // driven from Settings → Self-Heal. The core picks the batch and decides the outcome; the host owns the git worktree,
 // the protected-path revert and make regression; the core's Loop agent does the fixing. Every run that started ends
 // with exactly one outcome post, so its incidents never stay `fixing`, and a worktree without a proposal is removed.
