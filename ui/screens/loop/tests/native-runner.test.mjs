@@ -547,3 +547,14 @@ test("step review: a repair that does not complete records the step unresolved a
   assert.equal(out.stepReviews[0].reason, "repair did not complete");
   assert.match(out.statusSummary, /step reviews: 1 unresolved/);
 });
+
+test("step review: the wall-clock budget ends the run between a review and its repair", async () => {
+  let repairs = 0;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")], { wallClockBudgetSeconds: 0.05, maxIterations: 3 }), base({
+    async repair() { repairs += 1; return { ok: true, output: "" }; },
+    async reviewStep() { await new Promise((r) => setTimeout(r, 80)); return { verdict: "changes", findings: "fix x" }; },
+  }));
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /^wall-clock budget reached/);
+  assert.equal(repairs, 0);
+});

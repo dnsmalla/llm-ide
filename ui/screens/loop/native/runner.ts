@@ -185,6 +185,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       const haltAfterReview = haltedOutcome();
       if (haltAfterReview) return haltAfterReview;
       if (deps.isCancelled?.()) return cancelledOutcome();
+      if (expired()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
       if (review.verdict === "approve") { await endStepReview(stage, "approve", attempts, ""); return null; }
       if (review.verdict === "skipped") { await endStepReview(stage, "skipped", attempts, "", review.reason ?? "review skipped"); return null; }
       const used = reviews.repairs.get(stage.id) ?? 0;
@@ -204,6 +205,8 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       const haltAfterFix = haltedOutcome();
       if (haltAfterFix) return haltAfterFix;
       if (deps.isCancelled?.()) return cancelledOutcome();
+      // Reviews and repairs can loop for a long time; the wall-clock budget ends the run here as it does between stages.
+      if (expired()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
       if (!fix.ok) { await endStepReview(stage, "unresolved", attempts, review.findings, "repair did not complete"); return null; }
       // Same non-improving rule as a stage repair: findings that repeat across repairs mean the repair is not working.
       const signature = review.findings.trim().slice(0, 2000);
