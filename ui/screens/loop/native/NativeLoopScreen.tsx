@@ -15,6 +15,7 @@ import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { reviewSwitch, setReviewAfter } from "./review-ui.ts";
 import { stepReviewRecords } from "./review.ts";
+import { loopbackLogLine, loopbackRecord } from "./loopback.ts";
 import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, type LoopTemplate } from "./templates.ts";
 import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
@@ -739,7 +740,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       }));
       // Do not finish the run before the issue comments are actually posted.
       await trail?.idle();
-      setRunLog((l) => [...l, outcome.cancelled ? (cancelledRef.current ? "Loop cancelled." : `Loop aborted: ${outcome.statusSummary}`) : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`]);
+      setRunLog((l) => [...l, outcome.cancelled ? (cancelledRef.current ? "Loop cancelled." : `Loop aborted: ${outcome.statusSummary}`) : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`, ...(!outcome.passed && !outcome.cancelled && outcome.loopback ? [loopbackLogLine(outcome.loopback)] : [])]);
       if (!outcome.cancelled && !outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
         const failedRun = [...outcome.stages].reverse().find((o) => o.stage.kind === "regressionSweep" && !o.ok);
         const faultPaths = faultPathsFromOutput(failedRun?.output ?? "");
@@ -785,7 +786,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, costUsd: o.usage?.costUsd ?? null, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
       // Awaited: Ship's record update (setRunRecordShip) needs the record on disk, so the panel opens only after it.
-      await appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...stepReviewRecords(outcome.stepReviews), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      await appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...stepReviewRecords(outcome.stepReviews), ...loopbackRecord(outcome.loopback), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
       // A passed worktree run offers Ship: the Factory for its work item, and the Refactoring loop as one MR for the
       // whole run. Other non-Factory loops get no Ship offer.
       if (activeRun && (start || target.defaultKey === "refactor") && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) {
@@ -1120,11 +1121,11 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             <dt>Runs in</dt><dd>{loop.config.alwaysUseWorktree ? "a new worktree under system/loop-worktrees/ for each run (your working tree is not touched)" : workRoot ?? projectRoot}</dd>
             <dt>Project root</dt><dd>{projectRoot}</dd>
             {loopUsesInputPath(loop) ? <><dt>Working on</dt><dd>{loop.inputPath || "whole repository"}</dd></> : null}
-            <dt>Bounded by</dt><dd>{loop.config.maxIterations} iterations · {loop.config.wallClockBudgetSeconds ? `${Math.round(loop.config.wallClockBudgetSeconds / 60)} min time limit` : "no time limit"} · stop after {loop.config.consecutiveFailureStop} non-improving · {loop.config.maxRepairsPerStage} repairs/stage</dd>
+            <dt>Bounded by</dt><dd>{loop.config.maxIterations} iterations (rounds) · {loop.config.wallClockBudgetSeconds ? `${Math.round(loop.config.wallClockBudgetSeconds / 60)} min time limit` : "no time limit"} · stop after {loop.config.consecutiveFailureStop} non-improving · {loop.config.maxRepairsPerStage} repairs/stage</dd>
             <dt>Scheduled</dt><dd>{loop.runsOnSchedule ? "included in this page's cron schedule" : "no — run it from here"}</dd>
           </dl>
           <div className="loop-budgets">
-            <label className="loop-field"><span>Max iterations</span><input type="number" min={1} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = Math.max(1, Number(e.target.value) || 1); })} /></label>
+            <label className="loop-field"><span>Max iterations (rounds)</span><input type="number" min={1} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = Math.max(1, Number(e.target.value) || 1); })} /></label>
             <label className="loop-field"><span>Time budget (min)</span><input type="number" min={0} step={15} placeholder="none" title="Empty = no time limit" value={loop.config.wallClockBudgetSeconds === null ? "" : Math.round(loop.config.wallClockBudgetSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)) * 60; })} /></label>
             <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} max={10} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>
             <label className="loop-field"><span>Repairs per stage</span><input type="number" min={1} max={10} value={loop.config.maxRepairsPerStage} onChange={(e) => patchLoop((l) => { l.config.maxRepairsPerStage = Math.max(1, Number(e.target.value) || 1); })} /></label>
