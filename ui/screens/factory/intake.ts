@@ -95,6 +95,22 @@ export function finishChecksAllowed(work: { changedFiles: number; hasPlan: boole
   return work.changedFiles > 0 && work.hasPlan;
 }
 
+/**
+ * What to start for a card whose run was interrupted: check the work it wrote, else resume. Shared by the board's
+ * "Continue" button and the automatic resume so both make the same decision.
+ */
+export async function interruptedRunPlan(
+  d: { changedFiles(runId: string): Promise<number>; hasPlan(runId: string): Promise<boolean> },
+  item: WorkItemRecord,
+  facts: ItemFacts,
+): Promise<{ mode: RunMode; runId?: string; downgraded: boolean }> {
+  const runId = item.runIds.at(-1) ?? null;
+  const ok = runId !== null && facts.worktreeExists
+    ? finishChecksAllowed({ changedFiles: await d.changedFiles(runId), hasPlan: await d.hasPlan(runId) })
+    : false;
+  return { ...runPlanFor(ok ? "finishChecks" : "resume", item, facts), downgraded: !ok };
+}
+
 /** The notice for a send, counting what was already there. */
 export function sendSummary(added: number, existing: number): string {
   if (added === 0 && existing === 0) return "Nothing to send.";

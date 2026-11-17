@@ -16,9 +16,15 @@ import { stageCommentText } from "../../factory/issue-comment-poster.ts";
 import { issueTarget, issueTrail, runSummaryBody, type IssueTrail, type TrailDeps } from "./issue-trail.ts";
 import { autoShipRun } from "../../factory/auto-ship.ts";
 import { readReworkCounts, watchMrsOnce, writeReworkCounts } from "../../factory/mr-watch.ts";
+import { autoResumeOnce, readAutoResumed, writeAutoResumed } from "../../factory/auto-resume.ts";
+import { NOTE } from "../../factory/columns.ts";
+import { isFactoryLoop } from "./factory.ts";
+import { isManualOnly, loadLoops } from "./store.ts";
+import { coreStatusStore } from "../../shell/runtime";
+import { isHostAvailable } from "../../shell/host";
 import { chunkShipRequests, decodeShipResults, decodeWorktreeList } from "../../factory/board-model.ts";
 import type { ShipStatus } from "../../factory/columns.ts";
-import { cancelRun, configureRunManager, concurrency, liveRuns, postRunNotice, projectGuardedFs, startRun } from "./run-manager.ts";
+import { cancelRun, configureRunManager, concurrency, liveRuns, postRunNotice, projectGuardedFs, setRunNote, startRun } from "./run-manager.ts";
 
 let installed = false;
 
@@ -116,6 +122,52 @@ export function installRunManagerHost(): void {
   });
   installBusRunner();
   installMrWatch(hostFs, activeProject);
+  installAutoResume(hostFs, activeProject);
+}
+
+let autoResumeInstalled = false;
+
+/**
+ * Resumes a run the app's quit interrupted (factory/auto-resume.ts): once shortly after launch and on each project
+ * change. The delay lets the run manager flush held records first, so a finished run is not taken for an interrupted one.
+ */
+function installAutoResume(hostFs: ReturnType<typeof createHostFs>, activeProject: () => string | null): void {
+  if (autoResumeInstalled) return;
+  autoResumeInstalled = true;
+  let busy = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const tick = () => {
+    if (busy) return;
+    busy = true;
+    const root = activeProject();
+    void autoResumeOnce({
+      projectRoot: activeProject,
+      fs: (r) => projectGuardedFs(hostFs, r, activeProject),
+      worktrees: () => invokeHost<unknown>("loop_worktree_list").then(decodeWorktreeList, () => new Map()),
+      live: () => liveRuns(),
+      localSpawnedCore: () => isHostAvailable() && coreStatusStore.getSnapshot().status?.trust === "spawned",
+      loopIsManualOnly: async () => {
+        if (!root) return true;
+        const loaded = await loadLoops(projectGuardedFs(hostFs, root, activeProject)).catch(() => null);
+        const loop = loaded?.kind === "ok" ? loaded.store.loops.find(isFactoryLoop) : undefined;
+        // No readable Factory loop: nothing is known about it, so nothing is resumed.
+        return !loop || isManualOnly(loop);
+      },
+      changedFiles: (runId) => invokeHost<unknown>("loop_worktree_diff", { runId }).then((raw) => decodeWorktreeDiff(raw).files.length),
+      start: startRun,
+      readResumed: readAutoResumed,
+      writeResumed: writeAutoResumed,
+      notice: postRunNotice,
+      markResuming: (runId) => setRunNote(runId, NOTE.continuingAutomatically),
+    }).finally(() => { busy = false; });
+  };
+  const schedule = (ms: number) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(tick, ms);
+    (timer as unknown as { unref?: () => void }).unref?.();
+  };
+  schedule(5_000);
+  projectStore.subscribe(() => schedule(2_000));
 }
 
 let mrWatchInstalled = false;

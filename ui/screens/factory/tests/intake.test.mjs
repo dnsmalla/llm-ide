@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { memFs } from "./mem-fs.mjs";
 import { addItem, readItems } from "../items.ts";
-import { finishChecksAllowed, listSpecFiles, putRunOnBoard, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromSpec, workItemFromText } from "../intake.ts";
+import { interruptedRunPlan, finishChecksAllowed, listSpecFiles, putRunOnBoard, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromSpec, workItemFromText } from "../intake.ts";
 
 const NOW = new Date("2026-11-09T10:00:00.000Z");
 const issue = (n, over = {}) => ({ id: `gh-${n}`, provider: "github", repo: "acme/web", number: n, title: `Fix ${n}`, body: `Body ${n}`, url: `https://github.com/acme/web/issues/${n}`, ...over });
@@ -139,4 +139,12 @@ test("a failed board write is reported, not thrown, so the run goes on", async (
   const denied = { ...fs, write: async () => { throw Object.assign(new Error("denied"), { code: "denied" }); } };
   const result = await putRunOnBoard(denied, { source: "text", id: null, title: "Free", body: "", repo: null }, "r1");
   assert.match(result.error, /not on the Factory board/);
+});
+
+test("interruptedRunPlan: written work + plan checks it; otherwise resumes and says it downgraded", async () => {
+  const it = { key: "issue:1", runIds: ["r1"] };
+  const f = facts({ worktreeExists: true });
+  assert.deepEqual(await interruptedRunPlan({ changedFiles: async () => 2, hasPlan: async () => true }, it, f), { mode: "check", runId: "r1", downgraded: false });
+  assert.deepEqual(await interruptedRunPlan({ changedFiles: async () => 0, hasPlan: async () => true }, it, f), { mode: "full", runId: "r1", downgraded: true });
+  assert.deepEqual(await interruptedRunPlan({ changedFiles: async () => 2, hasPlan: async () => false }, it, f), { mode: "full", runId: "r1", downgraded: true });
 });

@@ -284,6 +284,14 @@ export function subscribe(listener: () => void): () => void {
 }
 
 /** A one-line notice for the Factory board (e.g. a background MR restart), shown once like a start refusal. */
+/** Sets the note a live run's card shows (e.g. "Continuing automatically…"); a run that is gone is ignored. */
+export function setRunNote(runId: string, note: string | null): void {
+  const run = runs.get(runId);
+  if (!run) return;
+  run.live.note = note;
+  emit();
+}
+
 export function postRunNotice(message: string): void {
   lastNotice = message;
   emit();

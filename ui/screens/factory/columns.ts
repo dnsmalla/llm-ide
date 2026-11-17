@@ -39,6 +39,7 @@ export const NOTE = {
   statusUnavailable: "status unavailable", ciFailed: "CI failed", newComments: "New review comments",
   ciFailedAndComments: "CI failed, new review comments", closedUnmerged: "Closed without merge", ciRunning: "CI running",
   failed: "Failed", stopped: "Stopped", error: "Error", blocked: "Blocked", notShipped: "Not shipped", awaitingReview: "Awaiting your review",
+  continuingAutomatically: "Continuing automatically…",
 } as const;
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -132,7 +133,7 @@ function finishedNote(statusCode: string): string {
 // older record: the run manager writes no in-progress marker, so the journal's last finished record still decides.
 /** The spec's column table. Order matters: live run, then no record, then the PR/MR, then the run result. */
 export function columnFor(f: ItemFacts): { column: Column; note: string | null } {
-  if (f.live) return { column: "working", note: f.live.state === "queued" ? NOTE.queued : f.live.state === "paused" ? NOTE.paused : null };
+  if (f.live) return { column: "working", note: f.live.state === "queued" ? (f.live.note === NOTE.continuingAutomatically ? NOTE.continuingAutomatically : NOTE.queued) : f.live.state === "paused" ? NOTE.paused : null };
   // A run marker with no live run means the app stopped mid-run, whatever older record exists.
   if (f.interrupted) return { column: "needsYou", note: NOTE.interrupted };
   const rec = f.lastRecord;

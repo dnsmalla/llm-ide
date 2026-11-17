@@ -347,3 +347,13 @@ test("an awaiting-review card sits in the done lane", () => {
   const lastRecord = { runId: "r1", mode: "full", statusCode: "awaiting_review", needsDecision: null, ship: null, lastStage: "Review", endedAt: "2026-11-09T10:00:00.000Z" };
   assert.equal(laneFor("needsYou", { ...EMPTY_FACTS, lastRecord }, ["Plan", "Review"]), "done");
 });
+
+test("a queued run the app resumed by itself shows the auto-resume note on its Working card", () => {
+  const items = [item("issue:a"), item("issue:b")];
+  const facts = new Map([
+    ["issue:a", { ...EMPTY_FACTS, live: { ...live("issue:a", "/p", "queued"), note: "Continuing automatically…" } }],
+    ["issue:b", { ...EMPTY_FACTS, live: { ...live("issue:b", "/p", "queued"), note: null } }],
+  ]);
+  const board = buildBoard(items, facts);
+  assert.deepEqual(board.working.map((c) => c.note), ["Continuing automatically…", "Queued"]);
+});

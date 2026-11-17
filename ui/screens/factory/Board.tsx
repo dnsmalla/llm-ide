@@ -18,7 +18,7 @@ import "./board.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
 import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
-import { finishChecksAllowed, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
+import { interruptedRunPlan, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
 import { isFactoryLoop, pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
 import { processHasIntake, processSteps } from "../loop/native/factory-template.ts";
 import { loadLoops } from "../loop/native/store.ts";
@@ -339,11 +339,11 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         const runId = item.runIds.at(-1) ?? null;
         const wt = runId ? worktrees.get(runId) : undefined;
         void act(async () => {
-          const changed = runId && wt ? await invokeHost<unknown>("loop_worktree_diff", { runId }).then((raw) => decodeWorktreeDiff(raw).files.length, () => 0) : 0;
-          const hasPlan = wt ? await fs.read(`${repoPrefixFor(root, wt.worktree)}/.factory/PLAN.md`, 200_000).then((r) => r.status === "ok", () => false) : false;
-          const ok = finishChecksAllowed({ changedFiles: changed, hasPlan });
-          const plan = ok ? runPlanFor("finishChecks", item, f) : runPlanFor("resume", item, f);
-          if (!ok) setNotice("The run stopped before its work was written, so there is nothing to check yet. It resumes instead.");
+          const plan = await interruptedRunPlan({
+            changedFiles: (id) => invokeHost<unknown>("loop_worktree_diff", { runId: id }).then((raw) => decodeWorktreeDiff(raw).files.length, () => 0),
+            hasPlan: () => (wt ? fs.read(`${repoPrefixFor(root, wt.worktree)}/.factory/PLAN.md`, 200_000).then((r) => r.status === "ok", () => false) : Promise.resolve(false)),
+          }, item, f);
+          if (plan.downgraded) setNotice("The run stopped before its work was written, so there is nothing to check yet. It resumes instead.");
           const started = startRun(root, item, plan.mode, plan.runId ? { runId: plan.runId } : undefined);
           if (!plan.runId) await attachRun(fs, item.key, started);
         });
