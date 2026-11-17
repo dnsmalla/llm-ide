@@ -188,6 +188,10 @@ fn git(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let out = crate::loop_runner::git_command()
         .args(crate::git::base_args())
         .args(args)
+        // A worktree checkout must not download Git LFS objects: credential helpers are off and there is no terminal,
+        // so git-lfs would fail asking for a username. The run works with the pointer files instead.
+        .env("GIT_LFS_SKIP_SMUDGE", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
         .current_dir(crate::fsutil::plain_path(dir))
         .stdin(Stdio::null())
         .output()
@@ -789,6 +793,31 @@ mod tests {
         let explicit = prepare_in(&p, &p, "r1z", Some(&head), "task").unwrap();
         assert_eq!(explicit.base_commit, head);
         remove_in(&explicit).unwrap();
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    /// A repo with a Git LFS file whose object is not stored locally: checking it out would make git-lfs download it,
+    /// which fails without credentials (or here, an unreachable LFS server). The worktree gets the pointer instead.
+    /// Needs git-lfs; without it there is no LFS filter to skip, so the test has nothing to check.
+    #[cfg(unix)]
+    #[test]
+    fn prepare_skips_lfs_download() {
+        if !Command::new("git").args(["lfs", "version"]).output().is_ok_and(|o| o.status.success()) {
+            return;
+        }
+        let p = project_repo("lfs");
+        let pointer = format!("version https://git-lfs.github.com/spec/v1\noid sha256:{}\nsize 12\n", "a".repeat(64));
+        std::fs::write(p.join(".gitattributes"), "*.bin filter=lfs diff=lfs merge=lfs -text\n").unwrap();
+        std::fs::write(p.join("big.bin"), &pointer).unwrap();
+        sh_git(&p, &["-c", "filter.lfs.process=git-lfs filter-process", "add", ".gitattributes", "big.bin"]);
+        sh_git(&p, &["commit", "-q", "-m", "lfs file"]);
+        sh_git(&p, &["config", "filter.lfs.process", "git-lfs filter-process"]);
+        sh_git(&p, &["config", "filter.lfs.required", "true"]);
+        sh_git(&p, &["config", "lfs.url", "http://127.0.0.1:9/"]);
+        let info = prepare_in(&p, &p, "lfs1", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        assert_eq!(std::fs::read_to_string(wt.join("big.bin")).unwrap(), pointer, "the pointer is checked out, nothing downloaded");
         remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&p);
     }
