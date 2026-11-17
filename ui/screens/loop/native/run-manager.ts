@@ -375,9 +375,22 @@ async function writeMarker(fs: FsApi, path: string, text: string, force = false)
   try { await fs.write(path, text, { expected_hash: null, ...(force ? { force: true } : {}) }); return true; } catch { return false; }
 }
 
-async function clearMarker(fs: FsApi, path: string): Promise<void> {
-  if (typeof fs.remove !== "function") return;
-  await fs.remove(path).catch(() => undefined);
+/** Never throws; false = the marker may still exist (the remove was refused or failed). */
+async function clearMarker(fs: FsApi, path: string): Promise<boolean> {
+  if (typeof fs.remove !== "function") return true;
+  try { await fs.remove(path); return true; } catch { return false; }
+}
+
+/** The marker of a run that threw, cleared now when its project is open, else remembered until it is. */
+async function clearOrHoldMarker(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Promise<void> {
+  const path = run.markerPath;
+  if (!path) return;
+  // The guarded fs refuses another project, so do not even try: hold the clear for flushPending.
+  if (d.activeProject() === run.live.projectRoot && await clearMarker(fs, path)) return;
+  const store = storage();
+  const id = `marker:${run.live.runId}`;
+  const held: PendingRecord = { projectRoot: run.live.projectRoot, entry: { id } as PendingRecord["entry"], record: {}, copy: null, marker: path, markerOnly: true };
+  writePending(store, [...readPending(store).filter((p) => p.entry.id !== id), held]);
 }
 
 async function execute(run: ManagedRun): Promise<void> {
@@ -391,7 +404,7 @@ async function execute(run: ManagedRun): Promise<void> {
     fail(run, e instanceof Error ? e.message : String(e));
     // No record will be written for a run that threw, so a left marker would show it Interrupted forever and
     // auto-resume it into the same crash.
-    if (run.markerPath) await clearMarker(fs, run.markerPath);
+    await clearOrHoldMarker(d, run, fs);
   }
   if (finished) {
     let entry: { id: string; startedAt: string } | null = null;
@@ -587,6 +600,11 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
 }
 
 async function writeHeld(d: RunManagerDeps, fs: FsApi, held: PendingRecord): Promise<void> {
+  if (held.markerOnly) {
+    // A throw keeps the entry stored for the next flush.
+    if (!(await clearMarker(fs, held.marker))) throw new Error("the run marker could not be removed");
+    return;
+  }
   await d.appendRecord(fs, held.entry, held.record);
   if (held.copy) await d.copyReadiness(fs, held.copy.prefix, held.copy.runId, new Date(held.copy.endedAt));
   await clearMarker(fs, held.marker);

@@ -611,6 +611,40 @@ test("a run that throws after the marker write removes the marker and reports th
   assert.match(rm.takeRunNotice(), /boom/);
 });
 
+test("a run that throws while another project is open holds the marker clear until its project is open again", async () => {
+  const storage = memoryStorage();
+  const marks = [];
+  let rejectRun;
+  setup({ storage, fsFor: markerFs(marks), runLoop: () => new Promise((_, reject) => { rejectRun = reject; }) });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const marker = "system/loop-worktrees/" + a + "/.factory/RUN.json";
+  await switchProject("/other");
+  rejectRun(new Error("boom"));
+  await settle();
+  assert.equal(marks.some(([k]) => k === "remove"), false, "no remove attempted against the wrong project");
+  const held = JSON.parse(storage.getItem("llmide.factory.pendingRecords"));
+  assert.equal(held.length, 1);
+  assert.equal(held[0].markerOnly, true);
+  assert.equal(held[0].marker, marker);
+  const after = [];
+  setup({ storage, fsFor: markerFs(after) });
+  await settle();
+  assert.deepEqual(after.filter(([k]) => k === "remove").map(([, p]) => p), [marker]);
+  assert.equal(world.records.length, 0, "a marker-only entry writes no record");
+  assert.deepEqual(JSON.parse(storage.getItem("llmide.factory.pendingRecords")), []);
+});
+
+test("a refused marker remove on a throw is held, and never throws into execute", async () => {
+  const storage = memoryStorage();
+  setup({ storage, fsFor: () => ({ write: async () => {}, remove: async () => { throw new Error("no_project"); } }), runLoop: () => { throw new Error("boom"); } });
+  rm.startRun("/p", item(1), "full");
+  await settle();
+  assert.equal(JSON.parse(storage.getItem("llmide.factory.pendingRecords")).length, 1);
+  assert.match(rm.takeRunNotice(), /boom/);
+  assert.equal(rm.liveRuns().length, 0, "the run still ended");
+});
+
 test("a record held for a closed project survives a restart and is written when the project is open at launch", async () => {
   const storage = memoryStorage();
   const marks = [];

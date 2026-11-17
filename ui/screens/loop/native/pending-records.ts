@@ -14,6 +14,8 @@ export interface PendingRecord {
   copy: { prefix: string; runId: string; endedAt: string } | null;
   /** The run marker to remove once the record is written. */
   marker: string;
+  /** A run that threw has no record; only its marker still has to be removed once its project is open. */
+  markerOnly?: boolean;
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
