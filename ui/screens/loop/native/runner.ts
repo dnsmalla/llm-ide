@@ -108,10 +108,14 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   if (reviews.outcomes.length === 0) return outcome;
   // A spent review budget never stops the run: the findings carry forward to the final review and the MR, which
   // are the human hand-off. Only the cost ceiling ends a run from inside a review.
-  const unresolved = reviews.outcomes.filter((r) => r.verdict === "unresolved").length;
-  const skipped = reviews.outcomes.filter((r) => r.verdict === "skipped").length;
-  const reviewNote = unresolved + skipped > 0 ? ` · step reviews: ${unresolved} unresolved, ${skipped} skipped` : "";
-  return { ...outcome, stepReviews: reviews.outcomes, statusSummary: `${outcome.statusSummary}${reviewNote}` };
+  return { ...outcome, stepReviews: reviews.outcomes, statusSummary: `${outcome.statusSummary}${stepReviewNote(reviews.outcomes)}` };
+}
+
+/** The summary suffix naming step reviews a person still has to look at; empty when every review approved. */
+export function stepReviewNote(outcomes: readonly Pick<StepReviewOutcome, "verdict">[]): string {
+  const unresolved = outcomes.filter((r) => r.verdict === "unresolved").length;
+  const skipped = outcomes.filter((r) => r.verdict === "skipped").length;
+  return unresolved + skipped > 0 ? ` · step reviews: ${unresolved} unresolved, ${skipped} skipped` : "";
 }
 
 async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews: StepReviewState): Promise<LoopRunOutcome> {

@@ -1,3 +1,4 @@
+import type { StepReviewOutcome } from "./runner.ts";
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
 
 // Where the AI step review lives. The skill is shipped with the central kit; the files are Factory-owned so a
@@ -50,4 +51,13 @@ export function parseStepVerdict(text: string | null): "approve" | "changes" | n
   if (last === "Verdict: approve") return "approve";
   if (last === "Verdict: changes") return "changes";
   return null;
+}
+
+/** Findings are capped so one long review cannot bloat the run record; the rest of the findings stay in the Review. */
+const RECORD_FINDINGS_MAX = 2000;
+
+/** The run record's `stepReviews`: one entry per review episode. Omitted entirely when no step was reviewed. */
+export function stepReviewRecords(reviews: readonly StepReviewOutcome[] | undefined): { stepReviews?: { stageName: string; verdict: StepReviewOutcome["verdict"]; attempts: number; findings: string; reason?: string }[] } {
+  if (!reviews || reviews.length === 0) return {};
+  return { stepReviews: reviews.map((r) => ({ stageName: r.stageName, verdict: r.verdict, attempts: r.attempts, findings: r.findings.slice(0, RECORD_FINDINGS_MAX), ...(r.reason !== undefined ? { reason: r.reason } : {}) })) };
 }

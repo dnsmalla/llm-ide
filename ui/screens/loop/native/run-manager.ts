@@ -11,12 +11,13 @@ import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } f
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
 import { readPending, writePending, type PendingRecord } from "./pending-records.ts";
-import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent, type StepReviewOutcome } from "./runner.ts";
+import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent } from "./runner.ts";
 import { autoShipKind, holdsForHuman, type AutoShipKind } from "./ship-model.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
 import { newRunId, repoPrefixFor } from "./worktree-run.ts";
+import { stepReviewRecords } from "./review.ts";
 import { countStepReviews, summarizeSteps, type StepReviewCounts } from "./issue-trail.ts";
 
 export type { RunMode } from "./factory.ts";
@@ -582,15 +583,6 @@ async function prepareWorktree(d: RunManagerDeps, run: ManagedRun): Promise<Work
 export function repoRelFor(repo: string | null, projectRoot: string, workRoot: string | null): string {
   if (repo !== null && /^(code\/(?!\.\.?$)[A-Za-z0-9._-]+)?$/.test(repo)) return repo;
   return workRoot ? repoPrefixFor(projectRoot, workRoot) : "";
-}
-
-/** Findings are capped so one long review cannot bloat the run record; the rest of the findings stay in the Review. */
-const RECORD_FINDINGS_MAX = 2000;
-
-/** The run record's `stepReviews`: one entry per review episode. Omitted entirely when no step was reviewed. */
-function stepReviewRecords(reviews: readonly StepReviewOutcome[] | undefined): { stepReviews?: { stageName: string; verdict: StepReviewOutcome["verdict"]; attempts: number; findings: string; reason?: string }[] } {
-  if (!reviews || reviews.length === 0) return {};
-  return { stepReviews: reviews.map((r) => ({ stageName: r.stageName, verdict: r.verdict, attempts: r.attempts, findings: r.findings.slice(0, RECORD_FINDINGS_MAX), ...(r.reason !== undefined ? { reason: r.reason } : {}) })) };
 }
 
 /** The `awaiting` record fact of a held run: what the run would have shipped as, so Approve can ship it that way. */

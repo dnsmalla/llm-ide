@@ -54,3 +54,13 @@ test("the model type accepts the new optional fields", () => {
   const store = m.decodeProjectStore({ schemaVersion: 2, loops: [{ id: "l", name: "N", config: { reviewMode: "human", stages: [{ name: "s", kind: "skill", skillId: "skills/x", order: 0, reviewAfter: true }] } }] });
   assert.equal(store.loops[0].config.stages[0].reviewAfter, true);
 });
+
+test("stepReviewRecords caps findings at 2000 chars, keeps the reason and is empty without reviews", async () => {
+  const { stepReviewRecords } = await import("../native/review.ts");
+  assert.deepEqual(stepReviewRecords(undefined), {});
+  assert.deepEqual(stepReviewRecords([]), {});
+  const out = stepReviewRecords([{ stageId: "a", stageName: "A", verdict: "unresolved", attempts: 2, findings: "x".repeat(5000) }, { stageId: "b", stageName: "B", verdict: "skipped", attempts: 0, findings: "", reason: "r" }]);
+  assert.equal(out.stepReviews[0].findings.length, 2000);
+  assert.deepEqual(out.stepReviews[1], { stageName: "B", verdict: "skipped", attempts: 0, findings: "", reason: "r" });
+  assert.equal("stageId" in out.stepReviews[0], false);
+});

@@ -3,7 +3,7 @@
 // rolled back to that checkpoint and marked blocked in the plan; a batch that passed stays, even when a later one is
 // rolled back. A user Stop is not rolled back: the person is looking at the tree.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
-import { pauseBetween, runNativeLoop, type LoopIterationOutcome, type LoopRunOutcome, type RunnerDeps, type StageOutcome } from "./runner.ts";
+import { pauseBetween, runNativeLoop, stepReviewNote, type LoopIterationOutcome, type LoopRunOutcome, type RunnerDeps, type StageOutcome, type StepReviewOutcome } from "./runner.ts";
 
 export interface RefactorBatchOpts {
   maxBatches?: number;
@@ -124,6 +124,8 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
   const applied: string[] = [];
   const skipped: string[] = [];
   let rolledBack: { id: string; reason: string; leftTodo: boolean } | null = null;
+  // Every batch is its own runNativeLoop, so its review outcomes are gathered here or the outer run would report none.
+  const stepReviews: StepReviewOutcome[] = [...(plan.stepReviews ?? [])];
   let failed = false;
   let hostError = false;
   let note = "";
@@ -151,6 +153,7 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
     iterations.push(...sub.iterations);
     iterationsUsed += sub.iterationsUsed;
     costUsd += sub.costUsd ?? 0;
+    stepReviews.push(...(sub.stepReviews ?? []));
     last = sub;
 
     if (sub.cancelled) { pending = null; note = sub.statusSummary; break; }
@@ -223,7 +226,8 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
     iterations: iterations.map((it, i) => ({ ...it, index: i + 1 })),
     costUsd,
     failedStage: passed ? null : last.failedStage,
-    statusSummary: parts.join("; "),
+    statusSummary: `${parts.join("; ")}${stepReviewNote(stepReviews)}`,
+    ...(stepReviews.length > 0 ? { stepReviews } : {}),
     // A run that kept verified batches is a pass; a later batch's halt is told in the summary, not as a run status.
     ...(last.cancelled ? { cancelled: true } : {}),
     ...(!passed && last.blocked ? { blocked: true } : {}),

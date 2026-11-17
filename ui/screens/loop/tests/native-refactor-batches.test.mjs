@@ -278,3 +278,13 @@ test("a failed rollback marks the batch blocked in the plan, whatever status it 
   assert.match(state.plan, /### R1 — R1 \(status: blocked\)\n- Blocked: rollback failed — /);
   assert.match(state.plan, /### R2 — R2 \(status: todo\)/);
 });
+
+test("step review outcomes of every batch reach the outer outcome and its summary", async () => {
+  const { deps, opts } = fakeRun({ plan: TODO("R1") + "\n" + TODO("R2") });
+  deps.snapshotBefore = async () => ({ tree: "t" });
+  deps.reviewStep = async () => ({ verdict: "skipped", findings: "", reason: "no worktree" });
+  const out = await runRefactorBatches(config(ALL), deps, opts);
+  assert.ok(out.stepReviews.length >= 2, "reviews from both batches are kept");
+  assert.equal(new Set(out.stepReviews.map((r) => r.verdict)).size, 1);
+  assert.match(out.statusSummary, / · step reviews: 0 unresolved, \d+ skipped$/);
+});
