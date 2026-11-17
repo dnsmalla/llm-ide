@@ -411,3 +411,16 @@ test("a test writer may create a new test file, but not a new conftest.py or hel
   const created = ["tests/test_tax.py", "tests/conftest.py", "tests/helpers.py", "src/app.test.ts"];
   assert.deepEqual(f.guardedPaths(loop, writer, created, created), ["tests/conftest.py", "tests/helpers.py"]);
 });
+
+test("configFor humanReview keeps the sendBack roles and tells Implement to read HUMAN-REVIEW.md", () => {
+  const cfg = configFor("humanReview", FULL.config);
+  const roles = cfg.stages.map((s) => factoryRole(s)).filter((r) => r !== null);
+  assert.deepEqual([...new Set(roles)].sort(), ["implement", "review", "reviewGate", "verify"]);
+  const implement = cfg.stages.find((s) => factoryRole(s) === "implement");
+  assert.ok(implement.prompt.endsWith(f.HUMAN_REVIEW_PROMPT_LINE));
+  assert.match(f.HUMAN_REVIEW_PROMPT_LINE, /\.factory\/HUMAN-REVIEW\.md/);
+});
+
+test("configFor keeps reviewMode human through the clone", () => {
+  assert.equal(configFor("full", { ...FULL.config, reviewMode: "human" }).reviewMode, "human");
+});

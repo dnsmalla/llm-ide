@@ -2,6 +2,8 @@
 // types from the shell (shell/core and shell/host do not load under node --test's strip-only mode).
 import { DEFAULT_GITLAB_BASE, repoKeyOf, type RepoConfig, type RepoProvider } from "../../settings/repo-config.ts";
 import { issueNumberOf, type FactoryRole, type WorkItem } from "./factory.ts";
+import type { LoopEngineConfig } from "./model.ts";
+import { reviewModeOf } from "./review.ts";
 import type { RunInfo } from "./worktree-run.ts";
 import { isCiHookPath } from "./protected.ts";
 
@@ -44,6 +46,14 @@ export function autoShipKind(r: { mode: string; statusCode: string; needsDecisio
   if (r.failedRole === "verify") return "testsFailing";
   if (r.failedRole === "review" || r.failedRole === "reviewGate") return "reviewRejected";
   return "incomplete";
+}
+
+/**
+ * True when a finished run that would auto-ship must wait for a person instead. Human mode holds every such run,
+ * including one the AI final review rejected: nothing ships before a person approves.
+ */
+export function holdsForHuman(config: Pick<LoopEngineConfig, "reviewMode">, r: { mode: string; statusCode: string; needsDecision: boolean; failedRole: FactoryRole | null }): boolean {
+  return reviewModeOf(config) === "human" && autoShipKind(r) !== null;
 }
 
 const KIND_PREFIX: Record<AutoShipKind, string> = { passed: "", testsFailing: "[Tests failing] ", reviewRejected: "[Review: changes requested] ", incomplete: "[Incomplete] " };

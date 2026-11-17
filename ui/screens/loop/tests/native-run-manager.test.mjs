@@ -597,3 +597,38 @@ test("runs held for another project do not count against the parallel-runs cap",
   await settle();
   assert.equal(rm.liveRuns().find((r) => r.runId === c).state, "running", "the open project's run is not blocked by the held ones");
 });
+
+test("reviewMode human holds a passing run as awaiting_review and ships nothing", async () => {
+  const shipped = [];
+  setup({
+    loadFactoryLoop: async () => ({ ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_LOOP.config), reviewMode: "human" } }),
+    autoShip: async (e) => { shipped.push(e.statusCode); return ""; },
+  });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  const rec = world.records.at(-1);
+  assert.equal(rec.record.statusCode, "awaiting_review");
+  assert.equal(rec.entry.statusCode, "awaiting_review");
+  assert.equal(rec.record.awaiting.held, "success");
+  assert.equal(rec.record.awaiting.kind, "passed");
+  assert.deepEqual(shipped, ["awaiting_review"]);
+});
+
+test("without reviewMode a passing run is success; a cancelled or errored run is never held", async () => {
+  setup();
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  assert.equal(world.records.at(-1).record.statusCode, "success");
+  assert.equal(world.records.at(-1).record.awaiting, undefined);
+  setup({ loadFactoryLoop: async () => ({ ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_LOOP.config), reviewMode: "human" } }) });
+  const b = rm.startRun("/p", item(2), "full");
+  await settle();
+  await finish(b, { ...PASSED, passed: false, cancelled: true });
+  assert.equal(world.records.at(-1).record.statusCode, "aborted");
+  const c = rm.startRun("/p", item(3), "full");
+  await settle();
+  await finish(c, { ...PASSED, passed: false, errored: true });
+  assert.equal(world.records.at(-1).record.statusCode, "error");
+});

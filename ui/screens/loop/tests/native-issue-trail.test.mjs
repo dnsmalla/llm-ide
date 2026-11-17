@@ -163,3 +163,8 @@ test("runSummaryBody adds one step reviews line only when a step was reviewed", 
   assert.equal(runSummaryBody(base).includes("Step reviews"), false);
   assert.equal(runSummaryBody({ ...base, stepReviews: null }).includes("Step reviews"), false);
 });
+
+test("a held run's summary says it is waiting for a person", () => {
+  const body = runSummaryBody({ process: "Factory", runId: "r3", statusCode: "awaiting_review", statusSummary: "", steps: [], changedFiles: [], costUsd: 0 });
+  assert.match(body, /waiting for your review/);
+});

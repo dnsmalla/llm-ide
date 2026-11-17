@@ -1,6 +1,7 @@
 // Board columns, derived from stored facts every time the board is read. A column is never written anywhere.
 import type { LiveRun, RunMode } from "../loop/native/run-manager.ts";
 import { factoryRole } from "../loop/native/factory.ts";
+import type { AutoShipKind } from "../loop/native/ship-model.ts";
 import type { StepReviewCounts } from "../loop/native/issue-trail.ts";
 import { displayText } from "../explorer/scm/model.ts";
 
@@ -24,6 +25,8 @@ export interface RunRecordFacts {
   autoShipBlocked?: string | null;
   /** Step review verdict counts, or null when the record has none (older records never do). */
   stepReviews?: StepReviewCounts | null;
+  /** Set on a run held for a person (reviewMode human); null otherwise. */
+  awaiting?: { held: "success" | "failed"; kind: AutoShipKind; failedStage: string | null } | null;
   reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null;
 }
 
@@ -35,11 +38,11 @@ export const NOTE = {
   queued: "Queued", paused: "Paused", interrupted: "Interrupted", intakeReady: "Intake ready",
   statusUnavailable: "status unavailable", ciFailed: "CI failed", newComments: "New review comments",
   ciFailedAndComments: "CI failed, new review comments", closedUnmerged: "Closed without merge", ciRunning: "CI running",
-  failed: "Failed", stopped: "Stopped", error: "Error", blocked: "Blocked", notShipped: "Not shipped",
+  failed: "Failed", stopped: "Stopped", error: "Error", blocked: "Blocked", notShipped: "Not shipped", awaitingReview: "Awaiting your review",
 } as const;
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const RUN_MODES: readonly string[] = ["full", "intakeOnly", "continue", "sendBack", "check", "rework"];
+const RUN_MODES: readonly string[] = ["full", "intakeOnly", "continue", "sendBack", "check", "rework", "humanReview"];
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function httpsUrl(v: unknown): string | null {
@@ -91,6 +94,7 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     readiness,
     autoShipBlocked: isRecord(raw.autoShip) && typeof raw.autoShip.blocked === "string" && raw.autoShip.blocked.trim() !== "" ? displayText(raw.autoShip.blocked).slice(0, 300) : null,
     stepReviews: decodeStepReviewCounts(raw.stepReviews),
+    awaiting: decodeAwaiting(raw.awaiting),
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,
     entry,
   };
@@ -107,6 +111,14 @@ function decodeStepReviewCounts(v: unknown): StepReviewCounts | null {
     else if (entry.verdict === "skipped") counts.skipped += 1;
   }
   return counts.approved + counts.unresolved + counts.skipped > 0 ? counts : null;
+}
+
+const AWAITING_KINDS: readonly string[] = ["passed", "testsFailing", "reviewRejected", "incomplete"];
+/** A malformed `awaiting` decodes to null so a damaged record never breaks the board. */
+function decodeAwaiting(v: unknown): RunRecordFacts["awaiting"] {
+  if (!isRecord(v)) return null;
+  if ((v.held !== "success" && v.held !== "failed") || typeof v.kind !== "string" || !AWAITING_KINDS.includes(v.kind)) return null;
+  return { held: v.held, kind: v.kind as AutoShipKind, failedStage: typeof v.failedStage === "string" ? v.failedStage.slice(0, 120) : null };
 }
 
 function finishedNote(statusCode: string): string {
@@ -143,6 +155,8 @@ export function columnFor(f: ItemFacts): { column: Column; note: string | null }
   if (rec.needsDecision !== null) return { column: "needsDecision", note: null };
   // The run should have opened its MR but could not: a passed run keeps its Ship button, any other waits for a person.
   if (rec.autoShipBlocked) return rec.statusCode === "success" ? { column: "readyToShip", note: NOTE.notShipped } : { column: "needsYou", note: NOTE.notShipped };
+  // Held for a person (reviewMode human). An MR-blocked record keeps the branch above, which is checked first.
+  if (rec.statusCode === "awaiting_review") return { column: "needsYou", note: NOTE.awaitingReview };
   if (rec.statusCode === "success") return rec.mode === "intakeOnly" ? { column: "inbox", note: NOTE.intakeReady } : { column: "readyToShip", note: null };
   return { column: "needsYou", note: finishedNote(rec.statusCode) };
 }

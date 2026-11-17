@@ -11,7 +11,7 @@ export { factoryAnchor, focusKeyFromAnchor } from "./anchor.ts";
 
 export const STATUS_REFRESH_MS = 5 * 60 * 1000;
 export const SHIP_STATUS_BATCH = 20;
-export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "finishChecks" | "rerun" | "intake" | "answer";
+export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "finishChecks" | "rerun" | "intake" | "answer" | "approve" | "requestChanges";
 export interface CardView {
   key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[];
   /** The board lane the card sits in (a process step, or backlog / MR / done). */
@@ -30,7 +30,7 @@ export interface CardView {
   stepReviews?: StepReviewCounts | null;
   shipOverride?: { rule: string; file: string | null; line: number | null } | null;
 }
-export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Continue", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue" };
+export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Continue", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue", approve: "Approve", requestChanges: "Request changes" };
 export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> = { issue: "Issue", spec: "Spec", text: "Text" };
 export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeExists: false, ship: null, shipStatusError: false, lastKnownColumn: null };
 
@@ -48,6 +48,8 @@ export function actionsFor(column: Column, note: string | null, process: { intak
       if (note === NOTE.interrupted) return ["finishChecks", "openDiff", "rerun", "discard"];
       if (note === NOTE.ciFailed || note === NOTE.newComments || note === NOTE.ciFailedAndComments) return ["sendBack", "openRequest", "openDiff", "discard"];
       if (note === NOTE.closedUnmerged || note === NOTE.statusUnavailable) return ["openRequest", "discard"];
+      // Task 8 wires the approve / requestChanges click handlers in Board.tsx and Card.tsx.
+      if (note === NOTE.awaitingReview) return ["approve", "requestChanges", "openDiff", "discard"];
       if (note === NOTE.notShipped) return ["rerun", "openDiff", "discard"];
       return ["resume", "openDiff", "discard"];
     case "readyToShip": return ["openDiff", "ship", "discard"];
@@ -82,7 +84,8 @@ export function laneFor(column: Column, f: ItemFacts, steps: readonly string[]):
   // An MR closed without merge is not done: back to Backlog, where Discard frees the issue to start again.
   if (rec?.ship && f.ship?.state === "closed") return LANE_BACKLOG;
   // Finished, not merged: ready to ship, or an MR open (also when CI failed or a reviewer commented).
-  if (rec?.ship || column === "readyToShip") return LANE_DONE;
+  // A run held for a person is finished work waiting on a decision, so it sits in Done, not at its last step.
+  if (rec?.ship || column === "readyToShip" || (column === "needsYou" && rec?.statusCode === "awaiting_review" && !rec.autoShipBlocked)) return LANE_DONE;
   if (column === "inbox") return LANE_BACKLOG;
   // Stopped: the failing step, else the last one reached; an interrupted run with no record has none.
   return stageLane(rec?.failingStage?.name ?? rec?.lastStage, steps) ?? (rec && steps[0] ? stepLane(steps[0]) : LANE_BACKLOG);

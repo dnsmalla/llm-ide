@@ -23,7 +23,7 @@ const when = (iso: string): string => {
   const h = Math.round(mins / 60);
   return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 };
-const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code === "aborted" ? "cancelled" : code === "running" ? "running" : "failed";
+const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code === "aborted" ? "cancelled" : code === "awaiting_review" ? "awaiting review" : code === "running" ? "running" : "failed";
 
 interface RunCard { run: LoopRunIndexEntry; lane: string; note: string; failed: boolean; live?: boolean }
 

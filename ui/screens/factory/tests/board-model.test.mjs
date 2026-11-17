@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, cardTone, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, laneFor, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, cardTone, chunkShipRequests, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
@@ -335,4 +335,15 @@ test("buildBoard puts the step review counts on the card, and a skipped non-git 
   assert.deepEqual(board.readyToShip[0].stepReviews, { approved: 0, unresolved: 0, skipped: 1 });
   assert.equal(formatStepReviews(board.readyToShip[0].stepReviews), "1 skipped");
   assert.equal("stepReviews" in buildBoard([item("issue:b")], new Map()).inbox[0], false, "no reviews, no key");
+});
+
+test("an awaiting-review card offers approve, request changes, diff and discard, in the Done lane", () => {
+  assert.deepEqual(actionsFor("needsYou", "Awaiting your review"), ["approve", "requestChanges", "openDiff", "discard"]);
+  assert.equal(ACTION_LABELS.approve, "Approve");
+  assert.equal(ACTION_LABELS.requestChanges, "Request changes");
+});
+
+test("an awaiting-review card sits in the done lane", () => {
+  const lastRecord = { runId: "r1", mode: "full", statusCode: "awaiting_review", needsDecision: null, ship: null, lastStage: "Review", endedAt: "2026-11-09T10:00:00.000Z" };
+  assert.equal(laneFor("needsYou", { ...EMPTY_FACTS, lastRecord }, ["Plan", "Review"]), "done");
 });

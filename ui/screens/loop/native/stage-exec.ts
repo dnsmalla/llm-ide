@@ -437,7 +437,8 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
     : [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
   if (target.goal) message.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
-  if (isFactoryLoop(target)) message.push(FACTORY_REPAIR_HINT);
+  // NOTE: kept out of FACTORY_REPAIR_HINT, which a generated registry pins byte for byte.
+  if (isFactoryLoop(target)) message.push(FACTORY_REPAIR_HINT, "If .factory/HUMAN-REVIEW.md exists, read it first.");
   const before = await dirtyBefore(ctx);
   const g: GuardedCallOutcome<AgentRunReply> = await guardedAgentCall<AgentRunReply>({
     before,

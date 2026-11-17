@@ -320,7 +320,9 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
  * or a pause that timed out is `aborted` (the Mac's `LoopEngineStatus.aborted`); an agent call that failed with nothing out
  * of scope is `error`; otherwise `success` or `failed`.
  */
-export function runStatusCode(o: Pick<LoopRunOutcome, "passed" | "cancelled" | "blocked" | "errored">): string {
+export function runStatusCode(o: Pick<LoopRunOutcome, "passed" | "cancelled" | "blocked" | "errored"> & { awaitingReview?: boolean }): string {
+  // Held for a person: checked first so no later code mistakes the run for success and ships it.
+  if (o.awaitingReview) return "awaiting_review";
   if (o.blocked) return "blocked.repair_out_of_scope";
   if (o.errored) return "error";
   if (o.cancelled) return "aborted";

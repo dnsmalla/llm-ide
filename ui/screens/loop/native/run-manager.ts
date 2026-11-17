@@ -11,6 +11,7 @@ import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } f
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
 import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent, type StepReviewOutcome } from "./runner.ts";
+import { autoShipKind, holdsForHuman, type AutoShipKind } from "./ship-model.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
@@ -488,7 +489,9 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   };
   const outcome = await d.runLoop(config, { ...d.createStageDeps(ctx, loop), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress }).finally(() => markerWrites);
   log(outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`);
-  return { loop, info, config, outcome };
+  // Human review mode: a finished run that would auto-ship waits for a person instead. runStatusCode reads the flag.
+  const held = holdsForHuman(config, { mode: run.live.mode, statusCode: runStatusCode(outcome), needsDecision: needsDecisionSummary(outcome) !== null, failedRole: outcome.failedStage ? factoryRole(outcome.failedStage) : null });
+  return { loop, info, config, outcome: held ? { ...outcome, awaitingReview: true } : outcome };
 }
 
 /** The worktree of an earlier run (Resume, continue, sendBack), or null when it was removed. */
@@ -534,6 +537,14 @@ function stepReviewRecords(reviews: readonly StepReviewOutcome[] | undefined): {
   return { stepReviews: reviews.map((r) => ({ stageName: r.stageName, verdict: r.verdict, attempts: r.attempts, findings: r.findings.slice(0, RECORD_FINDINGS_MAX), ...(r.reason !== undefined ? { reason: r.reason } : {}) })) };
 }
 
+/** The `awaiting` record fact of a held run: what the run would have shipped as, so Approve can ship it that way. */
+function awaitingFact(o: LoopRunOutcome, mode: RunMode): { awaiting?: { held: "success" | "failed"; kind: AutoShipKind; failedStage: string | null } } {
+  if (!o.awaitingReview) return {};
+  const held = o.passed ? "success" : "failed";
+  const kind = autoShipKind({ mode, statusCode: held, needsDecision: false, failedRole: o.failedStage ? factoryRole(o.failedStage) : null });
+  return kind ? { awaiting: { held, kind, failedStage: o.failedStage?.name ?? null } } : {};
+}
+
 async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Finished, started: Date): Promise<{ id: string; startedAt: string } | null> {
   const { live, item } = run;
   const ended = d.now();
@@ -555,6 +566,7 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
     iterations: iterationRecordsWithScores(f.outcome.iterations),
     workItem: { source: item.source, id: item.id, title: item.title },
     worktree: { runId: live.runId, branch: f.info.branch, baseCommit: f.info.baseCommit, repo: f.info.repo },
+    ...awaitingFact(f.outcome, live.mode),
     ship: null, needsDecision: needsDecisionSummary(f.outcome), diffSummary, costUsd: f.outcome.costUsd ?? stages.reduce((n, st) => n + (st.costUsd ?? 0), 0),
   };
   const copy = live.mode === "full" || live.mode === "intakeOnly";

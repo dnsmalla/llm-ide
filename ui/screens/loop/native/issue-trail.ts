@@ -140,7 +140,7 @@ export interface SummaryFacts {
   mergeRequest?: { url: string } | { notOpened: string } | null;
 }
 
-const STATUS_WORD: Record<string, string> = { success: "passed", failed: "failed", aborted: "cancelled", error: "ended with an error" };
+const STATUS_WORD: Record<string, string> = { success: "passed", failed: "failed", aborted: "cancelled", awaiting_review: "waiting for your review", error: "ended with an error" };
 
 /** The end-of-run comment: outcome, every step with its result and attempts, what changed, cost, time, and the MR. */
 export function runSummaryBody(f: SummaryFacts): string {

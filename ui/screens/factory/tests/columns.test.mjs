@@ -84,7 +84,7 @@ test("a passed intake-only run goes back to Inbox, ready to start", () => {
 test("decodeRunRecordFacts reads the factory fields and rejects other records", () => {
   const raw = { id: "e1", statusCode: "success", endedAt: "2026-11-09T10:00:00.000Z", factoryMode: "intakeOnly", worktree: { runId: "r1", branch: "factory/r1", baseCommit: "abc", repo: "code/web" }, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3", commit: "def", reused: false }, needsDecision: null };
   const entry = { id: "e1", startedAt: "2026-11-09T09:00:00.000Z" };
-  assert.deepEqual(decodeRunRecordFacts(raw, entry), { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3" }, reviewedPatchId: null, costUsd: null, durationSeconds: null, verdict: null, changed: null, test: null, failingStage: null, lastStage: null, readiness: null, autoShipBlocked: null, stepReviews: null, endedAt: "2026-11-09T10:00:00.000Z", entry });
+  assert.deepEqual(decodeRunRecordFacts(raw, entry), { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3" }, reviewedPatchId: null, costUsd: null, durationSeconds: null, verdict: null, changed: null, test: null, failingStage: null, lastStage: null, readiness: null, autoShipBlocked: null, stepReviews: null, awaiting: null, endedAt: "2026-11-09T10:00:00.000Z", entry });
   const reviewed = "d".repeat(64);
   assert.equal(decodeRunRecordFacts({ ...raw, diffSummary: { files: ["src/a.ts"], truncated: false, patchId: reviewed } }).reviewedPatchId, reviewed);
   assert.equal(decodeRunRecordFacts({ ...raw, diffSummary: { files: [], truncated: false, patchId: "short" } }).reviewedPatchId, null, "a malformed id never becomes a comparison");
@@ -169,4 +169,18 @@ test("decodeRunRecordFacts gives null step review counts without the key or with
   assert.equal(decodeRunRecordFacts({ worktree: { runId: "r1" } }).stepReviews, null);
   assert.equal(decodeRunRecordFacts({ worktree: { runId: "r1" }, stepReviews: "nope" }).stepReviews, null);
   assert.equal(decodeRunRecordFacts({ worktree: { runId: "r1" }, stepReviews: [{ verdict: 7 }] }).stepReviews, null);
+});
+
+test("an awaiting_review record is a Needs you card, unless the MR was blocked", () => {
+  assert.deepEqual(columnFor(facts({ lastRecord: record({ statusCode: "awaiting_review" }) })), { column: "needsYou", note: NOTE.awaitingReview });
+  assert.equal(NOTE.awaitingReview, "Awaiting your review");
+  assert.deepEqual(columnFor(facts({ lastRecord: record({ statusCode: "awaiting_review", autoShipBlocked: "x" }) })), { column: "needsYou", note: NOTE.notShipped });
+});
+
+test("decodeRunRecordFacts keeps humanReview mode and decodes awaiting, malformed awaiting is null", () => {
+  const raw = (awaiting) => ({ worktree: { runId: "r1" }, statusCode: "awaiting_review", awaiting, config: { stages: [] }, factoryMode: "humanReview" });
+  const ok = decodeRunRecordFacts(raw({ held: "failed", kind: "testsFailing", failedStage: "Verify" }));
+  assert.deepEqual(ok.awaiting, { held: "failed", kind: "testsFailing", failedStage: "Verify" });
+  assert.equal(decodeRunRecordFacts(raw({ held: "nope", kind: 3 })).awaiting, null);
+  assert.equal(decodeRunRecordFacts(raw(undefined)).awaiting, null);
 });

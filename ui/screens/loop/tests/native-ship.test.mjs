@@ -159,3 +159,15 @@ test("A4: the recorded review patch id warns and blocks Ship when the diff chang
   assert.equal(m.reviewedPatchIdWarning(reviewed, ""), null, "a diff still loading is not a mismatch");
   assert.equal(m.reviewedPatchIdWarning("not-a-patch-id", "b".repeat(64)), null, "a malformed recorded value is ignored");
 });
+
+test("holdsForHuman holds every run that would auto-ship, even one the AI reviewer rejected, only in human mode", () => {
+  const human = { reviewMode: "human" };
+  const ok = { mode: "full", statusCode: "success", needsDecision: false, failedRole: null };
+  assert.equal(m.holdsForHuman(human, ok), true);
+  assert.equal(m.holdsForHuman(human, { ...ok, statusCode: "failed", failedRole: "reviewGate" }), true);
+  assert.equal(m.holdsForHuman(human, { ...ok, statusCode: "failed", failedRole: "verify" }), true);
+  assert.equal(m.holdsForHuman({ reviewMode: undefined }, ok), false);
+  assert.equal(m.holdsForHuman(human, { ...ok, needsDecision: true }), false);
+  assert.equal(m.holdsForHuman(human, { ...ok, mode: "intakeOnly" }), false);
+  assert.equal(m.holdsForHuman(human, { ...ok, statusCode: "aborted" }), false);
+});
