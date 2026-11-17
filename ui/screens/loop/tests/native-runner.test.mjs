@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runNativeLoop } from "../native/runner.ts";
+import { runNativeLoop, runStatusCode } from "../native/runner.ts";
 import { decodeConfig } from "../native/model.ts";
 
 // stageDelaySeconds 0 keeps the existing tests off real timers; the pause tests below set it explicitly.
@@ -177,7 +177,7 @@ test("onProgress reports iteration, stage start/result and repair", async () => 
   assert.ok(events.some(([t, , id]) => t === "stage-start" && id === "b"));
 });
 
-test("R1: a snapshot stage and an apply skill stage run once across two iterations, while the failed Test is repaired and re-run", async () => {
+test("R1: a failed Test after an apply skill loops back to Apply (no repair agent); the snapshot stage still runs once", async () => {
   const calls = [];
   let tests = 0;
   const snapshot = stage("snap", "Snapshot", { kind: "codeGraph", graphOp: "snapshot" });
@@ -192,7 +192,7 @@ test("R1: a snapshot stage and an apply skill stage run once across two iteratio
     },
     async repair(s) { calls.push(`repair ${s.name}`); return { ok: true, output: "fixed" }; }, log() {},
   });
-  assert.deepEqual(calls, ["Snapshot", "Apply", "Test", "repair Test", "Test"]);
+  assert.deepEqual(calls, ["Snapshot", "Apply", "Test", "Apply", "Test"]);
   assert.equal(out.passed, true);
   assert.equal(out.iterationsUsed, 2);
 });
@@ -429,23 +429,6 @@ test("step review: default-off skill and shell stages take no snapshot and no re
   assert.deepEqual(out.stepReviews.map((r) => r.stageId), ["r"]);
 });
 
-test("step review: a step closed as unresolved is not reviewed again in a later iteration", async () => {
-  const reviewed_ids = [];
-  const aRuns = [];
-  let bRuns = 0;
-  const out = await runNativeLoop(cfg([reviewed("a", "A"), stage("b", "B")], { maxRepairsPerStage: 1 }), base({
-    async runStage(s) {
-      if (s.id === "a") { aRuns.push(s.id); return { ok: true, output: "" }; }
-      bRuns += 1; return { ok: bRuns > 1, output: bRuns > 1 ? "" : "boom" };
-    },
-    async repair() { return { ok: true, output: "fixed" }; },
-    async reviewStep(s) { reviewed_ids.push(s.id); return { verdict: "changes", findings: `f${reviewed_ids.length}` }; },
-  }));
-  assert.equal(out.passed, true);
-  assert.equal(aRuns.length, 2, "a runs again in iteration 2");
-  assert.deepEqual(reviewed_ids, ["a", "a"], "only the first iteration's two review passes ran");
-});
-
 test("step review: a stage that fails is not reviewed", async () => {
   let reviewCalls = 0;
   const out = await runNativeLoop(cfg([reviewed("a", "A")], { maxRepairsPerStage: 1 }), base({
@@ -557,4 +540,267 @@ test("step review: the wall-clock budget ends the run between a review and its r
   assert.equal(out.passed, false);
   assert.match(out.statusSummary, /^wall-clock budget reached/);
   assert.equal(repairs, 0);
+});
+
+// Verify loopback
+const code = (id, name, over = {}) => reviewed(id, name, { runOnce: true, ...over });
+const cfg3 = (stages, over = {}) => cfg(stages, { maxIterations: 3, ...over });
+const verify = stage("v", "Verify");
+const noRepair = async () => { throw new Error("no repair"); };
+
+test("loopback: a failed Verify re-runs the runOnce code stage with the test output, no repair agent", async () => {
+  const calls = [];
+  const contexts = [];
+  let vRuns = 0;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s, _p, loopback) {
+      calls.push([s.id, loopback ? loopback.round : null]);
+      if (s.id === "impl") contexts.push(loopback);
+      if (s.id === "v") { vRuns += 1; return { ok: vRuns > 1, output: vRuns > 1 ? "" : "boom" }; }
+      return { ok: true, output: "" };
+    },
+    repair: noRepair,
+  }));
+  assert.deepEqual(calls, [["impl", null], ["v", null], ["impl", 2], ["v", null]]);
+  assert.deepEqual(contexts[1], { round: 2, maxRounds: 3, findings: "Round 1 (tests)\nboom" });
+  assert.equal(out.passed, true);
+  assert.equal(out.iterationsUsed, 2);
+});
+
+test("loopback: never terminates - different failures each round stop at the round limit", async () => {
+  const counts = { impl: 0, v: 0, repair: 0 };
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxRepairsPerStage: 1, consecutiveFailureStop: 2 }), base({
+    async runStage(s) { counts[s.id] += 1; return s.id === "v" ? { ok: false, output: `fail ${counts.v}` } : { ok: true, output: "" }; },
+    async repair() { counts.repair += 1; return { ok: true, output: "" }; },
+  }));
+  assert.deepEqual(counts, { impl: 3, v: 3, repair: 0 });
+  assert.equal(out.passed, false);
+  assert.equal(out.stoppedAtLimit, true);
+  assert.equal(out.iterationsUsed, 3);
+  assert.equal(out.loopback.rounds, 3);
+  assert.equal(out.loopback.maxRounds, 3);
+  assert.equal(out.loopback.reason, "tests");
+  assert.equal(out.loopback.stopped, true);
+  assert.match(out.loopback.findings, /fail 3/);
+  assert.equal(out.statusSummary, "Stopped after 3 rounds: tests still failing");
+  assert.equal(out.failedStage.id, "v");
+  assert.equal(runStatusCode(out), "stopped.limit");
+});
+
+test("loopback: a limit of one round stops after one", async () => {
+  const counts = { impl: 0, v: 0 };
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations: 1 }), base({
+    async runStage(s) { counts[s.id] += 1; return { ok: s.id !== "v", output: "x" }; }, repair: noRepair,
+  }));
+  assert.deepEqual(counts, { impl: 1, v: 1 });
+  assert.equal(out.statusSummary, "Stopped after 1 round: tests still failing");
+});
+
+test("loopback: identical failures stop early, honouring consecutiveFailureStop", async () => {
+  for (const [stop, rounds] of [[1, 1], [2, 2], [3, 3]]) {
+    let impl = 0;
+    const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations: 5, consecutiveFailureStop: stop }), base({
+      async runStage(s) { if (s.id === "impl") impl += 1; return { ok: s.id !== "v", output: "same" }; }, repair: noRepair,
+    }));
+    assert.equal(impl, rounds, `stop ${stop}`);
+    assert.equal(out.iterationsUsed, rounds);
+    assert.equal(out.stoppedAtLimit, true);
+    assert.equal(out.statusSummary, `Stopped after ${rounds} ${rounds === 1 ? "round" : "rounds"}: tests still failing (no change since the previous round)`);
+  }
+});
+
+test("loopback: identical review findings in consecutive rounds stop early", async () => {
+  let impl = 0;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations: 5, consecutiveFailureStop: 2 }), base({
+    async runStage(s) { if (s.id === "impl") impl += 1; return { ok: true, output: "" }; }, repair: noRepair,
+    async reviewStep() { return { verdict: "changes", findings: "same finding" }; },
+  }));
+  assert.equal(impl, 2);
+  assert.equal(out.statusSummary, "Stopped after 2 rounds: review still requests changes (no change since the previous round)");
+  assert.equal(out.loopback.reason, "review");
+});
+
+test("loopback: a different output resets the unchanged counter", async () => {
+  let impl = 0, vRuns = 0;
+  const outputs = ["a", "a", "b", "b"];
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations: 6, consecutiveFailureStop: 3 }), base({
+    async runStage(s) {
+      if (s.id === "impl") impl += 1;
+      if (s.id === "v") { vRuns += 1; return { ok: vRuns > outputs.length, output: outputs[vRuns - 1] ?? "" }; }
+      return { ok: true, output: "" };
+    }, repair: noRepair,
+  }));
+  assert.equal(impl, 5);
+  assert.equal(out.passed, true);
+});
+
+test("loopback: a tests failure then a review finding with the same text is not the same signature", async () => {
+  let impl = 0, vRuns = 0;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations: 4, consecutiveFailureStop: 2 }), base({
+    async runStage(s) {
+      if (s.id === "impl") impl += 1;
+      if (s.id === "v") { vRuns += 1; return { ok: vRuns > 1, output: vRuns > 1 ? "" : "same" }; }
+      return { ok: true, output: "" };
+    }, repair: noRepair,
+    async reviewStep(_s, _snap, attempt) { return attempt === 1 ? { verdict: "changes", findings: "same" } : { verdict: "approve", findings: "" }; },
+  }));
+  assert.equal(impl, 3);
+  assert.equal(out.passed, true);
+});
+
+test("loopback: the review runs after Verify passes, not after Implement", async () => {
+  const log = [];
+  const snapshots = [];
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s) { log.push(`run ${s.id}`); return { ok: true, output: "" }; }, repair: noRepair,
+    async reviewStep(s, snapshot) { log.push(`review ${s.id}`); snapshots.push(snapshot); return { verdict: "approve", findings: "" }; },
+  }));
+  assert.deepEqual(log, ["run impl", "run v", "review impl"]);
+  assert.deepEqual(out.stepReviews, [{ stageId: "impl", stageName: "Implement", verdict: "approve", attempts: 0, findings: "" }]);
+  assert.deepEqual(snapshots, [{ tree: "t0" }]);
+});
+
+test("loopback: review changes loops back with the findings; one baseline across rounds", async () => {
+  const log = [];
+  const contexts = [];
+  const snaps = [];
+  let before = 0, reviews = 0;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s, _p, loopback) { log.push(s.id); if (s.id === "impl") contexts.push(loopback); return { ok: true, output: "" }; }, repair: noRepair,
+    async snapshotBefore() { before += 1; return { tree: "t0" }; },
+    async reviewStep(_s, snapshot) { log.push("review"); snaps.push(snapshot); reviews += 1; return reviews === 1 ? { verdict: "changes", findings: "fix x" } : { verdict: "approve", findings: "" }; },
+  }));
+  assert.deepEqual(log, ["impl", "v", "review", "impl", "v", "review"]);
+  assert.equal(contexts[1].findings, "Round 1 (review)\nfix x");
+  assert.equal(out.stepReviews[0].verdict, "approve");
+  assert.equal(out.stepReviews[0].attempts, 1);
+  assert.equal(before, 1);
+  assert.deepEqual(snaps, [{ tree: "t0" }, { tree: "t0" }]);
+});
+
+test("loopback: review changes forever stops at the limit", async () => {
+  let impl = 0;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations: 2, consecutiveFailureStop: 5 }), base({
+    async runStage(s) { if (s.id === "impl") impl += 1; return { ok: true, output: "" }; }, repair: noRepair,
+    async reviewStep() { return { verdict: "changes", findings: `f${impl}` }; },
+  }));
+  assert.equal(impl, 2);
+  assert.equal(out.stoppedAtLimit, true);
+  assert.equal(out.loopback.reason, "review");
+  assert.equal(out.statusSummary, "Stopped after 2 rounds: review still requests changes");
+  assert.equal(out.stepReviews[0].verdict, "unresolved");
+  assert.equal(out.stepReviews[0].attempts, 2);
+  assert.equal(out.stepReviews[0].reason, "round limit reached");
+  assert.equal(out.failedStage.id, "v");
+});
+
+test("loopback: findings accumulate across rounds and are recorded", async () => {
+  const contexts = [];
+  const recorded = [];
+  let vRuns = 0, reviews = 0;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { consecutiveFailureStop: 5 }), base({
+    async runStage(s, _p, loopback) {
+      if (s.id === "impl") contexts.push(loopback);
+      if (s.id === "v") { vRuns += 1; return { ok: vRuns > 1, output: vRuns > 1 ? "" : "A1" }; }
+      return { ok: true, output: "" };
+    }, repair: noRepair,
+    async reviewStep() { reviews += 1; return reviews === 1 ? { verdict: "changes", findings: "B2" } : { verdict: "approve", findings: "" }; },
+    async recordFindings(s, entry) { recorded.push([s.id, entry]); },
+  }));
+  assert.equal(out.passed, true);
+  assert.equal(contexts[2].findings, "Round 1 (tests)\nA1\n\nRound 2 (review)\nB2");
+  assert.deepEqual(recorded, [["impl", { round: 1, source: "tests", text: "A1" }], ["impl", { round: 2, source: "review", text: "B2" }]]);
+});
+
+test("loopback: cost ceiling after a loopback ends as a stopped run, spend kept", async () => {
+  const counts = { impl: 0, v: 0 };
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxCostUsd: 1 }), base({
+    async runStage(s) { counts[s.id] += 1; return s.id === "impl" ? { ok: true, output: "", usage: { costUsd: 0.6 } } : { ok: false, output: "x" }; }, repair: noRepair,
+  }));
+  assert.equal(out.stoppedAtLimit, true);
+  assert.match(out.statusSummary, /^cost ceiling reached/);
+  assert.equal(out.loopback.reason, "limit");
+  assert.ok(Math.abs(out.costUsd - 1.2) < 1e-9);
+  assert.equal(counts.v, 1);
+  assert.equal(runStatusCode(out), "stopped.limit");
+  const plain = await runNativeLoop(cfg3([stage("a", "A")], { maxCostUsd: 1 }), base({
+    async runStage() { return { ok: true, output: "", usage: { costUsd: 2 } }; },
+  }));
+  assert.equal(plain.stoppedAtLimit, undefined);
+});
+
+test("loopback: a ceiling reached inside the review ends the run", async () => {
+  const ran = [];
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxCostUsd: 1 }), base({
+    async runStage(s) { ran.push(s.id); return { ok: true, output: "" }; }, repair: noRepair,
+    async reviewStep() { return { verdict: "approve", findings: "", usage: { costUsd: 1.2 } }; },
+  }));
+  assert.match(out.statusSummary, /^cost ceiling reached/);
+  assert.equal(out.stoppedAtLimit, true);
+  assert.deepEqual(ran, ["impl", "v"]);
+});
+
+test("loopback: the wall clock ends a looping run as stopped", async () => {
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { wallClockBudgetSeconds: 0.001, consecutiveFailureStop: 5 }), base({
+    async runStage(s) { if (s.id === "v") { await new Promise((r) => setTimeout(r, 5)); return { ok: false, output: "no" }; } return { ok: true, output: "" }; }, repair: noRepair,
+  }));
+  assert.equal(out.statusSummary, "wall-clock budget reached");
+  assert.equal(out.stoppedAtLimit, true);
+});
+
+test("loopback: Stop between rounds cancels without a stopped flag", async () => {
+  let impl = 0, cancelled = false;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s) { if (s.id === "impl") impl += 1; if (s.id === "v") { cancelled = true; return { ok: false, output: "x" }; } return { ok: true, output: "" }; }, repair: noRepair,
+    isCancelled() { return cancelled; },
+  }));
+  assert.equal(out.cancelled, true);
+  assert.equal(impl, 1);
+  assert.equal(out.stoppedAtLimit, undefined);
+});
+
+test("loopback: progress events keep the review card in the Verify lane", async () => {
+  const events = [];
+  let vRuns = 0;
+  await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s) { if (s.id === "v") { vRuns += 1; return { ok: vRuns > 1, output: "x" }; } return { ok: true, output: "" }; }, repair: noRepair,
+    async reviewStep() { return { verdict: "approve", findings: "" }; },
+    onProgress(e) { events.push(e); },
+  }));
+  const loopbackEvent = events.find((e) => e.type === "loopback");
+  assert.deepEqual({ ...loopbackEvent, stage: loopbackEvent.stage.id }, { type: "loopback", stage: "v", round: 1, maxRounds: 3, reason: "tests" });
+  assert.equal(events.find((e) => e.type === "step-review").stage.id, "v");
+});
+
+test("loopback: a missing baseline skips the review but tests still loop", async () => {
+  let vRuns = 0;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s) { if (s.id === "v") { vRuns += 1; return { ok: vRuns > 1, output: "x" }; } return { ok: true, output: "" }; }, repair: noRepair,
+    snapshotBefore: async () => null,
+    async reviewStep() { throw new Error("no review without a baseline"); },
+  }));
+  assert.equal(out.passed, true);
+  assert.equal(out.stepReviews.length, 1);
+  assert.equal(out.stepReviews[0].verdict, "skipped");
+});
+
+test("loopback: both code stages of a block re-run", async () => {
+  const calls = [];
+  let vRuns = 0;
+  await runNativeLoop(cfg3([code("apply", "Apply", { skillId: "skills/refactor-apply" }), code("conform", "Conform", { skillId: "skills/refactor-conform" }), verify]), base({
+    async runStage(s) { calls.push(s.id); if (s.id === "v") { vRuns += 1; return { ok: vRuns > 1, output: "x" }; } return { ok: true, output: "" }; }, repair: noRepair,
+  }));
+  assert.deepEqual(calls, ["apply", "conform", "v", "apply", "conform", "v"]);
+});
+
+test("loopback: a code stage with no Verify after it keeps the in-place review and repair", async () => {
+  let reviews = 0;
+  const repairs = [];
+  const out = await runNativeLoop(cfg3([code("a", "A")]), base({
+    async repair(s, _o, _n, opts) { repairs.push(opts); return { ok: true, output: "" }; },
+    async reviewStep() { reviews += 1; return reviews === 1 ? { verdict: "changes", findings: "f" } : { verdict: "approve", findings: "" }; },
+  }));
+  assert.equal(out.passed, true);
+  assert.deepEqual(repairs, [{ review: true }]);
+  assert.equal(out.loopback, undefined);
 });
