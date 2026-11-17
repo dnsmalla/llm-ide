@@ -460,8 +460,23 @@ fn diff_base(info: &RunInfo) -> &str {
 pub fn diff_in(info: &RunInfo) -> Result<WorktreeDiff, String> {
     let lock = diff_lock(&info.run_id);
     let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
+    diff_against(info, diff_base(info))
+}
+
+/// The diff of the worktree against a checkpoint tree from `checkpoint_in`, so a review sees only what changed since
+/// that checkpoint. Same excludes and staging as `diff_in`. An id that is not a tree in this repo is refused before
+/// anything is staged.
+pub fn diff_since_in(info: &RunInfo, tree: &str) -> Result<WorktreeDiff, String> {
+    valid_tree(tree)?;
+    let lock = diff_lock(&info.run_id);
+    let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
+    let resolved = resolve_checkpoint(&PathBuf::from(&info.worktree), tree)?;
+    diff_against(info, &resolved)
+}
+
+/// The body of `diff_in` against `base`. The caller holds the run's diff lock.
+fn diff_against(info: &RunInfo, base: &str) -> Result<WorktreeDiff, String> {
     let wt = PathBuf::from(&info.worktree);
-    let base = diff_base(info);
     let patch = staged_patch(&wt, base, true)?;
     let mut args = vec!["diff", "--cached", "--no-ext-diff", "--no-textconv", base];
     args.extend(pathspec());
@@ -522,17 +537,23 @@ pub fn restore_in(info: &RunInfo, tree: &str) -> Result<(), String> {
     let lock = diff_lock(&info.run_id);
     let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
     let wt = PathBuf::from(&info.worktree);
-    // `<id>^{tree}` of a tree is the tree itself; of a commit it is a different id, so only a real tree id passes.
-    let resolved = git(&wt, &["rev-parse", "--verify", "--quiet", &format!("{tree}^{{tree}}")])
+    let resolved = resolve_checkpoint(&wt, tree)?;
+    // Staging first puts files created since the checkpoint in the index, so read-tree removes them.
+    git_owned(&wt, &staged_add_args())?;
+    git(&wt, &["read-tree", "--reset", "-u", &resolved])?;
+    Ok(())
+}
+
+/// The tree id for `tree` when git knows it as a tree, else "unknown checkpoint". `<id>^{tree}` of a tree is the tree
+/// itself, while of a commit it is a different id, so only a real tree id passes.
+fn resolve_checkpoint(wt: &Path, tree: &str) -> Result<String, String> {
+    let resolved = git(wt, &["rev-parse", "--verify", "--quiet", &format!("{tree}^{{tree}}")])
         .map(text)
         .map_err(|_| "unknown checkpoint".to_string())?;
     if !resolved.eq_ignore_ascii_case(tree) {
         return Err("unknown checkpoint".into());
     }
-    // Staging first puts files created since the checkpoint in the index, so read-tree removes them.
-    git_owned(&wt, &staged_add_args())?;
-    git(&wt, &["read-tree", "--reset", "-u", &resolved])?;
-    Ok(())
+    Ok(resolved)
 }
 
 /// True when `rel` is a plain path under the literal `.factory/` folder (no absolute path, no `..`, no root/prefix).
@@ -716,9 +737,17 @@ pub async fn loop_worktree_prepare(repo_rel: String, run_id: String, base: Optio
     .await
 }
 
+/// `since` absent is the whole run diff; present is the diff against that checkpoint tree (one step's change).
 #[tauri::command]
-pub async fn loop_worktree_diff(run_id: String) -> Result<WorktreeDiff, String> {
-    blocking(move || diff_in(&resolve(&run_id)?)).await
+pub async fn loop_worktree_diff(run_id: String, since: Option<String>) -> Result<WorktreeDiff, String> {
+    blocking(move || {
+        let info = resolve(&run_id)?;
+        match since {
+            Some(tree) => diff_since_in(&info, &tree),
+            None => diff_in(&info),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1033,6 +1062,37 @@ mod tests {
         std::fs::write(wt.join("a.txt"), "changed again\n").unwrap();
         assert_ne!(diff_in(&info).unwrap().patch_id, d.patch_id);
         assert_eq!(sh_git(&p, &["status", "--porcelain"]).trim(), "", "diffing never touches the main tree");
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diff_since_a_checkpoint_shows_only_later_changes() {
+        let p = project_repo("diff-since");
+        let info = prepare_in(&p, &p, "ds1", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(wt.join("a.txt"), "first edit\n").unwrap();
+        let tree = checkpoint_in(&info).unwrap();
+        std::fs::write(wt.join("a.txt"), "second edit\n").unwrap();
+        std::fs::write(wt.join("b.txt"), "brand new\n").unwrap();
+        std::fs::create_dir_all(wt.join(".factory")).unwrap();
+        std::fs::write(wt.join(".factory/x"), "report\n").unwrap();
+        let d = diff_since_in(&info, &tree).unwrap();
+        assert_eq!(d.files, vec!["a.txt".to_string(), "b.txt".to_string()], "{:?}", d.files);
+        assert!(d.text.contains("+second edit") && d.text.contains("+brand new"), "{}", d.text);
+        assert!(!d.text.contains("+first edit"), "the earlier step is not in the diff: {}", d.text);
+        assert!(!d.text.contains(".factory") && !d.text.contains("report"), "{}", d.text);
+        assert_eq!((d.additions, d.deletions), (2, 1), "numstat counts the same paths as the patch");
+        let at_tree = checkpoint_in(&info).unwrap();
+        let none = diff_since_in(&info, &at_tree).unwrap();
+        assert!(none.files.is_empty() && none.text.is_empty(), "{}", none.text);
+        assert!(diff_since_in(&info, "zzzz").is_err(), "a non-tree id is refused");
+        let commit = sh_git(&p, &["rev-parse", "HEAD"]).trim().to_string();
+        assert_eq!(diff_since_in(&info, &commit).unwrap_err(), "unknown checkpoint", "a commit id is refused");
+        assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "second edit\n", "the worktree is unchanged");
+        assert_eq!(checkpoint_in(&info).unwrap(), at_tree, "the refused call changed nothing");
+        assert_eq!(sh_git(&p, &["status", "--porcelain"]).trim(), "", "the main tree is untouched");
         remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&p);
     }
