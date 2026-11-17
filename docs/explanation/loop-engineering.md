@@ -187,6 +187,14 @@ config (`system/factory-template.json` for the Factory) is `auto` by default; `h
 review** instead of shipping, with Approve and Request changes. See
 [Edit the Factory process](../how-to/edit-factory-process.md).
 
+**Verify loopback.** Verify is the tests, then the AI review of the code step's changes. When it fails, the findings are
+added to `.factory/PLAN.md` (Factory; `.factory/FINDINGS.md` in other loops) and the code step runs again. The number of
+rounds is `maxIterations`: 3 by default for the Factory, and a stored 10 is treated as 3. The same failure twice in a row
+stops the run early. After the last round, or on a cost or time limit, the run stops (`stopped.limit`) with a warning and
+**no MR**: a failed run never opens a labelled draft any more (tests, Review gate, `check` mode, cost/time). Only a
+passed run ships (auto) or is held for you (human). In auto mode no click is needed until that final warning; the safety
+gates (shell approval, secret-scan override, CI/hook block, Intake "needs decision") stay human.
+
 ## Loops
 
 A project holds **several independent loops**, not one pipeline. Each
