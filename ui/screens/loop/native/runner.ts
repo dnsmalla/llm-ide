@@ -4,7 +4,7 @@
 // A stage that runs once per run (runsOncePerRun) is skipped in later iterations once it has passed.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
 import { effectiveReviewAfter } from "./review.ts";
-import { LOOPBACK_STOPPED_CODE, type FindingsEntry, type LoopbackContext, type LoopbackSummary } from "./loopback.ts";
+import { LOOPBACK_STOPPED_CODE, failureSignature, findingsText, groupOfCode, groupOfVerify, loopbackGroups, stoppedSummary, type FindingsEntry, type LoopbackContext, type LoopbackGroup, type LoopbackSummary } from "./loopback.ts";
 
 export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 
@@ -108,15 +108,25 @@ interface StepReviewState {
   closed: Set<string>;
   /** Review-driven repairs made per stage in this run; separate from the stage's own repair budget. */
   repairs: Map<string, number>;
+  /** Every loopback round's findings; the wrapper reads them to describe a run that a budget ended mid-loop. */
+  findings: FindingsEntry[];
+  /** True when the loop has at least one code stage paired with a Verify, so a budget stop is a loopback stop. */
+  hasGroups: boolean;
 }
 
 export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps): Promise<LoopRunOutcome> {
-  const reviews: StepReviewState = { outcomes: [], closed: new Set(), repairs: new Map() };
-  const outcome = await runLoopInner(config, deps, reviews);
+  const reviews: StepReviewState = { outcomes: [], closed: new Set(), repairs: new Map(), findings: [], hasGroups: false };
+  let outcome = await runLoopInner(config, deps, reviews);
+  // A budget that ends a looping run (cost, wall clock) is the same warning state as running out of rounds, so it never ships.
+  if (!outcome.passed && !outcome.cancelled && !outcome.blocked && !outcome.errored && !outcome.stoppedAtLimit && reviews.hasGroups && /^(cost ceiling reached|wall-clock budget reached)/.test(outcome.statusSummary)) {
+    outcome = { ...outcome, stoppedAtLimit: true, loopback: { rounds: outcome.iterationsUsed, maxRounds: Math.max(1, config.maxIterations), reason: "limit", findings: findingsText(reviews.findings), stopped: true } };
+  }
   if (reviews.outcomes.length === 0) return outcome;
   // A spent review budget never stops the run: the findings carry forward to the final review and the MR, which
   // are the human hand-off. Only the cost ceiling ends a run from inside a review.
-  return { ...outcome, stepReviews: reviews.outcomes, statusSummary: `${outcome.statusSummary}${stepReviewNote(reviews.outcomes)}` };
+  // A loopback stop already names why it stopped, so the "unresolved" suffix would only repeat it.
+  const note = outcome.loopback?.stopped && outcome.loopback.reason !== "limit" ? "" : stepReviewNote(reviews.outcomes);
+  return { ...outcome, stepReviews: reviews.outcomes, statusSummary: `${outcome.statusSummary}${note}` };
 }
 
 /** The summary suffix naming step reviews a person still has to look at; empty when every review approved. */
@@ -129,6 +139,17 @@ export function stepReviewNote(outcomes: readonly Pick<StepReviewOutcome, "verdi
 async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews: StepReviewState): Promise<LoopRunOutcome> {
   const stages = config.stages.filter((s) => s.enabled);
   if (stages.length === 0) throw new Error("this loop has no enabled stages");
+  const maxRounds = Math.max(1, config.maxIterations);
+  const groups = loopbackGroups(stages);
+  reviews.hasGroups = groups.length > 0;
+  // Loopback state is separate from the legacy repair counters: a loopback round never spends a repair.
+  let loopSignature: string | null = null;
+  let unchanged = 0;
+  const findings = reviews.findings;
+  // One baseline per group across all rounds, so the review judges the whole step, not just the last round's fix.
+  const groupBaseline = new Map<string, StepSnapshot | null>();
+  const groupAttempts = new Map<string, number>();
+  const reviewDue = new Set<string>();
   const repairs = new Map<string, number>();
   let lastFailure = "";
   let nonImproving = 0;
@@ -174,6 +195,24 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
     return null;
   };
   /**
+   * One review pass: runs the reviewer, books its spend, and applies the ceiling / halt / Stop / wall-clock checks. The
+   * progress card sits on `lane` (the Verify stage in a loopback group, so the card stays in that lane).
+   */
+  const reviewOnce = async (stage: LoopStage, lane: LoopStage, baseline: StepSnapshot, attempt: number): Promise<{ end: LoopRunOutcome } | { result: StepReviewResult }> => {
+    const reviewer = deps.reviewStep;
+    if (!reviewer) return { result: { verdict: "skipped", findings: "", reason: "no reviewer" } };
+    deps.onProgress?.({ type: "step-review", stage: lane, phase: "reviewing", attempt });
+    const review = await reviewer(stage, baseline, attempt);
+    spentUsd += review.usage?.costUsd ?? 0;
+    const ceilingAfterReview = ceilingOutcome(lane);
+    if (ceilingAfterReview) return { end: ceilingAfterReview };
+    const haltAfterReview = haltedOutcome();
+    if (haltAfterReview) return { end: haltAfterReview };
+    if (deps.isCancelled?.()) return { end: cancelledOutcome() };
+    if (expired()) return { end: { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" } };
+    return { result: review };
+  };
+  /**
    * Reviews one passed step and repairs its findings within the step's own budget. Returns the outcome that ends the
    * run (cost ceiling, halt, cancel), or null to carry on. A null baseline means no diff can be isolated: skipped.
    */
@@ -185,15 +224,9 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
     let lastSignature: string | null = null;
     let nonImproving = 0;
     for (;;) {
-      deps.onProgress?.({ type: "step-review", stage, phase: "reviewing", attempt: attempts + 1 });
-      const review = await reviewer(stage, baseline, attempts + 1);
-      spentUsd += review.usage?.costUsd ?? 0;
-      const ceilingAfterReview = ceilingOutcome(stage);
-      if (ceilingAfterReview) return ceilingAfterReview;
-      const haltAfterReview = haltedOutcome();
-      if (haltAfterReview) return haltAfterReview;
-      if (deps.isCancelled?.()) return cancelledOutcome();
-      if (expired()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
+      const reviewed = await reviewOnce(stage, stage, baseline, attempts + 1);
+      if ("end" in reviewed) return reviewed.end;
+      const review = reviewed.result;
       if (review.verdict === "approve") { await endStepReview(stage, "approve", attempts, ""); return null; }
       if (review.verdict === "skipped") { await endStepReview(stage, "skipped", attempts, "", review.reason ?? "review skipped"); return null; }
       const used = reviews.repairs.get(stage.id) ?? 0;
@@ -239,6 +272,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
     deps.onProgress?.({ type: "iteration", iteration });
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
+    let trigger: { group: LoopbackGroup; verify: LoopStage; source: "tests" | "review"; text: string } | null = null;
     for (const stage of stages) {
       if (runsOncePerRun(stage) && passedOnce.has(stage.id)) {
         deps.log(`↷ ${stage.name}: passed earlier in this run`);
@@ -253,11 +287,19 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       const haltAtStage = haltedOutcome();
       if (haltAtStage) return haltAtStage;
       deps.onProgress?.({ type: "stage-start", stage, index: stages.indexOf(stage) + 1, count: stages.length, iteration });
+      const codeGroup = groupOfCode(groups, stage.id);
+      const verifyGroup = groupOfVerify(groups, stage.id);
+      const groupHead = codeGroup?.codeStages[0];
+      // A grouped code stage is reviewed once its Verify passes, so it never takes the in-place review below.
+      if (codeGroup && groupHead && stage.id === groupHead.id && deps.reviewStep && !reviews.closed.has(groupHead.id) && !groupBaseline.has(codeGroup.closerId)) {
+        groupBaseline.set(codeGroup.closerId, deps.snapshotBefore ? await deps.snapshotBefore(stage) : null);
+      }
       // The baseline is taken before the stage writes anything, so its review sees only this stage's diff.
-      const isReviewed = deps.reviewStep !== undefined && effectiveReviewAfter(stage) && !reviews.closed.has(stage.id);
+      const isReviewed = codeGroup === null && deps.reviewStep !== undefined && effectiveReviewAfter(stage) && !reviews.closed.has(stage.id);
       const baseline = isReviewed ? (deps.snapshotBefore ? await deps.snapshotBefore(stage) : null) : undefined;
       const t0 = Date.now();
-      const result = await deps.runStage(stage, outcomes);
+      const loopbackContext: LoopbackContext | undefined = codeGroup && findings.length > 0 ? { round: iteration, maxRounds, findings: findingsText(findings) } : undefined;
+      const result = await deps.runStage(stage, outcomes, loopbackContext);
       stageRan = true;
       const outcome = { stage, ok: result.ok, output: result.output, durationMs: result.durationMs ?? Date.now() - t0, usage: result.usage };
       spentUsd += result.usage?.costUsd ?? 0;
@@ -266,6 +308,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       deps.onProgress?.({ type: "stage-result", stage, ok: result.ok, iteration, durationMs: outcome.durationMs ?? 0, costUsd: result.usage?.costUsd });
       deps.log(`${result.ok ? "✓" : "✗"} ${stage.name}: ${result.ok ? "passed" : "failed"}`);
       if (result.ok && runsOncePerRun(stage)) passedOnce.add(stage.id);
+      if (result.ok && codeGroup && groupHead && deps.reviewStep && !reviews.closed.has(groupHead.id)) reviewDue.add(codeGroup.closerId);
       if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {
         return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: stage, statusSummary: `cost ceiling reached ($${spentUsd.toFixed(2)} of $${config.maxCostUsd})`, costUsd: spentUsd };
       }
@@ -278,9 +321,70 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
         const endedByReview = await reviewPassedStep(stage, baseline);
         if (endedByReview) return endedByReview;
       }
+      if (!result.ok && stage.severity === "blocking" && verifyGroup) {
+        // Tests failed after a code stage: go back to that stage with the output instead of handing it to a repair agent.
+        reviewDue.delete(verifyGroup.closerId);
+        trigger = { group: verifyGroup, verify: stage, source: "tests", text: result.output };
+        break;
+      }
+      if (result.ok && verifyGroup && stage.id === verifyGroup.closerId && reviewDue.has(verifyGroup.closerId) && deps.reviewStep) {
+        const head = verifyGroup.codeStages[0];
+        const groupBase = groupBaseline.get(verifyGroup.closerId) ?? null;
+        reviewDue.delete(verifyGroup.closerId);
+        const haltBeforeGroupReview = haltedOutcome();
+        if (haltBeforeGroupReview) return haltBeforeGroupReview;
+        if (deps.isCancelled?.()) return cancelledOutcome();
+        const attempts = groupAttempts.get(verifyGroup.closerId) ?? 0;
+        if (groupBase === null) {
+          deps.onProgress?.({ type: "step-review", stage, phase: "reviewing", attempt: attempts + 1 });
+          await endStepReview(head, "skipped", attempts, "", "no baseline snapshot, so the step's diff cannot be isolated");
+          groupBaseline.delete(verifyGroup.closerId);
+        } else {
+          const reviewed = await reviewOnce(head, stage, groupBase, attempts + 1);
+          if ("end" in reviewed) return reviewed.end;
+          const review = reviewed.result;
+          if (review.verdict === "approve") {
+            await endStepReview(head, "approve", attempts, "");
+            groupBaseline.delete(verifyGroup.closerId); groupAttempts.delete(verifyGroup.closerId);
+          } else if (review.verdict === "skipped") {
+            await endStepReview(head, "skipped", attempts, "", review.reason ?? "review skipped");
+            groupBaseline.delete(verifyGroup.closerId); groupAttempts.delete(verifyGroup.closerId);
+          } else {
+            groupAttempts.set(verifyGroup.closerId, attempts + 1);
+            trigger = { group: verifyGroup, verify: stage, source: "review", text: review.findings };
+            break;
+          }
+        }
+      }
       if (!result.ok && stage.severity === "blocking") { failed = outcome; break; }
       const haltAfterStage = haltedOutcome();
       if (haltAfterStage) return haltAfterStage;
+    }
+    if (trigger) {
+      iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
+      const haltAfterRound = haltedOutcome();
+      if (haltAfterRound) return haltAfterRound;
+      if (deps.isCancelled?.()) return cancelledOutcome();
+      const code = trigger.group.codeStages[0];
+      const entry: FindingsEntry = { round: iteration, source: trigger.source, text: trigger.text.length > 12_000 ? trigger.text.slice(0, 12_000) : trigger.text };
+      const signature = failureSignature(trigger.source, trigger.text);
+      unchanged = signature === loopSignature ? unchanged + 1 : 1;
+      loopSignature = signature;
+      const noChange = unchanged >= Math.max(1, config.consecutiveFailureStop);
+      if (iteration >= maxRounds || noChange) {
+        if (trigger.source === "review") await endStepReview(code, "unresolved", groupAttempts.get(trigger.group.closerId) ?? 0, trigger.text, "round limit reached");
+        const summary = stoppedSummary(iteration, trigger.source, iteration < maxRounds && noChange);
+        deps.log(summary);
+        return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: trigger.verify, statusSummary: summary, stoppedAtLimit: true, loopback: { rounds: iteration, maxRounds, reason: trigger.source, findings: findingsText(findings.concat(entry)), stopped: true } };
+      }
+      const heldAfterRound = await heldOutcome();
+      if (heldAfterRound) return heldAfterRound;
+      findings.push(entry);
+      try { await deps.recordFindings?.(code, entry); } catch (e) { deps.log(`could not record the round's findings: ${e instanceof Error ? e.message : String(e)}`); }
+      for (const codeStage of trigger.group.codeStages) passedOnce.delete(codeStage.id);
+      deps.onProgress?.({ type: "loopback", stage: trigger.verify, round: iteration, maxRounds, reason: trigger.source });
+      deps.log(`↻ round ${iteration} of ${maxRounds} failed (${trigger.source}); back to ${code.name}`);
+      continue;
     }
     if (!failed) {
       iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
