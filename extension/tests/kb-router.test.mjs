@@ -22,7 +22,7 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 
 const db = await import('../kb/db.mjs');
 const { handleKB } = await import('../routes/router.mjs');
-const { appendCaptions, _resetForTests: resetLive } = await import('../agents/live-sessions.mjs');
+const { _resetForTests: resetLive } = await import('../agents/live-sessions.mjs');
 
 function resetDb() {
   db.closeDb();
@@ -139,44 +139,4 @@ test('POST /kb/connect-git rejects relative-traversal path that resolves outside
   await handleKB(req, res);
   assert.equal(res.statusCode, 403);
   assert.equal(JSON.parse(res._body).error.code, 'PATH_NOT_APPROVED');
-});
-
-test('GET /kb/system/status returns linked capture + review flow state for the authenticated user', async () => {
-  resetDb();
-  const users = await import('../server/users.mjs');
-  const u = users.registerUser(db.getDb(), {
-    email: `status-${Date.now()}@example.com`,
-    password: 'CorrectHorseBattery',
-    displayName: 'status',
-  });
-
-  appendCaptions(u.id, 'live-session-1', [{
-    speaker: 'Alice',
-    text: 'We should ship the hardening patch today.',
-    ts: Date.now(),
-    source: 'extension-cc',
-  }], 'Production Review');
-  db.submitReview(u.id, {
-    kind: 'dispatch',
-    title: 'Approve automation dispatch',
-    payload: { target: 'github' },
-    guardrails: {},
-  });
-
-  const req = makeReq({
-    method: 'GET',
-    url: '/kb/system/status',
-    userId: u.id,
-  });
-  const res = makeRes();
-  const handled = await handleKB(req, res);
-
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 200);
-  const body = JSON.parse(res._body);
-  assert.equal(body.flow.capture.activeCount, 1);
-  assert.equal(body.flow.capture.sessions[0].sessionId, 'live-session-1');
-  assert.equal(body.flow.review.pendingCount, 1);
-  assert.equal(body.flow.review.pendingItems.length, 1);
-  assert.equal(body.flow.agent.activeCount, 0);
 });

@@ -22,7 +22,7 @@ function windowSince(spec, now) {
   return toSqliteLocal(d);
 }
 
-// The kit table of docs/superpowers/plans/2026-10-27-kit-by-kit-migration.md.
+// The kit table of the kit-by-kit migration plan (no longer in the repo).
 // `features` are the LLMIDE_FEATURES keys the kit's server routes depend on;
 // an empty list = always on (no key of its own).
 const KIT_TABLE = Object.freeze([

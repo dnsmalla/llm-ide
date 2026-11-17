@@ -28,7 +28,7 @@ export const KINDS = new Set(['meeting', 'note', 'email', 'slack', 'document', '
 const nowIso = () => new Date().toISOString();
 
 /** Cap a string to `cap` UTF-8 bytes without splitting a character. */
-export function capUtf8(text, cap = BODY_CAP_BYTES) {
+function capUtf8(text, cap = BODY_CAP_BYTES) {
   const s = String(text ?? '');
   if (Buffer.byteLength(s, 'utf8') <= cap) return { text: s, truncated: false };
   let out = '';
@@ -67,7 +67,7 @@ function projectIdOf(v) {
  * Validate and normalise one note. Throws errValidation on a bad shape.
  * Returns null for a hidden note (never indexed; counted by the caller).
  */
-export function normaliseNote(input, defaultProjectId = '') {
+function normaliseNote(input, defaultProjectId = '') {
   if (!input || typeof input !== 'object') throw errValidation('each note must be an object');
   if (input.hidden === true) return null;
   const kind = input.kind === undefined ? 'meeting' : input.kind;
@@ -368,7 +368,7 @@ const SNIPPET_CHARS = 200;
 const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
 
 /** A plain-text excerpt of a (redacted) note body around the first matched word; no markup is interpreted. */
-export function snippetOf(body, q) {
+function snippetOf(body, q) {
   const text = redactSecretsForStorage(String(body ?? '')).replace(UNSAFE_TEXT, ' ').replace(/\s+/g, ' ').trim();
   if (!text) return '';
   const lower = text.toLowerCase();

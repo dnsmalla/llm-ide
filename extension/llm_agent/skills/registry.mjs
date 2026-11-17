@@ -33,9 +33,8 @@ const INTERNAL_SKILLS_DIR = join(__dirname, '..', 'internal', 'skills');
 
 // Load skills + base once per process (same lifecycle as the old
 // skillsCache).
-// The global dir composes its base via composeGlobalPrompt (no _base.md) and
-// keeps a non-skill role file (prompt.md) alongside the skills — tell the
-// loader so neither produces a spurious startup warning that would mask a real
+// The global dir has no _base.md and keeps a non-skill role file (prompt.md)
+// alongside the skills — tell the loader so neither produces a spurious startup warning that would mask a real
 // malformed-skill warning.
 export const globalSkills = loadSkills(GLOBAL_DIR, { requireBase: false, ignore: ['prompt.md'] });
 export const internalSkills = loadSkills(INTERNAL_SKILLS_DIR);
@@ -158,7 +157,7 @@ export function reloadPlugins() {
  * the user re-grants — `outdated` lets the UI say why instead of looking
  * mysteriously reset. A grant with no record reads as hooks-only.
  */
-export function trustStatusFor(p, trustedNames, trustedKinds) {
+function trustStatusFor(p, trustedNames, trustedKinds) {
   if (!trustedNames.has(p.name)) return { trusted: false, outdated: false, missing: [] };
   const recorded = trustedKinds.get(p.name) || new Set(['hooks']);
   const current = currentTrustKinds(p);

@@ -94,7 +94,7 @@ function platformPackages() {
 }
 
 /** The Agent SDK's bundled binary, when that package is installed. */
-export function bundledClaudePath() {
+function bundledClaudePath() {
   const require = createRequire(import.meta.url);
   for (const plat of platformPackages()) {
     try {
@@ -115,7 +115,7 @@ function nvmDirs(home) {
   } catch { return []; }
 }
 
-export function wellKnownDirs(env = process.env) {
+function wellKnownDirs(env = process.env) {
   const home = env.HOME || env.USERPROFILE || os.homedir();
   if (IS_WIN) {
     return [

@@ -865,7 +865,7 @@ export function mergeTeamYamlAssignments(existingText, current) {
  * user prepared for someone who has not registered yet). `knownEmails` is the users table, lower-cased.
  * A project with no current rows is left as-is so a file-only entry is not dropped.
  */
-export function mergeTeamYamlProjects(existingText, currentProjects, knownEmails = null) {
+function mergeTeamYamlProjects(existingText, currentProjects, knownEmails = null) {
   const known = knownEmails == null ? null : new Set([...knownEmails].map((e) => String(e).trim().toLowerCase()));
   const byProject = new Map((currentProjects ?? []).map((block) => [block.projectId, {
     projectId: block.projectId,

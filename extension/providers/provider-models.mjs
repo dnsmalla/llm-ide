@@ -60,7 +60,7 @@ function vetBase(conn) {
  * @param {string} apiKey
  * @param {{ fetchImpl?: typeof fetch, signal?: AbortSignal }} [opts]
  */
-export async function fetchLiveModels(conn, apiKey, { fetchImpl, signal } = {}) {
+async function fetchLiveModels(conn, apiKey, { fetchImpl, signal } = {}) {
   const entry = catalogEntry(conn.catalogId);
   if (!entry) throw new Error('unknown catalog provider');
   vetBase(conn);

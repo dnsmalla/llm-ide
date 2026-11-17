@@ -1,5 +1,5 @@
 {
-  "description": "Model provider verification and models, the Claude Agent SDK status and update, custom providers, tier routing and the usage ledger (limits, summary, resolve, record, rate-limit snapshot, turn composition). Roster: all 14 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/router.mjs (the /kb/providers/*, /kb/agent-sdk*, /kb/custom-providers, /kb/routing-tiers and /kb/usage/* branches) and extension/server/tier-routing.mjs / custom-providers.mjs / providers/tier-routing.mjs / kb/usage.mjs. All are token-protected and on the core feature set. Request parts list exactly the keys each handler reads; every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: POST /kb/providers/verify and /kb/providers/models share llmFast (429 declared); POST /kb/usage/record and PUT /kb/usage/limits share kbWrite (429 declared). POST /kb/agent-sdk/update has no request body. Not captured: the Claude SDK model listing (needs the local Claude CLI login), an ok:true verify (a live provider listing), an install through POST /kb/agent-sdk/update, and an Anthropic rate-limit snapshot; the schema says so where it matters, and x-optional marks the unfixtured properties. The two Agent SDK fixtures are produced in-process by calling llm_agent/sdk/updater.mjs (its registry fetch stubbed offline, the install refused) because the route itself would reach the npm registry; the bodies are the functions' return values, which the route sends verbatim.",
+  "description": "Model provider verification and models, the Claude Agent SDK status and update, custom providers, tier routing and the usage ledger (limits, summary, resolve, record, rate-limit snapshot, turn composition). Roster: all 12 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/router.mjs (the /kb/providers/*, /kb/agent-sdk*, /kb/routing-tiers and /kb/usage/* branches) and extension/server/tier-routing.mjs / custom-providers.mjs / providers/tier-routing.mjs / kb/usage.mjs. All are token-protected and on the core feature set. Request parts list exactly the keys each handler reads; every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: POST /kb/providers/verify and /kb/providers/models share llmFast (429 declared); PUT /kb/usage/limits shares kbWrite (429 declared). POST /kb/agent-sdk/update has no request body. Not captured: the Claude SDK model listing (needs the local Claude CLI login), an ok:true verify (a live provider listing), an install through POST /kb/agent-sdk/update, and an Anthropic rate-limit snapshot; the schema says so where it matters, and x-optional marks the unfixtured properties. The two Agent SDK fixtures are produced in-process by calling llm_agent/sdk/updater.mjs (its registry fetch stubbed offline, the install refused) because the route itself would reach the npm registry; the bodies are the functions' return values, which the route sends verbatim.",
   "$defs": {
     "ModelLimit": {
       "type": "object",
@@ -486,12 +486,25 @@
             },
             "busy": {
               "type": "object",
-              "required": ["chatTurns", "loopRuns", "total"],
+              "required": [
+                "chatTurns",
+                "loopRuns",
+                "total"
+              ],
               "description": "Agent runs in progress across ALL users, counts only (no ids, no user): chat turns in the turn lock, and Loop agent runs (POST /kb/loop/agent-run). The SDK update (POST /kb/agent-sdk/update) is refused while chatTurns or loopRuns is above zero (API 106).",
               "properties": {
-                "chatTurns": { "type": "integer", "description": "Chat turns in progress (the turn lock)." },
-                "loopRuns": { "type": "integer", "description": "Loop agent runs in progress." },
-                "total": { "type": "integer", "description": "chatTurns plus loopRuns." }
+                "chatTurns": {
+                  "type": "integer",
+                  "description": "Chat turns in progress (the turn lock)."
+                },
+                "loopRuns": {
+                  "type": "integer",
+                  "description": "Loop agent runs in progress."
+                },
+                "total": {
+                  "type": "integer",
+                  "description": "chatTurns plus loopRuns."
+                }
               }
             }
           }
@@ -543,91 +556,6 @@
               ]
             }
           }
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "POST /kb/custom-providers": {
-      "request": {
-        "body": {
-          "type": "object",
-          "properties": {
-            "providers": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "description": "A custom provider as the Mac app sends it (Core/Platform/CustomProvider.swift). The server keeps id, name, baseURL, models, isOpenAICompatible, isEnabled and anthropicBaseURL; apiKey is the vault key path (for example custom.<id>.apiKey), never the key itself. Invalid entries (no http(s) baseURL, no name) are dropped; at most 50 are stored.",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "baseURL": {
-                    "type": "string"
-                  },
-                  "apiKey": {
-                    "type": "string",
-                    "description": "vault key path"
-                  },
-                  "models": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "additionalProperties": true,
-                      "required": [
-                        "id"
-                      ],
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "displayName": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  },
-                  "isOpenAICompatible": {
-                    "type": "boolean"
-                  },
-                  "isEnabled": {
-                    "type": "boolean"
-                  },
-                  "anthropicBaseURL": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "Anthropic-format endpoint for the Agent engine; null when absent"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "type": "object",
-          "required": [
-            "success",
-            "count"
-          ],
-          "properties": {
-            "success": {
-              "type": "boolean"
-            },
-            "count": {
-              "type": "integer"
-            }
-          }
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
         },
         "401": {
           "$ref": "_common#/$defs/Error"
@@ -1614,83 +1542,6 @@
           }
         },
         "401": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "POST /kb/usage/record": {
-      "request": {
-        "body": {
-          "type": "object",
-          "description": "Read by POST /kb/usage/record. provider and model are required (400 otherwise). Token and turn counts are optional non-negative integers; absent or null means not reported. source is api | cli | auto-task (any other value is stored as api).",
-          "properties": {
-            "provider": {
-              "type": "string"
-            },
-            "model": {
-              "type": "string"
-            },
-            "source": {
-              "type": "string",
-              "description": "api|cli|auto-task"
-            },
-            "endpoint": {
-              "type": "string"
-            },
-            "runs": {
-              "type": "integer"
-            },
-            "inputTokens": {
-              "type": "integer"
-            },
-            "outputTokens": {
-              "type": "integer"
-            },
-            "cacheReadTokens": {
-              "type": "integer"
-            },
-            "cacheCreationTokens": {
-              "type": "integer"
-            },
-            "turns": {
-              "type": "integer"
-            },
-            "stopReason": {
-              "type": "string"
-            },
-            "requestId": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "type": "object",
-          "required": [
-            "ok",
-            "id"
-          ],
-          "description": "ok is false and id null when the ledger write failed (best effort).",
-          "properties": {
-            "ok": {
-              "type": "boolean"
-            },
-            "id": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            }
-          }
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "429": {
           "$ref": "_common#/$defs/Error"
         }
       }

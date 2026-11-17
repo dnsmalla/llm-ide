@@ -171,6 +171,3 @@ export function listClaimableJobsSystem(kinds = [], { limit = 50 } = {}) {
     ORDER BY created_at, rowid LIMIT ${n}`).all(...wanted).map(shape);
 }
 
-export function hasQueuedJobsSystem() {
-  return !!getDb().prepare("SELECT 1 FROM jobs WHERE state='queued' LIMIT 1").get();
-}

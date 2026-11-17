@@ -255,7 +255,7 @@ export function turnTokenBudget(raw = process.env.LLMIDE_V2_TURN_TOKEN_BUDGET) {
   console.warn(`LLMIDE_V2_TURN_TOKEN_BUDGET=${raw} ignored — must be a non-negative integer (0 = off); using ${TURN_TOKEN_BUDGET_DEFAULT}`);
   return TURN_TOKEN_BUDGET_DEFAULT;
 }
-export function sessionCapNoticeText() {
+function sessionCapNoticeText() {
   return 'Stopped: this chat reached its session token limit (the limit is approximate to one reply). Raise the limit to continue.';
 }
 const fmtTokens = (n) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M` : `${Math.round(n / 1000)}k`);

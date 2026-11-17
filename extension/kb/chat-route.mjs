@@ -60,7 +60,7 @@ function cleanId(value, field) {
  * Negative, fractional, non-numeric and absurd values are refused (never
  * clamped: a silently clamped cap would not be the cap the user typed).
  */
-export function parseTokenLimit(v) {
+function parseTokenLimit(v) {
   if (v === undefined) return undefined;
   if (v === null || v === 0) return null;
   if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0) throw invalid('tokenLimit must be a whole number of tokens, or null');
@@ -370,12 +370,6 @@ export function setHandoffPointer(db, userId, chatSessionId, upTo) {
   if (typeof upTo !== 'string' || !upTo || upTo.length > ID_MAX) return 0;
   return lazyPrepare(db, `UPDATE chat_session_route SET handoff_up_to = ? WHERE user_id = ? AND chat_session_id = ?`)
     .run(upTo, userId, chatSessionId).changes;
-}
-
-/** Chat ids that hold a route row for this user (the working-state listing). */
-export function listRouteChatIds(db, userId) {
-  requireUser(userId);
-  return lazyPrepare(db, 'SELECT chat_session_id AS id FROM chat_session_route WHERE user_id = ?').all(userId).map((r) => r.id);
 }
 
 // --- switch history (agent.db, best effort) ---------------------------------

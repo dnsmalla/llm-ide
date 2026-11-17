@@ -121,7 +121,7 @@ export function slugFor(name, kind = 'template') {
  * A slug for `name` that is free in `existing` (a Set of folder names):
  * `base`, then `base-2`, `base-3`, ... (`uniqueFolderSlug` in the Swift stores).
  */
-export function uniqueSlug(base, existing) {
+function uniqueSlug(base, existing) {
   let slug = base;
   let n = 2;
   while (existing.has(slug)) {
@@ -182,7 +182,7 @@ export function templateDisplayName(markdown, folderName) {
  * template with no raw content. Section headings are followed by one blank
  * line; the file ends with a single newline after the last heading.
  */
-export function renderTemplateBody(name, sections, surface = DEFAULT_SURFACE) {
+function renderTemplateBody(name, sections, surface = DEFAULT_SURFACE) {
   const s = normalizeSurface(surface);
   const lines = [
     `# ${name}`,

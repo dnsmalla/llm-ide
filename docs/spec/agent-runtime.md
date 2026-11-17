@@ -38,9 +38,8 @@ The classic engine (the text-fence tool loop `loop.mjs`, the fence parser `fence
 
 **Prompt and skill content** (linked, not reproduced here)
 
-- `extension/llm_agent/global/prompt.md` — global agent role
+- `extension/llm_agent/global/prompt.md` — global agent role (kept on disk; no code reads it at present)
 - `extension/llm_agent/global/ask-internal.md`, `ask-subagent.md`, `update-file.md`, `web-search.md`, `fetch-url.md`, `find-code.md` — global skill bodies
-- `extension/llm_agent/global/compose-prompt.mjs` — global prompt assembly
 - `extension/llm_agent/internal/prompt.md` — internal agent role
 - `extension/llm_agent/internal/skills/*.md` — internal skill bodies (`_base.md`, `search-kb.md`, `create-gitlab-issue.md`, `comment-gitlab-issue.md`, `trigger-review-code.md`)
 - `extension/llm_agent/internal/context/app-capabilities.md` — static app-capabilities section
@@ -196,11 +195,11 @@ Verbatim prompt and skill files (version-controlled; read the source, do not rel
 
 ### Prompt composition
 
-**Global agent** (`extension/llm_agent/global/compose-prompt.mjs`)
+**Global agent** (`extension/llm_agent/global/`)
 
-`composeGlobalPrompt()` (compose-prompt.mjs) returns the role **base only** — `rolePrompt`, the contents of `global/prompt.md` cached at module load. It does **not** embed skill bodies: `buildSystemPrompt` renders `# Available skills` + bodies exactly once (it already holds the skills map for dispatch — §2), so the base omits them. This mirrors the internal agent (role-only base, skills rendered by the loop); embedding them here too previously double-sent the global agent's skills.
+No composer module exists for this agent. `compose-prompt.mjs` (`composeGlobalPrompt()`) had no importer and was deleted, so `global/prompt.md` is not loaded by any code path today. The skill loader ignores it (`skills/registry.mjs`), and it is kept on disk pending a decision on whether the global role base should be rebuilt from it. Skill bodies are never embedded in a base; the loop renders `# Available skills` once from its skills map (§2).
 
-This is computed once at server start as `globalPromptBase` (route.mjs) and used as `agentContext.base`. Per request, `route.mjs` appends to the base, in order:
+Per request, the global agent's system prompt gets these appends, in order:
 
 1. an optional **persona** suffix (the user's configured voice),
 2. the **redacted Graphify repository-memory block** — the same `renderGraphifyMemory(agentContext, userId)` output the internal agent gets, run through `redactFence` before injection. This lets the global Code Assistant ground project answers in repo memory even when it answers directly instead of delegating to `ask-internal`, and

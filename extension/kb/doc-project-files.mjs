@@ -144,7 +144,7 @@ export function validateProjectRoot(raw, { home = homedir() } = {}) {
 }
 
 /** True when any component of `path` is a sensitive directory name (case-insensitive). */
-export function hasSensitiveComponent(path) {
+function hasSensitiveComponent(path) {
   return path.split(sep).some((c) => SENSITIVE_DIRECTORY_NAMES.includes(c.toLowerCase()));
 }
 
@@ -160,7 +160,7 @@ function insideRoot(root, candidate) {
  * an oversize file, or bytes that are not valid UTF-8 (Swift's
  * `String(contentsOf:encoding: .utf8)` fails on those, so the file is skipped).
  */
-export function readConfinedText(root, absPath, maxBytes = MAX_FILE_BYTES) {
+function readConfinedText(root, absPath, maxBytes = MAX_FILE_BYTES) {
   let real;
   try {
     real = realpathSync(absPath);

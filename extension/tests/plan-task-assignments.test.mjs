@@ -373,21 +373,6 @@ test('GET /projects/:id/plan-tasks is a project-member route with the assignee o
   assert.equal(unknown.res.statusCode, 404);
 });
 
-test('GET /kb/plan/:id and /kb/plan-task/update expose the assignee without changing owner', async () => {
-  const plan = await callPlan({ method: 'GET', url: '/kb/plan/plan-one', user: { id: owner } });
-  assert.equal(plan.res.statusCode, 200);
-  const task = plan.res.json().tasks.find((t) => t.id === 't-1');
-  assert.equal(task.assignee.userId, engineer);
-  assert.equal(plan.res.json().projectId, 'p-one');
-
-  const older = savePlan(owner, {
-    id: 'plan-owner-text', title: 'Owner text', meta: { projectId: 'p-one' },
-    tasks: [{ id: 'own-1', title: 'Owned by planner', owner: 'backend engineer' }],
-  });
-  assert.equal(older.tasks[0].owner, 'backend engineer');
-  assert.equal(older.tasks[0].assignee, null);
-});
-
 test('a plan cannot be tagged with a project the author is not a member of', async () => {
   const tag = (u, projectId) => callPlan({
     user: { id: u }, method: 'POST', url: '/kb/plan/save',

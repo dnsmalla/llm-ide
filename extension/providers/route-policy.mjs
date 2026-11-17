@@ -39,7 +39,7 @@ const DEFAULT_TTL = Object.freeze({ minutes: 10, source: 'assumed' });
 const SKEW_TOLERANCE_MS = MIN;
 
 /** The catalog id of a provider string: `custom:cat-groq` -> `groq`, `claude`/`anthropic` -> `anthropic`. */
-export function catalogIdOf(provider) {
+function catalogIdOf(provider) {
   if (!provider || provider === 'claude' || provider === 'anthropic') return 'anthropic';
   const m = /^custom:cat-(.+)$/.exec(provider);
   return m ? m[1] : null;
@@ -70,7 +70,7 @@ export function isWarm(warm, provider, model, now, { extended = false } = {}) {
 }
 
 /** The (provider, model) a chat last touched (newest stamp in `warm`), or null. */
-export function lastTouched(warm) {
+function lastTouched(warm) {
   let best = null;
   for (const [k, v] of Object.entries(warm ?? {})) {
     const t = Date.parse(v);

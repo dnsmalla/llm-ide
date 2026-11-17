@@ -43,13 +43,9 @@ test('routeTimeoutMs has NO budget for routes that scale with the user\'s data',
   // takes is a function of how much the user asked to index.
   assert.equal(routeTimeoutMs('/kb/ingest', 'POST'), null);
   assert.equal(routeTimeoutMs('/kb/connect-box', 'POST'), null);
-  // ingest-scip is bounded by loadScipIndex's own subprocess kill timer.
-  assert.equal(routeTimeoutMs('/kb/ingest-scip', 'POST'), null);
 });
 
-test('routeTimeoutMs applies the /kb/delete budget on both DELETE and POST (the router accepts both verbs)', () => {
-  assert.equal(routeTimeoutMs('/kb/delete', 'POST'), 30_000);
-  assert.equal(routeTimeoutMs('/kb/delete', 'DELETE'), 30_000);
+test('routeTimeoutMs is POST-only: a budgeted path answers null for any other verb', () => {
   assert.equal(routeTimeoutMs('/kb/dispatch', 'DELETE'), null, 'other routes remain POST-only');
 });
 

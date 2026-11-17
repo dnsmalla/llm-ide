@@ -35,7 +35,8 @@ const SCHEMA_DIR = join(ROOT, 'schema/http');
 const FIXTURE_DIR = join(SCHEMA_DIR, 'fixtures');
 const SERVER = join(ROOT, 'extension/server.mjs');
 const STUB_CLI = join(HERE, 'fixtures/stub-claude-cli.mjs');
-const COVERAGE_TARGET = 0.6;
+// 0.57 since v149 removed 31 client-less routes whose fixtures all replayed (474/818 then); raise it as fixtures land.
+const COVERAGE_TARGET = 0.57;
 // Assert mode (feature matrix, scripts/feature-matrix.mjs): CONTRACT_FEATURES is
 // the LLMIDE_FEATURES value the server boots with, and CONTRACT_EXPECT_DISABLED=1
 // turns the skip of disabled-feature routes into an assertion: a fixture whose
@@ -192,7 +193,7 @@ const SKIP_RULES = [
   },
   {
     why: 'external service: OAuth provider, email/Slack/Box/MCP/git host, plugin marketplace',
-    when: (fx) => fx.status < 300 && /\/(google|slack|box|email|mcp-connector|connect-git|connect-github-issues|connect-qa|connect-tickets-json|ingest-scip|ingest-code-graph|install-skills|notify)\b|\/marketplace|\/updates|\/(import|refresh|update)$|\/auth\/me\/(connectors|llm-sources|mcp-plugins)\/(add|update|resync)|\/auth\/me\/plugins\/(install|reload)|\/auth\/me\/codex-plugins|\/auth\/me\/claude-plugins|\/kb\/ingest$/.test(fx.endpoint),
+    when: (fx) => fx.status < 300 && /\/(google|slack|box|email|mcp-connector|connect-git|connect-github-issues|connect-qa|install-skills|notify)\b|\/marketplace|\/updates|\/(import|refresh|update)$|\/auth\/me\/(connectors|llm-sources|mcp-plugins)\/(add|update|resync)|\/auth\/me\/plugins\/(install|reload)|\/auth\/me\/codex-plugins|\/auth\/me\/claude-plugins|\/kb\/ingest$/.test(fx.endpoint),
   },
   {
     why: 'needs an archive receipt recorded through /kb/archive-receipts (or a commit) for the fixture user, so the purge can answer 200',
@@ -221,7 +222,6 @@ const SKIP_RULES = [
   {
     why: 'provider catalog: needs a connection seeded through POST /kb/providers/catalog/connect (and, for models and test, a reachable provider; for the turn, the tools switch on); the replay user starts with none. Covered with a stand-in for fetch by tests/provider-catalog-route.test.mjs',
     when: (fx) => (/^POST \/kb\/providers\/catalog\/(models|test)$/.test(fx.endpoint) && fx.status < 300)
-      || (fx.endpoint === 'POST /kb/providers/turn' && (fx.status === 400 || fx.status === 403 || fx.status === 404))
       || (fx.endpoint === 'POST /kb/providers/catalog/models' && fx.status === 403)
       || (fx.endpoint === 'POST /kb/providers/catalog/connect' && fx.status === 409),
   },
@@ -240,7 +240,7 @@ const SKIP_RULES = [
   },
   {
     why: 'needs a row seeded through another route (a :id or body id that must exist)',
-    when: (fx) => fx.status < 300 && (/:id|:name/.test(fx.endpoint) || /^(PUT \/kb\/agent\/personas\/active|POST \/kb\/code-sync|POST \/kb\/plan\/save|POST \/kb\/review\/|POST \/kb\/summarize|POST \/kb\/generate-code|POST \/kb\/generate-plan|POST \/kb\/analyze-risks|POST \/kb\/conflict-questions|POST \/kb\/dispatch|POST \/kb\/providers\/verify)/.test(fx.endpoint)),
+    when: (fx) => fx.status < 300 && (/:id|:name/.test(fx.endpoint) || /^(POST \/kb\/code-sync|POST \/kb\/plan\/save|POST \/kb\/review\/|POST \/kb\/summarize|POST \/kb\/generate-code|POST \/kb\/generate-plan|POST \/kb\/analyze-risks|POST \/kb\/conflict-questions|POST \/kb\/dispatch|POST \/kb\/providers\/verify)/.test(fx.endpoint)),
   },
   {
     // docs-kit K1: every project-scoped success, every folder-level 400 (the
@@ -271,12 +271,8 @@ const SKIP_RULES = [
     when: (fx) => fx.endpoint === 'POST /auth/register' && fx.status === 403,
   },
   {
-    why: 'needs a pending decision owned by another user (code-assist)',
-    when: (fx) => fx.endpoint === 'POST /code-assist/decision' && (fx.status === 200 || fx.status === 403),
-  },
-  {
     why: 'needs a pending review row seeded through the review flow',
-    when: (fx) => /^POST \/kb\/review\/(approve|reject)$/.test(fx.endpoint) && [200, 409, 422].includes(fx.status),
+    when: (fx) => /^POST \/kb\/review\/approve$/.test(fx.endpoint) && [200, 409, 422].includes(fx.status),
   },
   {
     why: 'needs an installed plugin with a managed source (seeded)',

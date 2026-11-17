@@ -2725,18 +2725,6 @@ export type GetKbAgentFeedbackStatsResponse200 = {
   sinceDays: number;
 };
 
-/** Request parts for `GET /kb/agent/feedback/by-task` (schema/http/agent.schema.json). */
-export type GetKbAgentFeedbackByTaskRequest = {
-  query: {
-    /** The window in days; the default is 30. */
-    sinceDays?: string;
-  };
-};
-
-export type GetKbAgentFeedbackByTaskResponse200 = {
-  tasks: TaskFeedback[];
-};
-
 /** Request parts for `GET /kb/agent/persona` (schema/http/agent.schema.json). */
 export type GetKbAgentPersonaRequest = Record<string, never>;
 
@@ -2762,70 +2750,6 @@ export type PutKbAgentPersonaResponse200 = {
   persona: LegacyPersona;
 };
 
-/** Request parts for `GET /kb/agent/personas` (schema/http/agent.schema.json). */
-export type GetKbAgentPersonasRequest = Record<string, never>;
-
-export type GetKbAgentPersonasResponse200 = PersonaList;
-
-/** Request parts for `POST /kb/agent/personas` (schema/http/agent.schema.json). */
-export type PostKbAgentPersonasRequest = {
-  body: {
-    name?: string;
-    promptSuffix?: string;
-    autoDispatch?: boolean;
-  };
-};
-
-export type PostKbAgentPersonasResponse200 = {
-  persona: Persona;
-  personas: Persona[];
-  active: string | null;
-  count: number;
-};
-
-/** Request parts for `PUT /kb/agent/personas/active` (schema/http/agent.schema.json). */
-export type PutKbAgentPersonasActiveRequest = {
-  body: {
-    id?: string;
-  };
-};
-
-export type PutKbAgentPersonasActiveResponse200 = PersonaList;
-
-export type PutKbAgentPersonasActiveResponse404 = CommonError;
-
-/** Request parts for `PUT /kb/agent/personas/:id` (schema/http/agent.schema.json). */
-export type PutKbAgentPersonasIdRequest = {
-  params: {
-    id: string;
-  };
-  body: {
-    name?: string;
-    promptSuffix?: string;
-    autoDispatch?: boolean;
-  };
-};
-
-export type PutKbAgentPersonasIdResponse200 = {
-  persona: Persona;
-};
-
-export type PutKbAgentPersonasIdResponse404 = CommonError;
-
-/** Request parts for `DELETE /kb/agent/personas/:id` (schema/http/agent.schema.json). */
-export type DeleteKbAgentPersonasIdRequest = {
-  params: {
-    id: string;
-  };
-};
-
-export type DeleteKbAgentPersonasIdResponse200 = {
-  removed: boolean;
-  active: string | null;
-};
-
-export type DeleteKbAgentPersonasIdResponse400 = CommonError;
-
 /** Request parts for `GET /kb/agent/catalog` (schema/http/agent.schema.json). */
 export type GetKbAgentCatalogRequest = Record<string, never>;
 
@@ -2848,16 +2772,6 @@ export type GetKbAgentCatalogResponse200 = {
 export type GetKbAgentCommandsRequest = Record<string, never>;
 
 export type GetKbAgentCommandsResponse200 = unknown;
-
-/** Request parts for `GET /kb/agent/generation-library` (schema/http/agent.schema.json). */
-export type GetKbAgentGenerationLibraryRequest = Record<string, never>;
-
-export type GetKbAgentGenerationLibraryResponse200 = {
-  /** Built-in skills repo path */
-  repo: string | null;
-  templates: LibraryEntry[];
-  commands: LibraryEntry[];
-};
 
 /** Request parts for `GET /kb/agent/skill-library` (schema/http/agent.schema.json). */
 export type GetKbAgentSkillLibraryRequest = Record<string, never>;
@@ -2956,49 +2870,6 @@ export type DeleteKbAgentSessionMemoryResponse200 = {
 };
 
 export type DeleteKbAgentSessionMemoryResponse400 = CommonError;
-
-/** Request parts for `POST /kb/agent/ask` (schema/http/agent.schema.json). */
-export type PostKbAgentAskRequest = {
-  body: {
-    /** User message (max 8 000 chars after sanitization) */
-    message?: string;
-    /** one base64 image, capped per image; not exercised offline */
-    image?: Record<string, unknown>;
-    /** the prior turns of this chat; only the last 10 are sent to the model */
-    history?: {
-      /** user or assistant */
-      role: string;
-      content: string;
-    }[];
-    provider?: string;
-    model?: string;
-  };
-};
-
-export type PostKbAgentAskResponse200 = {
-  reply: string;
-};
-
-export type PostKbAgentAskResponse400 = CommonError;
-
-/** Request parts for `GET /kb/agent/ask/history` (schema/http/agent.schema.json). */
-export type GetKbAgentAskHistoryRequest = {
-  query: {
-    /** Returns the newest N messages, oldest first; the default is 50, and reads are capped at 500. */
-    limit?: string;
-  };
-};
-
-export type GetKbAgentAskHistoryResponse200 = {
-  messages: AskMessage[];
-};
-
-/** Request parts for `DELETE /kb/agent/ask/history` (schema/http/agent.schema.json). */
-export type DeleteKbAgentAskHistoryRequest = Record<string, never>;
-
-export type DeleteKbAgentAskHistoryResponse200 = {
-  removed: number;
-};
 
 /** Request parts for `GET /kb/chat/sessions` (schema/http/agent.schema.json). */
 export type GetKbChatSessionsRequest = {
@@ -5452,36 +5323,6 @@ export type PostKbIndexNotesResponse200 = {
 
 export type PostKbIndexNotesResponse400 = CommonError;
 
-/** Request parts for `POST /kb/index/reconcile` (schema/http/index.schema.json). */
-export type PostKbIndexReconcileRequest = {
-  body: {
-    projectId?: string;
-    /** At most 20 000 entries. */
-    manifest: ManifestEntry[];
-    /** true deletes the extra rows. Default false: report only. */
-    prune?: boolean;
-    /** Keys the Mac could not index (unparseable, unavailable, unsendable). They are never pruned and are not reported as extra. At most 20 000. */
-    keep?: string[];
-    /** Required with prune: true and an empty manifest. Without it that request is refused (409 EMPTY_MANIFEST_REFUSED), so an emptied or unmounted folder cannot delete the index. */
-    allowEmpty?: boolean;
-  };
-};
-
-export type PostKbIndexReconcileResponse200 = {
-  /** In the manifest, not indexed. */
-  missing: string[];
-  /** Indexed with a different content hash. */
-  stale: string[];
-  /** Indexed, not in the manifest. */
-  extra: string[];
-  /** Rows deleted (only with prune true). */
-  pruned: number;
-};
-
-export type PostKbIndexReconcileResponse400 = CommonError;
-
-export type PostKbIndexReconcileResponse409 = CommonError;
-
 /** Request parts for `DELETE /kb/index/notes/:key` (schema/http/index.schema.json). */
 export type DeleteKbIndexNotesKeyRequest = {
   query: {
@@ -5526,23 +5367,6 @@ export type GetKbIndexSearchResponse200 = {
 };
 
 export type GetKbIndexSearchResponse400 = CommonError;
-
-/** Request parts for `GET /kb/index/status` (schema/http/index.schema.json). */
-export type GetKbIndexStatusRequest = {
-  query: {
-    /** Omit for every project of the user. */
-    projectId?: string;
-  };
-};
-
-export type GetKbIndexStatusResponse200 = {
-  notes: number;
-  /** Search rows written by those notes. */
-  ftsRows: number;
-  /** true when notes equals ftsRows. */
-  consistent: boolean;
-  lastIndexedAt: string | null;
-};
 
 /** Request parts for `POST /kb/index/scan` (schema/http/index.schema.json). */
 export type PostKbIndexScanRequest = {
@@ -5634,40 +5458,6 @@ export type GetKbIssuesResponse200 = {
 
 export type GetKbIssuesResponse401 = CommonError;
 
-/** Request parts for `GET /kb/meeting/:id` (schema/http/kb-sources.schema.json). */
-export type GetKbMeetingIdRequest = {
-  query: {
-    /** Opt-in extras: `transcript` adds the stored transcript text as `transcript`. Any other value is ignored (the handler checks equality only). */
-    include?: "transcript";
-  };
-  params: {
-    id: string;
-  };
-};
-
-export type GetKbMeetingIdResponse200 = Meeting;
-
-export type GetKbMeetingIdResponse400 = CommonError;
-
-export type GetKbMeetingIdResponse401 = CommonError;
-
-export type GetKbMeetingIdResponse404 = CommonError;
-
-/** Request parts for `GET /kb/entity/:id` (schema/http/kb-sources.schema.json). */
-export type GetKbEntityIdRequest = {
-  params: {
-    id: string;
-  };
-};
-
-export type GetKbEntityIdResponse200 = Entity;
-
-export type GetKbEntityIdResponse400 = CommonError;
-
-export type GetKbEntityIdResponse401 = CommonError;
-
-export type GetKbEntityIdResponse404 = CommonError;
-
 /** Request parts for `GET /kb/project/:id/export` (schema/http/kb-sources.schema.json). */
 export type GetKbProjectIdExportRequest = {
   params: {
@@ -5705,56 +5495,6 @@ export type GetKbStatsRequest = Record<string, never>;
 export type GetKbStatsResponse200 = Stats;
 
 export type GetKbStatsResponse401 = CommonError;
-
-/** Request parts for `GET /kb/system/status` (schema/http/kb-sources.schema.json). */
-export type GetKbSystemStatusRequest = Record<string, never>;
-
-export type GetKbSystemStatusResponse200 = SystemStatus;
-
-export type GetKbSystemStatusResponse401 = CommonError;
-
-/** Request parts for `GET /kb/export-all` (schema/http/kb-sources.schema.json). */
-export type GetKbExportAllRequest = {
-  query: {
-    /** meeting id to resume after */
-    cursor?: string;
-    /** Capped at 500; an absent value gives 100, and 0 or a non-numeric value is not replaced by the default. */
-    limit?: string;
-  };
-};
-
-/** application/x-ndjson: one JSON record per line (meeting with its entities), then a final {done, next_cursor} line; next_cursor is null on the last page */
-export type GetKbExportAllResponse200 = string;
-
-export type GetKbExportAllResponse401 = CommonError;
-
-/** Request parts for `POST /kb/delete` (schema/http/kb-sources.schema.json). */
-export type PostKbDeleteRequest = {
-  body: {
-    /** meeting id */
-    id?: string;
-  };
-};
-
-export type PostKbDeleteResponse200 = KbSourcesOk;
-
-export type PostKbDeleteResponse400 = CommonError;
-
-export type PostKbDeleteResponse401 = CommonError;
-
-/** Request parts for `DELETE /kb/delete` (schema/http/kb-sources.schema.json). */
-export type DeleteKbDeleteRequest = {
-  body: {
-    /** meeting id */
-    id?: string;
-  };
-};
-
-export type DeleteKbDeleteResponse200 = KbSourcesOk;
-
-export type DeleteKbDeleteResponse400 = CommonError;
-
-export type DeleteKbDeleteResponse401 = CommonError;
 
 /** Request parts for `POST /kb/ingest` (schema/http/kb-sources.schema.json). */
 export type PostKbIngestRequest = {
@@ -6004,26 +5744,6 @@ export type PostKbConnectGitResponse401 = CommonError;
 
 export type PostKbConnectGitResponse403 = CommonError;
 
-/** Request parts for `POST /kb/ingest-scip` (schema/http/kb-sources.schema.json). */
-export type PostKbIngestScipRequest = {
-  body: {
-    /** must be on the user's repo allow-list */
-    repoPath?: string;
-    /** Path to the SCIP index file */
-    scipPath?: string;
-    /** Replace the repo's existing graph rows; default true. */
-    replace?: boolean;
-  };
-};
-
-export type PostKbIngestScipResponse200 = unknown;
-
-export type PostKbIngestScipResponse400 = CommonError;
-
-export type PostKbIngestScipResponse401 = CommonError;
-
-export type PostKbIngestScipResponse403 = CommonError;
-
 /** Request parts for `POST /kb/connect-github-issues` (schema/http/kb-sources.schema.json). */
 export type PostKbConnectGithubIssuesRequest = {
   body: {
@@ -6042,29 +5762,6 @@ export type PostKbConnectGithubIssuesResponse200 = unknown;
 export type PostKbConnectGithubIssuesResponse400 = CommonError;
 
 export type PostKbConnectGithubIssuesResponse401 = CommonError;
-
-/** Request parts for `POST /kb/connect-tickets-json` (schema/http/kb-sources.schema.json). */
-export type PostKbConnectTicketsJsonRequest = {
-  body: {
-    /** Source label stored on each ticket entity; default manual. */
-    provider?: string;
-    /** Array of ticket objects (max 8 MB body) */
-    tickets?: {
-      id?: string;
-      title?: string;
-      body?: string;
-      url?: string;
-      /** provider-specific ticket fields, merged into the stored meta */
-      meta?: Record<string, unknown>;
-    }[];
-  };
-};
-
-export type PostKbConnectTicketsJsonResponse200 = TicketIndex;
-
-export type PostKbConnectTicketsJsonResponse400 = CommonError;
-
-export type PostKbConnectTicketsJsonResponse401 = CommonError;
 
 /** Request parts for `POST /kb/connect-qa` (schema/http/kb-sources.schema.json). */
 export type PostKbConnectQaRequest = {
@@ -6798,45 +6495,6 @@ export type PostKbLoopShipResponse500 = CommonError;
 
 export type PostKbLoopShipResponse502 = CommonError;
 
-/** Request parts for `POST /kb/ingest-code-graph` (schema/http/live-loop-misc.schema.json). */
-export type PostKbIngestCodeGraphRequest = {
-  body: {
-    /** Absolute path to the repo root (must be on user allow-list) */
-    repoPath?: string;
-    graph?: {
-      nodes?: CodeGraphNode[];
-      edges?: CodeGraphEdge[];
-    };
-    /** Clear this producer's existing rows for the repo first (first batch only) */
-    replace?: boolean;
-    /** Git commit the graph was generated from (7-64 hex); find-code compares it to HEAD to warn about a stale graph */
-    commitSha?: string;
-    /** ISO-8601 time the graph was generated */
-    generatedAt?: string;
-  };
-};
-
-export type PostKbIngestCodeGraphResponse200 = {
-  ok: true;
-  /** canonical repo path */
-  repo: string;
-  /** nodes written */
-  nodes: number;
-  /** edges written */
-  edges: number;
-  droppedNodes: number;
-  droppedEdges: number;
-  replaced: boolean;
-};
-
-export type PostKbIngestCodeGraphResponse400 = CommonError;
-
-export type PostKbIngestCodeGraphResponse401 = CommonError;
-
-export type PostKbIngestCodeGraphResponse403 = CommonError;
-
-export type PostKbIngestCodeGraphResponse404 = FeatureDisabled;
-
 /** Request parts for `GET /kb/issue-schedule` (schema/http/live-loop-misc.schema.json). */
 export type GetKbIssueScheduleRequest = {
   query: {
@@ -7279,38 +6937,6 @@ export type PostCodeAssistResponse410 = CommonError;
 
 export type PostCodeAssistResponse429 = CommonError;
 
-/** Request parts for `POST /code-assist/decision` (schema/http/notes-generation.schema.json). */
-export type PostCodeAssistDecisionRequest = {
-  body: {
-    /** Id from the approval_request progress event */
-    requestId?: string;
-    /** The legacy chat's agentContext.sessionId. */
-    sdkSessionId?: string;
-    /** 'always-allow' saves the rule the approval_request's `suggestion` offered — a project-scoped command-prefix rule for shell commands (`npm test`), a project-scoped tool rule for act tools — so later prompt-tier calls it covers skip the approval. No `suggestion` (a compound command) means it allows once. */
-    action?: "answer" | "allow" | "deny" | "always-allow";
-  };
-};
-
-export type PostCodeAssistDecisionResponse401 = CommonError;
-
-export type PostCodeAssistDecisionResponse410 = CommonError;
-
-/** Request parts for `POST /agent-sdk/spike` (schema/http/notes-generation.schema.json). */
-export type PostAgentSdkSpikeRequest = {
-  body: {
-    /** Raw prompt (max 4 000 chars) */
-    prompt?: string;
-    /** SDK session id to resume */
-    resume?: string;
-  };
-};
-
-export type PostAgentSdkSpikeResponse200 = unknown;
-
-export type PostAgentSdkSpikeResponse400 = CommonError;
-
-export type PostAgentSdkSpikeResponse401 = CommonError;
-
 /** Request parts for `POST /kb/complete` (schema/http/notes-generation.schema.json). */
 export type PostKbCompleteRequest = {
   body: {
@@ -7667,28 +7293,6 @@ export type PostKbCodeSyncResponse401 = CommonError;
 
 export type PostKbCodeSyncResponse404 = CommonError;
 
-/** Request parts for `GET /kb/plans` (schema/http/planning.schema.json). */
-export type GetKbPlansRequest = {
-  query: {
-    /** Capped at 200; the default is 50. */
-    limit?: string;
-  };
-};
-
-export type GetKbPlansResponse200 = {
-  plans: ({
-    id?: string;
-    title?: string;
-    meetingId?: string | null;
-    createdAt?: string;
-    updatedAt?: string;
-    taskCount?: number;
-  })[];
-  count: number;
-};
-
-export type GetKbPlansResponse401 = CommonError;
-
 /** Request parts for `GET /kb/plan/:id` (schema/http/planning.schema.json). */
 export type GetKbPlanIdRequest = {
   params: {
@@ -7780,94 +7384,6 @@ export type PostKbPlanSaveResponse400 = CommonError;
 export type PostKbPlanSaveResponse401 = CommonError;
 
 export type PostKbPlanSaveResponse500 = CommonError;
-
-/** Request parts for `DELETE /kb/plan/delete` (schema/http/planning.schema.json). */
-export type DeleteKbPlanDeleteRequest = {
-  body: {
-    id?: string;
-  };
-};
-
-export type DeleteKbPlanDeleteResponse200 = {
-  ok: true;
-};
-
-export type DeleteKbPlanDeleteResponse400 = CommonError;
-
-export type DeleteKbPlanDeleteResponse401 = CommonError;
-
-/** Request parts for `POST /kb/plan/delete` (schema/http/planning.schema.json). */
-export type PostKbPlanDeleteRequest = {
-  body: {
-    id?: string;
-  };
-};
-
-export type PostKbPlanDeleteResponse200 = {
-  ok: true;
-};
-
-export type PostKbPlanDeleteResponse400 = CommonError;
-
-export type PostKbPlanDeleteResponse401 = CommonError;
-
-/** Request parts for `PATCH /kb/plan-task/update` (schema/http/planning.schema.json). */
-export type PatchKbPlanTaskUpdateRequest = {
-  body: {
-    taskId?: string;
-    /** Only the keys present change; an explicit null clears a field. */
-    patch?: {
-      status?: string;
-      risk?: string | null;
-      riskReason?: string | null;
-      owner?: string | null;
-      due?: string | null;
-      files?: {
-        ref?: string;
-        title?: string;
-        bodyExcerpt?: string;
-        rank?: number;
-      }[];
-    };
-  };
-};
-
-export type PatchKbPlanTaskUpdateResponse200 = PlanTask;
-
-export type PatchKbPlanTaskUpdateResponse400 = CommonError;
-
-export type PatchKbPlanTaskUpdateResponse401 = CommonError;
-
-export type PatchKbPlanTaskUpdateResponse404 = CommonError;
-
-/** Request parts for `POST /kb/plan-task/update` (schema/http/planning.schema.json). */
-export type PostKbPlanTaskUpdateRequest = {
-  body: {
-    taskId?: string;
-    /** Only the keys present change; an explicit null clears a field. */
-    patch?: {
-      status?: string;
-      risk?: string | null;
-      riskReason?: string | null;
-      owner?: string | null;
-      due?: string | null;
-      files?: {
-        ref?: string;
-        title?: string;
-        bodyExcerpt?: string;
-        rank?: number;
-      }[];
-    };
-  };
-};
-
-export type PostKbPlanTaskUpdateResponse200 = PlanTask;
-
-export type PostKbPlanTaskUpdateResponse400 = CommonError;
-
-export type PostKbPlanTaskUpdateResponse401 = CommonError;
-
-export type PostKbPlanTaskUpdateResponse404 = CommonError;
 
 /** Request parts for `POST /kb/dispatch` (schema/http/planning.schema.json). */
 export type PostKbDispatchRequest = {
@@ -8053,57 +7569,6 @@ export type PostKbOutcomesRefreshResponse200 = {
 export type PostKbOutcomesRefreshResponse401 = CommonError;
 
 export type PostKbOutcomesRefreshResponse429 = CommonError;
-
-/** Request parts for `POST /kb/outcomes/retry-failed` (schema/http/planning.schema.json). */
-export type PostKbOutcomesRetryFailedRequest = {
-  body: {
-    /** Credentials and destination for the retry targets (as /kb/dispatch config). */
-    config?: Record<string, unknown>;
-  };
-};
-
-export type PostKbOutcomesRetryFailedResponse200 = {
-  retried: number;
-  ok: number;
-  failed: number;
-  deferred: number;
-};
-
-export type PostKbOutcomesRetryFailedResponse401 = CommonError;
-
-/** Request parts for `GET /kb/outcomes/task/:id` (schema/http/planning.schema.json). */
-export type GetKbOutcomesTaskIdRequest = {
-  params: {
-    id: string;
-  };
-};
-
-export type GetKbOutcomesTaskIdResponse200 = {
-  outcomes: ({
-    id: number;
-    provider: string;
-    ref?: string | null;
-    state: string;
-    isTerminal: boolean;
-    /** Outcome detail. */
-    meta?: Record<string, unknown>;
-    observedAt: string;
-  })[];
-};
-
-export type GetKbOutcomesTaskIdResponse400 = CommonError;
-
-export type GetKbOutcomesTaskIdResponse401 = CommonError;
-
-/** Request parts for `GET /kb/outcomes/stats` (schema/http/planning.schema.json). */
-export type GetKbOutcomesStatsRequest = Record<string, never>;
-
-export type GetKbOutcomesStatsResponse200 = {
-  total: number;
-  byState: Record<string, number>;
-};
-
-export type GetKbOutcomesStatsResponse401 = CommonError;
 
 /** Request parts for `GET /kb/plan-task/assignments` (schema/http/planning.schema.json). */
 export type GetKbPlanTaskAssignmentsRequest = {
@@ -8401,38 +7866,6 @@ export type PutKbProvidersSettingsRequest = {
 
 export type PutKbProvidersSettingsResponse200 = Settings;
 
-/** Request parts for `POST /kb/providers/turn` (schema/http/provider-catalog.schema.json). */
-export type PostKbProvidersTurnRequest = {
-  body: {
-    /** custom:cat-... of a connection of the caller */
-    provider?: string;
-    model?: string;
-    message?: string;
-    /** execute | plan | assist_plan | review need a model with tools; ask and document run without them */
-    mode?: string;
-    /** Prior turns, most recent 40 are used */
-    history?: ({
-      role: "user" | "assistant";
-      content: string;
-    })[];
-    /** workspaceRoot bounds what the file tools may read; chatSessionId keys the chat's task list */
-    agentContext?: {
-      workspaceRoot?: string;
-      chatSessionId?: string;
-    };
-  };
-};
-
-export type PostKbProvidersTurnResponse200 = unknown;
-
-export type PostKbProvidersTurnResponse400 = CommonError;
-
-export type PostKbProvidersTurnResponse401 = CommonError;
-
-export type PostKbProvidersTurnResponse403 = CommonError;
-
-export type PostKbProvidersTurnResponse404 = CommonError;
-
 /** Request parts for `POST /kb/providers/verify` (schema/http/providers-usage.schema.json). */
 export type PostKbProvidersVerifyRequest = {
   body: {
@@ -8535,37 +7968,6 @@ export type PostKbAgentSdkUpdateResponse200 = {
 };
 
 export type PostKbAgentSdkUpdateResponse401 = CommonError;
-
-/** Request parts for `POST /kb/custom-providers` (schema/http/providers-usage.schema.json). */
-export type PostKbCustomProvidersRequest = {
-  body: {
-    providers?: ({
-      id?: string;
-      name?: string;
-      baseURL?: string;
-      /** vault key path */
-      apiKey?: string;
-      models?: {
-        id: string;
-        displayName?: string;
-        [key: string]: unknown;
-      }[];
-      isOpenAICompatible?: boolean;
-      isEnabled?: boolean;
-      /** Anthropic-format endpoint for the Agent engine; null when absent */
-      anthropicBaseURL?: string | null;
-    })[];
-  };
-};
-
-export type PostKbCustomProvidersResponse200 = {
-  success: boolean;
-  count: number;
-};
-
-export type PostKbCustomProvidersResponse400 = CommonError;
-
-export type PostKbCustomProvidersResponse401 = CommonError;
 
 /** Request parts for `GET /kb/routing-tiers` (schema/http/providers-usage.schema.json). */
 export type GetKbRoutingTiersRequest = Record<string, never>;
@@ -8846,37 +8248,6 @@ export type GetKbUsageTurnCompositionResponse200 = {
 
 export type GetKbUsageTurnCompositionResponse401 = CommonError;
 
-/** Request parts for `POST /kb/usage/record` (schema/http/providers-usage.schema.json). */
-export type PostKbUsageRecordRequest = {
-  body: {
-    provider?: string;
-    model?: string;
-    /** api|cli|auto-task */
-    source?: string;
-    endpoint?: string;
-    runs?: number;
-    inputTokens?: number;
-    outputTokens?: number;
-    cacheReadTokens?: number;
-    cacheCreationTokens?: number;
-    turns?: number;
-    stopReason?: string;
-    requestId?: string;
-  };
-};
-
-/** ok is false and id null when the ledger write failed (best effort). */
-export type PostKbUsageRecordResponse200 = {
-  ok: boolean;
-  id: number | null;
-};
-
-export type PostKbUsageRecordResponse400 = CommonError;
-
-export type PostKbUsageRecordResponse401 = CommonError;
-
-export type PostKbUsageRecordResponse429 = CommonError;
-
 /** Request parts for `POST /kb/review/submit` (schema/http/review.schema.json). */
 export type PostKbReviewSubmitRequest = {
   body: {
@@ -8914,20 +8285,6 @@ export type GetKbReviewListResponse200 = {
 
 export type GetKbReviewListResponse401 = CommonError;
 
-/** Request parts for `GET /kb/review/get/:id` (schema/http/review.schema.json). */
-export type GetKbReviewGetIdRequest = {
-  params: {
-    /** The review item id (rev-…). */
-    id: string;
-  };
-};
-
-export type GetKbReviewGetIdResponse200 = ReviewItem;
-
-export type GetKbReviewGetIdResponse401 = CommonError;
-
-export type GetKbReviewGetIdResponse404 = CommonError;
-
 /** Request parts for `POST /kb/review/approve` (schema/http/review.schema.json). */
 export type PostKbReviewApproveRequest = {
   body: {
@@ -8956,53 +8313,6 @@ export type PostKbReviewApproveResponse422 = GuardrailRejection;
 export type PostKbReviewApproveResponse429 = CommonError;
 
 export type PostKbReviewApproveResponse500 = ExecutionFailure;
-
-/** Request parts for `POST /kb/review/reject` (schema/http/review.schema.json). */
-export type PostKbReviewRejectRequest = {
-  body: {
-    id?: string;
-    /** Stored as reviewerNote. */
-    note?: string;
-  };
-};
-
-export type PostKbReviewRejectResponse200 = ReviewItem;
-
-export type PostKbReviewRejectResponse400 = CommonError;
-
-export type PostKbReviewRejectResponse401 = CommonError;
-
-export type PostKbReviewRejectResponse404 = CommonError;
-
-export type PostKbReviewRejectResponse409 = CommonError;
-
-export type PostKbReviewRejectResponse429 = CommonError;
-
-/** Request parts for `DELETE /kb/review/delete` (schema/http/review.schema.json). */
-export type DeleteKbReviewDeleteRequest = {
-  body: {
-    id?: string;
-  };
-};
-
-export type DeleteKbReviewDeleteResponse200 = ReviewOk;
-
-export type DeleteKbReviewDeleteResponse400 = CommonError;
-
-export type DeleteKbReviewDeleteResponse401 = CommonError;
-
-/** Request parts for `POST /kb/review/delete` (schema/http/review.schema.json). */
-export type PostKbReviewDeleteRequest = {
-  body: {
-    id?: string;
-  };
-};
-
-export type PostKbReviewDeleteResponse200 = ReviewOk;
-
-export type PostKbReviewDeleteResponse401 = CommonError;
-
-export type PostKbReviewDeleteResponse429 = CommonError;
 
 /** Request parts for `GET /kb/self-heal/incidents` (schema/http/self-heal.schema.json). */
 export type GetKbSelfHealIncidentsRequest = Record<string, never>;
@@ -9558,12 +8868,6 @@ export interface ApiEndpoints {
       200: GetKbAgentFeedbackStatsResponse200;
     };
   };
-  "GET /kb/agent/feedback/by-task": {
-    request: GetKbAgentFeedbackByTaskRequest;
-    responses: {
-      200: GetKbAgentFeedbackByTaskResponse200;
-    };
-  };
   "GET /kb/agent/persona": {
     request: GetKbAgentPersonaRequest;
     responses: {
@@ -9576,39 +8880,6 @@ export interface ApiEndpoints {
       200: PutKbAgentPersonaResponse200;
     };
   };
-  "GET /kb/agent/personas": {
-    request: GetKbAgentPersonasRequest;
-    responses: {
-      200: GetKbAgentPersonasResponse200;
-    };
-  };
-  "POST /kb/agent/personas": {
-    request: PostKbAgentPersonasRequest;
-    responses: {
-      200: PostKbAgentPersonasResponse200;
-    };
-  };
-  "PUT /kb/agent/personas/active": {
-    request: PutKbAgentPersonasActiveRequest;
-    responses: {
-      200: PutKbAgentPersonasActiveResponse200;
-      404: PutKbAgentPersonasActiveResponse404;
-    };
-  };
-  "PUT /kb/agent/personas/:id": {
-    request: PutKbAgentPersonasIdRequest;
-    responses: {
-      200: PutKbAgentPersonasIdResponse200;
-      404: PutKbAgentPersonasIdResponse404;
-    };
-  };
-  "DELETE /kb/agent/personas/:id": {
-    request: DeleteKbAgentPersonasIdRequest;
-    responses: {
-      200: DeleteKbAgentPersonasIdResponse200;
-      400: DeleteKbAgentPersonasIdResponse400;
-    };
-  };
   "GET /kb/agent/catalog": {
     request: GetKbAgentCatalogRequest;
     responses: {
@@ -9619,12 +8890,6 @@ export interface ApiEndpoints {
     request: GetKbAgentCommandsRequest;
     responses: {
       200: GetKbAgentCommandsResponse200;
-    };
-  };
-  "GET /kb/agent/generation-library": {
-    request: GetKbAgentGenerationLibraryRequest;
-    responses: {
-      200: GetKbAgentGenerationLibraryResponse200;
     };
   };
   "GET /kb/agent/skill-library": {
@@ -9671,25 +8936,6 @@ export interface ApiEndpoints {
     responses: {
       200: DeleteKbAgentSessionMemoryResponse200;
       400: DeleteKbAgentSessionMemoryResponse400;
-    };
-  };
-  "POST /kb/agent/ask": {
-    request: PostKbAgentAskRequest;
-    responses: {
-      200: PostKbAgentAskResponse200;
-      400: PostKbAgentAskResponse400;
-    };
-  };
-  "GET /kb/agent/ask/history": {
-    request: GetKbAgentAskHistoryRequest;
-    responses: {
-      200: GetKbAgentAskHistoryResponse200;
-    };
-  };
-  "DELETE /kb/agent/ask/history": {
-    request: DeleteKbAgentAskHistoryRequest;
-    responses: {
-      200: DeleteKbAgentAskHistoryResponse200;
     };
   };
   "GET /kb/chat/sessions": {
@@ -10807,14 +10053,6 @@ export interface ApiEndpoints {
       400: PostKbIndexNotesResponse400;
     };
   };
-  "POST /kb/index/reconcile": {
-    request: PostKbIndexReconcileRequest;
-    responses: {
-      200: PostKbIndexReconcileResponse200;
-      400: PostKbIndexReconcileResponse400;
-      409: PostKbIndexReconcileResponse409;
-    };
-  };
   "DELETE /kb/index/notes/:key": {
     request: DeleteKbIndexNotesKeyRequest;
     responses: {
@@ -10827,12 +10065,6 @@ export interface ApiEndpoints {
     responses: {
       200: GetKbIndexSearchResponse200;
       400: GetKbIndexSearchResponse400;
-    };
-  };
-  "GET /kb/index/status": {
-    request: GetKbIndexStatusRequest;
-    responses: {
-      200: GetKbIndexStatusResponse200;
     };
   };
   "POST /kb/index/scan": {
@@ -10857,24 +10089,6 @@ export interface ApiEndpoints {
       401: GetKbIssuesResponse401;
     };
   };
-  "GET /kb/meeting/:id": {
-    request: GetKbMeetingIdRequest;
-    responses: {
-      200: GetKbMeetingIdResponse200;
-      400: GetKbMeetingIdResponse400;
-      401: GetKbMeetingIdResponse401;
-      404: GetKbMeetingIdResponse404;
-    };
-  };
-  "GET /kb/entity/:id": {
-    request: GetKbEntityIdRequest;
-    responses: {
-      200: GetKbEntityIdResponse200;
-      400: GetKbEntityIdResponse400;
-      401: GetKbEntityIdResponse401;
-      404: GetKbEntityIdResponse404;
-    };
-  };
   "GET /kb/project/:id/export": {
     request: GetKbProjectIdExportRequest;
     responses: {
@@ -10897,36 +10111,6 @@ export interface ApiEndpoints {
     responses: {
       200: GetKbStatsResponse200;
       401: GetKbStatsResponse401;
-    };
-  };
-  "GET /kb/system/status": {
-    request: GetKbSystemStatusRequest;
-    responses: {
-      200: GetKbSystemStatusResponse200;
-      401: GetKbSystemStatusResponse401;
-    };
-  };
-  "GET /kb/export-all": {
-    request: GetKbExportAllRequest;
-    responses: {
-      200: GetKbExportAllResponse200;
-      401: GetKbExportAllResponse401;
-    };
-  };
-  "POST /kb/delete": {
-    request: PostKbDeleteRequest;
-    responses: {
-      200: PostKbDeleteResponse200;
-      400: PostKbDeleteResponse400;
-      401: PostKbDeleteResponse401;
-    };
-  };
-  "DELETE /kb/delete": {
-    request: DeleteKbDeleteRequest;
-    responses: {
-      200: DeleteKbDeleteResponse200;
-      400: DeleteKbDeleteResponse400;
-      401: DeleteKbDeleteResponse401;
     };
   };
   "POST /kb/ingest": {
@@ -11014,29 +10198,12 @@ export interface ApiEndpoints {
       403: PostKbConnectGitResponse403;
     };
   };
-  "POST /kb/ingest-scip": {
-    request: PostKbIngestScipRequest;
-    responses: {
-      200: PostKbIngestScipResponse200;
-      400: PostKbIngestScipResponse400;
-      401: PostKbIngestScipResponse401;
-      403: PostKbIngestScipResponse403;
-    };
-  };
   "POST /kb/connect-github-issues": {
     request: PostKbConnectGithubIssuesRequest;
     responses: {
       200: PostKbConnectGithubIssuesResponse200;
       400: PostKbConnectGithubIssuesResponse400;
       401: PostKbConnectGithubIssuesResponse401;
-    };
-  };
-  "POST /kb/connect-tickets-json": {
-    request: PostKbConnectTicketsJsonRequest;
-    responses: {
-      200: PostKbConnectTicketsJsonResponse200;
-      400: PostKbConnectTicketsJsonResponse400;
-      401: PostKbConnectTicketsJsonResponse401;
     };
   };
   "POST /kb/connect-qa": {
@@ -11293,16 +10460,6 @@ export interface ApiEndpoints {
       502: PostKbLoopShipResponse502;
     };
   };
-  "POST /kb/ingest-code-graph": {
-    request: PostKbIngestCodeGraphRequest;
-    responses: {
-      200: PostKbIngestCodeGraphResponse200;
-      400: PostKbIngestCodeGraphResponse400;
-      401: PostKbIngestCodeGraphResponse401;
-      403: PostKbIngestCodeGraphResponse403;
-      404: PostKbIngestCodeGraphResponse404;
-    };
-  };
   "GET /kb/issue-schedule": {
     request: GetKbIssueScheduleRequest;
     responses: {
@@ -11466,21 +10623,6 @@ export interface ApiEndpoints {
       429: PostCodeAssistResponse429;
     };
   };
-  "POST /code-assist/decision": {
-    request: PostCodeAssistDecisionRequest;
-    responses: {
-      401: PostCodeAssistDecisionResponse401;
-      410: PostCodeAssistDecisionResponse410;
-    };
-  };
-  "POST /agent-sdk/spike": {
-    request: PostAgentSdkSpikeRequest;
-    responses: {
-      200: PostAgentSdkSpikeResponse200;
-      400: PostAgentSdkSpikeResponse400;
-      401: PostAgentSdkSpikeResponse401;
-    };
-  };
   "POST /kb/complete": {
     request: PostKbCompleteRequest;
     responses: {
@@ -11537,13 +10679,6 @@ export interface ApiEndpoints {
       404: PostKbCodeSyncResponse404;
     };
   };
-  "GET /kb/plans": {
-    request: GetKbPlansRequest;
-    responses: {
-      200: GetKbPlansResponse200;
-      401: GetKbPlansResponse401;
-    };
-  };
   "GET /kb/plan/:id": {
     request: GetKbPlanIdRequest;
     responses: {
@@ -11559,40 +10694,6 @@ export interface ApiEndpoints {
       400: PostKbPlanSaveResponse400;
       401: PostKbPlanSaveResponse401;
       500: PostKbPlanSaveResponse500;
-    };
-  };
-  "DELETE /kb/plan/delete": {
-    request: DeleteKbPlanDeleteRequest;
-    responses: {
-      200: DeleteKbPlanDeleteResponse200;
-      400: DeleteKbPlanDeleteResponse400;
-      401: DeleteKbPlanDeleteResponse401;
-    };
-  };
-  "POST /kb/plan/delete": {
-    request: PostKbPlanDeleteRequest;
-    responses: {
-      200: PostKbPlanDeleteResponse200;
-      400: PostKbPlanDeleteResponse400;
-      401: PostKbPlanDeleteResponse401;
-    };
-  };
-  "PATCH /kb/plan-task/update": {
-    request: PatchKbPlanTaskUpdateRequest;
-    responses: {
-      200: PatchKbPlanTaskUpdateResponse200;
-      400: PatchKbPlanTaskUpdateResponse400;
-      401: PatchKbPlanTaskUpdateResponse401;
-      404: PatchKbPlanTaskUpdateResponse404;
-    };
-  };
-  "POST /kb/plan-task/update": {
-    request: PostKbPlanTaskUpdateRequest;
-    responses: {
-      200: PostKbPlanTaskUpdateResponse200;
-      400: PostKbPlanTaskUpdateResponse400;
-      401: PostKbPlanTaskUpdateResponse401;
-      404: PostKbPlanTaskUpdateResponse404;
     };
   };
   "POST /kb/dispatch": {
@@ -11651,28 +10752,6 @@ export interface ApiEndpoints {
       200: PostKbOutcomesRefreshResponse200;
       401: PostKbOutcomesRefreshResponse401;
       429: PostKbOutcomesRefreshResponse429;
-    };
-  };
-  "POST /kb/outcomes/retry-failed": {
-    request: PostKbOutcomesRetryFailedRequest;
-    responses: {
-      200: PostKbOutcomesRetryFailedResponse200;
-      401: PostKbOutcomesRetryFailedResponse401;
-    };
-  };
-  "GET /kb/outcomes/task/:id": {
-    request: GetKbOutcomesTaskIdRequest;
-    responses: {
-      200: GetKbOutcomesTaskIdResponse200;
-      400: GetKbOutcomesTaskIdResponse400;
-      401: GetKbOutcomesTaskIdResponse401;
-    };
-  };
-  "GET /kb/outcomes/stats": {
-    request: GetKbOutcomesStatsRequest;
-    responses: {
-      200: GetKbOutcomesStatsResponse200;
-      401: GetKbOutcomesStatsResponse401;
     };
   };
   "GET /kb/plan-task/assignments": {
@@ -11802,16 +10881,6 @@ export interface ApiEndpoints {
       200: PutKbProvidersSettingsResponse200;
     };
   };
-  "POST /kb/providers/turn": {
-    request: PostKbProvidersTurnRequest;
-    responses: {
-      200: PostKbProvidersTurnResponse200;
-      400: PostKbProvidersTurnResponse400;
-      401: PostKbProvidersTurnResponse401;
-      403: PostKbProvidersTurnResponse403;
-      404: PostKbProvidersTurnResponse404;
-    };
-  };
   "POST /kb/providers/verify": {
     request: PostKbProvidersVerifyRequest;
     responses: {
@@ -11842,14 +10911,6 @@ export interface ApiEndpoints {
     responses: {
       200: PostKbAgentSdkUpdateResponse200;
       401: PostKbAgentSdkUpdateResponse401;
-    };
-  };
-  "POST /kb/custom-providers": {
-    request: PostKbCustomProvidersRequest;
-    responses: {
-      200: PostKbCustomProvidersResponse200;
-      400: PostKbCustomProvidersResponse400;
-      401: PostKbCustomProvidersResponse401;
     };
   };
   "GET /kb/routing-tiers": {
@@ -11912,15 +10973,6 @@ export interface ApiEndpoints {
       401: GetKbUsageTurnCompositionResponse401;
     };
   };
-  "POST /kb/usage/record": {
-    request: PostKbUsageRecordRequest;
-    responses: {
-      200: PostKbUsageRecordResponse200;
-      400: PostKbUsageRecordResponse400;
-      401: PostKbUsageRecordResponse401;
-      429: PostKbUsageRecordResponse429;
-    };
-  };
   "POST /kb/review/submit": {
     request: PostKbReviewSubmitRequest;
     responses: {
@@ -11937,14 +10989,6 @@ export interface ApiEndpoints {
       401: GetKbReviewListResponse401;
     };
   };
-  "GET /kb/review/get/:id": {
-    request: GetKbReviewGetIdRequest;
-    responses: {
-      200: GetKbReviewGetIdResponse200;
-      401: GetKbReviewGetIdResponse401;
-      404: GetKbReviewGetIdResponse404;
-    };
-  };
   "POST /kb/review/approve": {
     request: PostKbReviewApproveRequest;
     responses: {
@@ -11956,33 +11000,6 @@ export interface ApiEndpoints {
       422: PostKbReviewApproveResponse422;
       429: PostKbReviewApproveResponse429;
       500: PostKbReviewApproveResponse500;
-    };
-  };
-  "POST /kb/review/reject": {
-    request: PostKbReviewRejectRequest;
-    responses: {
-      200: PostKbReviewRejectResponse200;
-      400: PostKbReviewRejectResponse400;
-      401: PostKbReviewRejectResponse401;
-      404: PostKbReviewRejectResponse404;
-      409: PostKbReviewRejectResponse409;
-      429: PostKbReviewRejectResponse429;
-    };
-  };
-  "DELETE /kb/review/delete": {
-    request: DeleteKbReviewDeleteRequest;
-    responses: {
-      200: DeleteKbReviewDeleteResponse200;
-      400: DeleteKbReviewDeleteResponse400;
-      401: DeleteKbReviewDeleteResponse401;
-    };
-  };
-  "POST /kb/review/delete": {
-    request: PostKbReviewDeleteRequest;
-    responses: {
-      200: PostKbReviewDeleteResponse200;
-      401: PostKbReviewDeleteResponse401;
-      429: PostKbReviewDeleteResponse429;
     };
   };
   "GET /kb/self-heal/incidents": {

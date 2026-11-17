@@ -1,4 +1,4 @@
-// Ended-chat continuation (plan docs/superpowers/plans/2026-11-07-ended-chat-continuation.md, MASTER-PLAN S7 X3).
+// Ended-chat continuation (MASTER-PLAN S7 X3).
 //
 // A turn on a chat whose SDK session has ended is seeded with ONE short summary of the older turns, made on the
 // turn provider's fast model, plus the last turns verbatim, instead of a cold resume or a context-blind fresh

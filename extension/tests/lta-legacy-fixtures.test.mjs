@@ -1,4 +1,4 @@
-// Phase 0 (T0.4) of docs/superpowers/plans/2026-10-29-live-then-archive.md.
+// Phase 0 (T0.4) of the live-then-archive migration.
 // Builds a legacy-shaped DB through the real migrations and pins today's
 // behaviour the later phases must preserve or consciously change.
 import { test } from 'node:test';

@@ -56,13 +56,6 @@
         "400": "chatSessionId missing"
       }
     },
-    "DELETE /kb/agent/personas/{id}": {
-      "summary": "Delete a persona by ID (refuses if it is the last one)",
-      "responses": {
-        "200": "Delete result",
-        "400": "Delete failed (e.g. last persona)"
-      }
-    },
     "DELETE /kb/agent/project-memory": {
       "summary": "Remove one captured fact, or clear a repo's captured facts",
       "responses": {
@@ -228,18 +221,6 @@
         "200": "`running` is what this process loaded at startup, `installed` what is on disk (they differ after an update until the backend restarts — `restartNeeded`). `canUpdate` is false while remote access is on."
       }
     },
-    "GET /kb/agent/ask/history": {
-      "summary": "Retrieve persisted ask-the-agent conversation history (oldest-first)",
-      "responses": {
-        "200": "Message history"
-      },
-      "parameterSchemas": {
-        "query.limit": {
-          "type": "integer",
-          "default": 50
-        }
-      }
-    },
     "GET /kb/agent/catalog": {
       "summary": "Executable skills + plugin subagents for the Code Assistant \"/\" menu",
       "responses": {
@@ -250,18 +231,6 @@
       "summary": "Slash-commands enabled for this user (powers the chat \"/\" autocomplete)",
       "responses": {
         "200": "Commands, sorted by trigger"
-      }
-    },
-    "GET /kb/agent/feedback/by-task": {
-      "summary": "Per-plan-task agent feedback breakdown",
-      "responses": {
-        "200": "Feedback breakdown by plan task"
-      },
-      "parameterSchemas": {
-        "query.sinceDays": {
-          "type": "integer",
-          "default": 30
-        }
       }
     },
     "GET /kb/agent/feedback/stats": {
@@ -276,23 +245,10 @@
         }
       }
     },
-    "GET /kb/agent/generation-library": {
-      "summary": "Doc Gen / Visual template and command catalog from the enabled skills sources",
-      "description": "The kit's `templates/` and `commands/` families for the Mac app's Doc Gen and Visual menus. Each entry carries its `surface` (doc | visual), which divides the two menus. First enabled source wins on an id collision. Added in API v51.",
-      "responses": {
-        "200": "Generation library"
-      }
-    },
     "GET /kb/agent/persona": {
       "summary": "Get the user's active agent persona (legacy single-persona surface)",
       "responses": {
         "200": "Active persona or null"
-      }
-    },
-    "GET /kb/agent/personas": {
-      "summary": "List all agent personas and indicate the active one",
-      "responses": {
-        "200": "Personas list with active marker"
       }
     },
     "GET /kb/agent/project-memory": {
@@ -359,45 +315,6 @@
         "query.limit": {
           "type": "integer",
           "default": 200
-        }
-      }
-    },
-    "GET /kb/entity/{id}": {
-      "summary": "Fetch a single KB entity (action / decision / blocker / etc.) by ID",
-      "responses": {
-        "200": "Entity record",
-        "400": "Invalid ID format",
-        "404": "Not found"
-      },
-      "parameterSchemas": {
-        "path.id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$"
-        }
-      }
-    },
-    "GET /kb/export-all": {
-      "summary": "Export every KB row for the caller as newline-delimited JSON, paged by cursor",
-      "responses": {
-        "200": "NDJSON stream of export records"
-      },
-      "parameterSchemas": {
-        "query.limit": {
-          "type": "integer",
-          "default": 100
-        }
-      },
-      "responseContent": {
-        "200": {
-          "removeContent": [
-            "text/plain"
-          ],
-          "content": {
-            "application/x-ndjson": {
-              "schema": {
-                "type": "string"
-              }
-            }
-          }
         }
       }
     },
@@ -487,57 +404,11 @@
         }
       }
     },
-    "GET /kb/meeting/{id}": {
-      "summary": "Fetch a single meeting record by ID",
-      "parameters": {
-        "query.include": "Opt-in extras. `transcript` adds the stored transcript text as `transcript`."
-      },
-      "responses": {
-        "200": "Meeting record",
-        "400": "Invalid ID format",
-        "404": "Not found"
-      },
-      "parameterSchemas": {
-        "path.id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$"
-        }
-      }
-    },
-    "GET /kb/outcomes/stats": {
-      "summary": "Aggregate outcome statistics for the user (counts by state)",
-      "responses": {
-        "200": "Outcome statistics"
-      }
-    },
-    "GET /kb/outcomes/task/{id}": {
-      "summary": "List all outcome records for a specific plan task",
-      "responses": {
-        "200": "Outcome list",
-        "400": "Invalid ID"
-      },
-      "parameterSchemas": {
-        "path.id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$"
-        }
-      }
-    },
     "GET /kb/plan/{id}": {
       "summary": "Fetch a single plan by ID",
       "responses": {
         "200": "Plan",
         "404": "Not found"
-      }
-    },
-    "GET /kb/plans": {
-      "summary": "List plans for the authenticated user",
-      "responses": {
-        "200": "Plan list"
-      },
-      "parameterSchemas": {
-        "query.limit": {
-          "type": "integer",
-          "default": 50
-        }
       }
     },
     "GET /kb/project/{id}/export": {
@@ -549,13 +420,6 @@
         "200": "Export payload",
         "400": "INVALID_PROJECT_ID",
         "500": "EXPORT_FAILED"
-      }
-    },
-    "GET /kb/review/get/{id}": {
-      "summary": "Fetch a single review item by ID",
-      "responses": {
-        "200": "Review item",
-        "404": "Not found"
       }
     },
     "GET /kb/review/list": {
@@ -604,12 +468,6 @@
       "summary": "Per-user KB statistics (meeting count, entity counts, etc.)",
       "responses": {
         "200": "Statistics object"
-      }
-    },
-    "GET /kb/system/status": {
-      "summary": "Unified system status — KB stats, active captures, agent runs, pending reviews, outcome summary",
-      "responses": {
-        "200": "System status snapshot"
       }
     },
     "GET /kb/usage/limits": {
@@ -671,23 +529,6 @@
         "200": "Renamed",
         "400": "title required",
         "404": "Session not found"
-      }
-    },
-    "POST /agent-sdk/spike": {
-      "summary": "P0 spike — direct Claude Agent SDK query over SSE (temporary)",
-      "description": "Proof-of-concept surface from the P0 spike (SDK streaming, kb_search MCP tool, vault-key auth). Temporary by design; its successor is the /agent/v2/* protocol above.",
-      "responses": {
-        "200": "SSE stream of spike events",
-        "400": "Missing prompt"
-      },
-      "responseContent": {
-        "200": {
-          "content": {
-            "text/event-stream": {
-              "schema": {}
-            }
-          }
-        }
       }
     },
     "POST /agent/v2/cancel": {
@@ -795,15 +636,6 @@
         "429": "Rate limited"
       }
     },
-    "POST /code-assist/decision": {
-      "summary": "Answer a parked act-tool approval from a legacy /code-assist stream",
-      "description": "The legacy-engine counterpart of POST /agent/v2/decision, backed by the same in-process decision registry. A 'prompt'-tier run-bash command parks an approval and emits a progress event of phase `approval_request`; this route resolves it. Tenancy-checked: the deciding user AND the session the approval was parked under (the legacy chat's `agentContext.sessionId`) must both match, or the answer is 403.",
-      "responses": {
-        "200": "Decision delivered; the parked tool call resumes (or is denied) and the stream continues",
-        "403": "DECISION_FORBIDDEN — belongs to another user or session",
-        "404": "DECISION_EXPIRED / DECISION_UNKNOWN — nothing pending"
-      }
-    },
     "POST /extract-entities": {
       "summary": "Extract structured actions, decisions, and blockers from a transcript",
       "responses": {
@@ -889,15 +721,6 @@
         "200": "Always 200; `ok` says whether it updated"
       }
     },
-    "POST /kb/agent/ask": {
-      "summary": "Free-text Q&A with the meeting agent (uses active persona voice)",
-      "responses": {
-        "200": "Agent reply",
-        "400": "Missing or empty message",
-        "500": "Agent ask failed",
-        "429": "Rate limited"
-      }
-    },
     "POST /kb/agent/dispatch": {
       "summary": "Attach the meeting agent question-loop to an active live session",
       "responses": {
@@ -911,13 +734,6 @@
       "responses": {
         "200": "ok",
         "400": "Feedback failed"
-      }
-    },
-    "POST /kb/agent/personas": {
-      "summary": "Create a new agent persona",
-      "responses": {
-        "200": "Created persona plus full list",
-        "400": "Create failed"
       }
     },
     "POST /kb/agent/stop": {
@@ -1006,30 +822,6 @@
         "400": "Validation or parse error"
       }
     },
-    "POST /kb/connect-tickets-json": {
-      "summary": "Index an inline JSON array of tickets (Backlog, Jira, or generic)",
-      "responses": {
-        "200": "Indexing summary",
-        "400": "Validation or indexing error"
-      }
-    },
-    "POST /kb/custom-providers": {
-      "summary": "Sync the Mac app's custom model providers to the server",
-      "description": "Replaces the CALLER's custom-provider list (other users are untouched). The list is persisted per user, so it survives a server restart; an empty array deletes it. Entries without an id, a name, or an http(s) baseURL are dropped.",
-      "responses": {
-        "200": "Synced",
-        "400": "Invalid request body",
-        "405": "Method not allowed",
-        "413": "Request body too large"
-      }
-    },
-    "POST /kb/delete": {
-      "summary": "Delete a meeting and its associated entities",
-      "responses": {
-        "200": "ok",
-        "400": "Validation error"
-      }
-    },
     "POST /kb/dispatch": {
       "summary": "Preview / send tasks to GitHub, Backlog, or Linear",
       "responses": {
@@ -1096,25 +888,6 @@
         "400": "Validation error"
       },
       "bodyRequired": true
-    },
-    "POST /kb/ingest-code-graph": {
-      "summary": "Store a repo's structural code graph (nodes/edges) for agent traversal",
-      "description": "Written by the macOS app after each knowledge-graph generation. Populates `code_graph_nodes`/`code_graph_edges` with `source='structure'`, which backs `findRelatedSymbols` and the code-sync agent's symbol grounding. Large graphs arrive in batches — set `replace` on the first batch only, otherwise each batch discards the previous one. One request accepts at most 5000 nodes and 20000 edges.",
-      "responses": {
-        "200": "Stored counts for this batch, plus entries dropped as malformed",
-        "400": "Missing fields or batch over the per-request cap",
-        "403": "Path not on user allow-list",
-        "404": "feature_disabled — LLMIDE_FEATURES omits code_graph_3d; the route module is not loaded"
-      }
-    },
-    "POST /kb/ingest-scip": {
-      "summary": "Ingest a SCIP index into the code-graph tables",
-      "description": "`repoPath` must be on the caller's repo allow-list (compared after `path.resolve`), since it is used as the graph's identity key.",
-      "responses": {
-        "200": "Ingest counts",
-        "400": "Missing args or SCIP index failed",
-        "403": "Repo path not on the allow-list"
-      }
     },
     "POST /kb/live/{id}/append": {
       "summary": "Append caption chunks to an active live session",
@@ -1193,28 +966,6 @@
         "500": "Refresh failed"
       }
     },
-    "POST /kb/outcomes/retry-failed": {
-      "summary": "Retry all failed dispatched tasks across providers",
-      "responses": {
-        "200": "Retry summary",
-        "500": "Retry failed"
-      }
-    },
-    "POST /kb/plan-task/update": {
-      "summary": "Patch a single plan task (status, owner, due, risk, etc.)",
-      "responses": {
-        "200": "Updated task",
-        "400": "Missing taskId",
-        "404": "Task not found"
-      }
-    },
-    "POST /kb/plan/delete": {
-      "summary": "Delete a plan and its tasks",
-      "responses": {
-        "200": "ok",
-        "400": "Missing id"
-      }
-    },
     "POST /kb/plan/save": {
       "summary": "Create or update a plan without an LLM call (manual / auto-stub)",
       "responses": {
@@ -1258,21 +1009,6 @@
         "409": "REVIEW_NOT_PENDING, or REVIEW_RACE when another request claimed the item",
         "422": "GUARDRAILS_FAILED at approval time (auto-rejects the item), or CREDENTIAL_REQUIRED (API v75+) when the only failing check is the missing credential: the item stays pending so the approve can be retried with `config`/`pr` credentials or after saving one to the vault",
         "500": "Approval execution failed"
-      }
-    },
-    "POST /kb/review/delete": {
-      "summary": "Delete a review item from the queue",
-      "responses": {
-        "200": "ok",
-        "400": "Missing id"
-      }
-    },
-    "POST /kb/review/reject": {
-      "summary": "Reject a pending review item",
-      "responses": {
-        "200": "Updated review item",
-        "400": "Missing id",
-        "404": "Not found"
       }
     },
     "POST /kb/review/submit": {
@@ -1325,30 +1061,10 @@
         "429": "Rate limited"
       }
     },
-    "POST /kb/usage/record": {
-      "summary": "Record one usage event (used by the Mac Auto Tasks CLI path)",
-      "responses": {
-        "200": "Recorded"
-      }
-    },
     "PUT /kb/agent/persona": {
       "summary": "Set or reset the active agent persona",
       "responses": {
         "200": "Updated persona"
-      }
-    },
-    "PUT /kb/agent/personas/active": {
-      "summary": "Set the active persona by ID",
-      "responses": {
-        "200": "Updated personas list with new active",
-        "404": "Persona not found"
-      }
-    },
-    "PUT /kb/agent/personas/{id}": {
-      "summary": "Update a persona by ID",
-      "responses": {
-        "200": "Updated persona",
-        "404": "Not found"
       }
     },
     "PUT /kb/issue-schedule": {

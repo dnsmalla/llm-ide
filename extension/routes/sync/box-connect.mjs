@@ -11,7 +11,7 @@ export const BOX_CONNECT_TTL_MS = 10 * 60_000;
 const pending = new Map(); // state -> { userId, clientId, clientSecret, folder, verifier, createdAt, phase, code }
 const latest = new Map();  // userId -> state
 
-export const boxRedirectUri = (port) => `http://127.0.0.1:${port}/kb/sync/box/callback`;
+const boxRedirectUri = (port) => `http://127.0.0.1:${port}/kb/sync/box/callback`;
 export function _resetBoxConnectsForTest() { pending.clear(); latest.clear(); }
 
 function sweep(now) {

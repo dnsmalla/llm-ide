@@ -51,7 +51,7 @@ export function purgeChat(userId, chatSessionId, { deleteTranscripts = deleteSdk
  * The orphan path uses it: a chat whose Mac file is missing has no receipt, and what it must be able to
  * reach is derivative state only.
  */
-export function purgeWorkingOnly(userId, chatSessionId, { deleteTranscripts = deleteSdkTranscripts, isBusy = isBusyNow } = {}) {
+function purgeWorkingOnly(userId, chatSessionId, { deleteTranscripts = deleteSdkTranscripts, isBusy = isBusyNow } = {}) {
   if (isBusy(userId, chatSessionId)) return { purged: 0, busy: true };
   const ids = sdkIdsForChats(userId, [chatSessionId]);
   for (const sdk of ids) deleteTranscripts(userId, sdk);
@@ -97,7 +97,7 @@ export function replaySessionPurges(userId, { now = Date.now(), deleteTranscript
  * (`lastActivityMs`) AND at the transcript files of the SDK ids the tombstone captured, so the guard still
  * works once the mapping itself is gone.
  */
-export function tombstoneChatWasReused(due, transcriptMtime, userId) {
+function tombstoneChatWasReused(due, transcriptMtime, userId) {
   if (due.lastActivityMs > due.requestedMs) return true;
   for (const sdk of due.sdkSessionIds ?? []) {
     if (transcriptMtime(userId, sdk) > due.requestedMs) return true;

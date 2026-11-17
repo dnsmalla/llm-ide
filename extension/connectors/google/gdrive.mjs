@@ -40,12 +40,12 @@ export function normalizeDriveOptions(o = {}) {
   return { folderIds, includeSharedDrives: o.includeSharedDrives === true };
 }
 
-export const fileRef = (accountId, fileId) => `gdrive:${accountId}:${fileId}`;
+const fileRef = (accountId, fileId) => `gdrive:${accountId}:${fileId}`;
 const sqlTime = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
 const oneLine = (s, n = 300) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 
 /** Text from Drive is third-party content: drop image syntax and data: URIs, and neutralise raw HTML. */
-export function neutralizeDriveText(t) {
+function neutralizeDriveText(t) {
   return String(t ?? '')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '[image omitted]')
     .replace(/\[[^\]]*\]:\s*<?data:[^\s>]*>?/gi, '')
@@ -56,7 +56,7 @@ export function neutralizeDriveText(t) {
 const capText = (s, maxChars) => (s.length > maxChars ? `${s.slice(0, maxChars)}\n\n[...truncated]` : s);
 
 /** Pure: a file's rows. `content` null means metadata-only. */
-export function fileToRows(file, { accountId, path, content, contentNote, csv = false }) {
+function fileToRows(file, { accountId, path, content, contentNote, csv = false }) {
   const name = redactSecretsForStorage(oneLine(file.name, 300)) || '(untitled)';
   const lines = [`# ${escapeMarkdownText(name)}`, '', `Type: ${escapeMarkdownText(oneLine(file.mimeType, 100))}`];
   if (file.modifiedTime) lines.push(`Modified: ${escapeMarkdownText(oneLine(file.modifiedTime, 40))}`);

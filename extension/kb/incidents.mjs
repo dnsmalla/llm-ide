@@ -1,4 +1,4 @@
-// Self-Heal incident store (docs/superpowers/plans/2026-11-07-self-heal-a-incidents.md; table self_heal_incidents,
+// Self-Heal incident store (table self_heal_incidents,
 // migration 0067), the Mac's IncidentStore. One row per user and signature:
 //   - a repeat bumps count and lastSeen;
 //   - a fixed incident that recurs reopens as new with attempts + 1;

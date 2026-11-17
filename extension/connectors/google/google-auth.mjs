@@ -66,7 +66,7 @@ function safeEqual(a, b) {
  * Claims of an ID token received DIRECTLY from the token endpoint over the pinned TLS connection. The signature is
  * not verified (OpenID Connect Core 3.1.3.7 allows that for this path); aud, iss, exp and nonce are.
  */
-export function readIdToken(idToken, { clientId, nonce, now = Date.now() }) {
+function readIdToken(idToken, { clientId, nonce, now = Date.now() }) {
   const parts = String(idToken || '').split('.');
   if (parts.length !== 3) throw new GoogleApiError('GOOGLE_BAD_ID_TOKEN', 'Google returned no usable identity');
   let c;

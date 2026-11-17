@@ -91,7 +91,6 @@ test('featureDisabledFor maps a disabled group\'s paths to its feature key', () 
   assert.equal(featureDisabledFor('/kb/issue-schedule?provider=github&repo=o/r', CHAT_ONLY), 'gantt_issues');
   for (const p of ['/kb/issues/create', '/kb/issues/comment', '/kb/issues/close', '/kb/issues/update']) assert.equal(featureDisabledFor(p, CHAT_ONLY), null, `${p} stays with the board read`);
   assert.equal(featureDisabledFor('/kb/issues?provider=github', CHAT_ONLY), null, 'the board read stays always-on');
-  assert.equal(featureDisabledFor('/kb/ingest-code-graph', CHAT_ONLY), 'code_graph_3d');
   assert.equal(featureDisabledFor('/kb/search', CHAT_ONLY), null, 'always-on route');
   assert.equal(featureDisabledFor('/kb/loop/agent-run', null), null, 'null = all features');
   assert.equal(featureDisabledFor('/kb/loop/agent-run', new Set(['agent_chat', 'auto_tasks'])), null);
@@ -117,10 +116,6 @@ test('with only agent_chat, feature routes answer 404 feature_disabled', async (
   const write = await call('POST', '/kb/issues/comment', { provider: 'github', repo: 'o/r', number: 1, body: 'x' }, userId);
   assert.equal(write.status, 403, 'issue writes are always-on, but still need the desktop host proof');
   assert.equal(write.body.error.code, 'HOST_PROOF_REQUIRED');
-
-  const graph = await call('POST', '/kb/ingest-code-graph', { repoPath: '/x', graph: {} }, userId);
-  assert.equal(graph.status, 404);
-  assert.deepEqual(graph.body, { error: 'feature_disabled', feature: 'code_graph_3d' });
 });
 
 test('with only agent_chat, always-on routes are unaffected', async () => {
@@ -135,13 +130,12 @@ test('with only agent_chat, the disabled route modules were never imported', { s
   assert.equal(wasLoaded('/routes/loop-agent.mjs'), false);
   assert.equal(wasLoaded('/llm_agent/sdk/loop-agent.mjs'), false);
   assert.equal(wasLoaded('/routes/issue-schedule.mjs'), false);
-  assert.equal(wasLoaded('/routes/code-graph.mjs'), false);
   assert.equal(wasLoaded('/connectors/structure-graph.mjs'), false);
   assert.deepEqual(loadedGroups(), []);
 });
 
 test('enabledEndpoints drops a disabled group\'s endpoints and keeps the rest', () => {
-  const all = ['/kb/search', '/kb/loop/agent-run', '/kb/issue-schedule', '/kb/ingest-code-graph', '/generate-doc', '/generate-docx'];
+  const all = ['/kb/search', '/kb/loop/agent-run', '/kb/issue-schedule', '/generate-doc', '/generate-docx'];
   // /generate-doc is doc_gen-owned; /generate-docx (ExportMenu) is always on.
   assert.deepEqual(enabledEndpoints(all, CHAT_ONLY), ['/kb/search', '/generate-docx']);
   assert.deepEqual(enabledEndpoints(all, null), all);
@@ -158,15 +152,11 @@ test('with every feature (null), the feature routes behave exactly as before', a
   assert.equal(sched.status, 200);
   assert.deepEqual(sched.body.schedules, []);
 
-  const graph = await call('POST', '/kb/ingest-code-graph', {}, userId);
-  assert.equal(graph.status, 400);
-  assert.equal(graph.body.error.code, 'VALIDATION_FAILED');
 
   assert.deepEqual(loadedGroups().sort(), Object.keys(FEATURE_ROUTE_GROUPS).sort());
   // The sentinel does see these dynamic imports — so its "never imported"
   // verdict above is real, not a hook that observes nothing.
   if (hasLoadHooks) {
     assert.ok(wasLoaded('/routes/loop-agent.mjs'));
-    assert.ok(wasLoaded('/connectors/structure-graph.mjs'));
   }
 });

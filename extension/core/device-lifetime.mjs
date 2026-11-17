@@ -14,8 +14,6 @@ export function manifestState(validUntil, nowMs) {
   return validUntil + MANIFEST_STALE_AFTER_MS < nowMs ? 'stale_manifest' : nowMs > validUntil ? 'withheld' : 'fresh';
 }
 
-export const isStaleManifest = (validUntil, nowMs) => manifestState(validUntil, nowMs) === 'stale_manifest';
-
 /** 'live' through exactly 90 days from pairing (the boundary is still valid), then 'expired'. */
 export function deviceTokenState(pairedAt, nowMs) {
   return nowMs - pairedAt > DEVICE_TOKEN_MAX_LIFETIME_MS ? 'expired' : 'live';

@@ -29,7 +29,7 @@ const FILTERED = new Set(['skills', 'commands', 'agents']);
 // set too), and stray VCS state has no business in a generated root.
 const SKIP_TOP = new Set(['.mcp.json', '.git']);
 
-export function viewsRoot() {
+function viewsRoot() {
   return join(dirname(defaultPluginDir()), 'extensions', 'views');
 }
 

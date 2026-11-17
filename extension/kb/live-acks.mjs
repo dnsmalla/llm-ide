@@ -46,7 +46,7 @@ export function getCrashRow(userId, sessionId) {
   `).get(userId, sessionId) ?? null;
 }
 
-export function unackedUsage(userId, { excludeSession = null } = {}) {
+function unackedUsage(userId, { excludeSession = null } = {}) {
   requireUser(userId);
   const row = lazyPrepare(getDb(), `
     SELECT COUNT(*) AS n, COALESCE(SUM(bytes), 0) AS b FROM live_crash_rows
@@ -154,9 +154,3 @@ export function pruneLiveAcks({ now = Date.now(), retentionMs = ACK_RETENTION_MS
   return lazyPrepare(getDb(), 'DELETE FROM live_acks WHERE acked_at < ?').run(iso(now - retentionMs)).changes;
 }
 
-/** Ack rows for one session are removed with its meeting (kb/meetings.mjs deleteMeeting). */
-export function deleteAcksForSession(userId, sessionId) {
-  requireUser(userId);
-  return lazyPrepare(getDb(), 'DELETE FROM live_acks WHERE owner_user_id = ? AND session_id = ?')
-    .run(userId, sessionId).changes;
-}

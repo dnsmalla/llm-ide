@@ -75,7 +75,7 @@ export async function dropStore(userId) {
   await s?.close?.();
 }
 
-export async function closeSyncStores() {
+async function closeSyncStores() {
   const all = [...stores.values()];
   stores.clear();
   await Promise.allSettled(all.map((s) => s.close?.()));

@@ -92,13 +92,6 @@ const PROFILES = {
   // filling the in-memory ring buffer faster than it can be consumed.
   liveAppend: { capacity: 30, refillRate: 5 },     // 5/sec, burst 30
 
-  // Bulk export reads (GET /kb/export-all). Each call streams an entire
-  // user's meeting corpus out of SQLite, so it's far heavier than a normal
-  // read. Cap it so a script can't hammer the endpoint and turn it into a
-  // DB-amplification DoS, while still allowing legitimate paged exports
-  // (burst 5, then ~1 every 10s for follow-up cursor pages).
-  kbExport:   { capacity: 5, refillRate: 1 / 10 },
-
   // Applied to any profile name tryConsume does not recognize. Before this
   // existed an unknown name FAILED OPEN — a route whose profile was typo'd
   // or never added ran unthrottled forever, with only a one-line warning to

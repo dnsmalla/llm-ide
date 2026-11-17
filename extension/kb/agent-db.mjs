@@ -1,5 +1,5 @@
 // agent.db core (Stage 1a): the separate SQLite file that holds agent-run
-// history. See docs/superpowers/plans/2026-10-28-agent-store.md section 2.4.
+// history (the agent-store plan is no longer in the repo).
 //
 // Contract, in short:
 //   - Opened lazily (getAgentDb) or at boot (openAgentDb). Never throws: a
@@ -69,7 +69,7 @@ export function localDayBefore(now, days) {
 }
 
 /** True for SQLite errors that mean the file itself is damaged. */
-export function isCorruptionError(err) {
+function isCorruptionError(err) {
   const code = err?.code;
   if (code === 'SQLITE_CORRUPT' || code === 'SQLITE_NOTADB' || code === 'SQLITE_CORRUPT_VTAB') return true;
   return /malformed|not a database/i.test(String(err?.message ?? ''));

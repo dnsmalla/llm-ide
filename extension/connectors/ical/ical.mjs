@@ -17,8 +17,8 @@ import { redactSecretsForStorage } from '../../core/redact-secrets.mjs';
 export const LIMITS = Object.freeze({ maxSources: 10, daysBackMax: 365, daysAheadMax: 730, maxInstances: ICS_LIMITS.maxInstances, maxEvents: ICS_LIMITS.maxEvents, maxInstancesPerEvent: ICS_LIMITS.maxInstancesPerEvent, maxAttendees: 100 });
 
 const enc = (s) => encodeURIComponent(String(s));
-export const instanceRef = (sourceId, uid, key) => `ical:${sourceId}:${enc(uid)}:${key}`;
-export const sourcePrefix = (sourceId) => `ical:${sourceId}:`;
+const instanceRef = (sourceId, uid, key) => `ical:${sourceId}:${enc(uid)}:${key}`;
+const sourcePrefix = (sourceId) => `ical:${sourceId}:`;
 const uidPrefix = (sourceId, uid) => `ical:${sourceId}:${enc(uid)}:`;
 const sqlTime = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
 const oneLine = (s, n = 300) => redactIcalSecrets(cleanText(String(s ?? '')).replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n));
@@ -39,7 +39,7 @@ function descriptionMarkdown(d) {
 }
 
 /** Pure: one expanded instance to its `sources` rows (chunked). */
-export function instanceToRows(inst, { sourceId, sourceName = '' }) {
+function instanceToRows(inst, { sourceId, sourceName = '' }) {
   const summary = redactSecretsForStorage(oneLine(inst.summary, 300)) || '(no title)';
   const attendees = (inst.attendees || []).slice(0, LIMITS.maxAttendees).map((a) => ({ name: oneLine(a.name, 120), email: oneLine(a.email, 200), response: oneLine(a.response, 20) }));
   const more = Math.max(0, (inst.attendeeTotal || 0) - attendees.length);

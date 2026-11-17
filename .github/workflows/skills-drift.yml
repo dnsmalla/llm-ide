@@ -3,7 +3,7 @@ name: skills-drift
 # Fail if the synced agent-loop tool definitions (extension/llm_agent/internal/skills
 # and the managed .md defs in extension/llm_agent/global) have drifted from the
 # central dnsmalla/agent-kit repo at the commit pinned in extension/.skills-lock.
-# App-local files (prompt.md, compose-prompt.mjs) and read-tool handlers are not
+# App-local files (prompt.md) and read-tool handlers are not
 # managed by the sync and are not checked. Author tool defs in central, then run
 # `npm run sync:skills` and commit.
 

@@ -413,7 +413,7 @@ function sendRefusal(req, res, r) {
  * The optional `routeSeed` of a stream request: the client's own copy of the chat's route (the Mac chat file).
  * Only plain fields are read; the store validates and bounds them (seedRouteIfMissing).
  */
-export function routeSeedFrom(body, userId, db) {
+function routeSeedFrom(body, userId, db) {
   const seed = body?.routeSeed;
   if (!seed || typeof seed !== 'object' || Array.isArray(seed)) return null;
   // A pin naming a provider this user does not own is dropped from the seed (the limit and tokens still apply).

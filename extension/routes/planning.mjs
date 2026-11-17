@@ -1,6 +1,6 @@
 // Planning pipeline routes — generate-plan, analyze-risks, code-sync,
-// the plan CRUD surface (/kb/plans, /kb/plan/:id, /kb/plan/save,
-// /kb/plan/delete, /kb/plan-task/update), and the codegen + dispatch
+// the plan read and save surface (/kb/plan/:id, /kb/plan/save), plan-task
+// assignment, and the codegen + dispatch
 // endpoints that operate on a plan's tasks. Extracted from
 // kb/router.mjs as part of the modularization sweep.
 //
@@ -134,14 +134,6 @@ export async function handlePlanningRoutes(req, res, ctx) {
 
   // ── Plan CRUD ───────────────────────────────────────────────
 
-  if (req.method === 'GET' && url.startsWith('/kb/plans')) {
-    const u = new URL(url, 'http://127.0.0.1');
-    const limit = Number(u.searchParams.get('limit') || 50);
-    const plans = kb.listPlans(userId, limit);
-    sendJSON(res, 200, { plans, count: plans.length });
-    return true;
-  }
-
   if (req.method === 'GET' && url.startsWith('/kb/plan/')) {
     const id = decodeURIComponent(url.slice('/kb/plan/'.length).split('?')[0]);
     const plan = kb.getPlan(userId, id);
@@ -186,32 +178,6 @@ export async function handlePlanningRoutes(req, res, ctx) {
     } catch (err) {
       sendJSON(res, 500, { error: { code: 'SAVE_FAILED', message: err.message || 'Save failed' } });
     }
-    return true;
-  }
-
-  if ((req.method === 'DELETE' || req.method === 'POST') && url === '/kb/plan/delete') {
-    const body = parseJSON(await readBody(req));
-    if (!body?.id) {
-      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing plan id' } });
-      return true;
-    }
-    kb.deletePlan(userId, body.id);
-    sendJSON(res, 200, { ok: true });
-    return true;
-  }
-
-  if ((req.method === 'PATCH' || req.method === 'POST') && url === '/kb/plan-task/update') {
-    const body = parseJSON(await readBody(req));
-    if (!body?.taskId) {
-      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing taskId' } });
-      return true;
-    }
-    const updated = kb.updateTask(userId, body.taskId, body.patch || {});
-    if (!updated) {
-      sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Task not found' } });
-      return true;
-    }
-    sendJSON(res, 200, updated);
     return true;
   }
 

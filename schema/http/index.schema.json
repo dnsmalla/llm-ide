@@ -144,87 +144,6 @@
         }
       }
     },
-    "POST /kb/index/reconcile": {
-      "request": {
-        "body": {
-          "type": "object",
-          "required": [
-            "manifest"
-          ],
-          "properties": {
-            "projectId": {
-              "type": "string"
-            },
-            "manifest": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/ManifestEntry"
-              },
-              "description": "At most 20 000 entries."
-            },
-            "prune": {
-              "type": "boolean",
-              "description": "true deletes the extra rows. Default false: report only."
-            },
-            "keep": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "Keys the Mac could not index (unparseable, unavailable, unsendable). They are never pruned and are not reported as extra. At most 20 000."
-            },
-            "allowEmpty": {
-              "type": "boolean",
-              "description": "Required with prune: true and an empty manifest. Without it that request is refused (409 EMPTY_MANIFEST_REFUSED), so an emptied or unmounted folder cannot delete the index."
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "type": "object",
-          "required": [
-            "missing",
-            "stale",
-            "extra",
-            "pruned"
-          ],
-          "properties": {
-            "missing": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "In the manifest, not indexed."
-            },
-            "stale": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "Indexed with a different content hash."
-            },
-            "extra": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "Indexed, not in the manifest."
-            },
-            "pruned": {
-              "type": "integer",
-              "description": "Rows deleted (only with prune true)."
-            }
-          }
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "409": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
     "DELETE /kb/index/notes/:key": {
       "request": {
         "params": {
@@ -336,49 +255,6 @@
         },
         "400": {
           "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "GET /kb/index/status": {
-      "request": {
-        "query": {
-          "type": "object",
-          "properties": {
-            "projectId": {
-              "type": "string",
-              "description": "Omit for every project of the user."
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "type": "object",
-          "required": [
-            "notes",
-            "ftsRows",
-            "consistent",
-            "lastIndexedAt"
-          ],
-          "properties": {
-            "notes": {
-              "type": "integer"
-            },
-            "ftsRows": {
-              "type": "integer",
-              "description": "Search rows written by those notes."
-            },
-            "consistent": {
-              "type": "boolean",
-              "description": "true when notes equals ftsRows."
-            },
-            "lastIndexedAt": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
         }
       }
     },

@@ -1,5 +1,5 @@
 {
-  "description": "KB search, the meeting/entity/project reads, stats and system status, the connector and source ingest endpoints (local git and SCIP index, GitHub issues, tickets JSON, JUnit QA, IMAP email, Slack, Box, MCP-backed connectors), the activity feed, and the meeting/source delete. Rows: GET /kb/search, GET /kb/issues, GET /kb/meeting/:id, GET /kb/entity/:id, GET /kb/project/:id/export, POST /kb/project/install-skills, GET /kb/stats, GET /kb/system/status, GET /kb/export-all, POST and DELETE /kb/delete, POST /kb/ingest, POST /kb/connect-git, POST /kb/ingest-scip, POST /kb/connect-github-issues, POST /kb/connect-tickets-json, POST /kb/connect-qa, POST /kb/email/{test,fetch,seen,classify}, POST /kb/slack/{test,fetch,seen}, GET /kb/slack/conversations, POST /kb/box/test, POST /kb/connect-box, POST /kb/mcp-connector/{test,fetch,seen,classify}, GET and POST /kb/activity, POST /kb/activity/seen. Fixtures are real responses from `node server.mjs` on a temp DB (127.0.0.1, seeded through the API); tokens and secrets are placeholders, repo paths are /example/repo. Not captured offline, so their 2xx responses are x-unspecified with a reason: anything that reaches IMAP, Slack, Box, GitHub, a remote MCP server or a model (email/test and email/fetch success, email/classify success, slack test/fetch/conversations success, box success, connect-github-issues success, mcp test/fetch/classify success) and the install and SCIP indexers. The loopback guard refuses private addresses, so the IMAP 502 fixtures carry the real 'Refusing to connect' envelope. Request fields a fixture cannot exercise offline (IMAP options, Box subject fields, Slack lookback, the connector classify fields) are x-optional, not hidden. The 400 for a malformed JSON body (every JSON route) is not declared per route, as SCHEMA.md says. Not in this group: POST /kb/notify/slack (outcomes notifications, P6) and /kb/ingest-code-graph (code_graph_3d).",
+  "description": "KB search, the project export, stats, the connector and source ingest endpoints (local git, GitHub issues, JUnit QA, IMAP email, Slack, Box, MCP-backed connectors), and the activity feed. Rows: GET /kb/search, GET /kb/issues, GET /kb/project/:id/export, POST /kb/project/install-skills, GET /kb/stats, POST /kb/ingest, POST /kb/connect-git, POST /kb/connect-github-issues, POST /kb/connect-qa, POST /kb/email/{test,fetch,seen,classify}, POST /kb/slack/{test,fetch,seen}, GET /kb/slack/conversations, POST /kb/box/test, POST /kb/connect-box, POST /kb/mcp-connector/{test,fetch,seen,classify}, GET and POST /kb/activity, POST /kb/activity/seen. Fixtures are real responses from `node server.mjs` on a temp DB (127.0.0.1, seeded through the API); tokens and secrets are placeholders, repo paths are /example/repo. Not captured offline, so their 2xx responses are x-unspecified with a reason: anything that reaches IMAP, Slack, Box, GitHub, a remote MCP server or a model (email/test and email/fetch success, email/classify success, slack test/fetch/conversations success, box success, connect-github-issues success, mcp test/fetch/classify success) and the install indexer. The loopback guard refuses private addresses, so the IMAP 502 fixtures carry the real 'Refusing to connect' envelope. Request fields a fixture cannot exercise offline (IMAP options, Box subject fields, Slack lookback, the connector classify fields) are x-optional, not hidden. The 400 for a malformed JSON body (every JSON route) is not declared per route, as SCHEMA.md says. Not in this group: POST /kb/notify/slack (outcomes notifications, P6).",
   "$defs": {
     "Ok": {
       "type": "object",
@@ -216,13 +216,42 @@
     "IssueWriteOk": {
       "type": "object",
       "description": "A hosted issue write the provider accepted (extension/routes/issue-writes.mjs). Never carries the token.",
-      "required": ["ok", "id", "url", "state"],
+      "required": [
+        "ok",
+        "id",
+        "url",
+        "state"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "id": { "type": ["integer", "null"], "description": "The provider's id of the issue, comment or note" },
-        "url": { "type": ["string", "null"], "description": "The provider's web URL for it" },
-        "state": { "type": ["string", "null"], "description": "The issue state after the write; null for a comment" },
-        "deduped": { "type": "boolean", "x-optional": true, "description": "create only: true when this answer replays an earlier create with the same idem" }
+        "ok": {
+          "const": true
+        },
+        "id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The provider's id of the issue, comment or note"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The provider's web URL for it"
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The issue state after the write; null for a comment"
+        },
+        "deduped": {
+          "type": "boolean",
+          "x-optional": true,
+          "description": "create only: true when this answer replays an earlier create with the same idem"
+        }
       }
     },
     "Issue": {
@@ -816,76 +845,6 @@
         }
       }
     },
-    "GET /kb/meeting/:id": {
-      "request": {
-        "query": {
-          "type": "object",
-          "properties": {
-            "include": {
-              "type": "string",
-              "enum": [
-                "transcript"
-              ],
-              "description": "Opt-in extras: `transcript` adds the stored transcript text as `transcript`. Any other value is ignored (the handler checks equality only)."
-            }
-          }
-        },
-        "params": {
-          "type": "object",
-          "required": [
-            "id"
-          ],
-          "properties": {
-            "id": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/Meeting"
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "404": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "GET /kb/entity/:id": {
-      "request": {
-        "params": {
-          "type": "object",
-          "required": [
-            "id"
-          ],
-          "properties": {
-            "id": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/Entity"
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "404": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
     "GET /kb/project/:id/export": {
       "request": {
         "params": {
@@ -951,91 +910,6 @@
       "responses": {
         "200": {
           "$ref": "#/$defs/Stats"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "GET /kb/system/status": {
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/SystemStatus"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "GET /kb/export-all": {
-      "request": {
-        "query": {
-          "type": "object",
-          "properties": {
-            "cursor": {
-              "type": "string",
-              "description": "meeting id to resume after"
-            },
-            "limit": {
-              "type": "string",
-              "description": "Capped at 500; an absent value gives 100, and 0 or a non-numeric value is not replaced by the default."
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "x-content": "text",
-          "type": "string",
-          "description": "application/x-ndjson: one JSON record per line (meeting with its entities), then a final {done, next_cursor} line; next_cursor is null on the last page"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "POST /kb/delete": {
-      "request": {
-        "body": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "description": "meeting id"
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/Ok"
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "DELETE /kb/delete": {
-      "request": {
-        "body": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "description": "meeting id"
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/Ok"
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
         },
         "401": {
           "$ref": "_common#/$defs/Error"
@@ -1122,127 +996,570 @@
       "request": {
         "body": {
           "type": "object",
-          "required": ["provider"],
+          "required": [
+            "provider"
+          ],
           "properties": {
-            "provider": { "type": "string", "description": "Which saved token the single-use clone grant is for: github or gitlab; any other value is answered 400." }
+            "provider": {
+              "type": "string",
+              "description": "Which saved token the single-use clone grant is for: github or gitlab; any other value is answered 400."
+            }
           }
         }
       },
       "responses": {
         "200": {
           "type": "object",
-          "required": ["grant"],
+          "required": [
+            "grant"
+          ],
           "properties": {
-            "grant": { "type": ["string", "null"], "description": "64-hex single-use grant, valid 60 s; null when no token is saved for the provider." }
+            "grant": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "64-hex single-use grant, valid 60 s; null when no token is saved for the provider."
+            }
           }
         },
-        "400": { "$ref": "_common#/$defs/Error" },
-        "401": { "$ref": "_common#/$defs/Error" }
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
       }
     },
     "POST /kb/repos/check-token": {
       "request": {
         "body": {
           "type": "object",
-          "required": ["provider"],
+          "required": [
+            "provider"
+          ],
           "properties": {
-            "provider": { "type": "string", "enum": ["github", "gitlab"], "description": "Which vault token to verify." },
-            "baseUrl": { "type": "string", "description": "Self-hosted GitLab HTTPS base URL; ignored for GitHub.", "x-optional": true }
+            "provider": {
+              "type": "string",
+              "enum": [
+                "github",
+                "gitlab"
+              ],
+              "description": "Which vault token to verify."
+            },
+            "baseUrl": {
+              "type": "string",
+              "description": "Self-hosted GitLab HTTPS base URL; ignored for GitHub.",
+              "x-optional": true
+            }
           }
         }
       },
       "responses": {
         "200": {
           "type": "object",
-          "required": ["ok", "login", "name", "scopes"],
+          "required": [
+            "ok",
+            "login",
+            "name",
+            "scopes"
+          ],
           "properties": {
-            "ok": { "const": true },
-            "login": { "type": "string" },
-            "name": { "type": "string" },
-            "scopes": { "type": "array", "items": { "type": "string" } }
+            "ok": {
+              "const": true
+            },
+            "login": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         },
-        "400": { "$ref": "_common#/$defs/Error" },
-        "401": { "$ref": "_common#/$defs/Error" },
-        "403": { "$ref": "_common#/$defs/Error" },
-        "502": { "$ref": "_common#/$defs/Error" }
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
       }
     },
     "POST /kb/issues/create": {
       "description": "Desktop only: JWT + bus host proof (403 HOST_PROOF_REQUIRED first); feature gantt_issues. Creates an issue in a repo already on the caller's board (an imported ticket row whose URL is on github.com / gitlab.com, else 403 REPO_NOT_ALLOWED) with the vault token on the fixed host. A repeat with the same idem within 10 minutes replays the first answer (deduped: true); other content under that idem is 409 IDEM_CONFLICT. Provider refusals: 403 TOKEN_UNAUTHORIZED | TOKEN_FORBIDDEN, 400 PROVIDER_REJECTED, 502 PROVIDER_ERROR | PROVIDER_UNREACHABLE. 'dispatch' bucket.",
-      "request": { "body": { "type": "object", "required": ["provider", "repo", "title", "idem"], "properties": {
-        "provider": { "type": "string", "enum": ["github", "gitlab"] },
-        "repo": { "type": "string", "description": "GitHub owner/name, or a GitLab project path of 2 to 20 segments; at most 200 characters; no . or .. segment" },
-        "title": { "type": "string", "description": "1 to 255 characters after trimming" },
-        "body": { "type": "string", "x-optional": true, "description": "At most 20 000 characters; default empty" },
-        "idem": { "type": "string", "description": "16 to 64 of [A-Za-z0-9_-]; one key per issue the user means to create" }
-      } } },
-      "responses": { "200": { "$ref": "#/$defs/IssueWriteOk" }, "400": { "$ref": "_common#/$defs/Error" }, "401": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "409": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" } }
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "provider",
+            "repo",
+            "title",
+            "idem"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "github",
+                "gitlab"
+              ]
+            },
+            "repo": {
+              "type": "string",
+              "description": "GitHub owner/name, or a GitLab project path of 2 to 20 segments; at most 200 characters; no . or .. segment"
+            },
+            "title": {
+              "type": "string",
+              "description": "1 to 255 characters after trimming"
+            },
+            "body": {
+              "type": "string",
+              "x-optional": true,
+              "description": "At most 20 000 characters; default empty"
+            },
+            "idem": {
+              "type": "string",
+              "description": "16 to 64 of [A-Za-z0-9_-]; one key per issue the user means to create"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/IssueWriteOk"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
     },
     "POST /kb/issues/comment": {
       "description": "Desktop only, as POST /kb/issues/create. Adds a comment (GitLab: a note) to an issue on the caller's board; a PR or MR is 400 NOT_AN_ISSUE.",
-      "request": { "body": { "type": "object", "required": ["provider", "repo", "number", "body"], "properties": {
-        "provider": { "type": "string", "enum": ["github", "gitlab"] },
-        "repo": { "type": "string", "description": "As in POST /kb/issues/create" },
-        "number": { "type": "integer", "description": "The issue number (GitLab iid), a positive integer" },
-        "body": { "type": "string", "description": "1 to 20 000 characters, not only whitespace" }
-      } } },
-      "responses": { "200": { "$ref": "#/$defs/IssueWriteOk" }, "400": { "$ref": "_common#/$defs/Error" }, "401": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" } }
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "provider",
+            "repo",
+            "number",
+            "body"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "github",
+                "gitlab"
+              ]
+            },
+            "repo": {
+              "type": "string",
+              "description": "As in POST /kb/issues/create"
+            },
+            "number": {
+              "type": "integer",
+              "description": "The issue number (GitLab iid), a positive integer"
+            },
+            "body": {
+              "type": "string",
+              "description": "1 to 20 000 characters, not only whitespace"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/IssueWriteOk"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
     },
     "POST /kb/issues/close": {
       "description": "Desktop only, as POST /kb/issues/create. Closes an issue on the caller's board and marks its board row closed; a PR or MR is 400 NOT_AN_ISSUE.",
-      "request": { "body": { "type": "object", "required": ["provider", "repo", "number"], "properties": {
-        "provider": { "type": "string", "enum": ["github", "gitlab"] },
-        "repo": { "type": "string", "description": "As in POST /kb/issues/create" },
-        "number": { "type": "integer", "description": "The issue number (GitLab iid), a positive integer" }
-      } } },
-      "responses": { "200": { "$ref": "#/$defs/IssueWriteOk" }, "400": { "$ref": "_common#/$defs/Error" }, "401": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" } }
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "provider",
+            "repo",
+            "number"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "github",
+                "gitlab"
+              ]
+            },
+            "repo": {
+              "type": "string",
+              "description": "As in POST /kb/issues/create"
+            },
+            "number": {
+              "type": "integer",
+              "description": "The issue number (GitLab iid), a positive integer"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/IssueWriteOk"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
     },
     "GET /kb/issues/detail": {
       "description": "Desktop only: JWT + bus host proof (403 HOST_PROOF_REQUIRED). One hosted issue with its comments and the label, milestone and assignee choices of its repository, read with the vault token on the fixed provider host. The issue must be on the caller's board (an imported ticket row), else 403 REPO_NOT_ALLOWED; a missing token is 400 GITHUB_TOKEN_MISSING | GITLAB_TOKEN_MISSING; provider refusals map as in POST /kb/issues/create. The token never appears in the answer.",
-      "request": { "query": { "type": "object", "required": ["provider", "repo", "number"], "properties": {
-        "provider": { "type": "string", "description": "github or gitlab" },
-        "repo": { "type": "string", "description": "As in POST /kb/issues/create" },
-        "number": { "type": "string", "description": "The issue number (GitLab iid), a positive integer" }
-      } } },
+      "request": {
+        "query": {
+          "type": "object",
+          "required": [
+            "provider",
+            "repo",
+            "number"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "github or gitlab"
+            },
+            "repo": {
+              "type": "string",
+              "description": "As in POST /kb/issues/create"
+            },
+            "number": {
+              "type": "string",
+              "description": "The issue number (GitLab iid), a positive integer"
+            }
+          }
+        }
+      },
       "responses": {
-        "200": { "type": "object", "required": ["ok", "issue"], "properties": {
-          "ok": { "const": true },
-          "issue": { "type": "object", "required": ["state", "title", "body", "labels", "milestone", "milestoneId", "assignees", "assigneeIds", "dueDate", "author", "createdAt", "updatedAt", "webUrl"], "properties": {
-            "state": { "type": ["string", "null"] }, "title": { "type": "string" }, "body": { "type": "string" },
-            "labels": { "type": "array", "items": { "type": "string" } },
-            "milestone": { "type": ["object", "null"], "description": "title, dueOn, id" }, "milestoneId": { "type": ["integer", "null"] },
-            "assignees": { "type": "array", "items": { "type": "string" } }, "assigneeIds": { "type": "array", "items": { "type": "integer" } },
-            "dueDate": { "type": ["string", "null"] }, "author": { "type": ["string", "null"] }, "createdAt": { "type": ["string", "null"] }, "updatedAt": { "type": ["string", "null"] }, "webUrl": { "type": ["string", "null"] }
-          } },
-          "choices": { "type": "object", "required": ["labels", "milestones", "assignees"], "description": "What the repository offers, up to 100 each", "properties": {
-            "labels": { "type": "array", "items": { "type": "string" } },
-            "milestones": { "type": "array", "items": { "type": "object", "description": "id, title" } },
-            "assignees": { "type": "array", "items": { "type": "object", "description": "id, name" } }
-          } },
-          "comments": { "type": "array", "description": "Up to 100 non-system comments, newest last", "items": { "type": "object", "required": ["id", "author", "body", "at"], "properties": {
-            "id": { "type": ["integer", "null"] }, "author": { "type": "string" }, "body": { "type": "string" }, "at": { "type": ["string", "null"] }
-          } } }
-        } },
-        "400": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" }
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "issue"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "issue": {
+              "type": "object",
+              "required": [
+                "state",
+                "title",
+                "body",
+                "labels",
+                "milestone",
+                "milestoneId",
+                "assignees",
+                "assigneeIds",
+                "dueDate",
+                "author",
+                "createdAt",
+                "updatedAt",
+                "webUrl"
+              ],
+              "properties": {
+                "state": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                },
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "milestone": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "description": "title, dueOn, id"
+                },
+                "milestoneId": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "assignees": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "assigneeIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                "dueDate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "author": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "updatedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "webUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "choices": {
+              "type": "object",
+              "required": [
+                "labels",
+                "milestones",
+                "assignees"
+              ],
+              "description": "What the repository offers, up to 100 each",
+              "properties": {
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "milestones": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "id, title"
+                  }
+                },
+                "assignees": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "id, name"
+                  }
+                }
+              }
+            },
+            "comments": {
+              "type": "array",
+              "description": "Up to 100 non-system comments, newest last",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "author",
+                  "body",
+                  "at"
+                ],
+                "properties": {
+                  "id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "author": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
       }
     },
     "POST /kb/issues/update": {
       "description": "Desktop only, as POST /kb/issues/create. Edits an issue on the caller's board; at least one of title, body, state, labels, milestoneId, assignees, assigneeIds or dueDate is required (else 400 VALIDATION_FAILED 'nothing to update'). state closed or open also updates the board row. GitLab takes ids for milestone and assignees; GitHub takes names for assignees. A PR or MR is 400 NOT_AN_ISSUE. 'dispatch' bucket.",
-      "request": { "body": { "type": "object", "required": ["provider", "repo", "number"], "properties": {
-        "provider": { "type": "string", "enum": ["github", "gitlab"] },
-        "repo": { "type": "string", "description": "As in POST /kb/issues/create" },
-        "number": { "type": "integer", "description": "The issue number (GitLab iid), a positive integer" },
-        "title": { "type": "string", "x-optional": true, "description": "1 to 255 characters after trimming" },
-        "body": { "type": "string", "x-optional": true, "description": "At most 20 000 characters" },
-        "state": { "type": "string", "x-optional": true, "enum": ["open", "closed"] },
-        "labels": { "type": "array", "x-optional": true, "description": "Up to 50 names of at most 100 characters", "items": { "type": "string" } },
-        "milestoneId": { "type": "integer", "x-optional": true, "description": "A positive integer, or null to clear" },
-        "assignees": { "type": "array", "x-optional": true, "description": "Up to 20 names", "items": { "type": "string" } },
-        "assigneeIds": { "type": "array", "x-optional": true, "description": "Up to 20 positive integers (GitLab)", "items": { "type": "integer" } },
-        "dueDate": { "type": "string", "x-optional": true, "description": "YYYY-MM-DD, or null to clear" }
-      } } },
-      "responses": { "200": { "$ref": "#/$defs/IssueWriteOk" }, "400": { "$ref": "_common#/$defs/Error" }, "401": { "$ref": "_common#/$defs/Error" }, "403": { "$ref": "_common#/$defs/Error" }, "502": { "$ref": "_common#/$defs/Error" } }
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "provider",
+            "repo",
+            "number"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "github",
+                "gitlab"
+              ]
+            },
+            "repo": {
+              "type": "string",
+              "description": "As in POST /kb/issues/create"
+            },
+            "number": {
+              "type": "integer",
+              "description": "The issue number (GitLab iid), a positive integer"
+            },
+            "title": {
+              "type": "string",
+              "x-optional": true,
+              "description": "1 to 255 characters after trimming"
+            },
+            "body": {
+              "type": "string",
+              "x-optional": true,
+              "description": "At most 20 000 characters"
+            },
+            "state": {
+              "type": "string",
+              "x-optional": true,
+              "enum": [
+                "open",
+                "closed"
+              ]
+            },
+            "labels": {
+              "type": "array",
+              "x-optional": true,
+              "description": "Up to 50 names of at most 100 characters",
+              "items": {
+                "type": "string"
+              }
+            },
+            "milestoneId": {
+              "type": "integer",
+              "x-optional": true,
+              "description": "A positive integer, or null to clear"
+            },
+            "assignees": {
+              "type": "array",
+              "x-optional": true,
+              "description": "Up to 20 names",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assigneeIds": {
+              "type": "array",
+              "x-optional": true,
+              "description": "Up to 20 positive integers (GitLab)",
+              "items": {
+                "type": "integer"
+              }
+            },
+            "dueDate": {
+              "type": "string",
+              "x-optional": true,
+              "description": "YYYY-MM-DD, or null to clear"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/IssueWriteOk"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
     },
     "POST /kb/connect-git": {
       "request": {
@@ -1264,42 +1581,6 @@
       "responses": {
         "200": {
           "$ref": "#/$defs/GitIndex"
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "403": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "POST /kb/ingest-scip": {
-      "request": {
-        "body": {
-          "type": "object",
-          "properties": {
-            "repoPath": {
-              "type": "string",
-              "description": "must be on the user's repo allow-list"
-            },
-            "scipPath": {
-              "type": "string",
-              "description": "Path to the SCIP index file"
-            },
-            "replace": {
-              "type": "boolean",
-              "x-optional": true,
-              "description": "Replace the repo's existing graph rows; default true."
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "x-unspecified": "indexes a SCIP index file produced by an external indexer; no SCIP fixture is available offline, so the success body is not pinned"
         },
         "400": {
           "$ref": "_common#/$defs/Error"
@@ -1345,56 +1626,6 @@
       "responses": {
         "200": {
           "x-unspecified": "fetches the repo's issues from api.github.com (or gitlab.com for provider gitlab); the success needs the network, so it is not captured. It answers ok, the repo, count, chunks, pages, truncated and retryAfter (seconds to wait after a GitHub secondary limit that stopped the run early, else null). A truncated or stopped run deletes no stored rows (API 106)."
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "POST /kb/connect-tickets-json": {
-      "request": {
-        "body": {
-          "type": "object",
-          "properties": {
-            "provider": {
-              "type": "string",
-              "description": "Source label stored on each ticket entity; default manual."
-            },
-            "tickets": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "title": {
-                    "type": "string"
-                  },
-                  "body": {
-                    "type": "string"
-                  },
-                  "url": {
-                    "type": "string"
-                  },
-                  "meta": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "description": "provider-specific ticket fields, merged into the stored meta"
-                  }
-                }
-              },
-              "description": "Array of ticket objects (max 8 MB body)"
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/TicketIndex"
         },
         "400": {
           "$ref": "_common#/$defs/Error"

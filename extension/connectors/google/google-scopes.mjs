@@ -53,7 +53,7 @@ const CANON = new Map([
   [`${A}userinfo.email`, 'email'],
   [`${A}userinfo.profile`, 'profile'],
 ]);
-export function canonScope(s) { return CANON.get(s) || s; }
+function canonScope(s) { return CANON.get(s) || s; }
 
 /**
  * Scopes to request for a set of products (identity scopes included, de-duplicated, sorted).

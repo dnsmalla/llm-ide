@@ -1,10 +1,7 @@
-// /kb/providers/catalog*, /kb/providers/settings and /kb/providers/turn through
+// /kb/providers/catalog* and /kb/providers/settings through
 // the real router, with globalThis.fetch standing in for every provider.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { freshDb } from './provider-test-env.mjs';
 
 const { handleKB } = await import('../routes/router.mjs');
@@ -12,8 +9,6 @@ const models = await import('../providers/provider-models.mjs');
 const { _setPinnedFetchForTests } = await import('../server/pinned-fetch.mjs');
 const { _clearCooldownsForTests } = await import('../providers/provider-fallback.mjs');
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const rec = (n) => fs.readFileSync(path.join(here, 'fixtures/provider-adapter', n), 'utf8');
 const KEY = 'sk-route-0123456789abcdefgh';
 
 function makeReq({ method, url, body, userId }) {
@@ -145,75 +140,10 @@ test('a malformed body is a 400, not a 500', async () => {
   assert.equal(res.statusCode, 400);
 });
 
-test('POST /kb/providers/turn: 409 while the switch is off; then a full recorded tool round trip over SSE', async () => {
-  const { users: [a] } = freshDb();
-  models._clearModelCacheForTests();
-  _clearCooldownsForTests();
-  await call(a, 'POST', '/kb/providers/catalog/connect', { catalogId: 'groq', apiKey: KEY });
-  const body = { provider: 'custom:cat-groq', model: 'llama-3.3-70b-versatile', message: 'add a task', mode: 'execute', agentContext: { chatSessionId: 'c1' } };
-  let res = await call(a, 'POST', '/kb/providers/turn', body);
-  // tools off: not a refusal; a plain-chat stream opens with the notice
-  await withFetch((url) => (url.endsWith('/models')
-    ? json({ data: [{ id: 'llama-3.3-70b-versatile' }] })
-    : new Response(rec('openai-compatible-final.sse'), { status: 200, headers: { 'content-type': 'text/event-stream' } })), async (calls) => {
-    res = await call(a, 'POST', '/kb/providers/turn', body);
-    assert.equal(res.statusCode, 200);
-    const evs = res.events();
-    assert.deepEqual([evs[0].type, evs[0].kind, evs[0].data.reason], ['notice', 'tools_unavailable', 'tools_off']);
-    assert.ok(!calls.some((c) => c.url.endsWith('/chat/completions') && JSON.parse(c.init.body).tools), 'no tools sent to the provider');
-  });
-  await call(a, 'PUT', '/kb/providers/settings', { toolsEnabled: true });
-  const sse = [rec('openai-compatible-tool-call.sse'), rec('openai-compatible-final.sse')];
-  await withFetch((url) => {
-    if (url.endsWith('/models')) return json({ data: [{ id: 'llama-3.3-70b-versatile' }] });
-    return new Response(sse.shift(), { status: 200, headers: { 'content-type': 'text/event-stream' } });
-  }, async (calls) => {
-    res = await call(a, 'POST', '/kb/providers/turn', body);
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.headers['Content-Type'], 'text/event-stream');
-    const evs = res.events();
-    assert.deepEqual(evs.filter((e) => e.type !== 'usage').map((e) => e.type), ['init', 'tool_use_start', 'tool_args_delta', 'tool_args_delta', 'tool_result', 'delta', 'result']);
-    assert.match(evs.find((e) => e.type === 'tool_result').text, /write tests/);
-    assert.ok(!res._body.includes(KEY));
-    const chat = calls.filter((c) => c.url.endsWith('/chat/completions'));
-    assert.equal(chat.length, 2);
-    assert.ok(chat.every((c) => c.url.startsWith('https://api.groq.com/')), 'the key only ever went to the catalog host');
-  });
-  // a model without tools in a tool mode degrades the same way
-  await withFetch((url) => (url.endsWith('/models')
-    ? json({ data: [{ id: 'unknown-model' }] })
-    : new Response(rec('openai-compatible-final.sse'), { status: 200, headers: { 'content-type': 'text/event-stream' } })), async () => {
-    res = await call(a, 'POST', '/kb/providers/turn', { ...body, model: 'unknown-model' });
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.events()[0].data.reason, 'model_lacks_tools');
-  });
-});
-
 test('the existing verify and models routes are untouched by the new handler', async () => {
   const { users: [a] } = freshDb();
   const res = await call(a, 'POST', '/kb/providers/verify', { provider: 'skynet' });
   assert.equal(res.statusCode, 400);
-});
-
-test('a refused address answers 403 PROVIDER_BLOCKED on models and the turn, never a static list', async () => {
-  const { users: [a] } = freshDb();
-  models._clearModelCacheForTests();
-  await call(a, 'POST', '/kb/providers/catalog/connect', { catalogId: 'openai-compatible', slug: 'lan', baseURL: 'http://192.168.1.9:3001/v1', allowPrivate: true });
-  await call(a, 'PUT', '/kb/providers/settings', { toolsEnabled: true });
-  const prev = process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS;
-  process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS = '0';
-  try {
-    const m = await call(a, 'POST', '/kb/providers/catalog/models', { id: 'cat-openai-compatible-lan' });
-    assert.equal(m.statusCode, 403);
-    assert.equal(m.json().error.code, 'PROVIDER_BLOCKED');
-    const t = await call(a, 'POST', '/kb/providers/turn', { provider: 'custom:cat-openai-compatible-lan', model: 'x', message: 'hi', mode: 'ask' });
-    assert.equal(t.statusCode, 403);
-    assert.equal(t.json().error.code, 'PROVIDER_BLOCKED');
-    const c = await call(a, 'POST', '/kb/providers/catalog/test', { id: 'cat-openai-compatible-lan' });
-    assert.equal(c.json().ok, false);
-  } finally {
-    if (prev === undefined) delete process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS; else process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS = prev;
-  }
 });
 
 test('a submitted key is redacted even if an error message were to carry it', async () => {

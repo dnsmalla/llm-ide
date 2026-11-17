@@ -8,8 +8,7 @@
 // no SDK subprocess ever spawns — the fake captures the composed
 // (prompt, options) and tests invoke options.canUseTool exactly the way the
 // real SDK does when the model reaches for a tool. resolveAnthropicKey lives
-// here too (moved from spike-engine); its behavior stays covered by
-// agent-sdk-spike.test.mjs through the spike-engine re-export.
+// here (it moved out of the retired spike-engine.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -723,9 +722,7 @@ test('runAgentV2Turn: a file-valued workspaceRoot is refused (spawn needs a dire
 
 // --- resolveAnthropicKey move ------------------------------------------------
 
-test('resolveAnthropicKey: moved to engine.mjs, spike re-export is the same function', async () => {
-  const { resolveAnthropicKey: fromSpike } = await import('../llm_agent/sdk/spike-engine.mjs');
-  assert.equal(fromSpike, resolveAnthropicKey, 'spike-engine must re-export the engine implementation, not a copy');
+test('resolveAnthropicKey: env fallback and vault precedence', async () => {
   const prev = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = 'sk-ant-engine-test';
   try {

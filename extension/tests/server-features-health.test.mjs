@@ -76,7 +76,7 @@ test('/health with LLMIDE_FEATURES=agent_chat: features listed, pruned endpoints
   await withServer('agent_chat', (health, output) => {
     assert.deepEqual(health.features, ['agent_chat']);
     assert.ok(health.apiVersion >= 75);
-    for (const pruned of ['/kb/loop/agent-run', '/kb/issue-schedule', '/kb/ingest-code-graph']) {
+    for (const pruned of ['/kb/loop/agent-run', '/kb/issue-schedule']) {
       assert.ok(!health.endpoints.includes(pruned), `${pruned} is not advertised`);
     }
     // doc_gen is off here, yet project registration is always on (the bus and the task route need it).
@@ -90,7 +90,7 @@ test('/health with LLMIDE_FEATURES=agent_chat: features listed, pruned endpoints
 test('/health with LLMIDE_FEATURES unset: features null and the full endpoint list', async () => {
   await withServer(null, (health) => {
     assert.equal(health.features, null);
-    for (const ep of ['/kb/loop/agent-run', '/kb/issue-schedule', '/kb/ingest-code-graph', '/generate-doc']) {
+    for (const ep of ['/kb/loop/agent-run', '/kb/issue-schedule', '/generate-doc']) {
       assert.ok(health.endpoints.includes(ep), ep);
     }
     const missing = requiredEndpoints().filter((e) => !health.endpoints.includes(e));

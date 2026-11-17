@@ -64,7 +64,7 @@ const PERMISSION_TEXT = {
   agent: 'Adds sub-agent definitions (instructions).',
 };
 
-export function permissionSummary(members) {
+function permissionSummary(members) {
   const types = [...new Set(members.map((m) => m.type))];
   return types.filter((t) => PERMISSION_TEXT[t]).sort((a, b) => Number(EXECUTABLE_MEMBER_TYPES.includes(b)) - Number(EXECUTABLE_MEMBER_TYPES.includes(a)))
     .map((t) => ({ type: t, executable: EXECUTABLE_MEMBER_TYPES.includes(t), text: PERMISSION_TEXT[t] }));

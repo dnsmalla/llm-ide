@@ -104,7 +104,7 @@ const int = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.trunc(Number(v
  * store is down). The compares are fleet-wide jobs, so this is the same for
  * every user; it reveals no per-user data.
  */
-export function shadowMetrics() {
+function shadowMetrics() {
   let usage = null;
   let noteIndex = null;
   try {

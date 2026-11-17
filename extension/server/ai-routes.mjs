@@ -62,13 +62,13 @@ function ingestGeneratedDoc({ userId, ref, title, body, meta }) {
 // re-exported so existing imports from this module keep working.
 export { codeAssistErrorResponse };
 
-/** The 410 body for the removed POST /code-assist and /code-assist/decision (the classic engine). Exported for tests. */
-export function codeAssistRemovedBody(url = '/code-assist') {
+/** The 410 body for the removed POST /code-assist (the classic engine). Exported for tests. */
+export function codeAssistRemovedBody() {
   return {
     error: {
       code: 'ENDPOINT_REMOVED',
       message: 'This version of the LLM-IDE app is out of date: the classic chat endpoint was removed. Update the app to keep chatting.',
-      details: { use: url === '/code-assist/decision' ? '/agent/v2/decision' : '/agent/v2/stream', removedInApiVersion: 92 },
+      details: { use: '/agent/v2/stream', removedInApiVersion: 92 },
     },
   };
 }
@@ -199,59 +199,10 @@ export async function handleAIRoutes(req, res) {
     return true;
   }
 
-  // P0 SPIKE — Claude Agent SDK engine behind the future Mac-chat swap.
-  //
-  // POST /agent-sdk/spike { prompt, resume? } → SSE stream of mapped engine
-  // events (init / delta / tool_use_start / tool_args_delta / tool_result /
-  // result / sdk-passthrough). Proves: SDK streaming over SSE, the kb_search
-  // in-process domain tool, and vault-key auth. Temporary by design — its
-  // successor is the P1 `/agent/v2/*` protocol; observations from this
-  // endpoint feed that design.
-  if (req.method === 'POST' && req.url === '/agent-sdk/spike') {
-    const body = parseJSON(await readBody(req, 1024 * 1024));
-    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim().slice(0, 4000) : '';
-    if (!prompt) {
-      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing prompt' } });
-      return true;
-    }
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    const ac = new AbortController();
-    onClientDisconnect(req, res, () => ac.abort());
-    const writeEvent = (obj) => {
-      if (!res.writableEnded && !ac.signal.aborted) {
-        res.write(`data: ${JSON.stringify(obj)}\n\n`);
-      }
-    };
-    writeEvent({ type: 'spike_start', keyHint: 'resolving…' });
-    try {
-      // Imported per request, not at module load: spike-engine.mjs imports the
-      // Agent SDK, and this module is on server.mjs's boot path. An import
-      // failure lands in the catch below like any other spike failure.
-      const { runSpikeQuery } = await import('../llm_agent/sdk/spike-engine.mjs');
-      const out = await runSpikeQuery({
-        prompt,
-        userId: req.user?.id,
-        onEvent: writeEvent,
-        signal: ac.signal,
-        resume: typeof body.resume === 'string' && body.resume ? body.resume : undefined,
-      });
-      writeEvent({ type: 'spike_done', sessionId: out.sessionId, result: out.result, keySource: out.keySource });
-    } catch (err) {
-      if (!ac.signal.aborted) writeEvent({ type: 'error', error: err?.message || 'agent-sdk spike failed' });
-    }
-    if (!res.writableEnded) res.end();
-    return true;
-  }
-
-  // POST /code-assist and /code-assist/decision were the classic engine's routes (the fence loop). They
-  // answer 410 for one release; the chat runs on POST /agent/v2/stream (K1 P6 T6.9).
-  if (req.method === 'POST' && (pathOnly === '/code-assist' || pathOnly === '/code-assist/decision')) {
-    sendJSON(res, 410, codeAssistRemovedBody(pathOnly));
+  // POST /code-assist was the classic engine's route (the fence loop). It answers 410 for one release;
+  // the chat runs on POST /agent/v2/stream (K1 P6 T6.9). POST /code-assist/decision was removed outright.
+  if (req.method === 'POST' && pathOnly === '/code-assist') {
+    sendJSON(res, 410, codeAssistRemovedBody());
     return true;
   }
 

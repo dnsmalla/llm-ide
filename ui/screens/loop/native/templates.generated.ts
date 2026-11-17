@@ -655,7 +655,7 @@ export const BUILT_IN_TEMPLATES = [
           "id": "system-check/3",
           "taskId": null,
           "kind": "shellCommand",
-          "command": "cd extension && node --test tests/box-connector.test.mjs tests/box-routes.test.mjs tests/slack-source.test.mjs tests/slack-oauth.test.mjs tests/slack-oauth-routes.test.mjs tests/email-source.test.mjs tests/scip-connector.test.mjs tests/scip-scanner.test.mjs tests/git-connector-chunking.test.mjs",
+          "command": "cd extension && node --test tests/box-connector.test.mjs tests/box-routes.test.mjs tests/slack-source.test.mjs tests/slack-oauth.test.mjs tests/slack-oauth-routes.test.mjs tests/email-source.test.mjs tests/git-connector-chunking.test.mjs",
           "skillId": null,
           "targetPath": null,
           "outputPath": null,

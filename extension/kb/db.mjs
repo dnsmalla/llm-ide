@@ -189,7 +189,6 @@ export {
   listMeetings,
   listEntities,
   listEntitiesForMeetings,
-  getEntity,
   stats,
   statsAdmin,
 } from './meetings.mjs';
@@ -569,7 +568,6 @@ export {
   savePlan,
   getPlan,
   listPlans,
-  deletePlan,
   updateTask,
   mergeTaskMeta,
   claimTaskForDispatch,
@@ -600,21 +598,11 @@ export {
 } from './user.mjs';
 
 
-// Meeting-agent personas + Ask-the-Agent history live in personas.mjs.
-// Re-exported here so existing callers (`kb.getAgentPersona(...)`,
-// `kb.appendAgentAskMessage(...)`, etc.) keep working unchanged.
+// The meeting-agent persona (single) lives in personas.mjs. Re-exported here so
+// existing callers (`kb.getAgentPersona(...)`) keep working unchanged.
 export {
   getAgentPersona,
   setAgentPersona,
-  listAgentPersonas,
-  createAgentPersona,
-  updateAgentPersona,
-  deleteAgentPersona,
-  setActiveAgentPersona,
-  appendAgentAskMessage,
-  listAgentAskMessages,
-  clearAgentAskMessages,
-  retractLastAgentAskMessage,
 } from './personas.mjs';
 
 export {
@@ -634,7 +622,6 @@ export {
 // `kb.recordAgentFeedback(...)` etc. call sites.
 export {
   recordAgentFeedback,
-  agentFeedbackByTask,
   agentFeedbackStats,
 } from './feedback.mjs';
 
@@ -642,7 +629,6 @@ export {
 // Phase-8 outcome polling helpers live in outcomes.mjs.
 export {
   recordOutcome,
-  listOutcomesForTask,
   listDispatchedTasks,
   listDispatchedTasksForRetry,
   listUsersWithDispatchedTasks,
@@ -656,7 +642,6 @@ export {
   listReviews,
   getReview,
   setReviewStatus,
-  deleteReview,
 } from './reviews.mjs';
 
 // Project-scoped full export — used by GET /kb/project/:id/export and

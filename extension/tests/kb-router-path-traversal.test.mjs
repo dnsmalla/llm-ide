@@ -92,37 +92,6 @@ test('POST /kb/connect-git accepts an allowlisted path (200)', async () => {
   }
 });
 
-test('GET /kb/meeting/<bad-id> rejects path-traversal IDs (400 INVALID_ID)', async () => {
-  resetDb();
-  const u = users.registerUser(db.getDb(), {
-    email: `mtg-${Date.now()}@example.com`,
-    password: 'CorrectHorseBattery',
-    displayName: 'mtg',
-  });
-  // `%2F..%2Fetc` decodes to `/../etc` — must never reach getMeeting().
-  const req = makeReq({ method: 'GET', url: '/kb/meeting/%2F..%2Fetc', userId: u.id });
-  const res = makeRes();
-  const handled = await handleKB(req, res);
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 400);
-  assert.equal(JSON.parse(res._body).error.code, 'INVALID_ID');
-});
-
-test('GET /kb/entity/<bad-id> rejects path-traversal IDs (400 INVALID_ID)', async () => {
-  resetDb();
-  const u = users.registerUser(db.getDb(), {
-    email: `ent-${Date.now()}@example.com`,
-    password: 'CorrectHorseBattery',
-    displayName: 'ent',
-  });
-  const req = makeReq({ method: 'GET', url: '/kb/entity/..%2F..%2Fsecrets', userId: u.id });
-  const res = makeRes();
-  const handled = await handleKB(req, res);
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 400);
-  assert.equal(JSON.parse(res._body).error.code, 'INVALID_ID');
-});
-
 test('POST /kb/connect-git rejects /tmp/notarized-attack (403 PATH_NOT_APPROVED)', async () => {
   resetDb();
   const u = users.registerUser(db.getDb(), {

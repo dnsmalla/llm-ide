@@ -86,7 +86,7 @@ export function diffTrees(before, after, { limit = 200 } = {}) {
  * A cheap stamp of a tree: entry count, total size and newest mtime from lstat only (no file is read). A change
  * to any file's size or mtime changes it. Null when the tree cannot be walked or holds a link or special file.
  */
-export function stampDir(dir) {
+function stampDir(dir) {
   let n = 0; let size = 0; let newest = 0;
   const walk = (abs, depth) => {
     if (depth > ARCHIVE_LIMITS.depth) throw new Error('too_deep');

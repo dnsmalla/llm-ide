@@ -41,7 +41,7 @@ function diff(legacy, active) {
  * @param {{ sdkPlugins?: string[], pluginSkills?: string[], commands?: string[], subagents?: string[], mcpServers?: string[] }} loaded
  *   plain lists of identities (plugin names, `plugin/skill` keys, trigger names, server ids)
  */
-export function compareActiveSetToLoaded(active, loaded) {
+function compareActiveSetToLoaded(active, loaded) {
   const categories = {
     nativePlugins: diff(loaded.nativePlugins ?? [], active.nativePlugins),
     pluginSkills: diff(loaded.pluginSkills ?? [], active.pluginSkills.map((s) => `${s.plugin}/${s.name}`)),

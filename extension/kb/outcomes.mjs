@@ -228,25 +228,6 @@ export function recordOutcome(userId, { taskId, provider, ref, state, meta = {} 
   })();
 }
 
-export function listOutcomesForTask(userId, taskId, limit = 20) {
-  requireUser(userId);
-  const db = getDb();
-  return lazyPrepare(db, `
-    SELECT id, provider, ref, state, is_terminal, meta, observed_at
-    FROM outcomes WHERE task_id = ? AND user_id = ?
-    ORDER BY observed_at DESC LIMIT ?
-  `).all(String(taskId), userId, Math.min(100, Math.max(1, Number(limit) || 20)))
-    .map((r) => ({
-      id: r.id,
-      provider: r.provider,
-      ref: r.ref,
-      state: r.state,
-      isTerminal: !!r.is_terminal,
-      meta: safeParseMeta(r.meta),
-      observedAt: r.observed_at,
-    }));
-}
-
 // Used by the outcome watcher — every task that has been dispatched
 // has `meta.dispatched.{provider, url, number}` and is fair game to
 // poll.

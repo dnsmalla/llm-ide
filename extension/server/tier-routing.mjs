@@ -63,7 +63,7 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
  * invalid_shape | invalid_provider | invalid_model | unknown_tier |
  * unknown_feature) so the client can show why a setting did not stick.
  */
-export function normalizeTierRouting(config, dropped = null) {
+function normalizeTierRouting(config, dropped = null) {
   const tiers = {};
   const features = {};
   const drop = (entry, reason) => {

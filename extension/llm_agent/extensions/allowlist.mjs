@@ -20,13 +20,13 @@ export class AllowlistError extends Error {
   constructor(code, message, extra = {}) { super(message); this.name = 'AllowlistError'; this.code = code; this.extra = extra; }
 }
 
-export function operatorPatterns(spec = process.env.LLMIDE_EXT_ALLOWED_SOURCES) {
+function operatorPatterns(spec = process.env.LLMIDE_EXT_ALLOWED_SOURCES) {
   const l = parsePatterns(spec);
   return l.length ? l : DEFAULT_ALLOWED_SOURCES.split(',');
 }
 
 /** @returns {string[]|null} null when the operator set no ceiling */
-export function ceilingPatterns(spec = process.env.LLMIDE_EXT_ALLOWED_SOURCES_CEILING) {
+function ceilingPatterns(spec = process.env.LLMIDE_EXT_ALLOWED_SOURCES_CEILING) {
   const l = parsePatterns(spec);
   return l.length ? l : null;
 }
@@ -41,7 +41,7 @@ export function normalizeEntry(raw) {
 const coveredByCeiling = (entry, ceiling) => ceiling.some((c) => globMatches(c, entry));
 
 /** Whether one normalized entry may be on a user's list under `ceiling` (null = none). */
-export function entryAllowed(entry, ceiling) {
+function entryAllowed(entry, ceiling) {
   if (ceiling) return GLOBBY.test(entry) && coveredByCeiling(entry, ceiling);
   return PLAIN.test(entry);
 }

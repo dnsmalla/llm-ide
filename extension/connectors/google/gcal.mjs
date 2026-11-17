@@ -37,7 +37,7 @@ export function normalizeCalendarOptions(o = {}) {
 }
 
 const enc = (s) => encodeURIComponent(String(s));
-export const eventRef = (accountId, calendarId, eventId) => `gcal:${accountId}:${enc(calendarId)}:${enc(eventId)}`;
+const eventRef = (accountId, calendarId, eventId) => `gcal:${accountId}:${enc(calendarId)}:${enc(eventId)}`;
 const calPrefix = (accountId, calendarId) => `gcal:${accountId}:${enc(calendarId)}:`;
 const sqlTime = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
 
@@ -51,7 +51,7 @@ function descriptionMarkdown(d) {
 }
 
 /** Pure: one Calendar event to its `sources` rows (chunked), or null for a cancelled event. */
-export function eventToRows(ev, { accountId, calendarId }) {
+function eventToRows(ev, { accountId, calendarId }) {
   if (!ev || typeof ev.id !== 'string' || ev.status === 'cancelled') return null;
   const start = when(ev.start); const end = when(ev.end);
   const summary = redactSecretsForStorage(oneLine(ev.summary, 300)) || '(no title)';

@@ -27,7 +27,7 @@ export const ICS_LIMITS = Object.freeze({
 const DAY = 86_400_000;
 
 // ---------------------------------------------------------------- civil date arithmetic (proleptic Gregorian)
-export function daysFromCivil(y, m, d) {
+function daysFromCivil(y, m, d) {
   const yy = m <= 2 ? y - 1 : y;
   const era = Math.floor(yy / 400);
   const yoe = yy - era * 400;
@@ -35,7 +35,7 @@ export function daysFromCivil(y, m, d) {
   const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
   return era * 146_097 + doe - 719_468;
 }
-export function civilFromDays(z0) {
+function civilFromDays(z0) {
   const z = z0 + 719_468;
   const era = Math.floor(z / 146_097);
   const doe = z - era * 146_097;
@@ -102,7 +102,7 @@ function formatter(zone) {
 }
 
 /** Offset (zone minus UTC) in ms at the instant `utcMs`. */
-export function zoneOffsetMs(zone, utcMs) {
+function zoneOffsetMs(zone, utcMs) {
   if (!zone || zone === 'UTC') return 0;
   const p = {};
   for (const part of formatter(zone).formatToParts(new Date(utcMs))) if (part.type !== 'literal') p[part.type] = Number(part.value);
@@ -127,7 +127,7 @@ export function cleanText(s) {
 }
 
 /** RFC 5545 TEXT unescape (\n \N \, \; \\). Anything else after a backslash is kept as the character. */
-export function unescapeText(v) {
+function unescapeText(v) {
   return String(v).replace(/\\([\s\S])/g, (m, c) => (c === 'n' || c === 'N' ? '\n' : c));
 }
 
@@ -194,7 +194,7 @@ const DT_RE = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/i;
  * An iCalendar DATE or DATE-TIME property to { wall, allDay, zone, floating, tzUnknown }, or null when invalid.
  * `wall` is milliseconds as if the reading were UTC; for a real instant use wallToUtc(wall, zone).
  */
-export function parseDateValue(prop) {
+function parseDateValue(prop) {
   if (!prop) return null;
   const m = DT_RE.exec(String(prop.value).trim());
   if (!m) return null;
@@ -418,7 +418,7 @@ function nthMatching(first, last, dow, ord) {
  * caller's slack), at most `maxOut` of them. COUNT is honoured from DTSTART. Stops at the budget.
  * @returns {{ walls: number[], truncated: boolean }}
  */
-export function expandRule(rule, startWall, untilWall, loWall, hiWall, maxOut, budget) {
+function expandRule(rule, startWall, untilWall, loWall, hiWall, maxOut, budget) {
   const startDay = Math.floor(startWall / DAY);
   const msOfDay = startWall - startDay * DAY;
   const start = civilFromDays(startDay);
@@ -525,7 +525,7 @@ function isoUtc(ms) { return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z'
 const compactUtc = (ms) => isoUtc(ms).replace(/[-:]/g, '');
 
 /** A date value to its identity key: the date for all-day, else the UTC instant, compact. */
-export function dateKey(v) {
+function dateKey(v) {
   if (!v) return null;
   if (v.allDay) return isoDate(Math.floor(v.wall / DAY));
   return compactUtc(wallToUtc(v.wall, v.zone));

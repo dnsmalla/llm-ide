@@ -475,7 +475,16 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          POST only) redeems it to { token } when the loopback peer sends x-llmide-redeem-key equal to <data dir>/clone-redeem.key.
 //          That key exists only on an SSH server core (LLMIDE_SSH_SERVER=1, not a hub, loopback bind); otherwise 404. The SSH
 //          server helper is its only caller. Refusals are 403 { error: 'clone_credential_refused' }. Not in /health ENDPOINTS.
-const SERVER_API_VERSION = 148;
+//   v149 — removed (no caller in the repo's clients): POST /kb/ingest-code-graph, POST /kb/ingest-scip, the
+//          /kb/agent/persona(s) family except GET|PUT /kb/agent/persona, GET /kb/agent/feedback/by-task,
+//          GET /kb/agent/generation-library, POST /kb/agent/ask and GET|DELETE /kb/agent/ask/history, the /kb/review/get|reject|delete
+//          routes, GET|POST /kb/plans, POST /kb/plan/delete, POST|PATCH /kb/plan-task/update, GET /kb/outcomes/stats|task/:id,
+//          POST /kb/outcomes/retry-failed, GET /kb/index/status, POST /kb/index/reconcile, GET /kb/system/status,
+//          GET /kb/export-all, GET /kb/meeting/:id, GET /kb/entity/:id, POST|DELETE /kb/delete, POST /kb/connect-tickets-json,
+//          POST /kb/usage/record, POST /kb/custom-providers, POST /kb/providers/turn, POST /code-assist/decision and
+//          POST /agent-sdk/spike. Each now answers the generic unknown-route 404. POST /code-assist still answers 410.
+//          The code_graph_3d feature key remains (desktop toggle) but owns no route.
+const SERVER_API_VERSION = 149;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -494,8 +503,6 @@ const ALL_ENDPOINTS = [
   '/projects/:id/plan-tasks',
   '/chat',
   '/code-assist',
-  '/code-assist/decision',
-  '/agent-sdk/spike',
   '/agent/v2/stream',
   '/agent/v2/decision',
   '/agent/v2/session',
@@ -520,21 +527,13 @@ const ALL_ENDPOINTS = [
   '/kb/issues/comment',
   '/kb/issues/close',
   '/kb/issues/update',
-  '/kb/meeting/:id',
-  '/kb/entity/:id',
   '/kb/project/:id/export',
   '/kb/project/install-skills',
   '/kb/stats',
-  '/kb/export-all',
-  '/kb/system/status',
-  '/kb/delete',
   '/kb/connect-git',
-  '/kb/ingest-scip',
-  '/kb/ingest-code-graph',
   '/kb/connect-github-issues',
   '/kb/repos/check-token',
   '/kb/repos/clone-grant',
-  '/kb/connect-tickets-json',
   '/kb/connect-qa',
   '/kb/email/test',
   '/kb/email/fetch',
@@ -569,7 +568,6 @@ const ALL_ENDPOINTS = [
   '/kb/usage/limits',
   '/kb/usage/summary',
   '/kb/usage/resolve',
-  '/kb/usage/record',
   '/kb/usage/ratelimits',
   '/kb/usage/turn-composition',
   '/kb/storage',
@@ -589,34 +587,23 @@ const ALL_ENDPOINTS = [
   '/kb/providers/catalog/models',
   '/kb/providers/custom',
   '/kb/providers/settings',
-  '/kb/providers/turn',
   '/kb/agent-sdk',
   '/kb/agent-sdk/update',
-  '/kb/custom-providers',
   '/kb/routing-tiers',
   '/kb/code-sync',
-  '/kb/plans',
   '/kb/plan/:id',
   '/kb/plan/save',
-  '/kb/plan-task/update',
   '/kb/plan-task/assign',
   '/kb/plan-task/unassign',
   '/kb/plan-task/assignments',
-  '/kb/plan/delete',
   '/kb/dispatch',
   '/kb/generate-code',
   '/kb/issue-schedule',
   '/kb/review/submit',
   '/kb/review/list',
-  '/kb/review/get/:id',
   '/kb/review/approve',
-  '/kb/review/reject',
-  '/kb/review/delete',
   '/kb/notify/slack',
   '/kb/outcomes/refresh',
-  '/kb/outcomes/retry-failed',
-  '/kb/outcomes/task/:id',
-  '/kb/outcomes/stats',
   '/kb/live/sessions',
   '/kb/live/:id',
   '/kb/live/:id/append',
@@ -627,20 +614,13 @@ const ALL_ENDPOINTS = [
   '/kb/agent/runs',
   '/kb/agent/feedback',
   '/kb/agent/feedback/stats',
-  '/kb/agent/feedback/by-task',
   '/kb/agent/persona',
-  '/kb/agent/personas',
-  '/kb/agent/personas/:id',
-  '/kb/agent/personas/active',
   '/kb/agent/catalog',
   '/kb/agent/commands',
   '/kb/agent/skill-library',
-  '/kb/agent/generation-library',
   '/kb/agent/project-memory',
   '/kb/agent/session-memory',
   '/kb/agent/tool-approvals',
-  '/kb/agent/ask',
-  '/kb/agent/ask/history',
   '/kb/chat/sessions',
   '/kb/chat/sessions/:id',
   '/kb/chat/sessions/:id/messages',
@@ -657,10 +637,8 @@ const ALL_ENDPOINTS = [
   '/kb/archive-receipts',
   '/kb/index/notes',
   '/kb/index/notes/:key',
-  '/kb/index/reconcile',
   '/kb/index/scan',
   '/kb/index/search',
-  '/kb/index/status',
   '/kb/os/state',
   '/kb/os/stream',
   '/bus/commands',
@@ -742,11 +720,9 @@ function rateLimitProfile(url, method) {
   // otherwise `POST /kb/loop/agent-run?x=1` would dodge its bucket entirely.
   url = url.split('?')[0];
   // Expensive GET reads get a profile BEFORE the POST-only short-circuit.
-  // /kb/export-all streams a user's whole meeting corpus, so it must be
-  // throttled even though it's a GET. (Strip any query string first.)
+  // (Strip any query string first.)
   if (method === 'GET') {
     const path = url.split('?')[0];
-    if (path === '/kb/export-all') return 'kbExport';
     // Same 'dispatch' bucket as /kb/slack/test|fetch — this route makes up
     // to 20 outbound Slack API calls per request, so it must be throttled
     // to avoid burning through Slack's per-method rate limit and causing
@@ -786,7 +762,6 @@ function rateLimitProfile(url, method) {
   if (method !== 'POST') return null;
   if (url === '/generate-notes')         return 'llmFast';
   if (url === '/chat')                   return 'llmFast';
-  if (url === '/kb/agent/ask')           return 'llmFast';
   if (url === '/kb/complete')            return 'llmFast';          // one plain model call, same cost class as /chat
   if (url === '/generate-questions')     return 'llmFast';
   if (url === '/extract-entities')       return 'llmFast';
@@ -816,7 +791,6 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/providers/models')    return 'llmFast';        // provider model-list fetch
   if (url === '/kb/providers/catalog/test' || url === '/kb/providers/catalog/models') return 'llmFast';   // one free GET /models
   if (url === '/kb/providers/catalog/connect' || url === '/kb/providers/catalog/disconnect') return 'kbWrite';
-  if (url === '/kb/providers/turn')      return 'agentTurn';      // a multi-minute tool-capable chat turn
   if (url === '/kb/dispatch')            return 'dispatch';
   if (url === '/kb/repos/check-token')   return 'dispatch';   // one outbound provider /user call
   if (url === '/kb/loop/ship-status')    return 'dispatch';   // reads GitHub / GitLab PR or MR status
@@ -841,7 +815,6 @@ function rateLimitProfile(url, method) {
   if (url.startsWith('/kb/review/'))     return 'kbWrite';
   if (url.startsWith('/kb/plan-task/'))  return 'kbWrite';
   if (url === '/kb/ingest')              return 'kbWrite';
-  if (url === '/kb/usage/record')        return 'kbWrite';
   // Email routes open outbound IMAP connections + parse mail — expensive and
   // externally-directed, so throttle them like other external-API writes
   // (dispatch: ~1/10s burst 4) rather than the cheap kbWrite bucket.
@@ -878,7 +851,7 @@ function rateLimitProfile(url, method) {
   // Local filesystem symlink install of the skills kit into a project path.
   if (url === '/kb/project/install-skills') return 'kbWrite';
   // live-then-archive Phase 1 (plan section 4.1): cheap local writes, no model call.
-  if (url === '/kb/index/notes' || url === '/kb/index/reconcile' || url === '/kb/index/scan') return 'kbWrite';
+  if (url === '/kb/index/notes' || url === '/kb/index/scan') return 'kbWrite';
   if (url === '/kb/session-purges' || url === '/agent/v2/sessions/purge' || url === '/kb/archive-receipts') return 'kbWrite';
   if (/^\/kb\/chat\/sessions\/[^/]+\/archive\/(begin|commit)$/.test(url)) return 'kbWrite';
   if (/^\/kb\/live\/[^/]+\/ack$/.test(url)) return 'kbWrite';

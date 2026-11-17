@@ -93,7 +93,7 @@ function titleOf(s) {
  * text every store keeps), with its line count and content hash. The ack must
  * reproduce both.
  */
-export function captureOf(s) {
+function captureOf(s) {
   const held = heldOf(s);
   const lines = held.map((c) => {
     const t = new Date(c.ts).toISOString().slice(11, 19);
@@ -120,7 +120,7 @@ export function captionHashOf(captions) {
 
 const MIN_PLAUSIBLE_TS = Date.UTC(2000, 0, 1);
 const FUTURE_SLACK_MS = 5 * 60 * 1000;
-export const plausibleTs = (n) => Number.isFinite(n) && n >= MIN_PLAUSIBLE_TS && n <= Date.now() + FUTURE_SLACK_MS;
+const plausibleTs = (n) => Number.isFinite(n) && n >= MIN_PLAUSIBLE_TS && n <= Date.now() + FUTURE_SLACK_MS;
 
 /**
  * Optional capture metadata (additive API fields): startedAt (ms), language,

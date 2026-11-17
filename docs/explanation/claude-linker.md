@@ -21,7 +21,6 @@ Claude Agent SDK / claude CLI
 │ extension/llm_agent/sdk/   SDK engine, event │
 │   engine.mjs · events.mjs · tools.mjs ·      │
 │   hooks.mjs · decisions.mjs · transcripts.mjs│
-│   · spike-engine.mjs                         │
 │ extension/providers/       CLI argv builders,│
 │   providers.mjs · runtime.mjs ·              │
 │   web-client.mjs           stream-json parse │
@@ -58,7 +57,7 @@ Enforcement:
 | Where the `claude` executable is: `LLMIDE_CLAUDE_PATH`, SDK-bundled binary, PATH + well-known install dirs (validated: regular executable, not in a world-writable dir, `--version` probe); memoised with TTL; `CLAUDE_NOT_FOUND` typed error. Used by the SDK engine (`pathToClaudeCodeExecutable`, bundled binary first) and the CLI spawn paths (`cliBinFor`, plugin CLI; installed `claude` first) | `extension/providers/claude-path.mjs` |
 | `claude plugin …` argv (marketplace update, list --available --json, update --json --accept-command) and its JSON parsing | `extension/providers/claude-plugin-cli.mjs` |
 | SDK pin | `extension/package.json` (`@anthropic-ai/claude-agent-sdk`) |
-| SDK surface ledger (adopted / ignored / needs-human per top-level item) | `extension/llm_agent/sdk/sdk-surface.json` (gate: `tests/sdk-surface-ledger.test.mjs`, tool: `scripts/sdk-surface.mjs`) |
+| SDK surface ledger (adopted / ignored / needs-human per top-level item) | `extension/llm_agent/sdk/sdk-surface.json` (gate: `tests/sdk-surface-ledger.test.mjs`, tool: `extension/scripts/sdk-surface.mjs`) |
 | Wire event decode (desktop) | `ui/screens/chat/events.ts` |
 | v2 request body, event→result mapping, `SESSION_UNRESUMABLE` handling | `ui/screens/chat/controller.ts` |
 
@@ -69,7 +68,7 @@ On the next `@anthropic-ai/claude-agent-sdk` (or `claude` CLI) bump, work in thi
 1. **Pin**: bump `extension/package.json`, run `npm install`; `tests/dependency-pins.test.mjs` pins the version.
 2. **Server linker**: fix what the new SDK changed —
    `llm_agent/sdk/engine.mjs` (query options, permission modes, resume), `events.mjs` (message shapes — keep the OUTPUT wire format identical; absorb changes here), `tools.mjs`/`hooks.mjs`/`decisions.mjs`, `transcripts.mjs` (disk layout), and for CLI-flag changes `providers/providers.mjs` + `runtime.mjs` + `web-client.mjs`.
-3. **Tests**: `cd extension && npm test` — the SDK-shaped suites are `agent-v2-events`, `agent-v2-tools`, `agent-v2-routes`, `agent-sdk-spike`, `providers`, `spawn-cli-stream`, `stream-model-reply`, `mcp-cli-args`, `mcp-runclaude-args`, `cli-concurrency-cap`, `dependency-pins`, `sdk-surface`, `sdk-surface-ledger`.
+3. **Tests**: `cd extension && npm test` — the SDK-shaped suites are `agent-v2-events`, `agent-v2-tools`, `agent-v2-routes`, `providers`, `spawn-cli-stream`, `stream-model-reply`, `mcp-cli-args`, `mcp-runclaude-args`, `cli-concurrency-cap`, `dependency-pins`, `sdk-surface`, `sdk-surface-ledger`.
 4. **Adopt**: `tests/sdk-surface-ledger.test.mjs` fails until every new or removed top-level SDK item is classified in `llm_agent/sdk/sdk-surface.json`. By hand: `node scripts/sdk-surface.mjs diff --batch "$TMPDIR/b.md"` lists what is unclassified.
    - **What the loop does**: the `sdk-adoption` default loop (LLM-IDE checkout only, scheduled) classifies each new item in a worktree, implements server-only additive items (inside `llm_agent/sdk/` or `providers/`, wire shape unchanged) with a test in a top-level `extension/tests/sdk-adopt-<name>.test.mjs` (the only test files the loop's agent may write; every other test stays protected, and a subdirectory would change how `/bin/sh` expands the `npm test` glob), and marks anything needing a wire, desktop UI, permission or auth change `needs-human`. The result is a proposal in Settings › Self-Heal; nothing reaches main until you apply it. A version whose record is already proposed, needs-human, ignored or fixed is skipped on later ticks; a version-only bump with no new top-level item is recorded fixed.
    - **The seed backlog is human-only**: entries whose reason starts with `seed: not yet reviewed` were written by `init` when the ledger was created and are never re-offered to the loop. Count them (from `extension/`): `node -e 'const l=require("./llm_agent/sdk/sdk-surface.json");console.log(Object.values(l.items).filter(e=>e.reason?.startsWith("seed:")).length)'`.

@@ -17,7 +17,7 @@ const fail = (code) => { throw new SyncCryptoError(code); };
 
 export const newId22 = () => randomBytes(16).toString('base64url');
 
-export function pairQuery(p) {
+function pairQuery(p) {
   const box = p.st.startsWith('box:') ? `&bi=${encodeURIComponent(p.bi)}&bs=${encodeURIComponent(p.bs)}` : '';
   return `sv=${PAIR_VERSION}&${PAIR_FIELDS.map((k) => `${k}=${encodeURIComponent(p[k])}`).join('&')}${box}`;
 }

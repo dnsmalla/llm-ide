@@ -187,11 +187,17 @@ test('agent_ask_messages are wiped on user deletion (KB-1)', () => {
   const bob   = provision('bob-ask@example.com').id;
 
   // Insert ask-history for alice and bob.
-  db.appendAgentAskMessage(alice, { role: 'user',      content: 'Hello, agent!' });
-  db.appendAgentAskMessage(alice, { role: 'assistant', content: 'Hello, Alice.' });
-  db.appendAgentAskMessage(bob,   { role: 'user',      content: 'Bob speaking.' });
-
   const handle = db.getDb();
+  const now = Date.now() / 1000;
+  const insertAsk = (userId, role, content) => {
+    const seq = handle.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM agent_ask_messages WHERE user_id = ?').get(userId).n;
+    handle.prepare('INSERT INTO agent_ask_messages (user_id, seq, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(userId, seq, role, content, now);
+  };
+  insertAsk(alice, 'user', 'Hello, agent!');
+  insertAsk(alice, 'assistant', 'Hello, Alice.');
+  insertAsk(bob, 'user', 'Bob speaking.');
+
   // Pre-deletion sanity.
   assert.equal(handle.prepare('SELECT COUNT(*) AS n FROM agent_ask_messages WHERE user_id = ?').get(alice).n, 2);
   assert.equal(handle.prepare('SELECT COUNT(*) AS n FROM agent_ask_messages WHERE user_id = ?').get(bob).n, 1);

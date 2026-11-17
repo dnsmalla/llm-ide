@@ -120,7 +120,7 @@ function metaFor(entry) {
 }
 
 /** Registry entries a provider turn mounts in `mode`. */
-export function providerMountedEntries(mode) {
+function providerMountedEntries(mode) {
   const allow = restrictsTools(mode) ? allowedToolNames(mode) : null;
   return entries().filter((e) => !NOT_MOUNTED.has(e.name) && (!allow || allow.has(e.name)));
 }

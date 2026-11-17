@@ -106,7 +106,7 @@ function runGit(cwd, args, { env = {}, timeoutMs = 60_000, config = SAFE_GIT_CON
 }
 
 /** True when `repo` is a GitHub `owner/name` or a GitLab project path (no `.`/`..` segment). */
-export function validShipRepo(provider, repo) {
+function validShipRepo(provider, repo) {
   if (!Object.hasOwn(REPO_SHAPE, provider) || typeof repo !== 'string' || repo.length > SHIP_LIMITS.repo) return false;
   return REPO_SHAPE[provider].test(repo) && !repo.split('/').some((seg) => seg === '.' || seg === '..');
 }

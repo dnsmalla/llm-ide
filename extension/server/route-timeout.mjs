@@ -34,22 +34,14 @@ const BUDGETS_POST = new Map([
   ['/kb/providers/models',    30_000],
   ['/kb/providers/catalog/test',   30_000],
   ['/kb/providers/catalog/models', 30_000],
-  // A KB delete is a bounded set of indexed DELETEs, not a scaling workload.
-  ['/kb/delete',              30_000],
   // Removed (were 60 s–240 s): /kb/ingest and /kb/connect-box scale with how
-  // much data the user is indexing; /kb/ingest-scip is already bounded by
-  // loadScipIndex's own subprocess kill timer; and /kb/generate-plan,
+  // much data the user is indexing; and /kb/generate-plan,
   // /kb/analyze-risks, /kb/summarize, /kb/conflict-questions and
   // /kb/generate-code are all LLM generation.
 ]);
 
 export function routeTimeoutMs(url, method) {
   const path = String(url || '').split('?')[0];
-  // /kb/delete is the one route the router accepts on both DELETE and POST;
-  // every other budgeted route below is POST-only.
-  if (path === '/kb/delete' && (method === 'DELETE' || method === 'POST')) {
-    return BUDGETS_POST.get(path) ?? null;
-  }
   if (method !== 'POST') return null;
   return BUDGETS_POST.get(path) ?? null;
 }

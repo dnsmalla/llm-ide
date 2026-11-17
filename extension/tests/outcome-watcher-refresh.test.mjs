@@ -90,10 +90,6 @@ test('refreshAllOutcomes: a merged PR is recorded and auto-syncs task status to 
   const task = db.getTaskById(U, taskId);
   assert.equal(task.status, 'done', 'a merged PR outcome must auto-sync plan_tasks.status to done');
 
-  const outcomes = db.listOutcomesForTask(U, taskId);
-  assert.equal(outcomes.length, 1);
-  assert.equal(outcomes[0].state, 'merged');
-  assert.equal(outcomes[0].isTerminal, true);
 });
 
 test('refreshAllOutcomes: circuit breaker opens after repeated failures and skips the next scheduled poll', async () => {

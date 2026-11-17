@@ -61,7 +61,7 @@ const TOKEN_RE = /^(v1|v2)\.(\d{1,15})\.([0-9a-f]{32})\.([0-9a-f]{64})$/;
 export const CHAT_ID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
 export const bypassPurpose = (chatId) => `bypass:${chatId}`;
 
-export function signedPart(purpose, expiry, nonce, version = 'v2') {
+function signedPart(purpose, expiry, nonce, version = 'v2') {
   return `llmide-host-approval/${version}|${purpose}|${expiry}|${nonce}`;
 }
 
@@ -99,7 +99,7 @@ export function createHostApprovalVerifier({ now = Date.now } = {}) {
 }
 
 /** The process-wide verifier (the used-nonce set must outlive one request). */
-export const hostApprovalVerifier = createHostApprovalVerifier();
+const hostApprovalVerifier = createHostApprovalVerifier();
 
 /** Verifies the request header against the env key; false when the header is absent or repeated. */
 export function verifyRequestApproval(req, { env = process.env, verifier = hostApprovalVerifier, purpose } = {}) {

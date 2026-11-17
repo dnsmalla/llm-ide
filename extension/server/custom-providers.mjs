@@ -13,12 +13,10 @@
  */
 
 import { getDb } from '../kb/db.mjs';
-import { readBody, parseJSON, sendJSON } from '../core/utils.mjs';
 import { connectionAsCustomProvider } from './provider-connections.mjs';
 
 const FLAG = 'custom.providers';
 const MAX_PROVIDERS = 50;
-const MAX_BODY_BYTES = 100_000;
 
 /** db → (userId → Map("custom:<id>" → provider)). Keyed by the DB handle too,
  * so a reopened or test database never serves another one's rows. */
@@ -127,22 +125,3 @@ export function _resetCustomProviderCacheForTests(db = getDb()) {
  * other POST (size cap + slow-client timeout); it used to hand-roll the read
  * with no timeout and `req.connection.destroy()` on overflow.
  */
-export async function handleCustomProvidersSync(req, res, userId) {
-  if (req.method !== 'POST') {
-    sendJSON(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed' } });
-    return;
-  }
-  let data;
-  try {
-    data = parseJSON(await readBody(req, MAX_BODY_BYTES));
-  } catch (err) {
-    sendJSON(res, 413, { error: { code: 'BODY_TOO_LARGE', message: err?.message || 'Request body too large' } });
-    return;
-  }
-  if (!data || !Array.isArray(data.providers)) {
-    sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'providers array required' } });
-    return;
-  }
-  const count = syncCustomProviders(data.providers, userId);
-  sendJSON(res, 200, { success: true, count });
-}

@@ -24,7 +24,7 @@ process.env.NODE_ENV = 'test';
 const tmpDb = path.join(os.tmpdir(), `_customprov-${process.pid}-${Math.floor(performance.now() * 1000)}.db`);
 process.env.LLMIDE_DB_PATH = tmpDb;
 
-const { syncCustomProviders, getCustomProvider, handleCustomProvidersSync, _resetCustomProviderCacheForTests } = await import('../server/custom-providers.mjs');
+const { syncCustomProviders, getCustomProvider, _resetCustomProviderCacheForTests } = await import('../server/custom-providers.mjs');
 
 let getDb, registerUser, setSecret, closeDb;
 
@@ -121,30 +121,6 @@ test('registry: invalid entries are dropped (no id / name, non-http baseURL)', a
   assert.equal(n, 1);
   assert.equal(getCustomProvider('custom:ok', userId)?.vaultKey, 'custom.ok.apiKey', 'default vault key');
   assert.equal(getCustomProvider('custom:file', userId), undefined);
-  syncCustomProviders([], userId);
-});
-
-test('POST /kb/custom-providers: stores for the caller; 400 without a providers array', async () => {
-  const { Readable } = await import('node:stream');
-  const { userId } = await setupUser();
-  const call = async (method, body) => {
-    const req = Readable.from(body == null ? [] : [Buffer.from(body)]);
-    req.method = method;
-    req.headers = { 'content-type': 'application/json' };
-    const res = {
-      statusCode: 0, body: '', headersSent: false,
-      writeHead(code) { this.statusCode = code; this.headersSent = true; return this; },
-      setHeader() {}, end(b) { this.body = b ?? ''; },
-    };
-    await handleCustomProvidersSync(req, res, userId);
-    return { status: res.statusCode, json: res.body ? JSON.parse(res.body) : null };
-  };
-  const ok = await call('POST', JSON.stringify({ providers: [{ id: 'h', name: 'H', baseURL: 'https://h.example.com' }] }));
-  assert.equal(ok.status, 200);
-  assert.equal(ok.json.count, 1);
-  assert.equal(getCustomProvider('custom:h', userId)?.name, 'H');
-  assert.equal((await call('POST', JSON.stringify({ nope: 1 }))).status, 400);
-  assert.equal((await call('GET', null)).status, 405);
   syncCustomProviders([], userId);
 });
 

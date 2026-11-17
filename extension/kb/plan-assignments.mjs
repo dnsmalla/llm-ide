@@ -36,16 +36,6 @@ const isTaskId = (v) => typeof v === 'string' && TASK_ID_RE.test(v);
 const isUserId = (v) => typeof v === 'string' && USER_ID_RE.test(v);
 const isProjectId = (v) => typeof v === 'string' && PROJECT_ID_RE.test(v);
 
-/** The project a plan is tagged with (`plans.meta.projectId`), or null. */
-export function projectIdForPlan(db, planId) {
-  if (typeof planId !== 'string' || !planId) return null;
-  const row = db.prepare(
-    "SELECT json_extract(meta, '$.projectId') AS project_id FROM plans WHERE id = ?",
-  ).get(String(planId));
-  const id = row?.project_id;
-  return typeof id === 'string' && id ? id : null;
-}
-
 /** The task plus the plan/project it belongs to, or null. Deliberately not user-scoped: a project
  *  admin assigns a task on a plan another project member authored. */
 export function getTaskContext(db, taskId) {
@@ -74,7 +64,7 @@ function assignmentRow(db, taskId) {
   `).get(String(taskId)) ?? null;
 }
 
-export function assignmentView(row) {
+function assignmentView(row) {
   if (!row) return null;
   return {
     taskId: row.task_id,

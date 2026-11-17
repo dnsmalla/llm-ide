@@ -52,7 +52,7 @@ export function dailyRollupDue(lastDay, now = new Date()) {
  * in the main DB, written by deleteUserCascade). A row is removed only after
  * its purge succeeds. Returns the user ids purged.
  */
-export function replayPendingAgentPurges({ mainDb }) {
+function replayPendingAgentPurges({ mainDb }) {
   const done = [];
   let rows = [];
   try {
@@ -94,7 +94,7 @@ export function openAgentStoreAtBoot({ logger } = {}) {
  * compare it with the ledger. Own try blocks, so neither can stop the other or
  * the rollup. Exported for tests.
  */
-export function runDailyUsageShadow(db, now, logger) {
+function runDailyUsageShadow(db, now, logger) {
   try { pruneUsageCalls({ agentDb: db, now }); } catch (err) {
     log(logger, 'error', 'agent_usage_prune_failed', { error: err?.message });
   }

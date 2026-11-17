@@ -1,5 +1,5 @@
 {
-  "description": "Provider catalog (agent-kit K1 Phase 6, server API v90): the built-in catalog of model providers (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, and any OpenAI-compatible endpoint), the caller's connections to them, per-model capability flags, the two opt-in switches (tool-capable chat, cross-provider fallback), and the tool-capable provider turn. Roster: all 8 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/provider-catalog.mjs, mounted by extension/routes/router.mjs, and all are token-protected and on the core feature set. A key is accepted in the connect body once, goes to the per-user vault (custom.<id>.apiKey) and is never returned. A connection dispatches as the provider id custom:<id> (id is cat-<catalog id>, plus -<slug> for the generic endpoint). Every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: /catalog/test and /catalog/models share llmFast, /catalog/connect, /catalog/disconnect and PUT /settings share kbWrite, /turn uses agentTurn (429 is not declared; the bucket answers it uniformly). The stream of POST /kb/providers/turn is the agent/v2 event vocabulary (init, tool_use_start, tool_args_delta, tool_result, usage, delta, result, error, approval_request, approval_resolved, notice); approvals are answered through POST /agent/v2/decision with init.sessionId. A refusal before the first event is a plain JSON error (404 PROVIDER_NOT_CONNECTED, 403 PROVIDER_BLOCKED when the network guard refuses the provider's address, 400 PROVIDER_NO_KEY | VALIDATION_FAILED). A turn is never refused for lack of tools: with tools off, or on a model that cannot call them, a tool mode runs as plain chat and the stream opens with a notice event of kind tools_unavailable (data.reason tools_off | model_lacks_tools). Not captured: a fallback switch (the notice event with kind provider_fallback) and a live provider list; both are exercised by extension/tests. Fixtures are produced by driving the real router in-process with a stand-in for fetch, because the routes reach third-party hosts. Claude-compatible endpoints (API 99): GET /kb/providers/custom lists the caller's endpoints of kind anthropic-compatible (connections made with catalogId 'anthropic-compatible' through the existing connect and disconnect routes, plus the Mac-synced custom providers that have an Anthropic door, read-only); the entry is not part of the GET /kb/providers/catalog list, so that shape is unchanged. Never a key, only hasKey.",
+  "description": "Provider catalog (agent-kit K1 Phase 6, server API v90): the built-in catalog of model providers (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, and any OpenAI-compatible endpoint), the caller's connections to them, per-model capability flags, the two opt-in switches (tool-capable chat, cross-provider fallback). Roster: all 8 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/provider-catalog.mjs, mounted by extension/routes/router.mjs, and all are token-protected and on the core feature set. A key is accepted in the connect body once, goes to the per-user vault (custom.<id>.apiKey) and is never returned. A connection dispatches as the provider id custom:<id> (id is cat-<catalog id>, plus -<slug> for the generic endpoint). Every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: /catalog/test and /catalog/models share llmFast, /catalog/connect, /catalog/disconnect and PUT /settings share kbWrite. Not captured: a live provider list (exercised by extension/tests). Fixtures are produced by driving the real router in-process with a stand-in for fetch, because the routes reach third-party hosts. Claude-compatible endpoints (API 99): GET /kb/providers/custom lists the caller's endpoints of kind anthropic-compatible (connections made with catalogId 'anthropic-compatible' through the existing connect and disconnect routes, plus the Mac-synced custom providers that have an Anthropic door, read-only); the entry is not part of the GET /kb/providers/catalog list, so that shape is unchanged. Never a key, only hasKey.",
   "$defs": {
     "Connection": {
       "type": "object",
@@ -581,81 +581,6 @@
       "responses": {
         "200": {
           "$ref": "#/$defs/Settings"
-        }
-      }
-    },
-    "POST /kb/providers/turn": {
-      "request": {
-        "body": {
-          "type": "object",
-          "properties": {
-            "provider": {
-              "type": "string",
-              "description": "custom:cat-... of a connection of the caller"
-            },
-            "model": {
-              "type": "string"
-            },
-            "message": {
-              "type": "string"
-            },
-            "mode": {
-              "type": "string",
-              "description": "execute | plan | assist_plan | review need a model with tools; ask and document run without them"
-            },
-            "history": {
-              "type": "array",
-              "description": "Prior turns, most recent 40 are used",
-              "items": {
-                "type": "object",
-                "required": [
-                  "role",
-                  "content"
-                ],
-                "properties": {
-                  "role": {
-                    "type": "string",
-                    "enum": [
-                      "user",
-                      "assistant"
-                    ]
-                  },
-                  "content": {
-                    "type": "string"
-                  }
-                }
-              }
-            },
-            "agentContext": {
-              "type": "object",
-              "description": "workspaceRoot bounds what the file tools may read; chatSessionId keys the chat's task list",
-              "properties": {
-                "workspaceRoot": {
-                  "type": "string"
-                },
-                "chatSessionId": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "x-unspecified": "A server-sent stream in the agent/v2 event vocabulary (schema/agent-v2). This route emits a subset (init, tool_use_start, tool_args_delta, tool_result, usage, delta, result, error, approval_request, approval_resolved, notice), so the all-variants coverage that x-events demands would need fabricated events. Every emitted event is instead validated against the agent/v2 schema variants by extension/tests/provider-turn-wire.test.mjs."
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "404": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "403": {
-          "$ref": "_common#/$defs/Error"
         }
       }
     }

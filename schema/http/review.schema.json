@@ -1,5 +1,5 @@
 {
-  "description": "The /kb/review/* routes: the user-approval queue for guardrailed actions (dispatch to a tracker, codegen-apply into an allow-listed repo). Roster: all seven keys are literal entries of ALL_ENDPOINTS (extension/server.mjs): /kb/review/submit, /kb/review/list, /kb/review/get/:id, /kb/review/approve, /kb/review/reject, /kb/review/delete (DELETE and POST, both answered by one handler). Handler: extension/routes/review.mjs (reached from extension/routes/router.mjs); store: extension/kb/reviews.mjs; credential handling: extension/server/review-secrets.mjs. All routes are token-protected and on the core feature set (not feature-gated); every route is in the kbWrite rate bucket (429 declared on the POST routes that were captured). Request parts list exactly the keys the handler reads. Request bodies carry no required keys: the handler answers a missing key with 400 (VALIDATION_FAILED or REVIEW_SUBMIT_FAILED), and a 400 fixture carries the body it was sent. Malformed JSON bodies answer 400 on every route that reads one (not declared here, per SCHEMA.md). Payload: the payload of a review item is kind-specific and is checked by the guardrail engine (extension/guardrails/rules.mjs), not by this schema, so it is declared as an open object and its keys are listed in the Payload description. Credentials: submit strips credential-looking keys (token, apiKey, secret, password) from payload.config and payload.pr before storing, holds them in memory for approval (never persisted), and every review response returns the stripped payload. Approve reads config and pr from its body as credentials for that approval only; they are never stored or echoed. The approve path resolves credentials from the user vault, then held-from-submit, then the approve body, and dispatches only when the guardrails pass. A dispatch to github, backlog or linear needs a tracker credential and reaches the network, so no fixture approves a dispatch item; the approve 200 is captured for codegen-apply only (files are written into the allow-listed repo; no PR, because no GitHub token is resolved). The CAS race answer (409 REVIEW_RACE) is not captured: it needs two concurrent approvals of one item. The 422 CREDENTIAL_REQUIRED and GUARDRAILS_FAILED answers share one body shape, declared once.",
+  "description": "The /kb/review/* routes: the user-approval queue for guardrailed actions (dispatch to a tracker, codegen-apply into an allow-listed repo). Roster: all three keys are literal entries of ALL_ENDPOINTS (extension/server.mjs): /kb/review/submit, /kb/review/list, /kb/review/approve. Handler: extension/routes/review.mjs (reached from extension/routes/router.mjs); store: extension/kb/reviews.mjs; credential handling: extension/server/review-secrets.mjs. All routes are token-protected and on the core feature set (not feature-gated); every route is in the kbWrite rate bucket (429 declared on the POST routes that were captured). Request parts list exactly the keys the handler reads. Request bodies carry no required keys: the handler answers a missing key with 400 (VALIDATION_FAILED or REVIEW_SUBMIT_FAILED), and a 400 fixture carries the body it was sent. Malformed JSON bodies answer 400 on every route that reads one (not declared here, per SCHEMA.md). Payload: the payload of a review item is kind-specific and is checked by the guardrail engine (extension/guardrails/rules.mjs), not by this schema, so it is declared as an open object and its keys are listed in the Payload description. Credentials: submit strips credential-looking keys (token, apiKey, secret, password) from payload.config and payload.pr before storing, holds them in memory for approval (never persisted), and every review response returns the stripped payload. Approve reads config and pr from its body as credentials for that approval only; they are never stored or echoed. The approve path resolves credentials from the user vault, then held-from-submit, then the approve body, and dispatches only when the guardrails pass. A dispatch to github, backlog or linear needs a tracker credential and reaches the network, so no fixture approves a dispatch item; the approve 200 is captured for codegen-apply only (files are written into the allow-listed repo; no PR, because no GitHub token is resolved). The CAS race answer (409 REVIEW_RACE) is not captured: it needs two concurrent approvals of one item. The 422 CREDENTIAL_REQUIRED and GUARDRAILS_FAILED answers share one body shape, declared once.",
   "$defs": {
     "Finding": {
       "type": "object",
@@ -363,33 +363,6 @@
         }
       }
     },
-    "GET /kb/review/get/:id": {
-      "request": {
-        "params": {
-          "type": "object",
-          "required": [
-            "id"
-          ],
-          "properties": {
-            "id": {
-              "type": "string",
-              "description": "The review item id (rev-…)."
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/ReviewItem"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "404": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
     "POST /kb/review/approve": {
       "request": {
         "body": {
@@ -440,91 +413,6 @@
         },
         "500": {
           "$ref": "#/$defs/ExecutionFailure"
-        }
-      }
-    },
-    "POST /kb/review/reject": {
-      "request": {
-        "body": {
-          "type": "object",
-          "description": "id is required by the handler (400 VALIDATION_FAILED 'Missing id'). Rejecting drops any credentials held from submit. Only a pending item can be rejected (compare-and-swap on pending): any other status answers 409 REVIEW_NOT_PENDING with the stored status in the message, and an unknown id answers 404.",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "note": {
-              "type": "string",
-              "description": "Stored as reviewerNote."
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/ReviewItem"
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "404": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "409": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "429": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "DELETE /kb/review/delete": {
-      "request": {
-        "body": {
-          "type": "object",
-          "description": "id is required by the handler (400 VALIDATION_FAILED 'Missing id'). An unknown id answers ok: the store deletes nothing and the handler does not check for a row.",
-          "properties": {
-            "id": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/Ok"
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "POST /kb/review/delete": {
-      "request": {
-        "body": {
-          "type": "object",
-          "description": "Same handler as DELETE /kb/review/delete (the route accepts both methods).",
-          "properties": {
-            "id": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "$ref": "#/$defs/Ok"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "429": {
-          "$ref": "_common#/$defs/Error"
         }
       }
     }

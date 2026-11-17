@@ -27,7 +27,7 @@ export const installedFilePath = () => join(baseDir(), 'extensions-installed.jso
 export function userStoreDir(userId) {
   return join(baseDir(), 'extensions', 'store', createHash('sha256').update(String(userId)).digest('hex').slice(0, 24));
 }
-export const itemDirName = (id) => id.replace(/[:/]/g, '__');
+const itemDirName = (id) => id.replace(/[:/]/g, '__');
 export const itemStoreDir = (userId, id) => join(userStoreDir(userId), itemDirName(id));
 
 function readAll() {

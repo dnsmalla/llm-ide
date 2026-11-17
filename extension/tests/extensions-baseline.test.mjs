@@ -1,4 +1,4 @@
-// P0 of the extensions catalog (docs/superpowers/plans/2026-10-31-extensions-catalog.md):
+// P0 of the extensions catalog (the plan is no longer in the repo; see docs/spec/extensions-catalog.md):
 // pin what every extension consumer loads TODAY, for a synthetic world of
 // plugins, LLM sources and MCP servers, so each later phase can prove "no
 // change when the flag is off".

@@ -569,7 +569,7 @@ export const MODEL_FAMILY_PRICES = Object.freeze({
 });
 
 /** The price row for `model` by family substring (`opus`, `sonnet`, `haiku`), else `generic`. */
-export function priceForModel(model) {
+function priceForModel(model) {
   const id = String(model ?? '').toLowerCase();
   for (const family of Object.keys(MODEL_FAMILY_PRICES)) {
     if (family !== 'generic' && id.includes(family)) return MODEL_FAMILY_PRICES[family];

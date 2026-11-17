@@ -5,8 +5,7 @@
 
 import * as kb from '../kb/db.mjs';
 import { indexLocalRepo } from '../connectors/git.mjs';
-import { indexScip } from '../connectors/scip.mjs';
-import { indexGithubIssues, indexGitlabIssues, indexTicketsJson } from '../connectors/issues.mjs';
+import { indexGithubIssues, indexGitlabIssues } from '../connectors/issues.mjs';
 import { indexJUnit } from '../connectors/qa.mjs';
 import { indexBoxFolder, boxTest } from '../connectors/box.mjs';
 import { projectIdForFolder, filteredRepoAllowlist } from '../kb/projects.mjs';
@@ -15,8 +14,6 @@ import { projectIdForFolder, filteredRepoAllowlist } from '../kb/projects.mjs';
 // applyCodegen + openPullRequest moved into routes/review.mjs.
 import { notifySlack } from '../agents/slack.mjs';
 import { refreshAllOutcomes } from '../agents/outcome-watcher.mjs';
-import { listActiveSessions } from '../agents/live-sessions.mjs';
-import { listRuns } from '../agents/meeting-agent.mjs';
 // live-sessions imports moved into routes/live.mjs.
 import { handleAgentRoutes } from './agent.mjs';
 import { handleCloneGrant } from './clone-credential.mjs';
@@ -25,8 +22,6 @@ import { handleProjectRegister } from './project-register.mjs';
 import { handlePlanningRoutes } from './planning.mjs';
 import { handleLiveRoutes } from './live.mjs';
 import { handleReviewRoutes } from './review.mjs';
-import { recordFinishedRun } from '../kb/agent-runs.mjs';
-import { randomUUID } from 'node:crypto';
 import { handleChatRoutes } from './chat.mjs';
 import { handleIndexRoutes } from './index-routes.mjs';
 import { handleIssueDetailRoute } from './issue-detail.mjs';
@@ -51,7 +46,6 @@ import { classifyEmail } from '../agents/email-classify.mjs';
 import { runClaude } from '../providers/runtime.mjs';
 import { flushWarmCliPool } from '../providers/warm-cli-pool.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../providers/providers.mjs';
-import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
 import { handleProviderCatalog } from './provider-catalog.mjs';
 import { handleTierRoutingSync } from '../server/tier-routing.mjs';
 import { tierRoutingStatusFresh } from '../providers/tier-routing.mjs';
@@ -59,7 +53,6 @@ import { listSdkModels } from '../llm_agent/sdk/models.mjs';
 import { sdkStatus, updateSdk } from '../llm_agent/sdk/updater.mjs';
 import { activeTurnCount } from './agent-v2.mjs';
 import { agentBusySummary } from '../core/agent-busy.mjs';
-import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret, setSecret, checkImapHostBinding, bindImapHost } from '../server/vault.mjs';
 import { makePinnedFetch } from '../server/pinned-fetch.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
@@ -71,7 +64,7 @@ import { logger } from '../core/logger.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from '../kb/activity.mjs';
-import { getLimits, setLimits, usageSummary, resolveModel, recordUsage, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from '../kb/usage.mjs';
+import { getLimits, setLimits, usageSummary, resolveModel, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from '../kb/usage.mjs';
 import { turnCompositionRecent } from '../kb/turn-composition.mjs';
 import { installProjectSkills, isInstallableExclude } from '../kb/install-project-skills.mjs';
 import { listDisabledItems } from '../llm-sources/state.mjs';
@@ -268,12 +261,6 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    // Sync custom providers from Mac app
-    if (req.method === 'POST' && url === '/kb/custom-providers') {
-      await handleCustomProvidersSync(req, res, userId);
-      return true;
-    }
-
     // Sync the per-role tier routing config from Mac app (spec: tier routing)
     if (req.method === 'POST' && url === '/kb/routing-tiers') {
       await handleTierRoutingSync(req, res, userId);
@@ -284,17 +271,6 @@ export async function handleKB(req, res) {
     // registry, so it asks). May wait briefly for a CLI health probe.
     if (req.method === 'GET' && url === '/kb/routing-tiers') {
       sendJSON(res, 200, await tierRoutingStatusFresh(userId));
-      return true;
-    }
-
-    if ((req.method === 'DELETE' || req.method === 'POST') && url === '/kb/delete') {
-      const body = parseJSON(await readBody(req));
-      if (!body?.id) {
-        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing meeting id' } });
-        return true;
-      }
-      kb.deleteMeeting(userId, body.id);
-      sendJSON(res, 200, { ok: true });
       return true;
     }
 
@@ -446,45 +422,6 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    if (req.method === 'GET' && url.startsWith('/kb/meeting/')) {
-      const id = decodeURIComponent(url.slice('/kb/meeting/'.length).split('?')[0]);
-      if (!id || !SAFE_ID.test(id)) {
-        sendJSON(res, 400, { error: { code: 'INVALID_ID',
-          message: 'id must be 1–128 alphanumeric / _ / - characters' } });
-        return true;
-      }
-      const m = kb.getMeeting(userId, id);
-      if (!m) {
-        sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
-        return true;
-      }
-      // Opt-in: the transcript is large and most callers only need the
-      // summary, so it is added only for `?include=transcript`.
-      const include = new URL(url, 'http://127.0.0.1').searchParams.get('include');
-      if (include === 'transcript') {
-        sendJSON(res, 200, { ...m, transcript: kb.getMeetingTranscript(userId, id) });
-        return true;
-      }
-      sendJSON(res, 200, m);
-      return true;
-    }
-
-    if (req.method === 'GET' && url.startsWith('/kb/entity/')) {
-      const id = decodeURIComponent(url.slice('/kb/entity/'.length).split('?')[0]);
-      if (!id || !SAFE_ID.test(id)) {
-        sendJSON(res, 400, { error: { code: 'INVALID_ID',
-          message: 'id must be 1–128 alphanumeric / _ / - characters' } });
-        return true;
-      }
-      const e = kb.getEntity(userId, id);
-      if (!e) {
-        sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
-        return true;
-      }
-      sendJSON(res, 200, e);
-      return true;
-    }
-
     // Project-scoped full data export — used by the Swift app on project close
     // to persist all meetings + plans to the local folder tree.
     if (req.method === 'GET' && url.startsWith('/kb/project/') && url.endsWith('/export')) {
@@ -565,33 +502,6 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    if (req.method === 'GET' && url === '/kb/system/status') {
-      const stats = kb.stats(userId);
-      const sessions = listActiveSessions(userId);
-      const runs = listRuns(userId);
-      const pendingItems = kb.listReviews(userId, { status: 'pending', limit: 10 });
-      sendJSON(res, 200, {
-        stats,
-        flow: {
-          capture: {
-            activeCount: sessions.length,
-            sessions,
-          },
-          agent: {
-            activeCount: runs.length,
-            runs,
-          },
-          review: {
-            pendingCount: Number(stats?.reviews?.pending || 0),
-            byStatus: stats?.reviews || {},
-            pendingItems,
-          },
-          outcomes: stats?.outcomes || { total: 0, byState: {} },
-        },
-      });
-      return true;
-    }
-
     // Phase 3: connectors -------------------------------------------------
     // Each connector is fire-and-wait — calls return only when indexing
     // completes, so the client shows progress via a busy state.  All
@@ -625,34 +535,6 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    if (req.method === 'POST' && url === '/kb/ingest-scip') {
-      const body = parseJSON(await readBody(req));
-      if (!body?.repoPath || typeof body.repoPath !== 'string' ||
-          !body?.scipPath || typeof body.scipPath !== 'string') {
-        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'repoPath and scipPath are required' } });
-        return true;
-      }
-      const nodePath = await import('node:path');
-      const normalized = nodePath.resolve(body.repoPath);
-      // R-034 #2: same project scoping as connect-git.
-      const allowlist = filteredRepoAllowlist(kb.getDb(), userId);
-      if (!allowlist.includes(normalized)) {
-        sendJSON(res, 403, { error: { code: 'PATH_NOT_APPROVED', message: 'Repo path is not on your allow-list' } });
-        return true;
-      }
-      try {
-        const result = await indexScip(userId, normalized, body.scipPath, { replace: body.replace !== false });
-        sendJSON(res, 200, { ok: true, ...result });
-      } catch (err) {
-        sendJSON(res, 400, { error: { code: 'SCIP_INDEX_FAILED', message: err.message } });
-      }
-      return true;
-    }
-
-    // Structural code graph from the Mac app (code_graph_3d). Lives in
-    // routes/code-graph.mjs; absent when that feature is disabled.
-    if (await featureHandlers.code_graph_3d?.(req, res, { userId, url })) return true;
-
     if (req.method === 'POST' && url === '/kb/connect-github-issues') {
       const body = parseJSON(await readBody(req, 1024 * 1024));
       if (!body?.repo) {
@@ -679,21 +561,6 @@ export async function handleKB(req, res) {
         sendJSON(res, 200, { ok: true, ...result });
       } catch (err) {
         sendJSON(res, 400, { error: { code: `${provider.toUpperCase()}_INDEX_FAILED`, message: err.message } });
-      }
-      return true;
-    }
-
-    if (req.method === 'POST' && url === '/kb/connect-tickets-json') {
-      const body = parseJSON(await readBody(req, 8 * 1024 * 1024));
-      if (!Array.isArray(body?.tickets)) {
-        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'tickets must be an array' } });
-        return true;
-      }
-      try {
-        const result = indexTicketsJson(userId, { tickets: body.tickets, provider: body.provider });
-        sendJSON(res, 200, { ok: true, ...result });
-      } catch (err) {
-        sendJSON(res, 400, { error: { code: 'TICKETS_INDEX_FAILED', message: err.message } });
       }
       return true;
     }
@@ -1200,54 +1067,6 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    if (req.method === 'POST' && url === '/kb/usage/record') {
-      const body = parseJSON(await readBody(req, 16 * 1024)) || {};
-      if (typeof body.provider !== 'string' || typeof body.model !== 'string' || !body.provider || !body.model) {
-        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'provider and model are required' } });
-        return true;
-      }
-      // Optional token/turn counts (the Auto Task CLI reports them from
-      // `claude -p --output-format json`). Absent/null = "not reported";
-      // anything else must be a non-negative integer.
-      for (const k of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'turns']) {
-        const v = body[k];
-        if (v != null && !(Number.isInteger(v) && v >= 0)) {
-          sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: `${k} must be a non-negative integer` } });
-          return true;
-        }
-      }
-      const id = recordUsage(kb.getDb(), {
-        userId,
-        provider: body.provider,
-        model: body.model,
-        source: body.source,
-        endpoint: body.endpoint,
-        inputTokens: body.inputTokens,
-        outputTokens: body.outputTokens,
-        cacheReadTokens: body.cacheReadTokens,
-        cacheCreationTokens: body.cacheCreationTokens,
-        turns: body.turns,
-        stopReason: typeof body.stopReason === 'string' ? body.stopReason : null,
-        runs: body.runs,
-        requestId: body.requestId,
-      });
-      // Agent history: the Mac's Auto Task runs report here when they finish,
-      // so a 'auto-task' usage report is one 'autotask' run (best-effort; a
-      // repeated requestId is the same run).
-      if (id != null && body.source === 'auto-task') {
-        recordFinishedRun(userId, {
-          runId: typeof body.requestId === 'string' && body.requestId
-            ? `autotask:${body.requestId.slice(0, 100)}` : `autotask:${randomUUID()}`,
-          source: 'autotask', engine: 'cli', provider: body.provider, model: body.model,
-          status: 'ok', stopReason: typeof body.stopReason === 'string' ? body.stopReason : undefined,
-          inputTokens: body.inputTokens, outputTokens: body.outputTokens,
-          cacheReadTokens: body.cacheReadTokens, cacheCreationTokens: body.cacheCreationTokens,
-        });
-      }
-      sendJSON(res, 200, { ok: id != null, id });
-      return true;
-    }
-
     // Phase 4: planning + risk + code-sync ----------------------------
 
     if (req.method === 'POST' && url === '/kb/summarize') {
@@ -1348,51 +1167,10 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    if (req.method === 'GET' && url.startsWith('/kb/export-all')) {
-      const qIdx = url.indexOf('?');
-      const params = new URLSearchParams(qIdx >= 0 ? url.slice(qIdx + 1) : '');
-      const cursor = params.get('cursor');
-      const limit = Math.min(parseInt(params.get('limit') || '100', 10), 500);
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-      // Stop doing work if the client hangs up mid-stream — otherwise we'd
-      // keep pulling rows out of the DB and writing into a dead socket.
-      let aborted = false;
-      res.on('close', () => { aborted = true; });
-      let last = null;
-      try {
-        for await (const rec of iterateUserMeetings({ userId, cursor, limit })) {
-          if (aborted) break;
-          res.write(JSON.stringify(rec) + '\n');
-          last = rec.meeting.id;
-        }
-        if (!aborted) {
-          res.write(JSON.stringify({ done: true, next_cursor: last }) + '\n');
-          res.end();
-        }
-      } catch {
-        // Headers (200) are already on the wire, so we cannot change the
-        // status code. Emit a terminal error record the client can detect
-        // (done:false + error) and a resumable cursor, then end the stream.
-        // Re-throwing here would hit the outer handler's sendJSON() and
-        // crash with "headers already sent".
-        if (!aborted) {
-          try {
-            res.write(JSON.stringify({
-              done: false,
-              error: 'EXPORT_STREAM_FAILED',
-              next_cursor: last,
-            }) + '\n');
-          } catch { /* socket already gone */ }
-          try { res.end(); } catch { /* already ended */ }
-        }
-      }
-      return true;
-    }
-
     // ── Planning pipeline + plan CRUD ───────────────────────────
     // Lives in routes/planning.mjs. Handles generate-plan,
-    // analyze-risks, code-sync, /kb/plans, /kb/plan/:id, plan/save,
-    // plan/delete, plan-task/update, dispatch, generate-code.
+    // analyze-risks, code-sync, /kb/plan/:id, plan/save, plan-task assignment,
+    // dispatch, generate-code.
     if (await handlePlanningRoutes(req, res, { userId, url })) return true;
 
     // ── Issue scheduling overlay (gantt parity) ─────────────────
@@ -1491,35 +1269,6 @@ export async function handleKB(req, res) {
         sendJSON(res, 200, summary);
       } catch (err) {
         sendJSON(res, 500, { error: { code: 'OUTCOMES_REFRESH_FAILED', message: err.message || 'Refresh failed' } });
-      }
-      return true;
-    }
-
-    if (req.method === 'GET' && url.startsWith('/kb/outcomes/task/')) {
-      const id = decodeURIComponent(url.slice('/kb/outcomes/task/'.length).split('?')[0]);
-      if (!id || !SAFE_ID.test(id)) {
-        sendJSON(res, 400, { error: { code: 'INVALID_ID',
-          message: 'id must be 1–128 alphanumeric / _ / - characters' } });
-        return true;
-      }
-      sendJSON(res, 200, { outcomes: kb.listOutcomesForTask(userId, id) });
-      return true;
-    }
-
-    if (req.method === 'GET' && url === '/kb/outcomes/stats') {
-      sendJSON(res, 200, kb.outcomeStats(userId));
-      return true;
-    }
-
-    // Manually trigger a retry of all failed dispatches for this user.
-    if (req.method === 'POST' && url === '/kb/outcomes/retry-failed') {
-      const body = parseJSON(await readBody(req, 512 * 1024)) || {};
-      try {
-        const { retryFailedDispatches } = await import('../agents/dispatcher.mjs');
-        const result = await retryFailedDispatches(userId, body.config || {});
-        sendJSON(res, 200, result);
-      } catch (err) {
-        sendJSON(res, 500, { error: { code: 'RETRY_FAILED', message: err.message || 'Retry failed' } });
       }
       return true;
     }

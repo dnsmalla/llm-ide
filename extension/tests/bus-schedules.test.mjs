@@ -1,5 +1,4 @@
-// Desktop scheduler records and standing approvals for the command bus (plan
-// docs/superpowers/plans/2026-11-05-desktop-job-scheduler-approvals.md, spec docs/spec/command-bus.md section 9).
+// Desktop scheduler records and standing approvals for the command bus (spec docs/spec/command-bus.md section 9).
 // No network, no engine: sources.update runs on a fake.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';

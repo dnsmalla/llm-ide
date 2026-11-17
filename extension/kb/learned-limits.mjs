@@ -71,7 +71,7 @@ export function getLearned(db, userId, provider, model = '', now = new Date()) {
 }
 
 /** Requests and billable tokens this key spent since `since`, from the user's own ledger. */
-export function usageSince(db, userId, provider, model, since) {
+function usageSince(db, userId, provider, model, since) {
   const row = lazyPrepare(db, `
     SELECT COALESCE(SUM(runs), 0) AS requests,
            COALESCE(SUM(COALESCE(input_tokens,0) + COALESCE(output_tokens,0) + COALESCE(cache_creation_tokens,0)), 0) AS tokens

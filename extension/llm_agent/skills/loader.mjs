@@ -90,8 +90,8 @@ function validateSchema(schema) {
 
 // Options:
 //   requireBase — warn when _base.md is absent (default true). The global
-//     skill dir composes its base separately (composeGlobalPrompt) and has no
-//     _base.md by design, so it passes false to avoid a spurious warning.
+//     skill dir has no _base.md by design (its role file is prompt.md, which
+//     the loader ignores), so it passes false to avoid a spurious warning.
 //   ignore — filenames to skip entirely (not load, not warn on). The global
 //     dir keeps a non-skill role file (prompt.md) alongside its skills;
 //     scanning it as a skill would warn "missing frontmatter", noise that's

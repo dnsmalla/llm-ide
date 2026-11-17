@@ -164,14 +164,7 @@ function normalizeRoute(url) {
     .replace(/\/kb\/live\/[^/]+$/, '/kb/live/:id')
     .replace(/\/kb\/plan\/[^/]+/, '/kb/plan/:id')
     .replace(/\/kb\/plan-task\/[^/]+/, '/kb/plan-task/:id')
-    .replace(/\/kb\/meeting\/[^/]+/, '/kb/meeting/:id')
-    .replace(/\/kb\/entity\/[^/]+/, '/kb/entity/:id')
-    .replace(/\/kb\/review\/get\/[^/]+/, '/kb/review/get/:id')
     .replace(/\/kb\/review\/approve\/[^/]+/, '/kb/review/approve/:id')
-    .replace(/\/kb\/review\/reject\/[^/]+/, '/kb/review/reject/:id')
-    .replace(/\/kb\/review\/delete\/[^/]+/, '/kb/review/delete/:id')
-    .replace(/\/kb\/outcomes\/task\/[^/]+/, '/kb/outcomes/task/:id')
-    .replace(/\/kb\/agent\/feedback\/by-task\/[^/]+/, '/kb/agent/feedback/by-task/:id')
     .replace(/\/kb\/agent\/runs\/[^/]+/, '/kb/agent/runs/:id');
   // Collapse any route not matching a known prefix to 'other' so clients
   // cannot inflate metric cardinality by sending arbitrary paths.

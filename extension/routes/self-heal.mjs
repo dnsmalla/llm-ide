@@ -1,5 +1,4 @@
-// Self-Heal routes (plan A: docs/superpowers/plans/2026-11-07-self-heal-a-incidents.md; plan B, the fix runs:
-// docs/superpowers/plans/2026-11-07-self-heal-b-fix-loop.md; contract schema/http/self-heal.schema.json).
+// Self-Heal routes (plan A: incidents; plan B, the fix runs; contract schema/http/self-heal.schema.json).
 // server.mjs imports this module only while config.selfHeal is on (LLMIDE_SELF_HEAL=1, which the Tauri host passes
 // only in a debug build). Otherwise every path answers 404 feature_disabled before this module loads. Every route
 // needs the JWT AND the bus host proof, so only the desktop UI of the core the host spawned reaches the store.
@@ -56,7 +55,7 @@ export function activeRun(userId, now = Date.now()) {
 
 // What a fix run itself produces (the Mac's SuppressionScope.selfHealRun): the core's own log and server errors. A
 // crash or a Chat or Loop error cannot come from this run (it is not a Loop run) and is still recorded.
-export const suppressedDuringRun = (report) => report?.source === 'log' || report?.source === 'server';
+const suppressedDuringRun = (report) => report?.source === 'log' || report?.source === 'server';
 
 /** The outcome body, validated; null when anything is malformed. The proposal branch must be this run's. */
 function readOutcome(body, runId) {

@@ -24,8 +24,8 @@ const MAX_RECENT_QUESTIONS = 5;
 const MAX_PLAN_CHARS = 4000;
 
 // sanitizePersonaSuffix and personaConfigBlock are imported from
-// prompt-utils.mjs — single source of truth shared with the /kb/agent/ask
-// route handler so injection-pattern fixes propagate everywhere.
+// prompt-utils.mjs — single source of truth shared with the providers' prompt
+// path so injection-pattern fixes propagate everywhere.
 
 /**
  * Draft one question (or decline).

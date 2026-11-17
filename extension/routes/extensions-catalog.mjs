@@ -76,7 +76,7 @@ const STATUS = {
 };
 
 /** The legacy list that already holds this kind and name (its switch would be shared, gate.mjs), or null. */
-export function legacyNameTaken(userId, kind, name) {
+function legacyNameTaken(userId, kind, name) {
   if (kind === 'plugin' && loadedPlugins().some((p) => p.name === name)) return `a plugin named '${name}' is already in Plugins; remove it there first`;
   if (kind === 'mcp' && listMcpPluginsWithState(userId).plugins.some((p) => p.id === name)) return `an MCP server '${name}' is already in MCP Plugins; remove it there first`;
   if (kind === 'llm-source' && listSources().some((s) => s.id === name)) return `an LLM source '${name}' is already in LLM Sources; remove it there first`;

@@ -69,7 +69,7 @@ const defaultFreeBytes = (dir) => {
 const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
 /** The old Mac app's data directory for this machine, or null off macOS. */
-export function defaultLegacyDir(env = process.env, platform = process.platform) {
+function defaultLegacyDir(env = process.env, platform = process.platform) {
   const override = str(env.LLMIDE_LEGACY_DATA_DIR);
   if (override) return path.resolve(override);
   if (platform !== 'darwin') return null;
@@ -78,7 +78,7 @@ export function defaultLegacyDir(env = process.env, platform = process.platform)
 }
 
 /** The desktop core data directory (`<app data>/core`), matching fsutil::data_dir_for. */
-export function defaultTargetDir(env = process.env, platform = process.platform) {
+function defaultTargetDir(env = process.env, platform = process.platform) {
   const override = str(env.LLMIDE_DESKTOP_DATA_DIR);
   if (override) return path.join(path.resolve(override), 'core');
   if (platform === 'darwin') {
@@ -450,7 +450,7 @@ function inspectSide(dir, dbName) {
 }
 
 /** Read-only inspection. Never writes, never creates sidecars on a quiescent DB. */
-export function inspectDatabase(file) {
+function inspectDatabase(file) {
   const out = { exists: false, valid: false, empty: true, sizeBytes: 0, tableCount: 0, totalRows: 0, tables: {}, migration: null, reason: 'missing' };
   if (!file || !fs.existsSync(file)) return out;
   out.exists = true;

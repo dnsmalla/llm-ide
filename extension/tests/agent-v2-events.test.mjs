@@ -2,9 +2,7 @@
 //
 // mapSdkMessage is pure — no SDK objects, no DB, no network — so this suite
 // is fully hermetic: it drives fabricated SDK messages and pins the wire
-// event shapes the Mac UI depends on. The spike suite
-// (agent-sdk-spike.test.mjs) keeps exercising the same mapper through its
-// re-export from spike-engine.mjs.
+// event shapes the Mac UI depends on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 

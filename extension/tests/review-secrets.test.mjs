@@ -63,20 +63,6 @@ const submit = (config) => call('POST', '/kb/review/submit', {
   payload: { planId: 'plan1', target: 'github', config },
 });
 
-test('submit: the token never lands in the DB or any review response', async () => {
-  reset();
-  const r = await submit({ repo: 'a/b', token: TOKEN });
-  assert.equal(r.status, 200);
-  assert.equal(r.body.guardrails.passed, true, 'a supplied credential still satisfies the guardrail');
-  const id = r.body.id;
-  const raw = db.getDb().prepare('SELECT payload FROM review_items WHERE id = ?').get(id).payload;
-  assert.ok(!raw.includes(TOKEN), 'token persisted in review_items.payload');
-  assert.ok(!JSON.stringify(r.body).includes(TOKEN));
-  const got = await call('GET', `/kb/review/get/${id}`);
-  assert.ok(!JSON.stringify(got.body).includes(TOKEN));
-  assert.equal(got.body.payload.config.repo, 'a/b');
-});
-
 test('submit: vault credential satisfies the dispatch guardrail with no token sent', async () => {
   reset();
   setSecret(db.getDb(), U, 'github.token', TOKEN);
@@ -195,16 +181,6 @@ test('held secrets expire after the TTL and are capped per user', async () => {
   assert.ok(m.takeHeldSecrets('u-cap', 'r5', t0).config);
   assert.ok(m.takeHeldSecrets('u-cap', `r${m.HELD_MAX_PER_USER + 4}`, t0).config);
   assert.ok(m.takeHeldSecrets('u-other', 'keep', t0).config);
-});
-
-test('held secrets: dropped on review delete', async () => {
-  reset();
-  const m = await import('../server/review-secrets.mjs');
-  const r = await submit({ repo: 'a/b', token: TOKEN });
-  assert.ok(m.takeHeldSecrets(U, r.body.id).config, 'held after submit');
-  const d = await call('POST', '/kb/review/delete', { id: r.body.id });
-  assert.equal(d.status, 200);
-  assert.deepEqual(m.takeHeldSecrets(U, r.body.id), {});
 });
 
 test('held secrets: dropped after a successful /kb/dispatch of an approved review', async () => {

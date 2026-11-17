@@ -218,13 +218,6 @@ export function listPlans(userId, limit = 50) {
   }));
 }
 
-export function deletePlan(userId, planId) {
-  requireUser(userId);
-  const db = getDb();
-  db.prepare('DELETE FROM plans WHERE id = ? AND user_id = ?')
-    .run(String(planId), userId);
-}
-
 // ── Task-level CRUD ──────────────────────────────────────────────
 
 export function updateTask(userId, taskId, patch) {

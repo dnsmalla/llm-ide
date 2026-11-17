@@ -1,5 +1,5 @@
-// Shared prompt-safety utilities used by both the meeting-agent question
-// loop (agent-prompt.mjs) and the /kb/agent/ask route handler.
+// Shared prompt-safety utilities used by the meeting-agent question loop
+// (agent-prompt.mjs) and the provider prompt path.
 //
 // Keeping these in one place means any future injection-pattern fix is
 // applied consistently everywhere persona suffixes appear in prompts.

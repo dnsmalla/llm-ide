@@ -24,7 +24,7 @@ export const gitEnv = () => minimalCliEnv({
 });
 
 /** argv for `git <args>` with the hardening prefix; diff-producing subcommands also get --no-ext-diff --no-textconv. */
-export function gitArgv(args) {
+function gitArgv(args) {
   const [sub, ...rest] = args;
   const diffy = sub === 'show' || sub === 'diff' || sub === 'log';
   return [...GIT_HARDENING_ARGS, sub, ...(diffy ? ['--no-ext-diff', '--no-textconv'] : []), ...rest];

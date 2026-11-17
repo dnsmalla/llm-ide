@@ -108,7 +108,7 @@ const loop = (u, body, deps) => {
 test('the dangerous routes carry the class that gates them', () => {
   const cls = (m, p) => routeAuthorityFor(m, p)?.cls;
   assert.equal(cls('POST', '/kb/loop/agent-run'), 'model.exec');
-  assert.equal(cls('POST', '/kb/providers/turn'), 'model.exec');
+  assert.equal(cls('POST', '/kb/loop/agent-run'), 'model.exec');
   assert.equal(cls('POST', '/kb/agent/dispatch'), 'model.exec');
   assert.equal(cls('POST', '/kb/project/install-skills'), 'install');
   assert.equal(cls('POST', '/kb/agent-sdk/update'), 'install');
@@ -116,13 +116,11 @@ test('the dangerous routes carry the class that gates them', () => {
   assert.equal(cls('DELETE', '/auth/me/repos'), 'fs.write');
   assert.equal(cls('POST', '/kb/complete'), 'model.read');
   assert.equal(cls('POST', '/agent/v2/stream'), 'model.ask');
-  assert.equal(cls('POST', '/kb/agent/ask'), 'model.ask');
   assert.equal(cls('POST', '/admin/invites'), 'admin');
-  assert.equal(cls('POST', '/kb/ingest-scip'), 'fs.write');
   assert.equal(cls('POST', '/auth/me/plugins/hook-trust'), 'install');
   assert.equal(cls('POST', '/auth/me/mcp-plugins/toggle'), 'install');
   assert.equal(cls('PUT', '/auth/me/workspace-trust'), 'install');
-  assert.equal(cls('POST', '/kb/outcomes/retry-failed'), 'external.write');
+  assert.equal(cls('POST', '/kb/notify/slack'), 'external.write');
   assert.equal(cls('POST', '/kb/summarize'), 'model.read');
   assert.equal(cls('GET', '/kb/loop/agent-run'), undefined, 'only the declared method');
   assert.ok(ROUTE_POLICY.length > 300);

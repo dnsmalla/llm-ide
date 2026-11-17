@@ -5,6 +5,23 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### API v149: removed endpoints with no caller
+
+- **Removed 31 HTTP endpoints that no client in the repo called** (`SERVER_API_VERSION` 148 → 149): `POST /kb/ingest-code-graph`,
+  `POST /kb/ingest-scip`, `GET|POST /kb/agent/personas`, `PUT /kb/agent/personas/active`, `PUT|DELETE /kb/agent/personas/:id`,
+  `GET /kb/agent/feedback/by-task`, `GET /kb/agent/generation-library`, `POST /kb/agent/ask`, `GET|DELETE /kb/agent/ask/history`,
+  `GET /kb/review/get/:id`, `POST /kb/review/reject`, `DELETE|POST /kb/review/delete`,
+  `GET /kb/plans`, `DELETE|POST /kb/plan/delete`, `PATCH|POST /kb/plan-task/update`, `GET /kb/outcomes/stats`,
+  `GET /kb/outcomes/task/:id`, `POST /kb/outcomes/retry-failed`, `GET /kb/index/status`, `POST /kb/index/reconcile`,
+  `GET /kb/system/status`, `GET /kb/export-all`, `GET /kb/meeting/:id`, `GET /kb/entity/:id`, `DELETE|POST /kb/delete`,
+  `POST /kb/connect-tickets-json`, `POST /kb/usage/record`, `POST /kb/custom-providers`, `POST /kb/providers/turn`,
+  `POST /code-assist/decision`, `POST /agent-sdk/spike`. They now answer the generic unknown-route 404. `POST /code-assist`
+  still answers 410. Kept: `GET|PUT /kb/agent/persona`, `/kb/agent/feedback`, `/kb/agent/feedback/stats`, `/kb/index/scan|search|notes`,
+  the other `/kb/usage/*` routes, `/kb/archive-receipts`.
+- The `code_graph_3d` feature key stays (desktop toggle and `/health` features) but owns no route now.
+- Removed the dead Agent SDK spike engine (`llm_agent/sdk/spike-engine.mjs`), the SCIP connector
+  (`connectors/scip.mjs`, `connectors/scip-scanner.mjs`) and the unused `llm_agent/global/compose-prompt.mjs`.
+
 ### SSH server mode (desktop)
 
 - **Connect to your own Linux server over SSH**, like VS Code Remote-SSH: the desktop installs the core

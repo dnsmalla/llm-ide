@@ -2,7 +2,7 @@
 // turn stream, the approval-decision endpoint, and session delete.
 //
 // Hermetic: scratch DB (applyMigrations runs on first getDb), req/res
-// doubles copied from tests/agent-sdk-spike.test.mjs, and a fake turn
+// doubles, and a fake turn
 // runner injected through the `deps` seam — no SDK subprocess, no network,
 // no server boot. The engine itself is covered by agent-v2-engine.test.mjs;
 // these tests pin the ROUTE contract: pre-SSE validation, SSE framing with
@@ -47,7 +47,7 @@ const { registerDecision, abortDecisionsForSession } = await import('../llm_agen
 const { agentSdkHomeFor } = await import('../llm_agent/sdk/engine.mjs');
 const { handleAgentV2Routes, freshTurnHistory } = await import('../routes/agent-v2.mjs');
 
-// --- req/res doubles (from agent-sdk-spike.test.mjs; makeReq additionally
+// --- req/res doubles (makeReq additionally
 // records close handlers so the abort test can drop the "connection"). -----
 
 function makeReq({ method, url, body, user }) {
@@ -1164,7 +1164,7 @@ test('session delete: also removes the chat\'s session-memory rows', async () =>
 test('non-/agent/v2 URLs fall through untouched (returns false)', async () => {
   const res = makeRes();
   assert.equal(
-    await handleAgentV2Routes(makeReq({ method: 'POST', url: '/kb/agent/ask', body: {}, user: { id: 'u' } }), res),
+    await handleAgentV2Routes(makeReq({ method: 'POST', url: '/kb/not-an-agent-route', body: {}, user: { id: 'u' } }), res),
     false,
   );
   assert.equal(res._body, '');

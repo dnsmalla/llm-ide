@@ -13,7 +13,7 @@ test('buildHealthPayload exposes schema version and full endpoint capability lis
     claude: { ok: true },
     migration: { current: 7 },
     apiVersion: 19,
-    endpoints: ['/generate-notes', '/kb/system/status'],
+    endpoints: ['/generate-notes', '/kb/stats'],
     serverStartedAt: startedAt,
   });
 
@@ -21,7 +21,7 @@ test('buildHealthPayload exposes schema version and full endpoint capability lis
   assert.equal(payload.apiVersion, 19);
   assert.equal(payload.schemaVersion, 7);
   assert.ok(payload.uptimeSec >= 4);
-  assert.deepEqual(payload.endpoints, ['/generate-notes', '/kb/system/status']);
+  assert.deepEqual(payload.endpoints, ['/generate-notes', '/kb/stats']);
   // skillsAvailable omitted here: undefined !== false, so it reads as available
   // (a caller unaware of the check, e.g. an older test, still gets 'ok').
   assert.deepEqual(payload.checks, { db: true, claude: true, claudeError: undefined, skills: true, skillsError: undefined });
@@ -65,9 +65,9 @@ test('buildHealthPayload reports degraded dependencies without dropping the capa
 });
 
 test('buildNotFoundDetails includes restart hint and advertised endpoints', () => {
-  const details = buildNotFoundDetails(['/generate-notes', '/kb/system/status']);
+  const details = buildNotFoundDetails(['/generate-notes', '/kb/stats']);
   assert.match(details.hint, /Restart node server\.mjs/i);
-  assert.deepEqual(details.endpoints, ['/generate-notes', '/kb/system/status']);
+  assert.deepEqual(details.endpoints, ['/generate-notes', '/kb/stats']);
 });
 
 test('buildHealthPayload reports the enabled feature set (null = every feature)', () => {

@@ -1,4 +1,4 @@
-// Engine interface for bus tasks (docs/superpowers/plans/2026-10-31-auto-tasks-audit.md section 4, G1):
+// Engine interface for bus tasks (G1):
 //
 //   runTask({ userId, engine: { provider, model?, credential? }, prompt, cwd, mode, signal, spawn, deps })
 //     -> { text, usage?, stopReason, engine }

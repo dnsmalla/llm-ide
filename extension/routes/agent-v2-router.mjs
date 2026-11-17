@@ -190,7 +190,7 @@ export async function runAdapterTurn(args) {
 const EMPTY_USED = { in: 0, out: 0, cacheWrite: 0, cacheRead: 0, billable: 0 };
 
 /** The wire shape of a route: flat, with the two switches the client needs to draw its control. */
-export function routeWire(route, chatSessionId, env = process.env) {
+function routeWire(route, chatSessionId, env = process.env) {
   const base = route ?? {
     chatSessionId, provider: '', model: '', pinned: false, pinnedBy: 'user', tokenLimit: null, used: EMPTY_USED,
     remaining: null, stickyUntil: null, warm: {}, switchSeq: 0, handoffUpTo: null, pending: null, updatedAt: null,

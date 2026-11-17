@@ -1,4 +1,4 @@
-// POST /code-assist and /code-assist/decision answer 410 for one release (agent-kit K1 P6 T6.9): the
+// POST /code-assist answers 410 for one release (agent-kit K1 P6 T6.9): the
 // classic engine is deleted, an old Mac app gets a clear "update the app" error.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,7 +22,7 @@ function res() {
   return { statusCode: 200, _b: '', headers: {}, writeHead(c, h) { this.statusCode = c; Object.assign(this.headers, h || {}); }, setHeader() {}, write(c) { this._b += c; return true; }, end(c) { if (c) this._b += c; }, on() { return this; }, once() { return this; } };
 }
 
-for (const [url, use] of [['/code-assist', '/agent/v2/stream'], ['/code-assist/decision', '/agent/v2/decision']]) {
+for (const [url, use] of [['/code-assist', '/agent/v2/stream']]) {
   test(`POST ${url} answers 410 ENDPOINT_REMOVED, names the replacement, and does not read the body`, async () => {
     const r = req(url, { message: 'hi', requestId: 'x' });
     const out = res();
@@ -32,7 +32,7 @@ for (const [url, use] of [['/code-assist', '/agent/v2/stream'], ['/code-assist/d
     assert.equal(body.error.code, 'ENDPOINT_REMOVED');
     assert.match(body.error.message, /Update the app/);
     assert.deepEqual(body.error.details, { use, removedInApiVersion: 92 });
-    assert.deepEqual(body, codeAssistRemovedBody(url));
+    assert.deepEqual(body, codeAssistRemovedBody());
     assert.equal(r.bodyRead, false, 'a removed route never reads (or buffers) the body');
   });
 }
@@ -43,7 +43,7 @@ test('the 410 is cheap: /code-assist is no longer in the agent-turn rate bucket'
 });
 
 test('a query string does not turn the 410 into a 404: /code-assist?x=1 and /chat?x=1 answer 410', async () => {
-  for (const [url, use] of [['/code-assist?x=1', '/agent/v2/stream'], ['/code-assist/decision?x=1', '/agent/v2/decision']]) {
+  for (const [url, use] of [['/code-assist?x=1', '/agent/v2/stream']]) {
     const out = res();
     assert.equal(await handleAIRoutes(req(url, { message: 'hi' }), out), true, url);
     assert.equal(out.statusCode, 410, url);

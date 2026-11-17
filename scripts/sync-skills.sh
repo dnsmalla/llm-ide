@@ -45,7 +45,7 @@ echo "central skills repo: $central"
 # Domain tools → internal/skills (full mirror).
 "$central/scripts/sync-agent-tools.sh" "$TARGET"
 # Always-on global tools → global/ (copies the .md defs; the app-local
-# system prompt.md and compose-prompt.mjs in that dir are preserved).
+# prompt.md in that dir is preserved).
 "$central/scripts/sync-agent-globals.sh" "$PWD/extension/llm_agent/global"
 # Record the synced central commit for reproducible builds / drift checks.
 git -C "$central" rev-parse HEAD > "$REPO_ROOT/.skills-lock" 2>/dev/null || true

@@ -8,14 +8,13 @@
 //   POST /kb/providers/catalog/models       { id, refresh? }      (live list or static, with capability flags)
 //   GET  /kb/providers/settings             { toolsEnabled, fallbackEnabled, fallbackOrder, toolOverrides }
 //   PUT  /kb/providers/settings             a patch of the above
-//   POST /kb/providers/turn                 SSE: a tool-capable turn on a connected non-Anthropic model
 //
 // Additive: the existing /kb/providers/verify and /kb/providers/models are
 // untouched. A key is accepted in a request body once, goes straight to the
 // per-user vault and is never returned, logged or put in an error.
 
 import { getDb } from '../kb/db.mjs';
-import { sendJSON, readBody, onClientDisconnect } from '../core/utils.mjs';
+import { sendJSON, readBody } from '../core/utils.mjs';
 import { catalogEntries } from '../server/provider-catalog.mjs';
 import {
   listConnections, getConnection, connectProvider, disconnectProvider, getSettings, updateSettings, kindOf,
@@ -23,13 +22,8 @@ import {
 import { getSecret } from '../server/vault.mjs';
 import { listCustomProviders } from '../server/custom-providers.mjs';
 import { listConnectionModels, testConnection } from '../providers/provider-models.mjs';
-import { authorizeAction, projectScopeRefusal } from '../server/route-authority.mjs';
-import { runProviderTurn, ProviderTurnError } from '../llm_agent/adapter/provider-turn.mjs';
 import { migrateLegacyProviderKeys, migrationView, legacyKeyFor } from '../providers/legacy-key-migration.mjs';
-import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
-
-const log = logger.child({ component: 'provider-catalog-route' });
 const STATUS_FOR = { VALIDATION_FAILED: 400, NOT_FOUND: 404, LIMIT: 409 };
 
 function err(res, status, code, message) {
@@ -141,44 +135,5 @@ export async function handleProviderCatalog(req, res, { userId, url }) {
     }
     return true;
   }
-  if (m === 'POST' && path === '/kb/providers/turn') return handleTurn(req, res, userId, db);
   return false;
-}
-
-async function handleTurn(req, res, userId, db) {
-  const b = await body(req, res, 1024 * 1024); if (!b) return true;
-  // R-020 Q1: a hub turn names a known project; the project grant may only narrow the team grant.
-  const projectId = typeof b.projectId === 'string' && b.projectId ? b.projectId : null;
-  const scopeRefusal = projectScopeRefusal(db, userId, projectId);
-  if (scopeRefusal) { err(res, scopeRefusal.status, scopeRefusal.code, scopeRefusal.message); return true; }
-  if (projectId) {
-    const decision = authorizeAction(db, userId, 'model.exec', { projectId, req });
-    if (!decision.ok) { err(res, decision.status, decision.code, decision.message); return true; }
-  }
-  const ac = new AbortController();
-  onClientDisconnect(req, res, () => ac.abort());
-  let streaming = false;
-  const onEvent = (ev) => {
-    if (res.writableEnded || ac.signal.aborted) return;
-    if (!streaming) {
-      streaming = true;
-      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-    }
-    res.write(`data: ${JSON.stringify(ev)}\n\n`);
-  };
-  try {
-    await runProviderTurn({
-      userId, provider: String(b.provider || ''), model: String(b.model || ''), message: b.message, history: b.history,
-      mode: typeof b.mode === 'string' ? b.mode : 'ask',
-      agentContext: b.agentContext && typeof b.agentContext === 'object' ? b.agentContext : {},
-      onEvent, signal: ac.signal, deps: { db },
-    });
-  } catch (e) {
-    if (e instanceof ProviderTurnError && !streaming) { err(res, e.status, e.code, e.message); return true; }
-    log.error('provider_turn_failed', { code: e?.code, message: redactWithKey(String(e?.message || e), null).slice(0, 200) });
-    if (!streaming) { err(res, 500, 'INTERNAL', 'The provider turn failed'); return true; }
-    onEvent({ type: 'error', code: 'INTERNAL', message: 'The provider turn failed', retryable: false });
-  }
-  if (!res.writableEnded) res.end();
-  return true;
 }

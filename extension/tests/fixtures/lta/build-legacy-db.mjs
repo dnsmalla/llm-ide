@@ -1,5 +1,5 @@
 // Synthetic "legacy" server data for the live-then-archive migration tests
-// (docs/superpowers/plans/2026-10-29-live-then-archive.md, T0.4).
+// (live-then-archive plan, T0.4).
 //
 // Seeds a DB that the caller already opened through the REAL migrations
 // (kb/db.mjs getDb) with the shapes the legacy server wrote: `meetings` +

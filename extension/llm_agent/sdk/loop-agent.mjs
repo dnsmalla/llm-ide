@@ -267,7 +267,7 @@ export const LOOP_GREP_SECRET_EXCLUSIONS = Object.freeze([
 ]);
 
 /** Grep's input with the secret exclusions appended to its `glob`. */
-export function withSecretExclusions(input) {
+function withSecretExclusions(input) {
   const own = typeof input?.glob === 'string' ? input.glob.trim() : '';
   return { ...(input || {}), glob: [own, ...LOOP_GREP_SECRET_EXCLUSIONS].filter(Boolean).join(' ') };
 }

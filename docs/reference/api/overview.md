@@ -12,7 +12,7 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 - **Auth** — `Authorization: Bearer <access_token>` for everything except the public routes below
 - **Versioning** — `SERVER_API_VERSION` reported by `GET /health`; the client compares against its `REQUIRED_ENDPOINTS` allowlist and surfaces a "restart server" banner on mismatch. The bump rule is in `schema/http/SCHEMA.md`.
 - **Error envelope** — `{ "error": { "code": "...", "message": "...", "details": {} } }`
-- **Feature set** — `LLMIDE_FEATURES` (comma-separated enabled feature keys, the Mac app's build features; unset/empty = all) prunes feature-owned route groups. See [Feature-pruned routes](#feature-pruned-routes)
+- **Feature set** — `LLMIDE_FEATURES` (comma-separated enabled feature keys, the retired Mac app's build features; unset/empty = all) prunes feature-owned route groups. See [Feature-pruned routes](#feature-pruned-routes)
 
 ## Error codes
 
@@ -66,9 +66,7 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/ingest` | Add a meeting and its entities |
-| `POST` | `/kb/delete` | Delete by id |
 | `GET` | `/kb/search?q=…` | Unified search across all KB types |
-| `GET` | `/kb/meeting/:id` | Full meeting + entities |
 | `GET` | `/kb/stats` | Counts by table |
 
 ### Connectors
@@ -78,7 +76,6 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 | `POST` | `/kb/connect-git` | Index a local repo into `sources` |
 | `POST` | `/kb/connect-github-issues` | Pull issues from GitHub into `sources` (up to 20 pages of 100 per run; a run that stops early deletes nothing and may answer `retryAfter`) |
 | `GET` | `/kb/issues?repo=…&state=…&offset=…&limit=…` | One page of indexed issues: `issues`, `total`, `hasMore`, `nextOffset` (API 105, `docs/spec/api-server.md` 7j) |
-| `POST` | `/kb/connect-tickets-json` | Bulk import tickets from JSON |
 | `POST` | `/kb/connect-qa` | Index QA pairs |
 
 ### Planning
@@ -88,7 +85,6 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 | `POST` | `/kb/generate-plan` | KB-grounded plan from a meeting or query |
 | `POST` | `/kb/analyze-risks` | Annotate plan tasks with risk scores |
 | `POST` | `/kb/code-sync` | FTS5 lookup of touched files per task |
-| `GET` | `/kb/plans` | List saved plans |
 | `GET` | `/kb/plan-task/assignments` | The caller's plan-task assignments across projects (API 130) |
 | `POST` | `/kb/plan-task/assign` | Assign/reassign a task to a project member (omitted `userId` = me) |
 | `POST` | `/kb/plan-task/unassign` | Clear a task's assignment |
@@ -108,8 +104,6 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 | `POST` | `/kb/review/submit` | Add an item to the review queue |
 | `POST` | `/kb/review/list` | List queue, optionally filtered |
 | `POST` | `/kb/review/approve` | Approve and dispatch |
-| `POST` | `/kb/review/reject` | Reject with a reason |
-| `POST` | `/kb/review/delete` | Drop an item |
 
 Notes (API v75+):
 
@@ -122,8 +116,6 @@ Notes (API v75+):
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/outcomes/refresh` | Trigger an outcome poll |
-| `GET` | `/kb/outcomes/task/:id` | Outcomes for one task |
-| `GET` | `/kb/outcomes/stats` | Aggregate outcome stats |
 
 ### Live session
 
@@ -148,7 +140,7 @@ Notes (API v75+):
 
 ## Feature-pruned routes
 
-The macOS app can be built without some features and starts its server with the same list in `LLMIDE_FEATURES` (for example `agent_chat,file_explorer,terminal`). The server then never imports a disabled feature's route module, and that module's paths answer:
+The desktop app can run without some features and starts its core with the same list in `LLMIDE_FEATURES` (for example `agent_chat,file_explorer,terminal`). The server then never imports a disabled feature's route module, and that module's paths answer:
 
 ```json
 { "error": "feature_disabled", "feature": "auto_tasks" }
@@ -160,7 +152,6 @@ with status `404`. The body is deliberately not the usual error envelope, so a c
 |---|---|
 | `auto_tasks` | `/kb/loop/*` (`/kb/loop/agent-run`) |
 | `gantt_issues` | `/kb/issue-schedule` |
-| `code_graph_3d` | `/kb/ingest-code-graph` |
 
 `GET /health` reports the applied set as `features` (`null` = every feature, otherwise the sorted enabled keys) and leaves the disabled paths out of `endpoints`. The Chrome extension's `REQUIRED_ENDPOINTS` are all always-on, so any feature set satisfies it. `doc_gen` prunes `/generate-doc` only (its module is `routes/doc-gen.mjs`); `/generate-docx` is always on because the Chrome extension's ExportMenu calls it. Unknown keys are ignored with one warning line. `code_graph_3d`, `gantt_issues` and `doc_gen` are dropped when `file_explorer` is not enabled, the same rule the desktop build applies.
 
@@ -189,7 +180,7 @@ Profiles are tuned per workload. Defaults:
 | `llmHeavy` | `/generate-*`, `/chat` | 3 burst / 30 s |
 | `dispatch` | `/kb/dispatch`, `/kb/review/approve` | 4 burst / 10 s |
 | `outcomePoll` | `/kb/outcomes/refresh` | 1 / 30 s |
-| `kbWrite` | `/kb/ingest`, `/kb/delete`, `/kb/live/*` | 20 / 10 s |
+| `kbWrite` | `/kb/ingest`, `/kb/live/*` | 20 / 10 s |
 | `authPublic` | `/auth/register`, `/auth/login` | 5 / 60 s per IP |
 
 `429` responses include `Retry-After` in seconds.

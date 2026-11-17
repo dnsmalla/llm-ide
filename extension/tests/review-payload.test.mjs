@@ -160,22 +160,6 @@ test('submit: only top-level config credentials are held for approval; nested on
 
 // ---------------------------------------------------------------- read
 
-test('read: a row stored with nested credentials is redacted on GET and never echoed', async () => {
-  reset();
-  const item = db.submitReview(U, {
-    kind: 'dispatch', planId: 'plan1', title: 'legacy',
-    payload: { planId: 'plan1', target: 'github', config: { repo: 'a/b', nested: { apiKey: 'VAL_READ_KEY' } }, items: [{ title: 'x', headers: { Authorization: 'VAL_READ_AUTHZ' } }] },
-    guardrails: {},
-  });
-  const got = await call('GET', `/kb/review/get/${item.id}`);
-  assert.equal(got.status, 200);
-  assert.ok(!JSON.stringify(got.body).includes('VAL_READ_KEY'));
-  assert.ok(!JSON.stringify(got.body).includes('VAL_READ_AUTHZ'));
-  assert.equal(got.body.payload.config.repo, 'a/b');
-  // Still in the raw row (the read path redacts, the migration scrubs storage).
-  assert.ok(rawPayload(item.id).payload.includes('VAL_READ_KEY'));
-});
-
 // ---------------------------------------------------------------- migration 0045
 
 test('migration 0045 scrubs credentials at every depth from stored rows, idempotently', () => {

@@ -1,5 +1,4 @@
-// Update orchestrator for Claude-imported plugins (spec:
-// docs/superpowers/specs/2026-10-06-plugin-update-claude-codex-design.md).
+// Update orchestrator for Claude-imported plugins.
 //
 // Detection has two tiers: `reimport` (Claude Code's install differs from the
 // version llm-ide copied — exact and offline) and `upstream` (the marketplace

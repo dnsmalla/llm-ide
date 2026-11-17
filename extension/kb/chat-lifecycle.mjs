@@ -49,7 +49,7 @@ export function archiveHash(messages) {
  * The same digest as archiveHash, computed by streaming the chat's rows in
  * order, so a chat of any length is hashed without loading it whole.
  */
-export function archiveDigest(db, userId, sessionId) {
+function archiveDigest(db, userId, sessionId) {
   const h = crypto.createHash('sha256');
   let count = 0;
   const stmt = lazyPrepare(db, `
@@ -213,7 +213,7 @@ export function archiveBegin(userId, sessionId, { after, limit, fence } = {}) {
 }
 
 /** The receipt a server commit or a Mac-verified file left for this chat, or null. */
-export function getArchiveReceipt(userId, chatSessionId) {
+function getArchiveReceipt(userId, chatSessionId) {
   requireUser(userId);
   return lazyPrepare(getDb(),
     'SELECT hash, message_count, source, committed_at FROM archive_receipts WHERE owner_user_id = ? AND chat_session_id = ?',
@@ -327,7 +327,7 @@ export function receiptIsStale(userId, chatSessionId) {
  * row, or a session-memory fact (any of them written after a delete was requested
  * means the chat is live again). Epoch milliseconds, 0 when nothing exists.
  */
-export function chatLastActivityMs(userId, chatSessionId) {
+function chatLastActivityMs(userId, chatSessionId) {
   requireUser(userId);
   const db = getDb();
   const agent = lazyPrepare(db,

@@ -101,28 +101,6 @@ export async function handleReviewRoutes(req, res, ctx) {
     return true;
   }
 
-  if (req.method === 'GET' && url.startsWith('/kb/review/get/')) {
-    const id = decodeURIComponent(url.slice('/kb/review/get/'.length).split('?')[0]);
-    const item = kb.getReview(userId, id);
-    if (!item) { sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } }); return true; }
-    sendJSON(res, 200, redactReviewItem(item));
-    return true;
-  }
-
-  if (req.method === 'POST' && url === '/kb/review/reject') {
-    const body = parseJSON(await readBody(req));
-    if (!body?.id) { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing id' } }); return true; }
-    const updated = kb.setReviewStatus(userId, body.id, {
-      status: 'rejected',
-      reviewerNote: body.note,
-      expectedStatus: 'pending',
-    });
-    if (!updated) { sendNotPending(res, userId, body.id); return true; }
-    dropHeldSecrets(userId, body.id);
-    sendJSON(res, 200, redactReviewItem(updated));
-    return true;
-  }
-
   // POST /kb/review/approve — the big one. Re-runs guardrails,
   // claims the item via compare-and-swap, executes the action, and
   // writes the result back. Compare-and-swap on `pending` so two
@@ -262,15 +240,6 @@ export async function handleReviewRoutes(req, res, ctx) {
       const cur = finished || kb.getReview(userId, body.id);
       sendJSON(res, 500, { error: { code: 'REVIEW_EXECUTION_FAILED', message }, item: redactReviewItem(cur) });
     }
-    return true;
-  }
-
-  if ((req.method === 'DELETE' || req.method === 'POST') && url === '/kb/review/delete') {
-    const body = parseJSON(await readBody(req));
-    if (!body?.id) { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing id' } }); return true; }
-    kb.deleteReview(userId, body.id);
-    dropHeldSecrets(userId, body.id);
-    sendJSON(res, 200, { ok: true });
     return true;
   }
 

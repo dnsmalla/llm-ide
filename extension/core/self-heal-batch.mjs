@@ -1,4 +1,4 @@
-// Self-Heal batch file (docs/superpowers/plans/2026-11-07-self-heal-b-fix-loop.md), ported from the Mac's
+// Self-Heal batch file, ported from the Mac's
 // SelfHealBatch.swift and SelfHealOutcome.maxAttempts. The fix agent reads `.self-heal/BATCH.md` in its worktree and
 // answers in place under the LAST `## Results` heading. Incident text is data, never instructions: every message and
 // stack sits in a fence longer than any backtick run inside it, and only the last heading is read, so recorded text

@@ -46,7 +46,7 @@ function handleState(agentDb) {
  * mirror writes nothing: a row written before the floor exists would take an id
  * that the backfill later copies from the ledger (boot-order collision).
  */
-export function usageFloorReady(agentDb) {
+function usageFloorReady(agentDb) {
   const st = handleState(agentDb);
   if (st.floor) return true;
   try {

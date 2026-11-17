@@ -36,48 +36,6 @@ export function recordAgentFeedback(userId, { sessionId, captionSeq, verdict, pl
   );
 }
 
-/// Per-plan-task breakdown of agent feedback. Returns one row per
-/// plan task that has at least one feedback entry, with verdict
-/// counts + useful-rate + avg-score-when-useful. Drives the "which
-/// tasks does the LLM ground best in?" insight on the Plan tab.
-export function agentFeedbackByTask(userId, { sinceDays = 30 } = {}) {
-  requireUser(userId);
-  const db = getDb();
-  // Use a parameterized offset (seconds) instead of string-interpolating the
-  // number of days into the SQL.  SQLite's datetime() accepts a modifier in
-  // the form '+N seconds' which can be fully parameterized.
-  const sinceOffsetSec = -Math.max(1, Math.floor(sinceDays)) * 86400;
-  const rows = lazyPrepare(db, `
-    SELECT
-      plan_task_id            AS planTaskId,
-      COUNT(*)                AS total,
-      SUM(verdict = 'useful') AS useful,
-      SUM(verdict = 'noise')  AS noise,
-      SUM(verdict = 'later')  AS later,
-      AVG(CASE WHEN verdict = 'useful' THEN score END) AS avgScoreUseful,
-      AVG(CASE WHEN verdict = 'noise'  THEN score END) AS avgScoreNoise
-    FROM agent_feedback
-    WHERE user_id = ?
-      AND recorded_at >= datetime('now', ? || ' seconds')
-      AND plan_task_id IS NOT NULL
-      AND plan_task_id != ''
-    GROUP BY plan_task_id
-    ORDER BY total DESC, useful DESC
-  `).all(userId, String(sinceOffsetSec));
-  return rows.map((r) => ({
-    planTaskId: r.planTaskId,
-    total: r.total,
-    byVerdict: {
-      useful: r.useful || 0,
-      noise: r.noise || 0,
-      later: r.later || 0,
-    },
-    usefulRate: r.total > 0 ? (r.useful || 0) / r.total : null,
-    avgScoreUseful: r.avgScoreUseful,
-    avgScoreNoise: r.avgScoreNoise,
-  }));
-}
-
 /// Aggregate stats for the user — drives the §10 telemetry view and
 /// eventually the Phase 3 threshold tuner.
 export function agentFeedbackStats(userId, { sinceDays = 30 } = {}) {

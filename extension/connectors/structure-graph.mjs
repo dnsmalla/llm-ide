@@ -5,12 +5,12 @@
 // (GraphKit's StructureGraphBuilder: file + symbol nodes, contains/imports/
 // inherits/implements/calls edges) and writes it to `<repo>/system/graph/`. That
 // graph never reached the server, so `code_graph_nodes` stayed empty for every
-// install — `/kb/ingest-scip` is the only other writer and it requires a
+// install — the SCIP ingest route (removed in API 149) was the only other writer, and it required a
 // hand-produced SCIP index, which nothing in the product generates. The result
 // was that `findRelatedSymbols` (graphkit/graph.mjs), and therefore the
 // compiler-derived half of the code-sync agent's grounding, always returned [].
-// This module closes that gap: the Mac POSTs its CGData to
-// /kb/ingest-code-graph after each generation and it lands in the same tables
+// This module closes that gap: a generated structure graph is written by
+// ingestStructureGraph and it lands in the same tables
 // the SCIP path writes, tagged `source='structure'` (migration 0027) so the two
 // producers replace only their own rows.
 //

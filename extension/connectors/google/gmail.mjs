@@ -106,7 +106,7 @@ function decodeBodyData(part) {
 }
 
 /** Walk the MIME tree: inline text parts and attachment metadata. Bounded in depth and part count. */
-export function extractParts(payload) {
+function extractParts(payload) {
   const plain = []; const html = []; const attachments = [];
   let seen = 0;
   const walk = (p, depth) => {
@@ -153,7 +153,7 @@ const capBytes = (s, max) => {
 };
 
 /** One message to its Markdown body (untrusted text, escaped) and attachment metadata. */
-export function messageBody(msg) {
+function messageBody(msg) {
   const { plain, html, attachments } = extractParts(msg.payload || {});
   // Redact the raw text first (a secret split by escaping or markup is harder to match later); the note is redacted again as a whole.
   const plainText = redactSecretsForStorage(plain.filter((x) => typeof x === 'string').join('\n\n').trim());
@@ -169,7 +169,7 @@ export function messageBody(msg) {
 const iso = (ms) => { const n = Number(ms); return Number.isFinite(n) && n > 0 ? new Date(n).toISOString() : null; };
 const q = (v) => JSON.stringify(v);
 
-export function noteFileName(accountId, threadId) { return `gmail-${accountId}-${String(threadId).replace(/[^A-Za-z0-9_-]/g, '_')}.md`; }
+function noteFileName(accountId, threadId) { return `gmail-${accountId}-${String(threadId).replace(/[^A-Za-z0-9_-]/g, '_')}.md`; }
 
 function excludedSet(options) {
   const s = new Set(ALWAYS_EXCLUDED);

@@ -31,7 +31,7 @@ export const NOTE_SHADOW_MAX_QUERIES = 20;
 const SAMPLE_CAP = 10;
 
 /** Deterministic PRNG (mulberry32) so one day's query set is reproducible. */
-export function seededRandom(seed) {
+function seededRandom(seed) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6D2B79F5) >>> 0;
@@ -85,7 +85,7 @@ export function topKOverlap(a, b, k = NOTE_SHADOW_K) {
 }
 
 /** Legacy meeting hits for one (user, project): the same FTS query, restricted to the owner in SQL. */
-export function legacyMeetingHits(db, userId, projectId, q, limit = NOTE_SHADOW_K) {
+function legacyMeetingHits(db, userId, projectId, q, limit = NOTE_SHADOW_K) {
   const filter = buildSearchFilter(q);
   if (!filter?.match) return [];
   const where = searchFilterSql(filter);
@@ -101,7 +101,7 @@ export function legacyMeetingHits(db, userId, projectId, q, limit = NOTE_SHADOW_
  * One (user, project) pair as a generator: it yields after building the scope and after each
  * query, so the caller can spend a slice budget on it. Returns the pair's result.
  */
-export function* comparePairSteps(db, userId, projectId, seed) {
+function* comparePairSteps(db, userId, projectId, seed) {
   const indexMeetings = lazyPrepare(db,
     "SELECT json_extract(meta, '$.meetingId') AS mid FROM note_index WHERE user_id = ? AND project_id = ? AND kind = 'meeting'",
   ).all(userId, projectId).map((r) => r.mid).filter((m) => typeof m === 'string' && m !== '');

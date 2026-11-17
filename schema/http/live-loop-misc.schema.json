@@ -1,5 +1,5 @@
 {
-  "description": "Live captions, the Loop headless agent step, the issue-schedule overlay, the code-graph upload, the account audit and delete, and the MCP connector start and status. Rows: POST /kb/loop/ship-status (feature auto_tasks; the Factory board's PR/MR status read), POST /kb/loop/agent-run (feature auto_tasks), POST /kb/loop/ship (feature auto_tasks; bus host proof first, so only its 403 fixture replays live, the rest are recorded by tests/factory-ship.test.mjs), POST /kb/ingest-code-graph (feature code_graph_3d), GET, PUT and DELETE /kb/issue-schedule (feature gantt_issues), GET /kb/live/sessions, GET /kb/live/:id, POST /kb/live/:id/append, POST /kb/live/:id/finalize, GET /kb/live/:id/stream (live captions: core, always on), GET /auth/me/audit, POST /auth/me/delete, POST /auth/mcp-connector/start and GET /auth/mcp-connector/status. Feature-owned rows answer 404 {error: 'feature_disabled', feature: <key>} when that LLMIDE_FEATURES key is off; every such 404 is declared and captured by a second temp-DB server started with auto_tasks, gantt_issues and code_graph_3d off. Fixtures are real responses from `node server.mjs` on a temp DB (127.0.0.1), seeded through the API, with repo paths /example/repo. Exceptions, each stated on its fixture: the loop 200/400-provider/502/503/504 fixtures are produced in-process by calling routes/loop-agent.mjs with its engine seam (deps.runAgent, deps.validateRoot) stubbed, so no model is called and no CLI spawns; the route's response construction is what is captured. Not captured offline, so their 2xx is x-unspecified with a reason: the SSE live stream (no event schema exists in the repo), POST /auth/mcp-connector/start success and 502 (both reach the connector's remote MCP server for dynamic client registration). The 400 for a malformed JSON body (every JSON route) is not declared per route, as SCHEMA.md says. Request fields the fixtures do not exercise are x-optional.",
+  "description": "Live captions, the Loop headless agent step, the issue-schedule overlay, the account audit and delete, and the MCP connector start and status. Rows: POST /kb/loop/ship-status (feature auto_tasks; the Factory board's PR/MR status read), POST /kb/loop/agent-run (feature auto_tasks), POST /kb/loop/ship (feature auto_tasks; bus host proof first, so only its 403 fixture replays live, the rest are recorded by tests/factory-ship.test.mjs), GET, PUT and DELETE /kb/issue-schedule (feature gantt_issues), GET /kb/live/sessions, GET /kb/live/:id, POST /kb/live/:id/append, POST /kb/live/:id/finalize, GET /kb/live/:id/stream (live captions: core, always on), GET /auth/me/audit, POST /auth/me/delete, POST /auth/mcp-connector/start and GET /auth/mcp-connector/status. Feature-owned rows answer 404 {error: 'feature_disabled', feature: <key>} when that LLMIDE_FEATURES key is off; every such 404 is declared and captured by a second temp-DB server started with auto_tasks and gantt_issues off. Fixtures are real responses from `node server.mjs` on a temp DB (127.0.0.1), seeded through the API, with repo paths /example/repo. Exceptions, each stated on its fixture: the loop 200/400-provider/502/503/504 fixtures are produced in-process by calling routes/loop-agent.mjs with its engine seam (deps.runAgent, deps.validateRoot) stubbed, so no model is called and no CLI spawns; the route's response construction is what is captured. Not captured offline, so their 2xx is x-unspecified with a reason: the SSE live stream (no event schema exists in the repo), POST /auth/mcp-connector/start success and 502 (both reach the connector's remote MCP server for dynamic client registration). The 400 for a malformed JSON body (every JSON route) is not declared per route, as SCHEMA.md says. Request fields the fixtures do not exercise are x-optional.",
   "$defs": {
     "LiveCaption": {
       "type": "object",
@@ -585,7 +585,7 @@
                 "string",
                 "null"
               ],
-              "description": "The SDK result subtype (success, error_max_turns, \u2026), or no_progress when LLM-IDE stopped the step: the same tool call repeated more than three times with no file change in between, or five tool calls in a row failed."
+              "description": "The SDK result subtype (success, error_max_turns, …), or no_progress when LLM-IDE stopped the step: the same tool call repeated more than three times with no file change in between, or five tool calls in a row failed."
             },
             "denied": {
               "type": "array",
@@ -608,7 +608,7 @@
             "noProgressReason": {
               "type": "string",
               "x-optional": true,
-              "description": "Present only with resultSubtype no_progress \u2014 why the step was stopped"
+              "description": "Present only with resultSubtype no_progress — why the step was stopped"
             }
           }
         },
@@ -757,100 +757,6 @@
         },
         "502": {
           "$ref": "_common#/$defs/Error"
-        }
-      }
-    },
-    "POST /kb/ingest-code-graph": {
-      "request": {
-        "body": {
-          "type": "object",
-          "properties": {
-            "repoPath": {
-              "type": "string",
-              "description": "Absolute path to the repo root (must be on user allow-list)"
-            },
-            "graph": {
-              "type": "object",
-              "properties": {
-                "nodes": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/CodeGraphNode"
-                  }
-                },
-                "edges": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/CodeGraphEdge"
-                  }
-                }
-              }
-            },
-            "replace": {
-              "type": "boolean",
-              "description": "Clear this producer's existing rows for the repo first (first batch only)"
-            },
-            "commitSha": {
-              "type": "string",
-              "description": "Git commit the graph was generated from (7-64 hex); find-code compares it to HEAD to warn about a stale graph"
-            },
-            "generatedAt": {
-              "type": "string",
-              "description": "ISO-8601 time the graph was generated"
-            }
-          }
-        }
-      },
-      "responses": {
-        "200": {
-          "type": "object",
-          "required": [
-            "ok",
-            "repo",
-            "nodes",
-            "edges",
-            "droppedNodes",
-            "droppedEdges",
-            "replaced"
-          ],
-          "properties": {
-            "ok": {
-              "const": true
-            },
-            "repo": {
-              "type": "string",
-              "description": "canonical repo path"
-            },
-            "nodes": {
-              "type": "integer",
-              "description": "nodes written"
-            },
-            "edges": {
-              "type": "integer",
-              "description": "edges written"
-            },
-            "droppedNodes": {
-              "type": "integer"
-            },
-            "droppedEdges": {
-              "type": "integer"
-            },
-            "replaced": {
-              "type": "boolean"
-            }
-          }
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "401": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "403": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "404": {
-          "$ref": "#/$defs/FeatureDisabled"
         }
       }
     },

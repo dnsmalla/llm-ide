@@ -57,7 +57,7 @@ const SNIPPET_CHARS = 360;
  * (case-insensitive), else its head. A whole chunk is up to 80 lines — far
  * more than a ranked list needs; the agent reads the file for the rest.
  */
-export function snippetFor(body, query) {
+function snippetFor(body, query) {
   if (typeof body !== 'string' || !body) return '';
   const text = body.replace(/\s+/g, ' ').trim();
   if (text.length <= SNIPPET_CHARS) return text;

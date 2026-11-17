@@ -1,5 +1,5 @@
 // End-to-end for the structural code-graph ingest: the Mac app's
-// StructureGraphBuilder output → /kb/ingest-code-graph → code_graph_* →
+// StructureGraphBuilder output → ingestStructureGraph → code_graph_* →
 // findRelatedSymbols. Before this path existed the tables had no product-side
 // writer at all (only a hand-produced SCIP index, which nothing generates), so
 // the compiler-derived half of code-sync's grounding always came back empty.

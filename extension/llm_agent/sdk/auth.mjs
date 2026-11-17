@@ -1,6 +1,6 @@
 // The engine's auth ladder and per-user engine home, kept free of the Agent
 // SDK so modules that only need these (models.mjs for the model picker,
-// transcripts.mjs for session cleanup, spike-engine.mjs) do not import
+// transcripts.mjs for session cleanup) do not import
 // engine.mjs. Importing engine.mjs loads the SDK and the whole engine graph;
 // routes/router.mjs reaches models.mjs and transcripts.mjs at boot, so before
 // this split every server boot paid that cost before the first chat turn.
@@ -13,8 +13,8 @@ import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
 
 // --- Auth: per-user vault key first, operator env as fallback -------------
-// (Moved here from spike-engine.mjs via engine.mjs — the v2 runner, the Loop
-// and the spike share one auth ladder.)
+// (Moved here from the retired spike-engine.mjs — the v2 runner and the Loop
+// share one auth ladder.)
 
 export function resolveAnthropicKey(userId) {
   if (userId) {

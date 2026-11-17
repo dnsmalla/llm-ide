@@ -3,8 +3,7 @@
 // This module is deliberately dependency-free (no SDK import, no DB): the
 // mapper consumes plain message objects, so tests drive it with fabricated
 // input and the protocol design can be reviewed against real transcripts
-// without a live engine. SDK-facing modules (spike-engine.mjs, the v2
-// engine) import the mapper from here — it is the single definition of the
+// without a live engine. SDK-facing modules (the v2 engine) import the mapper from here — it is the single definition of the
 // v2 event vocabulary.
 //
 // Event model: `mapSdkMessage()` emits a small, engine-agnostic set

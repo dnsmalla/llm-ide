@@ -48,7 +48,7 @@ const laneFor = (info, kind, args) => (info.write ? `write:${args.projectId ?? k
 const codeOf = (e) => (ERROR_CODES.includes(e?.code) ? e.code : 'engine_failed');
 
 /** Strip big text from a result before it goes into a terminal event; the full result is on the command row. */
-export function eventResult(result) {
+function eventResult(result) {
   if (!result || typeof result !== 'object') return undefined;
   const out = {};
   for (const [k, v] of Object.entries(result)) {

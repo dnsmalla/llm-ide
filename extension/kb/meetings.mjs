@@ -30,7 +30,7 @@ const ALLOWED_KINDS = new Set(['action', 'decision', 'blocker']);
 // Reserved FTS id prefix of derived note rows (migration 0050). Client meeting
 // ids must not reach it, and control characters are never valid in an id.
 export const RESERVED_MEETING_ID_PREFIX = '\u0001note:';
-export function checkMeetingId(id) {
+function checkMeetingId(id) {
   const s = String(id ?? '');
   if (/[\u0000-\u001f\u007f]/.test(s) || s.startsWith(RESERVED_MEETING_ID_PREFIX)) {
     throw errValidation('meeting id contains control characters or a reserved prefix');
@@ -181,7 +181,7 @@ export function getMeeting(userId, meetingId) {
   };
 }
 
-// Read-only listing used by /kb/export-all. Returns one DB row per
+// Read-only listing. Returns one DB row per
 // meeting in date-desc order, optionally paged via the opaque
 // `cursor` (last seen meeting id from the prior page).
 export function listMeetings(userId, cursor, limit) {
@@ -254,31 +254,10 @@ export function listEntitiesForMeetings(userId, meetingIds) {
   return out;
 }
 
-export function getEntity(userId, entityId) {
-  requireUser(userId);
-  const db = getDb();
-  const e = lazyPrepare(db, `
-    SELECT e.id, e.meeting_id, e.kind, e.text, e.meta, e.quote, m.title AS meeting_title, m.date
-    FROM entities e LEFT JOIN meetings m ON m.id = e.meeting_id
-    WHERE e.id = ? AND e.user_id = ?
-  `).get(String(entityId), userId);
-  if (!e) return null;
-  return {
-    id: e.id,
-    meetingId: e.meeting_id,
-    meetingTitle: e.meeting_title,
-    date: e.date,
-    kind: e.kind,
-    text: e.text,
-    quote: e.quote,
-    meta: safeParseMeta(e.meta),
-  };
-}
-
 // ── Stats ─────────────────────────────────────────────────────────
 
-// `stats()` runs ~9 COUNT/GROUP-BY scans and is hit repeatedly — /kb/stats and
-// /kb/system/status both call it, often back-to-back and on a poll. A tiny
+// `stats()` runs ~9 COUNT/GROUP-BY scans and is hit repeatedly — /kb/stats
+// calls it, often back-to-back and on a poll. A tiny
 // per-user TTL cache collapses those bursts into one scan set. The window is
 // short enough that dashboard counts stay effectively live; single-process +
 // single-writer means there's no cross-process coherence to worry about.

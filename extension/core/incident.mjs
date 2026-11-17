@@ -1,4 +1,4 @@
-// Self-Heal incident rules (docs/superpowers/plans/2026-11-07-self-heal-a-incidents.md), ported from the retired Mac
+// Self-Heal incident rules, ported from the retired Mac
 // app (IncidentRedactor, IncidentSignature, IncidentClassifier). Pure: no I/O, no DB. Incident text is data, never
 // instructions: nothing in plan A hands it to a model, logs it or sends it anywhere.
 import crypto from 'node:crypto';

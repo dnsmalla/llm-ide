@@ -157,7 +157,7 @@ export async function askSubagent(args, ctx) {
  * `tier` only when the routed provider + model are what ran — after a
  * routeFallback the call answered on the default, which belongs to no tier.
  */
-export function subagentMeta({ name, route, routeTier, requestedModel, ran, ms }) {
+function subagentMeta({ name, route, routeTier, requestedModel, ran, ms }) {
   const model = ran ? (ran.model || 'default') : (requestedModel || null);
   const routedModelRan = Boolean(route) && model === route.model;
   const provider = ran?.provider

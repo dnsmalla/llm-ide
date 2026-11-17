@@ -1,8 +1,7 @@
 // Team authority for every HTTP route (ADR 0021, plan H1.2). Every method + path the core serves has
 // exactly one action class (kb/members.mjs CLASS_GRANTS); an authenticated request that matches no
 // rule is refused (deny by default). tests/route-policy-coverage.test.mjs fails when a served route has
-// no rule or a rule names no route. The evidence for each class is
-// docs/superpowers/plans/parity-inventory/route-inventory-2026-11-08.md.
+// no rule or a rule names no route. The evidence for each class was the 2026-11-08 route inventory (no longer in the repo).
 //
 // Why a table instead of a check per route: the same omission kept recurring —
 // a dangerous route was added with a JWT check and nothing else. Every entry
@@ -44,7 +43,7 @@ const REFUSALS = Object.freeze({
  * A local/solo install keeps the team fallback for compatibility.
  */
 export const PROJECT_WORK_ROUTES = Object.freeze([
-  'POST /agent/v2/stream', 'POST /kb/agent/ask', 'POST /kb/loop/agent-run', 'POST /kb/providers/turn',
+  'POST /agent/v2/stream', 'POST /kb/loop/agent-run',
   'POST /kb/generate-code', 'POST /kb/project/install-skills',
   'POST /kb/issues/create', 'POST /kb/issues/comment', 'POST /kb/issues/close', 'POST /kb/issues/update',
 ]);
@@ -86,7 +85,7 @@ function refuse(db, userId, reason, cls) {
  * The project id a request names: `?project=` / `?projectId=` (the docs and index routes) or
  * `/projects/:id/...`. A body-carried id cannot be seen here; the turn/handler checks that one itself.
  */
-export function projectIdForRequest(method, url) {
+function projectIdForRequest(method, url) {
   const raw = String(url || '');
   const path = raw.split('?')[0];
   if (raw.includes('?')) {
@@ -216,15 +215,11 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/activity',
     '/kb/agent-history/settings',
     '/kb/agent-sdk',
-    '/kb/agent/ask/history',
     '/kb/agent/catalog',
     '/kb/agent/commands',
     '/kb/agent/diagnose',
-    '/kb/agent/feedback/by-task',
     '/kb/agent/feedback/stats',
-    '/kb/agent/generation-library',
     '/kb/agent/persona',
-    '/kb/agent/personas',
     '/kb/agent/runs',
     '/kb/agent/session-memory',
     '/kb/agent/skill-library',
@@ -233,12 +228,9 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/calendar-ical/sources',
     '/kb/chat/sessions',
     '/kb/chat/sessions/:id',
-    '/kb/entity/:id',
-    '/kb/export-all',
     '/kb/google/accounts',
     '/kb/google/status',
     '/kb/index/search',
-    '/kb/index/status',
     '/kb/issue-schedule',
     '/kb/issues',
     '/kb/issues/detail',
@@ -248,25 +240,19 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/live/:id/stream',
     '/kb/live/sessions',
     '/kb/live/unacked',
-    '/kb/meeting/:id',
     '/kb/os/state',
     '/kb/os/stream',
-    '/kb/outcomes/stats',
-    '/kb/outcomes/task/:id',
     '/kb/plan/:id',
-    '/kb/plans',
     '/kb/plan-task/assignments',
     '/kb/project/:id/export',
     '/kb/providers/catalog',
     '/kb/providers/custom',
     '/kb/providers/settings',
-    '/kb/review/get/:id',
     '/kb/review/list',
     '/kb/routing-tiers',
     '/kb/search',
     '/kb/stats',
     '/kb/storage',
-    '/kb/system/status',
     '/kb/usage/limits',
     '/kb/usage/ratelimits',
     '/kb/usage/resolve',
@@ -276,7 +262,6 @@ export const ROUTE_POLICY = Object.freeze([
   ...rules('self.read', 'POST', [
     '/chat',
     '/code-assist',
-    '/code-assist/decision',
   ]),
   ...rules('self.write', 'POST', [
     '/agent/v2/cancel',
@@ -296,7 +281,6 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/agent-history/clear',
     '/kb/agent-history/compact',
     '/kb/agent/feedback',
-    '/kb/agent/personas',
     '/kb/agent/stop',
     '/kb/archive-receipts',
     '/kb/calendar-ical/options',
@@ -306,73 +290,54 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/chat/sessions/:id/archive/commit',
     '/kb/chat/sessions/:id/messages',
     '/kb/connect-qa',
-    '/kb/connect-tickets-json',
-    '/kb/custom-providers',
-    '/kb/delete',
     '/kb/email/seen',
     '/kb/google/disconnect',
     '/kb/google/gmail/seen',
     '/kb/google/options',
     '/kb/google/start',
     '/kb/index/notes',
-    '/kb/index/reconcile',
     '/kb/ingest',
-    '/kb/ingest-code-graph',
     '/kb/live/:id/ack',
     '/kb/live/:id/append',
     '/kb/live/:id/finalize',
     '/kb/mcp-connector/seen',
-    '/kb/plan-task/update',
     '/kb/plan-task/assign',
     '/kb/plan-task/unassign',
-    '/kb/plan/delete',
     '/kb/plan/save',
     '/kb/providers/catalog/connect',
     '/kb/providers/catalog/disconnect',
-    '/kb/review/delete',
-    '/kb/review/reject',
     '/kb/review/submit',
     '/kb/routing-tiers',
     '/kb/session-purges',
     '/kb/slack/seen',
-    '/kb/usage/record',
   ]),
   ...rules('self.write', 'PUT', [
     '/agent/v2/session/route',
     '/auth/me/prefs',
     '/kb/agent-history/settings',
     '/kb/agent/persona',
-    '/kb/agent/personas/:id',
-    '/kb/agent/personas/active',
     '/kb/issue-schedule',
     '/kb/providers/settings',
     '/kb/usage/limits',
   ]),
   ...rules('self.write', 'PATCH', [
     '/kb/chat/sessions/:id',
-    '/kb/plan-task/update',
   ]),
   ...rules('self.write', 'DELETE', [
     '/agent/v2/session',
     '/auth/me/connectors/:id',
-    '/kb/agent/ask/history',
-    '/kb/agent/personas/:id',
     '/kb/agent/session-memory',
     '/kb/agent/tool-approvals',
     '/kb/calendar-ical/sources/:id',
     '/kb/chat/sessions/:id',
     '/kb/chat/sessions/:id/messages',
     '/kb/chat/sessions/:id/messages/:seq',
-    '/kb/delete',
     '/kb/index/notes/:key',
     '/kb/issue-schedule',
-    '/kb/plan/delete',
-    '/kb/review/delete',
   ]),
   ...rules('model.ask', 'POST', [
     '/agent/v2/decision',
     '/agent/v2/stream',
-    '/kb/agent/ask',
   ]),
   ...rules('model.read', 'POST', [
     '/kb/tasks/:id/run',
@@ -392,10 +357,8 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/summarize',
   ]),
   ...rules('model.exec', 'POST', [
-    '/agent-sdk/spike',
     '/kb/agent/dispatch',
     '/kb/loop/agent-run',
-    '/kb/providers/turn',
     '/kb/self-heal/runs',
   ]),
   ...rules('fs.read', 'GET', [
@@ -417,7 +380,6 @@ export const ROUTE_POLICY = Object.freeze([
   ...rules('fs.write', 'POST', [
     '/auth/me/repos',
     '/kb/docs/seed',
-    '/kb/ingest-scip',
     '/kb/projects/register',
   ]),
   ...rules('fs.write', 'PUT', [
@@ -472,7 +434,6 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/loop/ship',
     '/kb/dispatch',
     '/kb/notify/slack',
-    '/kb/outcomes/retry-failed',
     '/kb/review/approve',
   ]),
   ...rules('install', 'GET', [

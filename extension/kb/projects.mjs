@@ -35,11 +35,11 @@ const MODES = Object.freeze(['none', 'read_only', 'execute']);
 
 const err = (code, message, status) => new AppError(code, message, { status });
 
-export function isProjectRole(v) {
+function isProjectRole(v) {
   return typeof v === 'string' && PROJECT_ROLE_SET.has(v);
 }
 
-export function isProjectMaxMode(v) {
+function isProjectMaxMode(v) {
   return typeof v === 'string' && MODES.includes(v);
 }
 
@@ -132,7 +132,7 @@ export function canManageProjectGrant(grant) {
 }
 
 /** How many project owners a project has (the last one is protected, like the team owner). */
-export function projectOwnerCount(db, projectId) {
+function projectOwnerCount(db, projectId) {
   return db.prepare(
     "SELECT COUNT(*) AS n FROM project_members WHERE project_id = ? AND role = 'owner'",
   ).get(String(projectId)).n;

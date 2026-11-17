@@ -32,16 +32,6 @@ test.after(async () => {
 
 const note = (i, extra = {}) => ({ noteKey: `http/${i}.md`, title: `T${i}`, date: '2026-10-29T00:00:00.000Z', contentHash: `h${i}`, body: `body ${i}`, ...extra });
 
-test('a normal batch round-trips: 200 with counts, then status is consistent', async () => {
-  const r = await srv.call('POST', '/kb/index/notes', { projectId: 'p1', notes: [note(1), note(2)] });
-  assert.equal(r.status, 200);
-  assert.equal(r.body.upserted, 2);
-  const st = await srv.call('GET', '/kb/index/status?projectId=p1');
-  assert.equal(st.status, 200);
-  assert.equal(st.body.consistent, true);
-  assert.equal(st.body.notes, 2);
-});
-
 test('a body over 1 MB is refused with 413 PAYLOAD_TOO_LARGE and nothing is written', async () => {
   // Just over the limit, not far over it: the server refuses at the limit and
   // closes, and bytes still in flight at that moment turn the close into a TCP

@@ -132,10 +132,3 @@ export function setReviewStatus(userId, id, { status, reviewerNote, result, expe
   if (info.changes === 0) return null;
   return getReview(userId, id);
 }
-
-export function deleteReview(userId, id) {
-  requireUser(userId);
-  const db = getDb();
-  lazyPrepare(db, 'DELETE FROM review_items WHERE id = ? AND user_id = ?')
-    .run(String(id), userId);
-}
