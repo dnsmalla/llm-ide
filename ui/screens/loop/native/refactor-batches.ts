@@ -231,6 +231,8 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
     // A run that kept verified batches is a pass; a later batch's halt is told in the summary, not as a run status.
     ...(last.cancelled ? { cancelled: true } : {}),
     ...(!passed && last.blocked ? { blocked: true } : {}),
+    // Carry the sub-run's round-limit stop so the run manager shows the warning state and never ships it.
+    ...(!passed && last.stoppedAtLimit ? { stoppedAtLimit: true, ...(last.loopback ? { loopback: last.loopback } : {}) } : {}),
     ...(!passed && (last.errored || hostError) ? { errored: true } : {}),
   };
 }

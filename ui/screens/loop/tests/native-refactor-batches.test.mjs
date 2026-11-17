@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runRefactorBatches, splitRefactorPhases, nextTodoBatch } from "../native/refactor-batches.ts";
 import { decodeConfig } from "../native/model.ts";
+import { runStatusCode } from "../native/runner.ts";
 
 const stage = (id, over = {}) => ({ id, name: id, kind: "shellCommand", order: 0, enabled: true, severity: "blocking", allowsRepair: true, ...over });
 const PLAN = stage("plan", { kind: "skill", skillId: "skills/refactor-planner", defaultKey: "refactor-plan" });
@@ -73,8 +74,8 @@ test("batch 2 failing restores its checkpoint, is marked blocked with a reason, 
   assert.equal(out.passed, true, "a later rollback does not undo an earlier verified batch");
   assert.deepEqual(state.restores, ["tree2"], "restored to the checkpoint taken before batch 2");
   assert.match(state.plan, /### R1 — R1 \(status: done\)/);
-  assert.match(state.plan, /### R2 — R2 \(status: blocked\)\n- Blocked: Refactor Test — Refactor Test failed; repair did not complete\n/);
-  assert.match(out.statusSummary, /^1 batch applied \(R1\); R2 rolled back: Refactor Test failed; repair did not complete$/);
+  assert.match(state.plan, /### R2 — R2 \(status: blocked\)\n- Blocked: Refactor Test — Stopped after 1 round: tests still failing\n/);
+  assert.match(out.statusSummary, /^1 batch applied \(R1\); R2 rolled back: Stopped after 1 round: tests still failing$/);
 });
 
 test("batch 1 failing restores, is blocked, and the run does not pass", async () => {
@@ -287,4 +288,33 @@ test("step review outcomes of every batch reach the outer outcome and its summar
   assert.ok(out.stepReviews.length >= 2, "reviews from both batches are kept");
   assert.equal(new Set(out.stepReviews.map((r) => r.verdict)).size, 1);
   assert.match(out.statusSummary, / · step reviews: 0 unresolved, \d+ skipped$/);
+});
+
+test("refactor batch: a Test that keeps failing re-runs Apply, rolls the batch back and reports stopped.limit", async () => {
+  const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
+  const inner = deps.runStage;
+  // Apply marks R1 done on its first run, so the fake's per-batch failure cannot hold for the re-run: fail every Test after Apply.
+  deps.runStage = async (s, prior) => (s.id === "test" && state.ran.includes("apply") ? (state.ran.push(s.id), { ok: false, output: "1 failed" }) : inner(s, prior));
+  let repairs = 0;
+  deps.repair = async () => { repairs += 1; return { ok: false, output: "no" }; };
+  const out = await runRefactorBatches(config([PLAN, SNAP, APPLY, TEST], { maxIterations: 2 }), deps, opts);
+  assert.equal(state.ran.filter((id) => id === "apply").length, 2);
+  assert.equal(repairs, 0, "a loopback round never spends a repair");
+  assert.deepEqual(state.restores, ["tree1"]);
+  assert.match(state.plan, /### R1 — R1 \(status: blocked\)\n- Blocked: .*Stopped after 2 rounds: tests still failing/);
+  assert.equal(out.passed, false);
+  assert.equal(out.stoppedAtLimit, true);
+  assert.equal(runStatusCode(out), "stopped.limit");
+});
+
+test("refactor batch: a red Test Baseline after Test Write stays left todo even when it stopped at the round limit", async () => {
+  const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
+  const inner = deps.runStage;
+  let baselines = 0;
+  deps.runStage = async (s, prior) => { if (s.id === "baseline" && ++baselines >= 2) { state.ran.push(s.id); return { ok: false, output: "baseline red" }; } return inner(s, prior); };
+  const out = await runRefactorBatches(config([PLAN, SNAP, WRITE, BASELINE, APPLY, TEST], { maxIterations: 2 }), deps, opts);
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /left todo/);
+  assert.match(state.plan, /### R1 — R1 \(status: todo\)/);
+  assert.equal(out.stoppedAtLimit, true);
 });
