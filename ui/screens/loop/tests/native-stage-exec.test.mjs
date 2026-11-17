@@ -1142,3 +1142,21 @@ test("recordFindings logs a failed write and does not throw", async () => {
   await createStageDeps(ctx, loopOf([skillStage()])).recordFindings(skillStage(), { round: 1, source: "tests", text: "boom" });
   assert.ok(log.some((line) => /findings notes not written/.test(line)));
 });
+
+test("recordFindings never writes over a PLAN.md it could not read", async () => {
+  const writes = [];
+  const fs = {
+    async read(path) {
+      if (path.endsWith(".factory/PLAN.md")) throw new Error("EIO");
+      throw Object.assign(new Error("nf"), { code: "not_found" });
+    },
+    async write(path, text) { writes.push(path); return {}; },
+    async list() { return { entries: [] }; },
+    async create() { return {}; },
+  };
+  const { ctx, log } = ctxOf({ fs });
+  await createStageDeps(ctx, loopOf([skillStage()])).recordFindings(skillStage(), { round: 1, source: "tests", text: "boom" });
+  assert.equal(writes.some((path) => path.endsWith("PLAN.md")), false);
+  assert.deepEqual(writes, ["system/loop-worktrees/r1/.factory/FINDINGS.md"]);
+  assert.ok(log.some((line) => /PLAN\.md could not be read/.test(line)));
+});

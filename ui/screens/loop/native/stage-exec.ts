@@ -464,15 +464,35 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
   return { ok: agentRunSucceeded(g.result), output: g.result.reply ?? "", ...(typeof g.result.usage?.costUsd === "number" ? { usage: { costUsd: g.result.usage.costUsd } } : {}) };
 }
 
+type ExistingFile = { state: "ok"; text: string } | { state: "missing" } | { state: "error"; message: string };
+
+async function readExisting(ctx: StageExecContext, rel: string): Promise<ExistingFile> {
+  const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
+  try {
+    const r = await ctx.fs.read(prefix ? `${prefix}/${rel}` : rel, 200_000);
+    return r.status === "ok" && typeof r.text === "string" ? { state: "ok", text: r.text } : { state: "missing" };
+  } catch (e) {
+    if ((e as { code?: string })?.code === "not_found") return { state: "missing" };
+    return { state: "error", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /**
  * Appends one round's findings to the plan notes (Factory with a plan) or .factory/FINDINGS.md, keeping every earlier
  * round. A failed write is only logged: the code stage also gets the findings inline, so the run can still go on.
  */
 async function recordRoundFindings(ctx: StageExecContext, loop: LoopDefinition, entry: FindingsEntry): Promise<void> {
   try {
-    const hasPlan = isFactoryLoop(loop) && (await readRunFile(ctx, PLAN_FILE)) !== null;
-    const file = hasPlan ? PLAN_FILE : FINDINGS_FILE;
-    const previous = (await readRunFile(ctx, file)) ?? "";
+    // A read ERROR is not a missing file: a forced write over an unreadable PLAN.md would destroy it.
+    let file = FINDINGS_FILE;
+    if (isFactoryLoop(loop)) {
+      const plan = await readExisting(ctx, PLAN_FILE);
+      if (plan.state === "error") ctx.log(`findings notes: ${PLAN_FILE} could not be read (${plan.message}); writing ${FINDINGS_FILE} instead`);
+      else if (plan.state === "ok") file = PLAN_FILE;
+    }
+    const current = await readExisting(ctx, file);
+    if (current.state === "error") throw new Error(`${file} could not be read (${current.message}); not overwriting it`);
+    const previous = current.state === "ok" ? current.text : "";
     const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
     const rel = prefix ? `${prefix}/${file}` : file;
     const separator = previous === "" || previous.endsWith("\n\n") ? "" : previous.endsWith("\n") ? "\n" : "\n\n";
