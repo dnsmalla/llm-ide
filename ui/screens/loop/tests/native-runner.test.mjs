@@ -491,3 +491,59 @@ test("step review: progress events arrive in order reviewing, fixing, reviewing,
     ["step-review-result", "approve"],
   ]);
 });
+
+test("step review: a halt raised by a passing stage ends the run before any review agent starts", async () => {
+  let ran = 0;
+  let halted = false;
+  let reviewCalls = 0;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")]), base({
+    async runStage() { ran += 1; halted = true; return { ok: true, output: "edited" }; },
+    halt() { return halted ? "agent edit left in place; the run stopped" : null; },
+    async reviewStep() { reviewCalls += 1; return { verdict: "approve", findings: "" }; },
+  }));
+  assert.equal(ran, 1);
+  assert.equal(reviewCalls, 0);
+  assert.equal(out.passed, false);
+  assert.equal(out.blocked, true);
+  assert.equal(out.statusSummary, "agent edit left in place; the run stopped");
+});
+
+test("step review: Stop during a passing stage ends the run before any review agent starts", async () => {
+  let reviewCalls = 0;
+  let cancelled = false;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")]), base({
+    async runStage() { cancelled = true; return { ok: true, output: "" }; },
+    isCancelled() { return cancelled; },
+    async reviewStep() { reviewCalls += 1; return { verdict: "approve", findings: "" }; },
+  }));
+  assert.equal(reviewCalls, 0);
+  assert.equal(out.cancelled, true);
+  assert.equal(out.passed, false);
+});
+
+test("step review: Stop after a changes verdict ends the run before the repair", async () => {
+  let repairCalls = 0;
+  let cancelled = false;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")]), base({
+    async reviewStep() { cancelled = true; return { verdict: "changes", findings: "fix" }; },
+    isCancelled() { return cancelled; },
+    async repair() { repairCalls += 1; return { ok: true, output: "fixed" }; },
+  }));
+  assert.equal(repairCalls, 0);
+  assert.equal(out.cancelled, true);
+  assert.equal(out.passed, false);
+});
+
+test("step review: a repair that does not complete records the step unresolved and the run continues", async () => {
+  const ran = [];
+  const out = await runNativeLoop(cfg([reviewed("a", "A"), reviewed("b", "B")]), base({
+    async runStage(s) { ran.push(s.id); return { ok: true, output: "" }; },
+    async reviewStep(s) { return s.id === "a" ? { verdict: "changes", findings: "fix a" } : { verdict: "approve", findings: "" }; },
+    async repair() { return { ok: false, output: "" }; },
+  }));
+  assert.deepEqual(ran, ["a", "b"]);
+  assert.equal(out.passed, true);
+  assert.equal(out.stepReviews[0].verdict, "unresolved");
+  assert.equal(out.stepReviews[0].reason, "repair did not complete");
+  assert.match(out.statusSummary, /step reviews: 1 unresolved/);
+});

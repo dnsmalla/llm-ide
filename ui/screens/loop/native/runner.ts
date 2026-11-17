@@ -256,6 +256,10 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       }
       // Only a passed step is reviewed: a failed one goes through the stage's own repair path instead.
       if (result.ok && baseline !== undefined) {
+        // A halt or Stop that arrived during the stage must end the run before a review agent starts and spends money.
+        const haltBeforeReview = haltedOutcome();
+        if (haltBeforeReview) return haltBeforeReview;
+        if (deps.isCancelled?.()) return cancelledOutcome();
         const endedByReview = await reviewPassedStep(stage, baseline);
         if (endedByReview) return endedByReview;
       }
