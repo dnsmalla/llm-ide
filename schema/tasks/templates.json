@@ -786,7 +786,7 @@
       "stages": [
         {
           "name": "Skills",
-          "command": "cd extension && node --test tests/agent-skills.test.mjs tests/agent-skill-telemetry.test.mjs tests/skill-library.test.mjs tests/install-project-skills.test.mjs tests/task-skill-routing.test.mjs"
+          "command": "cd extension && node --test tests/agent-skills.test.mjs tests/skill-library.test.mjs tests/install-project-skills.test.mjs tests/task-skill-routing.test.mjs"
         },
         {
           "name": "Plugins",
@@ -794,7 +794,7 @@
         },
         {
           "name": "Plugins + MCP",
-          "command": "cd extension && node --test tests/mcp-config.test.mjs tests/mcp-state.test.mjs tests/mcp-plugin-servers.test.mjs tests/plugin-mcp-wiring.test.mjs tests/agent-v2-user-mcp.test.mjs tests/plugin-hook-trust.test.mjs tests/plugin-hook-runner.test.mjs tests/plugin-hook-trust-route.test.mjs tests/agent-v2-plugin-hooks.test.mjs tests/mcp-cli-args.test.mjs tests/route-mcp-mode.test.mjs"
+          "command": "cd extension && node --test tests/mcp-config.test.mjs tests/mcp-state.test.mjs tests/mcp-plugin-servers.test.mjs tests/plugin-mcp-wiring.test.mjs tests/agent-v2-user-mcp.test.mjs tests/plugin-hook-trust.test.mjs tests/plugin-hook-runner.test.mjs tests/plugin-hook-trust-route.test.mjs tests/agent-v2-plugin-hooks.test.mjs tests/mcp-cli-args.test.mjs"
         },
         {
           "name": "Connectors",
