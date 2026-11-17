@@ -57,7 +57,12 @@ export interface StageExecContext {
 }
 
 /** The halt one run raised. A reason ends the run; `isError` = a failed agent call with nothing out of scope. */
-export interface HaltState { reason: string | null; isError: boolean }
+export interface HaltState {
+  reason: string | null;
+  isError: boolean;
+  /** The files each move stage's batch named when it first ran, so a loopback round keeps that scope. */
+  plannedByStage?: Map<string, string[]>;
+}
 
 type ShellRun = { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean };
 type Prior = readonly StageOutcome[];
@@ -229,7 +234,11 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   // The batch's file list as planned, read BEFORE the agent runs: apply edits the plan itself (it marks the batch done),
   // so a list read afterwards could name a module the agent added to it.
   const moves = ctx.runId !== null && !isFactoryLoop(target) && s.skillId !== null && REFACTOR_MOVE_SKILLS.has(s.skillId);
-  const plannedFiles = moves ? await batchFileList(ctx, s.skillId === "skills/refactor-apply" ? "todo" : "done") : [];
+  // A loopback round fixes the batch that already ran: Apply marked it done, so re-reading "the first todo batch" would
+  // name the NEXT batch's files. The scope of the round that first ran is kept instead.
+  const remembered = loopback ? halt.plannedByStage?.get(s.id) : undefined;
+  const plannedFiles = remembered ?? (moves ? await batchFileList(ctx, s.skillId === "skills/refactor-apply" ? "todo" : "done") : []);
+  if (moves && remembered === undefined) (halt.plannedByStage ??= new Map()).set(s.id, plannedFiles);
   // Only Intake also reads the project's llm-doc/ (a split layout keeps it outside the run's worktree).
   const llmDocExists = s.skillId === FACTORY_INTAKE_SKILL && ctx.projectRoot ? await ctx.fs.list("llm-doc").then(() => true, () => false) : false;
   const timeoutMs = (s.timeoutSeconds ?? 1800) * 1000;

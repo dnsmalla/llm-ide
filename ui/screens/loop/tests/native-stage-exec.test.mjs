@@ -478,6 +478,23 @@ const moveRun = (over = {}) => {
 // The worktree's plan, as the refactor-apply stage reads it: one batch in progress that names `files`.
 const planFs = (files) => fakeFs({ "system/loop-worktrees/r1/llm-doc/loop/refactor/REFACTOR.md": `# Plan\n\n### R1 Move golden (status: todo)\n- Files: ${files}\n- Intent: move\n` }).fs;
 
+test("a loopback round keeps the first round's batch scope even though Apply marked the batch done", async () => {
+  const { loop, apply, reply } = moveRun();
+  const planPath = "system/loop-worktrees/r1/llm-doc/loop/refactor/REFACTOR.md";
+  let plan = "# Plan\n\n### R1 Move golden (status: todo)\n- Files: `new.py`, `tests/test_golden.py`\n- Intent: move\n";
+  const fs = { ...planFs("x"), async read(p) { if (p !== planPath) throw Object.assign(new Error("missing"), { code: "not_found" }); return { status: "ok", text: plan }; } };
+  const messages = [];
+  const core = { async request(_path, opts) { messages.push(opts.body.message); plan = plan.replace("(status: todo)", "(status: done)"); return reply; } };
+  const { host, calls } = fakeHost({ loop_worktree_diff: { text: importDiff("tests/test_golden.py"), truncated: false } });
+  const { ctx } = ctxOf({ host, core, fs });
+  const deps = createStageDeps(ctx, loop);
+  assert.equal((await deps.runStage(apply, [])).ok, true);
+  assert.equal((await deps.runStage(apply, [], { round: 2, maxRounds: 3, findings: "Round 1 (tests)\nboom" })).ok, true);
+  assert.equal(calls.some(([c]) => c === "loop_revert_paths"), false, "round 2 still allows the first batch's files");
+  assert.match(messages[1], /do not start a new batch/);
+  assert.doesNotMatch(messages[0], /do not start a new batch/);
+});
+
 test("an import move to a module the batch's plan does not name is reverted", async () => {
   const { loop, apply, reply } = moveRun();
   const { host, calls } = fakeHost({ loop_worktree_diff: { text: importDiff("tests/test_golden.py"), truncated: false } });
@@ -1081,6 +1098,7 @@ test("a skill stage re-run after a failed round is told the round and the fenced
   await deps.runStage(s, [], LOOPBACK);
   const message = calls[0][1].body.message;
   assert.match(message, /Round 2 of 3/);
+  assert.match(message, /do not start a new batch, a new plan item, or unrelated files/);
   assert.ok(message.includes("```markdown\nRound 1 (tests)\nboom\n```"));
   await deps.runStage(s, []);
   assert.doesNotMatch(calls[1][1].body.message, /Round 2 of 3|boom/);
