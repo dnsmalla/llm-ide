@@ -8,22 +8,24 @@ import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { guardedAgentCall, type AgentWrites, type GuardedCallOutcome } from "./agent-call.ts";
 import { evaluateArtifact } from "./artifact.ts";
 import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
-import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, REFACTOR_MOVE_SKILLS, agentRunBody, guardedPaths, isFactoryLoop, reviewDiffSection } from "./factory.ts";
+import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, REFACTOR_MOVE_SKILLS, agentRunBody, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
 import { importOnlyFiles } from "./import-only.ts";
 import { followsRegistry, registrySource, stagePromptText } from "./default-stage.ts";
 import { graphDigest, rulesDigest } from "./graph-digest.ts";
 import { INPUT_PATH_SKILLS, pathInside } from "./input-path.ts";
 import type { LoopDefinition, LoopStage } from "./model.ts";
-import { checkWrites, isTestFileName } from "./protected.ts";
+import { isTestFileName } from "./protected.ts";
 import { runRegression } from "./regression.ts";
 import type { RunnerDeps, StageOutcome, StageRunResult } from "./runner.ts";
+import { noteUnresolvedStep, readRunFile, reviewStepOnce, takeStepSnapshot } from "./step-review-exec.ts";
 import { checkSkillResult, planFiles } from "./step-contract.ts";
+import { AGENT_TRANSPORT_GRACE_MS, changedPathsNow, dirtyBefore, guardProtected, haltOn, normaliseRel, stopReason, wroteReport } from "./stage-guard.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure, type TestStructure } from "./testmap.ts";
+import { STEP_REVIEWS_FILE } from "./review.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
 import { changedPathArgs, repoPrefixFor, stageHostArgs } from "./worktree-run.ts";
 
 /** The core's default request timeout is 30 s; an agent call runs as long as its body allows, plus this transport grace. */
-const AGENT_TRANSPORT_GRACE_MS = 60_000;
 const REPAIR_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** `invokeHost`'s shape; tests pass a fake. */
@@ -58,28 +60,6 @@ export interface HaltState { reason: string | null; isError: boolean }
 
 type ShellRun = { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean };
 type Prior = readonly StageOutcome[];
-
-/** Paths with uncommitted changes before an agent call. `null` = the snapshot failed, so nothing may be reverted. */
-async function dirtyBefore(ctx: StageExecContext): Promise<Set<string> | null> {
-  try { return new Set(await ctx.host<string[]>("loop_changed_paths", changedPathArgs(ctx.runId, ctx.projectRoot))); } catch { return null; }
-}
-
-/** Paths git reports as changed right now; null when git cannot say (the post-throw check needs this). */
-async function changedPathsNow(ctx: StageExecContext): Promise<string[] | null> {
-  try { return await ctx.host<string[]>("loop_changed_paths", changedPathArgs(ctx.runId, ctx.projectRoot)); } catch { return null; }
-}
-
-/** Protected-path and scope guard for one agent call (the Mac's checkScope + policy). */
-function guardProtected(ctx: StageExecContext, paths: readonly string[], target: LoopDefinition, before: ReadonlySet<string> | null, created: readonly string[] = []): Promise<string | null> {
-  return checkWrites(
-    paths,
-    { policy: target.config.protectedPathPolicy, extraProtectedGlobs: target.config.extraProtectedGlobs, scopeGlobs: target.scopeGlobs },
-    before,
-    created,
-    async (p, c) => { await ctx.host("loop_revert_paths", { paths: p, created: c, ...changedPathArgs(ctx.runId, ctx.projectRoot) }); },
-    (line) => ctx.log(line),
-  );
-}
 
 /** The refactor plan's path under the run's root. */
 function planPathFor(ctx: StageExecContext): string {
@@ -166,21 +146,6 @@ async function outsideInputPath(ctx: StageExecContext, inputPath: string, paths:
   return candidates.map((path) => ({ path, importOnly: importOnly.includes(path) }));
 }
 
-/** The reason the run must stop after one agent call, or null when its writes were acceptable. */
-function stopReason(g: { error: string | null; violation: string | null }): string | null {
-  if (g.error !== null) return `the agent call failed (${g.error})${g.violation ? `; ${g.violation}` : ""}`;
-  return g.violation;
-}
-
-/** A failed or violating agent call: halts the run unless the user already cancelled it. */
-function haltOn(ctx: StageExecContext, halt: HaltState, violation: string | null, stop: string | null): StageRunResult {
-  const output = stop ?? "the agent call failed";
-  if (violation === null && ctx.isCancelled()) return { ok: false, output };
-  halt.isError = violation === null;
-  halt.reason = `${output}; the run stopped`;
-  return { ok: false, output };
-}
-
 async function runShell(ctx: StageExecContext, s: LoopStage, target: LoopDefinition): Promise<StageRunResult> {
   const approvalToken = await ctx.approvalToken(s);
   const r = await ctx.host<ShellRun>("loop_run_stage", { stageId: s.id, loopId: target.id, approvalToken, timeoutSecs: s.timeoutSeconds, ...stageHostArgs(ctx.runId) });
@@ -216,13 +181,6 @@ function factoryReportPath(s: LoopStage): string | null {
   return s.outputPath && s.outputPath.startsWith(".factory/") ? s.outputPath : null;
 }
 
-const normaliseRel = (p: string): string => p.replace(/\\/g, "/").replace(/^\.\//, "");
-
-/** The report is written only when the agent run itself reports the path (a stale file must never decide a gate). */
-function wroteReport(r: AgentRunReply, path: string): boolean {
-  const want = normaliseRel(path);
-  return [...(r.changedPaths ?? []), ...(r.createdPaths ?? [])].some((p) => normaliseRel(p) === want);
-}
 
 async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinition, halt: HaltState): Promise<StageRunResult> {
   if (!s.skillId) return { ok: false, output: "This skill stage has no skill id." };
@@ -255,6 +213,11 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
     } catch (e) {
       return { ok: false, output: `the worktree diff could not be read for the review (${e instanceof Error ? e.message : String(e)})` };
     }
+  }
+  // The Review also weighs the findings of steps whose AI review ended unresolved (the run went on past them).
+  if (s.skillId === FACTORY_REVIEW_SKILL) {
+    const notes = await readRunFile(ctx, STEP_REVIEWS_FILE);
+    if (notes !== null && notes.trim() !== "") parts.push(unresolvedStepReviewsSection(notes));
   }
   const before = await dirtyBefore(ctx);
   // The batch's file list as planned, read BEFORE the agent runs: apply edits the plan itself (it marks the batch done),
@@ -467,8 +430,11 @@ export async function runOneStage(ctx: StageExecContext, s: LoopStage, target: L
   throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
 }
 
-async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, attempt: number, target: LoopDefinition, halt: HaltState): Promise<StageRunResult> {
-  const message = [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
+async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, attempt: number, target: LoopDefinition, halt: HaltState, opts?: { review?: boolean }): Promise<StageRunResult> {
+  // A review repair starts from a step that passed its checks, so the message says so and carries the findings to fix.
+  const message = opts?.review
+    ? [`A review of the step “${s.name}” found the problems below. The step's own checks passed; fix what the review asks for in this repository.`, `Attempt ${attempt}.`, `Review findings:\n${output.slice(0, 12_000)}`]
+    : [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
   if (target.goal) message.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
   if (isFactoryLoop(target)) message.push(FACTORY_REPAIR_HINT);
@@ -492,7 +458,7 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
 }
 
 /** The runner deps that execute stages for one run. Each call has its own halt state. */
-export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError"> {
+export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError" | "snapshotBefore" | "reviewStep" | "noteUnresolvedReview"> {
   const halt: HaltState = { reason: null, isError: false };
   return {
     async runStage(s, prior) {
@@ -510,8 +476,11 @@ export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pi
       ctx.log("");
       return r;
     },
-    repair: (s, output, attempt) => repairStage(ctx, s, output, attempt, loop, halt),
+    repair: (s, output, attempt, opts) => repairStage(ctx, s, output, attempt, loop, halt, opts),
     halt: () => halt.reason,
     haltIsError: () => halt.isError,
+    snapshotBefore: () => takeStepSnapshot(ctx),
+    reviewStep: (s, snapshot) => reviewStepOnce(ctx, loop, s, snapshot, halt),
+    noteUnresolvedReview: (s, findings) => noteUnresolvedStep(ctx, s, findings),
   };
 }

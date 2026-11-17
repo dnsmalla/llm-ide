@@ -845,3 +845,216 @@ test("a Test Map stage that falls back to file matching prints the too-large not
   assert.equal(r.ok, true, r.output);
   assert.match(r.output, /\ngraph too large to read \(over 32 MB\); the map fell back to matching files by name\n/);
 });
+
+// ---- AI step review (5b) ----------------------------------------------------------------------------------------
+
+const buildStep = stage({ id: "s1", name: "Build", kind: "skill", command: null, skillId: "skills/test-driven-development" });
+const reviewLoop = (over = {}) => ({ ...loopOf([buildStep]), goal: "ship it", ...over });
+const verdictPath = "system/loop-worktrees/r1/.factory/reviews/s1.md";
+
+/** A fake fs that also takes writes and directory creation, for the notes file. */
+function writableFs(files = {}) {
+  const store = { ...files };
+  return {
+    store,
+    fs: {
+      async read(path) {
+        if (!(path in store)) throw Object.assign(new Error(`not found: ${path}`), { code: "not_found" });
+        return { status: "ok", text: store[path], hash: "h" };
+      },
+      async list() { return { entries: [] }; },
+      async create() { return {}; },
+      async write(path, text) { store[path] = text; return {}; },
+    },
+  };
+}
+
+test("createStageDeps also returns the step-review deps", () => {
+  const { ctx } = ctxOf();
+  const deps = createStageDeps(ctx, loopOf([buildStep]));
+  assert.equal(typeof deps.snapshotBefore, "function");
+  assert.equal(typeof deps.reviewStep, "function");
+  assert.equal(typeof deps.noteUnresolvedReview, "function");
+});
+
+test("snapshotBefore takes the worktree checkpoint by run id", async () => {
+  const { host, calls } = fakeHost({ loop_worktree_checkpoint: "tree123" });
+  const { ctx } = ctxOf({ host });
+  assert.deepEqual(await createStageDeps(ctx, loopOf([buildStep])).snapshotBefore(buildStep), { tree: "tree123" });
+  assert.deepEqual(calls, [["loop_worktree_checkpoint", { runId: "r1" }]]);
+});
+
+test("snapshotBefore without a worktree run returns null, calls no host command and logs the skip", async () => {
+  const { host, calls } = fakeHost();
+  const { ctx, log } = ctxOf({ host, runId: null, runRoot: "/p" });
+  assert.equal(await createStageDeps(ctx, loopOf([buildStep])).snapshotBefore(buildStep), null);
+  assert.equal(calls.length, 0);
+  assert.match(log.join("\n"), /step review skipped/);
+});
+
+test("snapshotBefore returns null and logs when the host rejects the checkpoint", async () => {
+  const { host } = fakeHost({ loop_worktree_checkpoint: () => { throw new Error("git failed"); } });
+  const { ctx, log } = ctxOf({ host });
+  assert.equal(await createStageDeps(ctx, loopOf([buildStep])).snapshotBefore(buildStep), null);
+  assert.match(log.join("\n"), /step review skipped.*git failed/);
+});
+
+test("reviewStep clears the verdict file, reviews the step diff since the snapshot and reads an approve verdict", async () => {
+  const order = [];
+  const calls = [];
+  const host = async (command, args) => {
+    order.push(command);
+    calls.push([command, args]);
+    if (command === "loop_changed_paths") return [];
+    if (command === "loop_worktree_diff") return { text: "+added line", truncated: false };
+    return null;
+  };
+  const core = {
+    async request(path, opts) {
+      order.push("agent-run");
+      calls.push(["agent-run", { path, opts }]);
+      return { reply: "approved", resultSubtype: "success", ran: true, changedPaths: [".factory/reviews/s1.md"], createdPaths: [], usage: { costUsd: 0.2 } };
+    },
+  };
+  const { fs } = fakeFs({ [verdictPath]: "# Step review: Build\n\nVerdict: approve\n" });
+  const { ctx } = ctxOf({ host, core, fs });
+  const deps = createStageDeps(ctx, reviewLoop());
+  const r = await deps.reviewStep(buildStep, { tree: "tree123" }, 1);
+  assert.deepEqual(r, { verdict: "approve", findings: "", usage: { costUsd: 0.2 } });
+  assert.deepEqual(calls.find(([c]) => c === "loop_clear_factory_output"), ["loop_clear_factory_output", { path: ".factory/reviews/s1.md", runId: "r1" }]);
+  assert.ok(order.indexOf("loop_clear_factory_output") < order.indexOf("agent-run"), "a stale verdict is cleared before the review runs");
+  assert.deepEqual(calls.find(([c]) => c === "loop_worktree_diff"), ["loop_worktree_diff", { runId: "r1", since: "tree123" }]);
+  const body = calls.find(([c]) => c === "agent-run")[1].opts.body;
+  assert.deepEqual(body.skills, ["skills/step-review"]);
+  assert.equal(body.writeScope, ".factory");
+  assert.equal(body.repoRoot, "/p/system/loop-worktrees/r1");
+  assert.match(body.message, /Step: Build/);
+  assert.match(body.message, /Loop goal: ship it/);
+  assert.match(body.message, /Output path: \.factory\/reviews\/s1\.md/);
+  assert.match(body.message, /\+added line/);
+});
+
+test("reviewStep reads a changes verdict and passes the whole review text as findings", async () => {
+  const { host } = fakeHost({ loop_worktree_diff: { text: "+x", truncated: false } });
+  const text = "- [high] `src/a.ts:3` — wrong\n\nVerdict: changes\n";
+  const { core } = fakeCore({ reply: "done", resultSubtype: "success", changedPaths: [".factory/reviews/s1.md"], createdPaths: [] });
+  const { fs } = fakeFs({ [verdictPath]: text });
+  const { ctx } = ctxOf({ host, core, fs });
+  assert.deepEqual(await createStageDeps(ctx, reviewLoop()).reviewStep(buildStep, { tree: "t" }, 1), { verdict: "changes", findings: text });
+});
+
+test("reviewStep skips when the agent did not report the verdict file, even if a stale one is on disk", async () => {
+  const { host } = fakeHost({ loop_worktree_diff: { text: "+x", truncated: false } });
+  const { core } = fakeCore({ reply: "done", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+  const { fs } = fakeFs({ [verdictPath]: "Verdict: approve\n" });
+  const { ctx } = ctxOf({ host, core, fs });
+  const r = await createStageDeps(ctx, reviewLoop()).reviewStep(buildStep, { tree: "t" }, 1);
+  assert.equal(r.verdict, "skipped");
+  assert.match(r.reason, /wrote no verdict/);
+});
+
+test("reviewStep skips when the verdict file is missing or has no exact verdict line", async () => {
+  const { host } = fakeHost({ loop_worktree_diff: { text: "+x", truncated: false } });
+  const { core } = fakeCore({ reply: "done", resultSubtype: "success", changedPaths: [".factory/reviews/s1.md"], createdPaths: [] });
+  const missing = await createStageDeps(ctxOf({ host, core, fs: fakeFs({}).fs }).ctx, reviewLoop()).reviewStep(buildStep, { tree: "t" }, 1);
+  assert.equal(missing.verdict, "skipped");
+  assert.match(missing.reason, /wrote no verdict/);
+  const { fs } = fakeFs({ [verdictPath]: "Verdict: approve.\n" });
+  const malformed = await createStageDeps(ctxOf({ host, core, fs }).ctx, reviewLoop()).reviewStep(buildStep, { tree: "t" }, 1);
+  assert.equal(malformed.verdict, "skipped");
+  assert.match(malformed.reason, /wrote no verdict/);
+});
+
+test("reviewStep retries the diff without the checkpoint when the snapshot is lost, and logs it", async () => {
+  const diffCalls = [];
+  const host = async (command, args) => {
+    if (command === "loop_worktree_diff") {
+      diffCalls.push(args);
+      if (args.since) throw new Error("unknown tree");
+      return { text: "+whole run", truncated: false };
+    }
+    if (command === "loop_changed_paths") return [];
+    return null;
+  };
+  const { core, calls } = fakeCore({ reply: "ok", resultSubtype: "success", changedPaths: [".factory/reviews/s1.md"], createdPaths: [] });
+  const { fs } = fakeFs({ [verdictPath]: "Verdict: approve\n" });
+  const { ctx, log } = ctxOf({ host, core, fs });
+  const r = await createStageDeps(ctx, reviewLoop()).reviewStep(buildStep, { tree: "gone" }, 1);
+  assert.equal(r.verdict, "approve");
+  assert.deepEqual(diffCalls, [{ runId: "r1", since: "gone" }, { runId: "r1" }]);
+  assert.match(log.join("\n"), /baseline lost/);
+  assert.match(calls[0][1].body.message, /\+whole run/);
+});
+
+test("reviewStep skips (never throws) when the agent call fails without a write violation", async () => {
+  const host = async (command) => (command === "loop_worktree_diff" ? { text: "+x", truncated: false } : command === "loop_changed_paths" ? [] : null);
+  const core = { async request() { throw new Error("timed out"); } };
+  const { ctx } = ctxOf({ host, core });
+  const deps = createStageDeps(ctx, reviewLoop());
+  const r = await deps.reviewStep(buildStep, { tree: "t" }, 1);
+  assert.equal(r.verdict, "skipped");
+  assert.match(r.reason, /agent call failed.*timed out/);
+  assert.equal(deps.halt(), null, "a failed review is a skip, not a halt");
+});
+
+test("reviewStep halts the run when the reviewer writes outside .factory/ and reverts the write", async () => {
+  const { host, calls } = fakeHost({ loop_worktree_diff: { text: "+x", truncated: false } });
+  const { core } = fakeCore({ reply: "edited the code", resultSubtype: "success", changedPaths: ["src/a.ts"], createdPaths: [] });
+  const { fs } = fakeFs({ [verdictPath]: "Verdict: approve\n" });
+  const { ctx } = ctxOf({ host, core, fs });
+  const deps = createStageDeps(ctx, reviewLoop());
+  const r = await deps.reviewStep(buildStep, { tree: "t" }, 1);
+  assert.equal(r.verdict, "skipped");
+  assert.match(deps.halt(), /outside \.factory\/.*src\/a\.ts/);
+  assert.equal(deps.haltIsError(), false);
+  assert.deepEqual(calls.find(([c]) => c === "loop_revert_paths")?.[1].paths, ["src/a.ts"]);
+});
+
+test("a non-Factory loop's protected-path policy does not judge the review's verdict file", async () => {
+  const { host } = fakeHost({ loop_worktree_diff: { text: "+x", truncated: false } });
+  const { core } = fakeCore({ reply: "ok", resultSubtype: "success", changedPaths: [".factory/reviews/s1.md"], createdPaths: [] });
+  const { fs } = fakeFs({ [verdictPath]: "Verdict: approve\n" });
+  const { ctx } = ctxOf({ host, core, fs });
+  const loop = { ...reviewLoop({ defaultKey: "regression" }), config: { ...reviewLoop().config, protectedPathPolicy: "stop" } };
+  const deps = createStageDeps(ctx, loop);
+  assert.equal((await deps.reviewStep(buildStep, { tree: "t" }, 1)).verdict, "approve");
+  assert.equal(deps.halt(), null);
+});
+
+test("a repair for review findings says the step passed and carries the findings; a plain repair is unchanged", async () => {
+  const { host } = fakeHost();
+  const { core, calls } = fakeCore({ reply: "fixed", resultSubtype: "success", changedPaths: ["src/a.ts"], createdPaths: [] });
+  const { ctx } = ctxOf({ host, core });
+  const deps = createStageDeps(ctx, loopOf([buildStep]));
+  await deps.repair(buildStep, "- [high] `src/a.ts:3` — wrong", 1, { review: true });
+  assert.match(calls[0][1].body.message, /^A review of the step “Build” found the problems below/);
+  assert.match(calls[0][1].body.message, /\[high\] `src\/a\.ts:3`/);
+  await deps.repair(buildStep, "1 failing", 2);
+  assert.match(calls[1][1].body.message, /^Fix the failing Loop stage “Build”/);
+});
+
+test("noteUnresolvedReview appends a section per step to .factory/STEP-REVIEWS.md and creates the file", async () => {
+  const store = writableFs();
+  const { ctx } = ctxOf({ fs: store.fs });
+  const deps = createStageDeps(ctx, loopOf([buildStep]));
+  await deps.noteUnresolvedReview(buildStep, "- [high] `a.ts:1` — bad");
+  await deps.noteUnresolvedReview({ ...buildStep, id: "s2", name: "Test" }, "- [medium] `b.ts:2` — worse");
+  const text = store.store["system/loop-worktrees/r1/.factory/STEP-REVIEWS.md"];
+  assert.match(text, /^## Build\n\n- \[high\] `a\.ts:1` — bad/);
+  assert.match(text, /## Test\n\n- \[medium\] `b\.ts:2` — worse/);
+});
+
+test("the Factory Review message carries unresolved step reviews only when the notes file exists", async () => {
+  const review = stage({ id: "s7", name: "Review", kind: "skill", command: null, skillId: "skills/factory-review", outputPath: ".factory/REVIEW.md" });
+  const reviewed = (files) => {
+    const { host } = fakeHost({ loop_clear_factory_output: null, loop_worktree_diff: { text: "", truncated: false } });
+    const { core, calls } = fakeCore({ reply: "ok", resultSubtype: "success", changedPaths: [".factory/REVIEW.md"], createdPaths: [] });
+    const { ctx } = ctxOf({ host, core, fs: fakeFs(files).fs });
+    return createStageDeps(ctx, loopOf([review])).runStage(review, []).then(() => calls[0][1].body.message);
+  };
+  const withNotes = await reviewed({ "system/loop-worktrees/r1/.factory/STEP-REVIEWS.md": "## Build\n\n- [high] `a.ts:1` — bad\n" });
+  assert.match(withNotes, /Unresolved step reviews/);
+  assert.match(withNotes, /## Build/);
+  const without = await reviewed({});
+  assert.doesNotMatch(without, /Unresolved step reviews/);
+});
