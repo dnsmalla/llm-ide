@@ -745,6 +745,24 @@ test("loopback: findings accumulate across rounds and are recorded", async () =>
   assert.deepEqual(recorded, [["impl", { round: 1, source: "tests", text: "A1" }], ["impl", { round: 2, source: "review", text: "B2" }]]);
 });
 
+test("loopback: a code stage is told only its own group's findings", async () => {
+  const contexts = [];
+  const v1 = stage("v1", "Verify one"), v2 = stage("v2", "Verify two");
+  let v1Runs = 0, v2Runs = 0;
+  await runNativeLoop(cfg3([code("tw", "Tests"), v1, code("apply", "Apply"), v2]), base({
+    async runStage(s, _p, loopback) {
+      if (s.id === "apply") contexts.push(loopback);
+      if (s.id === "v1") { v1Runs += 1; return { ok: v1Runs > 1, output: "G1 broke" }; }
+      if (s.id === "v2") { v2Runs += 1; return { ok: false, output: `G2 broke ${"AB"[v2Runs - 1] ?? "C"}` }; }
+      return { ok: true, output: "" };
+    }, repair: noRepair,
+  }));
+  assert.ok(contexts.length >= 2);
+  assert.equal(contexts[0], undefined);
+  assert.match(contexts[1].findings, /G2 broke A/);
+  assert.doesNotMatch(contexts[1].findings, /G1 broke/);
+});
+
 test("loopback: cost ceiling after a loopback ends as a stopped run, spend kept", async () => {
   const counts = { impl: 0, v: 0 };
   const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxCostUsd: 1 }), base({

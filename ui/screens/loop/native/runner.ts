@@ -93,11 +93,11 @@ export interface LoopRunOutcome {
   errored?: boolean;
   /** One entry per step review episode; set only when a step was reviewed or skipped. */
   stepReviews?: StepReviewOutcome[];
-  /** Set when the run is held for a person's review (Task 7). */
+  /** Set when the run is held for a person's review. */
   awaitingReview?: boolean;
   /** Ended because the loopback rounds or a budget ran out without passing: the warning state, never shipped. */
   stoppedAtLimit?: boolean;
-  /** Set only when the run looped back at least once. */
+  /** Set only on a stopped run: it used up its loopback rounds, or a budget ended a run that has a Verify loopback. */
   loopback?: LoopbackSummary;
 }
 
@@ -146,7 +146,10 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
   // Loopback state is separate from the legacy repair counters: a loopback round never spends a repair.
   let loopSignature: string | null = null;
   let unchanged = 0;
+  // Every round's findings (the record and the stop summary) and each group's own (what its code stage is told), so a
+  // later group's code stage never reads an earlier group's failures.
   const findings = reviews.findings;
+  const groupFindings = new Map<string, FindingsEntry[]>();
   // One baseline per group across all rounds, so the review judges the whole step, not just the last round's fix.
   const groupBaseline = new Map<string, StepSnapshot | null>();
   const groupAttempts = new Map<string, number>();
@@ -299,7 +302,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       const isReviewed = codeGroup === null && deps.reviewStep !== undefined && effectiveReviewAfter(stage) && !reviews.closed.has(stage.id);
       const baseline = isReviewed ? (deps.snapshotBefore ? await deps.snapshotBefore(stage) : null) : undefined;
       const t0 = Date.now();
-      const loopbackContext: LoopbackContext | undefined = codeGroup && findings.length > 0 ? { round: iteration, maxRounds, findings: findingsText(findings) } : undefined;
+      const loopbackContext: LoopbackContext | undefined = codeGroup && (groupFindings.get(codeGroup.closerId)?.length ?? 0) > 0 ? { round: iteration, maxRounds, findings: findingsText(groupFindings.get(codeGroup.closerId) ?? []) } : undefined;
       const result = await deps.runStage(stage, outcomes, loopbackContext);
       stageRan = true;
       const outcome = { stage, ok: result.ok, output: result.output, durationMs: result.durationMs ?? Date.now() - t0, usage: result.usage };
@@ -383,6 +386,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       const heldAfterRound = await heldOutcome();
       if (heldAfterRound) return heldAfterRound;
       findings.push(entry);
+      groupFindings.set(trigger.group.closerId, [...(groupFindings.get(trigger.group.closerId) ?? []), entry]);
       try { await deps.recordFindings?.(code, entry); } catch (e) { deps.log(`could not record the round's findings: ${e instanceof Error ? e.message : String(e)}`); }
       for (const codeStage of trigger.group.codeStages) passedOnce.delete(codeStage.id);
       deps.onProgress?.({ type: "loopback", stage: trigger.verify, round: iteration, maxRounds, reason: trigger.source });

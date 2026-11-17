@@ -56,7 +56,7 @@ export function actionsFor(column: Column, note: string | null, process: { intak
       if (note === NOTE.interrupted) return ["finishChecks", "openDiff", "rerun", "discard"];
       if (note === NOTE.ciFailed || note === NOTE.newComments || note === NOTE.ciFailedAndComments) return ["sendBack", "openRequest", "openDiff", "discard"];
       if (note === NOTE.closedUnmerged || note === NOTE.statusUnavailable) return ["openRequest", "discard"];
-      // Task 8 wires the approve / requestChanges click handlers in Board.tsx and Card.tsx.
+      // A run held for a person's review is approved or sent back from the card.
       if (note === NOTE.awaitingReview) return ["approve", "requestChanges", "openDiff", "discard"];
       if (note === NOTE.stoppedNoMr) return ["openDiff", "rerun", "discard"];
       if (note === NOTE.notShipped) return ["rerun", "openDiff", "discard"];
