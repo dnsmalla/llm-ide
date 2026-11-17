@@ -934,6 +934,17 @@ test("reviewStep clears the verdict file, reviews the step diff since the snapsh
   assert.match(body.message, /\+added line/);
 });
 
+test("reviewStep skips without calling the agent when the step changed no files", async () => {
+  for (const diff of [{ text: "", truncated: false }, { text: "", files: [], truncated: false }, { text: "   \n", truncated: false }, { text: "x", files: [], truncated: false }]) {
+    const { host, calls } = fakeHost({ loop_worktree_diff: diff });
+    const { core } = fakeCore({ reply: "done", resultSubtype: "success", changedPaths: [".factory/reviews/s1.md"], createdPaths: [] });
+    const { ctx } = ctxOf({ host, core, fs: fakeFs({}).fs });
+    const r = await createStageDeps(ctx, reviewLoop()).reviewStep(buildStep, { tree: "t" }, 1);
+    assert.deepEqual(r, { verdict: "skipped", findings: "", reason: "the step changed no files" });
+    assert.equal(calls.some(([c]) => c === "agent-run"), false);
+  }
+});
+
 test("reviewStep reads a changes verdict and passes the whole review text as findings", async () => {
   const { host } = fakeHost({ loop_worktree_diff: { text: "+x", truncated: false } });
   const text = "- [high] `src/a.ts:3` — wrong\n\nVerdict: changes\n";

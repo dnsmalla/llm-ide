@@ -50,15 +50,16 @@ export async function takeStepSnapshot(ctx: StageExecContext): Promise<StepSnaps
 }
 
 /** The step's diff since its checkpoint. A lost checkpoint falls back to the run's whole diff (logged), never a skip. */
-async function stepDiff(ctx: StageExecContext, runId: string, snapshot: StepSnapshot): Promise<{ text: string; truncated: boolean }> {
-  let d: { text?: unknown; truncated?: unknown };
+async function stepDiff(ctx: StageExecContext, runId: string, snapshot: StepSnapshot): Promise<{ text: string; truncated: boolean; changedFiles: number | null }> {
+  let d: { text?: unknown; truncated?: unknown; files?: unknown };
   try {
     d = await ctx.host<typeof d>("loop_worktree_diff", { runId, since: snapshot.tree });
   } catch (e) {
     ctx.log(`step review: baseline lost (${messageOf(e)}); reviewing the run's whole diff instead`);
     d = await ctx.host<typeof d>("loop_worktree_diff", { runId });
   }
-  return { text: typeof d.text === "string" ? d.text : "", truncated: d.truncated === true };
+  // The host already leaves .factory/ out of the diff, so an empty list means the step touched no reviewable file.
+  return { text: typeof d.text === "string" ? d.text : "", truncated: d.truncated === true, changedFiles: Array.isArray(d.files) ? d.files.length : null };
 }
 
 /** The reviewer may write only its verdict file under .factory/: any other path is reverted and judged a violation. */
@@ -98,12 +99,14 @@ export async function reviewStepOnce(ctx: StageExecContext, loop: LoopDefinition
   } catch (e) {
     return skipped(`the old review could not be cleared (${messageOf(e)})`);
   }
-  let diff: { text: string; truncated: boolean };
+  let diff: { text: string; truncated: boolean; changedFiles: number | null };
   try {
     diff = await stepDiff(ctx, runId, snapshot);
   } catch (e) {
     return skipped(`the step's diff could not be read (${messageOf(e)})`);
   }
+  // Without this the skill turns "no diff" into a [high] finding, which would pay for a review and then a repair loop over nothing.
+  if (diff.changedFiles === 0 || diff.text.trim() === "") return skipped("the step changed no files");
   const message = reviewMessage(loop, stage, outputPath, diff);
   const before = await dirtyBefore(ctx);
   const g: GuardedCallOutcome<AgentRunReply> = await guardedAgentCall<AgentRunReply>({
