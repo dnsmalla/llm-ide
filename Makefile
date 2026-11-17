@@ -17,6 +17,13 @@ build:
 clean:
 	rm -rf extension/dist extension/extension-v*.zip
 
+# Disk space a dev checkout piles up: Rust debug caches (~19 GB) and the kb/backups
+# copies the repo-kb layout never prunes. Dry run; `make clean-cache APPLY=1` deletes
+# (only the value 1; stop `tauri dev` first, it uses the debug cache).
+.PHONY: clean-cache
+clean-cache:
+	node scripts/clean-cache.mjs $(if $(filter 1,$(APPLY)),--apply)
+
 # --- desktop (Tauri) ---------------------------------------------------------
 
 .PHONY: test-desktop test-desktop-node
@@ -165,6 +172,7 @@ contract-gates:
 	node scripts/gen-openapi.mjs --check
 	node scripts/http-inventory.mjs --coverage
 	node --test scripts/http-inventory.test.mjs
+	node --test scripts/clean-cache.test.mjs
 	node scripts/gen-design-tokens.mjs --check
 
 # Regenerate the HTTP inventory snapshot. Not a gate and never needed for a
