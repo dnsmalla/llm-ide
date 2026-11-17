@@ -92,8 +92,9 @@ step keeps your text and no longer gets those updates; delete the `prompt` key t
 
 ## Step reviews and the final review
 
-Two switches control reviews. Both live in `system/factory-template.json`, and the Board header and the Loop screen
-write the same keys.
+Two switches control reviews. Both live in `system/factory-template.json`: the Board header toggle writes `reviewMode`,
+and the Process tab edits `reviewAfter`. The Loop screen does not offer either for a Factory loop, because every Board run
+rebuilds the loop from this file and would drop a value set there.
 
 ```json
 {
@@ -101,6 +102,7 @@ write the same keys.
   "reviewMode": "human",
   "stages": [
     { "role": "implement", "reviewAfter": true },
+    { "role": "verify", "command": "auto" },
     { "role": "custom", "name": "Doc review", "kind": "skill", "skill": "doc-writer", "reviewAfter": true },
     { "role": "review" },
     { "role": "reviewGate" }
@@ -122,7 +124,8 @@ Default for `reviewAfter` when the key is absent:
 | Shell command and verdict check steps | no |
 
 Each step review writes its verdict to `.factory/reviews/<step id>.md`. Findings the repair loop could not resolve are
-collected in `.factory/STEP-REVIEWS.md`.
+collected in `.factory/STEP-REVIEWS.md`. A run without a git worktree cannot diff a step, so it always records its step
+reviews as skipped.
 
 In human mode, **Approve** lets the run ship. **Request changes** takes your note, writes it to
 `.factory/HUMAN-REVIEW.md` and re-runs from Implement. A run that is waiting for your review survives quitting the app
