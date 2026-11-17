@@ -73,8 +73,6 @@ export interface RunManagerDeps {
   newId(): string;
   /** A stage boundary: the Factory bus runner renews its lease from this, not only from the 60 s timer. */
   onStage?(runId: string): void;
-  /** A stage boundary: the Factory bus runner renews its lease from this, not only from the 60 s timer. */
-  onStage?(runId: string): void;
   /** A stage finished (passed or failed): the Factory posts its step comment on the run's issue. */
   onStageResult?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; stage: LoopStage; ok: boolean; iteration: number; runPrefix: string }): void;
   /** The run's record was just written: the Factory opens its draft MR (or records why not). Returns a log line. */
@@ -320,7 +318,7 @@ function fail(run: ManagedRun, message: string): void {
 /** Starts a run (or queues it when the cap is reached) and returns its run id. Never awaits. */
 export function startRun(projectRoot: string, item: RunItem, mode: RunMode, opts: { runId?: string } = {}): string {
   const d = requireDeps();
-  if ((mode === "continue" || mode === "sendBack" || mode === "check" || mode === "rework") && !opts.runId) throw new Error(`${mode} needs the runId of an existing worktree`);
+  if ((mode === "continue" || mode === "sendBack" || mode === "check" || mode === "rework" || mode === "humanReview") && !opts.runId) throw new Error(`${mode} needs the runId of an existing worktree`);
   const runId = opts.runId ?? newRunId(d.now(), d.rand);
   if (runs.has(runId)) return runId;
   // A new run for a work item that already has a live run of the same kind would cut a second worktree, branch and
