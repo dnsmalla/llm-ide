@@ -6,14 +6,16 @@ import { accountLine, SIGN_OUT_TEXT } from "../misc-model.ts";
 import { SecretField } from "../secret-field.ts";
 import { useEnv, useModel, useRefreshOnFocus } from "../context.tsx";
 import { Button, ErrorText, Field, NeedsHost, SecretInput } from "../ui.tsx";
+import { SavedLoginRow } from "./SavedLoginRow.tsx";
 
 export default function AccountSection() {
-  const { client, host } = useEnv();
+  const { client, host, serverMode } = useEnv();
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [confirmOut, setConfirmOut] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loginRowKey, setLoginRowKey] = useState(0);
   const [resetKey, setResetKey] = useState(0);
   const password = useModel(() => new SecretField());
 
@@ -44,6 +46,9 @@ export default function AccountSection() {
       setMe(null);
     } catch (e) {
       setError(describeError(e));
+    } finally {
+      // Sign-out may have changed the saved login (or failed to), so the Saved login row reads it again.
+      setLoginRowKey((k) => k + 1);
     }
   };
 
@@ -69,6 +74,7 @@ export default function AccountSection() {
           <div className="st-row"><Button tone="primary" disabled={busy || !email.trim()} onClick={() => void signIn()}>Sign in</Button></div>
         </form>
       ) : <NeedsHost what="Signing in" />}
+      {(serverMode ?? "local") === "local" ? <SavedLoginRow key={loginRowKey} host={host} /> : null}
     </div>
   );
 }

@@ -146,6 +146,9 @@ const REMOTE_SAFE_COMMANDS = new Set([
   "core_status", "core_start", "core_stop", "core_restart",
   "get_prefs", "set_prefs", "app_restart", "host_platform", "ping",
   "open_external_url", "trust_confirm",
+  // The saved repository list is app configuration, not hub data. Refusing it in remote mode would let a later
+  // local launch overwrite edits made meanwhile, so it stays reachable in both modes.
+  "repo_config_load", "repo_config_save",
 ]);
 const REMOTE_SAFE_PREFIXES = ["remote_", "update_", "notify_", "tray_"];
 
@@ -468,5 +471,60 @@ export const host = {
   async remoteSessionClear(): Promise<void> {
     if (!isHostAvailable()) return;
     await invokeHost<unknown>("remote_session_clear");
+  },
+
+  /**
+   * Local mode: the saved local login (email, password, refresh token) in the OS keychain. The password goes to the
+   * host only here, on save; the host never returns it, and `localLoginStatus` returns the email alone.
+   */
+  async localLoginSave(email: string, password: string): Promise<string | null> {
+    if (!isHostAvailable()) return null;
+    // The host signs in with the local core first; nothing is stored unless the core accepts the password.
+    const t = await invokeHost<unknown>("local_login_save", { email, password });
+    return typeof t === "string" && t.length > 0 ? t : null;
+  },
+
+  /** The stored refresh token for this data dir (the host refuses unless the local core is trusted). */
+  async localLoginSession(): Promise<string | null> {
+    if (!isHostAvailable()) return null;
+    const t = await invokeHost<unknown>("local_login_session");
+    return typeof t === "string" && t.length > 0 ? t : null;
+  },
+
+  /** Signs in again with the saved password on the host; returns the new refresh token. Never returns the password. */
+  async localLoginRelogin(): Promise<string | null> {
+    if (!isHostAvailable()) return null;
+    const t = await invokeHost<unknown>("local_login_relogin");
+    return typeof t === "string" && t.length > 0 ? t : null;
+  },
+
+  /** Updates the saved refresh token only when `email` is the saved account (the host compares case-insensitively). */
+  async localLoginStoreRefresh(email: string, refresh: string): Promise<void> {
+    if (!isHostAvailable()) return;
+    await invokeHost<unknown>("local_login_store_refresh", { email, refresh });
+  },
+
+  async localLoginStatus(): Promise<{ saved: boolean; email: string | null }> {
+    if (!isHostAvailable()) return { saved: false, email: null };
+    const v = await invokeHost<unknown>("local_login_status");
+    const o = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+    return { saved: o.saved === true, email: typeof o.email === "string" && o.email.length > 0 ? o.email : null };
+  },
+
+  async localLoginForget(): Promise<void> {
+    if (!isHostAvailable()) return;
+    await invokeHost<unknown>("local_login_forget");
+  },
+
+  /** The host copy of the saved repository list (JSON text), or null when there is none yet. */
+  async repoConfigLoad(): Promise<string | null> {
+    if (!isHostAvailable()) return null;
+    const t = await invokeHost<unknown>("repo_config_load");
+    return typeof t === "string" && t.length > 0 ? t : null;
+  },
+
+  async repoConfigSave(json: string): Promise<void> {
+    if (!isHostAvailable()) return;
+    await invokeHost<unknown>("repo_config_save", { json });
   },
 };

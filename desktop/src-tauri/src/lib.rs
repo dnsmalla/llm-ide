@@ -64,6 +64,8 @@ mod ssh_transport;
 mod ssh_workspace;
 mod workspace_backend;
 mod ssh_workspace_cmds;
+mod local_login;
+mod repo_config_store;
 mod remote_deploy;
 mod remote_hub;
 mod remote_session;
@@ -502,6 +504,14 @@ macro_rules! product_handlers {
                 remote_session::remote_session_store,
                 remote_session::remote_session_load,
                 remote_session::remote_session_clear,
+                local_login::local_login_save,
+                local_login::local_login_session,
+                local_login::local_login_relogin,
+                local_login::local_login_store_refresh,
+                local_login::local_login_status,
+                local_login::local_login_forget,
+                repo_config_store::repo_config_load,
+                repo_config_store::repo_config_save,
                 remote_tls::remote_tls_probe,
                 remote_tls::remote_tls_pin,
                 remote_tls::remote_tls_unpin,

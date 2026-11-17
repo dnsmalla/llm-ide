@@ -330,6 +330,12 @@ export interface SettingsHost {
   signOut?(): Promise<void>;
   /** Clear the hub refresh token held in the OS keychain (remote mode). */
   remoteSessionClear?(): Promise<void>;
+  /** Local mode: whether a login is saved in the keychain, and its email. The password is never read back. */
+  localLoginStatus?(): Promise<{ saved: boolean; email: string | null }>;
+  /** Local mode: verifies the email and password by signing in to the local core, then saves them. */
+  localLoginChange?(email: string, password: string): Promise<void>;
+  /** Local mode: removes the saved login from the keychain (the session itself is not signed out). */
+  localLoginForget?(): Promise<void>;
 }
 
 export interface SettingsEnv {

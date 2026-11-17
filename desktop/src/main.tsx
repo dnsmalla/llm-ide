@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { setHostBridge } from "@llmide/screens/shell/host";
 import { seedThemeFromHost } from "@llmide/screens/shell";
+import { hydrateRepoConfig } from "@llmide/screens/settings/repo-config";
 import { App } from "./App";
 import "@llmide/ui-kit/styles.css";
 import "./design/shell.css";
@@ -18,8 +19,20 @@ if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
   void invoke<{ stored?: { theme?: unknown } }>("get_prefs").then((v) => seedThemeFromHost(v?.stored?.theme), () => undefined);
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+const renderApp = () => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+};
+
+// The saved repository list lives in a host file. It is copied into webview storage before the first render, so no
+// screen reads the defaults first. The wait is capped: a slow host must not hold the window shut.
+if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+  const hydrated = hydrateRepoConfig().catch(() => undefined);
+  const capped = new Promise<void>((resolve) => setTimeout(resolve, 2000));
+  void Promise.race([hydrated, capped]).then(renderApp);
+} else {
+  renderApp();
+}

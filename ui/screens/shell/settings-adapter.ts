@@ -23,6 +23,7 @@ import { CoreError, type CoreClient } from "./core";
 import { createSshServerIo } from "../settings/ssh-server-model";
 import { decodePickedChoice, decodePickedFolder, decodePrefsView, type HostPrefsPatch, type HostPrefsView } from "./host-prefs";
 import type { CoreStatus } from "./host";
+import { clearSavedLoginRejected, setSavedLoginNote } from "./saved-login-state.ts";
 
 export interface SettingsAdapterDeps {
   core: Pick<CoreClient, "requestRaw" | "login" | "logout">;
@@ -61,6 +62,12 @@ export function trustOf(status: CoreStatus | null): CoreTrust {
   if (status?.trust === "ssh_forward") return "ssh-pinned";
   if (status?.trust === "remote_pinned") return "remote-pinned";
   return status?.trust === "spawned" ? "spawned" : "adopted-unverified";
+}
+
+/** The host's answer for the saved local login: the email is shown, the password never comes back. */
+function decodeLocalLoginStatus(raw: unknown): { saved: boolean; email: string | null } {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  return { saved: o.saved === true, email: typeof o.email === "string" && o.email.length > 0 ? o.email : null };
 }
 
 export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
@@ -360,6 +367,23 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
     },
     async signOut() {
       await d.core.logout();
+      // A new sign-in starts with a clean slate: a refused-password notice from an earlier attempt must not outlive it.
+      clearSavedLoginRejected();
+      setSavedLoginNote(null);
+      // An explicit sign-out in local mode also forgets the saved login. A failure is not swallowed here: the Saved
+      // login row then still shows the login, and the user can forget it there.
+      if (d.coreStatus()?.mode === "local") await d.invoke("local_login_forget");
+    },
+    async localLoginStatus() {
+      return decodeLocalLoginStatus(await d.invoke<unknown>("local_login_status"));
+    },
+    async localLoginChange(email, password) {
+      // The host verifies the password with the local core before it stores anything, so a wrong password cannot
+      // replace a working one. The current webview session is left as it is.
+      await d.invoke("local_login_save", { email, password });
+    },
+    async localLoginForget() {
+      await d.invoke("local_login_forget");
     },
   };
   return { client: settingsClientFrom(d.core), host };

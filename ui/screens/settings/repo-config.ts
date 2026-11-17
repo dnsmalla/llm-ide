@@ -1,3 +1,5 @@
+import { host, isHostAvailable } from "../shell/host.ts";
+
 // The Mac's Repositories card (Features/SourceControl/Views/RepoSettingsSection.swift) for the desktop:
 // GitLab/GitHub tabs, a write-only token per provider, the per-provider automation allow-list and the saved
 // repository list. Tokens go to the core vault (`github.token` / `gitlab.token`, never rendered back); everything
@@ -127,12 +129,106 @@ export function readRepoConfig(storage: Storage | undefined = globalThis.localSt
   }
 }
 
+/**
+ * The host's copy of the list (`repo-config.json` in the desktop data dir). The host copy is the source of truth in the
+ * desktop app: webview storage is lost when the webview is reset or when dev and packaged builds use other origins.
+ */
+export interface RepoConfigHostIo {
+  load(): Promise<string | null>;
+  save(json: string): Promise<void>;
+}
+
+const desktopHostIo: RepoConfigHostIo = {
+  load: () => host.repoConfigLoad(),
+  save: (json) => host.repoConfigSave(json),
+};
+
+// `undefined` = the desktop host when it is present (the normal case); tests install a fake, `null` turns it off.
+let hostIoOverride: RepoConfigHostIo | null | undefined;
+
+export function setRepoConfigHostIo(io: RepoConfigHostIo | null | undefined): void {
+  hostIoOverride = io;
+}
+
+function activeHostIo(): RepoConfigHostIo | null {
+  if (hostIoOverride !== undefined) return hostIoOverride;
+  return isHostAvailable() ? desktopHostIo : null;
+}
+
 export function writeRepoConfig(c: RepoConfig, storage: Storage | undefined = globalThis.localStorage): void {
+  const json = JSON.stringify(c);
   try {
-    storage?.setItem(KEY, JSON.stringify(c));
+    storage?.setItem(KEY, json);
   } catch {
     // Storage full/unavailable: the component keeps the change for this session.
   }
+  // Fire-and-forget: a failed host write keeps the webview copy, which is what the screens read in this session.
+  const io = activeHostIo();
+  if (io) void io.save(json).catch(() => undefined);
+}
+
+/**
+ * Forget path: empties the host copy together with localStorage. An empty object reads back as the defaults,
+ * so a later start does not bring the cleared list back from the host file.
+ */
+export function clearRepoConfigHostFile(): void {
+  const io = activeHostIo();
+  if (io) void io.save("{}").catch(() => undefined);
+}
+
+export type RepoConfigHydration = "restored" | "migrated" | "unchanged";
+
+function isJsonObject(text: string): boolean {
+  try {
+    return isRecord(JSON.parse(text));
+  } catch {
+    return false;
+  }
+}
+
+function readLocalRaw(storage: Storage | undefined): string | null {
+  try {
+    return storage?.getItem(KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Start-up: makes the host copy visible to the screens. A host copy that exists and is valid is written into
+ * localStorage. With no host copy yet, a list saved only in the webview is copied to the host once (the migration
+ * from the old localStorage-only version). An unreadable host copy is left alone, and so is the local one.
+ */
+export async function hydrateRepoConfig(
+  storage: Storage | undefined = globalThis.localStorage,
+  io: RepoConfigHostIo | null = activeHostIo(),
+): Promise<RepoConfigHydration> {
+  if (!io) return "unchanged";
+  let hostJson: string | null;
+  try {
+    hostJson = await io.load();
+  } catch {
+    // Refused or malformed on the host: keep the webview copy, and do not overwrite the host file with it either.
+    return "unchanged";
+  }
+  if (hostJson !== null && isJsonObject(hostJson)) {
+    try {
+      storage?.setItem(KEY, hostJson);
+    } catch {
+      // Storage unavailable: the screens read the defaults this session; the host copy is still the source of truth.
+    }
+    return "restored";
+  }
+  const local = readLocalRaw(storage);
+  if (local !== null && isJsonObject(local)) {
+    try {
+      await io.save(local);
+      return "migrated";
+    } catch {
+      return "unchanged";
+    }
+  }
+  return "unchanged";
 }
 
 /** The active saved clone's absolute path when it lives inside `projectRoot`; otherwise the project root. */

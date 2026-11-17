@@ -821,6 +821,27 @@ Five do-not-regress rules from the system re-review (D1: hubs are owner/admin-ex
 - **Host API and extension chat surfaces are exempt from the HUB FOLDER rule, never the project grant.** `runV2Turn` allows `agentContext.surface` `host-api`/`extension` to use their server-owned scratch folder even though it is in no project. A Host API turn still needs a real project on a hub (the gateway and `startHostTurn` refuse a projectless one); the extension side panel has no project picker, so its projectless turn runs under the team clamp (read-only on a hub, no tools). The scratch folder is per user (`core/extension-chat-workspace.mjs` `<data>/extension-chat/<user>`; hostile ids are hashed). Pinned by `tests/agent-v2-project-hub.test.mjs` and `tests/chat-removed.test.mjs`.
 - **The hub edge passes only `/admin/members`, `/admin/members/*` and `/admin/invites*`.** `deploy/hub/llm-ide-hub.nginx.template` proxies exactly those to the core (JWT + team role are checked there); the bare `/admin`, `/admin/`, `/admin/backup`, `/admin/users/*`, `/admin/membersX` and `/admin/invitesX` stay 404 at the edge. The desktop proxy forwards to this same edge. The desktop and hub web register forms carry the single-use invite token. Pinned by `desktop/scripts/hub-nginx.test.mjs`, `ui/screens/shell/tests/core.test.mjs`, `ui/screens/shell/tests/components.test.mjs`.
 
+## Desktop local login and saved repository list (`desktop/src-tauri/src/{local_login,repo_config_store}.rs`)
+
+### ✅ MUST preserve
+
+- **Credentials are used only after a live verification of the spawned core.** Every command that sends the password or the refresh token (`local_login_save`, `_session`, `_relogin`, `_store_refresh`) calls `CoreHost::verified_url()` inside its blocking task, immediately before the use. That probe requires mode local, phase Ready, trust `spawned` and this launch's nonce on `/health`. A probe may be retried (3 tries, about 2 s) for a busy core. Stopped, restarting, failed, adopted or remote cores get `untrusted_core`. The URL must be `http://127.0.0.1:<port>`; `localhost` and `[::1]` are refused. Gate: `local_login::credential_core`. Pinned by `local_login::tests::only_a_spawned_verified_local_core_gets_credentials`.
+- **Save verifies with the core first.** `local_login_save` signs in to the verified core and stores the entry only when that answers HTTP 200 with a refresh token. A 401/403 is `login_rejected` and writes nothing. Any other status, including a 3xx redirect, is an error.
+- **One keychain slot.** Save replaces the entry and forget clears it, whatever data dir saved it. A different data dir is ignored on READ only (never deleted by a read).
+- **Refresh rotations update only the saved account.** `local_login_store_refresh` takes the signed-in user's email and writes only when it matches the saved email, case-insensitively.
+- **Unticking "Keep me signed in" forgets the saved login** before that sign-in.
+- **A saved login is forgotten only by an explicit sign-out or Forget.** A null refresh token, a 401 or an expired session never clears it. If the keychain refuses the forget during sign-out, the sign-out completes and the Settings row shows the saved login with a warning.
+- **The password never leaves the host.** The webview sends it in only through `local_login_save`, and gets back the refresh token and an email, never the password. `StoredLogin` has a redacted `Debug`; the login request sends the password in the body only, refuses redirects and accepts only HTTP 200.
+- **Repository config holds no tokens.** `repo-config.json` is app configuration only; git and provider tokens stay in the core vault (`github.token`, `gitlab.token`).
+
+### ❌ DO NOT do these
+
+- **Do NOT send the saved password or refresh token to a core that is not verified right now** (`verified_url()` returning `Some`), including an adopted core, a stopped or restarting core, or a remote hub. Do NOT trust cached status fields for this decision.
+- **Do NOT return the password to the webview**, log it, or put it in an error text.
+- **Do NOT create a login entry from a rotated refresh token**, or attach a rotated token to an account other than the saved one.
+- **Do NOT clear the saved login on a session expiry**, only on an explicit sign-out (`signOutExplicitly`) or Settings > Forget.
+- **Do NOT treat the local login as protection against a compromised webview.** A compromised webview can still plant credentials of an account it can log into (residual risk, accepted): it can save a login for any account whose password it knows, and the saved login is then used at the next start.
+
 ## SSH server mode (`desktop/src-tauri/src/ssh_*.rs`, `desktop/scripts/stage-hub-core.mjs`)
 
 The desktop installs, starts and forwards to the core on a Linux server reached by the system `ssh`. User steps are in [Connect over SSH](../how-to/connect-over-ssh.md); packaging is in `desktop/PACKAGING.md` ("SSH server mode").

@@ -2,9 +2,37 @@ import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } fro
 import { StatusBanner } from "@llmide/ui-kit";
 import { CoreError, isAbortError, type CoreClient } from "./core";
 import { describeCoreErrorFor } from "./core-explain";
-import type { CoreStatus } from "./host";
+import { host, type CoreStatus } from "./host";
+import {
+  clearSavedLoginRejected,
+  savedLoginNote,
+  savedLoginRejected,
+  setSavedLoginNote,
+  subscribeSavedLoginNote,
+  subscribeSavedLoginRejected,
+} from "./saved-login-state";
 import type { StatusHint, StatusView } from "./status-view";
 import type { TrustGate } from "./trust-gate";
+
+/** Shown when the core is not the one this app started: the login is used for this sign-in only, not saved. */
+const NOTE_NOT_SAVED_ADOPTED = "This core is not the one the app started, so your login was not saved.";
+/** Shown when an unticked sign-in could not clear a login saved earlier. */
+const NOTE_FORGET_FAILED = "Could not remove the saved login; open Settings → Account to forget it.";
+
+function codeOf(e: unknown): string {
+  const code = (e as { code?: unknown })?.code;
+  return typeof code === "string" ? code : "";
+}
+
+/** Text for a host command failure (the host sends `{code, message}`); anything else reads as a generic failure. */
+function hostErrorText(e: unknown): string {
+  const code = codeOf(e);
+  if (code === "keychain_unavailable") return "Could not save your login on this computer. Untick “Keep me signed in” to sign in without saving.";
+  if (code === "login_rejected") return "The email or password is incorrect.";
+  if (code === "untrusted_core") return NOTE_NOT_SAVED_ADOPTED;
+  const message = (e as { message?: unknown })?.message;
+  return code !== "" && typeof message === "string" ? message : "Sign-in failed.";
+}
 
 /** Names the unverified core and the risk; credentials are held back until the user agrees. */
 export function UntrustedCoreNotice({ url, onConfirm }: { url: string | null; onConfirm: () => void }) {
@@ -117,6 +145,10 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
+  // Local mode only: the checkbox offers to keep the login on this computer. A hub login is never kept here.
+  const localMode = getStatus?.()?.mode === "local";
+  const rejectedLogin = useSyncExternalStore(subscribeSavedLoginRejected, savedLoginRejected, () => false);
+  const savedNote = useSyncExternalStore(subscribeSavedLoginNote, savedLoginNote, () => null);
 
   useEffect(() => {
     const ctl = new AbortController();
@@ -147,16 +179,55 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
     setPending(true);
     setError(null);
     setNotice(null);
+    setSavedLoginNote(null);
+    // Read before the reset below. The checkbox is absent (and so unchecked) outside local mode.
+    const keepSignedIn = localMode && data.get("keepSignedIn") !== null;
     try {
       if (mode === "create") {
         await client.register(email, password, displayName || undefined, ctl.signal, invite || undefined);
         setNotice("Account created. Signing in…");
       }
-      await client.login(email, password, ctl.signal);
+      if (keepSignedIn) {
+        // The host signs in with the core and stores the login only when the core accepts the password. This webview
+        // then adopts the verified refresh token, so the password is sent once. A keychain failure stops the sign-in
+        // here (the message says to untick the box), rather than signing in without the login being kept.
+        let refresh: string | null = null;
+        try {
+          refresh = await host.localLoginSave(email, password);
+        } catch (err) {
+          if (codeOf(err) !== "untrusted_core") throw err;
+          // An adopted (dev) core cannot hold the login: sign in normally, and say the login was not kept.
+          setSavedLoginNote(NOTE_NOT_SAVED_ADOPTED);
+        }
+        if (refresh) await client.restoreSession(refresh, ctl.signal);
+        else await client.login(email, password, ctl.signal);
+      } else {
+        if (localMode) {
+          // Unticked: a login saved earlier must not survive this sign-in. A failed forget is only a warning, and only
+          // when the login is still saved; the sign-in itself goes on.
+          let forgotten = true;
+          try {
+            await host.localLoginForget();
+          } catch {
+            forgotten = false;
+          }
+          if (!forgotten) {
+            let stillSaved = true;
+            try {
+              stillSaved = (await host.localLoginStatus()).saved;
+            } catch {
+              stillSaved = true;
+            }
+            if (stillSaved) setSavedLoginNote(NOTE_FORGET_FAILED);
+          }
+        }
+        await client.login(email, password, ctl.signal);
+      }
+      clearSavedLoginRejected();
       form.reset();
     } catch (err) {
       if (isAbortError(err)) return;
-      setError(err instanceof CoreError ? describeCoreErrorFor(err, getStatus ? getStatus() : null) : "Sign-in failed.");
+      setError(err instanceof CoreError ? describeCoreErrorFor(err, getStatus ? getStatus() : null) : hostErrorText(err));
       const pw = form.elements.namedItem("password");
       if (pw instanceof HTMLInputElement) pw.value = "";
     } finally {
@@ -168,7 +239,16 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
   return (
     <div className="sh-panel">
       <h2 className="sh-panel-title">{create ? "Create your account" : "Sign in to LLM-IDE"}</h2>
-      <p className="sh-panel-text sh-muted">The account lives on the LLM-IDE core you connect to. You sign in again each time the app starts.</p>
+      <p className="sh-panel-text sh-muted">
+        The account lives on the LLM-IDE core you connect to.{" "}
+        {localMode
+          ? "With “Keep me signed in” ticked, the email, password and session are kept in this computer's keychain and reused at every start. Untick it to sign in again each time the app starts. Signing out forgets the saved login."
+          : "You sign in again each time the app starts."}
+      </p>
+      {savedNote ? <div role="status" className="sh-panel-text">{savedNote}</div> : null}
+      {rejectedLogin && !error ? (
+        <div role="status" className="sh-panel-text">Your saved login was rejected. Sign in again to update it.</div>
+      ) : null}
       {getStatus?.()?.url ? <p className="sh-panel-text sh-muted">Server: <code>{getStatus()!.url}</code></p> : null}
       {trust?.needsConfirm && gate && <UntrustedCoreNotice url={trust.url} onConfirm={() => gate.confirm()} />}
       <form className="sh-form" onSubmit={submit} aria-busy={pending}>
@@ -199,6 +279,12 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
             </button>
           </div>
         </label>
+        {localMode && (
+          <label className="sh-field">
+            <input name="keepSignedIn" type="checkbox" defaultChecked disabled={pending} />
+            <span>Keep me signed in on this computer</span>
+          </label>
+        )}
         {error && (
           <div role="alert" className="sh-form-error">
             {error}

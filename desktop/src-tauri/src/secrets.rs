@@ -21,6 +21,8 @@ pub const SERVICE: &str = "com.llmide.desktop";
 pub const ACCOUNT_JWT: &str = "jwt-secret";
 pub const ACCOUNT_VAULT: &str = "vault-key";
 pub const ACCOUNT_HUB_SESSION: &str = "hub-session";
+/// The local login (email, password, refresh token) kept for the local core; see `local_login.rs`.
+pub const ACCOUNT_LOCAL_LOGIN: &str = "local-login";
 pub const BACKEND_ENV: &str = "LLMIDE_KEYCHAIN_BACKEND";
 /// The server rejects secrets shorter than this (`extension/core/config.mjs`).
 const MIN_LEN: usize = 32;

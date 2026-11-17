@@ -35,6 +35,7 @@ import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, isSele
 import { RemoteProjectBar } from "./RemoteProjectBar";
 import { getHubError, remoteBanner, subscribeHubError } from "./remote-status";
 import { bindRemoteSession } from "./remote-session";
+import { bindLocalSession, signOutExplicitly } from "./local-session";
 import { landingFor, readHome, selectHome } from "./landing";
 import { activityStore, core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
@@ -157,6 +158,17 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     if (!remoteSessionReady) return undefined;
     return bindRemoteSession();
   }, [remoteSessionReady]);
+  // Local mode: restore the remembered local login once the spawned core is ready, and again after each core restart
+  // (a restarted core has no session in memory; the keychain login is the way back in). The key moves only with the
+  // URL and restart count, so ordinary status polls do not rebind.
+  const localCore = coreStatusStore.getSnapshot().status;
+  const localSessionKey = !remoteMode && !view.down && localCore?.mode === "local" && localCore.trust === "spawned" && localCore.state === "ready"
+    ? `${localCore.url}#${localCore.restarts}`
+    : "";
+  useEffect(() => {
+    if (!localSessionKey) return undefined;
+    return bindLocalSession();
+  }, [localSessionKey]);
   const session = useCoreSession();
   const hubError = useSyncExternalStore(subscribeHubError, getHubError, getHubError);
   const hubBanner = remoteBanner(view.down ? "offline" : "online", session.signedIn, hubError);
@@ -363,10 +375,10 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       openSettings: () => dispatch({ type: "select", id: "settings" }),
       openHelp: () => setGuideOpen(true),
       openPermissions: () => setPermissionsOpen(true),
-      signOut: () => core.logout(),
-      signOutAndForget: async () => { forgetLocalSettings(); await core.logout(); },
+      signOut: () => signOutExplicitly(),
+      signOutAndForget: async () => { forgetLocalSettings(); await signOutExplicitly(); },
       disconnectPlan: () => readDisconnectPlan(core),
-      disconnectAll: (plan, onStep) => disconnectAll(core, plan, () => core.logout(), { onStep }),
+      disconnectAll: (plan, onStep) => disconnectAll(core, plan, signOutExplicitly, { onStep }),
     }),
     [],
   );
