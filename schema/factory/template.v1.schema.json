@@ -35,6 +35,13 @@
         }
       }
     },
+    "reviewMode": {
+      "enum": [
+        "auto",
+        "human"
+      ],
+      "description": "auto (the default, absent) runs the AI review after each reviewable step; human leaves those reviews to the person"
+    },
     "stages": {
       "type": "array",
       "minItems": 1,
@@ -97,15 +104,14 @@
           }
         },
         {
-          "description": "Built-in skill steps: their skill is fixed, the prompt can be changed.",
+          "description": "Built-in skill steps: their skill is fixed, the prompt can be changed. reviewAfter may be set on intake, plan and implement.",
           "additionalProperties": false,
           "properties": {
             "role": {
               "enum": [
                 "intake",
                 "plan",
-                "implement",
-                "review"
+                "implement"
               ]
             },
             "name": {
@@ -122,7 +128,36 @@
             },
             "severity": {
               "$ref": "#/$defs/severity",
-              "description": "advisory only for intake and plan; implement and review must stay blocking"
+              "description": "advisory only for intake and plan; implement must stay blocking"
+            },
+            "reviewAfter": {
+              "type": "boolean",
+              "description": "true or false: whether the AI reviews this step after it passes; absent uses the default for the step"
+            }
+          }
+        },
+        {
+          "description": "The built-in review step: its skill is fixed, the prompt can be changed. It cannot be made advisory or turned off, and has no reviewAfter (the Review step is itself the review).",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "const": "review"
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "$ref": "#/$defs/prompt"
+            },
+            "timeoutMinutes": {
+              "$ref": "#/$defs/timeoutMinutes"
+            },
+            "severity": {
+              "$ref": "#/$defs/severity",
+              "description": "review must stay blocking"
             }
           }
         },
@@ -223,6 +258,10 @@
             },
             "severity": {
               "$ref": "#/$defs/severity"
+            },
+            "reviewAfter": {
+              "type": "boolean",
+              "description": "true or false: whether the AI reviews this step after it passes"
             },
             "prompt": {
               "$ref": "#/$defs/prompt"

@@ -6,7 +6,7 @@
 import type { FsApi } from "../../explorer/fs";
 import { DETECTED_STRUCTURE, DETECTED_TEST } from "./environment.ts";
 import { FACTORY_BUILT_IN_STAGES, FACTORY_TEMPLATE, factoryRole, isCustomStage, type FactoryRole } from "./factory.ts";
-import type { LoopDefinition, LoopStage } from "./model.ts";
+import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 
 export const TEMPLATE_FILE = "system/factory-template.json";
 
@@ -23,9 +23,10 @@ export interface TemplateStage {
   command?: string;
   timeoutMinutes?: number;
   prompt?: string;
+  reviewAfter?: boolean;
 }
 export interface TemplateBudget { maxIterations?: number; maxCostUsd?: number; wallClockMinutes?: number }
-export interface FactoryTemplate { version: 1; budget?: TemplateBudget; stages: TemplateStage[] }
+export interface FactoryTemplate { version: 1; budget?: TemplateBudget; reviewMode?: "auto" | "human"; stages: TemplateStage[] }
 export interface TemplateError { path: string; line: number; message: string }
 export type TemplateParse = { ok: true; template: FactoryTemplate } | { ok: false; errors: TemplateError[] };
 
@@ -35,7 +36,9 @@ const REQUIRED: readonly FactoryRole[] = ["implement", "verify", "review", "revi
 const ORDER: readonly [FactoryRole, FactoryRole][] = [["implement", "verify"], ["verify", "review"], ["review", "reviewGate"]];
 const PROMPT_ROLES = new Set<TemplateRole>(["intake", "plan", "implement", "review"]);
 const COMMAND_ROLES = new Set<TemplateRole>(["setup", "verify"]);
-const STAGE_KEYS = new Set(["role", "name", "kind", "skill", "verdictPath", "verdictLine", "enabled", "severity", "command", "timeoutMinutes", "prompt"]);
+const STAGE_KEYS = new Set(["role", "name", "kind", "skill", "verdictPath", "verdictLine", "enabled", "severity", "command", "timeoutMinutes", "prompt", "reviewAfter"]);
+// Only the steps whose output an AI review can judge; a gate, setup, verify or a shell step has nothing to review.
+const REVIEW_AFTER_ROLES = new Set<TemplateRole>(["intake", "plan", "implement"]);
 const SKILL = /^(skills\/)?[a-z0-9][a-z0-9-]{0,63}$/;
 // The Factory's own gates read these; a custom check on them would be taken for that gate.
 const RESERVED_VERDICTS = new Set([".factory/READINESS.md", ".factory/REVIEW.md"]);
@@ -181,8 +184,13 @@ export function parseFactoryTemplate(text: string): TemplateParse {
     err("", "the file must be a JSON object with \"version\" and \"stages\"");
     return { ok: false, errors };
   }
-  for (const k of Object.keys(root)) if (!["version", "budget", "stages"].includes(k)) err(k, `unknown key (allowed: version, budget, stages)`);
+  for (const k of Object.keys(root)) if (!["version", "budget", "stages", "reviewMode"].includes(k)) err(k, `unknown key (allowed: version, budget, stages, reviewMode)`);
   if (root.version !== 1) err("version", "version must be 1");
+  let reviewMode: "auto" | "human" | undefined;
+  if (root.reviewMode !== undefined) {
+    if (root.reviewMode === "auto" || root.reviewMode === "human") reviewMode = root.reviewMode;
+    else err("reviewMode", '"auto" or "human"');
+  }
   let budget: TemplateBudget | undefined;
   if (root.budget !== undefined) {
     if (!isObj(root.budget)) err("budget", "budget must be an object");
@@ -202,7 +210,7 @@ export function parseFactoryTemplate(text: string): TemplateParse {
   else root.stages.forEach((raw, i) => { const st = checkStage(raw, `stages[${i}]`, err); if (st) stages.push(st); });
   if (Array.isArray(root.stages) && root.stages.length > 0 && root.stages.length <= MAX_STAGES && stages.length === root.stages.length) checkProcess(stages, err);
   if (errors.length > 0) return { ok: false, errors: errors.sort((a, b) => a.line - b.line) };
-  return { ok: true, template: { version: 1, ...(budget ? { budget } : {}), stages } };
+  return { ok: true, template: { version: 1, ...(budget ? { budget } : {}), ...(reviewMode ? { reviewMode } : {}), stages } };
 }
 
 function checkStage(raw: unknown, at: string, err: (path: string, message: string) => void): TemplateStage | null {
@@ -268,6 +276,11 @@ function checkStage(raw: unknown, at: string, err: (path: string, message: strin
     else if (typeof raw.prompt !== "string" || raw.prompt.length > 20_000) e(`${at}.prompt`, "a prompt is text of at most 20,000 characters");
     else out.prompt = raw.prompt;
   }
+  if (raw.reviewAfter !== undefined) {
+    if (!(REVIEW_AFTER_ROLES.has(r) || skillStep)) e(`${at}.reviewAfter`, `not allowed for a "${r}" step${custom ? " of this kind" : ""}`);
+    else if (typeof raw.reviewAfter !== "boolean") e(`${at}.reviewAfter`, "true or false");
+    else out.reviewAfter = raw.reviewAfter;
+  }
   if (raw.timeoutMinutes !== undefined) {
     if (!isInt(raw.timeoutMinutes, 1, 240)) e(`${at}.timeoutMinutes`, "a whole number of minutes from 1 to 240");
     else out.timeoutMinutes = raw.timeoutMinutes;
@@ -309,12 +322,12 @@ function checkProcess(stages: TemplateStage[], err: (path: string, message: stri
 
 // ---- format, default, migration, apply -----------------------------------------------------------------------------
 
-const STAGE_ORDER: (keyof TemplateStage)[] = ["role", "name", "kind", "skill", "enabled", "severity", "verdictPath", "verdictLine", "command", "timeoutMinutes", "prompt"];
+const STAGE_ORDER: (keyof TemplateStage)[] = ["role", "name", "kind", "skill", "enabled", "severity", "reviewAfter", "verdictPath", "verdictLine", "command", "timeoutMinutes", "prompt"];
 
 export function formatFactoryTemplate(t: FactoryTemplate): string {
   const stages = t.stages.map((s) => Object.fromEntries(STAGE_ORDER.filter((k) => s[k] !== undefined).map((k) => [k, s[k]])));
   const budget = t.budget ? Object.fromEntries((["maxIterations", "maxCostUsd", "wallClockMinutes"] as const).filter((k) => t.budget![k] !== undefined).map((k) => [k, t.budget![k]])) : undefined;
-  return JSON.stringify({ version: 1, ...(budget ? { budget } : {}), stages }, null, 2) + "\n";
+  return JSON.stringify({ version: 1, ...(budget ? { budget } : {}), ...(t.reviewMode ? { reviewMode: t.reviewMode } : {}), stages }, null, 2) + "\n";
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
@@ -354,6 +367,10 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
         if (required) drop(s, `advisory severity: the "${role}" step must stay blocking, so it blocks again`);
         else out.severity = "advisory";
       }
+      if (typeof s.reviewAfter === "boolean") {
+        if (REVIEW_AFTER_ROLES.has(role)) out.reviewAfter = s.reviewAfter;
+        else drop(s, `its reviewAfter: a "${role}" step has no AI review, so it is not kept`);
+      }
       if (role === "setup" && command.trim()) out.command = command;
       if (role === "verify") out.command = command.trim() && command !== DETECTED_TEST ? command : "auto";
       if (PROMPT_ROLES.has(role)) { if (s.prompt && s.prompt !== b.prompt) out.prompt = s.prompt; }
@@ -367,6 +384,7 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
     if (s.kind !== "shellCommand" && s.kind !== "skill" && s.kind !== "artifactCheck") { drop(s, `a "${s.kind}" step cannot be written in the template`); continue; }
     if (s.kind === "skill" && reviewAt >= 0 && gateAt > reviewAt && index > reviewAt && index < gateAt) { drop(s, BETWEEN_REVIEW_AND_GATE); continue; }
     if (s.testOp) drop(s, `its testOp "${s.testOp}": a custom step has none, so it is not kept`);
+    if (typeof s.reviewAfter === "boolean" && s.kind !== "skill") drop(s, "its reviewAfter: only a skill step has an AI review, so it is not kept");
     const out: TemplateStage = { role: "custom", name: s.name, kind: s.kind };
     if (s.kind === "artifactCheck") {
       const v = s.check && isObj(s.check.verdict) ? s.check.verdict : null;
@@ -390,6 +408,7 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
       if (!skill || !SKILL.test(skill)) { drop(s, `its skill "${s.skillId ?? ""}" is not a skills/<name> skill`); continue; }
       out.skill = skill;
       if (s.prompt) out.prompt = s.prompt;
+      if (typeof s.reviewAfter === "boolean") out.reviewAfter = s.reviewAfter;
     }
     if (!s.enabled && !(autoShell && s.disabledByDetection)) out.enabled = false;
     if (s.severity === "advisory") out.severity = "advisory";
@@ -406,6 +425,8 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
         maxCostUsd: clamp(c.maxCostUsd ?? 0, 0, 1000),
         wallClockMinutes: clamp(Math.round((c.wallClockBudgetSeconds ?? 7200) / 60), 1, 1440),
       },
+      // The model writes reviewMode only as "human"; absent means the default "auto", so it is not written.
+      ...(c.reviewMode === "human" ? { reviewMode: "human" as const } : {}),
       stages,
     },
     dropped,
@@ -450,13 +471,13 @@ export function applyTemplate(loop: LoopDefinition, t: FactoryTemplate, detected
       if (prev) used.add(prev);
       const command = ts.role === "setup" ? ts.command ?? "" : ts.role === "verify" ? (!ts.command || ts.command === "auto" ? detectedTest ?? DETECTED_TEST : ts.command) : b.command;
       const enabled = ts.enabled ?? (ts.role === "setup" ? (command ?? "").trim() !== "" : b.enabled);
-      return {
+      return withReviewAfter({
         ...structuredClone(b), ...(prev ?? {}),
         kind: b.kind, skillId: b.skillId, check: b.check === null ? null : structuredClone(b.check), targetPath: b.targetPath, outputPath: b.outputPath,
         runOnce: b.runOnce, allowsRepair: b.allowsRepair, severity: ts.severity ?? "blocking",
         name: ts.name ?? b.name, enabled, prompt: PROMPT_ROLES.has(ts.role) ? ts.prompt ?? b.prompt : b.prompt, command, timeoutSeconds, order,
         disabledByDetection: ts.role === "setup" && enabled ? null : prev?.disabledByDetection ?? b.disabledByDetection,
-      };
+      }, ts.reviewAfter);
     }
     customs++;
     const kind = ts.kind!;
@@ -472,7 +493,7 @@ export function applyTemplate(loop: LoopDefinition, t: FactoryTemplate, detected
       isDefault: false, enabled: true, defaultKey: null, severity: "blocking", timeoutSeconds: null, detectedCommand: null, check: null, testOp: null,
       graphOp: null, allowsRepair: kind !== "skill", runOnce: false, defaultRevision: null, disabledByDetection: null, raw: null,
     };
-    return {
+    return withReviewAfter({
       ...base, ...(prev ?? {}),
       // Only a "custom/" id keeps a step out of the Factory's roles, so an older loop's random id is replaced.
       id: prev && isCustomStage(prev) ? prev.id : base.id,
@@ -480,21 +501,29 @@ export function applyTemplate(loop: LoopDefinition, t: FactoryTemplate, detected
       enabled: ts.enabled ?? !undetected, severity: ts.severity ?? "blocking", timeoutSeconds, order, runOnce: false,
       allowsRepair: prev?.allowsRepair ?? base.allowsRepair, check, testOp: null, graphOp: null, raw: null,
       disabledByDetection: undetected ? true : kind === "shellCommand" && auto ? false : prev?.disabledByDetection ?? null,
-    };
+    }, ts.reviewAfter);
   });
   const b = t.budget ?? {};
   const d = FACTORY_TEMPLATE.config;
   const cost = b.maxCostUsd ?? d.maxCostUsd ?? 0;
-  return {
-    ...loop,
-    config: {
-      ...loop.config,
-      stages,
-      maxIterations: b.maxIterations ?? d.maxIterations,
-      maxCostUsd: cost === 0 ? null : cost,
-      wallClockBudgetSeconds: (b.wallClockMinutes ?? Math.round((d.wallClockBudgetSeconds ?? 7200) / 60)) * 60,
-    },
+  const config: LoopEngineConfig = {
+    ...loop.config,
+    stages,
+    maxIterations: b.maxIterations ?? d.maxIterations,
+    maxCostUsd: cost === 0 ? null : cost,
+    wallClockBudgetSeconds: (b.wallClockMinutes ?? Math.round((d.wallClockBudgetSeconds ?? 7200) / 60)) * 60,
   };
+  // The spread above keeps the previous apply's value, so an absent key is removed here, not inherited.
+  if (t.reviewMode === "human") config.reviewMode = "human";
+  else delete config.reviewMode;
+  return { ...loop, config };
+}
+
+/** A stage's reviewAfter is exactly the template's: an absent key stays absent, so a removed key does not linger from `...prev`. */
+function withReviewAfter(stage: LoopStage, value: boolean | undefined): LoopStage {
+  if (value === undefined) delete stage.reviewAfter;
+  else stage.reviewAfter = value;
+  return stage;
 }
 
 function canonical(v: unknown): string {

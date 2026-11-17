@@ -275,3 +275,73 @@ test("processStepNames: enabled steps in order are the board lanes; gates, an em
   assert.deepEqual(processStepNames(t, new Set(["Structure verify"])), ["Design", "Structure verify", "Doc review", "Review"]);
   assert.deepEqual(processStepNames(defaultFactoryTemplate()).includes("Review gate"), false);
 });
+
+const reviewTemplate = () => ({ version: 1, reviewMode: "human", stages: [
+  { role: "plan", reviewAfter: true },
+  { role: "custom", name: "Docs", kind: "skill", skill: "doc-writer", reviewAfter: true },
+  { role: "implement", reviewAfter: false },
+  { role: "verify", command: "npm test" },
+  { role: "review" },
+  { role: "reviewGate" },
+] });
+
+test("reviewAfter and reviewMode parse where they mean something", () => {
+  const r = parseFactoryTemplate(text(reviewTemplate()));
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.equal(r.template.reviewMode, "human");
+  assert.equal(r.template.stages[2].reviewAfter, false);
+  assert.equal(r.template.stages[0].reviewAfter, true);
+});
+
+test("reviewAfter is refused on steps it has no meaning for, and reviewMode takes only auto or human", () => {
+  const at = (o) => errorsOf(text(o)).map((e) => `${e.path}: ${e.message}`).join("\n");
+  const t = reviewTemplate();
+  assert.match(at({ ...t, reviewMode: "manual" }), /^reviewMode: /m);
+  assert.match(at({ ...t, stages: t.stages.map((s, i) => (i === 2 ? { ...s, reviewAfter: "x" } : s)) }), /^stages\[2\]\.reviewAfter: /m);
+  const onVerify = at({ ...t, stages: t.stages.map((s) => (s.role === "verify" ? { ...s, reviewAfter: true } : s)) });
+  assert.match(onVerify, /^stages\[3\]\.reviewAfter: /m);
+  assert.match(at({ ...t, stages: [{ role: "review", reviewAfter: true }, ...t.stages.slice(3)] }), /^stages\[0\]\.reviewAfter: /m);
+  assert.match(at({ ...t, stages: [...t.stages.slice(0, 5), { role: "reviewGate", reviewAfter: true }] }), /^stages\[5\]\.reviewAfter: /m);
+  assert.match(at({ ...t, stages: [{ role: "custom", name: "Lint", kind: "shellCommand", command: "npm run lint", reviewAfter: true }, ...t.stages.slice(2)] }), /^stages\[0\]\.reviewAfter: /m);
+});
+
+test("reviewAfter and reviewMode survive a format and parse round trip, and the default text has neither", () => {
+  const t = parseFactoryTemplate(text(reviewTemplate())).template;
+  assert.deepEqual(parseFactoryTemplate(formatFactoryTemplate(t)).template, t);
+  const dflt = formatFactoryTemplate(defaultFactoryTemplate());
+  assert.equal(dflt.includes("reviewAfter"), false);
+  assert.equal(dflt.includes("reviewMode"), false);
+});
+
+test("applyTemplate writes reviewAfter and reviewMode, and a removed key does not linger from the previous apply", () => {
+  const withKeys = applyTemplate(loopOf(), reviewTemplate(), "npm test");
+  assert.equal(withKeys.config.reviewMode, "human");
+  assert.equal(withKeys.config.stages.find((s) => factoryRole(s) === "implement").reviewAfter, false);
+  const without = applyTemplate(withKeys, defaultFactoryTemplate(), "npm test");
+  assert.equal("reviewMode" in without.config, false);
+  for (const s of without.config.stages) assert.equal("reviewAfter" in s, false, s.name);
+});
+
+test("templateFromLoop carries reviewMode and a reviewAfter skill step, and drops nothing", () => {
+  const stages = structuredClone(FACTORY_BUILT_IN_STAGES);
+  stages.splice(6, 0, { ...stages[5], id: "custom/docs-1", name: "Docs", kind: "skill", skillId: "skills/doc-writer", command: null, check: null, prompt: "Check docs.", reviewAfter: true, order: 6 });
+  const loop = loopOf(stages.map((s, i) => ({ ...s, order: i })));
+  loop.config.reviewMode = "human";
+  const { template, dropped } = templateFromLoop(loop);
+  assert.deepEqual(dropped, []);
+  assert.equal(template.reviewMode, "human");
+  assert.equal(template.stages.find((s) => s.name === "Docs").reviewAfter, true);
+});
+
+test("Review Focus 5: applying the default twice is the same loop, and the pinned Factory loop fixtures still migrate to a parsable template", async () => {
+  const { readFileSync } = await import("node:fs");
+  const loop = loopOf();
+  const once = applyTemplate(loop, defaultFactoryTemplate(), "npm test");
+  assert.equal(sameLoop(once, applyTemplate(once, defaultFactoryTemplate(), "npm test")), true);
+  // The fixtures are saved Factory loop definitions (loop.json shape), not templates: they must migrate and round-trip.
+  for (const f of ["factory-template.v1.json", "factory-template.v2.json"]) {
+    const pinned = JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8"));
+    const r = parseFactoryTemplate(formatFactoryTemplate(templateFromLoop(pinned).template));
+    assert.equal(r.ok, true, `${f}: ${JSON.stringify(r.errors)}`);
+  }
+});
