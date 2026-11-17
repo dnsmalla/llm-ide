@@ -3,8 +3,15 @@
 // up to maxRepairsPerStage; the run ends at a repair budget, the consecutive non-improving stop, or maxIterations.
 // A stage that runs once per run (runsOncePerRun) is skipped in later iterations once it has passed.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
+import { effectiveReviewAfter } from "./review.ts";
 
 export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
+
+/** What the working tree looked like before a reviewed step ran; the review diffs against it. */
+export interface StepSnapshot { tree: string }
+export interface StepReviewResult { verdict: "approve" | "changes" | "skipped"; findings: string; reason?: string; usage?: { costUsd?: number } }
+/** One review episode for a step: it ends approved, unresolved (budget spent, or findings stopped changing), or skipped. */
+export interface StepReviewOutcome { stageId: string; stageName: string; verdict: "approve" | "unresolved" | "skipped"; attempts: number; findings: string; reason?: string }
 
 /** A stage that runs once per run, not once per iteration: a passed one is skipped, so a repair never re-plans or re-applies. */
 export function runsOncePerRun(stage: LoopStage): boolean {
@@ -16,12 +23,26 @@ export type ProgressEvent =
   | { type: "stage-result"; stage: LoopStage; ok: boolean; iteration: number; durationMs: number; costUsd?: number }
   | { type: "stage-skipped"; stage: LoopStage; index: number; count: number; iteration: number }
   | { type: "repair"; stage: LoopStage; attempt: number }
+  | { type: "step-review"; stage: LoopStage; phase: "reviewing" | "fixing"; attempt: number }
+  | { type: "step-review-result"; stage: LoopStage; verdict: StepReviewOutcome["verdict"]; attempts: number }
   | { type: "paused"; paused: boolean };
 export interface RunnerDeps {
   /** Execute one stage once. `prior` is every outcome so far (including earlier iterations). Throws for an unsupported kind. */
   runStage(stage: LoopStage, prior: readonly StageOutcome[]): Promise<StageRunResult>;
-  /** Ask the repair agent to fix a failed stage. `attempt` is 1-based for this stage/run. */
-  repair(stage: LoopStage, output: string, attempt: number): Promise<StageRunResult>;
+  /**
+   * Ask the repair agent to fix a failed stage. `attempt` is 1-based for this stage/run. `opts.review` marks a repair
+   * of AI step-review findings rather than of a failed stage, so the agent is told the step passed and what to fix.
+   */
+  repair(stage: LoopStage, output: string, attempt: number, opts?: { review?: boolean }): Promise<StageRunResult>;
+  /**
+   * Captures the tree before a reviewed stage runs. Null = no baseline is possible, so the step's diff cannot be
+   * isolated and its review is skipped (recorded, not a failure).
+   */
+  snapshotBefore?(stage: LoopStage): Promise<StepSnapshot | null>;
+  /** Reviews only the diff since `snapshot`. `attempt` is the 1-based review pass within this step's episode. */
+  reviewStep?(stage: LoopStage, snapshot: StepSnapshot, attempt: number): Promise<StepReviewResult>;
+  /** Records a step whose review ended unresolved, so the Review stage and the person see the open findings. */
+  noteUnresolvedReview?(stage: LoopStage, findings: string): Promise<void>;
   log(line: string): void;
   /** Asked between stages so Stop can end the run without starting the next stage. */
   isCancelled?(): boolean;
@@ -66,9 +87,34 @@ export interface LoopRunOutcome {
   blocked?: boolean;
   /** Ended by a halt for an agent call that failed (timeout, dropped connection) without a violation: the Mac's `error`. */
   errored?: boolean;
+  /** One entry per step review episode; set only when a step was reviewed or skipped. */
+  stepReviews?: StepReviewOutcome[];
+  /** Set when the run is held for a person's review (Task 7). */
+  awaitingReview?: boolean;
+}
+
+/** Step-review state that outlives one iteration, so a closed step is not reviewed again later in the run. */
+interface StepReviewState {
+  outcomes: StepReviewOutcome[];
+  /** Stage ids whose review ended without approval; a later iteration runs them without reviewing again. */
+  closed: Set<string>;
+  /** Review-driven repairs made per stage in this run; separate from the stage's own repair budget. */
+  repairs: Map<string, number>;
 }
 
 export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps): Promise<LoopRunOutcome> {
+  const reviews: StepReviewState = { outcomes: [], closed: new Set(), repairs: new Map() };
+  const outcome = await runLoopInner(config, deps, reviews);
+  if (reviews.outcomes.length === 0) return outcome;
+  // A spent review budget never stops the run: the findings carry forward to the final review and the MR, which
+  // are the human hand-off. Only the cost ceiling ends a run from inside a review.
+  const unresolved = reviews.outcomes.filter((r) => r.verdict === "unresolved").length;
+  const skipped = reviews.outcomes.filter((r) => r.verdict === "skipped").length;
+  const reviewNote = unresolved + skipped > 0 ? ` · step reviews: ${unresolved} unresolved, ${skipped} skipped` : "";
+  return { ...outcome, stepReviews: reviews.outcomes, statusSummary: `${outcome.statusSummary}${reviewNote}` };
+}
+
+async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews: StepReviewState): Promise<LoopRunOutcome> {
   const stages = config.stages.filter((s) => s.enabled);
   if (stages.length === 0) throw new Error("this loop has no enabled stages");
   const repairs = new Map<string, number>();
@@ -102,6 +148,69 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
     deps.log("pause timed out without a resume; the run is aborted to release the loop");
     return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "pause timed out without a resume; the run was aborted", cancelled: true };
   };
+  const ceilingOutcome = (stage: LoopStage): LoopRunOutcome | null => {
+    if (config.maxCostUsd === null || spentUsd < config.maxCostUsd) return null;
+    return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: stage, statusSummary: `cost ceiling reached ($${spentUsd.toFixed(2)} of $${config.maxCostUsd})`, costUsd: spentUsd };
+  };
+  const cancelledOutcome = (): LoopRunOutcome => ({ passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "run cancelled", cancelled: true });
+  // Records how one review episode ended. Anything but approval closes the step for the rest of the run.
+  const endStepReview = async (stage: LoopStage, verdict: StepReviewOutcome["verdict"], attempts: number, findings: string, reason?: string): Promise<null> => {
+    reviews.outcomes.push({ stageId: stage.id, stageName: stage.name, verdict, attempts, findings, ...(reason === undefined ? {} : { reason }) });
+    if (verdict !== "approve") reviews.closed.add(stage.id);
+    deps.onProgress?.({ type: "step-review-result", stage, verdict, attempts });
+    if (verdict === "unresolved") await deps.noteUnresolvedReview?.(stage, findings);
+    return null;
+  };
+  /**
+   * Reviews one passed step and repairs its findings within the step's own budget. Returns the outcome that ends the
+   * run (cost ceiling, halt, cancel), or null to carry on. A null baseline means no diff can be isolated: skipped.
+   */
+  const reviewPassedStep = async (stage: LoopStage, baseline: StepSnapshot | null): Promise<LoopRunOutcome | null> => {
+    const reviewer = deps.reviewStep;
+    if (!reviewer) return null;
+    if (baseline === null) return endStepReview(stage, "skipped", 0, "", "no baseline snapshot, so the step's diff cannot be isolated");
+    let attempts = 0;
+    let lastSignature: string | null = null;
+    let nonImproving = 0;
+    for (;;) {
+      deps.onProgress?.({ type: "step-review", stage, phase: "reviewing", attempt: attempts + 1 });
+      const review = await reviewer(stage, baseline, attempts + 1);
+      spentUsd += review.usage?.costUsd ?? 0;
+      const ceilingAfterReview = ceilingOutcome(stage);
+      if (ceilingAfterReview) return ceilingAfterReview;
+      const haltAfterReview = haltedOutcome();
+      if (haltAfterReview) return haltAfterReview;
+      if (deps.isCancelled?.()) return cancelledOutcome();
+      if (review.verdict === "approve") { await endStepReview(stage, "approve", attempts, ""); return null; }
+      if (review.verdict === "skipped") { await endStepReview(stage, "skipped", attempts, "", review.reason ?? "review skipped"); return null; }
+      const used = reviews.repairs.get(stage.id) ?? 0;
+      if (used >= Math.max(1, config.maxRepairsPerStage)) { await endStepReview(stage, "unresolved", attempts, review.findings, "repair budget exhausted"); return null; }
+      // Pause and Stop hold before a review repair, as they do before a stage repair.
+      const heldBeforeFix = await heldOutcome();
+      if (heldBeforeFix) return heldBeforeFix;
+      if (deps.isCancelled?.()) return cancelledOutcome();
+      deps.onProgress?.({ type: "step-review", stage, phase: "fixing", attempt: used + 1 });
+      deps.log(`↻ fixing review findings in ${stage.name} (attempt ${used + 1} of ${Math.max(1, config.maxRepairsPerStage)})`);
+      const fix = await deps.repair(stage, review.findings, used + 1, { review: true });
+      spentUsd += fix.usage?.costUsd ?? 0;
+      reviews.repairs.set(stage.id, used + 1);
+      attempts += 1;
+      const ceilingAfterFix = ceilingOutcome(stage);
+      if (ceilingAfterFix) return ceilingAfterFix;
+      const haltAfterFix = haltedOutcome();
+      if (haltAfterFix) return haltAfterFix;
+      if (deps.isCancelled?.()) return cancelledOutcome();
+      if (!fix.ok) { await endStepReview(stage, "unresolved", attempts, review.findings, "repair did not complete"); return null; }
+      // Same non-improving rule as a stage repair: findings that repeat across repairs mean the repair is not working.
+      const signature = review.findings.trim().slice(0, 2000);
+      nonImproving = signature === lastSignature ? nonImproving + 1 : 1;
+      lastSignature = signature;
+      if (nonImproving >= Math.max(1, config.consecutiveFailureStop)) {
+        await endStepReview(stage, "unresolved", attempts, review.findings, `findings did not change across ${nonImproving} repairs`);
+        return null;
+      }
+    }
+  };
 
   for (let iteration = 1; iteration <= Math.max(1, config.maxIterations); iteration++) {
     const heldAtStart = await heldOutcome();
@@ -129,6 +238,9 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       const haltAtStage = haltedOutcome();
       if (haltAtStage) return haltAtStage;
       deps.onProgress?.({ type: "stage-start", stage, index: stages.indexOf(stage) + 1, count: stages.length, iteration });
+      // The baseline is taken before the stage writes anything, so its review sees only this stage's diff.
+      const isReviewed = deps.reviewStep !== undefined && effectiveReviewAfter(stage) && !reviews.closed.has(stage.id);
+      const baseline = isReviewed ? (deps.snapshotBefore ? await deps.snapshotBefore(stage) : null) : undefined;
       const t0 = Date.now();
       const result = await deps.runStage(stage, outcomes);
       stageRan = true;
@@ -141,6 +253,11 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
       if (result.ok && runsOncePerRun(stage)) passedOnce.add(stage.id);
       if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {
         return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: stage, statusSummary: `cost ceiling reached ($${spentUsd.toFixed(2)} of $${config.maxCostUsd})`, costUsd: spentUsd };
+      }
+      // Only a passed step is reviewed: a failed one goes through the stage's own repair path instead.
+      if (result.ok && baseline !== undefined) {
+        const endedByReview = await reviewPassedStep(stage, baseline);
+        if (endedByReview) return endedByReview;
       }
       if (!result.ok && stage.severity === "blocking") { failed = outcome; break; }
       const haltAfterStage = haltedOutcome();

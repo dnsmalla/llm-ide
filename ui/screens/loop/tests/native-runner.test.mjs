@@ -294,3 +294,200 @@ test("a halt raised while the pause is running ends the pause at once", async ()
   await waitUnlessCancelled(5000, () => false, () => halted);
   assert.ok(Date.now() - t0 < 1500, `ended early, took ${Date.now() - t0} ms`);
 });
+
+// Step review: a skill stage is reviewed by default, so these tests build on a skill stage and a pass-through base.
+const reviewed = (id, name, over = {}) => stage(id, name, { kind: "skill", skillId: "skills/test-driven-development", ...over });
+const base = (over = {}) => ({
+  async runStage() { return { ok: true, output: "" }; }, async repair() { throw new Error("no repair"); }, log() {},
+  snapshotBefore: async () => ({ tree: "t0" }), ...over,
+});
+
+test("step review: an approving reviewer passes the step with no repair", async () => {
+  let repairs = 0;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")]), base({
+    async repair() { repairs += 1; return { ok: true, output: "" }; },
+    async reviewStep() { return { verdict: "approve", findings: "" }; },
+  }));
+  assert.equal(out.passed, true);
+  assert.deepEqual(out.stepReviews, [{ stageId: "a", stageName: "A", verdict: "approve", attempts: 0, findings: "" }]);
+  assert.equal(repairs, 0);
+});
+
+test("step review: changes, then approve, repairs once with the findings and review:true", async () => {
+  const repairCalls = [];
+  let reviewCount = 0;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")]), base({
+    async reviewStep() { reviewCount += 1; return reviewCount === 1 ? { verdict: "changes", findings: "fix x" } : { verdict: "approve", findings: "" }; },
+    async repair(s, o, attempt, opts) { repairCalls.push([s.id, o, attempt, opts]); return { ok: true, output: "fixed" }; },
+  }));
+  assert.equal(out.passed, true);
+  assert.deepEqual(repairCalls, [["a", "fix x", 1, { review: true }]]);
+  assert.equal(reviewCount, 2);
+  assert.equal(out.stepReviews[0].verdict, "approve");
+  assert.equal(out.stepReviews[0].attempts, 1);
+});
+
+test("step review: its repair budget is separate from the stage's own repair budget", async () => {
+  const repairKinds = [];
+  let runs = 0;
+  let reviewCount = 0;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")], { maxRepairsPerStage: 2 }), base({
+    async runStage() { runs += 1; return { ok: runs > 1, output: runs > 1 ? "" : "boom" }; },
+    async repair(s, o, attempt, opts) { repairKinds.push(opts?.review ? "review" : "normal"); return { ok: true, output: "fixed" }; },
+    async reviewStep() { reviewCount += 1; return reviewCount < 3 ? { verdict: "changes", findings: `finding ${reviewCount}` } : { verdict: "approve", findings: "" }; },
+  }));
+  assert.deepEqual(repairKinds, ["normal", "review", "review"]);
+  assert.equal(out.passed, true);
+  assert.equal(out.stepReviews[0].verdict, "approve");
+});
+
+test("step review: a spent review budget ends the step as unresolved, but the run still passes", async () => {
+  let n = 0;
+  const noted = [];
+  const out = await runNativeLoop(cfg([reviewed("a", "A")], { maxRepairsPerStage: 1 }), base({
+    async reviewStep() { n += 1; return { verdict: "changes", findings: `finding ${n}` }; },
+    async repair() { return { ok: true, output: "fixed" }; },
+    async noteUnresolvedReview(s, findings) { noted.push([s.id, findings]); },
+  }));
+  assert.equal(out.passed, true);
+  assert.equal(out.stepReviews[0].verdict, "unresolved");
+  assert.equal(noted.length, 1);
+  assert.match(out.statusSummary, /step reviews: 1 unresolved/);
+});
+
+test("step review: identical findings across repairs stop the review as unresolved", async () => {
+  let repairs = 0;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")], { consecutiveFailureStop: 2, maxRepairsPerStage: 5 }), base({
+    async reviewStep() { return { verdict: "changes", findings: "same" }; },
+    async repair() { repairs += 1; return { ok: true, output: "fixed" }; },
+  }));
+  assert.equal(repairs, 2, "it stops after the second repair");
+  assert.equal(out.stepReviews[0].verdict, "unresolved");
+  assert.equal(out.stepReviews[0].attempts, 2);
+});
+
+test("step review: the review's spend counts toward the USD ceiling and ends the run before the next stage", async () => {
+  const ran = [];
+  const out = await runNativeLoop(cfg([reviewed("a", "A"), reviewed("b", "B")], { maxCostUsd: 1 }), base({
+    async runStage(s) { ran.push(s.id); return { ok: true, output: "" }; },
+    async reviewStep() { return { verdict: "approve", findings: "", usage: { costUsd: 1.2 } }; },
+  }));
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /cost ceiling reached/);
+  assert.deepEqual(ran, ["a"]);
+});
+
+test("step review: a repair that crosses the USD ceiling ends the run", async () => {
+  const out = await runNativeLoop(cfg([reviewed("a", "A")], { maxCostUsd: 5 }), base({
+    async reviewStep() { return { verdict: "changes", findings: "fix", usage: { costUsd: 0.1 } }; },
+    async repair() { return { ok: true, output: "fixed", usage: { costUsd: 6 } }; },
+  }));
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /cost ceiling reached/);
+  assert.equal(out.costUsd, 6.1);
+});
+
+test("step review: no baseline snapshot skips the review and records why", async () => {
+  let reviewCalls = 0;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")]), base({
+    snapshotBefore: async () => null,
+    async reviewStep() { reviewCalls += 1; return { verdict: "approve", findings: "" }; },
+  }));
+  assert.equal(reviewCalls, 0);
+  assert.equal(out.passed, true);
+  assert.equal(out.stepReviews[0].verdict, "skipped");
+  assert.equal(typeof out.stepReviews[0].reason, "string");
+  assert.match(out.statusSummary, /1 skipped/);
+});
+
+test("step review: a reviewer's own skipped verdict is recorded and the run continues", async () => {
+  const ran = [];
+  const out = await runNativeLoop(cfg([reviewed("a", "A"), reviewed("b", "B")]), base({
+    async runStage(s) { ran.push(s.id); return { ok: true, output: "" }; },
+    async reviewStep() { return { verdict: "skipped", findings: "", reason: "no diff" }; },
+  }));
+  assert.equal(out.passed, true);
+  assert.deepEqual(ran, ["a", "b"]);
+  assert.equal(out.stepReviews[0].verdict, "skipped");
+  assert.equal(out.stepReviews[0].reason, "no diff");
+});
+
+test("step review: default-off skill and shell stages take no snapshot and no review; reviewAfter true on a shell stage does", async () => {
+  const snapshots = [];
+  const reviews = [];
+  const out = await runNativeLoop(cfg([
+    stage("s", "Shell"),
+    reviewed("w", "Plan", { skillId: "skills/writing-plans" }),
+    stage("r", "Forced", { reviewAfter: true }),
+  ]), base({
+    async snapshotBefore(s) { snapshots.push(s.id); return { tree: "t" }; },
+    async reviewStep(s) { reviews.push(s.id); return { verdict: "approve", findings: "" }; },
+  }));
+  assert.equal(out.passed, true);
+  assert.deepEqual(snapshots, ["r"]);
+  assert.deepEqual(reviews, ["r"]);
+  assert.deepEqual(out.stepReviews.map((r) => r.stageId), ["r"]);
+});
+
+test("step review: a step closed as unresolved is not reviewed again in a later iteration", async () => {
+  const reviewed_ids = [];
+  const aRuns = [];
+  let bRuns = 0;
+  const out = await runNativeLoop(cfg([reviewed("a", "A"), stage("b", "B")], { maxRepairsPerStage: 1 }), base({
+    async runStage(s) {
+      if (s.id === "a") { aRuns.push(s.id); return { ok: true, output: "" }; }
+      bRuns += 1; return { ok: bRuns > 1, output: bRuns > 1 ? "" : "boom" };
+    },
+    async repair() { return { ok: true, output: "fixed" }; },
+    async reviewStep(s) { reviewed_ids.push(s.id); return { verdict: "changes", findings: `f${reviewed_ids.length}` }; },
+  }));
+  assert.equal(out.passed, true);
+  assert.equal(aRuns.length, 2, "a runs again in iteration 2");
+  assert.deepEqual(reviewed_ids, ["a", "a"], "only the first iteration's two review passes ran");
+});
+
+test("step review: a stage that fails is not reviewed", async () => {
+  let reviewCalls = 0;
+  const out = await runNativeLoop(cfg([reviewed("a", "A")], { maxRepairsPerStage: 1 }), base({
+    async runStage() { return { ok: false, output: "boom" }; },
+    async repair() { return { ok: true, output: "fixed" }; },
+    async reviewStep() { reviewCalls += 1; return { verdict: "approve", findings: "" }; },
+  }));
+  assert.equal(out.passed, false);
+  assert.equal(reviewCalls, 0);
+  assert.equal("stepReviews" in out, false);
+});
+
+test("step review: cancellation during a review ends the run as cancelled", async () => {
+  let cancelled = false;
+  const out = await runNativeLoop(cfg([reviewed("a", "A"), reviewed("b", "B")]), base({
+    isCancelled() { return cancelled; },
+    async reviewStep() { cancelled = true; return { verdict: "approve", findings: "" }; },
+  }));
+  assert.equal(out.cancelled, true);
+  assert.equal(out.passed, false);
+});
+
+test("step review: a deps object without reviewStep yields no stepReviews key", async () => {
+  const out = await runNativeLoop(cfg([reviewed("a", "A")]), {
+    async runStage() { return { ok: true, output: "" }; }, async repair() { throw new Error("no"); }, log() {},
+  });
+  assert.equal(out.passed, true);
+  assert.equal("stepReviews" in out, false);
+});
+
+test("step review: progress events arrive in order reviewing, fixing, reviewing, then the result", async () => {
+  const events = [];
+  let reviewCount = 0;
+  await runNativeLoop(cfg([reviewed("a", "A")]), base({
+    async reviewStep() { reviewCount += 1; return reviewCount === 1 ? { verdict: "changes", findings: "x" } : { verdict: "approve", findings: "" }; },
+    async repair() { return { ok: true, output: "fixed" }; },
+    onProgress(e) { if (e.type.startsWith("step-review")) events.push([e.type, e.phase ?? e.verdict]); },
+  }));
+  assert.deepEqual(events, [
+    ["step-review", "reviewing"],
+    ["step-review", "fixing"],
+    ["step-review", "reviewing"],
+    ["step-review-result", "approve"],
+  ]);
+});
