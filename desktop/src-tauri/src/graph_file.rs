@@ -2,7 +2,7 @@
 //! project), never by the webview. The confined read itself (`read_within`) is shared with the SSH helper and lives
 //! in `llmide_workspace_core::project::graph`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use llmide_workspace_core::{FsError, R};
 use serde_json::json;
@@ -41,7 +41,7 @@ pub fn project_root() -> Option<PathBuf> {
     {
         let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
         return env("LLMIDE_POC_PROJECT_ROOT")
-            .or_else(|| env("LLMIDE_POC_GRAPH").and_then(|g| g.parent().map(Path::to_path_buf)))
+            .or_else(|| env("LLMIDE_POC_GRAPH").and_then(|g| g.parent().map(std::path::Path::to_path_buf)))
             .or_else(|| env("HOME").map(|h| h.join(DEFAULT_PROJECT_REL)));
     }
     #[cfg(not(debug_assertions))]
