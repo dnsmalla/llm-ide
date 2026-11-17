@@ -10,6 +10,7 @@ import { TEMPLATE_FILE, applyTemplate, droppedMessage, formatFactoryTemplate, pa
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
+import { readPending, writePending, type PendingRecord } from "./pending-records.ts";
 import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent, type StepReviewOutcome } from "./runner.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
@@ -86,7 +87,7 @@ export interface RunManagerDeps {
 
 /** The host's RunInfo (Phase A Task 4), camelCase on the wire. */
 interface WorktreeInfo { runId: string; project: string; repo: string; worktree: string; branch: string; baseCommit: string }
-interface ManagedRun { live: LiveRun; item: RunItem; reuse: boolean; cancelled: boolean; abort: AbortController; /** Set while the run holds for its project; cancelRun calls it. */ wake?: () => void }
+interface ManagedRun { live: LiveRun; item: RunItem; reuse: boolean; cancelled: boolean; abort: AbortController; /** Where the run marker was written; execute clears it when the run throws before a record exists. */ markerPath?: string; /** Set while the run holds for its project; cancelRun calls it. */ wake?: () => void }
 interface Finished { loop: LoopDefinition; info: WorktreeInfo; config: LoopEngineConfig; outcome: LoopRunOutcome }
 
 export const CONCURRENCY_KEY = "llmide.factory.concurrency";
@@ -175,7 +176,9 @@ let cap: number | null = null;
 const listeners = new Set<() => void>();
 let snapshot: readonly LiveRun[] = Object.freeze([]);
 /** Record writes for runs that ended while another project was open, keyed by project root. */
-const pending = new Map<string, Array<() => Promise<void>>>();
+const pending = new Map<string, Array<{ id: string; write: () => Promise<void> }>>();
+/** Entry ids being written by a flush right now, so a second flush (configure + project change) cannot write them twice. */
+const flushing = new Set<string>();
 let unsubscribeProject: (() => void) | null = null;
 /** Why the latest run did not start; read once by takeRunNotice. */
 let lastNotice: string | null = null;
@@ -186,6 +189,9 @@ export function configureRunManager(next: Partial<RunManagerDeps>): void {
   if (next.subscribeProject) {
     unsubscribeProject?.();
     unsubscribeProject = next.subscribeProject(onProjectChange);
+    // A record left by a quit is stored, and no project change will announce a project that is already open at launch.
+    const root = deps.activeProject?.() ?? null;
+    if (root !== null && deps.fsFor && deps.appendRecord) void flushPending(root);
   }
 }
 
@@ -209,6 +215,7 @@ export function resetRunManagerForTests(): void {
   cap = null;
   listeners.clear();
   pending.clear();
+  flushing.clear();
   unsubscribeProject?.();
   unsubscribeProject = null;
   deps = { ...PURE_DEFAULTS };
@@ -382,6 +389,9 @@ async function execute(run: ManagedRun): Promise<void> {
     finished = await runInWorktree(d, run, fs);
   } catch (e) {
     fail(run, e instanceof Error ? e.message : String(e));
+    // No record will be written for a run that threw, so a left marker would show it Interrupted forever and
+    // auto-resume it into the same crash.
+    if (run.markerPath) await clearMarker(fs, run.markerPath);
   }
   if (finished) {
     let entry: { id: string; startedAt: string } | null = null;
@@ -446,6 +456,8 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   let markerWrites: Promise<unknown> = Promise.resolve();
   if (!(await writeMarker(fs, marker, JSON.stringify(markerBase)))) {
     log("The run marker could not be written; an interrupted run may not offer Resume.");
+  } else {
+    run.markerPath = marker;
   }
   const ctx: StageExecContext = {
     projectRoot: run.live.projectRoot, runId: run.live.runId, runRoot: info.worktree, fs, host: d.host, core: d.core, log,
@@ -559,17 +571,25 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
   };
   const copy = live.mode === "full" || live.mode === "intakeOnly";
   const prefix = repoPrefixFor(live.projectRoot, f.info.worktree);
-  const marker = `${prefix}/.factory/RUN.json`;
-  const write = async () => {
-    await d.appendRecord(fs, entry, record);
-    if (copy) await d.copyReadiness(fs, prefix, live.runId, ended);
-    // Same write closure as the record, so flushPending also clears the marker when the project is reopened.
-    await clearMarker(fs, marker);
+  const held: PendingRecord = {
+    projectRoot: live.projectRoot, entry, record,
+    copy: copy ? { prefix, runId: live.runId, endedAt: ended.toISOString() } : null,
+    // Cleared by the same write as the record, so flushPending also clears the marker when the project is reopened.
+    marker: `${prefix}/.factory/RUN.json`,
   };
-  if (d.activeProject() === live.projectRoot) { await write(); return { id: entry.id, startedAt: entry.startedAt }; }
+  if (d.activeProject() === live.projectRoot) { await writeHeld(d, fs, held); return { id: entry.id, startedAt: entry.startedAt }; }
   appendLog(run, "The run's project is not open; its record is saved when you open it again.");
-  pending.set(live.projectRoot, [...(pending.get(live.projectRoot) ?? []), write]);
+  pending.set(live.projectRoot, [...(pending.get(live.projectRoot) ?? []), { id: entry.id, write: () => writeHeld(d, fs, held) }]);
+  // Also stored, so quitting before the project reopens does not lose the record. The in-memory entry stays for this session.
+  const store = storage();
+  writePending(store, [...readPending(store).filter((p) => p.entry.id !== entry.id), held]);
   return null;
+}
+
+async function writeHeld(d: RunManagerDeps, fs: FsApi, held: PendingRecord): Promise<void> {
+  await d.appendRecord(fs, held.entry, held.record);
+  if (held.copy) await d.copyReadiness(fs, held.copy.prefix, held.copy.runId, new Date(held.copy.endedAt));
+  await clearMarker(fs, held.marker);
 }
 
 /**
@@ -598,17 +618,29 @@ function holdForProject(d: RunManagerDeps, run: ManagedRun): () => Promise<"ok" 
   };
 }
 
-/** Writes the records of runs that ended while their project was closed, once it is open again. */
+/** Writes the records of runs that ended while their project was closed (this session's and stored ones), once it is open again. */
 async function flushPending(projectRoot: string): Promise<void> {
-  const writes = pending.get(projectRoot);
-  if (!writes) return;
+  const d = deps as RunManagerDeps;
+  const memory = (pending.get(projectRoot) ?? []).filter((m) => !flushing.has(m.id));
   pending.delete(projectRoot);
-  const failed: Array<() => Promise<void>> = [];
-  for (const write of writes) {
-    try { await write(); } catch { failed.push(write); }
+  const memoryIds = new Set(memory.map((m) => m.id));
+  const stored = readPending(storage()).filter((p) => p.projectRoot === projectRoot && !memoryIds.has(p.entry.id) && !flushing.has(p.entry.id));
+  for (const id of [...memoryIds, ...stored.map((p) => p.entry.id)]) flushing.add(id);
+  const written = new Set<string>();
+  const failed: typeof memory = [];
+  for (const m of memory) {
+    try { await m.write(); written.add(m.id); } catch { failed.push(m); }
   }
+  for (const p of stored) {
+    try { await writeHeld(d, d.fsFor(projectRoot), p); written.add(p.entry.id); } catch { /* stays stored for the next flush */ }
+  }
+  for (const id of [...memoryIds, ...stored.map((p) => p.entry.id)]) flushing.delete(id);
   // A failed write is retried on the next project change instead of being dropped.
   if (failed.length > 0) pending.set(projectRoot, [...(pending.get(projectRoot) ?? []), ...failed]);
+  if (written.size > 0) {
+    const store = storage();
+    writePending(store, readPending(store).filter((p) => !written.has(p.entry.id)));
+  }
 }
 
 /** The file API for one project: every call refuses (code no_project) while another project is open. */

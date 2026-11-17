@@ -597,3 +597,72 @@ test("runs held for another project do not count against the parallel-runs cap",
   await settle();
   assert.equal(rm.liveRuns().find((r) => r.runId === c).state, "running", "the open project's run is not blocked by the held ones");
 });
+
+const markerFs = (marks) => () => ({ write: async (path) => { marks.push(["write", path]); }, remove: async (path) => { marks.push(["remove", path]); } });
+
+test("a run that throws after the marker write removes the marker and reports the error", async () => {
+  const marks = [];
+  setup({ fsFor: markerFs(marks), runLoop: () => { throw new Error("boom"); } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const marker = "system/loop-worktrees/" + a + "/.factory/RUN.json";
+  assert.ok(marks.some(([k, p]) => k === "write" && p === marker));
+  assert.ok(marks.some(([k, p]) => k === "remove" && p === marker), "no marker left to show Interrupted forever");
+  assert.match(rm.takeRunNotice(), /boom/);
+});
+
+test("a record held for a closed project survives a restart and is written when the project is open at launch", async () => {
+  const storage = memoryStorage();
+  const marks = [];
+  setup({ storage, fsFor: markerFs(marks) });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await switchProject("/other");
+  await finish(a);
+  assert.equal(world.records.length, 0);
+  const held = JSON.parse(storage.getItem("llmide.factory.pendingRecords"));
+  assert.equal(held.length, 1);
+  assert.equal(held[0].projectRoot, "/p");
+  // The app quits and relaunches with /p already open.
+  const after = [];
+  setup({ storage, fsFor: markerFs(after) });
+  await settle();
+  assert.equal(world.records.length, 1);
+  assert.equal(world.records[0].entry.factoryRunId, a);
+  assert.equal(world.copies.length, 1);
+  assert.ok(after.some(([k, p]) => k === "remove" && p.endsWith("/.factory/RUN.json")));
+  assert.deepEqual(JSON.parse(storage.getItem("llmide.factory.pendingRecords")), []);
+});
+
+test("a failed write keeps the stored record for the next flush", async () => {
+  const storage = memoryStorage();
+  setup({ storage });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await switchProject("/other");
+  await finish(a);
+  let fail = true;
+  setup({ storage, appendRecord: async (fs, entry, record) => { if (fail) throw new Error("disk"); world.records.push({ entry, record }); } });
+  await settle();
+  assert.equal(world.records.length, 0);
+  assert.equal(JSON.parse(storage.getItem("llmide.factory.pendingRecords")).length, 1, "kept");
+  fail = false;
+  await switchProject("/other");
+  await switchProject("/p");
+  assert.equal(world.records.length, 1);
+  assert.deepEqual(JSON.parse(storage.getItem("llmide.factory.pendingRecords")), []);
+});
+
+test("a record held in memory is written once, and without storage the in-memory path still works", async () => {
+  setup({ storage: undefined });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await switchProject("/other");
+  await finish(a);
+  assert.equal(world.records.length, 0);
+  await switchProject("/p");
+  assert.equal(world.records.length, 1);
+  await switchProject("/other");
+  await switchProject("/p");
+  assert.equal(world.records.length, 1, "not written twice");
+});
