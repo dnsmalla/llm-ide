@@ -725,6 +725,45 @@ export const TASKS: readonly TaskDef[] = [
     "revision": 1
   },
   {
+    "id": "loop.step_review",
+    "label": "Loop step review",
+    "group": "Loop",
+    "description": "Loop step: review one code-writing step's diff and write its verdict under .factory/reviews.",
+    "aliases": [],
+    "runner": {
+      "kind": "agent",
+      "prompt": "prompts/loop.step_review.md"
+    },
+    "input": {
+      "kind": "repo",
+      "required": true,
+      "paths": []
+    },
+    "output": {
+      "kind": "file",
+      "persist": "file",
+      "revertWrites": false
+    },
+    "schedule": {
+      "backend": "none",
+      "defaultCron": null,
+      "schedulable": false
+    },
+    "scope": "project",
+    "readOnly": false,
+    "requiresRepo": true,
+    "requiresLocalHost": true,
+    "features": [],
+    "availability": {
+      "status": "available",
+      "reason": null
+    },
+    "revision": 1,
+    "knownPromptHashes": [
+      "41d7e99ddc9d66b2a272f79dd679d54eb56993c67552ccc1b1decc5c46e8d8e6"
+    ]
+  },
+  {
     "id": "loop.test_gap_writer",
     "label": "Test gap writer",
     "group": "Maintenance",

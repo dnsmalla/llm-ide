@@ -1,0 +1,1 @@
+Review the fenced step diff in the message, the only change this Loop step made, and write the review file at the Output path the message gives, under .factory/reviews/, as the step-review skill describes. The file must end with exactly one line, Verdict: approve or Verdict: changes. Write nothing else.

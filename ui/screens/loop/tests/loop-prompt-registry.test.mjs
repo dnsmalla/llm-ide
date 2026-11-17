@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { DEFAULT_LOOP_SPECS } from "../native/defaults.generated.ts";
 import { TASK_BY_ID } from "../../tasks/registry.generated.ts";
 import { PROMPTS } from "../../tasks/prompts.generated.ts";
@@ -38,3 +39,25 @@ for (const [spec, stageKey, taskId] of MOVED) {
     assert.equal(generated.promptTask, undefined, "the reference is not emitted into loop data");
   });
 }
+
+// Auto-review: the per-step review prompt is a registry task, and factory.review must stay byte-identical so the
+// Factory's own review gate keeps its shipped prompt hash.
+const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+
+test("loop.step_review is an agent task whose prompt asks for the verdict file under .factory/reviews", () => {
+  const prompt = PROMPTS["loop.step_review"];
+  assert.equal(typeof prompt, "string");
+  assert.ok(prompt.length > 0);
+  assert.ok(prompt.includes("Verdict: approve"));
+  assert.ok(prompt.includes("Verdict: changes"));
+  assert.ok(prompt.includes(".factory/reviews"));
+  assert.equal(TASK_BY_ID["loop.step_review"].runner.kind, "agent");
+  assert.equal(TASK_BY_ID["loop.step_review"].group, "Loop");
+  assert.equal(TASK_BY_ID["loop.step_review"].readOnly, false);
+  assert.equal(TASK_BY_ID["loop.step_review"].revision, 1);
+  assert.ok(TASK_BY_ID["loop.step_review"].knownPromptHashes.includes(sha256(prompt)));
+});
+
+test("factory.review still hashes to its shipped prompt hash", () => {
+  assert.equal(sha256(PROMPTS["factory.review"]), "39e0da10239cceee1e544430a8019fe5258539a19e1ae7a7f54d5ce2dabeea29");
+});
