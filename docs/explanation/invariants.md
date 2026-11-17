@@ -597,7 +597,7 @@ Pinned by the tests in `desktop/src-tauri/src/loop_worktree.rs` and `loop_runner
 - **These gates stay human in every review mode:** the native shell-command approval before a run starts, the Ship secret-scan override, manual-only scheduled loops, the CI/hook-file auto-ship block, and Intake "needs decision".
 - **Request changes writes `.factory/HUMAN-REVIEW.md` and re-runs from Implement** (run mode `humanReview`).
 - **Verify is tests, then the AI review of the code step's changes.** A failed Verify adds its findings to `.factory/PLAN.md` (Factory; `.factory/FINDINGS.md` in other loops) and re-runs the code step. Rounds are `maxIterations` (Factory default 3; a stored 10 is treated as 3). The same failure twice in a row stops early, and a cost or time limit stops the run too.
-- **A failed run (`stopped.limit`) is never auto-shipped or held for human review; only a passed run ships or is held.** It ends with a warning and no MR, so a failed run no longer opens a labelled draft (tests, Review gate, `check` mode, cost/time). In auto mode no click is needed until that final warning.
+- **A failed run (`stopped.limit`) is never auto-shipped or held for human review; only a passed run ships or is held.** It ends with a warning and no MR (a loop gets up to 3 rounds, a lower iteration setting lowers it, and the same failure twice in a row stops it early), so a failed run no longer opens a labelled draft (tests, Review gate, `check` mode, cost/time). In auto mode no click is needed until that final warning.
 
 ### ❌ DO NOT
 

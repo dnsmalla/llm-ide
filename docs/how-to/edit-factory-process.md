@@ -116,8 +116,8 @@ rebuilds the loop from this file and would drop a value set there.
   ships. In **human** the run ends on **Awaiting your review**.
 
 Verify is the tests, then the AI review of the code step's changes. If it fails, the findings are added to
-`.factory/PLAN.md` and the code step runs again, for up to `maxIterations` rounds (default 3; a stored 10 is treated as
-3). The same failure twice in a row stops the run early. After the last round, or on a cost or time limit, the run stops
+`.factory/PLAN.md` and the code step runs again, for up to 3 rounds (a lower iteration setting lowers it; any code-writing loop, not only the
+Factory). The same failure twice in a row stops the run early. After the last round, or on a cost or time limit, the run stops
 with a warning and no MR is opened: a failed run no longer opens a labelled draft (tests, Review gate, `check` mode,
 cost/time). Only a passed run ships (auto) or waits for you (human). Auto mode needs no clicks until that final warning.
 

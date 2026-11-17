@@ -570,7 +570,7 @@ test("loopback: a failed Verify re-runs the runOnce code stage with the test out
 test("loopback: never terminates - different failures each round stop at the round limit", async () => {
   const counts = { impl: 0, v: 0, repair: 0 };
   const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxRepairsPerStage: 1, consecutiveFailureStop: 2 }), base({
-    async runStage(s) { counts[s.id] += 1; return s.id === "v" ? { ok: false, output: `fail ${counts.v}` } : { ok: true, output: "" }; },
+    async runStage(s) { counts[s.id] += 1; return s.id === "v" ? { ok: false, output: `fail ${"ABC"[counts.v - 1]}` } : { ok: true, output: "" }; },
     async repair() { counts.repair += 1; return { ok: true, output: "" }; },
   }));
   assert.deepEqual(counts, { impl: 3, v: 3, repair: 0 });
@@ -581,7 +581,7 @@ test("loopback: never terminates - different failures each round stop at the rou
   assert.equal(out.loopback.maxRounds, 3);
   assert.equal(out.loopback.reason, "tests");
   assert.equal(out.loopback.stopped, true);
-  assert.match(out.loopback.findings, /fail 3/);
+  assert.match(out.loopback.findings, /fail C/);
   assert.equal(out.statusSummary, "Stopped after 3 rounds: tests still failing");
   assert.equal(out.failedStage.id, "v");
   assert.equal(runStatusCode(out), "stopped.limit");
@@ -596,17 +596,38 @@ test("loopback: a limit of one round stops after one", async () => {
   assert.equal(out.statusSummary, "Stopped after 1 round: tests still failing");
 });
 
-test("loopback: identical failures stop early, honouring consecutiveFailureStop", async () => {
-  for (const [stop, rounds] of [[1, 1], [2, 2], [3, 3]]) {
+test("loopback: identical failures stop after the second round, whatever consecutiveFailureStop says", async () => {
+  for (const stop of [1, 2, 5]) {
     let impl = 0;
     const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations: 5, consecutiveFailureStop: stop }), base({
       async runStage(s) { if (s.id === "impl") impl += 1; return { ok: s.id !== "v", output: "same" }; }, repair: noRepair,
     }));
-    assert.equal(impl, rounds, `stop ${stop}`);
-    assert.equal(out.iterationsUsed, rounds);
+    assert.equal(impl, 2, `stop ${stop}`);
+    assert.equal(out.iterationsUsed, 2);
     assert.equal(out.stoppedAtLimit, true);
-    assert.equal(out.statusSummary, `Stopped after ${rounds} ${rounds === 1 ? "round" : "rounds"}: tests still failing (no change since the previous round)`);
+    assert.equal(out.statusSummary, "Stopped after 2 rounds: tests still failing (no change since the previous round)");
   }
+});
+
+test("loopback: any code-writing loop is capped at 3 rounds; a lower iteration setting lowers it", async () => {
+  for (const [maxIterations, rounds] of [[10, 3], [2, 2]]) {
+    let impl = 0, vRuns = 0;
+    const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations, consecutiveFailureStop: 3 }), base({
+      async runStage(s) { if (s.id === "impl") impl += 1; if (s.id === "v") { vRuns += 1; return { ok: false, output: `fail ${"ABCDEFGHIJ"[vRuns - 1]}` }; } return { ok: true, output: "" }; }, repair: noRepair,
+    }));
+    assert.equal(impl, rounds, `max ${maxIterations}`);
+    assert.equal(out.loopback.maxRounds, rounds);
+    assert.equal(out.statusSummary, `Stopped after ${rounds} rounds: tests still failing`);
+  }
+});
+
+test("loopback: failures differing only in timings count as identical", async () => {
+  let impl = 0, vRuns = 0;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s) { if (s.id === "impl") impl += 1; if (s.id === "v") { vRuns += 1; return { ok: false, output: `1 failed in ${vRuns === 1 ? "12ms" : "15ms"}` }; } return { ok: true, output: "" }; }, repair: noRepair,
+  }));
+  assert.equal(impl, 2);
+  assert.match(out.statusSummary, /no change since the previous round/);
 });
 
 test("loopback: identical review findings in consecutive rounds stop early", async () => {
@@ -622,7 +643,7 @@ test("loopback: identical review findings in consecutive rounds stop early", asy
 
 test("loopback: a different output resets the unchanged counter", async () => {
   let impl = 0, vRuns = 0;
-  const outputs = ["a", "a", "b", "b"];
+  const outputs = ["a", "b", "a"];
   const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations: 6, consecutiveFailureStop: 3 }), base({
     async runStage(s) {
       if (s.id === "impl") impl += 1;
@@ -630,8 +651,9 @@ test("loopback: a different output resets the unchanged counter", async () => {
       return { ok: true, output: "" };
     }, repair: noRepair,
   }));
-  assert.equal(impl, 5);
-  assert.equal(out.passed, true);
+  // A repeat that is not consecutive is progress of a sort: only the round cap ends this run.
+  assert.equal(impl, 3);
+  assert.equal(out.statusSummary, "Stopped after 3 rounds: tests still failing");
 });
 
 test("loopback: a tests failure then a review finding with the same text is not the same signature", async () => {

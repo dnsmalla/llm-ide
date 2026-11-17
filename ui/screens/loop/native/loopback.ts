@@ -15,6 +15,11 @@ export interface LoopbackContext { round: number; maxRounds: number; findings: s
 export interface FindingsEntry { round: number; source: "tests" | "review"; text: string }
 export interface LoopbackGroup { codeStages: LoopStage[]; verifyIds: string[]; closerId: string }
 
+/** The most rounds any loop gets, whatever its iteration setting (a lower setting still wins). */
+export const LOOPBACK_MAX_ROUNDS = 3;
+/** Consecutive rounds with the same failure that mean the code stage is not making progress. */
+export const LOOPBACK_IDENTICAL_STOP = 2;
+
 const FINDINGS_MAX_CHARS = 12_000;
 const RECORD_FINDINGS_MAX_CHARS = 4000;
 const SIGNATURE_MAX_CHARS = 2000;
@@ -71,7 +76,9 @@ export function stoppedSummary(rounds: number, reason: "tests" | "review", uncha
 
 /** Two rounds with the same signature made no progress, so the loop can stop early instead of spending the remaining rounds. */
 export function failureSignature(source: "tests" | "review", text: string): string {
-  return `${source}:${text.trim().slice(0, SIGNATURE_MAX_CHARS)}`;
+  // Digits are replaced because timings, counts and timestamps differ on every run of the same failure.
+  const normalised = text.trim().replace(/\d+/g, "#");
+  return `${source}:${normalised.slice(0, SIGNATURE_MAX_CHARS)}`;
 }
 
 /** Spread into a run record; nothing is written for a run that never looped back, so old readers see no new key. */

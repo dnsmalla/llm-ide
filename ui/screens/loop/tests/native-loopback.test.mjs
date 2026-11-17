@@ -62,6 +62,7 @@ test("stoppedSummary and failureSignature", () => {
   assert.equal(lb.stoppedSummary(1, "review"), "Stopped after 1 round: review still requests changes");
   assert.equal(lb.stoppedSummary(2, "tests", true), "Stopped after 2 rounds: tests still failing (no change since the previous round)");
   assert.equal(lb.failureSignature("tests", "  boom "), "tests:boom");
+  assert.equal(lb.failureSignature("tests", "ran 3 in 12ms at 10:41:07"), lb.failureSignature("tests", "ran 4 in 15ms at 10:42:09"));
   assert.equal(lb.failureSignature("review", "a".repeat(5000)), "review:" + "a".repeat(2000));
 });
 

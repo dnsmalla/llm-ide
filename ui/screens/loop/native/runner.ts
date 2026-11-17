@@ -4,7 +4,7 @@
 // A stage that runs once per run (runsOncePerRun) is skipped in later iterations once it has passed.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
 import { effectiveReviewAfter } from "./review.ts";
-import { LOOPBACK_STOPPED_CODE, failureSignature, findingsText, groupOfCode, groupOfVerify, loopbackGroups, stoppedSummary, type FindingsEntry, type LoopbackContext, type LoopbackGroup, type LoopbackSummary } from "./loopback.ts";
+import { LOOPBACK_IDENTICAL_STOP, LOOPBACK_MAX_ROUNDS, LOOPBACK_STOPPED_CODE, failureSignature, findingsText, groupOfCode, groupOfVerify, loopbackGroups, stoppedSummary, type FindingsEntry, type LoopbackContext, type LoopbackGroup, type LoopbackSummary } from "./loopback.ts";
 
 export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 
@@ -119,7 +119,7 @@ export async function runNativeLoop(config: LoopEngineConfig, deps: RunnerDeps):
   let outcome = await runLoopInner(config, deps, reviews);
   // A budget that ends a looping run (cost, wall clock) is the same warning state as running out of rounds, so it never ships.
   if (!outcome.passed && !outcome.cancelled && !outcome.blocked && !outcome.errored && !outcome.stoppedAtLimit && reviews.hasGroups && /^(cost ceiling reached|wall-clock budget reached)/.test(outcome.statusSummary)) {
-    outcome = { ...outcome, stoppedAtLimit: true, loopback: { rounds: outcome.iterationsUsed, maxRounds: Math.max(1, config.maxIterations), reason: "limit", findings: findingsText(reviews.findings), stopped: true } };
+    outcome = { ...outcome, stoppedAtLimit: true, loopback: { rounds: outcome.iterationsUsed, maxRounds: Math.min(Math.max(1, config.maxIterations), LOOPBACK_MAX_ROUNDS), reason: "limit", findings: findingsText(reviews.findings), stopped: true } };
   }
   if (reviews.outcomes.length === 0) return outcome;
   // A spent review budget never stops the run: the findings carry forward to the final review and the MR, which
@@ -139,7 +139,8 @@ export function stepReviewNote(outcomes: readonly Pick<StepReviewOutcome, "verdi
 async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews: StepReviewState): Promise<LoopRunOutcome> {
   const stages = config.stages.filter((s) => s.enabled);
   if (stages.length === 0) throw new Error("this loop has no enabled stages");
-  const maxRounds = Math.max(1, config.maxIterations);
+  // Every code-writing loop gets the same cap; a lower configured value still wins.
+  const maxRounds = Math.min(Math.max(1, config.maxIterations), LOOPBACK_MAX_ROUNDS);
   const groups = loopbackGroups(stages);
   reviews.hasGroups = groups.length > 0;
   // Loopback state is separate from the legacy repair counters: a loopback round never spends a repair.
@@ -370,7 +371,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       const signature = failureSignature(trigger.source, trigger.text);
       unchanged = signature === loopSignature ? unchanged + 1 : 1;
       loopSignature = signature;
-      const noChange = unchanged >= Math.max(1, config.consecutiveFailureStop);
+      const noChange = unchanged >= LOOPBACK_IDENTICAL_STOP;
       // Rounds remained when only the no-change rule fired; the recorded reason must say so, not "round limit".
       const stoppedEarly = iteration < maxRounds && noChange;
       if (iteration >= maxRounds || noChange) {

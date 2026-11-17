@@ -189,7 +189,7 @@ review** instead of shipping, with Approve and Request changes. See
 
 **Verify loopback.** Verify is the tests, then the AI review of the code step's changes. When it fails, the findings are
 added to `.factory/PLAN.md` (Factory; `.factory/FINDINGS.md` in other loops) and the code step runs again. The number of
-rounds is `maxIterations`: 3 by default for the Factory, and a stored 10 is treated as 3. The same failure twice in a row
+rounds is up to 3 for every code-writing loop (a lower iteration setting lowers it). The same failure twice in a row
 stops the run early. After the last round, or on a cost or time limit, the run stops (`stopped.limit`) with a warning and
 **no MR**: a failed run never opens a labelled draft any more (tests, Review gate, `check` mode, cost/time). Only a
 passed run ships (auto) or is held for you (human). In auto mode no click is needed until that final warning; the safety
