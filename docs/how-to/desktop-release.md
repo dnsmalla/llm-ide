@@ -105,7 +105,7 @@ A failure here means the package, not the source tree, is broken — do not publ
 2. Refresh the lockfile's root entry:
 
    ```bash
-   cd desktop/src-tauri && cargo update -p llmide-desktop-poc --offline
+   cd desktop/src-tauri && cargo update -p llmide-desktop --offline
    ```
 
 3. Add a section to `CHANGELOG.md` with exactly this heading, then the notes. The date part is free text.

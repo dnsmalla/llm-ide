@@ -53,7 +53,7 @@ jobs:
           LLMIDE_POC_AUTOBENCH: all
           LLMIDE_KEYCHAIN_BACKEND: memory
         run: |
-          exe=desktop/src-tauri/target/release/llmide-desktop-poc
+          exe=desktop/src-tauri/target/release/llmide-desktop
           [ "$RUNNER_OS" = "Windows" ] && exe="$exe.exe"
           run="$exe"; [ "$RUNNER_OS" = "Linux" ] && run="xvfb-run -a $exe"
           timeout 1500 $run 2>&1 | tee autobench.log || true

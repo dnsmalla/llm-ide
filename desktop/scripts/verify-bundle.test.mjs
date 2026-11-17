@@ -10,7 +10,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 import { BUNDLE_ID, checkInfo, checkLayout } from './verify-bundle.mjs';
 
 const good = {
-  CFBundleIdentifier: BUNDLE_ID, CFBundleName: 'LLM-IDE', CFBundleExecutable: 'llmide-desktop-poc',
+  CFBundleIdentifier: BUNDLE_ID, CFBundleName: 'LLM-IDE', CFBundleExecutable: 'llmide-desktop',
   NSDesktopFolderUsageDescription: 'LLM-IDE reads project files on the Desktop.',
   NSDocumentsFolderUsageDescription: 'LLM-IDE reads project files in Documents.',
   NSDownloadsFolderUsageDescription: 'LLM-IDE reads project files in Downloads.',

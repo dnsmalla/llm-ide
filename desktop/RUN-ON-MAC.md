@@ -118,7 +118,7 @@ Try these in order. Note anything that differs in the bug-report template at the
 - **Diagnostics without secrets:** Settings > About > Copy diagnostics gives versions and states only (no
   tokens, keys or file contents). Never attach anything from your keychain; `prefs.json` in the data folder
   is safe to attach, the database and `secrets` files are not.
-- **Start from a terminal** to see host messages: `"/path/to/LLM-IDE.app/Contents/MacOS/llm-ide-desktop-poc"`
+- **Start from a terminal** to see host messages: `"/path/to/LLM-IDE.app/Contents/MacOS/llmide-desktop"`
   (stop it with Cmd+Q in the app, or Ctrl+C in that terminal).
 - **Reset:** quit the app and move `~/Library/Application Support/llm-ide-desktop` aside to start from an empty
   core. Remove the keychain item `com.llmide.desktop` too if the app says the secret store is unreadable.
