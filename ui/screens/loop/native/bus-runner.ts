@@ -66,6 +66,9 @@ export function decodeClaimable(body: unknown): ClaimedCommand[] {
 /** How a finished run maps to the command's terminal state: a cancel is an interruption, not a failure. */
 export function finishStateFor(statusCodes: readonly string[]): "succeeded" | "failed" | "interrupted" {
   if (statusCodes.some((s) => s === "aborted")) return "interrupted";
+  // A run held for a person's review is waiting, not broken. The phone has no "waiting" state, so it gets the
+  // non-failure one that tells it to look again (never "succeeded": nothing is ready to ship until a person approves).
+  if (statusCodes.some((s) => s === "awaiting_review")) return "interrupted";
   return statusCodes.every((s) => s === "success") ? "succeeded" : "failed";
 }
 

@@ -162,6 +162,7 @@ test("the terminal state and result mapping", () => {
   assert.equal(finishStateFor(["success", "success"]), "succeeded");
   assert.equal(finishStateFor(["success", "failed"]), "failed");
   assert.equal(finishStateFor(["success", "aborted"]), "interrupted");
+  assert.equal(finishStateFor(["awaiting_review"]), "interrupted", "a held run is waiting, not failed");
   assert.deepEqual(finishResult("succeeded"), { readyToShip: true, shipped: false });
   assert.equal(finishResult("failed", "boom").shipped, false);
 });
