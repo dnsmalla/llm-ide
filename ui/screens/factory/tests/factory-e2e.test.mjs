@@ -116,11 +116,10 @@ test("an open issue runs every step, comments after each one, and opens its draf
   assert.equal(column.column, "shipped");
 });
 
-test("a run whose tests fail still reaches the MR, labelled, and the issue says so", async () => {
+test("a run whose tests fail opens no MR: it ends stopped, and the issue says so", async () => {
   const w = world({ failRole: "verify" });
-  const { column } = await runIssue(w);
+  const { record } = await runIssue(w);
   assert.match(w.comments.find((c) => /`Verify`/.test(c.body)).body, /— failed/);
-  assert.equal(w.shipped[0].title, "[Tests failing] #2 Make buttons more colorful in Smart Input UI");
-  assert.match(w.shipped[0].body, /^> \*\*The Factory's tests failed \(Verify\)\.\*\*/);
-  assert.equal(column.column, "shipped");
+  assert.equal(w.shipped.length, 0, "only a passed run opens an MR");
+  assert.equal(record.statusCode, "stopped.limit");
 });

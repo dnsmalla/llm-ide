@@ -35,17 +35,13 @@ export function autoShipBlock(diff: WorktreeDiff | null): string | null {
 export type AutoShipKind = "passed" | "testsFailing" | "reviewRejected" | "incomplete";
 
 /**
- * How a finished Factory run reaches its draft MR, or null when it must not open one by itself. The MR is the one place
- * a person reviews, so a failed run ships too, labelled; a cancel, an error, a guard block, an intake-only run and a
- * run waiting on an intake decision do not.
+ * How a finished Factory run reaches its draft MR, or null when it must not open one by itself. The MR is the hand-off
+ * for finished work only: a failed or stopped run (tests, review, cost, time) is a warning a person looks at in the
+ * worktree, so it never opens an MR; nor do a cancel, an error, a guard block, an intake-only run or an intake decision.
  */
 export function autoShipKind(r: { mode: string; statusCode: string; needsDecision: boolean; failedRole: FactoryRole | null }): AutoShipKind | null {
   if (r.mode === "intakeOnly" || r.needsDecision) return null;
-  if (r.statusCode === "success") return "passed";
-  if (r.statusCode !== "failed") return null;
-  if (r.failedRole === "verify") return "testsFailing";
-  if (r.failedRole === "review" || r.failedRole === "reviewGate") return "reviewRejected";
-  return "incomplete";
+  return r.statusCode === "success" ? "passed" : null;
 }
 
 /**
@@ -56,6 +52,7 @@ export function holdsForHuman(config: Pick<LoopEngineConfig, "reviewMode">, r: {
   return reviewModeOf(config) === "human" && autoShipKind(r) !== null;
 }
 
+// The failed kinds stay so an old held record (written before failed runs stopped shipping) can still be approved.
 const KIND_PREFIX: Record<AutoShipKind, string> = { passed: "", testsFailing: "[Tests failing] ", reviewRejected: "[Review: changes requested] ", incomplete: "[Incomplete] " };
 
 export function autoShipTitle(title: string, kind: AutoShipKind): string {

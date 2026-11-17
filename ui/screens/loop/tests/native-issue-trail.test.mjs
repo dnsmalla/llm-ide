@@ -168,3 +168,8 @@ test("a held run's summary says it is waiting for a person", () => {
   const body = runSummaryBody({ process: "Factory", runId: "r3", statusCode: "awaiting_review", statusSummary: "", steps: [], changedFiles: [], costUsd: 0 });
   assert.match(body, /waiting for your review/);
 });
+
+test("runSummaryBody words a stopped run as stopped at its limit with no MR", () => {
+  const body = runSummaryBody({ process: "Factory", runId: "r5", statusCode: "stopped.limit", statusSummary: "Stopped after 3 rounds: tests still failing", steps: [], changedFiles: [], costUsd: 0 });
+  assert.match(body, /stopped at its limit, no MR opened/);
+});

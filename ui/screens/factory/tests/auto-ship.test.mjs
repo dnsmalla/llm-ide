@@ -39,7 +39,7 @@ test("a passed run opens its draft MR against the branch it was cut from, record
   assert.match(w.comments[0], /merge_requests\/9/);
 });
 
-test("a failed run ships too, labelled in the title and first line of the description", async () => {
+test("an old held failed record still ships labelled when a person approves it", async () => {
   const w = world();
   await autoShipRun(w.d, ctx({ kind: "testsFailing", failedStage: "Verify" }));
   assert.equal(w.shipped[0].title, "[Tests failing] Make buttons more colorful");

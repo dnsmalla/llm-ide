@@ -144,7 +144,7 @@ const STATUS_WORD: Record<string, string> = { success: "passed", failed: "failed
 
 /** The end-of-run comment: outcome, every step with its result and attempts, what changed, cost, time, and the MR. */
 export function runSummaryBody(f: SummaryFacts): string {
-  const word = STATUS_WORD[f.statusCode] ?? (f.statusCode.startsWith("blocked") ? "blocked" : displayLine(f.statusCode).slice(0, 40));
+  const word = STATUS_WORD[f.statusCode] ?? (f.statusCode.startsWith("blocked") ? "blocked" : f.statusCode.startsWith("stopped") ? "stopped at its limit, no MR opened" : displayLine(f.statusCode).slice(0, 40));
   const lines = [`**${displayLine(f.process).replace(/[*`]/g, "").slice(0, 60)} · run summary** — ${word}`, "", `Run ${code(f.runId, 80)}`];
   const summary = displayLine(f.statusSummary).trim();
   if (summary) lines.push(`Result: ${code(summary, 200)}`);

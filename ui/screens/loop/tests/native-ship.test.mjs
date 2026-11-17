@@ -83,14 +83,11 @@ test("autoShipBlock opens an MR only for a diff a person can fully review that t
   assert.match(m.autoShipBlock(diff({ files: ["src/a.ts", ".github/workflows/ci.yml"] })), /\.github\/workflows\/ci\.yml/);
 });
 
-test("autoShipKind: every finished run reaches its MR, labelled by how it ended; stops and refusals do not", () => {
+test("autoShipKind: only a passed run reaches its MR; failed, stopped, cancelled and refused runs do not", () => {
   const r = (over = {}) => ({ mode: "full", statusCode: "success", needsDecision: false, failedRole: null, ...over });
   assert.equal(m.autoShipKind(r()), "passed");
-  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: "verify" })), "testsFailing");
-  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: "review" })), "reviewRejected");
-  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: "reviewGate" })), "reviewRejected");
-  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: "implement" })), "incomplete");
-  assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole: null })), "incomplete", "budget reached");
+  for (const failedRole of ["verify", "review", "reviewGate", "implement", null]) assert.equal(m.autoShipKind(r({ statusCode: "failed", failedRole })), null, `failed at ${failedRole}`);
+  assert.equal(m.autoShipKind(r({ statusCode: "stopped.limit", failedRole: "verify" })), null, "the warning state never ships");
   for (const stop of ["aborted", "error", "blocked.repair_out_of_scope"]) assert.equal(m.autoShipKind(r({ statusCode: stop })), null, stop);
   assert.equal(m.autoShipKind(r({ mode: "intakeOnly" })), null);
   assert.equal(m.autoShipKind(r({ statusCode: "failed", needsDecision: true })), null, "the intake gate asks a person first");
@@ -160,12 +157,13 @@ test("A4: the recorded review patch id warns and blocks Ship when the diff chang
   assert.equal(m.reviewedPatchIdWarning("not-a-patch-id", "b".repeat(64)), null, "a malformed recorded value is ignored");
 });
 
-test("holdsForHuman holds every run that would auto-ship, even one the AI reviewer rejected, only in human mode", () => {
+test("holdsForHuman holds only passed runs, and only in human mode", () => {
   const human = { reviewMode: "human" };
   const ok = { mode: "full", statusCode: "success", needsDecision: false, failedRole: null };
   assert.equal(m.holdsForHuman(human, ok), true);
-  assert.equal(m.holdsForHuman(human, { ...ok, statusCode: "failed", failedRole: "reviewGate" }), true);
-  assert.equal(m.holdsForHuman(human, { ...ok, statusCode: "failed", failedRole: "verify" }), true);
+  assert.equal(m.holdsForHuman(human, { ...ok, statusCode: "failed", failedRole: "reviewGate" }), false);
+  assert.equal(m.holdsForHuman(human, { ...ok, statusCode: "failed", failedRole: "verify" }), false);
+  assert.equal(m.holdsForHuman(human, { mode: "full", statusCode: "stopped.limit", needsDecision: false, failedRole: "verify" }), false);
   assert.equal(m.holdsForHuman({ reviewMode: undefined }, ok), false);
   assert.equal(m.holdsForHuman(human, { ...ok, needsDecision: true }), false);
   assert.equal(m.holdsForHuman(human, { ...ok, mode: "intakeOnly" }), false);

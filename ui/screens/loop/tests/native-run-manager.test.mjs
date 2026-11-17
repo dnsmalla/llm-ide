@@ -798,3 +798,92 @@ test("a held failed run whose stage no longer exists still ships with its stored
   assert.equal(shipped[0].kind, "testsFailing");
   assert.equal(shipped[0].statusCode, "failed");
 });
+
+// Verify loopback: a failed run never opens an MR; only a passed one ships (auto) or is held (human).
+const verifyStage = () => FACTORY_LOOP.config.stages.find((s) => s.id === "factory/verify");
+const reviewGateStage = () => FACTORY_LOOP.config.stages.find((s) => s.id === "factory/review-gate");
+const FAILED = (over = {}) => ({ passed: false, iterationsUsed: 1, stages: [], iterations: [], failedStage: verifyStage(), statusSummary: "tests failed", ...over });
+
+test("a loopback-stopped run opens no MR and records stopped.limit with its loopback summary", async () => {
+  const shipped = [];
+  const finishedInfo = [];
+  const loopback = { rounds: 3, maxRounds: 3, reason: "tests", findings: "boom", stopped: true };
+  // An early event makes the manager publish the run's progress.
+  setup({ autoShip: async (e) => { shipped.push(e); return "x"; }, onRunFinished: (i) => finishedInfo.push(i), runLoop: (config, deps) => { world.configs.push(config); deps.onProgress({ type: "iteration", iteration: 1 }); const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  assert.equal(rm.liveRuns()[0].progress.maxIterations, FACTORY_LOOP.config.maxIterations);
+  const notes = [];
+  rm.subscribe?.(() => notes.push(rm.liveRuns()[0]?.note ?? null));
+  await finish(a, FAILED({ stoppedAtLimit: true, iterationsUsed: 3, statusSummary: "Stopped after 3 rounds: tests still failing", loopback }));
+  assert.equal(shipped.length, 0);
+  const rec = world.records.at(-1);
+  assert.equal(rec.record.statusCode, "stopped.limit");
+  assert.deepEqual(rec.record.loopback, loopback);
+  assert.equal(finishedInfo[0].statusCode, "stopped.limit");
+  assert.equal(notes.includes("Opening the MR"), false);
+});
+
+test("a stopped run in human review mode is not held: no awaiting field, not awaiting_review", async () => {
+  setup({ loadFactoryLoop: async () => ({ ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_LOOP.config), reviewMode: "human" } }), autoShip: async () => "x" });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a, FAILED({ stoppedAtLimit: true }));
+  const rec = world.records.at(-1).record;
+  assert.equal(rec.statusCode, "stopped.limit");
+  assert.equal("awaiting" in rec, false);
+});
+
+for (const [label, mode, outcome, opts] of [
+  ["a plain failed Verify in full mode", "full", FAILED()],
+  ["a failed run in check mode", "check", FAILED(), { runId: "r-old" }],
+  ["a rejected final Review gate", "full", FAILED({ failedStage: reviewGateStage() })],
+]) {
+  test(`${label} is stopped.limit and opens no MR`, async () => {
+    const shipped = [];
+    setup({ autoShip: async (e) => { shipped.push(e); return "x"; } });
+    if (opts) world.list = [{ runId: opts.runId, project: "/p", repo: "/p", worktree: "/p/system/loop-worktrees/r-old", branch: "factory/r-old", baseCommit: "abc1234def" }];
+    const a = rm.startRun("/p", item(1), mode, opts ?? {});
+    await settle();
+    await finish(a, outcome);
+    assert.equal(shipped.length, 0);
+    assert.equal(world.records.at(-1).record.statusCode, "stopped.limit");
+  });
+}
+
+test("cancelled, errored and blocked runs keep their own states; none ships", async () => {
+  const shipped = [];
+  for (const [flag, code] of [[{ cancelled: true }, "aborted"], [{ errored: true }, "error"], [{ blocked: true }, "blocked.repair_out_of_scope"]]) {
+    setup({ autoShip: async (e) => { shipped.push(e); return "x"; } });
+    const a = rm.startRun("/p", item(1), "full");
+    await settle();
+    await finish(a, FAILED(flag));
+    assert.equal(world.records.at(-1).record.statusCode, code);
+  }
+  // autoShip is still called for these (its kind rule refuses them), but never with the stopped code.
+  assert.equal(shipped.some((e) => e.statusCode === "stopped.limit"), false);
+});
+
+test("a passed run still ships in auto mode", async () => {
+  const shipped = [];
+  setup({ autoShip: async (e) => { shipped.push(e.statusCode); return "x"; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  assert.deepEqual(shipped, ["success"]);
+});
+
+test("a loopback event marks the Verify row failed and clears the sub-state", async () => {
+  let onProgress;
+  setup({ runLoop: (config, deps) => { onProgress = deps.onProgress; world.configs.push(config); const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const verify = verifyStage();
+  onProgress({ type: "stage-start", stage: verify, index: 5, count: 8, iteration: 1 });
+  onProgress({ type: "step-review", stage: verify, phase: "reviewing" });
+  onProgress({ type: "loopback", stage: verify, round: 1, maxRounds: 3, reason: "tests" });
+  const progress = rm.liveRuns()[0].progress;
+  assert.equal(progress.stages.find((r) => r.id === verify.id).state, "failed");
+  assert.equal(progress.substate, null);
+  await finish(a);
+});
