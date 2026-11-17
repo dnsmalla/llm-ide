@@ -7,6 +7,7 @@ import { BUILT_IN_TEMPLATES, applyTemplate, ensureDefaultLoops, factoryLoop, ini
 import { DETECTED_TEST } from "../native/environment.ts";
 import { decodeRepoConfig } from "../../settings/repo-config.ts";
 import { DEFAULT_LOOP_SPECS } from "../native/defaults.ts";
+import { effectiveReviewAfter } from "../native/review.ts";
 
 // Every built-in step, including Intake and its gate, which the default process leaves out.
 const FULL = { ...FACTORY_TEMPLATE, config: { ...structuredClone(FACTORY_TEMPLATE.config), stages: structuredClone(f.FACTORY_BUILT_IN_STAGES) } };
@@ -423,4 +424,10 @@ test("configFor humanReview keeps the sendBack roles and tells Implement to read
 
 test("configFor keeps reviewMode human through the clone", () => {
   assert.equal(configFor("full", { ...FULL.config, reviewMode: "human" }).reviewMode, "human");
+});
+
+test("by default only Implement and Test gaps are reviewed after they run", () => {
+  // Pins the defaults that effectiveReviewAfter derives, so the template JSON never has to carry them.
+  const reviewed = FACTORY_TEMPLATE.config.stages.filter((s) => effectiveReviewAfter(s)).map((s) => s.name);
+  assert.deepEqual(reviewed, ["Implement", "Test gaps"]);
 });
