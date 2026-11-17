@@ -316,7 +316,7 @@ A stage is one step of the run (`LoopStage`). Seven kinds are described here; th
 - **`shellCommand`** — an arbitrary project command (`swift test`, `npm test`).
   The desktop host requires a native Cancel-first dialog approval pinned to the
   command's exact SHA-256, the loop/stage id and the working folder before it will
-  ever spawn `/bin/sh`; the Mac app's equivalent is `VerifyApprovalStore`. A
+  ever spawn `/bin/sh`; the retired Mac app's equivalent was `VerifyApprovalStore`. A
   page-side `window.confirm` or localStorage list is not an approval: the host
   re-reads `system/loop.json` and refuses when the command changed.
 - **`skill`** — a central skill executed as a *generate* step: it edits the tree,

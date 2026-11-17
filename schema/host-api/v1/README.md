@@ -1,7 +1,6 @@
 # Host API v1 contract
 
-The machine-checked contract for Mac, desktop, iOS and web clients. Design:
-[`docs/superpowers/specs/2026-11-03-host-api-design.md`](../../../docs/superpowers/specs/2026-11-03-host-api-design.md).
+The machine-checked contract for Mac, desktop, iOS and web clients. The host API design spec is no longer in the repo; this folder is the contract.
 
 This directory contains the frame envelope, command registry, event schemas and
 fixtures. The host is the core's gateway (`extension/routes/host-api/`), run by the desktop app; Swift validation and payload types are generated into `ios_app/SharedProtocol`.

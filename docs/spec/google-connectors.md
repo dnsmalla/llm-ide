@@ -3,7 +3,7 @@ title: Google connectors (Gmail, Calendar, Drive) — spec
 status: draft
 ---
 
-This page records the Google connectors as built on 2026-10-31 (API 103, migration 0059): slices G0 to G3 of [the plan](../superpowers/plans/2026-10-31-google-connectors-plan.md). Everything cites code. What was never run against a real Google account is listed in section 12 and is **unverified**.
+This page records the Google connectors as built on 2026-10-31 (API 103, migration 0059): slices G0 to G3 of the Google connectors plan (no longer in the repo). Everything cites code. What was never run against a real Google account is listed in section 12 and is **unverified**.
 
 Google sign-in here is a **connector credential only**. It is never an app login and never a model provider. The older `/auth/google/*` routes (IMAP over `mail.google.com`) are not part of this page except for the legacy token (section 4).
 

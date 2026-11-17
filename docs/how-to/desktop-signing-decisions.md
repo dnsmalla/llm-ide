@@ -19,9 +19,9 @@ Nothing has run against real certificates or secrets yet (UN-071, UN-115).
 
 - Needs an Apple Developer Program membership and a **Developer ID Application** certificate.
 - Notarisation needs an app-specific password or an App Store Connect API key.
-- The Mac app (since removed) already had `mac/Scripts/sign.sh` and `notarize.sh`; the Tauri bundle needs the same entitlements
+- The retired Mac app had its own `sign.sh` and `notarize.sh` (removed with it; in git history); the Tauri bundle needs the same entitlements
   (hardened runtime, the bundled node binary signed with the same identity).
-- **Decided:** the pipeline reuses the Mac app's seven `MAC_*` secrets (Developer ID, Apple ID, app-specific password).
+- **Decided:** the pipeline reuses the seven `MAC_*` secrets the retired Mac app used (Developer ID, Apple ID, app-specific password).
   Moving both trains to an App Store Connect API key is a later option.
 
 ### 2. Windows signing
@@ -72,7 +72,7 @@ from OS code signing.
 3. The Linux format choice above.
 4. The updater key pair, plus the hosting choice for update manifests.
 5. Done: `com.llmide.desktop` and `LLM-IDE` are the production identifier and name (they keep the app separate
-   from the Swift app's `com.llmide.macapp`).
+   from the retired Swift app's `com.llmide.macapp`).
 
 ## After you decide
 

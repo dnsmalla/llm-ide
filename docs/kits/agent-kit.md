@@ -6,9 +6,9 @@ Status: **K0 Map**, written 2026-10-29. No code was changed. Citations are `path
 
 agent-kit is the **north-star kit**: the model-facing half of LLM-IDE. It is the chat the user talks to (Mac Code Assistant panel, menu-bar quick chat, phone chat through the Mac, extension side-panel chat), the server engines that answer it, the provider layer that reaches the models, and the extension surface (plugins, MCP servers, LLM sources, skills) that is delivered into a turn. Its job under the plan's principle (*skeleton for ever-improving LLMs*) is to stay a thin adapter over the Claude Agent SDK and own only project control: permission, budget, routing, memory, contract.
 
-The plan row (`docs/superpowers/plans/2026-10-27-kit-by-kit-migration.md:103`, kit 5) names: `llm_agent/`, `providers/`, `mcp/`, `plugins/`, `llm-sources/`, `agents/agent-prompt`, `kb/` chat-sessions, agent-sessions, session-memory, turn-composition, personas, tool-*; `Features/Chat`, `ClaudeLink/`; side-panel chat. Key `agent_chat` (never off); contract groups `agent`, `providers-usage` and the plugin, MCP and LLM-source rows of `health-auth`; depends on core. The plan's "known hard spot" (`:116`) says chat sessions are double-stored (Mac JSON files vs `unified_chat_sessions` / `agent_sessions`) and that K1a decides the home. This map confirms the problem and finds it is a different shape than the plan states (section 5): the server table the plan names is not read by the Mac at all, and `agent_sessions` is a mapping, not a transcript.
+The plan row (kit-by-kit migration plan, line 103, kit 5) names: `llm_agent/`, `providers/`, `mcp/`, `plugins/`, `llm-sources/`, `agents/agent-prompt`, `kb/` chat-sessions, agent-sessions, session-memory, turn-composition, personas, tool-*; `Features/Chat`, `ClaudeLink/`; side-panel chat. Key `agent_chat` (never off); contract groups `agent`, `providers-usage` and the plugin, MCP and LLM-source rows of `health-auth`; depends on core. The plan's "known hard spot" (`:116`) says chat sessions are double-stored (Mac JSON files vs `unified_chat_sessions` / `agent_sessions`) and that K1a decides the home. This map confirms the problem and finds it is a different shape than the plan states (section 5): the server table the plan names is not read by the Mac at all, and `agent_sessions` is a mapping, not a transcript.
 
-Since the plan was written (2026-10-27), the **agent store** landed (`docs/superpowers/plans/2026-10-28-agent-store.md`): agent history (runs, tool events, turn composition, activity) moved out of the main DB into a separate `agent.db`. Section 2a maps it as it is now.
+Since the plan was written (2026-10-27), the **agent store** landed (the agent-store plan): agent history (runs, tool events, turn composition, activity) moved out of the main DB into a separate `agent.db`. Section 2a maps it as it is now.
 
 ## 2. Code on every side
 
@@ -296,7 +296,7 @@ What this changes for this kit, by reading:
 
 ## User decisions 2026-10-30
 
-Recorded in the user's meaning. The plan that applies them is [agent-kit K1](../superpowers/plans/2026-10-30-agent-kit-k1.md); this section only records what was decided and what is still open.
+Recorded in the user's meaning. The plan that applies them (agent-kit K1) is no longer in the repo; this section only records what was decided and what is still open.
 
 ### Decided
 

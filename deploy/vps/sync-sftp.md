@@ -2,7 +2,7 @@
 
 The desktop writes encrypted sync files to this VPS over SFTP. Phones and browsers read and write only their own
 folder over `https://llm-ide.com/sync/`. The server only ever holds ciphertext. Design:
-`docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md` §8.1, ADR 0020.
+`docs/decisions/0020-box-encrypted-sync.md`, wire format in `schema/sync/v1/README.md`.
 
 ## 1. Account and folders (as root)
 

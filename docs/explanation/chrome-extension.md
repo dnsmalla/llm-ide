@@ -52,7 +52,7 @@ There is **no `chrome.windows.create({ type: 'popup' })` call** in the extension
 | In-page status overlay | Content script (`content/floating-overlay.ts`) |
 | Message routing, script injection | Service worker (`background/service-worker.ts`) |
 | Live transcript, AI chat, settings | Side panel (`sidepanel/`) |
-| Persistence (transcripts, prefs, auth) | `chrome.storage.local` via `lib/storage.ts` + `lib/config.ts` |
+| Persistence (transcripts, prefs, auth) | `chrome.storage.local` via `lib/capture-store.ts` + `lib/config.ts` |
 | Server URL safety | `lib/config.ts` (`isSafeServerUrl()`, localhost port 3456 only) |
 
 ## Cross-references

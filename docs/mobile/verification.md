@@ -41,7 +41,7 @@ is unchanged and documented as temporary (Plan 4 decision 7).
 ## Host API v1 reads from the iPhone app (user-run)
 
 Setup: the desktop with `LLMIDE_HOST_API_READ=1`, and an iPhone paired **after** the switch was on (a device
-paired before it must re-pair to get `read`). Plan: `docs/superpowers/plans/2026-11-05-host-api-v1-reads-ios.md`.
+paired before it must re-pair to get `read`).
 
 | # | Check | Expected |
 |---|---|---|

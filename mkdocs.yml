@@ -70,7 +70,8 @@ exclude_docs: |
   _templates/
   _scripts/
   _stubs.txt
-  # Kept even though the directory is currently empty: the vendored
-  # writing-plans / brainstorming skills still save new plans and specs
-  # here, and they must never enter the published site or --strict build.
+  # Kept on purpose: it holds the MASTER-PLAN and USER-NEEDS status trackers
+  # (read by scripts/plan-status.mjs and scripts/user-needs.mjs), and the
+  # vendored writing-plans / brainstorming skills save new plans here.
+  # None of it may enter the published site or a --strict build.
   superpowers/

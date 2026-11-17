@@ -417,5 +417,4 @@ One timeline serves both providers — same chart, same controls.
 ## Next Steps
 
 - [Configure Auto Tasks](./configure-auto-tasks.md) — Set up automated code reviews and testing
-- [Create a Plan](../tutorials/02-generate-a-plan.md) — Use your repo for AI-assisted planning
 - [Reference: Error Codes](../reference/error-codes.md) — Troubleshoot specific errors

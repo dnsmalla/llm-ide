@@ -8,7 +8,7 @@ LLM-IDE has two server modes. **Local desktop** is the default: the app runs the
 computer and phones/browsers read encrypted MEGA/Box/SFTP snapshots while it is online (ADR 0020).
 **Remote SSH hub** runs the same core on a server you own, behind nginx TLS, so the desktop, web app
 and iPhone work while your computer is off. This page is the operator path; decisions and the full
-task list are in `docs/superpowers/plans/2026-11-08-remote-server-modes.md` (D1–D11 approved).
+task list were in a plan that is no longer in the repo (D1–D11 approved).
 
 ## Before you start
 

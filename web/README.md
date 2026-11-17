@@ -45,7 +45,7 @@ Use [MANUAL-CHECK.md](MANUAL-CHECK.md) before calling a release shipped.
 
 When the desktop is not reachable, a browser linked to sync reads the desktop's last encrypted snapshot (chats,
 meetings with notes, plans and tasks, usage) from the user's dedicated MEGA account and can queue chat prompts that
-run, read-only, when the desktop is back (design: docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md).
+run, read-only, when the desktop is back (design: [ADR 0020](../docs/decisions/0020-box-encrypted-sync.md)).
 
 - Link it from the desktop: Settings → sync → Add a phone or browser → Browser. Open the link here (or paste it on the
   Pairing screen) and compare the 6-digit code on both screens. An app installed to the iPhone home screen has storage

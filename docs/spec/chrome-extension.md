@@ -15,7 +15,7 @@ This document governs the following source files (all under `extension/src/`):
 |------|------|
 | `lib/messages.ts` | Message type enum + typed union + `isMessage()` guard |
 | `lib/platforms.ts` | Platform registry and `detectPlatformFromUrl()` |
-| `lib/storage.ts` | Local persistence (covered in §5) |
+| `lib/capture-store.ts` | Local persistence (covered in §5) |
 | `lib/config.ts` | Debug flag and environment helpers (covered in §6) |
 | `content/caption-scraper.ts` | Core DOM scraper — Meet, Teams, Zoom CC readers |
 | `content/speaker-detector.ts` | Active-speaker and participant-list detector |
@@ -240,7 +240,7 @@ In `startRecording()` (`useTranscript.ts:533–590`): if `isSupportedUrl(url)` r
 
 ## §4 Client state (`chrome.storage.local`)
 
-Sources: `extension/src/lib/storage.ts`, `extension/src/sidepanel/hooks/useTranscript.ts`, `extension/src/sidepanel/hooks/useChat.ts`, `extension/src/sidepanel/hooks/useAudioDevices.ts`, `extension/src/sidepanel/components/ConnectorsSettings.tsx`, `extension/src/lib/config.ts`.
+Sources: `extension/src/lib/capture-store.ts`, `extension/src/sidepanel/hooks/useTranscript.ts`, `extension/src/sidepanel/hooks/useChat.ts`, `extension/src/sidepanel/hooks/useAudioDevices.ts`, `extension/src/sidepanel/components/ConnectorsSettings.tsx`, `extension/src/lib/config.ts`.
 
 ### 4.1 Storage keys — complete list
 
@@ -266,11 +266,11 @@ Sources: `extension/src/lib/storage.ts`, `extension/src/sidepanel/hooks/useTrans
 
 ### 4.2 `SavedTranscript` shape
 
-`lib/storage.ts:13–23`:
+`lib/capture-store.ts`:
 
 ```typescript
 interface SavedTranscript {
-  id: string;                        // `${Date.now()}-${8-byte hex random}` (storage.ts:14, generateId() at line 25)
+  id: string;                        // `${Date.now()}-${8-byte hex random}` (capture-store.ts, generateId() at line 25)
   meetingTitle: string;
   date: string;                      // ISO timestamp when stopRecording() fired
   duration: number;                  // elapsed seconds of recording

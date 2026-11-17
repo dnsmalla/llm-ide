@@ -1,6 +1,6 @@
 # User needs: everything only you can do or decide
 
-Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), [ROADMAP](ROADMAP.md) "Waiting on you", [USER-CHECKLIST](USER-CHECKLIST.md), [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
+Created 2026-10-31 by reviewing [MASTER-PLAN](MASTER-PLAN.md) (every `(you)` and `(wait)` line), ROADMAP "Waiting on you", USER-CHECKLIST, [desktop/RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md), [docs/mobile/verification.md](../mobile/verification.md), the open-question sections of every plan in `plans/`, the kit maps in `docs/kits/`, and the decisions you recorded in conversation.
 
 Open count: 52 open, 43 done, 95 total
 
@@ -29,7 +29,7 @@ Open count: 52 open, 43 done, 95 total
   - Effort: 2 minutes. Blocks: UN-032 (which Auto Tasks are cut or merged). Status: not run.
 - [x] **UN-004** Swift app manual checks (about 30 minutes). Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
   - Why you: needs the real Mac app and your providers.
-  - How: [USER-CHECKLIST section B](USER-CHECKLIST.md#b-manual-app-checks-about-30-minutes): basics, Providers, DeepSeek chat, chat cap chip, Plugin/MCP/LLM-source screens (this also covers the Extensions screen real-app check), the 12-step quit-and-relaunch with `lta.mode` on, and the extension "Mac app not running" state. Safe mode: `defaults write com.llmide.macapp lta.mode shadow`.
+  - How: USER-CHECKLIST section B: basics, Providers, DeepSeek chat, chat cap chip, Plugin/MCP/LLM-source screens (this also covers the Extensions screen real-app check), the 12-step quit-and-relaunch with `lta.mode` on, and the extension "Mac app not running" state. Safe mode: `defaults write com.llmide.macapp lta.mode shadow`.
   - Effort: 30 minutes. Blocks: turning live-then-archive `lta.mode` on by default, closing Mac K1 work, the Extensions screen check. Status: not run.
 - [ ] **UN-005** Gmail with an app password (the easy way).
   - Why you: your Google account and a password only you can create.
@@ -45,11 +45,11 @@ Open count: 52 open, 43 done, 95 total
   - Effort: 10 minutes. Blocks: the Drive-as-folder real run. Status: not run.
 - [ ] **UN-008** Mac autobench with the window frontmost.
   - Why you: a hidden or agent-run window changes the numbers (Phase 3 exit condition).
-  - How: run the autobench from [RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md) and [the Phase 0 report](plans/2026-10-25-tauri-phase0-report.md) with the app window frontmost for the whole run; send the result file. Confirms the 30-second hidden phase.
+  - How: run the autobench from [RUN-ON-MAC.md](../../desktop/RUN-ON-MAC.md) and the Phase 0 report with the app window frontmost for the whole run; send the result file. Confirms the 30-second hidden phase.
   - Effort: 10 minutes. Blocks: Phase 3 exit, the ADR 0018 condition. Status: not run.
 - [ ] **UN-009** One Windows autobench run.
   - Why you: needs a Windows machine; ADR 0018 pauses the work if it fails, so earlier is cheaper.
-  - How: build and run the desktop app on Windows; record graph frame rate (need at least 30 fps), sidecar start and quit, installer size. Steps in [the Phase 3 plan](plans/2026-10-31-tauri-phase3-plan.md) and the Phase 0 report.
+  - How: build and run the desktop app on Windows; record graph frame rate (need at least 30 fps), sidecar start and quit, installer size. Steps in the Phase 3 plan and the Phase 0 report.
   - Effort: 60 minutes. Blocks: Phase 3 exit, any Windows work. Status: not run.
 - [ ] **UN-010** Grant Accessibility to measure caption read cadence.
   - Why you: a macOS permission dialog only you can approve.
@@ -57,11 +57,11 @@ Open count: 52 open, 43 done, 95 total
   - Effort: 5 minutes. Blocks: Phase 3 exit measurement. Status: not run.
 - [ ] **UN-011** Token bench go-ahead, plumbing and cheap sanity run.
   - Why you: runs count against your plan limits and need your `claude` login.
-  - How: [USER-CHECKLIST A steps 1 and 2](USER-CHECKLIST.md#a-bench-plan-token-affecting-changes-are-off-until-you-decide): `make token-bench-fake` (free), then `node scripts/token-bench.mjs --only greeting,repo-search,auto-mode --repeat 1`. Tell the agent "go" when the numbers look plausible.
+  - How: USER-CHECKLIST A steps 1 and 2: `make token-bench-fake` (free), then `node scripts/token-bench.mjs --only greeting,repo-search,auto-mode --repeat 1`. Tell the agent "go" when the numbers look plausible.
   - Effort: 15 minutes. Blocks: every token-affecting change (X1 lean config, X2 SDK adoption, router defaults, X3), all shipped OFF until then. Status: not run.
 - [ ] **UN-012** Token bench baselines.
   - Why you: one real run per model on your account; commit deliberately.
-  - How: [USER-CHECKLIST A step 3](USER-CHECKLIST.md#a-bench-plan-token-affecting-changes-are-off-until-you-decide) (fast model, then Sonnet-class). Measure the first run's cost before relying on the estimate.
+  - How: USER-CHECKLIST A step 3 (fast model, then Sonnet-class). Measure the first run's cost before relying on the estimate.
   - Effort: 60 minutes. Blocks: UN-013, UN-014, P17 token baseline. Status: not run.
 - [ ] **UN-013** Token bench noise check.
   - Why you: same account and plan limits.
@@ -81,7 +81,7 @@ Open count: 52 open, 43 done, 95 total
   - Effort: 30 minutes. Blocks: any caption or transcript merge. Status: not run.
 - [ ] **UN-017** Optional: create your own Google Cloud OAuth client.
   - Why you: your Google account and a Cloud project; only needed if you want OAuth-based Gmail, Calendar or Drive instead of the easy setups above.
-  - How: [Google plan section 7](plans/2026-10-31-google-connectors-plan.md): create a project, enable the Gmail, Calendar and Drive APIs, consent screen in Testing with your accounts as test users, OAuth client of type Desktop app, paste the id and secret into the write-only Advanced field. Expect 7-day refresh-token expiry while in Testing (unverified, check at setup).
+  - How: Google plan section 7: create a project, enable the Gmail, Calendar and Drive APIs, consent screen in Testing with your accounts as test users, OAuth client of type Desktop app, paste the id and secret into the write-only Advanced field. Expect 7-day refresh-token expiry while in Testing (unverified, check at setup).
   - Effort: 30 minutes. Blocks: any live OAuth Google run (fixtures only until then). Status: not started; optional.
 - [ ] **UN-018** Optional: install the nightly push job.
   - Why you: it pushes to your remote; until installed, agents push only when you say.
@@ -101,25 +101,25 @@ Open count: 52 open, 43 done, 95 total
 Each has a recommendation and what waiting costs. Reply "go with your recommendation" to take it. Questions you answered in conversation are in section E, and anything decided by the "do the best, secure" delegation is in section C.
 
 - [ ] **UN-030** Google Q-G2 and Q-G3: replace Gmail IMAP OAuth (`mail.google.com`) with the REST read-only connector and revoke the old token; Drive metadata for everything and content only for ticked folders.
-  - Source: [Google plan section 12](plans/2026-10-31-google-connectors-plan.md). Recommended: yes to both. If you wait: Gmail keeps the broad scope and Drive OAuth stays unfinished. Blocks: G5 to G7. (Q-G1 is answered, see E.)
+  - Source: Google plan section 12. Recommended: yes to both. If you wait: Gmail keeps the broad scope and Drive OAuth stays unfinished. Blocks: G5 to G7. (Q-G1 is answered, see E.)
 - [ ] **UN-031** Issues core Q-I1 to Q-I3: paste GitHub and GitLab tokens once into Settings (write-only), with `gh` and `glab` import as a convenience; Gantt writes only our overlay in v1; allow a bounded, rebuildable per-user issue cache in SQLite, purged on disconnect.
-  - Source: [Issues and Gantt plan section 13](plans/2026-10-31-issues-gantt-core-plan.md). Recommended: (a) with (b), overlay only, yes. If you wait: IC0 cannot start, so the Issues and Gantt screens wait.
+  - Source: Issues and Gantt plan section 13. Recommended: (a) with (b), overlay only, yes. If you wait: IC0 cannot start, so the Issues and Gantt screens wait.
 - [ ] **UN-032** Auto Tasks T1 to T6: remove generateKnowledge, generateDoc, updatePlanStatus after UN-003 shows zero runs; fold the five merges with an alias table; template save, config set and toggle desktop-only; phone starts implement or ship only through desktop approval; `--yolo` not the default for codex and gemini; write tasks on a bare API key only if you need it.
-  - Source: [Auto Tasks audit section 8](plans/2026-10-31-auto-tasks-audit.md). Recommended: the answers in the table; confirm T6 (do you need API-key-only write tasks, or is login enough). If you wait: the Node port keeps all 13 tasks. Depends on UN-003.
+  - Source: Auto Tasks audit section 8. Recommended: the answers in the table; confirm T6 (do you need API-key-only write tasks, or is login enough). If you wait: the Node port keeps all 13 tasks. Depends on UN-003.
 - [ ] **UN-033** Command bus Q2 to Q6: explorer read-only and note create native-only for the phone; delete the dead phone image field; design the headless always-on core but do not build it; allow up to 3 phones per user with one writer.
-  - Source: [command bus spec section 11](plans/2026-10-31-command-bus-spec.md). Recommended: yes to all. If you wait: S2 and S6 scope stays fuzzy.
+  - Source: command bus spec section 11. Recommended: yes to all. If you wait: S2 and S6 scope stays fuzzy.
 - [ ] **UN-034** Mobile TLS Q1 to Q4: ship TLS before the bus; one release of cleartext fallback; "Reset security identity" as the only rotation; keep `NSAllowsLocalNetworking` for one release.
-  - Source: [TLS design section 10](plans/2026-10-31-mobile-tls-pinning-design.md). Recommended: yes to all. If you wait: the cleartext link and open ATS stay.
+  - Source: TLS design section 10. Recommended: yes to all. If you wait: the cleartext link and open ATS stay.
 - [ ] **UN-035** Phase 5 macOS plan: 3D graph outside the macOS exit gate (2D inside, WebGL 3D right after); Windows then Linux order.
-  - Source: [Phase 5 plan section 15 items 1 and 2](plans/2026-10-31-tauri-phase5-macos-plan.md). Recommended: yes to both. If you wait: the 3D graph and the Windows/Linux order cannot be scheduled.
+  - Source: Phase 5 plan section 15 items 1 and 2. Recommended: yes to both. If you wait: the 3D graph and the Windows/Linux order cannot be scheduled.
 - [ ] **UN-036** Phase 3 plan: desktop chat store (same file format, in the desktop's own data dir); run the Windows measurement in week 1 of Phase 3 (see UN-009); a deferred row for Source Control hosted actions.
-  - Source: [Phase 3 plan section 12](plans/2026-10-31-tauri-phase3-plan.md). Recommended: yes to all. If you wait: the chat store is undecided.
+  - Source: Phase 3 plan section 12. Recommended: yes to all. If you wait: the chat store is undecided.
 - [ ] **UN-037** Phase 7 desktop control Q3, Q5, Q8, Q9: terminals and shell apps denied in the first release; grant lifetimes 15 minutes default, 4 hours maximum, 5 minutes idle; offer the sign-in handoff `ask_user`; review the shared clause together with the relay and the driver separately.
-  - Source: [Phase 7 design section 12.2](plans/2026-10-31-phase7-desktop-control-design.md). Recommended: yes to all. If you wait: nothing is built before the spike; the defaults stay provisional.
+  - Source: Phase 7 design section 12.2. Recommended: yes to all. If you wait: nothing is built before the spike; the defaults stay provisional.
 - [ ] **UN-038** Relay X1 and X2: no password at the relay (account bound to the desktop's signing key; say so if you want an extra login factor), and book the external security review during R0.
-  - Source: [relay design section 13](plans/2026-10-31-relay-design.md). Recommended: yes to both. If you wait: R0 cannot freeze its spec.
+  - Source: relay design section 13. Recommended: yes to both. If you wait: R0 cannot freeze its spec.
 - [x] **UN-039** Relay D6: hosting (small VPS first behind a storage interface, in your preferred region, hardware-key MFA, PWA host as a separate account) versus Cloudflare Workers and R2; plus a company domain and a named account owner.
-  - Source: [relay design section 8](plans/2026-10-31-relay-design.md). Decide at the start of R2. Recommended: VPS first. If you wait: nothing until R2. Status: answered 2026-11-04 — a VPS with your own domain, later; the web app runs on localhost until then. The domain, VPS and account owner are set up at R2.
+  - Source: relay design section 8. Decide at the start of R2. Recommended: VPS first. If you wait: nothing until R2. Status: answered 2026-11-04 — a VPS with your own domain, later; the web app runs on localhost until then. The domain, VPS and account owner are set up at R2.
 - [ ] **UN-040** Knowledge-kit open questions: Q2 (agent search of meetings by default), Q5 (retire or fill entities), Q6 (keep ReviewConflicts a section), Q7, Q9 (kit boundaries), Q10, Q11 (notes in a cloud-sync folder), Q12 (N-1 window), Q13 (keyless kit), Q14 (single user). Q1, Q3, Q4, Q8 are answered.
   - Source: [knowledge-kit section 7](../kits/knowledge-kit.md). Recommended: the Leaning column. If you wait: K1 stays unstarted.
 - [ ] **UN-041** Q19 (notes without `platform` are invisible in Library) and Q16 (search latency at 50k notes).
@@ -131,9 +131,9 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
 - [ ] **UN-044** Pin the Chrome extension origin instead of accepting every `chrome-extension://*` (ROADMAP Q22).
   - Why you: needs the extension id from your Chrome install. How: open `chrome://extensions`, copy the id, tell the agent; it goes in `extension-ids.json` in the server's data dir (`~/Library/Application Support/llm-ide-desktop/core/` on macOS), then restart the server. Effort: 2 minutes. Status: mechanism built 2026-11-05. You have not installed the extension yet (2026-11-05), so there is no id and nothing to pin; without the file the server accepts any extension, as before. Do it when you load it unpacked (`extension/dist`, id shown on `chrome://extensions`) or publish it (store id; the manifest `key` route fits then, with no old local data to lose).
 - [ ] **UN-045** Flag-off `no-ack` capture retention (up to 50 captures) until the ack protocol is on by default.
-  - Source: [extension storage audit](plans/2026-10-31-extension-storage-audit.md). Recommended: accept for now, turn the ack default on after the real-meeting check (UN-016).
+  - Source: extension storage audit. Recommended: accept for now, turn the ack default on after the real-meeting check (UN-016).
 - [x] **UN-046** Status audit decisions: write the missing connector-catalog spec and schedule catalog phase 3 and a real Miro run; close the 51 private-wrapper decode-lab skips before more Mac routes switch. Status: retired 2026-11-06 — the Swift Mac app was removed from the repo.
-  - Source: [status audit](plans/2026-10-31-status-audit.md). Recommended: yes to both, in that order.
+  - Source: status audit. Recommended: yes to both, in that order.
 - [ ] **UN-047** Automation-kit A5 and capture-kit C2: may a repair outside a loop's scope be approved from the phone (recommended: desktop only), and retire `/extract-entities` after UN-040 Q5.
   - Source: [automation-kit section 7](../kits/automation-kit.md), [capture-kit section 7](../kits/capture-kit.md).
 - [ ] **UN-048** Docs-kit open items 10 and 11: comment drift fix and whether other kits may name docs-kit data types.
@@ -152,11 +152,11 @@ Each has a recommendation and what waiting costs. Reply "go with your recommenda
 You said "do the best, secure, usable for big projects" and agents decided. Each is ticked; reopen any by saying so.
 
 - [x] **UN-107** Desktop audit decisions (2026-11-05, you: "do as per security based"): (1) keep the desktop Doc Gen names `<slug>-YYYYMMDD.md`, which never overwrite an earlier document (the Mac's `<template>-doc.md` does); (2) keep refusing refactor batches until the desktop has a rollback, so a bad multi-file edit can always be undone. The Loop missing-default decision is implemented (write on load). DELEGATED: revisit if wrong.
-- [x] **UN-060** Relay design D1 to D5, D7 to D9: tiered clients (PWA read-only plus low-risk queue), fixed read-only ceiling for remote turns, no recovery code in v1, printed revoke code, fixed-schedule heartbeat with 72-hour IP retention, upload-only extension scope, per-user sharing, external review before public exposure. DELEGATED: revisit if wrong. Source: [relay design](plans/2026-10-31-relay-design.md) section 13.
+- [x] **UN-060** Relay design D1 to D5, D7 to D9: tiered clients (PWA read-only plus low-risk queue), fixed read-only ceiling for remote turns, no recovery code in v1, printed revoke code, fixed-schedule heartbeat with 72-hour IP retention, upload-only extension scope, per-user sharing, external review before public exposure. DELEGATED: revisit if wrong. Source: relay design section 13.
 - [x] **UN-061** No third-party analytics in the relay or PWA. DELEGATED: revisit if wrong.
 - [x] **UN-062** Sync-kit S1 to S6: keep the native iOS app permanently; freeze new phone surfaces while the relay is unbuilt; extension keeps local-core mode; relay carries a read-and-request subset first; delete PIN pairing at R9; each user enrolls their own devices. DELEGATED: revisit if wrong. Source: [sync-kit section 7](../kits/sync-kit.md).
 - [x] **UN-063** ui-kit U1 to U6 (provisional): `tokens.json` the only token source, per-surface generated CSS, component kit at `ui/kit/` at K3, pixel-tolerance parity, graph-kit keeps its own theme with a conformance check, per-platform icons. DELEGATED: revisit if wrong.
-- [x] **UN-064** Phase 7 provisional defaults D1 to D10 (one trusted Rust process, local-presence proof, no communicating apps, tree-only to cloud models, audit deletion by approval, optional browser tier deferred, stop-only from native iOS, first-party mount, global budgets, accept OS capture picker). DELEGATED: revisit if wrong. Source: [Phase 7 design section 12.1](plans/2026-10-31-phase7-desktop-control-design.md).
+- [x] **UN-064** Phase 7 provisional defaults D1 to D10 (one trusted Rust process, local-presence proof, no communicating apps, tree-only to cloud models, audit deletion by approval, optional browser tier deferred, stop-only from native iOS, first-party mount, global budgets, accept OS capture picker). DELEGATED: revisit if wrong. Source: Phase 7 design section 12.1.
 - [x] **UN-065** Issues provider tokens move into the core vault with a one-way Keychain migration (W2). DELEGATED: revisit if wrong.
 - [x] **UN-066** Mac Auto Tasks move to the SDK engine for Claude, with multi-engine (codex, gemini, others) kept first-class. DELEGATED (also answered by you 2026-10-31): revisit if wrong.
 - [x] **UN-067** Google connectors: bring your own client now, no hosted client until Google confirms the verification cost. DELEGATED: revisit if wrong.

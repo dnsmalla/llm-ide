@@ -245,6 +245,5 @@ If your question isn't answered above:
 ## Related Topics
 
 - **[First Meeting](../tutorials/01-first-meeting.md)** — How to capture your first meeting
-- **[Generate a Plan](../tutorials/02-generate-a-plan.md)** — Use your repository for AI planning
 - **[Architecture Overview](../explanation/architecture.md)** — How the system works internally
 - **[Error Codes](../reference/error-codes.md)** — Interpret specific errors

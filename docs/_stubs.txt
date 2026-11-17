@@ -3,7 +3,4 @@
 # A page in this list may contain TODO / TBD markers without failing lint.
 # Remove entries as pages are written.
 
-# (populated during Phase 2)
-tutorials/02-generate-a-plan.md
-tutorials/03-add-an-endpoint.md
-how-to/rotate-jwt-secret.md
+# (none: every page is complete)

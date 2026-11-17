@@ -1,6 +1,6 @@
 # Sync v1 wire and crypto
 
-Design: docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md. Sync v1 is relay v1 (schema/relay/v1/README.md)
+Design: [ADR 0020](../../../docs/decisions/0020-box-encrypted-sync.md). Sync v1 is relay v1 (schema/relay/v1/README.md)
 byte for byte, plus the purposes below. Any change bumps `v` and the vectors (`node scripts/sync-vectors.mjs --write`).
 
 | Purpose | From → to | Key |

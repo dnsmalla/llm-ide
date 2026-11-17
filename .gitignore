@@ -19,8 +19,6 @@ kb/*.pre-move
 # The whole root kb/ is runtime state (databases, logs, agent-sdk cache, team.yaml); extension/kb/ is code.
 /kb/
 
-# Leftover builds and bundles of the removed Swift Mac app (it lives in git history).
-/mac/
 kb/.migrating*
 
 # Test-created SQLite files (per-test temp DBs).
@@ -50,15 +48,6 @@ extension.zip
 
 # Bot-worker Chromium profile — contains persistent Google session.
 extension/bot-worker/bot-profile/
-
-# Mac build artefacts
-mac/.build/
-mac/.build-*/
-mac/LlmIdeMac.app/
-mac/LlmIdeMac_*.dmg
-
-# Mac local dev signing identity (machine-local; see Scripts/make-dev-cert.sh)
-mac/Scripts/.sign-identity
 
 # Editor / OS
 .DS_Store
@@ -111,14 +100,11 @@ __pycache__/
 # IDE git panel or the agent's git status.
 graphify-out/
 system/
-# ...but not the Mac app's System feature (os-kit), which is source.
-!mac/Sources/LlmIdeMac/Features/System/
 .code-notes/
 .understand-anything/
 
 # Personal scratch / design notes kept locally, not part of the repo.
 flag-semantics-flow-zero.md
-mac/MeetNotesMac.app/
 import-repo-settings.sh
 extension/tests/_skill-library-*/
 extension/tests/_claude-plugins-fixture/
@@ -148,8 +134,7 @@ extension/tests/mcp-plugins-state.json
 # Top-level copy of the external computer-agent (lives at
 # ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/). Anchored to the repo
 # root with a leading slash so it does NOT match nested directories of the
-# same name — notably mac/Sources/LlmIdeMac/Core/**/Services/ and
-# Features/*/Services/, which are real app source and must stay tracked.
+# same name — notably nested Services/ folders in app source, which must stay tracked.
 # (A bare `services/` silently ignored new *Service.swift files there.)
 /services/
 extension/tests/_connector-routes-repo-root-fixture/

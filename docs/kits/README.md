@@ -1,9 +1,13 @@
 # Kits
 
+> **Historical:** these pages are close-outs from the Mac-app era. The Swift Mac app was removed on
+> 2026-11-06, so the `path:line` citations, Mac feature folders and `mac/` paths below describe that
+> code, not the current tree. The pages are kept as the record of each kit's map.
+
 A **kit** is one capability of LLM-IDE that can be read, tested, removed and
 (later) rebuilt on its own: its server routes, its Mac feature folder and the
 Core code behind it, its extension surface, its contract group and its feature
-key. The kit-by-kit migration plan (`docs/superpowers/plans/2026-10-27-kit-by-kit-migration.md`)
+key. The kit-by-kit migration plan (no longer in the repo)
 moves one kit at a time through the same steps; the **K0 Map** step produces
 the kit README. A kit README records, with `path:line` evidence, the code on
 every side, every edge into and out of the kit, which pieces are *delegated* to

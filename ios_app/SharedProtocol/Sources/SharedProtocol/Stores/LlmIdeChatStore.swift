@@ -33,8 +33,7 @@ public class LlmIdeChatStore: ObservableObject {
     /// SET stays (a late frame for an older turn must still be routable), but
     /// cancellation needs a deterministic target.
     private var currentCommandId: String?
-    // TO BE REPLACED IN S4 (command-bus spec R-C2, docs/superpowers/plans/2026-10-31-command-bus-spec.md
-    // section 8): the idle timeout below (which sends Cancel) is phone-side retry/cancel policy that the core's replay and detach (`chat.attach` plus a transport
+    // TO BE REPLACED IN S4 (command-bus spec R-C2, docs/spec/command-bus.md section 8): the idle timeout below (which sends Cancel) is phone-side retry/cancel policy that the core's replay and detach (`chat.attach` plus a transport
     // heartbeat) will own. They are kept as they are for now; do not extend them. Tracked as the
     // "phone chat policy removed" row of the S4 exit checklist (docs/mobile/verification.md).
     private var streamTimeoutTask: Task<Void, Never>?

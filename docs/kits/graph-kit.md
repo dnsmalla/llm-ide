@@ -10,11 +10,11 @@ Counts. Line counts are `wc -l` over the listed files. Swift test counts are `gr
 
 graph-kit is the whole graph system in one repository, built as two Swift products with different lifetimes. **GraphCore** holds the model, the JSON contract and the layout engine; the app always links it (`gk/Package.swift:1-24`, products `:28-29`). **GraphKit** holds the producers (scanners, extractors, the memory generator and the merger); the app can drop it (`gk/Package.swift:13`, and the `UNPLUG:` markers in `mac/Package.swift:313,402`). Around the Swift code the repository also holds a TypeScript package and CLI that serves as the graph-engine plugin (`gk/typescript`, `gk/graph-engine.json`), a Rust crate for the OS graph core that runs as WASM in the System page (`gk/rust/os-graph`, `gk/web`), and the canonical schema (`gk/schema`).
 
-The plan's kit row (`docs/superpowers/plans/2026-10-27-kit-by-kit-migration.md`, kit table, row 3) names the kit as the graph-kit repo, `extension/graphkit/`, `kb/code-graph`, `graph_generation/`, and `Features/CodeGraph`. The key is `code_graph_3d` and the contract group is live-loop-misc. The plan's K1 for this kit is "layout in Rust/WASM, K3 = WebGL view" (plan, Order, item 5).
+The plan's kit row (kit-by-kit migration plan, kit table, row 3) names the kit as the graph-kit repo, `extension/graphkit/`, `kb/code-graph`, `graph_generation/`, and `Features/CodeGraph`. The key is `code_graph_3d` and the contract group is live-loop-misc. The plan's K1 for this kit is "layout in Rust/WASM, K3 = WebGL view" (plan, Order, item 5).
 
 This map found three things the plan's row does not state:
 
-1. The OS view (the System page) has its source in `gk/web` and is built into the app by `ui/os-view`. The plan places the System page under os-kit (§3 edge G8 and decision Q2).
+1. The OS view (the System page) has its source in `gk/web` and is built into the app by `ui/os-view (removed)`. The plan places the System page under os-kit (§3 edge G8 and decision Q2).
 2. The repository has at least four graph JSON shapes and two layout families (§5 and §6.5). The Rust crate does not contain the Swift layout engine; it contains a different community algorithm and a different layout (§10, P2).
 3. The layout engine is not a UI-state-only piece. It is a computation, so the plan's K1-skip rule does not apply and K1 is needed.
 
@@ -84,7 +84,7 @@ This map found three things the plan's row does not state:
 | Core: wire mirror | `Core/Project/ProjectGraphFile.swift` | 278 | Core-owned Codable mirror of `GraphDocument`. The file's header says Core must not import GraphCore (`:6-11`). v1.1 decode `graph(fromJSON:)` `:164`. |
 | System bridge | `Features/System/Services/SystemBridge.swift` | 676 | `projectGraph` native call (`:52-53`), reply `projectGraphReply` (`:372`), encode failure `500 graph_encode_failed` (`:390`). |
 | System web view | `Features/System/Views/SystemWebView.swift` | 380 | Provider (`:278-292`) gives the page the cached graph, or `ProjectGraphFile` when none is cached. |
-| System host | `Features/System/Views/SystemView.swift` | 34 | Hosts the bundled `os-view` page (`ui/os-view`). |
+| System host | `Features/System/Views/SystemView.swift` | 34 | Hosts the bundled `os-view` page (`ui/os-view (removed)`). |
 | Graph section | `Shell/GraphSectionView.swift` | 78 | Switches the Graph section between the System page and the code graph (`:72`). |
 | Loop: graph reader | `Features/Loop/Models/GraphIndex.swift` | 60 | Reads `system/graph/graph.json` (`:55`). Own Codable, so Loop does not import CodeGraph (`:2-5`). |
 | Loop: graph report and quadrant | `Features/Loop/Models/GraphReport.swift` (242), `CodeQuadrant.swift` (31) | 273 | |
@@ -127,7 +127,7 @@ This map found three things the plan's row does not state:
 | HTTP: `POST /kb/ingest-code-graph` | Route `routes/code-graph.mjs:21`; group `live-loop-misc` in `schema/http/live-loop-misc.schema.json` (row describes the code-graph upload, `:2`) | Body `repoPath`, `graph` (GraphDocument-like), `replace`, `commitSha`, `generatedAt`. | 5 fixtures: `schema/http/fixtures/live-loop-misc/post-kb-ingest-code-graph-{200,400,401,403,404}.json`. `schema/http/INVENTORY.md:44,124`. Client `LlmIdeAPIClient+CodeGraph.swift`. TypeScript type `extension/src/lib/api-types.ts:3483-3488`. |
 | HTTP: `POST /kb/ingest-scip` | `routes/router.mjs:503-525`; `schema/http/INVENTORY.md:55,123` | SCIP index path | No Mac or extension caller ("tests only"). 3 fixtures in `schema/http/fixtures/kb-sources/`. |
 | HTTP: `POST /kb/code-sync` | `routes/planning.mjs:84`; `INVENTORY.md:59,160` | Grounds plan tasks in files and symbols | "tests only" caller. 5 fixtures in `schema/http/fixtures/planning/`. |
-| Native bridge: `projectGraph` | `Features/System/Services/SystemBridge.swift:52-53,366-391`; `ui/os-view/src/bridge.ts` (header contract) | The cached project graph as canonical `GraphDocument` JSON, or `200 null` | `ProjectGraphDocument` (`ProjectGraphFile.swift:12-64`) mirrors the shape without importing GraphCore. |
+| Native bridge: `projectGraph` | `Features/System/Services/SystemBridge.swift:52-53,366-391`; `ui/os-view (removed)` (header contract) | The cached project graph as canonical `GraphDocument` JSON, or `200 null` | `ProjectGraphDocument` (`ProjectGraphFile.swift:12-64`) mirrors the shape without importing GraphCore. |
 | Layout output | `GraphLayout`, `GraphLayoutEngine.swift:57-91` | In-process value. Not a wire format. Not persisted (§5). | |
 
 Relations. `GraphDocument` and `CGData` are the same content with a version envelope (`GraphDocument.swift:18-41`). `graph.json` 1.1 is a different shape (per-file, no edges list) and is converted to a `ProjectGraphDocument` only for the System page (`ProjectGraphFile.swift:164`). `VizGraph` is a summary model built by Rust, not a graph. Three JSON shapes therefore carry "the code graph" to three consumers, and none of them converts to the layout's input (`CGData`) except the canonical one.
@@ -184,7 +184,7 @@ Legend. **C** is a contract (a Core seam, an HTTP route or a file format). **D**
 | G5 | Loop to the rescanner | C (`GraphRescanning`) | ok | `Features/Loop/Services/LoopRunService.swift:61`, `LoopRunnerProvider.swift:17` |
 | G6 | AutoTask to repo locator and to `graph.json` | C (Core) and file | ok | `AutoCodeUpdateService+PipelineTasks.swift:726-743` |
 | G7 | System page to the project graph | C (`ProjectGraphRegistry`, `ProjectGraphFile`) | ok | `Features/System/Views/SystemWebView.swift:278-292` |
-| G8 | System page source (`ui/os-view`) to graph-kit `web/src` | D (source alias at build time) | **✗ under K0**: the os-kit page imports graph-kit's source across a repository boundary | `ui/os-view/vite.config.ts:15-16,40`; `ui/os-view/src/main.tsx:2` |
+| G8 | System page source (`ui/os-view (removed)`) to graph-kit `web/src` | D (source alias at build time) | **✗ under K0**: the os-kit page imports graph-kit's source across a repository boundary | `ui/os-view (removed):15-16,40`; `ui/os-view (removed):2` |
 | G9 | os-kit server (`kb/os-state.mjs`) to the code-graph table | D (SQL read of a graph-kit table, no route) | **✗ under K0** | `extension/kb/os-state.mjs:33,165` |
 | G10 | Settings to CodeGraph | C (`SettingsSectionRegistry`, registered by Shell) | ok | `Shell/FeatureCatalog.swift:152-156` |
 | G11 | Chat, Explorer, Issues, Live, Library to CodeGraph | none | ok. Grep finds no references outside the folder except the comments in `Core/Memory/GraphMemoryState.swift:7,30`. | |
@@ -192,11 +192,11 @@ Legend. **C** is a contract (a Core seam, an HTTP route or a file format). **D**
 | G13 | Server `kb` to `graphkit` | none | ok. The ESLint table forbids it; no `kb` module imports `graphkit` (the one match, `kb/session-memory.mjs:3,75`, is a comment). | `eslint.config.mjs:144` |
 | G14 | Extension (Chrome) to the code graph | C (HTTP) | ok. Only the API types reference the route (`extension/src/lib/api-types.ts:3483-3488`). | |
 | G15 | Plugin engine to the app | C (manifest and JSON file) | ok | `gk/graph-engine.json`, `PluginGraphEngine.swift:175-240` |
-| G16 | graph-kit `web` OS view to the `OsHost` implementation | C (interface implemented by the host) | ok | `ui/os-view/src/hosts.ts`, `gk/web/src/host.ts` |
+| G16 | graph-kit `web` OS view to the `OsHost` implementation | C (interface implemented by the host) | ok | `ui/os-view (removed)`, `gk/web/src/host.ts` |
 
-**Cycles.** None found. The Swift feature graph has no edge into CodeGraph except from Shell (G3). The server has no kb to graphkit edge (G13). The web side has a build-time cycle of source only: `gk/web` is consumed by `ui/os-view`, and the host interface is implemented in `ui/os-view` (G8, G16). That is not a runtime cycle, but it is a repository-level coupling that the K0 rule should fix (decision Q2).
+**Cycles.** None found. The Swift feature graph has no edge into CodeGraph except from Shell (G3). The server has no kb to graphkit edge (G13). The web side has a build-time cycle of source only: `gk/web` is consumed by `ui/os-view (removed)`, and the host interface is implemented in `ui/os-view (removed)` (G8, G16). That is not a runtime cycle, but it is a repository-level coupling that the K0 rule should fix (decision Q2).
 
-**Repository coupling for pins.** graph-kit is a separate repository, and it stays one (user decision, 2026-10-28), so that other consumers can reuse it. A change lands in graph-kit first. Then `make graphkit-bump` pushes it and moves the three pins: the submodule gitlink, the `revision:` in `mac/Package.swift`, and the entry in `mac/Package.resolved`. `mac-ci.yml:280-287` enforces that the gitlink and the `revision:` match, and `make graphkit-pin-check` enforces all three and, with `ONLINE=1`, that the pinned commit exists on the remote. The System page additionally needs `ui/os-view` rebuilt and its bundle committed (`make os-view`, checked by `os-view-check`; the bump does both). The steps are in [`docs/how-to/graph-kit-workflow.md`](../how-to/graph-kit-workflow.md).
+**Repository coupling for pins.** graph-kit is a separate repository, and it stays one (user decision, 2026-10-28), so that other consumers can reuse it. A change lands in graph-kit first. Then `make graphkit-bump` pushes it and moves the three pins: the submodule gitlink, the `revision:` in `mac/Package.swift`, and the entry in `mac/Package.resolved`. `mac-ci.yml:280-287` enforces that the gitlink and the `revision:` match, and `make graphkit-pin-check` enforces all three and, with `ONLINE=1`, that the pinned commit exists on the remote. The System page additionally needs `ui/os-view (removed)` rebuilt and its bundle committed (`make os-view`, checked by `os-view-check`; the bump does both). The steps are in [`docs/how-to/graph-kit-workflow.md`](../how-to/graph-kit-workflow.md).
 
 ## 4. Delegated vs owned
 
@@ -529,7 +529,7 @@ None of these is approved. Each has a recommendation.
 | # | Question | Options | Recommendation |
 |---|---|---|---|
 | Q1 | How does the Mac get the Rust kernel, if at all? | A (WASM in the sidecar), B (static library), C (WASM in JavaScriptCore), D (keep Swift, goldens only) | A, decided by the T0 spike; D if the spike misses the budget. Do not choose B for the Mac alone (§7.3). |
-| Q2 | Where does the OS view live? | Keep `gk/web` as the source and `ui/os-view` as the host (today), move the page into os-kit, or merge | Decide in os-kit's K0. Until then, record G8 as a known cross-repo coupling and keep `os-view-check` as the gate. |
+| Q2 | Where does the OS view live? | Keep `gk/web` as the source and `ui/os-view (removed)` as the host (today), move the page into os-kit, or merge | Decide in os-kit's K0. Until then, record G8 as a known cross-repo coupling and keep `os-view-check` as the gate. |
 | Q3 | One community algorithm or two? | Keep Louvain (Mac) and label propagation (System page); or port Louvain to Rust and switch the System page | Switch the System page to Louvain after the port, with a golden that shows the change. Two clusterings for one project is a defect, not a choice (D7). |
 | Q4 | `CGSimulation3D` (Swift 3D) and the WebGL view | Port it; retire it for the System page's orbit view; retire it in favour of a WebGL force view in K3 | Retire it in K3. Keep it until the WebGL view matches it. Do not port it in K1. |
 | Q5 | Parity bar: bit-identical picture or metric-level? | Bit-identical (only B can deliver it on the Mac); metric-level (A, C, D) | Metric-level, with a one-time, announced change of picture at the release boundary. No positions are persisted, so no user data changes. |

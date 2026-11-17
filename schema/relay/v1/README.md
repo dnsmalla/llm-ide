@@ -1,6 +1,6 @@
 # Relay v1 wire and crypto (live envelopes, slice R1/R2)
 
-Design: docs/superpowers/plans/2026-10-31-relay-design.md. Plan: docs/superpowers/plans/2026-11-05-relay.md.
+Design: [ADR 0018](../../../docs/decisions/0018-tauri-desktop-node-core-relay.md) (the relay design and plan are no longer in the repo).
 Frozen for the external review (G-EXT). Any change bumps `v` and the vectors.
 
 ## Canonical encoding `enc(fields)`

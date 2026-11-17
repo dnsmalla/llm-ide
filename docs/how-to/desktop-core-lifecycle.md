@@ -18,14 +18,16 @@ the OS credential store ([desktop-secret-store.md](desktop-secret-store.md)).
 
 This is **not** the Mac app's `~/Library/Application Support/llm-ide/system`, on purpose: two apps
 must not open the same SQLite file or share vault keys (the vault is encrypted with the key in each
-app's own credential entry). Until an importer exists the desktop app starts with an empty KB.
+app's own credential entry). A new desktop install therefore starts with an empty KB until the
+import below is run.
 
-### Import path from the Mac app (not built)
+### Import path from the Mac app
 
-A safe import must copy, never move: quit the Mac app, snapshot `data.db` and `agent.db` with
-SQLite `VACUUM INTO` into `core/`, and copy nothing from the vault tables (they are encrypted with
-the Mac app's key; credentials are re-entered). The server already has a verified snapshot routine
-(`extension/kb/data-dir-migration.mjs`) to reuse. Until then do not copy files by hand.
+The import exists and is explicit. It runs from `extension/` with `npm run import:legacy-data`; see
+[Import the old Mac app's data](import-old-mac-data.md) for the steps and the rollback. It copies,
+never moves: the old folder is not changed, `data.db` and `agent.db` are snapshotted with SQLite
+`VACUUM INTO` into `core/`, and `.dev-secrets.json` (the vault key) is copied with them. Do not copy
+files by hand.
 
 ## Lifecycle in one paragraph
 

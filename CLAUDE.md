@@ -163,7 +163,7 @@ L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
 | Change server port | `extension/src/lib/config.ts` default + `extension/server.mjs` `PORT` + CORS origin list |
 | Persist UI state | `chrome.storage.local` via the owning hook; do NOT add new store |
 | Add new tab | `TABS` array in `extension/src/sidepanel/App.tsx` + new panel block |
-| Persist meeting data | Extend `SavedTranscript` in `extension/src/lib/storage.ts`; write in `stopRecording()` |
+| Persist meeting data | Extend `SavedTranscript` in `extension/src/lib/capture-store.ts`; write in `stopRecording()` |
 | Install agent skills into a user project | Auto on New Project / Rebuild via `POST /kb/project/install-skills` (`extension/kb/install-project-skills.mjs`); kit lives in `.skills` |
 | Add a desktop screen or section | `ui/screens/<section>/` + `ui/screens/shell/sections.ts`; host commands in `desktop/src-tauri/src/` (registered in `lib.rs`, listed in `build.rs` COMMANDS, granted in `capabilities/default.json`) |
 | Add a Host API v1 command | `schema/host-api/v1` + `node scripts/generate-host-api.mjs` + `extension/routes/host-api/` + the web/iOS clients |

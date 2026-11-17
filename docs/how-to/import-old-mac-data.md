@@ -31,44 +31,44 @@ read-only inspection created (and only if they did not exist before).
 
 ## The explicit action (recommended)
 
+The desktop Settings card for this import was removed. The import now runs from the extension
+folder with the `import:legacy-data` npm script:
+
 1. Quit anything that may still have the old `data.db` open (the Mac app was removed; an old server
    process is the usual culprit).
-2. Start the desktop app.
-3. Open **Settings → Server & Backend → Old Mac app data**.
-4. The card shows a read-only status: the old folder, its size, rows and schema version, and the
-   desktop folder it would replace.
-5. Press **Import old Mac app data…**.
+2. Check the status. This is read-only and safe while the desktop app runs:
+
+   ```sh
+   cd extension
+   npm run import:legacy-data -- --status
+   ```
+
+3. Import. This refuses a non-empty desktop folder:
+
+   ```sh
+   npm run import:legacy-data -- --import
+   ```
+
+Stop the desktop app before the import. If an external server adopted by the app holds the target
+database, the import refuses with `target-in-use` and nothing changes.
 
 If the desktop data folder is **empty or initial** (no `data.db`, a zero-byte one, or one with no
 tables), the import proceeds without replacing anything.
 
-If the desktop data folder **already holds data**, the card says **Would replace the desktop data**
-and the button becomes **Replace with old Mac app data…**. Pressing it opens a native,
-Cancel-first confirmation that names both folders and the size. Only that click starts the
-replacement. The helper writes and verifies a backup of the current `data.db`, `agent.db` and
-`.dev-secrets.json` under `core/backups/pre-import-<stamp>.*` **before** the switch.
+If the desktop data folder **already holds data**, add `--force`. The helper then writes and
+verifies a backup of the current `data.db`, `agent.db` and `.dev-secrets.json` under
+`core/backups/pre-import-<stamp>.*` **before** the switch.
 
-The desktop-owned core is stopped for the switch and restarted afterwards. An adopted external
-server is never stopped; if it holds the target DB the import refuses with `target-in-use` and
-nothing changes.
-
-### Keychain transfer (why the app must do it)
+### Keychain secrets
 
 The host spawns the core with `LLMIDE_JWT_SECRET` and `LLMIDE_VAULT_KEY` from the OS keychain
-(`com.llmide.desktop`). Environment values win over `.dev-secrets.json`, so a file-only copy would
-import a database whose vault cannot be decrypted. The host therefore:
-
-1. reads the old `.dev-secrets.json` and backs up the current keychain values (owner-only, beside
-   the DB backup);
-2. stores the old JWT secret and vault key in the keychain;
-3. runs the import;
-4. restores the previous keychain values if the import does not complete.
-
-Secrets are never logged, returned to the webview, or put in an error message.
+(`com.llmide.desktop`). Environment values win over `.dev-secrets.json`, so copying the file alone
+imports a database whose vault cannot be decrypted. The import does not touch the keychain; set the
+two items yourself before starting the app (see "CLI and the keychain" below).
 
 ## The command line
 
-The same helper is a CLI (the desktop host runs this exact file from the staged core):
+The same helper is a CLI:
 
 ```sh
 cd extension
@@ -101,10 +101,9 @@ node kb/legacy-import.mjs --import \
 
 **CLI and the keychain.** The CLI copies `.dev-secrets.json` but cannot update the macOS keychain.
 If the old data holds vault-encrypted secrets, the desktop app would still pass its old keychain key
-to the core and the imported vault would not open. Use the Settings action on macOS for vault-bearing
-data, or set the two keychain items yourself (`security add-generic-password -U -s com.llmide.desktop
--a jwt-secret -w`, then `-a vault-key`, with the values from the old `.dev-secrets.json`) before
-starting the app. The CLI is the fallback for headless machines and for verifying a copy.
+to the core and the imported vault would not open. Before starting the app, set the two keychain
+items yourself (`security add-generic-password -U -s com.llmide.desktop -a jwt-secret -w`, then
+`-a vault-key`, with the values from the old `.dev-secrets.json`).
 
 ## What "verified" means
 
@@ -170,6 +169,3 @@ Anything written to the imported database after the import is not in the backup.
   post-commit failure rolls back; a source-snapshot failure never touches the destination; a target
   held by a writer refuses; a marker without a valid DB refuses; vault rows without a key refuse; no
   free space refuses; the CLI prints one JSON report. Temp dirs only.
-- `desktop/src-tauri/src/legacy_import.rs`: path resolution per OS, report parsing, and the fixed
-  dialog text.
-- `ui/screens/settings/tests/legacy-import-model.test.ts`: decoding and the status card's wording.

@@ -1,6 +1,6 @@
 # sync-kit
 
-Status: **K0 Map**, written 2026-10-31. No code was changed. Citations are paths and `path:line` where a line was read; read on 2026-10-31 at `main` (`de8d51e8`). Counts say how they were taken (`wc -l`, `find`, `ls`, grep). Section 9 lists where the migration plan's premises do not match the code; section 10 lists what was not verified. The relay itself is designed in [the relay design](../superpowers/plans/2026-10-31-relay-design.md); this page maps what exists today.
+Status: **K0 Map**, written 2026-10-31. No code was changed. Citations are paths and `path:line` where a line was read; read on 2026-10-31 at `main` (`de8d51e8`). Counts say how they were taken (`wc -l`, `find`, `ls`, grep). Section 9 lists where the migration plan's premises do not match the code; section 10 lists what was not verified. The relay itself is designed in [ADR 0018](../decisions/0018-tauri-desktop-node-core-relay.md) (its design plan is no longer in the repo); this page maps what exists today.
 
 ## 1. Purpose
 

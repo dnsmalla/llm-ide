@@ -1,9 +1,9 @@
 # Desktop chat store: one copy, live then archive
 
-The desktop app keeps each chat as one file in the Mac app's own format (`sessions/<UUID>.json`), so
+The desktop app keeps each chat as one file in the retired Mac app's own format (`sessions/<UUID>.json`), so
 there is one stored copy of a chat whichever app wrote it. Code: `desktop/src-tauri/src/chat_store.rs`
 (files), `chat_archive.rs` (quit hook and recovery sweep), `chat_cmds.rs` (Tauri commands).
-Decision record: [Phase 3 plan, section 4](../superpowers/plans/2026-10-31-tauri-phase3-plan.md).
+Decision record: the Phase 3 plan, section 4 (the plan file is no longer in the repo; see [ADR 0018](../decisions/0018-tauri-desktop-node-core-relay.md)).
 
 ## Where the files are
 
@@ -40,8 +40,8 @@ over 256 MiB is refused, over 64 MiB is read-only. The Mac itself caps a chat at
 - Chat ids must be UUIDs, user ids one `[A-Za-z0-9._-]` segment: no traversal.
 - A file stamped with another `ownerUserId` is invisible and never overwritten; unowned older files
   are visible, as on the Mac. Saves stamp the owner.
-- Overwrites are compare-and-swap on a revision (mtime ns, size, inode) under the lock; the Mac app does
-  not take our lock file, so against the Mac the revision check is the protection (a concurrent Mac write
+- Overwrites are compare-and-swap on a revision (mtime ns, size, inode) under the lock; the retired Mac app
+  did not take our lock file, so against the Mac the revision check is the protection (a concurrent Mac write
   is a `conflict`, never lost). The lock file records pid and process start time; a dead owner or a
   recycled pid is recovered. Writes are temp file, fsync, rename, directory fsync.
 - Delete writes a tombstone to `pending-deletes.json` first, then removes the file, then asks the core
@@ -71,7 +71,7 @@ to be correct, the journal only makes an interrupted run visible (`chat_archive_
 
 So Windows and Linux are weaker: there is no hook for an OS shutdown, and the sweep carries it. The
 extension's server-held chats (`/kb/chat/sessions`, archive begin/commit) are NOT archived by the desktop
-app yet; the Mac app does that, and without it those rows stay on the server.
+app yet; the retired Mac app did that, and without it those rows stay on the server.
 Orphaned working state (file gone, no tombstone) is reported as `fileMissing` and not purged here.
 
 ## Retry and interrupted replies
@@ -89,7 +89,7 @@ The half reply is not kept beside the retry's answer:
   one-row repair, not a truncation: the "fewer than half" confirmation does not apply (and cannot trigger),
   a repeated call is a no-op (`dropped: false`), and an older interrupted partial the user kept is history
   and stays. Nothing else in the file changes; header fields this build does not model are preserved.
-- **Why no marker/tombstone** — a marker inside the Mac-format file would be a shape the Mac app does not
+- **Why no marker/tombstone** — a marker inside the Mac-format file would be a shape the retired Mac app did not
   read, and this row is the failed turn's partial (replaced by the retry's answer), not history. The same
   reasoning applies to the core's server-held chats: `DELETE /kb/chat/sessions/:id/messages/:seq` (API 127,
   `kb/chat-sessions.mjs` `deleteChatMessage`) hard-deletes the newest interrupted assistant row, scoped by

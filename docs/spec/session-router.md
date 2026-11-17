@@ -3,7 +3,7 @@ title: Session router — spec
 status: draft
 ---
 
-This is the contract for the per-chat route (agent-kit K1 Phase 6b): one chat can be pinned to a provider and model, carry a session token limit, and switch provider without carrying its old transcript. Server API version 91. The design record, with the reasoning and the user's answers (Q-R1 to Q-R5), is section 14 of `docs/superpowers/plans/2026-10-30-agent-kit-k1.md`.
+This is the contract for the per-chat route (agent-kit K1 Phase 6b): one chat can be pinned to a provider and model, carry a session token limit, and switch provider without carrying its old transcript. Server API version 91. The design record, with the reasoning and the user's answers (Q-R1 to Q-R5), is section 14 of the agent-kit K1 plan (no longer in the repo).
 
 Everything here is **off by default**. With the switches below unset, a turn behaves exactly as before: no route row is read or written, the routes answer `enabled: false`, and no new column is on the turn path.
 

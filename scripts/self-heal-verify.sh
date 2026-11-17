@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Self-Heal verify (docs/superpowers/plans/2026-11-07-self-heal-b-fix-loop.md), ported from the Mac's
-# mac/Scripts/self-heal-verify.sh. The desktop host runs the SOURCE CHECKOUT's copy (never the worktree's) inside a
+# Self-Heal verify. The desktop host runs the SOURCE CHECKOUT's copy (never the worktree's) inside a
 # Self-Heal worktree: borrow the checkout's dependencies, then run the regression gate. The host reverts the fix
 # agent's edits to scripts/**, **/*.sh, Makefile and package.json files before this runs.
 set -euo pipefail

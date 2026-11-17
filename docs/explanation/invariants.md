@@ -80,7 +80,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ---
 
-## Transcript persistence (`extension/src/lib/storage.ts` + useTranscript)
+## Transcript persistence (`extension/src/lib/capture-store.ts` + useTranscript)
 
 ### ✅ MUST preserve
 
@@ -89,7 +89,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **`MAX_TRANSCRIPTS = 50`** — oldest pruned first to stay under chrome.storage.local's 5 MB quota.
 - **`loadTranscript()` refuses while recording** — returns `false`; `HistoryView` surfaces that as a flash message.
 - **Storage errors are non-fatal** — `.catch(() => {})` on persist; the live UI is the user's source of truth during a session.
-- **Type-only import in storage.ts** — `import type { TranscriptSegment }` avoids a runtime cycle with `useTranscript.ts`.
+- **Type-only import in capture-store.ts** — `import type { TranscriptSegment }` avoids a runtime cycle with `useTranscript.ts`.
 
 ### ❌ DO NOT do these
 
@@ -448,31 +448,32 @@ restore are explicit, bounded operations. Guide:
 - **Do NOT restore without verifying both backups first, without a pre-restore snapshot, or while the server/core holds the file open.**
 - **DO NOT** open a second Node process that writes a live DB; the offline CLI probes the write lock and refuses.
 
-## Legacy Mac app data import (`extension/kb/legacy-import.mjs`, `desktop/src-tauri/src/legacy_import.rs`)
+## Legacy Mac app data import (`extension/kb/legacy-import.mjs`)
 
 The retired Mac app's `~/Library/Application Support/llm-ide/system` is imported into the desktop's
 `~/Library/Application Support/llm-ide-desktop/core` by an explicit, one-time, verified COPY. It is
-not the repo-kb MOVE above and it never writes to the old folder. Guide:
+not the repo-kb MOVE above and it never writes to the old folder. It runs only as the CLI
+(`npm run import:legacy-data`); the desktop Settings card and host commands were removed. Guide:
 [import-old-mac-data.md](../how-to/import-old-mac-data.md).
 
 ### ✅ MUST preserve (legacy Mac import)
 
 - **Detection only; no silent import.** The old folder counts only with a real `data.db` that passes `quick_check`, has tables and an applied `schema_migrations` version. The desktop target counts as empty/initial only when it has no `data.db`, a zero-byte one, or one with no tables.
-- **A non-empty desktop DB is replaced only after an explicit confirmation and a verified backup.** The desktop host shows a native, Cancel-first dialog naming both folders; the helper writes `backups/pre-import-<stamp>.db`, `.agent.db` and `.dev-secrets.json` and verifies the backup BEFORE moving the live files. The CLI needs `--force`.
+- **A non-empty desktop DB is replaced only with `--force` and a verified backup.** The helper writes `backups/pre-import-<stamp>.db`, `.agent.db` and `.dev-secrets.json` and verifies the backup BEFORE moving the live files.
 - **The old folder is never changed.** No rename, delete, checkpoint or write. Source snapshots run under a `BEGIN IMMEDIATE` write lock with a read-only `VACUUM INTO` connection; the writer is closed while the reader is still open so SQLite does not checkpoint on close, and only the empty `-wal`/`-shm` sidecars this run created are removed.
 - **Verify before switching, and again after.** `quick_check` on the locked source, `integrity_check` on every copy, per-table counts + `sqlite_sequence` against the source, `schema_migrations` (and `agent_schema_migrations`) versions, then the same checks plus the secrets bytes on the committed files. `data.db` is renamed last.
 - **Rollback restores the previous files; it never deletes the last copy.** Old target files move to `core/.legacy-import-replaced/` (not deleted), are restored on any failure, and only removed after the post-commit verification. A failed import leaves the live DB byte-identical (plus the verified backups).
-- **The vault key moves with the data.** The desktop core receives `LLMIDE_JWT_SECRET`/`LLMIDE_VAULT_KEY` from the OS keychain, which wins over `.dev-secrets.json`; the host backs up the current keychain values, stores the old app's values, and restores them if the import does not complete. Secrets are never logged, returned to the webview or put in an error.
+- **The vault key must follow the data.** The desktop core receives `LLMIDE_JWT_SECRET`/`LLMIDE_VAULT_KEY` from the OS keychain, which wins over `.dev-secrets.json`. The CLI does not touch the keychain, so the guide has the user set both items from the old `.dev-secrets.json`. Secrets are never logged or put in an error.
 - **Once, idempotently.** `core/legacy-import.json` is written only after the committed files verify. A completed marker plus a healthy `data.db` makes every later run a no-op. A marker without a healthy DB, or a leftover `legacy-import.journal.json`, refuses instead of importing again.
-- **The core is stopped for the switch and restarted after it** (an adopted external server is never stopped; if it holds the target DB the import refuses `target-in-use`).
+- **Never import under a live core.** If a writer holds the target DB the import refuses `target-in-use`.
 
 ### ❌ DO NOT do these (legacy Mac import)
 
-- **Do NOT import at boot or on a timer.** No detection may change data; the user's click (or explicit CLI flags) is the only entry point.
-- **Do NOT overwrite a non-empty desktop DB without `--force`/the native dialog and a verified backup first.**
+- **Do NOT import at boot or on a timer.** No detection may change data; the explicit CLI run is the only entry point.
+- **Do NOT overwrite a non-empty desktop DB without `--force` and a verified backup first.**
 - **Do NOT checkpoint, rename, move or delete anything in the old folder** — including a WAL that is only cleaned up by a read.
 - **Do NOT trust the marker without a healthy target DB**, or hand-edit it to force a re-import.
-- **Do NOT skip the keychain transfer** when `.dev-secrets.json` exists, and do not copy the file only: the core would use the keychain key and the imported vault would not open.
+- **Do NOT document or ship a file-only copy as complete** when `.dev-secrets.json` exists: the core would use the keychain key and the imported vault would not open.
 - **Do NOT log, return or error with a JWT secret, vault key or decrypted value.**
 
 ### ✅ MUST understand
@@ -728,7 +729,7 @@ Test names `HostApiV1*Tests` below were the retired Swift app's; the Node and Sh
 | Change the server port | `extension/src/lib/config.ts` default + `extension/server.mjs` `PORT` + CORS origin list (still `127.0.0.1`) |
 | Persist a new piece of UI state | `chrome.storage.local` via the hook that owns it; do NOT add a new store |
 | Add a new tab | `TABS` array in `extension/src/sidepanel/App.tsx` + a new panel block + ensure `.tabs` still scrolls at narrow width |
-| Persist new meeting data alongside the transcript | Extend `SavedTranscript` in `extension/src/lib/storage.ts`; write in `stopRecording()`; read in `HistoryView` |
+| Persist new meeting data alongside the transcript | Extend `SavedTranscript` in `extension/src/lib/capture-store.ts`; write in `stopRecording()`; read in `HistoryView` |
 | Change how the graph is laid out | `graph-kit/Sources/GraphCore/Layout/` only — then re-run `graph-layout-lab --compare`. Never touch the renderer to compensate for a layout problem |
 
 ## Derived note index (`extension/kb/note-index.mjs`, migration 0050)

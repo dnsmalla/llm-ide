@@ -4,7 +4,7 @@ Status: **K0 Map**, written 2026-10-31. No code was changed. Citations are `path
 
 ## 1. Purpose
 
-os-kit is the **System page**: one read-only screen that shows what the system is doing and has done, with no model call. The Mac app shows it as the default page of the Graph section; the data comes from one server aggregate and one change stream. Its plan row (`docs/superpowers/plans/2026-10-27-kit-by-kit-migration.md`, kit 1) is `GET /kb/os/state` plus a live stream, a Mac web panel and "the Agentic OS view". Its own plan is `docs/superpowers/plans/2026-10-27-os-kit.md` (steps OS-1 to OS-4, then revisions 2 and 3).
+os-kit is the **System page**: one read-only screen that shows what the system is doing and has done, with no model call. The Mac app shows it as the default page of the Graph section; the data comes from one server aggregate and one change stream. Its plan row (kit-by-kit migration plan, kit 1) is `GET /kb/os/state` plus a live stream, a Mac web panel and "the Agentic OS view". Its own plan (steps OS-1 to OS-4, then revisions 2 and 3) is no longer in the repo.
 
 The key finding of this map: **os-kit is split across three owners today** (the server aggregate in LLM-IDE, the React page in the graph-kit repository, the host and bridge in LLM-IDE), and the plan's revision 3 chose that split on purpose (the page lives in graph-kit; LLM-IDE keeps only the host).
 
@@ -29,10 +29,10 @@ The key finding of this map: **os-kit is split across three owners today** (the 
 |---|---|---|---|
 | The page (source) | `graph-kit/web/src/` | 9 017 lines of TS, TSX, CSS (graph-kit map, `docs/kits/graph-kit.md` 2a) | `controller.ts` (1 056), `systemGraph.ts` (288), `host.ts` (113, the `OsHost` interface), `components/` (`Brain`, `CodeStructure`, `HubOverview`, `NodeSearch`, `Recent`, `Selection`), `orbit/` (three.js), `wasm/` (the Rust core as embedded bytes). Own `theme.css`, `os-tokens.css`, `theme.ts`. |
 | OS graph core | `graph-kit/rust/os-graph/` | 6 037 lines Rust | Community detection, orbit layout, viz graph; WASM. See the graph-kit map. |
-| Host package | `ui/os-view/` | `src/` 984 lines over 11 files (`api.ts` 123, `bridge.ts` 187, `hosts.ts` 285, `stream.ts` 118, `sse.ts` 58, `boot.ts` 73, `main.tsx` 32, `components/DevConnect.tsx` 88) | Supplies graph-kit's `OsHost` over the native bridge (Mac) and over HTTP (dev). Aliases `@dnsmalla/graph-kit-web` to the graph-kit source (`ui/os-view/vite.config.ts`). |
-| Host tests | `ui/os-view/tests/os-view.test.mjs` | 919 lines, 64 `test(`/`it(` | |
+| Host package | `ui/os-view (removed)` | `src/` 984 lines over 11 files (`api.ts` 123, `bridge.ts` 187, `hosts.ts` 285, `stream.ts` 118, `sse.ts` 58, `boot.ts` 73, `main.tsx` 32, `components/DevConnect.tsx` 88) | Supplies graph-kit's `OsHost` over the native bridge (Mac) and over HTTP (dev). Aliases `@dnsmalla/graph-kit-web` to the graph-kit source (`ui/os-view (removed)`). |
+| Host tests | `ui/os-view (removed)` | 919 lines, 64 `test(`/`it(` | |
 | Built bundle | `mac/Sources/LlmIdeMac/Resources/os-view/` | | Committed; `make os-view` writes it, `make os-view-check` fails when stale (`Makefile:245-262`). Runs from `file://` in a WKWebView, so one classic IIFE script (`vite.config.ts`). |
-| Tokens | `ui/os-view/src/tokens.generated.css` | | From `schema/design/tokens.json`; the page also carries graph-kit's own theme (see the ui-kit map). |
+| Tokens | `ui/os-view (removed)` | | From `schema/design/tokens.json`; the page also carries graph-kit's own theme (see the ui-kit map). |
 
 ### 2c. Mac app (`mac/Sources/LlmIdeMac/`)
 
@@ -56,7 +56,7 @@ The Chrome extension has no System tab (plan, "The Chrome extension gets nothing
 |---|---|---|---|---|
 | O1 | os-kit server to every kit's tables | direct SQL and in-process registries (`listInFlightChatTurns`, `listRuns`, `listActiveSessions`, `memoryLedgerRepos`) | ok (server layering: routes may import any Node layer) | `extension/routes/os.mjs:12-19` |
 | O2 | os-kit to graph-kit (code graph freshness) | SQL read of `code_graph_meta` | **✗ under K0**: reads a graph-kit table directly, no route | `extension/kb/os-state.mjs:165` (graph-kit map G9) |
-| O3 | os-kit page source to graph-kit repo | build-time source alias across a repository boundary | **✗ under K0** (graph-kit map G8, decision Q2) | `ui/os-view/vite.config.ts` |
+| O3 | os-kit page source to graph-kit repo | build-time source alias across a repository boundary | **✗ under K0** (graph-kit map G8, decision Q2) | `ui/os-view (removed)` |
 | O4 | System page to CodeGraph (Mac) | `ProjectGraphRegistry` seam | C | `Core/Contracts/ProjectGraphProviding.swift` |
 | O5 | System page to Loop and Auto Tasks | none: `macOnly` placeholders and the native `routines` call | gap | `extension/routes/os.mjs` (`macOnly`) |
 | O6 | System page to Chat and agent runs | `cancel` requests carried in the state, executed through the bridge | C | `SystemBridge.swift` |
@@ -89,7 +89,7 @@ The plan sizes os-kit at 3 to 4 tasks (K0 to K2) and 2 to 3 for K3, K4. The serv
 2. **Close O2.** Read code-graph freshness through a graph-kit helper (a function the kit exports), not SQL in os-kit.
 3. **Decide O3** (graph-kit decision Q2): where the page source lives. Until decided, keep `os-view-check`.
 4. **Fill the `macOnly` gap** when automation-kit's job runner moves Loop and Auto Task state server-side (plan, Gaps): no page change needed.
-5. **Desktop host.** A third `OsHost` implementation over HTTP for the Tauri app (the HTTP host exists for dev, `ui/os-view/src/hosts.ts`).
+5. **Desktop host.** A third `OsHost` implementation over HTTP for the Tauri app (the HTTP host exists for dev, `ui/os-view (removed)`).
 
 ## 7. Decisions needed from the user
 
@@ -97,7 +97,7 @@ Options and the recommended answer; the recommendation is mine.
 
 | # | Question | Options | Recommended |
 |---|---|---|---|
-| S1 | Where does the System page source live: graph-kit (revision 3, today), `ui/os-view` in LLM-IDE, or a new `os-kit` repository? | keep; move to LLM-IDE; new repo | keep in graph-kit for now. You decided this on 2026-10-27 (revision 3); the cost is O3 (a build across a repo boundary), which `os-view-check` already gates. Revisit only if a second consumer of the OS graph appears. |
+| S1 | Where does the System page source live: graph-kit (revision 3, today), `ui/os-view (removed)` in LLM-IDE, or a new `os-kit` repository? | keep; move to LLM-IDE; new repo | keep in graph-kit for now. You decided this on 2026-10-27 (revision 3); the cost is O3 (a build across a repo boundary), which `os-view-check` already gates. Revisit only if a second consumer of the OS graph appears. |
 | S2 | Should the kit table become generated (single list shared with the kit README index and the feature matrix)? | generate; keep hand-copied | generate, with a test that fails when `docs/kits/README.md` and `KIT_TABLE` disagree. It is the one place where "what kits exist" is duplicated. |
 | S3 | Should the System page be reachable from the Chrome extension and the phone (relay)? | no; extension tab; phone view | no for the extension. For the phone, only after sync-kit and only a **view with no cancel actions** (the cancel and clear calls are destructive; see the Phase 7 design for the rule that the phone tier never approves destructive classes). |
 | S4 | Is the `file` native call acceptable as is for the preview? | yes; add a size and type cap and an audit line; drop the preview | keep, add a size cap and log one line per read; confirm the root-confinement test covers symlinks (not verified here). |
@@ -116,7 +116,7 @@ Options and the recommended answer; the recommendation is mine.
 
 ## 9. Drift, gaps and corrections to the plan's premises
 
-1. The plan says the page is "React + ui-kit". The page is graph-kit's, with its own theme files; ui-kit tokens reach it only through `ui/os-view`'s generated CSS (ui-kit map, UI4).
+1. The plan says the page is "React + ui-kit". The page is graph-kit's, with its own theme files; ui-kit tokens reach it only through `ui/os-view (removed)`'s generated CSS (ui-kit map, UI4).
 2. The plan's os-kit row says "mac web panel". It lives in the Graph section as the default page (revision 2), not on Home.
 3. `KIT_TABLE` has 10 kits; the plan's table also lists ui-kit, desktop-shell and Settings, and the file's comment says it mirrors the plan's table.
 4. The plan's "kits as rings: delegated vs owned" is not in the state response: `kits` carries `id`, `requires`, `enabled` only.

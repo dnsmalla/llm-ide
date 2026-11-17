@@ -2,8 +2,7 @@
 
 With the desktop off, the LLM-IDE iPhone app and web app can read your documents in Box and your code on gitlab.com
 directly: browse, open one file read-only, and search. They use your own provider logins with read-only access.
-Nothing is copied through sync and nothing read is stored on the device. Design: spec §9; plan
-docs/superpowers/plans/2026-11-06-sync-sp7-direct-reads.md.
+Nothing is copied through sync and nothing read is stored on the device. Design: [ADR 0020](../decisions/0020-box-encrypted-sync.md).
 
 ## GitLab (gitlab.com)
 

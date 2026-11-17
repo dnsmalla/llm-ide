@@ -18,7 +18,7 @@ _Originally:_ Proposed (design approved by the user in brainstorming, 2026-11-05
 [ADR 0018](0018-tauri-desktop-node-core-relay.md) makes the desktop the main worker and
 adds a relay for the phone and extension. It assumes one organisation: the desktop
 "holds the company LLM API key" (decision 3), "one company API key with per-user caps"
-pays for AI (decision 5), and the [relay design](../superpowers/plans/2026-10-31-relay-design.md)
+pays for AI (decision 5), and the relay design (no longer in the repo)
 lists "no multi-tenant SaaS: the relay serves one organisation's devices" as a non-goal.
 Its open question X1 asks how a user logs in to the relay account at all; the proposal
 was "no password at the relay, the account is created by the desktop".
@@ -59,7 +59,7 @@ for one trusted machine and cannot become a public identity service.
    exchanges the code and keeps the refresh token in an `HttpOnly` cookie. The accounts
    API sends no CORS headers.
 
-Full design: [accounts and device linking](../superpowers/specs/2026-11-05-accounts-and-device-linking-design.md).
+Full design: the accounts and device linking spec (no longer in the repo; this ADR is the decision record).
 
 ## Amendments to earlier decisions
 

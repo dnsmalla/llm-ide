@@ -14,7 +14,7 @@ to measure caption cadence) are recorded **before Phase 3 exits**, not before it
 starts. If the Windows run fails the gate, work pauses and the plan is revisited. This
 is acceptance to begin the Phase 3 screens, not a statement that the Phase 0 gate has
 passed: those measurements are still open. See the
-[Phase 3 plan](../superpowers/plans/2026-10-31-tauri-phase3-plan.md).
+Phase 3 plan (no longer in the repo).
 **Date:** 2026-10-24
 
 ## Context
@@ -42,7 +42,7 @@ nothing else works. Engineers on Windows and Linux cannot use the product at all
    Claude subscription.
 
 Adoption is gated on a Phase 0 proof of concept with measured go/no-go criteria; see
-the [plan](../superpowers/plans/2026-10-24-tauri-desktop-and-relay.md).
+the plan (no longer in the repo).
 
 ## Consequences
 

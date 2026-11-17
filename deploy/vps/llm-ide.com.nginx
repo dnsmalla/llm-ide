@@ -1,4 +1,4 @@
-# Own-server sync (docs/superpowers/specs/2026-11-05-box-encrypted-sync-design.md 8.1, deploy/vps/sync-sftp.md): one
+# Own-server sync (ADR 0020, deploy/vps/sync-sftp.md): one
 # request-rate zone per client address, and the exact app origins that may call /sync/ from another origin. The PWA on
 # this host is same-origin and needs none. Never "*".
 limit_req_zone $binary_remote_addr zone=llmidesync:1m rate=2r/s;

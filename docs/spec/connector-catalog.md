@@ -3,7 +3,7 @@ title: Connector catalog, phase 1 — spec
 status: draft
 ---
 
-This page records the connector catalog as it is **shipped and readable in code** on 2026-10-31: the curated list, the per-user selection, the MCP-backed ingestion path (Miro today), the Mac Library section and the selection-gated Settings cards. It was written after the fact (the status audit found no spec file, `docs/superpowers/plans/2026-10-31-status-audit.md` section b), so every claim cites the code. Section 8 separates what is shipped from what is unverified or not built.
+This page records the connector catalog as it is **shipped and readable in code** on 2026-10-31: the curated list, the per-user selection, the MCP-backed ingestion path (Miro today), the Mac Library section and the selection-gated Settings cards. It was written after the fact (the status audit found no spec file), so every claim cites the code. Section 8 separates what is shipped from what is unverified or not built.
 
 Not covered: Box, Slack, Email and Git ingestion internals (see [knowledge-base](knowledge-base.md) and the knowledge-kit map `docs/kits/knowledge-kit.md`); the user-added MCP servers of the extensions catalog (see [extensions-catalog](extensions-catalog.md)), which are a different mechanism.
 
@@ -21,7 +21,7 @@ Not covered: Box, Slack, Email and Git ingestion internals (see [knowledge-base]
 | MCP routes | `extension/server/auth-routes.mjs`, `extension/routes/router.mjs` | `/auth/mcp-connector/*` and `/kb/mcp-connector/*` |
 | Dedup table | `extension/kb/migrations/0031_mcp_connector_state.sql` | `mcp_connector_seen` |
 | Desktop client | `ui/screens/library/sources/source-actions.ts` | HTTP wrappers and the Library source panes |
-| Desktop Settings | `ui/screens/settings/sections/ConnectionsSection.tsx` | Selection-gated connection cards |
+| Desktop Settings | `ui/screens/settings/sources-model.ts` | Selection-gated connection cards |
 
 ## §2 The catalog
 

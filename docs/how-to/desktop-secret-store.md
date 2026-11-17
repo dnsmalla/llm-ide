@@ -52,16 +52,15 @@ Linux adds `dbus-secret-service` and RustCrypto (`crypto-rust`, no OpenSSL).
 
 ## Tests
 
-`LLMIDE_KEYCHAIN_BACKEND=memory` selects an in-process store (same convention as
-the Mac app); `cargo test --lib` uses the trait directly with the memory backend
-and never touches a real keychain.
+`LLMIDE_KEYCHAIN_BACKEND=memory` selects an in-process store; `cargo test --lib`
+uses the trait directly with the memory backend and never touches a real keychain.
 
-## Migration from the Mac app
+## Data from the retired Mac app
 
-The desktop app uses its own service and accounts. It never reads the Mac app's
-keychain items, so a user moving over starts with fresh secrets: stored provider
-keys in the old vault are not carried over and must be re-entered (or imported
-with an explicit user action in a later task).
+The desktop app uses its own service and accounts and never reads the old Mac
+app's keychain items. To bring old data and its vault over, follow
+[Import the old Mac app's data](import-old-mac-data.md), which includes setting
+the two keychain items by hand.
 
 ## Not yet verified
 

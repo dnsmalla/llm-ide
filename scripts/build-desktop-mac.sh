@@ -123,8 +123,8 @@ for bin in "$APP"/Contents/MacOS/*; do
     exit 1
   fi
 done
-echo "bundle id: $(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist") (the Swift Mac app is com.llmide.macapp; they can run side by side)"
-echo "app data:  ~/Library/Application Support/llm-ide-desktop (the Swift app uses .../llm-ide)"
+echo "bundle id: $(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")"
+echo "app data:  ~/Library/Application Support/llm-ide-desktop"
 
 if [ "$SMOKE" = 1 ]; then
   step "Smoke-test the core inside the app (health + nonce, DB under the data dir, claude probe, clean stop)"

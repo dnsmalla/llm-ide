@@ -3,7 +3,7 @@ title: Command bus: the core job API
 status: draft
 ---
 
-One command and result contract for every client of the desktop core: the desktop UI, the Chrome extension and the iPhone (through the Mac host's WebSocket now, a relay later). This page is the contract of what is **implemented** (slices S1 and S3 of [the plan](../superpowers/plans/2026-10-31-command-bus-spec.md)); the plan carries the migration, the mobile audit and the open questions.
+One command and result contract for every client of the desktop core: the desktop UI, the Chrome extension and the iPhone (through the Mac host's WebSocket now, a relay later). This page is the contract of what is **implemented** (slices S1 and S3 of the command-bus plan, no longer in the repo); that plan carried the migration, the mobile audit and the open questions.
 
 Not covered: the Swift transport host (S2), the iOS renderer (S4), the extension on the bus (S5) and the relay (S6).
 

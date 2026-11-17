@@ -3,7 +3,7 @@ title: Extensions catalog (phases P0 to P5 server half and installed-item loadin
 status: draft
 ---
 
-This is the contract for the first five phases of the extensions catalog ([plan](../superpowers/plans/2026-10-31-extensions-catalog.md)): one item model over plugins, MCP servers and LLM sources, a computed active set, consumers that honour it behind a flag, and extensions on provider-adapter turns. P4 adds four HTTP routes (API version 93, §9); the server half of P5 adds updates, rollback, repair, catalog indexes with search and the active view (API version 94, §9b). There is no new SSE event and no Mac UI yet: the Mac Extensions screen and the allowlist setting are the next step.
+This is the contract for the first five phases of the extensions catalog (the plan is no longer in the repo): one item model over plugins, MCP servers and LLM sources, a computed active set, consumers that honour it behind a flag, and extensions on provider-adapter turns. P4 adds four HTTP routes (API version 93, §9); the server half of P5 adds updates, rollback, repair, catalog indexes with search and the active view (API version 94, §9b). There is no new SSE event and no Mac UI yet: the Mac Extensions screen and the allowlist setting are the next step.
 
 Governing decisions (user, 2026-10-30): every download is user-initiated; scan findings only warn; one global extension format where each engine uses what it supports and silently skips the rest; plugin hooks run only on Claude SDK turns; on a provider-adapter turn the user's active MCP servers and plugin tools are mounted automatically when provider tools are allowed and the model can call tools.
 

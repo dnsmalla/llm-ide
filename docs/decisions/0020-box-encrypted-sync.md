@@ -13,15 +13,15 @@ web working as far as possible with the desktop off, no desktop login, no money 
 day the user asked for MEGA and the user's own server over SSH as more adapters behind one interface.
 The first adapter is MEGA, by user decision on 2026-11-05; the own server (SFTP) and Box follow (see below).
 **Date:** 2026-11-05
-**Design:** [Box encrypted sync design](../superpowers/specs/2026-11-05-box-encrypted-sync-design.md).
-**Research:** [offline desktop memo](../superpowers/research/2026-11-05-offline-desktop-research.md).
+**Design:** the wire format in `schema/sync/v1/README.md`; the design spec is no longer in the repo.
+**Research:** the offline desktop memo of 2026-11-05 (no longer in the repo).
 
 ## Context
 
 [ADR 0019](0019-public-accounts-desktop-data.md) put a public identity service on the VPS: passkey
 accounts, desktop OAuth sign-in and commitment-based device linking, so phones and browsers could reach
 the desktop through the relay. Three review rounds
-([relay review](../superpowers/reviews/2026-11-05-relay-review.md)) found the envelope crypto, relay
+(relay review of 2026-11-05, no longer in the repo) found the envelope crypto, relay
 auth and routing sound. They also found that the linking ceremony still lets a malicious account
 service take over a link in about 1 s. The outbound Rust client loop is unfinished. Public exposure
 still waits on a paid external review (G-EXT).

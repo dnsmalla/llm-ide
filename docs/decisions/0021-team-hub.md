@@ -8,7 +8,7 @@ amends: "0020 (adds the team path beside sync; sync stays for solo users); 0018 
 # ADR 0021: Team Hub, the core in hub mode, members by assigned authority
 
 **Status:** Accepted. The user approved the five decisions "as recommended" on 2026-11-07.
-**Review and plan:** [team hub plan](../superpowers/plans/2026-11-07-team-hub-plan.md).
+**Review and plan:** the team hub plan (no longer in the repo).
 
 ## Context
 
