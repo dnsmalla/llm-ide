@@ -8,7 +8,7 @@ import { createHostFs } from "../explorer/fs";
 import { invokeHost } from "../shell/host";
 import { core } from "../shell/runtime";
 import { setRunRecordShip } from "../loop/native/history.ts";
-import { LOOP_PAGE_NOTE, cancelRun, concurrency, liveRuns, setConcurrency, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
+import { LOOP_PAGE_NOTE, cancelRun, concurrency, liveRuns, setConcurrency, shipHeldRun, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
 import { installRunManagerHost } from "../loop/native/run-manager-host.ts";
 import { ShipPanel } from "../loop/native/ShipPanel.tsx";
 import { decodeWorktreeDiff } from "../loop/native/ship-model.ts";
@@ -24,6 +24,7 @@ import { processHasIntake, processSteps } from "../loop/native/factory-template.
 import { loadLoops } from "../loop/native/store.ts";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
+import { requestChanges } from "./human-review.ts";
 import { Card } from "./Card.tsx";
 import { LaneBoard } from "./LaneBoard.tsx";
 import { LoopRuns } from "./LoopRuns.tsx";
@@ -359,6 +360,22 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         return;
       case "answer":
         void act(async () => { await answerDecision({ fs, start: startRun, projectRoot: root }, item, note ?? ""); });
+        return;
+      case "approve": {
+        const rec = facts.get(item.key)?.lastRecord;
+        const awaiting = rec?.awaiting;
+        const entry = rec?.entry;
+        if (!rec || !awaiting || !entry) { setError("This card is not waiting for review. Refresh and try again."); return; }
+        // Same autoShip path as an automatic finish: a blocked ship is recorded and shown as "Not shipped".
+        void act(async () => {
+          const line = await shipHeldRun(root, item, { runId: rec.runId, entry, awaiting });
+          if (line) setNotice(line);
+          await refreshStatus(true);
+        });
+        return;
+      }
+      case "requestChanges":
+        void act(async () => { await requestChanges({ fs, start: startRun, projectRoot: root }, item, note ?? ""); });
         return;
       case "sendBack": {
         const f = facts.get(item.key);

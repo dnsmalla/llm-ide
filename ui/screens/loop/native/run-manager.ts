@@ -494,6 +494,25 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   return { loop, info, config, outcome: held ? { ...outcome, awaitingReview: true } : outcome };
 }
 
+/**
+ * Approve on a run held for a person: ships it through the same autoShip path as an automatic finish, so every safety
+ * block (CI/hook files, secret scan, diff size) still applies. Starts no run. Returns autoShip's log line.
+ */
+export async function shipHeldRun(projectRoot: string, item: RunItem, facts: { runId: string; entry: { id: string; startedAt: string }; awaiting: { held: "success" | "failed"; kind: AutoShipKind; failedStage: string | null } }): Promise<string> {
+  const d = requireDeps();
+  if (!d.autoShip) return "";
+  const info = await findWorktree(d, facts.runId);
+  if (!info) return "MR not opened: the run's worktree was removed.";
+  // autoShip derives the ship kind from the failing stage's role, so the stage is looked up by the name the record kept.
+  let failedStage: LoopStage | null = null;
+  if (facts.awaiting.held === "failed" && facts.awaiting.failedStage) {
+    const loop = await d.loadFactoryLoop(d.fsFor(projectRoot)).catch(() => null);
+    failedStage = loop?.config.stages.find((s) => s.name === facts.awaiting.failedStage) ?? null;
+  }
+  return d.autoShip({ runId: facts.runId, projectRoot, mode: "full", item, info, entry: facts.entry, statusCode: facts.awaiting.held, needsDecision: false, failedStage, runPrefix: repoPrefixFor(projectRoot, info.worktree) })
+    .catch((e: unknown) => `MR not opened: ${e instanceof Error ? e.message : String(e)}`);
+}
+
 /** The worktree of an earlier run (Resume, continue, sendBack), or null when it was removed. */
 async function findWorktree(d: RunManagerDeps, runId: string): Promise<WorktreeInfo | null> {
   const list = await d.host<WorktreeInfo[]>("loop_worktree_list").catch(() => null);

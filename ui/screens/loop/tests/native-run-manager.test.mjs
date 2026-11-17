@@ -632,3 +632,32 @@ test("without reviewMode a passing run is success; a cancelled or errored run is
   await finish(c, { ...PASSED, passed: false, errored: true });
   assert.equal(world.records.at(-1).record.statusCode, "error");
 });
+
+test("shipHeldRun ships a held run through autoShip as a success and starts no run", async () => {
+  const shipped = [];
+  setup({ autoShip: async (e) => { shipped.push(e); return "Draft MR: https://example/mr/9"; } });
+  world.list = [{ runId: "r9", project: "/p", repo: "/p", worktree: "/p/system/loop-worktrees/r9", branch: "factory/r9", baseCommit: "abc" }];
+  const line = await rm.shipHeldRun("/p", item(9), { runId: "r9", entry: { id: "e1", startedAt: "2026-11-09T10:00:00Z" }, awaiting: { held: "success", kind: "passed", failedStage: null } });
+  assert.equal(line, "Draft MR: https://example/mr/9");
+  assert.equal(shipped.length, 1);
+  assert.deepEqual({ runId: shipped[0].runId, statusCode: shipped[0].statusCode, needsDecision: shipped[0].needsDecision, prefix: shipped[0].runPrefix, entry: shipped[0].entry.id }, { runId: "r9", statusCode: "success", needsDecision: false, prefix: "system/loop-worktrees/r9", entry: "e1" });
+  assert.equal(rm.liveRuns().length, 0, "approving starts no run");
+});
+
+test("shipHeldRun of a failed hold keeps the failed status and the failing stage", async () => {
+  const shipped = [];
+  setup({ autoShip: async (e) => { shipped.push(e); return ""; } });
+  world.list = [{ runId: "r9", project: "/p", repo: "/p", worktree: "/p/system/loop-worktrees/r9", branch: "factory/r9", baseCommit: "abc" }];
+  const verify = FACTORY_LOOP.config.stages.find((s) => s.kind === "command" || /verify|test/i.test(s.name));
+  await rm.shipHeldRun("/p", item(9), { runId: "r9", entry: { id: "e1", startedAt: "x" }, awaiting: { held: "failed", kind: "testsFailing", failedStage: verify.name } });
+  assert.equal(shipped[0].statusCode, "failed");
+  assert.equal(shipped[0].failedStage?.name, verify.name);
+});
+
+test("shipHeldRun without an autoShip dep, or without the worktree, returns a line and throws nothing", async () => {
+  setup({ autoShip: undefined });
+  assert.equal(await rm.shipHeldRun("/p", item(9), { runId: "r9", entry: { id: "e1", startedAt: "x" }, awaiting: { held: "success", kind: "passed", failedStage: null } }), "");
+  setup({ autoShip: async () => "never" });
+  world.list = [];
+  assert.match(await rm.shipHeldRun("/p", item(9), { runId: "r9", entry: { id: "e1", startedAt: "x" }, awaiting: { held: "success", kind: "passed", failedStage: null } }), /worktree/);
+});

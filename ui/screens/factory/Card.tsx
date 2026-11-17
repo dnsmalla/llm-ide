@@ -16,11 +16,11 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
   const [readingDiscard, setReadingDiscard] = useState(false);
-  const [sendBackOpen, setSendBackOpen] = useState(false);
+  const [noteFor, setNoteFor] = useState<"sendBack" | "requestChanges" | null>(null);
   const [note, setNote] = useState("");
   const [answer, setAnswer] = useState("");
   return (
-    <li className="fx-card" data-key={view.key} data-selected={selected} data-tone={cardTone(view.status)} onKeyDown={(e) => { if (e.key === "Escape") { setConfirmDiscard(false); setSendBackOpen(false); setNote(""); } }}>
+    <li className="fx-card" data-key={view.key} data-selected={selected} data-tone={cardTone(view.status)} onKeyDown={(e) => { if (e.key === "Escape") { setConfirmDiscard(false); setNoteFor(null); setNote(""); } }}>
       <div className="fx-card-top">
         <span className="fx-status">{view.status}</span>
         {view.note ? <span className="fx-note">{view.note}</span> : null}
@@ -50,12 +50,13 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
           <button type="submit" className="fx-btn fx-primary" disabled={!answer.trim()}>Answer &amp; continue</button>
         </form>
       ) : null}
-      {sendBackOpen ? (
-        <form className="fx-form" aria-label="Send back" onSubmit={(e) => { e.preventDefault(); setSendBackOpen(false); onAction("sendBack", note); setNote(""); }}>
-          <label className="fx-field fx-grow"><span>Note for the agent (optional)</span><textarea rows={3} value={note} maxLength={4000} onChange={(e) => setNote(e.target.value)} autoFocus /></label>
-          <span className="fx-hint">The failing CI output and new review comments go with it, fenced as data.</span>
-          <button type="submit" className="fx-btn fx-primary">Send back</button>
-          <button type="button" className="fx-btn" onClick={() => setSendBackOpen(false)}>Cancel</button>
+      {noteFor ? (
+        // One form for both: Send back (note optional, CI and comments go with it) and Request changes (note required).
+        <form className="fx-form" aria-label={ACTION_LABELS[noteFor]} onSubmit={(e) => { e.preventDefault(); if (noteFor === "requestChanges" && !note.trim()) return; const which = noteFor; setNoteFor(null); onAction(which, note); setNote(""); }}>
+          <label className="fx-field fx-grow"><span>{noteFor === "requestChanges" ? "What should change" : "Note for the agent (optional)"}</span><textarea rows={3} value={note} maxLength={4000} onChange={(e) => setNote(e.target.value)} autoFocus /></label>
+          {noteFor === "sendBack" ? <span className="fx-hint">The failing CI output and new review comments go with it, fenced as data.</span> : null}
+          <button type="submit" className="fx-btn fx-primary" disabled={noteFor === "requestChanges" && !note.trim()}>{ACTION_LABELS[noteFor]}</button>
+          <button type="button" className="fx-btn" onClick={() => setNoteFor(null)}>Cancel</button>
         </form>
       ) : null}
       {confirmDiscard ? (
@@ -67,7 +68,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       ) : view.actions.length > 0 ? (
         <div className="fx-actions">
           {view.actions.map((a) => (
-            <button key={a} type="button" className={a === "start" || a === "ship" || a === "finishChecks" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
+            <button key={a} type="button" className={a === "start" || a === "ship" || a === "finishChecks" || a === "approve" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
               if (a === "discard") {
                 setConfirmDiscard(true);
                 setDiscardStatus(null);
@@ -77,7 +78,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
                 }
                 return;
               }
-              if (a === "sendBack") setSendBackOpen(true);
+              if (a === "sendBack" || a === "requestChanges") setNoteFor(a);
               else onAction(a);
             }}>{ACTION_LABELS[a]}</button>
           ))}
