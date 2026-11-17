@@ -84,7 +84,7 @@ test("a passed intake-only run goes back to Inbox, ready to start", () => {
 test("decodeRunRecordFacts reads the factory fields and rejects other records", () => {
   const raw = { id: "e1", statusCode: "success", endedAt: "2026-11-09T10:00:00.000Z", factoryMode: "intakeOnly", worktree: { runId: "r1", branch: "factory/r1", baseCommit: "abc", repo: "code/web" }, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3", commit: "def", reused: false }, needsDecision: null };
   const entry = { id: "e1", startedAt: "2026-11-09T09:00:00.000Z" };
-  assert.deepEqual(decodeRunRecordFacts(raw, entry), { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3" }, reviewedPatchId: null, costUsd: null, durationSeconds: null, verdict: null, changed: null, test: null, failingStage: null, lastStage: null, readiness: null, autoShipBlocked: null, stepReviews: null, awaiting: null, endedAt: "2026-11-09T10:00:00.000Z", entry });
+  assert.deepEqual(decodeRunRecordFacts(raw, entry), { runId: "r1", mode: "intakeOnly", statusCode: "success", needsDecision: null, ship: { provider: "gitlab", url: "https://gitlab.com/acme/web/-/merge_requests/3" }, reviewedPatchId: null, costUsd: null, durationSeconds: null, verdict: null, changed: null, test: null, failingStage: null, lastStage: null, readiness: null, autoShipBlocked: null, stepReviews: null, awaiting: null, loopback: null, endedAt: "2026-11-09T10:00:00.000Z", entry });
   const reviewed = "d".repeat(64);
   assert.equal(decodeRunRecordFacts({ ...raw, diffSummary: { files: ["src/a.ts"], truncated: false, patchId: reviewed } }).reviewedPatchId, reviewed);
   assert.equal(decodeRunRecordFacts({ ...raw, diffSummary: { files: [], truncated: false, patchId: "short" } }).reviewedPatchId, null, "a malformed id never becomes a comparison");
@@ -183,4 +183,19 @@ test("decodeRunRecordFacts keeps humanReview mode and decodes awaiting, malforme
   assert.deepEqual(ok.awaiting, { held: "failed", kind: "testsFailing", failedStage: "Verify" });
   assert.equal(decodeRunRecordFacts(raw({ held: "nope", kind: 3 })).awaiting, null);
   assert.equal(decodeRunRecordFacts(raw(undefined)).awaiting, null);
+});
+
+test("decodeRunRecordFacts reads a loopback object tolerantly", () => {
+  const raw = { id: "e1", statusCode: "stopped.limit", worktree: { runId: "r1" } };
+  const good = { rounds: 3, maxRounds: 3, reason: "tests", findings: "boom" };
+  assert.deepEqual(decodeRunRecordFacts({ ...raw, loopback: good }).loopback, good);
+  assert.equal(decodeRunRecordFacts({ ...raw, loopback: { ...good, rounds: "x" } }).loopback, null);
+  assert.equal(decodeRunRecordFacts({ ...raw, loopback: { ...good, reason: "nope" } }).loopback, null);
+  assert.equal(decodeRunRecordFacts({ ...raw, loopback: "str" }).loopback, null);
+  assert.equal(decodeRunRecordFacts(raw).loopback, null);
+});
+
+test("a stopped.limit record needs you with the no-MR note; a plain failure keeps Failed", () => {
+  assert.deepEqual(columnFor(facts({ lastRecord: record({ statusCode: "stopped.limit" }), worktreeExists: true })), { column: "needsYou", note: "Stopped, no MR opened" });
+  assert.equal(columnFor(facts({ lastRecord: record({ statusCode: "failed" }), worktreeExists: true })).note, NOTE.failed);
 });

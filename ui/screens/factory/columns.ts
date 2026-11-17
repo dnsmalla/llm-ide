@@ -3,12 +3,14 @@ import type { LiveRun, RunMode } from "../loop/native/run-manager.ts";
 import { factoryRole } from "../loop/native/factory.ts";
 import type { AutoShipKind } from "../loop/native/ship-model.ts";
 import type { StepReviewCounts } from "../loop/native/issue-trail.ts";
+import { LOOPBACK_STOPPED_CODE } from "../loop/native/loopback.ts";
 import { displayText } from "../explorer/scm/model.ts";
 
 export type Column = "inbox" | "needsDecision" | "working" | "needsYou" | "readyToShip" | "shipped" | "done";
 
 export interface ShipComment { author: string; body: string; at: string; /** Posted by an integration, not a person. */ bot?: boolean }
 export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; ci: "none" | "pending" | "success" | "failed"; ciSummary: string | null; comments: ShipComment[] }
+export interface LoopbackFacts { rounds: number; maxRounds: number; reason: "tests" | "review" | "limit"; findings: string }
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
 export interface RunRecordFacts {
   runId: string; mode: RunMode; statusCode: string; needsDecision: string | null;
@@ -26,6 +28,8 @@ export interface RunRecordFacts {
   /** Step review verdict counts, or null when the record has none (older records never do). */
   stepReviews?: StepReviewCounts | null;
   /** Set on a run held for a person (reviewMode human); null otherwise. */
+  /** Why and when a looping run stopped without an MR, or null (older records and runs that never looped back). */
+  loopback?: LoopbackFacts | null;
   awaiting?: { held: "success" | "failed"; kind: AutoShipKind; failedStage: string | null } | null;
   reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null;
 }
@@ -39,7 +43,7 @@ export const NOTE = {
   statusUnavailable: "status unavailable", ciFailed: "CI failed", newComments: "New review comments",
   ciFailedAndComments: "CI failed, new review comments", closedUnmerged: "Closed without merge", ciRunning: "CI running",
   failed: "Failed", stopped: "Stopped", error: "Error", blocked: "Blocked", notShipped: "Not shipped", awaitingReview: "Awaiting your review",
-  continuingAutomatically: "Continuing automatically…",
+  continuingAutomatically: "Continuing automatically…", stoppedNoMr: "Stopped, no MR opened",
 } as const;
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -96,6 +100,7 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     autoShipBlocked: isRecord(raw.autoShip) && typeof raw.autoShip.blocked === "string" && raw.autoShip.blocked.trim() !== "" ? displayText(raw.autoShip.blocked).slice(0, 300) : null,
     stepReviews: decodeStepReviewCounts(raw.stepReviews),
     awaiting: decodeAwaiting(raw.awaiting),
+    loopback: decodeLoopback(raw.loopback),
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,
     entry,
   };
@@ -112,6 +117,16 @@ function decodeStepReviewCounts(v: unknown): StepReviewCounts | null {
     else if (entry.verdict === "skipped") counts.skipped += 1;
   }
   return counts.approved + counts.unresolved + counts.skipped > 0 ? counts : null;
+}
+
+/** Anything malformed decodes to null so a damaged record never breaks the board. */
+function decodeLoopback(v: unknown): LoopbackFacts | null {
+  if (!isRecord(v)) return null;
+  const { rounds, maxRounds, reason, findings } = v;
+  if (typeof rounds !== "number" || !Number.isFinite(rounds) || typeof maxRounds !== "number" || !Number.isFinite(maxRounds)) return null;
+  if (reason !== "tests" && reason !== "review" && reason !== "limit") return null;
+  // Findings are untrusted model/test output: cap them and strip control characters before the card renders them as text.
+  return { rounds, maxRounds, reason, findings: typeof findings === "string" ? displayText(findings).slice(0, 4000) : "" };
 }
 
 const AWAITING_KINDS: readonly string[] = ["passed", "testsFailing", "reviewRejected", "incomplete"];
@@ -154,6 +169,8 @@ export function columnFor(f: ItemFacts): { column: Column; note: string | null }
     return { column: "shipped", note: s.ci === "pending" ? NOTE.ciRunning : null };
   }
   if (rec.needsDecision !== null) return { column: "needsDecision", note: null };
+  // A looping run that spent its rounds ends here with no MR: a person decides, never a button that would ship it.
+  if (rec.statusCode === LOOPBACK_STOPPED_CODE) return { column: "needsYou", note: NOTE.stoppedNoMr };
   // The run should have opened its MR but could not: a passed run keeps its Ship button, any other waits for a person.
   if (rec.autoShipBlocked) return rec.statusCode === "success" ? { column: "readyToShip", note: NOTE.notShipped } : { column: "needsYou", note: NOTE.notShipped };
   // Held for a person (reviewMode human). An MR-blocked record keeps the branch above, which is checked first.
