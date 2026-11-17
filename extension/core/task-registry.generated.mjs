@@ -150,9 +150,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 1,
+    "revision": 2,
     "knownPromptHashes": [
-      "d6f592cb6efeccfad4e5d8fc2e0fc885c7b9c00c341059bb315062fe70755ab3"
+      "d6f592cb6efeccfad4e5d8fc2e0fc885c7b9c00c341059bb315062fe70755ab3",
+      "5c68e095b84f97d4ecc330ce603d410e2f0dd8ccf0946ad75d6055f24a7eb245"
     ]
   },
   {
