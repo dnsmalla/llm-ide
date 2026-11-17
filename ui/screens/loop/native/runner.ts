@@ -4,6 +4,7 @@
 // A stage that runs once per run (runsOncePerRun) is skipped in later iterations once it has passed.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
 import { effectiveReviewAfter } from "./review.ts";
+import { LOOPBACK_STOPPED_CODE, type FindingsEntry, type LoopbackContext, type LoopbackSummary } from "./loopback.ts";
 
 export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 
@@ -25,10 +26,13 @@ export type ProgressEvent =
   | { type: "repair"; stage: LoopStage; attempt: number }
   | { type: "step-review"; stage: LoopStage; phase: "reviewing" | "fixing"; attempt: number }
   | { type: "step-review-result"; stage: LoopStage; verdict: StepReviewOutcome["verdict"]; attempts: number }
+  | { type: "loopback"; stage: LoopStage; round: number; maxRounds: number; reason: "tests" | "review" }
   | { type: "paused"; paused: boolean };
 export interface RunnerDeps {
   /** Execute one stage once. `prior` is every outcome so far (including earlier iterations). Throws for an unsupported kind. */
-  runStage(stage: LoopStage, prior: readonly StageOutcome[]): Promise<StageRunResult>;
+  runStage(stage: LoopStage, prior: readonly StageOutcome[], loopback?: LoopbackContext): Promise<StageRunResult>;
+  /** Persist one round's findings (the plan notes file) so a re-run code stage and the final record keep every round. */
+  recordFindings?(stage: LoopStage, entry: FindingsEntry): Promise<void>;
   /**
    * Ask the repair agent to fix a failed stage. `attempt` is 1-based for this stage/run. `opts.review` marks a repair
    * of AI step-review findings rather than of a failed stage, so the agent is told the step passed and what to fix.
@@ -91,6 +95,10 @@ export interface LoopRunOutcome {
   stepReviews?: StepReviewOutcome[];
   /** Set when the run is held for a person's review (Task 7). */
   awaitingReview?: boolean;
+  /** Ended because the loopback rounds or a budget ran out without passing: the warning state, never shipped. */
+  stoppedAtLimit?: boolean;
+  /** Set only when the run looped back at least once. */
+  loopback?: LoopbackSummary;
 }
 
 /** Step-review state that outlives one iteration, so a closed step is not reviewed again later in the run. */
@@ -327,11 +335,12 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
  * or a pause that timed out is `aborted` (the Mac's `LoopEngineStatus.aborted`); an agent call that failed with nothing out
  * of scope is `error`; otherwise `success` or `failed`.
  */
-export function runStatusCode(o: Pick<LoopRunOutcome, "passed" | "cancelled" | "blocked" | "errored"> & { awaitingReview?: boolean }): string {
+export function runStatusCode(o: Pick<LoopRunOutcome, "passed" | "cancelled" | "blocked" | "errored" | "stoppedAtLimit"> & { awaitingReview?: boolean }): string {
   // Held for a person: checked first so no later code mistakes the run for success and ships it.
   if (o.awaitingReview) return "awaiting_review";
   if (o.blocked) return "blocked.repair_out_of_scope";
   if (o.errored) return "error";
   if (o.cancelled) return "aborted";
+  if (o.stoppedAtLimit) return LOOPBACK_STOPPED_CODE;
   return o.passed ? "success" : "failed";
 }
