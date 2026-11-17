@@ -50,6 +50,11 @@ export interface LoopStage {
   /** SHA-256 of the prompt text this stage was saved with; a stage whose prompt no longer matches was edited. */
   promptHash?: string | null;
   disabledByDetection: boolean | null;
+  /**
+   * Run an AI review of this step's changes after it passes. Absent = the skill-based default (review.ts decides);
+   * an explicit boolean always wins. Absent on files written before step reviews existed.
+   */
+  reviewAfter?: boolean | null;
   /** Original object for an unknown kind, so saving does not destroy a newer build's fields. */
   raw: Record<string, unknown> | null;
 }
@@ -78,6 +83,8 @@ export interface LoopEngineConfig {
   refactorBatchesPerRun: number | null;
   /** A per-run USD ceiling; null = no ceiling. Factory loops set 10. */
   maxCostUsd: number | null;
+  /** "auto" (default) lets AI step reviews gate the run; "human" pauses for a person. Absent = "auto". */
+  reviewMode?: "auto" | "human";
 }
 
 export interface LoopDefinition {
@@ -141,6 +148,7 @@ export function decodeStage(v: unknown): LoopStage | null {
     promptRef: str(v.promptRef),
     promptHash: str(v.promptHash),
     disabledByDetection: typeof v.disabledByDetection === "boolean" ? v.disabledByDetection : null,
+    ...(typeof v.reviewAfter === "boolean" ? { reviewAfter: v.reviewAfter } : {}),
     raw: kind === "unsupported" ? v : null,
   };
 }
@@ -169,6 +177,7 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     stageDelaySeconds: stageDelay(o.stageDelaySeconds),
     refactorBatchesPerRun: num(o.refactorBatchesPerRun),
     maxCostUsd: num(o.maxCostUsd),
+    ...(o.reviewMode === "human" ? { reviewMode: "human" as const } : {}),
   };
 }
 
@@ -241,6 +250,7 @@ function encodeStage(s: LoopStage): Record<string, unknown> {
     ...(s.promptRef ? { promptRef: s.promptRef } : {}),
     ...(s.promptHash ? { promptHash: s.promptHash } : {}),
     ...(s.disabledByDetection !== null ? { disabledByDetection: s.disabledByDetection } : {}),
+    ...(typeof s.reviewAfter === "boolean" ? { reviewAfter: s.reviewAfter } : {}),
   };
 }
 
@@ -263,5 +273,6 @@ function encodeConfig(c: LoopEngineConfig): Record<string, unknown> {
     ...(c.repairModel !== null ? { repairModel: c.repairModel } : {}),
     ...(c.refactorBatchesPerRun !== null ? { refactorBatchesPerRun: c.refactorBatchesPerRun } : {}),
     ...(c.maxCostUsd !== null ? { maxCostUsd: c.maxCostUsd } : {}),
+    ...(c.reviewMode === "human" ? { reviewMode: "human" } : {}),
   };
 }

@@ -119,3 +119,34 @@ test("inputPath is written only when non-empty", () => {
   assert.equal(JSON.parse(m.encodeProjectStore(store("src/billing"))).loops[0].inputPath, "src/billing");
   assert.equal(m.decodeProjectStore(JSON.parse(m.encodeProjectStore(store("src/billing")))).loops[0].inputPath, "src/billing");
 });
+
+test("reviewAfter is absent unless it is a boolean and round-trips when set", () => {
+  const store = m.decodeProjectStore({ schemaVersion: 2, loops: [{ id: "l", name: "R", config: { stages: [
+    { id: "a", name: "Plain", kind: "skill", skillId: "skills/factory-intake", order: 0 },
+    { id: "b", name: "Yes", kind: "skill", skillId: "skills/factory-intake", order: 1, reviewAfter: "yes" },
+    { id: "c", name: "Off", kind: "skill", skillId: "skills/factory-intake", order: 2, reviewAfter: false },
+  ] } }] });
+  const [plain, junk, off] = store.loops[0].config.stages;
+  assert.equal("reviewAfter" in plain, false, "a missing key decodes with no key");
+  assert.equal("reviewAfter" in junk, false, "a non-boolean decodes with no key");
+  assert.equal(off.reviewAfter, false);
+  const encoded = JSON.parse(m.encodeProjectStore(store)).loops[0].config.stages;
+  assert.equal(encoded[2].reviewAfter, false, "an explicit false is written");
+  assert.equal("reviewAfter" in encoded[0], false, "an absent key is not written");
+  assert.equal("reviewAfter" in encoded[1], false, "a dropped non-boolean is not written");
+});
+
+test("reviewMode is written only when human and decodes absent otherwise", () => {
+  const plain = m.decodeProjectStore({ schemaVersion: 2, loops: [{ id: "l", name: "L", config: { stages: [] } }] }).loops[0];
+  assert.equal("reviewMode" in plain.config, false, "a config without the key decodes with no key");
+  const encoded = JSON.parse(m.encodeProjectStore({ schemaVersion: 2, loops: [plain] })).loops[0].config;
+  assert.equal("reviewMode" in encoded, false, "auto (the default) is not written");
+
+  const human = m.decodeProjectStore({ schemaVersion: 2, loops: [{ id: "l", name: "H", config: { reviewMode: "human", stages: [] } }] }).loops[0];
+  assert.equal(human.config.reviewMode, "human");
+  const humanOut = JSON.parse(m.encodeProjectStore({ schemaVersion: 2, loops: [human] })).loops[0].config;
+  assert.equal(humanOut.reviewMode, "human");
+
+  const bogus = m.decodeProjectStore({ schemaVersion: 2, loops: [{ id: "l", name: "B", config: { reviewMode: "bogus", stages: [] } }] }).loops[0];
+  assert.equal("reviewMode" in bogus.config, false, "an unknown value decodes absent");
+});
