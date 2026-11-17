@@ -90,6 +90,47 @@ The built-in steps keep their fixed skill, verdict file and repair rules, so the
 A built-in step without `prompt` follows the built-in prompt, including its later updates. Once you set `prompt`, the
 step keeps your text and no longer gets those updates; delete the `prompt` key to follow the default again.
 
+## Step reviews and the final review
+
+Two switches control reviews. Both live in `system/factory-template.json`, and the Board header and the Loop screen
+write the same keys.
+
+```json
+{
+  "version": 1,
+  "reviewMode": "human",
+  "stages": [
+    { "role": "implement", "reviewAfter": true },
+    { "role": "custom", "name": "Doc review", "kind": "skill", "skill": "doc-writer", "reviewAfter": true },
+    { "role": "review" },
+    { "role": "reviewGate" }
+  ]
+}
+```
+
+- `reviewAfter` (on a step) turns the AI review of that step's changes on or off. It is allowed on `intake`, `plan`,
+  `implement` and on custom skill steps. Leave it out to use the default for the skill.
+- `reviewMode` (top level) is `"auto"` (the default, key absent) or `"human"`. In **auto** the AI reviews and the run
+  ships. In **human** the run ends on **Awaiting your review**.
+
+Default for `reviewAfter` when the key is absent:
+
+| Step | Reviewed by default |
+|------|---------------------|
+| Skill that may write code (`implement`, `test-gap-writer`, `test-structure-setup`, `refactor-apply`, `refactor-conform`, and any unknown skill) | yes |
+| Skill that only reads or plans (`factory-intake`, `writing-plans`, `factory-review`, `plan-director`, `plan-structure-index`, `doc-structure-index`, `refactor-planner`, `doc-writer`, `step-review`) | no |
+| Shell command and verdict check steps | no |
+
+Each step review writes its verdict to `.factory/reviews/<step id>.md`. Findings the repair loop could not resolve are
+collected in `.factory/STEP-REVIEWS.md`.
+
+In human mode, **Approve** lets the run ship. **Request changes** takes your note, writes it to
+`.factory/HUMAN-REVIEW.md` and re-runs from Implement. A run that is waiting for your review survives quitting the app
+and is never resumed automatically; open it and decide. Interrupted runs, by contrast, resume once on their own.
+
+The **Final review: Auto / Human** control in the Factory board header edits `reviewMode` for you: Human adds the key,
+Auto removes it, and every other key stays as it was.
+
 ## Rules
 
 - `implement`, `verify`, `review` and `reviewGate` are required, appear once each, in that order, and cannot be turned
