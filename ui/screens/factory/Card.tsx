@@ -1,6 +1,6 @@
 // One Factory card: title, source, the derived note and the actions its column allows.
 import { useState, type ReactNode } from "react";
-import { ACTION_LABELS, SOURCE_LABELS, cardTone, formatDuration, type CardAction, type CardView } from "./board-model.ts";
+import { ACTION_LABELS, SOURCE_LABELS, cardTone, formatDuration, loopbackTitle, type CardAction, type CardView } from "./board-model.ts";
 import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
 import { formatStepReviews } from "../loop/native/issue-trail.ts";
 
@@ -44,6 +44,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       {view.shipOverride ? <p className="fx-hint">Shipped past a secret hit: {view.shipOverride.rule}{view.shipOverride.file ? ` at ${view.shipOverride.file}${view.shipOverride.line ? `:${view.shipOverride.line}` : ""}` : ""}.</p> : null}
       {view.changed ? <p className="fx-hint">{view.changed.files}{view.changed.truncated ? "+" : ""} file{view.changed.files === 1 ? "" : "s"}{view.changed.additions != null ? ` · +${view.changed.additions}/−${view.changed.deletions ?? 0}` : ""}</p> : null}
       {view.test ? <p className="fx-hint">Test: {view.test.ok === null ? "unknown" : view.test.ok ? "passed" : "failed"}{view.test.command ? ` · ${view.test.command}` : ""}</p> : null}
+      {view.loopback ? <div className="fx-failure" role="alert"><strong>{loopbackTitle(view.loopback)}</strong><pre>{view.loopback.findings}</pre></div> : null}
       {view.failingStage ? <div className="fx-failure"><strong>{view.failingStage.name}</strong><pre>{view.failingStage.error}</pre></div> : null}
       {view.readiness ? (
         <form className="fx-form" aria-label="Answer the decision" onSubmit={(e) => { e.preventDefault(); if (!answer.trim()) return; onAction("answer", answer); setAnswer(""); }}>

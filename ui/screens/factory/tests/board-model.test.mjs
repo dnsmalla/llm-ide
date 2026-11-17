@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, laneFor, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, cardTone, chunkShipRequests, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, laneFor, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, cardTone, chunkShipRequests, loopbackTitle, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
 import { formatStepReviews } from "../../loop/native/issue-trail.ts";
+import { NOTE } from "../columns.ts";
 import { budget } from "../../test-support/perf.ts";
 
 const item = (key, over = {}) => ({ key, source: "issue", id: key.slice(6), title: `Title ${key}`, body: "", repo: null, addedAt: "2026-11-09T00:00:00.000Z", runIds: [], ...over });
@@ -356,4 +357,39 @@ test("a queued run the app resumed by itself shows the auto-resume note on its W
   ]);
   const board = buildBoard(items, facts);
   assert.deepEqual(board.working.map((c) => c.note), ["Continuing automatically…", "Queued"]);
+});
+
+test("actionsFor the stopped-no-MR note offers only Open diff, Run again and Discard", () => {
+  const actions = actionsFor("needsYou", NOTE.stoppedNoMr);
+  assert.deepEqual(actions, ["openDiff", "rerun", "discard"]);
+  for (const banned of ["resume", "ship", "finishChecks", "sendBack", "approve"]) assert.ok(!actions.includes(banned));
+  assert.ok(actionsFor("needsYou", NOTE.failed).includes("resume"));
+});
+
+test("a mid-loop card shows its step lane and the round, with no actions", () => {
+  const progress = (over = {}) => ({ stageName: "Implement", stageIndex: 3, stageCount: 8, iteration: 2, maxIterations: 3, repairs: 0, stages: [], startedAt: null, substate: null, ...over });
+  const run = (p) => ({ ...EMPTY_FACTS, live: { ...live("issue:a"), progress: p } });
+  const card = buildBoard([item("issue:a")], new Map([["issue:a", run(progress())]]), Date.now(), { steps: ["Implement", "Verify"] }).working[0];
+  assert.equal(card.status, "Working");
+  assert.deepEqual(card.actions, []);
+  assert.equal(card.lane, "step:Implement");
+  assert.match(card.progressLabel, /round 2 of 3/);
+  const verify = buildBoard([item("issue:a")], new Map([["issue:a", run(progress({ stageName: "Verify", substate: "reviewing" }))]]), Date.now(), { steps: ["Implement", "Verify"] }).working[0];
+  assert.equal(verify.lane, "step:Verify");
+  assert.ok(verify.progressLabel.startsWith("Verify · reviewing · "));
+  assert.equal(progressLabel({ stageName: "Verify", stageIndex: 5, stageCount: 8, iteration: 2, maxIterations: 3, repairs: 0, startedAt: null, substate: "reviewing" }), "Verify · reviewing · 5 of 8 · round 2 of 3");
+  assert.match(progressLabel({ stageName: "Verify", stageIndex: 5, stageCount: 8, iteration: 2, repairs: 0, startedAt: null }), /iter 2/);
+});
+
+test("a stopped loop card is an alert with the findings and a title", () => {
+  const loopback = { rounds: 3, maxRounds: 3, reason: "tests", findings: "boom" };
+  const f = { ...EMPTY_FACTS, worktreeExists: true, lastRecord: rec("r1", { statusCode: "stopped.limit", loopback, verdict: "Stopped after 3 rounds: tests still failing" }) };
+  const card = buildBoard([item("issue:a")], new Map([["issue:a", f]])).needsYou[0];
+  assert.equal(card.status, "Needs you");
+  assert.equal(cardTone(card.status), "alert");
+  assert.equal(card.note, "Stopped, no MR opened");
+  assert.equal(card.loopback.findings, "boom");
+  assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "tests", findings: "" }), "Tests still failing after 3 rounds");
+  assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "review", findings: "" }), "Review still requests changes after 3 rounds");
+  assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "limit", findings: "" }), "Stopped at its limit in round 3 of 3");
 });
