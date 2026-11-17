@@ -113,7 +113,7 @@ again; the next run uses the file.
 ## Which steps a re-run uses
 
 A full run, and a restart after a rejected MR, run every step. **Send back** runs Implement, Verify, Review and the
-Review gate; **Finish checks** runs Verify, Review and the Review gate. Both also keep your blocking custom checks
+Review gate; **Continue** (on an interrupted card) runs Verify, Review and the Review gate. Both also keep your blocking custom checks
 (shell and verdict steps such as Structure verify) and skip custom skill steps such as Test gaps and Doc review.
 
 ## Errors

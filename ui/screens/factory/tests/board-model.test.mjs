@@ -31,8 +31,8 @@ test("actionsFor readyToShip is openDiff, ship, discard", () => {
 });
 
 test("actionsFor needsYou with Interrupted is resume, discard", () => {
-  assert.deepEqual(actionsFor("needsYou", "Interrupted"), ["finishChecks", "rerun", "discard"]);
-  assert.equal(ACTION_LABELS.finishChecks, "Finish checks");
+  assert.deepEqual(actionsFor("needsYou", "Interrupted"), ["finishChecks", "openDiff", "rerun", "discard"]);
+  assert.equal(ACTION_LABELS.finishChecks, "Continue");
   assert.equal(ACTION_LABELS.rerun, "Run again from start");
   assert.deepEqual(actionsFor("needsYou", "Not shipped"), ["rerun", "openDiff", "discard"]);
 });

@@ -88,7 +88,7 @@ export function runPlanFor(action: "start" | "intake" | "resume" | "finishChecks
 }
 
 /**
- * Finish checks reviews work the interrupted run already did, so there must be some: changes in the worktree and the
+ * Continue (finishChecks) reviews work the interrupted run already did, so there must be some: changes in the worktree and the
  * plan they implement. A run stopped before Plan or Implement would otherwise be reviewed as an empty diff.
  */
 export function finishChecksAllowed(work: { changedFiles: number; hasPlan: boolean }): boolean {

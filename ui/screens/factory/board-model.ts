@@ -27,7 +27,7 @@ export interface CardView {
   notShipped?: string | null;
   shipOverride?: { rule: string; file: string | null; line: number | null } | null;
 }
-export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Finish checks", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue" };
+export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Continue", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue" };
 export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> = { issue: "Issue", spec: "Spec", text: "Text" };
 export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeExists: false, ship: null, shipStatusError: false, lastKnownColumn: null };
 
@@ -40,8 +40,9 @@ export function actionsFor(column: Column, note: string | null, process: { intak
     case "needsDecision": return ["intake", "discard"];
     case "working": return [];
     case "needsYou":
-      // Finish checks tests and reviews the work already done instead of rerunning the whole Loop.
-      if (note === NOTE.interrupted) return ["finishChecks", "rerun", "discard"];
+      // Continue (finishChecks) tests and reviews the work already done instead of rerunning the whole Loop, or resumes
+      // the run when it stopped before its work was written. Open diff shows what the interrupted run changed.
+      if (note === NOTE.interrupted) return ["finishChecks", "openDiff", "rerun", "discard"];
       if (note === NOTE.ciFailed || note === NOTE.newComments || note === NOTE.ciFailedAndComments) return ["sendBack", "openRequest", "openDiff", "discard"];
       if (note === NOTE.closedUnmerged || note === NOTE.statusUnavailable) return ["openRequest", "discard"];
       if (note === NOTE.notShipped) return ["rerun", "openDiff", "discard"];
