@@ -291,7 +291,7 @@ export function fenceFor(text: string): string {
   return "`".repeat(Math.max(3, longest + 1));
 }
 
-function fencedBlock(text: string): string[] {
+export function fencedBlock(text: string): string[] {
   const fence = fenceFor(text);
   return [`${fence}markdown`, text, fence];
 }
