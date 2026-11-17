@@ -26,7 +26,7 @@ const MAX_REVIEW_DIFF_CHARS = 150_000;
 
 export type WorkItem = { source: "issue" | "spec" | "text"; id: string | null; title: string; body: string; repo: string | null; provider?: "github" | "gitlab" | null };
 
-// NOTE: the core neutralises fence markers in the whole agent-run message, so prompts never name the markers.
+// NOTE: the core neutralises the angle-bracket sentinel markers (<<< and >>>) in the whole agent-run message, not backtick fences, so prompts never name those markers.
 /** Where one round's findings are recorded for a re-run code stage: the plan notes for a Factory run, else a findings file. */
 export const FINDINGS_FILE = ".factory/FINDINGS.md";
 export const PLAN_FILE = ".factory/PLAN.md";

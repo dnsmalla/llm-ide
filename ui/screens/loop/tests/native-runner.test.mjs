@@ -694,6 +694,17 @@ test("loopback: review changes forever stops at the limit", async () => {
   assert.equal(out.failedStage.id, "v");
 });
 
+test("loopback: a review stopped by the no-change rule says so, not round limit", async () => {
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify], { maxIterations: 5, consecutiveFailureStop: 2 }), base({
+    async runStage() { return { ok: true, output: "" }; }, repair: noRepair,
+    async reviewStep() { return { verdict: "changes", findings: "same finding" }; },
+  }));
+  assert.equal(out.stoppedAtLimit, true);
+  assert.equal(out.iterationsUsed, 2);
+  assert.equal(out.stepReviews[0].verdict, "unresolved");
+  assert.equal(out.stepReviews[0].reason, "no change since the previous round");
+});
+
 test("loopback: findings accumulate across rounds and are recorded", async () => {
   const contexts = [];
   const recorded = [];

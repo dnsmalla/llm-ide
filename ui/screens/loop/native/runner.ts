@@ -371,9 +371,11 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       unchanged = signature === loopSignature ? unchanged + 1 : 1;
       loopSignature = signature;
       const noChange = unchanged >= Math.max(1, config.consecutiveFailureStop);
+      // Rounds remained when only the no-change rule fired; the recorded reason must say so, not "round limit".
+      const stoppedEarly = iteration < maxRounds && noChange;
       if (iteration >= maxRounds || noChange) {
-        if (trigger.source === "review") await endStepReview(code, "unresolved", groupAttempts.get(trigger.group.closerId) ?? 0, trigger.text, "round limit reached");
-        const summary = stoppedSummary(iteration, trigger.source, iteration < maxRounds && noChange);
+        if (trigger.source === "review") await endStepReview(code, "unresolved", groupAttempts.get(trigger.group.closerId) ?? 0, trigger.text, stoppedEarly ? "no change since the previous round" : "round limit reached");
+        const summary = stoppedSummary(iteration, trigger.source, stoppedEarly);
         deps.log(summary);
         return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: trigger.verify, statusSummary: summary, stoppedAtLimit: true, loopback: { rounds: iteration, maxRounds, reason: trigger.source, findings: findingsText(findings.concat(entry)), stopped: true } };
       }

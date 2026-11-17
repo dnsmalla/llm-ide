@@ -27,9 +27,9 @@ export interface RunRecordFacts {
   autoShipBlocked?: string | null;
   /** Step review verdict counts, or null when the record has none (older records never do). */
   stepReviews?: StepReviewCounts | null;
-  /** Set on a run held for a person (reviewMode human); null otherwise. */
   /** Why and when a looping run stopped without an MR, or null (older records and runs that never looped back). */
   loopback?: LoopbackFacts | null;
+  /** Set on a run held for a person (reviewMode human); null otherwise. */
   awaiting?: { held: "success" | "failed"; kind: AutoShipKind; failedStage: string | null } | null;
   reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null;
 }
