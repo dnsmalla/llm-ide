@@ -77,7 +77,7 @@ export interface RunManagerDeps {
   /** A stage finished (passed or failed): the Factory posts its step comment on the run's issue. */
   onStageResult?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; stage: LoopStage; ok: boolean; iteration: number; runPrefix: string }): void;
   /** The run's record was just written: the Factory opens its draft MR (or records why not). Returns a log line. */
-  autoShip?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; info: WorktreeInfo; entry: { id: string; startedAt: string }; statusCode: string; needsDecision: boolean; failedStage: LoopStage | null; runPrefix: string }): Promise<string>;
+  autoShip?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; info: WorktreeInfo; entry: { id: string; startedAt: string }; statusCode: string; needsDecision: boolean; failedStage: LoopStage | null; runPrefix: string; /** Set by Approve: the kind the run was held as, so the MR label matches it whatever the loop config says now. */ kind?: AutoShipKind }): Promise<string>;
   /**
    * A finished run's record was written (or held): the Factory bus runner reports it to the phone, and the issue trail
    * posts the run summary. `steps`, `durationSeconds`, `costUsd` and `shipLine` (the autoShip log line,
@@ -527,23 +527,27 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   return { loop, info, config, outcome: held ? { ...outcome, awaitingReview: true } : outcome };
 }
 
+/** Runs whose Approve is shipping right now. */
+const shippingHeld = new Set<string>();
+
 /**
  * Approve on a run held for a person: ships it through the same autoShip path as an automatic finish, so every safety
  * block (CI/hook files, secret scan, diff size) still applies. Starts no run. Returns autoShip's log line.
+ * `statusCode` / `shipped` describe the record the card was drawn from; a stale card (no longer awaiting, or already
+ * shipped) is refused so an old click cannot open a second MR.
  */
-export async function shipHeldRun(projectRoot: string, item: RunItem, facts: { runId: string; entry: { id: string; startedAt: string }; awaiting: { held: "success" | "failed"; kind: AutoShipKind; failedStage: string | null } }): Promise<string> {
+export async function shipHeldRun(projectRoot: string, item: RunItem, facts: { runId: string; entry: { id: string; startedAt: string }; statusCode?: string; shipped?: boolean; awaiting: { held: "success" | "failed"; kind: AutoShipKind; failedStage: string | null } }): Promise<string> {
   const d = requireDeps();
   if (!d.autoShip) return "";
-  const info = await findWorktree(d, facts.runId);
-  if (!info) return "MR not opened: the run's worktree was removed.";
-  // autoShip derives the ship kind from the failing stage's role, so the stage is looked up by the name the record kept.
-  let failedStage: LoopStage | null = null;
-  if (facts.awaiting.held === "failed" && facts.awaiting.failedStage) {
-    const loop = await d.loadFactoryLoop(d.fsFor(projectRoot)).catch(() => null);
-    failedStage = loop?.config.stages.find((s) => s.name === facts.awaiting.failedStage) ?? null;
-  }
-  return d.autoShip({ runId: facts.runId, projectRoot, mode: "full", item, info, entry: facts.entry, statusCode: facts.awaiting.held, needsDecision: false, failedStage, runPrefix: repoPrefixFor(projectRoot, info.worktree) })
-    .catch((e: unknown) => `MR not opened: ${e instanceof Error ? e.message : String(e)}`);
+  if ((facts.statusCode !== undefined && facts.statusCode !== "awaiting_review") || facts.shipped) return "Not approved: this run is no longer waiting for review.";
+  // autoShip can take minutes; a second click must not open a second MR.
+  if (shippingHeld.has(facts.runId)) return "Already opening the MR for this run.";
+  shippingHeld.add(facts.runId);
+  const info = await findWorktree(d, facts.runId).catch(() => null);
+  if (!info) { shippingHeld.delete(facts.runId); return "MR not opened: the run's worktree was removed."; }
+  return d.autoShip({ runId: facts.runId, projectRoot, mode: "full", item, info, entry: facts.entry, statusCode: facts.awaiting.held, needsDecision: false, failedStage: null, kind: facts.awaiting.kind, runPrefix: repoPrefixFor(projectRoot, info.worktree) })
+      .catch((e: unknown) => `MR not opened: ${e instanceof Error ? e.message : String(e)}`)
+      .finally(() => { shippingHeld.delete(facts.runId); });
 }
 
 /** The worktree of an earlier run (Resume, continue, sendBack), or null when it was removed. */

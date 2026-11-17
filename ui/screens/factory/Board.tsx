@@ -123,6 +123,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     return () => { live = false; };
   }, [fs, projectRoot, active]);
   const [notice, setNotice] = useState<string | null>(null);
+  // Cards whose Approve is shipping: the button is disabled meanwhile (the run manager also refuses a second ship).
+  const [shipping, setShipping] = useState<ReadonlySet<string>>(new Set());
   const [cleanup, setCleanup] = useState<CleanupPlan | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   useEffect(() => {
@@ -384,10 +386,15 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         const entry = rec?.entry;
         if (!rec || !awaiting || !entry) { setError("This card is not waiting for review. Refresh and try again."); return; }
         // Same autoShip path as an automatic finish: a blocked ship is recorded and shown as "Not shipped".
+        setShipping((cur) => new Set(cur).add(item.key));
         void act(async () => {
-          const line = await shipHeldRun(root, item, { runId: rec.runId, entry, awaiting });
-          if (line) setNotice(line);
-          await refreshStatus(true);
+          try {
+            const line = await shipHeldRun(root, item, { runId: rec.runId, entry, awaiting, statusCode: rec.statusCode, shipped: Boolean(rec.ship) });
+            if (line) setNotice(line);
+            await refreshStatus(true);
+          } finally {
+            setShipping((cur) => { const next = new Set(cur); next.delete(item.key); return next; });
+          }
         });
         return;
       }
@@ -533,6 +540,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
                       selected={view.key === selectedKey}
                       onOpen={() => setSelectedKey(view.key)}
                       onAction={(a, note) => { if (it) onAction(it, a, note); }}
+                      busy={shipping.has(view.key)}
                       requestProvider={it ? facts.get(it.key)?.lastRecord?.ship?.provider ?? null : null}
                       onDiscardStatus={it ? async () => {
                         const runId = it.runIds.at(-1);

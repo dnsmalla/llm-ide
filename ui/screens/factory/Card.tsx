@@ -4,7 +4,7 @@ import { ACTION_LABELS, SOURCE_LABELS, cardTone, formatDuration, type CardAction
 import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
 import { formatStepReviews } from "../loop/native/issue-trail.ts";
 
-export function Card({ view, selected, onOpen, onAction, onDiscardStatus, requestProvider = null }: {
+export function Card({ view, selected, onOpen, onAction, onDiscardStatus, requestProvider = null, busy = false }: {
   view: CardView;
   selected: boolean;
   onOpen: () => void;
@@ -12,6 +12,8 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
   /** Reads the item's worktree status before the confirm, so the confirm can state the numbers. */
   onDiscardStatus?: () => Promise<unknown>;
   requestProvider?: "github" | "gitlab" | null;
+  /** Approve is shipping: it cannot be clicked again. */
+  busy?: boolean;
 }): ReactNode {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
@@ -68,7 +70,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       ) : view.actions.length > 0 ? (
         <div className="fx-actions">
           {view.actions.map((a) => (
-            <button key={a} type="button" className={a === "start" || a === "ship" || a === "finishChecks" || a === "approve" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
+            <button key={a} type="button" disabled={busy && a === "approve"} className={a === "start" || a === "ship" || a === "finishChecks" || a === "approve" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
               if (a === "discard") {
                 setConfirmDiscard(true);
                 setDiscardStatus(null);

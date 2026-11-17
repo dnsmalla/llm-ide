@@ -82,7 +82,7 @@ export function installRunManagerHost(): void {
       }, e));
     },
     autoShip: async (e) => {
-      const kind = autoShipKind({ mode: e.mode, statusCode: e.statusCode, needsDecision: e.needsDecision, failedRole: e.failedStage ? factoryRole(e.failedStage) : null });
+      const kind = e.kind ?? autoShipKind({ mode: e.mode, statusCode: e.statusCode, needsDecision: e.needsDecision, failedRole: e.failedStage ? factoryRole(e.failedStage) : null });
       if (!kind) return "";
       const fs = projectGuardedFs(hostFs, e.projectRoot, activeProject);
       const trail = trailFor(e.runId, e.item);

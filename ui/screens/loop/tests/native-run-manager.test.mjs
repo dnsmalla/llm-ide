@@ -644,14 +644,14 @@ test("shipHeldRun ships a held run through autoShip as a success and starts no r
   assert.equal(rm.liveRuns().length, 0, "approving starts no run");
 });
 
-test("shipHeldRun of a failed hold keeps the failed status and the failing stage", async () => {
+test("shipHeldRun of a failed hold keeps the failed status and the stored kind", async () => {
   const shipped = [];
   setup({ autoShip: async (e) => { shipped.push(e); return ""; } });
   world.list = [{ runId: "r9", project: "/p", repo: "/p", worktree: "/p/system/loop-worktrees/r9", branch: "factory/r9", baseCommit: "abc" }];
   const verify = FACTORY_LOOP.config.stages.find((s) => s.kind === "command" || /verify|test/i.test(s.name));
   await rm.shipHeldRun("/p", item(9), { runId: "r9", entry: { id: "e1", startedAt: "x" }, awaiting: { held: "failed", kind: "testsFailing", failedStage: verify.name } });
   assert.equal(shipped[0].statusCode, "failed");
-  assert.equal(shipped[0].failedStage?.name, verify.name);
+  assert.equal(shipped[0].kind, "testsFailing");
 });
 
 test("shipHeldRun without an autoShip dep, or without the worktree, returns a line and throws nothing", async () => {
@@ -763,4 +763,38 @@ test("a record held in memory is written once, and without storage the in-memory
   await switchProject("/other");
   await switchProject("/p");
   assert.equal(world.records.length, 1, "not written twice");
+});
+
+test("a second concurrent shipHeldRun for the same run calls autoShip once", async () => {
+  const gate = deferred();
+  let calls = 0;
+  setup({ autoShip: async () => { calls++; await gate.promise; return "Draft MR: https://example/mr/1"; } });
+  world.list = [{ runId: "r9", project: "/p", repo: "/p", worktree: "/p/system/loop-worktrees/r9", branch: "factory/r9", baseCommit: "abc" }];
+  const facts = { runId: "r9", entry: { id: "e1", startedAt: "x" }, awaiting: { held: "success", kind: "passed", failedStage: null } };
+  const first = rm.shipHeldRun("/p", item(9), facts);
+  await settle();
+  assert.match(await rm.shipHeldRun("/p", item(9), facts), /Already opening/);
+  gate.resolve();
+  assert.match(await first, /Draft MR/);
+  assert.equal(calls, 1);
+  assert.match(await rm.shipHeldRun("/p", item(9), facts), /Draft MR/, "after it finishes, the guard is released");
+});
+
+test("shipHeldRun refuses a stale record: already shipped or no longer awaiting review", async () => {
+  let calls = 0;
+  setup({ autoShip: async () => { calls++; return "x"; } });
+  world.list = [{ runId: "r9", project: "/p", repo: "/p", worktree: "/p/system/loop-worktrees/r9", branch: "factory/r9", baseCommit: "abc" }];
+  const base = { runId: "r9", entry: { id: "e1", startedAt: "x" }, awaiting: { held: "success", kind: "passed", failedStage: null } };
+  assert.match(await rm.shipHeldRun("/p", item(9), { ...base, shipped: true, statusCode: "awaiting_review" }), /no longer waiting/);
+  assert.match(await rm.shipHeldRun("/p", item(9), { ...base, statusCode: "success" }), /no longer waiting/);
+  assert.equal(calls, 0);
+});
+
+test("a held failed run whose stage no longer exists still ships with its stored kind", async () => {
+  const shipped = [];
+  setup({ autoShip: async (e) => { shipped.push(e); return ""; } });
+  world.list = [{ runId: "r9", project: "/p", repo: "/p", worktree: "/p/system/loop-worktrees/r9", branch: "factory/r9", baseCommit: "abc" }];
+  await rm.shipHeldRun("/p", item(9), { runId: "r9", entry: { id: "e1", startedAt: "x" }, awaiting: { held: "failed", kind: "testsFailing", failedStage: "Renamed away" } });
+  assert.equal(shipped[0].kind, "testsFailing");
+  assert.equal(shipped[0].statusCode, "failed");
 });
