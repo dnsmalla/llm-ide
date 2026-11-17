@@ -35,7 +35,8 @@ const SCHEMA_DIR = join(ROOT, 'schema/http');
 const FIXTURE_DIR = join(SCHEMA_DIR, 'fixtures');
 const SERVER = join(ROOT, 'extension/server.mjs');
 const STUB_CLI = join(HERE, 'fixtures/stub-claude-cli.mjs');
-// 0.57 since v149 removed 31 client-less routes whose fixtures all replayed (474/818 then); raise it as fixtures land.
+// 0.57 since v149 removed 31 client-less routes, 108 fixtures and their skip rules
+// (474/818 = 57.9% after); raise it as fixtures land.
 const COVERAGE_TARGET = 0.57;
 // Assert mode (feature matrix, scripts/feature-matrix.mjs): CONTRACT_FEATURES is
 // the LLMIDE_FEATURES value the server boots with, and CONTRACT_EXPECT_DISABLED=1

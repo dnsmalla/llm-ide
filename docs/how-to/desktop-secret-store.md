@@ -22,10 +22,7 @@ CSPRNG, hex encoded (64 chars; the server requires at least 32).
   To reset, delete the `com.llmide.desktop` entries in the OS credential manager.
 - The secrets reach the sidecar via `Command::env` only: never argv, never logged
   (`Secrets` has a redacted `Debug`; errors never include values).
-- The webview gets one command, `secrets_status`, returning booleans
-  (`backend`, `available`, `jwt_secret`, `vault_key`). No command returns a value.
-  It is declared in `build.rs`, granted as `allow-secrets-status` in
-  `capabilities/default.json`, and covered by `npm run check:security`.
+- The webview has no secrets command at all; no command returns a value.
 - An adopted server on :3456 keeps its own environment; the host only supplies
   secrets to a sidecar it spawns.
 

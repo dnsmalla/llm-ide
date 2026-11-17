@@ -61,7 +61,7 @@ server itself refuses a busy chat or a stale receipt. A hard 6 s cap bounds the 
 
 A journal (`archive-journal.json`) is written before the first server call. At the next start, right after
 the webview binds its session, the sweep replays tombstones and repeats the same steps; it needs no journal
-to be correct, the journal only makes an interrupted run visible (`chat_archive_status`).
+to be correct, the journal only makes an interrupted run visible on disk.
 
 | | macOS | Windows / Linux |
 |---|---|---|
@@ -106,4 +106,4 @@ in the file to remove, so the drop is skipped. Tests: `ui/screens/chat/tests/con
 `chat_bind_session`, `chat_unbind_session`, `chat_list` (paged, newest first, 10k+ chats via a cached
 index keyed by mtime and size), `chat_load` (page), `chat_save` (`replace`, or `append` with the expected
 count; the revision is required once the chat exists), `chat_drop_message` (drop the newest interrupted
-assistant partial; see "Retry and interrupted replies"), `chat_delete`, `chat_archive_status`.
+assistant partial; see "Retry and interrupted replies"), `chat_delete`.

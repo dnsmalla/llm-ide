@@ -153,7 +153,7 @@ pub(crate) fn accepted(result: &rfd::MessageDialogResult, accept: &str) -> bool 
     matches!(result, rfd::MessageDialogResult::Custom(label) if label == accept)
 }
 
-// ---- bypass_confirm -----------------------------------------------------------------------
+// ---- bypass_confirm_signed ----------------------------------------------------------------
 
 pub const SUMMARY_MAX_CHARS: usize = 120;
 static BYPASS_LIMIT: RateLimit = RateLimit::new(1_000, 6);

@@ -1,8 +1,9 @@
 /**
  * Custom Provider Registry
  *
- * User-registered LLM providers, synced from the Mac app
- * (`POST /kb/custom-providers`) and looked up by `custom:<uuid>` at dispatch.
+ * User-registered LLM providers, looked up by `custom:<uuid>` at dispatch.
+ * NOTE: the only writer was the retired Mac app's `POST /kb/custom-providers`
+ * (removed in API v149); `syncCustomProviders` is now reached from tests only.
  *
  * PER USER, and persisted. It used to be one process-global Map that every
  * sync `clear()`ed: user B's sync wiped user A's providers, and a server

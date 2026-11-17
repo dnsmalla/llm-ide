@@ -6,7 +6,7 @@
 //!   Secret Service) under service `com.llmide.desktop`, through the `keyring` crate.
 //! - Generated once (32 random bytes, hex), read on every core start, handed to the
 //!   Node sidecar through its environment only. Never argv, never logged, never
-//!   returned to the webview (`secrets_status` returns booleans).
+//!   returned to the webview (no command exposes them).
 //! - Fails closed: a locked or unavailable store is an error. A read error never
 //!   triggers generation (that would orphan the vault), and there is no plaintext
 //!   file fallback.

@@ -549,6 +549,7 @@ macro_rules! app_handler {
                 sse_replay::sse_replay_stop,
                 sse_replay::sse_channel_stream,
                 ax_probe::ax_probe,
+                capture_ax_macos::capture_dump_tree
         ]
     };
 }

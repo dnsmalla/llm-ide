@@ -6,7 +6,7 @@
 //   2. "which model should run next?"        → resolveModel() (the auto-switch)
 //
 // Every dispatch path records into usage_ledger: chat/review via runClaude +
-// providers.mjs, and the Mac Auto Tasks CLI via POST /kb/usage/record. Caps are
+// providers.mjs. Caps are
 // user-set per (provider, model); defaults live here in DEFAULT_CHAINS so an
 // untouched provider needs no DB rows and the feature stays inert (limit 0 = no
 // cap) until the user configures it.
