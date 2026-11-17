@@ -516,6 +516,47 @@ test("LiveRun.progress follows the runner events", async () => {
   assert.equal(rm.liveRuns().find((r) => r.runId === a).progress.repairs, 1);
 });
 
+test("a step review sets the live sub-state and its verdicts reach the record, findings capped at 2000", async () => {
+  let emit;
+  setup({ runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const live = () => rm.liveRuns().find((r) => r.runId === a);
+  const impl = { id: "s1", name: "Implement" };
+  emit({ type: "stage-start", stage: impl, index: 3, count: 8, iteration: 1 });
+  emit({ type: "step-review", stage: impl, phase: "reviewing", attempt: 1 });
+  await settle();
+  assert.equal(live().progress.substate, "reviewing");
+  emit({ type: "step-review", stage: impl, phase: "fixing", attempt: 1 });
+  await settle();
+  assert.equal(live().progress.substate, "fixing review");
+  emit({ type: "step-review-result", stage: impl, verdict: "approve", attempts: 1 });
+  await settle();
+  assert.equal(live().progress.substate, null);
+  emit({ type: "step-review", stage: impl, phase: "reviewing", attempt: 1 });
+  emit({ type: "stage-start", stage: { id: "s2", name: "Verify" }, index: 4, count: 8, iteration: 1 });
+  await settle();
+  assert.equal(live().progress.substate, null, "a new stage clears the sub-state");
+  const stepReviews = [
+    { stageId: "s1", stageName: "Implement", verdict: "approve", attempts: 1, findings: "" },
+    { stageId: "s2", stageName: "Verify", verdict: "unresolved", attempts: 3, findings: "x".repeat(2500), reason: "repair budget exhausted" },
+  ];
+  await finish(a, { ...PASSED, stepReviews });
+  const { record } = world.records[0];
+  assert.deepEqual(record.stepReviews, [
+    { stageName: "Implement", verdict: "approve", attempts: 1, findings: "" },
+    { stageName: "Verify", verdict: "unresolved", attempts: 3, findings: "x".repeat(2000), reason: "repair budget exhausted" },
+  ]);
+});
+
+test("a record has no stepReviews key when no step was reviewed", async () => {
+  setup();
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  assert.equal("stepReviews" in world.records[0].record, false);
+});
+
 test("startRun does not start a second live run for the same item, project and mode", async () => {
   setup();
   const a = rm.startRun("/p", item(1), "full");

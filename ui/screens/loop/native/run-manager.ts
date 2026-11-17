@@ -10,12 +10,12 @@ import { TEMPLATE_FILE, applyTemplate, droppedMessage, formatFactoryTemplate, pa
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
-import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent } from "./runner.ts";
+import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent, type StepReviewOutcome } from "./runner.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
 import { newRunId, repoPrefixFor } from "./worktree-run.ts";
-import { summarizeSteps } from "./issue-trail.ts";
+import { countStepReviews, summarizeSteps, type StepReviewCounts } from "./issue-trail.ts";
 
 export type { RunMode } from "./factory.ts";
 
@@ -42,6 +42,8 @@ export interface LiveRun {
     repairs: number;
     stages: { id: string; name: string; state: "running" | "passed" | "failed" | "repaired" | "skipped" }[];
     startedAt: string | null;
+    /** What the run does inside the current step while its AI review runs; null otherwise. */
+    substate: "reviewing" | "fixing review" | null;
   } | null;
 }
 
@@ -79,7 +81,7 @@ export interface RunManagerDeps {
    * posts the run summary. `steps`, `durationSeconds`, `costUsd` and `shipLine` (the autoShip log line,
    * "" when none) describe the run for that summary.
    */
-  onRunFinished?(info: { runId: string; itemKey: string; projectRoot: string; mode: RunMode; statusCode: string; statusSummary: string; item: RunItem; steps: { name: string; ok: boolean; attempts: number }[]; durationSeconds: number; costUsd: number | null; shipLine: string }): void;
+  onRunFinished?(info: { runId: string; itemKey: string; projectRoot: string; mode: RunMode; statusCode: string; statusSummary: string; item: RunItem; steps: { name: string; ok: boolean; attempts: number }[]; durationSeconds: number; costUsd: number | null; shipLine: string; stepReviews: StepReviewCounts | null }): void;
 }
 
 /** The host's RunInfo (Phase A Task 4), camelCase on the wire. */
@@ -400,7 +402,7 @@ async function execute(run: ManagedRun): Promise<void> {
       const o = finished.outcome;
       d.onRunFinished?.({
         runId: run.live.runId, itemKey: run.item.key, projectRoot: run.live.projectRoot, mode: run.live.mode, statusCode: runStatusCode(o), statusSummary: o.statusSummary,
-        item: run.item, steps: summarizeSteps(o.stages),
+        item: run.item, steps: summarizeSteps(o.stages), stepReviews: countStepReviews(o.stepReviews),
         durationSeconds: (d.now().getTime() - started.getTime()) / 1000, costUsd: o.costUsd ?? null, shipLine,
       });
     } catch { /* a listener must never change the run's own outcome */ }
@@ -451,7 +453,7 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     isCancelled: () => run.cancelled, markCancelled: () => { run.cancelled = true; },
   };
   log(`▶ ${loop.name} (${run.live.mode})`);
-  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, repairs: 0, stages: [], startedAt: run.live.startedAt };
+  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null };
   run.live.progress = progress;
   const onProgress = (e: RunProgressEvent) => {
     if (e.type === "iteration") progress.iteration = e.iteration;
@@ -459,6 +461,8 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       const stage = e.stage.name;
       markerWrites = markerWrites.then(() => writeMarker(fs, marker, JSON.stringify({ ...markerBase, stage }), true));
       progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
+      // A new step starts with no review in progress, so a sub-state from the previous step cannot carry over.
+      progress.substate = null;
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = "running"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "running" });
     } else if (e.type === "stage-result") {
@@ -471,6 +475,10 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = "skipped"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "skipped" });
+    } else if (e.type === "step-review") {
+      progress.substate = e.phase === "fixing" ? "fixing review" : "reviewing";
+    } else if (e.type === "step-review-result") {
+      progress.substate = null;
     } else if (e.type === "repair") {
       progress.repairs += 1;
       const row = progress.stages.find((r) => r.id === e.stage.id);
@@ -517,6 +525,15 @@ export function repoRelFor(repo: string | null, projectRoot: string, workRoot: s
   return workRoot ? repoPrefixFor(projectRoot, workRoot) : "";
 }
 
+/** Findings are capped so one long review cannot bloat the run record; the rest of the findings stay in the Review. */
+const RECORD_FINDINGS_MAX = 2000;
+
+/** The run record's `stepReviews`: one entry per review episode. Omitted entirely when no step was reviewed. */
+function stepReviewRecords(reviews: readonly StepReviewOutcome[] | undefined): { stepReviews?: { stageName: string; verdict: StepReviewOutcome["verdict"]; attempts: number; findings: string; reason?: string }[] } {
+  if (!reviews || reviews.length === 0) return {};
+  return { stepReviews: reviews.map((r) => ({ stageName: r.stageName, verdict: r.verdict, attempts: r.attempts, findings: r.findings.slice(0, RECORD_FINDINGS_MAX), ...(r.reason !== undefined ? { reason: r.reason } : {}) })) };
+}
+
 async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Finished, started: Date): Promise<{ id: string; startedAt: string } | null> {
   const { live, item } = run;
   const ended = d.now();
@@ -534,7 +551,7 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
   const entry: LoopRunIndexEntry & { factoryRunId: string; factoryMode: RunMode } = { id: d.newId(), loopId: f.loop.id, loopName: f.loop.name, startedAt: started.toISOString(), durationSeconds: (ended.getTime() - started.getTime()) / 1000, iterationsUsed: f.outcome.iterationsUsed, statusCode: runStatusCode(f.outcome), statusSummary: f.outcome.statusSummary, trigger: "manual", factoryRunId: live.runId, factoryMode: live.mode };
   const stages = f.outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, costUsd: o.usage?.costUsd ?? null, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: o.durationMs ?? 0 } }));
   const record = {
-    ...entry, endedAt: ended.toISOString(), gitRoot: f.info.worktree, config: f.config, changedPaths, summaryPath: null, stages,
+    ...entry, endedAt: ended.toISOString(), gitRoot: f.info.worktree, config: f.config, changedPaths, summaryPath: null, stages, ...stepReviewRecords(f.outcome.stepReviews),
     iterations: iterationRecordsWithScores(f.outcome.iterations),
     workItem: { source: item.source, id: item.id, title: item.title },
     worktree: { runId: live.runId, branch: f.info.branch, baseCommit: f.info.baseCommit, repo: f.info.repo },

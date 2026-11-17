@@ -1,6 +1,7 @@
 // Board columns, derived from stored facts every time the board is read. A column is never written anywhere.
 import type { LiveRun, RunMode } from "../loop/native/run-manager.ts";
 import { factoryRole } from "../loop/native/factory.ts";
+import type { StepReviewCounts } from "../loop/native/issue-trail.ts";
 import { displayText } from "../explorer/scm/model.ts";
 
 export type Column = "inbox" | "needsDecision" | "working" | "needsYou" | "readyToShip" | "shipped" | "done";
@@ -21,6 +22,8 @@ export interface RunRecordFacts {
   readiness: string | null;
   /** Why the run did not open its draft MR by itself (auto-ship refused or failed), or null. */
   autoShipBlocked?: string | null;
+  /** Step review verdict counts, or null when the record has none (older records never do). */
+  stepReviews?: StepReviewCounts | null;
   reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null;
 }
 
@@ -87,9 +90,23 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
     lastStage: (() => { const n = stages.at(-1)?.stageName; return typeof n === "string" && n !== "" ? n.slice(0, 120) : null; })(),
     readiness,
     autoShipBlocked: isRecord(raw.autoShip) && typeof raw.autoShip.blocked === "string" && raw.autoShip.blocked.trim() !== "" ? displayText(raw.autoShip.blocked).slice(0, 300) : null,
+    stepReviews: decodeStepReviewCounts(raw.stepReviews),
     endedAt: typeof raw.endedAt === "string" ? raw.endedAt : null,
     entry,
   };
+}
+
+/** Counts the verdicts of a record's `stepReviews`. Malformed entries are skipped, so a damaged entry never breaks the board. */
+function decodeStepReviewCounts(v: unknown): StepReviewCounts | null {
+  if (!Array.isArray(v)) return null;
+  const counts: StepReviewCounts = { approved: 0, unresolved: 0, skipped: 0 };
+  for (const entry of v) {
+    if (!isRecord(entry)) continue;
+    if (entry.verdict === "approve") counts.approved += 1;
+    else if (entry.verdict === "unresolved") counts.unresolved += 1;
+    else if (entry.verdict === "skipped") counts.skipped += 1;
+  }
+  return counts.approved + counts.unresolved + counts.skipped > 0 ? counts : null;
 }
 
 function finishedNote(statusCode: string): string {

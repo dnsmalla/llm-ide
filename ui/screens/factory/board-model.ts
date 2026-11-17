@@ -3,6 +3,7 @@
 import { loadRunRecord, type HistoryFs } from "../loop/native/history.ts";
 import type { WorkItem } from "../loop/native/factory.ts";
 import type { LiveRun } from "../loop/native/run-manager.ts";
+import type { StepReviewCounts } from "../loop/native/issue-trail.ts";
 import { COLUMNS, COLUMN_LABELS, NOTE, columnFor, decodeRunRecordFacts, type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
 import type { WorkItemRecord } from "./items.ts";
 
@@ -25,6 +26,8 @@ export interface CardView {
   readiness?: string | null;
   /** Why the run did not open its draft MR by itself. */
   notShipped?: string | null;
+  /** The last run's step review verdicts; the key is absent when it has none. */
+  stepReviews?: StepReviewCounts | null;
   shipOverride?: { rule: string; file: string | null; line: number | null } | null;
 }
 export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Continue", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue" };
@@ -158,7 +161,7 @@ export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, lane: laneFor(column, f, steps), status: COLUMN_LABELS[column], progress: f.live?.progress && f.live.progress.stageCount > 0 ? Math.min(1, (f.live.progress.stageIndex + 1) / f.live.progress.stageCount) : null, actions: actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, lane: laneFor(column, f, steps), status: COLUMN_LABELS[column], progress: f.live?.progress && f.live.progress.stageCount > 0 ? Math.min(1, (f.live.progress.stageIndex + 1) / f.live.progress.stageCount) : null, actions: actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null, ...(f.lastRecord?.stepReviews ? { stepReviews: f.lastRecord.stepReviews } : {}) });
   }
   return board;
 }
@@ -396,10 +399,11 @@ export function formatDuration(seconds: number): string {
 
 /** One line for a live card: `Implement · 3 of 8 · iter 2 · repair 1 · 4m 12s`. */
 export function progressLabel(
-  p: { stageName: string | null; stageIndex: number; stageCount: number; iteration: number; repairs: number; startedAt: string | null },
+  p: { stageName: string | null; stageIndex: number; stageCount: number; iteration: number; repairs: number; startedAt: string | null; substate?: string | null },
   nowMs = Date.now(),
 ): string {
-  const stage = p.stageName ? `${p.stageName} · ${p.stageIndex} of ${p.stageCount}` : p.iteration > 0 ? `Iteration ${p.iteration}` : "Starting";
+  // The sub-state sits between the step name and its position, so the card reads "Implement · reviewing · 3 of 8".
+  const stage = p.stageName ? `${p.stageName}${p.substate ? ` · ${p.substate}` : ""} · ${p.stageIndex} of ${p.stageCount}` : p.iteration > 0 ? `Iteration ${p.iteration}` : "Starting";
   const parts = [stage];
   if (p.stageName && p.iteration > 0) parts.push(`iter ${p.iteration}`);
   if (p.repairs > 0) parts.push(`repair ${p.repairs}`);

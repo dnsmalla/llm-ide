@@ -101,6 +101,27 @@ export function stepCommentBody(f: StepFacts): string {
   return lines.join("\n");
 }
 
+/** Verdict counts over one run's step reviews (a run that reviewed no step has none, so the counts are null). */
+export interface StepReviewCounts { approved: number; unresolved: number; skipped: number }
+
+/** Counts the verdicts of a run's step reviews, or null when no step was reviewed or skipped. */
+export function countStepReviews(outcomes: readonly { verdict: "approve" | "unresolved" | "skipped" }[] | undefined): StepReviewCounts | null {
+  if (!outcomes || outcomes.length === 0) return null;
+  const counts: StepReviewCounts = { approved: 0, unresolved: 0, skipped: 0 };
+  for (const o of outcomes) {
+    if (o.verdict === "approve") counts.approved += 1;
+    else if (o.verdict === "unresolved") counts.unresolved += 1;
+    else if (o.verdict === "skipped") counts.skipped += 1;
+  }
+  return counts;
+}
+
+/** `2 approved, 1 unresolved`: the non-zero counts in that order, or "" when there are none. */
+export function formatStepReviews(counts: StepReviewCounts | null | undefined): string {
+  if (!counts) return "";
+  return [counts.approved > 0 ? `${counts.approved} approved` : "", counts.unresolved > 0 ? `${counts.unresolved} unresolved` : "", counts.skipped > 0 ? `${counts.skipped} skipped` : ""].filter((part) => part !== "").join(", ");
+}
+
 export interface SummaryFacts {
   process: string;
   runId: string;
@@ -113,6 +134,8 @@ export interface SummaryFacts {
   costUsd?: number | null;
   /** A runOnce stage that already passed is reported without pretending it ran again. */
   skipped?: boolean;
+  /** Step review verdicts; one line only when a step was reviewed or skipped. */
+  stepReviews?: StepReviewCounts | null;
   /** The MR/PR this run opened, or the reason none was opened. */
   mergeRequest?: { url: string } | { notOpened: string } | null;
 }
@@ -132,6 +155,8 @@ export function runSummaryBody(f: SummaryFacts): string {
     if (f.steps.length > MAX_STEPS) lines.push(`| … and ${f.steps.length - MAX_STEPS} more | | |`);
     lines.push("");
   }
+  const reviews = formatStepReviews(f.stepReviews);
+  if (reviews) lines.push(`Step reviews: ${reviews}`);
   lines.push(f.changedFiles && f.changedFiles.length > 0 ? changedLine(f.changedFiles) : "Changed files: none");
   const facts: string[] = [];
   if (typeof f.durationSeconds === "number" && Number.isFinite(f.durationSeconds)) facts.push(`time ${Math.max(0, Math.round(f.durationSeconds))} s`);

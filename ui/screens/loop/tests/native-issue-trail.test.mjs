@@ -154,3 +154,12 @@ test("the Loop screen opens a run issue only when config.issueTrail is on", asyn
   assert.match(call.slice(0, 600), /open: target\.config\.issueTrail === true/);
   assert.doesNotMatch(call.slice(0, 600), /open: true/);
 });
+
+test("runSummaryBody adds one step reviews line only when a step was reviewed", () => {
+  const base = { process: "Factory", runId: "r", statusCode: "success", statusSummary: "", steps: [], changedFiles: [] };
+  const body = runSummaryBody({ ...base, stepReviews: { approved: 2, unresolved: 1, skipped: 0 } });
+  assert.ok(body.includes("Step reviews: 2 approved, 1 unresolved"), body);
+  assert.equal(body.split("\n").filter((l) => l.startsWith("Step reviews:")).length, 1);
+  assert.equal(runSummaryBody(base).includes("Step reviews"), false);
+  assert.equal(runSummaryBody({ ...base, stepReviews: null }).includes("Step reviews"), false);
+});

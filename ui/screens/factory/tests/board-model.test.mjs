@@ -5,6 +5,7 @@ import {
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem,
 } from "../board-model.ts";
+import { formatStepReviews } from "../../loop/native/issue-trail.ts";
 import { budget } from "../../test-support/perf.ts";
 
 const item = (key, over = {}) => ({ key, source: "issue", id: key.slice(6), title: `Title ${key}`, body: "", repo: null, addedAt: "2026-11-09T00:00:00.000Z", runIds: [], ...over });
@@ -319,4 +320,19 @@ test("a process without an Intake step offers no Run intake on Inbox cards", () 
   assert.deepEqual(actionsFor("inbox", null), ["start", "intake", "discard"], "unknown process: unchanged");
   const board = buildBoard([item("issue:a")], new Map(), 0, { intake: false });
   assert.deepEqual(board.inbox[0].actions, ["start", "discard"]);
+});
+
+test("progressLabel names the review sub-state after the stage", () => {
+  const p = { stageName: "Implement", stageIndex: 3, stageCount: 8, iteration: 1, repairs: 0, startedAt: null };
+  assert.equal(progressLabel({ ...p, substate: "reviewing" }), "Implement · reviewing · 3 of 8 · iter 1");
+  assert.equal(progressLabel({ ...p, substate: "fixing review" }), "Implement · fixing review · 3 of 8 · iter 1");
+  assert.equal(progressLabel(p), "Implement · 3 of 8 · iter 1");
+});
+
+test("buildBoard puts the step review counts on the card, and a skipped non-git review reads as 1 skipped", () => {
+  const records = new Map([["issue:a", { ...EMPTY_FACTS, lastRecord: { ...rec("ra"), stepReviews: { approved: 0, unresolved: 0, skipped: 1 } }, worktreeExists: true }]]);
+  const board = buildBoard([item("issue:a", { runIds: ["ra"] })], records);
+  assert.deepEqual(board.readyToShip[0].stepReviews, { approved: 0, unresolved: 0, skipped: 1 });
+  assert.equal(formatStepReviews(board.readyToShip[0].stepReviews), "1 skipped");
+  assert.equal("stepReviews" in buildBoard([item("issue:b")], new Map()).inbox[0], false, "no reviews, no key");
 });

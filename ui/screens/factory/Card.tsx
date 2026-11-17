@@ -2,6 +2,7 @@
 import { useState, type ReactNode } from "react";
 import { ACTION_LABELS, SOURCE_LABELS, cardTone, formatDuration, type CardAction, type CardView } from "./board-model.ts";
 import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
+import { formatStepReviews } from "../loop/native/issue-trail.ts";
 
 export function Card({ view, selected, onOpen, onAction, onDiscardStatus, requestProvider = null }: {
   view: CardView;
@@ -36,6 +37,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       ) : null}
       {view.lastLine ? <p className="fx-card-line" title={view.lastLine}>{view.lastLine.slice(0, 120)}</p> : null}
       {view.verdict ? <p className="fx-hint">{view.verdict}</p> : null}
+      {view.stepReviews ? <p className="fx-hint">Step reviews: {formatStepReviews(view.stepReviews)}</p> : null}
       {view.notShipped ? <p className="fx-hint" role="note">Not shipped: {view.notShipped}</p> : null}
       {view.shipOverride ? <p className="fx-hint">Shipped past a secret hit: {view.shipOverride.rule}{view.shipOverride.file ? ` at ${view.shipOverride.file}${view.shipOverride.line ? `:${view.shipOverride.line}` : ""}` : ""}.</p> : null}
       {view.changed ? <p className="fx-hint">{view.changed.files}{view.changed.truncated ? "+" : ""} file{view.changed.files === 1 ? "" : "s"}{view.changed.additions != null ? ` · +${view.changed.additions}/−${view.changed.deletions ?? 0}` : ""}</p> : null}

@@ -109,7 +109,7 @@ export function installRunManagerHost(): void {
         process: "Factory", runId: info.runId, statusCode: info.statusCode, statusSummary: info.statusSummary, steps: info.steps,
         changedFiles: await invokeHost<unknown>("loop_worktree_diff", { runId: info.runId }).then((raw) => decodeWorktreeDiff(raw).files, () => null),
         durationSeconds: info.durationSeconds, costUsd: info.costUsd,
-        mergeRequest: shipLineToMr(info.shipLine),
+        mergeRequest: shipLineToMr(info.shipLine), stepReviews: info.stepReviews,
       }));
       void (trail?.idle() ?? Promise.resolve()).then(() => trails.delete(info.runId));
     },
