@@ -11,12 +11,20 @@ export async function readReviewMode(fs: Pick<FsApi, "read">): Promise<"auto" | 
 }
 
 export async function writeReviewMode(fs: Pick<FsApi, "read" | "write">, mode: "auto" | "human"): Promise<{ ok: true } | { ok: false; message: string }> {
-  const file = await readTemplateFile(fs);
+  // A read error is reported, not thrown: the caller is a click handler with nobody to catch it.
+  let file: Awaited<ReturnType<typeof readTemplateFile>>;
+  try {
+    file = await readTemplateFile(fs);
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
   if (file.kind === "missing") return { ok: false, message: "The Factory process file does not exist yet. Open Process once to create it." };
   const parsed = file.parse.ok ? file.parse : parseFactoryTemplate(file.text);
   if (!parsed.ok) return { ok: false, message: "The Factory process has problems; fix them in Process first." };
-  const { reviewMode: _drop, ...rest } = parsed.template;
-  const next = mode === "human" ? { ...rest, reviewMode: "human" as const } : rest;
+  // Auto means the key is absent (the file stays minimal), so remove it rather than write "auto".
+  const next = { ...parsed.template };
+  if (mode === "human") next.reviewMode = "human";
+  else delete next.reviewMode;
   // expected_hash makes a concurrent Process-tab save win instead of being overwritten.
   try {
     await fs.write(TEMPLATE_FILE, formatFactoryTemplate(next), { expected_hash: file.hash });

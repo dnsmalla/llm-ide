@@ -128,6 +128,19 @@ In human mode, **Approve** lets the run ship. **Request changes** takes your not
 `.factory/HUMAN-REVIEW.md` and re-runs from Implement. A run that is waiting for your review survives quitting the app
 and is never resumed automatically; open it and decide. Interrupted runs, by contrast, resume once on their own.
 
+Auto-resume applies only when all of these hold: the run was interrupted by an app quit, the app is in Local mode with
+the core it spawned itself, the loop is not manual-only, the card was not discarded, the run id has not been resumed
+before (at most once per run id), and the run is not awaiting review. When it cannot be sure (for example the state
+is unreadable), it starts nothing.
+
+These safety gates stay human, whatever the review settings are:
+
+- the native shell-command approval the app shows before a run starts;
+- the Ship secret-scan override;
+- scheduled loops that are manual-only (they never start on their own);
+- the block on auto-shipping changes to CI or hook files;
+- Intake "needs decision" (a run stops there until you decide).
+
 The **Final review: Auto / Human** control in the Factory board header edits `reviewMode` for you: Human adds the key,
 Auto removes it, and every other key stays as it was.
 

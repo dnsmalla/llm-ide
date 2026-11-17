@@ -101,15 +101,20 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   useEffect(() => {
     if (!active || !projectRoot) return;
     let cancelled = false;
+    // Clear first so a project switch never shows the previous project's value while the new one loads.
+    setReviewModeState(null);
     readReviewMode(fs).then((mode) => { if (!cancelled) setReviewModeState(mode); }, () => { if (!cancelled) setReviewModeState(null); });
     return () => { cancelled = true; };
   }, [active, projectRoot, fs]);
   const chooseReviewMode = (mode: "auto" | "human") => {
     if (mode === reviewMode) return;
-    void writeReviewMode(fs, mode).then((r) => {
-      if (r.ok) setReviewModeState(mode);
-      else setError(r.message);
-    });
+    void writeReviewMode(fs, mode).then(
+      (r) => {
+        if (r.ok) setReviewModeState(mode);
+        else setError(r.message);
+      },
+      (e) => setError(e instanceof Error ? e.message : String(e)),
+    );
   };
 
   useEffect(() => {

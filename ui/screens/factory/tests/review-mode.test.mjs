@@ -27,3 +27,9 @@ test("an invalid or missing template is refused without writing", async () => {
   assert.equal((await writeReviewMode(none, "human")).ok, false);
   assert.equal(await readReviewMode(none), null);
 });
+
+test("a read error is returned as a failure, not thrown", async () => {
+  const fs = { read: async () => { throw new Error("disk gone"); }, write: async () => { throw new Error("must not write"); } };
+  const r = await writeReviewMode(fs, "human");
+  assert.deepEqual(r, { ok: false, message: "disk gone" });
+});

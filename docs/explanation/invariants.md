@@ -593,7 +593,8 @@ Pinned by the tests in `desktop/src-tauri/src/loop_worktree.rs` and `loop_runner
 - **`reviewAfter` and `reviewMode` are written only when they differ from the default.** `setReviewAfter` deletes the key when the value equals `effectiveReviewAfter` for an unset key; `setReviewMode("auto")` deletes `reviewMode`. This keeps `loop.json` and `system/factory-template.json` minimal.
 - **`system/factory-template.json` is the single source of the Factory's review settings.** The Board's "Final review" toggle goes through `readTemplateFile` / `parseFactoryTemplate` / `formatFactoryTemplate` with an `expected_hash`, and refuses to write when the file is missing or invalid.
 - **A verdict is the last non-empty line** (`parseStepVerdict`): `Verdict: approve` or `Verdict: changes`. Anything else is no verdict.
-- **A run awaiting human review survives a quit and is never auto-resumed.** Only interrupted runs auto-resume, once per run id, in Local mode with a spawned core.
+- **A run awaiting human review survives a quit and is never auto-resumed.** Auto-resume needs ALL of: the run was interrupted by an app quit, Local mode with the app-spawned core, not a manual-only loop, not a discarded card, at most once per run id, not awaiting review. If it cannot be sure (unreadable state) it starts nothing.
+- **These gates stay human in every review mode:** the native shell-command approval before a run starts, the Ship secret-scan override, manual-only scheduled loops, the CI/hook-file auto-ship block, and Intake "needs decision".
 - **Request changes writes `.factory/HUMAN-REVIEW.md` and re-runs from Implement** (run mode `humanReview`).
 
 ### ❌ DO NOT
