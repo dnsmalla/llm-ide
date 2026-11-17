@@ -34,6 +34,7 @@ mod graph_file;
 mod mermaid_runtime;
 mod menu;
 mod legacy_import;
+mod retired_leftovers;
 mod loop_approval;
 mod loop_runner;
 mod loop_worktree;

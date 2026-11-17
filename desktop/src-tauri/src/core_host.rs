@@ -1814,6 +1814,12 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     // extension only, never any chrome-extension:// origin.
     crate::core_env::pin_extension_ids(&db_dir)?;
     if let Err(e) = migrate_addons(&db_dir) { eprintln!("core: add-on migration failed: {e}"); }
+    // After the add-on copy, which reads the same legacy folder. Best effort: a failure only logs.
+    match crate::retired_leftovers::remove_mac_rebuild_staging() {
+        Ok(true) => eprintln!("core: deleted the retired Mac app's rebuild-staging folder"),
+        Ok(false) => {}
+        Err(e) => eprintln!("core: leftover cleanup failed: {e}"),
+    }
     // Fail closed: no secrets, no sidecar. Values go in the child's env only.
     let secrets = crate::secrets::default_backend()
         .and_then(|b| crate::secrets::load_or_create(b.as_ref()))
