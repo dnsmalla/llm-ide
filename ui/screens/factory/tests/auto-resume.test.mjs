@@ -5,7 +5,7 @@ import { memFs } from "./mem-fs.mjs";
 
 const item = (key = "issue:2", runIds = ["r1"]) => ({ key, source: "issue", id: key.slice(6), title: "Colorful buttons", body: "", repo: "g/p", provider: "gitlab", addedAt: "2026-11-12T00:00:00.000Z", runIds });
 const MARK = "system/loop-worktrees/r1/.factory/RUN.json";
-const marker = (over = {}) => JSON.stringify({ runId: "r1", startedAt: "2026-11-12T09:00:00.000Z", ...over });
+const marker = (over = {}) => JSON.stringify({ runId: "r1", mode: "full", startedAt: "2026-11-12T09:00:00.000Z", ...over });
 
 function project({ items = [item()], record = null, withMarker = true, plan = true } = {}) {
   const files = {
@@ -119,3 +119,30 @@ test("storedPendingRunIds: a held record's run id and a marker:<runId> entry bot
     assert.deepEqual([...storedPendingRunIds("/p")].sort(), ["r1", "r2"]);
   } finally { delete globalThis.localStorage; }
 });
+
+for (const mode of ["full", "continue", "check"]) {
+  test(`a ${mode} marker is auto-resumed`, async () => {
+    const fs = memFs({ "system/factory/items.json": JSON.stringify({ schemaVersion: 1, items: [item()] }), [MARK]: marker({ mode }), "system/loop-worktrees/r1/.factory/PLAN.md": "plan" });
+    const w = deps(fs);
+    assert.equal(await autoResumeOnce(w.d), 1);
+    assert.equal(w.started[0].mode, "check");
+  });
+}
+
+test("an intakeOnly marker resumes as intakeOnly, never as a full run", async () => {
+  const fs = memFs({ "system/factory/items.json": JSON.stringify({ schemaVersion: 1, items: [item()] }), [MARK]: marker({ mode: "intakeOnly" }) });
+  const w = deps(fs, { changedFiles: async () => 0 });
+  assert.equal(await autoResumeOnce(w.d), 1);
+  assert.deepEqual([w.started[0].mode, w.started[0].runId], ["intakeOnly", "r1"]);
+});
+
+for (const mode of ["humanReview", "sendBack", "rework", "mystery", undefined]) {
+  test(`a ${mode} marker is left on the card and not recorded as resumed`, async () => {
+    const m = JSON.parse(marker()); if (mode === undefined) delete m.mode; else m.mode = mode;
+    const fs = memFs({ "system/factory/items.json": JSON.stringify({ schemaVersion: 1, items: [item()] }), [MARK]: JSON.stringify(m), "system/loop-worktrees/r1/.factory/PLAN.md": "plan" });
+    const w = deps(fs);
+    assert.equal(await autoResumeOnce(w.d), 0);
+    assert.equal(w.started.length, 0);
+    assert.deepEqual(w.stored.ids, {});
+  });
+}

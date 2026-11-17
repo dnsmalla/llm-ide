@@ -7,7 +7,7 @@ import type { LiveRun } from "../loop/native/run-manager.ts";
 import { readPending } from "../loop/native/pending-records.ts";
 import { assembleFacts, latestRecords, type WorktreeInfo } from "./board-model.ts";
 import { NOTE } from "./columns.ts";
-import { interruptedRunPlan } from "./intake.ts";
+import { interruptedRunPlan, runPlanFor } from "./intake.ts";
 import { attachRun, readItems } from "./items.ts";
 import type { StartRunFn } from "./send-back.ts";
 
@@ -33,6 +33,9 @@ export interface AutoResumeDeps {
   /** Marks the started run's card `Continuing automatically…` while it is queued. */
   markResuming?(runId: string): void;
 }
+
+// full/continue/check resume through the usual check-or-resume decision; intakeOnly resumes as intakeOnly.
+const AUTO_RESUMABLE_MODES: ReadonlySet<string> = new Set(["full", "continue", "check", "intakeOnly"]);
 
 // A second tick must not start the same run while the first is still deciding.
 const attempted = new Set<string>();
@@ -73,14 +76,19 @@ export async function autoResumeOnce(d: AutoResumeDeps): Promise<number> {
       const mark = await fs.read(`${repoPrefixFor(root, wt.worktree)}/.factory/RUN.json`).catch(() => null);
       if (mark?.status !== "ok") continue;
       let startedMs = Number.NaN;
+      let markMode = "";
       try {
         const parsed: unknown = JSON.parse(mark.text ?? "");
-        const obj = parsed as { runId?: unknown; startedAt?: unknown } | null;
+        const obj = parsed as { runId?: unknown; startedAt?: unknown; mode?: unknown } | null;
         if (obj?.runId !== runId || typeof obj.startedAt !== "string") continue;
+        markMode = typeof obj.mode === "string" ? obj.mode : "";
         startedMs = Date.parse(obj.startedAt);
       } catch { continue; }
       // Without a usable start time the "finished after the marker" check cannot be made: do not start.
       if (Number.isNaN(startedMs)) continue;
+      // Only modes whose resume is faithful restart on their own: humanReview/sendBack/rework carry a person's requested
+      // changes that a generic check/resume would skip (and auto mode would then ship), so they stay on the card.
+      if (!AUTO_RESUMABLE_MODES.has(markMode)) continue;
       const f = assembleFacts(item, { projectRoot: root, live: d.live() as LiveRun[], records, worktrees: worktrees as ReadonlyMap<string, unknown>, interrupted: new Set([runId]), ship: new Map(), lastKnown: new Map() });
       const rec = f.lastRecord;
       if (f.live || rec?.statusCode === "awaiting_review") continue;
@@ -95,7 +103,7 @@ export async function autoResumeOnce(d: AutoResumeDeps): Promise<number> {
       resumed[runId] = true;
       try {
         const prefix = repoPrefixFor(root, wt.worktree);
-        const plan = await interruptedRunPlan({
+        const plan = markMode === "intakeOnly" ? { ...runPlanFor("intake", item, f), downgraded: false } : await interruptedRunPlan({
           changedFiles: (id) => d.changedFiles(id).catch(() => 0),
           hasPlan: () => fs.read(`${prefix}/.factory/PLAN.md`, 200_000).then((r) => r.status === "ok", () => false),
         }, item, f);
