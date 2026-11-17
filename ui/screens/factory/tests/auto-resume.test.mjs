@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { _resetAutoResumeForTests, autoResumeOnce } from "../auto-resume.ts";
+import { _resetAutoResumeForTests, autoResumeOnce, storedPendingRunIds } from "../auto-resume.ts";
 import { memFs } from "./mem-fs.mjs";
 
 const item = (key = "issue:2", runIds = ["r1"]) => ({ key, source: "issue", id: key.slice(6), title: "Colorful buttons", body: "", repo: "g/p", provider: "gitlab", addedAt: "2026-11-12T00:00:00.000Z", runIds });
@@ -37,7 +37,7 @@ function deps(fs, over = {}) {
       changedFiles: async () => 3,
       start: (root, it, mode, opts) => { started.push({ root, key: it.key, mode, runId: opts?.runId, recorded: { ...stored.ids } }); return opts?.runId ?? "new"; },
       readResumed: () => stored.ids,
-      writeResumed: (ids) => { stored.ids = { ...ids }; },
+      writeResumed: (ids) => { stored.ids = { ...ids }; return true; },
       notice: (m) => notices.push(m),
       ...over,
     },
@@ -90,14 +90,32 @@ const NEGATIVES = {
   "a discarded item": [project({ items: [] }), {}],
   "no open project": [project(), { projectRoot: () => null }],
   "a marker of another run id": [project({ items: [item("issue:2", ["r0", "r1"])] }), { worktrees: async () => new Map([["r1", { runId: "r1", worktree: "/p/system/loop-worktrees/r1" }]]) }],
+  "a marker without startedAt": [project(), {}],
+  "a finished record without endedAt": [project({ record: { statusCode: "success" } }), {}],
+  "unreadable once-per-run storage (null)": [project(), { readResumed: () => null }],
+  "unreadable once-per-run storage (throws)": [project(), { readResumed: () => { throw new Error("storage"); } }],
+  "a failed write of the once-per-run id": [project(), { writeResumed: () => false }],
   "a finished record still pending for this run": [project(), { pendingRunIds: () => new Set(["r1"]) }],
 };
 for (const [name, [fs, over]] of Object.entries(NEGATIVES)) {
   test(`no auto-resume for ${name}`, async () => {
     if (name === "a marker of another run id") fs.put(MARK, marker({ runId: "r0" }));
+    if (name === "a marker without startedAt") fs.put(MARK, JSON.stringify({ runId: "r1" }));
     const w = deps(fs, over);
     assert.equal(await autoResumeOnce(w.d), 0);
     assert.equal(w.started.length, 0);
     assert.deepEqual(w.stored.ids, {});
   });
 }
+
+test("storedPendingRunIds: a held record's run id and a marker:<runId> entry both block", () => {
+  const data = JSON.stringify([
+    { projectRoot: "/p", entry: { id: "e1" }, record: { worktree: { runId: "r1" } }, copy: null, marker: "m" },
+    { projectRoot: "/p", entry: { id: "marker:r2" }, record: {}, copy: null, marker: "m", markerOnly: true },
+    { projectRoot: "/other", entry: { id: "marker:r3" }, record: {}, copy: null, marker: "m", markerOnly: true },
+  ]);
+  globalThis.localStorage = { getItem: () => data, setItem() {} };
+  try {
+    assert.deepEqual([...storedPendingRunIds("/p")].sort(), ["r1", "r2"]);
+  } finally { delete globalThis.localStorage; }
+});

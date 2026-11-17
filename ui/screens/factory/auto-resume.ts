@@ -23,8 +23,10 @@ export interface AutoResumeDeps {
   /** loop_worktree_diff -> files.length */
   changedFiles(runId: string): Promise<number>;
   start: StartRunFn;
-  readResumed(): Record<string, true>;
-  writeResumed(ids: Record<string, true>): void;
+  /** Null when storage is unreadable: nothing starts then, since the once-per-run guard cannot be checked. */
+  readResumed(): Record<string, true> | null;
+  /** False when the ids could not be persisted: the run is not started, since a crash could then loop it. */
+  writeResumed(ids: Record<string, true>): boolean;
   notice(message: string): void;
   /** Run ids whose finished record is still held for this project (not yet flushed to the journal). Default: stored ones. */
   pendingRunIds?(root: string): ReadonlySet<string>;
@@ -60,7 +62,9 @@ export async function autoResumeOnce(d: AutoResumeDeps): Promise<number> {
     const worktrees = await d.worktrees();
     const records = await latestRecords(fs, new Set(items.flatMap((i) => i.runIds.slice(-1))));
     const held = (d.pendingRunIds ?? storedPendingRunIds)(root);
-    const resumed = d.readResumed();
+    let resumed: Record<string, true> | null;
+    try { resumed = d.readResumed(); } catch { resumed = null; }
+    if (!resumed) return 0;
     let n = 0;
     for (const item of items) {
       const runId = item.runIds.at(-1) ?? null;
@@ -68,21 +72,26 @@ export async function autoResumeOnce(d: AutoResumeDeps): Promise<number> {
       if (!runId || !wt || resumed[runId] || attempted.has(`${root}\u0000${runId}`) || held.has(runId)) continue;
       const mark = await fs.read(`${repoPrefixFor(root, wt.worktree)}/.factory/RUN.json`).catch(() => null);
       if (mark?.status !== "ok") continue;
-      let startedAt = "";
+      let startedMs = Number.NaN;
       try {
         const parsed: unknown = JSON.parse(mark.text ?? "");
         const obj = parsed as { runId?: unknown; startedAt?: unknown } | null;
-        if (obj?.runId !== runId) continue;
-        startedAt = typeof obj.startedAt === "string" ? obj.startedAt : "";
+        if (obj?.runId !== runId || typeof obj.startedAt !== "string") continue;
+        startedMs = Date.parse(obj.startedAt);
       } catch { continue; }
+      // Without a usable start time the "finished after the marker" check cannot be made: do not start.
+      if (Number.isNaN(startedMs)) continue;
       const f = assembleFacts(item, { projectRoot: root, live: d.live() as LiveRun[], records, worktrees: worktrees as ReadonlyMap<string, unknown>, interrupted: new Set([runId]), ship: new Map(), lastKnown: new Map() });
       const rec = f.lastRecord;
       if (f.live || rec?.statusCode === "awaiting_review") continue;
       // A finished record from after the marker was written means the run ended; the marker is only waiting to be cleared.
-      if (rec?.endedAt && startedAt && rec.endedAt >= startedAt) continue;
+      // A record without a readable end time counts as finished too: any doubt resolves to not starting.
+      if (rec && !(Date.parse(rec.endedAt ?? "") < startedMs)) continue;
       // Recorded BEFORE start: a crash, a throw or a declined approval must never make this run loop.
       attempted.add(`${root}\u0000${runId}`);
-      d.writeResumed({ ...resumed, [runId]: true });
+      let saved = false;
+      try { saved = d.writeResumed({ ...resumed, [runId]: true }); } catch { saved = false; }
+      if (!saved) continue;
       resumed[runId] = true;
       try {
         const prefix = repoPrefixFor(root, wt.worktree);
@@ -105,17 +114,24 @@ export async function autoResumeOnce(d: AutoResumeDeps): Promise<number> {
 
 const RESUMED_KEY = "llmide.factory.autoResumed";
 
-/** Run ids already auto-resumed, kept across restarts. Unreadable storage reads as none (the in-process guard still holds). */
-export function readAutoResumed(): Record<string, true> {
+/** Run ids already auto-resumed, kept across restarts. Null when storage is unreadable or corrupt. */
+export function readAutoResumed(): Record<string, true> | null {
   try {
-    const raw: unknown = JSON.parse(globalThis.localStorage?.getItem(RESUMED_KEY) ?? "{}");
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const store = globalThis.localStorage;
+    if (!store) return null;
+    const raw: unknown = JSON.parse(store.getItem(RESUMED_KEY) ?? "{}");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     return Object.fromEntries(Object.keys(raw).map((k) => [k, true as const]));
-  } catch { return {}; }
+  } catch { return null; }
 }
 
-export function writeAutoResumed(ids: Record<string, true>): void {
-  try { globalThis.localStorage?.setItem(RESUMED_KEY, JSON.stringify(ids)); } catch { /* the in-process guard still holds */ }
+export function writeAutoResumed(ids: Record<string, true>): boolean {
+  try {
+    const store = globalThis.localStorage;
+    if (!store) return false;
+    store.setItem(RESUMED_KEY, JSON.stringify(ids));
+    return true;
+  } catch { return false; }
 }
 
 export function _resetAutoResumeForTests(): void { attempted.clear(); }
