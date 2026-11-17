@@ -177,6 +177,16 @@ Review and Review gate run every iteration. The template forces
 (a draft PR/MR through `POST /kb/loop/ship`) and Discard (removes the worktree
 and branch). The worktree is never removed any other way. A loop that runs in a worktree cannot carry a Regression stage; the host refuses it.
 
+### Step reviews and the final review
+
+After a skill step passes, an AI step review (`skills/step-review`) can check the step's own diff. Whether a step is
+reviewed is `reviewAfter` on the stage; when absent it defaults to on for skills that may write code and off for
+planning, documentation and read-only skills (`effectiveReviewAfter`, `ui/screens/loop/native/review.ts`). Verdicts
+go to `.factory/reviews/<id>.md` and unresolved findings to `.factory/STEP-REVIEWS.md`. `reviewMode` on the loop
+config (`system/factory-template.json` for the Factory) is `auto` by default; `human` ends a run on **Awaiting your
+review** instead of shipping, with Approve and Request changes. See
+[Edit the Factory process](../how-to/edit-factory-process.md).
+
 ## Loops
 
 A project holds **several independent loops**, not one pipeline. Each

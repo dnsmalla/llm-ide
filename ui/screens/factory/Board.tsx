@@ -24,6 +24,7 @@ import { processHasIntake, processSteps } from "../loop/native/factory-template.
 import { loadLoops } from "../loop/native/store.ts";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { answerDecision, sendBack } from "./send-back.ts";
+import { readReviewMode, writeReviewMode } from "./review-mode.ts";
 import { Card } from "./Card.tsx";
 import { LaneBoard } from "./LaneBoard.tsx";
 import { LoopRuns } from "./LoopRuns.tsx";
@@ -82,6 +83,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [retryAt, setRetryAt] = useState<number | null>(null);
   const [cap, setCap] = useState(() => concurrency());
   const [error, setError] = useState<string | null>(null);
+  const [reviewMode, setReviewModeState] = useState<"auto" | "human" | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   // The Factory works from open issues (llm-doc specs become issues first, via Sources → Issue); free text stays for odd jobs.
   const [addKind, setAddKind] = useState<"issue" | "text">("issue");
@@ -94,6 +96,21 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [hasIntake, setHasIntake] = useState<boolean | null>(null);
   // The process steps in order (the board's lanes); null = not known yet.
   const [steps, setSteps] = useState<string[] | null>(null);
+  // The final-review toggle mirrors system/factory-template.json; null (missing or invalid file) disables it.
+  useEffect(() => {
+    if (!active || !projectRoot) return;
+    let cancelled = false;
+    readReviewMode(fs).then((mode) => { if (!cancelled) setReviewModeState(mode); }, () => { if (!cancelled) setReviewModeState(null); });
+    return () => { cancelled = true; };
+  }, [active, projectRoot, fs]);
+  const chooseReviewMode = (mode: "auto" | "human") => {
+    if (mode === reviewMode) return;
+    void writeReviewMode(fs, mode).then((r) => {
+      if (r.ok) setReviewModeState(mode);
+      else setError(r.message);
+    });
+  };
+
   useEffect(() => {
     setHasIntake(null);
     setSteps(null);
@@ -413,6 +430,12 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
             {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </label>
+        <div className="fx-field fx-field-inline" role="group" aria-label="Final review">
+          <span>Final review</span>
+          {(["auto", "human"] as const).map((mode) => (
+            <button key={mode} type="button" className={`fx-btn${reviewMode === mode ? " fx-primary" : ""}`} aria-pressed={reviewMode === mode} disabled={reviewMode === null} title={mode === "auto" ? "AI reviews the change, then it ships" : "The run waits for your approval"} onClick={() => chooseReviewMode(mode)}>{mode === "auto" ? "Auto" : "Human"}</button>
+          ))}
+        </div>
         <button type="button" className="fx-btn" onClick={() => void (cleanup ? setCleanup(null) : openCleanup())} aria-expanded={cleanup !== null} disabled={worktrees.size === 0}>Clean up…</button>
         <button type="button" className="fx-btn" onClick={() => { setIssuesTick((n) => n + 1); void loadFacts().then(() => refreshStatus(true)); }}>Refresh</button>
         <button type="button" className="fx-btn fx-primary" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>Add</button>

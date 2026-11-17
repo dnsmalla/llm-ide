@@ -586,6 +586,22 @@ Pinned by the tests in `desktop/src-tauri/src/loop_worktree.rs` and `loop_runner
 - **Factory stages are identified by role, never by key.** `factoryRole` (`ui/screens/loop/native/factory.ts`) derives the role from the skill id, the verdict file or the shell kind, because `applyTemplate` resets stage ids and keys; `configFor` narrows a run to the stages of its mode by role.
 - **Do NOT** store a column on a work item, auto-delete an interrupted worktree, auto-send CI failures back, pass PR/MR text to the agent unfenced, or let a run follow the active project after a switch.
 
+## Step review and human review (`ui/screens/loop/native/{review,review-ui}.ts`, `ui/screens/factory/review-mode.ts`)
+
+### ✅ MUST preserve
+
+- **`reviewAfter` and `reviewMode` are written only when they differ from the default.** `setReviewAfter` deletes the key when the value equals `effectiveReviewAfter` for an unset key; `setReviewMode("auto")` deletes `reviewMode`. This keeps `loop.json` and `system/factory-template.json` minimal.
+- **`system/factory-template.json` is the single source of the Factory's review settings.** The Board's "Final review" toggle goes through `readTemplateFile` / `parseFactoryTemplate` / `formatFactoryTemplate` with an `expected_hash`, and refuses to write when the file is missing or invalid.
+- **A verdict is the last non-empty line** (`parseStepVerdict`): `Verdict: approve` or `Verdict: changes`. Anything else is no verdict.
+- **A run awaiting human review survives a quit and is never auto-resumed.** Only interrupted runs auto-resume, once per run id, in Local mode with a spawned core.
+- **Request changes writes `.factory/HUMAN-REVIEW.md` and re-runs from Implement** (run mode `humanReview`).
+
+### ❌ DO NOT
+
+- Store `"reviewMode": "auto"` or a `reviewAfter` equal to the default.
+- Resume a run that is awaiting review automatically.
+- Write the Board toggle's change anywhere but `system/factory-template.json`.
+
 ## Agent-engine prompt cache + metering (`extension/llm_agent/sdk/{engine,turn-context}.mjs`, `routes/agent-v2.mjs`)
 
 ### ✅ MUST preserve
