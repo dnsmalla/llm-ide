@@ -257,7 +257,7 @@ export function taskMarkdown(item: WorkItem): string {
 }
 
 /** Untrusted text as a fenced data block: fence markers inside it are neutralised, nothing is deleted. */
-const fenceAsData = (text: string): string => `${FENCE_OPEN}\n${neutralizeFences(text)}\n${FENCE_CLOSE}`;
+export const fenceAsData = (text: string): string => `${FENCE_OPEN}\n${neutralizeFences(text)}\n${FENCE_CLOSE}`;
 
 /** The prompt section that gives the Review stage the worktree diff (the Loop agent has no shell to run git). */
 export function reviewDiffSection(diff: { text: string; truncated: boolean }): string {
