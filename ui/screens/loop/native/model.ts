@@ -55,6 +55,8 @@ export interface LoopStage {
    * an explicit boolean always wins. Absent on files written before step reviews existed.
    */
   reviewAfter?: boolean | null;
+  /** Lessons the user accepted for this step; added to its message without touching `prompt`/`promptHash`. */
+  promptAddendum?: string | null;
   /** Original object for an unknown kind, so saving does not destroy a newer build's fields. */
   raw: Record<string, unknown> | null;
 }
@@ -85,6 +87,15 @@ export interface LoopEngineConfig {
   maxCostUsd: number | null;
   /** "auto" (default) lets AI step reviews gate the run; "human" pauses for a person. Absent = "auto". */
   reviewMode?: "auto" | "human";
+  /** Suggest improvements after this many finished runs. Absent = 5; read it through reviewEveryRunsOf. */
+  reviewEveryRuns?: number;
+}
+
+/** The improvement-review cadence in runs: default 5, whole number, clamped to 1..50. */
+export function reviewEveryRunsOf(config: Pick<LoopEngineConfig, "reviewEveryRuns">): number {
+  const n = config.reviewEveryRuns;
+  if (typeof n !== "number" || !Number.isFinite(n)) return 5;
+  return Math.min(50, Math.max(1, Math.floor(n)));
 }
 
 export interface LoopDefinition {
@@ -149,6 +160,7 @@ export function decodeStage(v: unknown): LoopStage | null {
     promptHash: str(v.promptHash),
     disabledByDetection: typeof v.disabledByDetection === "boolean" ? v.disabledByDetection : null,
     ...(typeof v.reviewAfter === "boolean" ? { reviewAfter: v.reviewAfter } : {}),
+    ...(typeof v.promptAddendum === "string" && v.promptAddendum.trim() !== "" ? { promptAddendum: v.promptAddendum } : {}),
     raw: kind === "unsupported" ? v : null,
   };
 }
@@ -178,6 +190,7 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     refactorBatchesPerRun: num(o.refactorBatchesPerRun),
     maxCostUsd: num(o.maxCostUsd),
     ...(o.reviewMode === "human" ? { reviewMode: "human" as const } : {}),
+    ...(typeof o.reviewEveryRuns === "number" && Number.isFinite(o.reviewEveryRuns) ? { reviewEveryRuns: o.reviewEveryRuns } : {}),
   };
 }
 
@@ -251,6 +264,7 @@ function encodeStage(s: LoopStage): Record<string, unknown> {
     ...(s.promptHash ? { promptHash: s.promptHash } : {}),
     ...(s.disabledByDetection !== null ? { disabledByDetection: s.disabledByDetection } : {}),
     ...(typeof s.reviewAfter === "boolean" ? { reviewAfter: s.reviewAfter } : {}),
+    ...(typeof s.promptAddendum === "string" && s.promptAddendum.trim() !== "" ? { promptAddendum: s.promptAddendum } : {}),
   };
 }
 
@@ -274,5 +288,6 @@ function encodeConfig(c: LoopEngineConfig): Record<string, unknown> {
     ...(c.refactorBatchesPerRun !== null ? { refactorBatchesPerRun: c.refactorBatchesPerRun } : {}),
     ...(c.maxCostUsd !== null ? { maxCostUsd: c.maxCostUsd } : {}),
     ...(c.reviewMode === "human" ? { reviewMode: "human" } : {}),
+    ...(typeof c.reviewEveryRuns === "number" ? { reviewEveryRuns: c.reviewEveryRuns } : {}),
   };
 }

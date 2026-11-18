@@ -202,6 +202,8 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   }
   // A built-in stage that is still unedited runs the registry prompt, the same text the editor shows.
   const parts = [stagePromptText(s, registrySource(s))?.trim() || `Run the ${s.name} skill for this loop.`];
+  const lessons = addendumSection(s);
+  if (lessons) parts.push(lessons);
   if (target.goal) parts.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
   const inputPath = target.inputPath ?? "";
@@ -445,11 +447,19 @@ export async function runOneStage(ctx: StageExecContext, s: LoopStage, target: L
   throw new Error(`“${s.name}” is a ${s.kind} stage; this native runner executes shell, empty Regression, skill and artifact-check stages`);
 }
 
+/** The user-accepted lessons for a stage as a message section, or null when there are none. */
+export function addendumSection(stage: Pick<LoopStage, "promptAddendum">): string | null {
+  const text = stage.promptAddendum?.trim();
+  return text ? `Project lessons for this step (accepted by the user):\n${text}` : null;
+}
+
 async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, attempt: number, target: LoopDefinition, halt: HaltState, opts?: { review?: boolean }): Promise<StageRunResult> {
   // A review repair starts from a step that passed its checks, so the message says so and carries the findings to fix.
   const message = opts?.review
     ? [`A review of the step “${s.name}” found the problems below. The step's own checks passed; fix what the review asks for in this repository.`, `Attempt ${attempt}.`, `Review findings:\n${output.slice(0, 12_000)}`]
     : [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
+  const lessons = addendumSection(s);
+  if (lessons) message.push(lessons);
   if (target.goal) message.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
   // NOTE: kept out of FACTORY_REPAIR_HINT, which a generated registry pins byte for byte.

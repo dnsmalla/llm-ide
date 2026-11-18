@@ -1194,3 +1194,30 @@ test("recordFindings never writes over a PLAN.md it could not read", async () =>
   assert.deepEqual(writes, ["system/loop-worktrees/r1/.factory/FINDINGS.md"]);
   assert.ok(log.some((line) => /PLAN\.md could not be read/.test(line)));
 });
+
+test("an addendum follows the stage prompt and precedes the loop goal; repair and step review carry it too", async () => {
+  const { host } = fakeHost({ loop_worktree_diff: { text: "+x", truncated: false } });
+  const { core, calls } = fakeCore({ reply: "ok", resultSubtype: "success", changedPaths: [], createdPaths: [] });
+  const { ctx } = ctxOf({ host, core, fs: fakeFs({ ".factory/reviews/s1.md": "Verdict: approve\n" }).fs });
+  const s = stage({ id: "s1", name: "Build", kind: "skill", command: null, skillId: "skills/writing-plans", prompt: "Do the build.", promptAddendum: "Never touch vendor/." });
+  const loop = { ...loopOf([s]), goal: "ship it" };
+  const deps = createStageDeps(ctx, loop);
+  await deps.runStage(s, []);
+  const msg = calls[0][1].body.message;
+  assert.match(msg, /Do the build\.\n\nProject lessons for this step \(accepted by the user\):\nNever touch vendor\/\.\n\nLoop goal: ship it/);
+  await deps.repair(s, "1 failing", 1);
+  assert.match(calls[1][1].body.message, /Project lessons for this step \(accepted by the user\):\nNever touch vendor\//);
+  await deps.reviewStep(s, { tree: "t" }, 1);
+  assert.match(calls[2][1].body.message, /Project lessons for this step \(accepted by the user\):\nNever touch vendor\//);
+  const plain = { ...s, promptAddendum: null };
+  await createStageDeps(ctx, { ...loop, config: { ...loop.config, stages: [plain] } }).runStage(plain, []);
+  assert.doesNotMatch(calls[3][1].body.message, /Project lessons/);
+});
+
+test("setting an addendum leaves the built-in stage unedited, so it still follows the registry", async () => {
+  const { followsRegistry } = await import("../native/default-stage.ts");
+  const base = registryStage(REGISTRY_PLAN_STAGE_SKILL);
+  assert.equal(followsRegistry(base), true);
+  assert.equal(followsRegistry({ ...base, promptAddendum: "Be brief." }), true);
+  assert.equal({ ...base, promptAddendum: "Be brief." }.promptHash, base.promptHash);
+});

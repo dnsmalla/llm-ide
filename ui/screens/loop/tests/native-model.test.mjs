@@ -150,3 +150,29 @@ test("reviewMode is written only when human and decodes absent otherwise", () =>
   const bogus = m.decodeProjectStore({ schemaVersion: 2, loops: [{ id: "l", name: "B", config: { reviewMode: "bogus", stages: [] } }] }).loops[0];
   assert.equal("reviewMode" in bogus.config, false, "an unknown value decodes absent");
 });
+
+test("promptAddendum and reviewEveryRuns decode, survive encode, and older files decode unchanged", () => {
+  const raw = { loops: [{ name: "A", config: { reviewEveryRuns: 7, stages: [{ name: "S", kind: "shellCommand", order: 0, promptAddendum: "Prefer small diffs." }] } }] };
+  const loop = m.decodeProjectStore(raw).loops[0];
+  assert.equal(loop.config.stages[0].promptAddendum, "Prefer small diffs.");
+  assert.equal(loop.config.reviewEveryRuns, 7);
+  const again = m.decodeProjectStore(JSON.parse(m.encodeProjectStore(m.decodeProjectStore(raw)))).loops[0];
+  assert.equal(again.config.stages[0].promptAddendum, "Prefer small diffs.");
+  assert.equal(again.config.reviewEveryRuns, 7);
+  const old = m.decodeProjectStore({ loops: [{ name: "A", config: { stages: [{ name: "S", kind: "shellCommand", order: 0 }] } }] }).loops[0];
+  assert.equal(old.config.stages[0].promptAddendum, undefined);
+  assert.equal(old.config.reviewEveryRuns, undefined);
+  const encoded = JSON.parse(m.encodeProjectStore({ schemaVersion: 2, loops: [old] })).loops[0].config;
+  assert.equal("reviewEveryRuns" in encoded, false);
+  assert.equal("promptAddendum" in encoded.stages[0], false);
+});
+
+test("a wrong-typed or empty addendum and cadence are dropped; reviewEveryRunsOf defaults and clamps", () => {
+  const loop = m.decodeProjectStore({ loops: [{ name: "A", config: { reviewEveryRuns: "x", stages: [{ name: "S", kind: "shellCommand", order: 0, promptAddendum: 5 }] } }] }).loops[0];
+  assert.equal(loop.config.stages[0].promptAddendum, undefined);
+  assert.equal(loop.config.reviewEveryRuns, undefined);
+  assert.equal(m.reviewEveryRunsOf(loop.config), 5);
+  assert.equal(m.reviewEveryRunsOf({ reviewEveryRuns: 0 }), 1);
+  assert.equal(m.reviewEveryRunsOf({ reviewEveryRuns: 999 }), 50);
+  assert.equal(m.reviewEveryRunsOf({ reviewEveryRuns: 12.7 }), 12);
+});
