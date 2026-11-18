@@ -126,10 +126,13 @@ export function saveProposals(db, userId, { projectId, loopId, cursor, expectedC
     if (storedCursor(db, userId, projectId, loopId) !== expectedCursor) {
       throw err('REVIEW_RACE', 'Another review already moved this loop forward', 409);
     }
-    db.prepare(
-      `UPDATE loop_improvements SET status = 'superseded'
-       WHERE user_id = ? AND project_id = ? AND loop_id = ? AND status = 'proposed'`,
-    ).run(userId, projectId, loopId);
+    // An empty save (a review that found nothing) must not wipe suggestions the user has not decided on yet.
+    if ((proposals ?? []).length > 0) {
+      db.prepare(
+        `UPDATE loop_improvements SET status = 'superseded'
+         WHERE user_id = ? AND project_id = ? AND loop_id = ? AND status = 'proposed'`,
+      ).run(userId, projectId, loopId);
+    }
     const insert = db.prepare(
       `INSERT INTO loop_improvements
          (id, user_id, project_id, loop_id, template_key, stage_key, change, rationale, evidence,

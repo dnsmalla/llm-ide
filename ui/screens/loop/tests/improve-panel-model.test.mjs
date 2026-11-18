@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { acceptImprovement, revertImprovement, shouldAutoReview, runningLoopIdsOf } from "../native/improve/panel-model.ts";
+import { acceptImprovement, revertImprovement, shouldAutoReview, runningLoopIdsOf, reviewStatusLine } from "../native/improve/panel-model.ts";
 import { loadLoops } from "../native/store.ts";
 import { encodeProjectStore } from "../native/model.ts";
 import { initialProjectStore } from "../native/templates.ts";
@@ -163,4 +163,8 @@ test("the click-time check refuses when a run started after render, with zero wr
   await assert.rejects(acceptImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project"), /Finish or stop the run first/);
   await assert.rejects(revertImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7) }), /Finish or stop the run first/);
   assert.equal(d.state.events.length, 0);
+});
+
+test("reviewStatusLine shows a failed review with its reason", () => {
+  assert.match(reviewStatusLine({ failed: "the reply was not valid JSON" }), /^Review failed: the reply was not valid JSON/);
 });

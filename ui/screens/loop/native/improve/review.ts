@@ -25,6 +25,8 @@ const MAX_TEXT = 600;
 const PROMPT_CHARS = 1500;
 const REVIEW_TIMEOUT_MS = 600000;
 const REVIEW_MAX_CHARS = 190000;
+const NOT_JSON = "the reply was not valid JSON";
+const NO_LIST = "the reply had no proposals list";
 const NEEDS_EVIDENCE = "needs evidence from 2 runs or a user change";
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -148,8 +150,8 @@ function hasEvidence(ids: number[], byId: Map<number, ReviewSignal>): boolean {
 export function parseProposals(reply: string, loop: LoopDefinition, signals: ReviewSignal[]): { proposals: Proposal[]; dropped: { reason: string }[] } {
   const dropped: { reason: string }[] = [];
   const parsed = extractJson(reply);
-  if (!isObj(parsed)) return { proposals: [], dropped: [{ reason: "the reply was not valid JSON" }] };
-  if (!Array.isArray(parsed.proposals)) return { proposals: [], dropped: [{ reason: "the reply had no proposals list" }] };
+  if (!isObj(parsed)) return { proposals: [], dropped: [{ reason: NOT_JSON }] };
+  if (!Array.isArray(parsed.proposals)) return { proposals: [], dropped: [{ reason: NO_LIST }] };
   const byId = new Map(signals.map((s) => [s.id, s]));
   const proposals: Proposal[] = [];
   for (const raw of parsed.proposals) {
@@ -182,7 +184,7 @@ interface ReviewState {
 const reviewing = new Set<string>();
 
 /** One review of a loop's new signals; one at a time per loop. A cursor race with another review is reported as skipped. */
-export async function runReview(deps: { core: CoreFetch; projectRoot: string; loop: LoopDefinition }): Promise<{ saved: number; dropped: { reason: string }[] } | { skipped: "no new signals" | "a review is already running" | "another review saved first" }> {
+export async function runReview(deps: { core: CoreFetch; projectRoot: string; loop: LoopDefinition }): Promise<{ saved: number; dropped: { reason: string }[] } | { failed: string } | { skipped: "no new signals" | "a review is already running" | "another review saved first" }> {
   const { core, projectRoot, loop } = deps;
   if (reviewing.has(loop.id)) return { skipped: "a review is already running" };
   reviewing.add(loop.id);
@@ -198,6 +200,9 @@ export async function runReview(deps: { core: CoreFetch; projectRoot: string; lo
       method: "POST", body: { message, skills: [], repoRoot: projectRoot, readOnly: true, role: "loop", timeoutMs: REVIEW_TIMEOUT_MS }, timeoutMs: REVIEW_TIMEOUT_MS + 30000,
     });
     const { proposals, dropped } = parseProposals(run.reply ?? "", loop, input.signals);
+    // An unreadable reply is a failed review, not an empty one: saving would advance the cursor and lose these signals for good.
+    const unreadable = dropped.find((d) => d.reason === NOT_JSON || d.reason === NO_LIST);
+    if (unreadable) return { failed: unreadable.reason };
     try {
       const saved = await core.request<{ ids: number[] }>("/kb/loop/improve/proposals", {
         method: "POST", body: { projectRoot, loopId: loop.id, expectedCursor: input.cursor, cursor: input.lastId, proposals },

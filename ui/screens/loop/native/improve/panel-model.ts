@@ -139,7 +139,8 @@ export function outcomeLabel(outcome: { verdict?: string } | null): string | nul
 }
 
 /** The verdict text the review dropped/skipped result shows in the status line. */
-export function reviewStatusLine(r: { saved: number; dropped: { reason: string }[] } | { skipped: string }): string {
+export function reviewStatusLine(r: { saved: number; dropped: { reason: string }[] } | { failed: string } | { skipped: string }): string {
+  if ("failed" in r) return `Review failed: ${r.failed}. Nothing was changed; try again.`;
   if ("skipped" in r) return `No review: ${r.skipped}`;
   const dropped = r.dropped.length ? ` ${r.dropped.length} dropped: ${[...new Set(r.dropped.map((d) => d.reason))].join("; ")}` : "";
   return `${r.saved} new suggestion${r.saved === 1 ? "" : "s"}.${dropped}`;

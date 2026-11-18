@@ -217,6 +217,13 @@ test("signalsSinceReview keeps a 'worse' outcome older than the cursor until the
   assert.equal(signalsSinceReview(db, userA.id, 'P1', loop).signals.length, 0);
 });
 
+test('saveProposals with no proposals keeps pending rows proposed but still advances the cursor', () => {
+  const a = saveProposals(db, userA.id, { projectId: 'P1', loopId: 'keep', cursor: 1, expectedCursor: 0, proposals: [proposal()] });
+  saveProposals(db, userA.id, { projectId: 'P1', loopId: 'keep', cursor: 2, expectedCursor: 1, proposals: [] });
+  assert.equal(db.prepare('SELECT status FROM loop_improvements WHERE id = ?').get(a.ids[0]).status, 'proposed');
+  assert.equal(storedCursor(userA, 'P1', 'keep'), 2);
+});
+
 test('output_edited: the same newest SHA is recorded once, a new newest SHA again', () => {
   const edit = (commits) => recordSignal(db, userA.id, { projectId: 'P1', loopId: 'oe', kind: 'output_edited', runId: 'oe-run', payload: { extraCommits: commits } });
   const first = edit(['a1']);

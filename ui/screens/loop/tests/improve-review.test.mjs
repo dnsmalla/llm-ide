@@ -136,6 +136,21 @@ test("runReview saves proposals with the state's cursors and a read-only agent c
   assert.equal(state.reviewInputFor, "L");
 });
 
+test("an unreadable reply is a failed review: nothing is saved and the cursor stays", async () => {
+  for (const [agentReply, reason] of [["sorry, no json", "the reply was not valid JSON"], ['{"a":1}', "the reply had no proposals list"]]) {
+    const core = fakeCore({ agentReply });
+    assert.deepEqual(await runReview({ core, projectRoot: "/p", loop: loop() }), { failed: reason });
+    assert.equal(core.calls.some((c) => c.path === "/kb/loop/improve/proposals"), false);
+  }
+});
+
+test("a reply whose proposals were all dropped by validation is still saved (the cursor advances)", async () => {
+  const core = fakeCore({ agentReply: reply([prop(timeoutChange(900), [99])]) });
+  const out = await runReview({ core, projectRoot: "/p", loop: loop() });
+  assert.deepEqual(out, { saved: 0, dropped: [{ reason: "needs evidence from 2 runs or a user change" }] });
+  assert.equal(core.calls.filter((c) => c.path === "/kb/loop/improve/proposals").length, 1);
+});
+
 test("no signals is skipped without calling the agent", async () => {
   const core = fakeCore({ signals: [] });
   assert.deepEqual(await runReview({ core, projectRoot: "/p", loop: loop() }), { skipped: "no new signals" });
