@@ -25,7 +25,10 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 const cap = (s: string, n: number): string => (s.length > n ? s.slice(0, n) : s);
 
 /** The run_finished payload for a finished run; `passed` is the runner's success code (see runStatusCode). */
-export function runSignalPayload(entry: LoopRunIndexEntry, record: Record<string, unknown>): RunFinishedPayload {
+export function runSignalPayload(entryIn: LoopRunIndexEntry, recordIn: Record<string, unknown>): RunFinishedPayload {
+  // Total: a held record comes from persisted JSON, so neither argument is trusted to be an object.
+  const entry: Partial<LoopRunIndexEntry> = isObj(entryIn) ? entryIn : {};
+  const record: Record<string, unknown> = isObj(recordIn) ? recordIn : {};
   const stages = (Array.isArray(record.stages) ? record.stages : []).filter(isObj).map((s) => ({
     name: typeof s.stageName === "string" ? s.stageName : "",
     ok: isObj(s.run) && s.run.exitCode === 0,
@@ -38,10 +41,11 @@ export function runSignalPayload(entry: LoopRunIndexEntry, record: Record<string
   }));
   const rounds = isObj(record.loopback) && typeof record.loopback.rounds === "number" ? record.loopback.rounds : 0;
   return {
-    statusCode: entry.statusCode,
-    passed: entry.statusCode === "success",
-    iterations: entry.iterationsUsed,
-    durationSeconds: entry.durationSeconds,
+    statusCode: typeof entry.statusCode === "string" ? entry.statusCode : "",
+    // A run held for a person passed all its checks and only waits for review.
+    passed: entry.statusCode === "success" || entry.statusCode === "awaiting_review",
+    iterations: typeof entry.iterationsUsed === "number" ? entry.iterationsUsed : 0,
+    durationSeconds: typeof entry.durationSeconds === "number" ? entry.durationSeconds : 0,
     costUsd: typeof record.costUsd === "number" && Number.isFinite(record.costUsd) ? record.costUsd : null,
     stages, stepReviews, loopbackRounds: rounds,
   };
@@ -109,10 +113,12 @@ export function loadCoreApiVersion(core: CoreFetch): Promise<unknown> {
 
 let warned = false;
 /** Posts one signal. Never rejects; logs once per session on failure. */
-export async function postSignal(core: CoreFetch, body: { projectRoot: string; loopId: string; stageKey?: string | null; kind: string; runId?: string | null; payload: unknown }): Promise<void> {
+export async function postSignal(core: CoreFetch, body: { projectRoot: string; loopId: string; stageKey?: string | null; kind: string; runId?: string | null; payload: unknown | (() => unknown) }): Promise<void> {
   try {
     if (!improveAvailable(await loadCoreApiVersion(core))) return;
-    await core.request("/kb/loop/improve/signal", { method: "POST", body });
+    // A thunk is built here, inside the fail-open try, so building a payload can never throw into the caller.
+    const payload = typeof body.payload === "function" ? (body.payload as () => unknown)() : body.payload;
+    await core.request("/kb/loop/improve/signal", { method: "POST", body: { ...body, payload } });
   } catch (e) {
     if (!warned) {
       warned = true;

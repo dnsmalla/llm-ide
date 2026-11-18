@@ -790,7 +790,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       const record = { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...stepReviewRecords(outcome.stepReviews), ...loopbackRecord(outcome.loopback), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) };
       await appendRunRecord(fs, entry, record).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
       // Not awaited and fail-open: a signal never delays or fails the run.
-      if (projectRoot) void postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: runSignalPayload(entry, record) });
+      if (projectRoot) void postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: () => runSignalPayload(entry, record) });
       // A passed worktree run offers Ship: the Factory for its work item, and the Refactoring loop as one MR for the
       // whole run. Other non-Factory loops get no Ship offer.
       if (activeRun && (start || target.defaultKey === "refactor") && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) {
@@ -993,13 +993,16 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       setDirty(false);
       setNotice("Loop configuration saved.");
       // After the save only; loops that are new or deleted give no signal. Fail-open and not awaited.
+      // Its own try: nothing after a successful save may surface as a save error.
       if (projectRoot) {
-        const previous = new Map(load.store.loops.map((l) => [l.id, l]));
-        for (const loop of store.loops) {
-          const prev = previous.get(loop.id);
-          if (!prev) continue;
-          for (const sig of loopEditSignals(prev, loop)) void postSignal(core, { projectRoot, loopId: loop.id, stageKey: sig.stageKey, kind: "loop_edited", payload: sig.payload });
-        }
+        try {
+          const previous = new Map(load.store.loops.map((l) => [l.id, l]));
+          for (const loop of store.loops) {
+            const prev = previous.get(loop.id);
+            if (!prev) continue;
+            for (const sig of loopEditSignals(prev, loop)) void postSignal(core, { projectRoot, loopId: loop.id, stageKey: sig.stageKey, kind: "loop_edited", payload: sig.payload });
+          }
+        } catch { /* fail-open */ }
       }
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "The Loop file could not be saved.");

@@ -305,7 +305,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     void loadLoops(fs).then((r) => {
       const loop = r.kind === "ok" ? r.store.loops.find(isFactoryLoop) : undefined;
       if (loop) void postSignal(core, { projectRoot: root, loopId: loop.id, kind: s.kind, runId: s.runId, payload: s.payload });
-    }, () => undefined);
+    }, () => undefined).catch(() => undefined);
   };
   const act = async (fn: () => Promise<void>) => {
     try {

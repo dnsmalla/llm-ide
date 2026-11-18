@@ -912,3 +912,16 @@ test("a failing core never breaks the record write", async () => {
   await finish(a);
   assert.equal(world.records.length, 1);
 });
+
+test("a held record with malformed fields (the reader already drops non-object records) still completes its write and posts at most one signal", async () => {
+  const posts = [];
+  const core = { async request(path, opts) { if (path === "/health") return { apiVersion: 150 }; posts.push(opts.body); return {}; } };
+  const copies = [];
+  const storage = memoryStorage({ "llmide.factory.pendingRecords": JSON.stringify([{ projectRoot: "/p", entry: { id: "x1", loopId: "F", startedAt: "t" }, record: { stages: 5, stepReviews: "x", loopback: 3, costUsd: "n" }, copy: { prefix: "p", runId: "r1", endedAt: "2026-11-09T10:00:00Z" }, marker: "p/.factory/RUN.json" }]) });
+  setup({ core, storage, copyReadiness: async (fs, prefix, runId) => { copies.push(runId); return false; } });
+  await settle();
+  assert.equal(world.records.length, 1);
+  assert.equal(copies.length, 1);
+  assert.ok(posts.length <= 1);
+  assert.deepEqual(JSON.parse(storage.getItem("llmide.factory.pendingRecords")), []);
+});

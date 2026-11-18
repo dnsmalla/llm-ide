@@ -654,7 +654,7 @@ async function writeHeld(d: RunManagerDeps, fs: FsApi, held: PendingRecord): Pro
   }
   await d.appendRecord(fs, held.entry, held.record);
   // Fire-and-forget and fail-open: the core also counts a repeated run_finished for the same run once.
-  void postSignal(d.core, { projectRoot: held.projectRoot, loopId: held.entry.loopId, kind: "run_finished", runId: held.entry.id, payload: runSignalPayload(held.entry, held.record) });
+  void postSignal(d.core, { projectRoot: held.projectRoot, loopId: held.entry.loopId, kind: "run_finished", runId: held.entry.id, payload: () => runSignalPayload(held.entry, held.record) });
   if (held.copy) await d.copyReadiness(fs, held.copy.prefix, held.copy.runId, new Date(held.copy.endedAt));
   await clearMarker(fs, held.marker);
 }

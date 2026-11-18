@@ -17,6 +17,21 @@ function codeOf(e: unknown): string {
   return typeof e === "object" && e !== null && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "";
 }
 
+const MAX_COMMENT = 4000;
+const MAX_COMMENTS_TOTAL = 20000;
+/** Each body capped; when the total is over the cap the oldest comments are dropped (the list is oldest first). */
+export function capComments(comments: readonly { author: string; body: string }[]): { author: string; body: string }[] {
+  const out: { author: string; body: string }[] = [];
+  let total = 0;
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const body = comments[i].body.slice(0, MAX_COMMENT);
+    if (total + body.length > MAX_COMMENTS_TOTAL) break;
+    total += body.length;
+    out.unshift({ author: comments[i].author, body });
+  }
+  return out;
+}
+
 /** Project-relative root of a run's worktree (Phase A: `<project>/system/loop-worktrees/<run_id>`). */
 export function worktreePrefix(runId: string): string {
   if (!RUN_ID.test(runId)) throw new Error(`invalid run id: ${runId}`);
@@ -51,7 +66,7 @@ export async function sendBack(deps: { fs: SendBackFs; start: StartRunFn; projec
   if (!runId) throw new Error("This card has no run to send back to.");
   await prepareSendBack(deps.fs, worktreePrefix(runId), status, userNote);
   try {
-    deps.onUserSignal?.({ kind: "sent_back", runId, payload: { note: userNote.trim().slice(0, MAX_NOTE), comments: status.comments.map((c) => ({ author: c.author, body: c.body })), ciFailed: status.ci === "failed" } });
+    deps.onUserSignal?.({ kind: "sent_back", runId, payload: { note: userNote.trim().slice(0, MAX_NOTE), comments: capComments(status.comments), ciFailed: status.ci === "failed" } });
   } catch { /* a signal never blocks the send-back */ }
   return deps.start(deps.projectRoot, item, "sendBack", { runId });
 }

@@ -66,3 +66,20 @@ test("postSignal posts once when available and never rejects on 404 or network e
   const old = { async request(path) { if (path !== "/health") throw new Error("must not post"); return { apiVersion: 149 }; } };
   await postSignal(old, { projectRoot: "/p", loopId: "L", kind: "run_finished", payload: {} });
 });
+
+test("runSignalPayload is total and an awaiting_review run counts as passed", () => {
+  for (const bad of [null, undefined, 5, "x", []]) assert.doesNotThrow(() => runSignalPayload(entry, bad));
+  assert.doesNotThrow(() => runSignalPayload(null, null));
+  assert.equal(runSignalPayload(entry, null).stages.length, 0);
+  assert.equal(runSignalPayload({ ...entry, statusCode: "awaiting_review" }, {}).passed, true);
+  assert.equal(runSignalPayload({ ...entry, statusCode: "error" }, {}).passed, false);
+});
+
+test("postSignal builds a thunk payload inside its fail-open try", async () => {
+  const posts = [];
+  const core = { async request(path, opts) { if (path === "/health") return { apiVersion: 150 }; posts.push(opts.body); return {}; } };
+  await postSignal(core, { projectRoot: "/p", loopId: "L", kind: "run_finished", payload: () => { throw new Error("bad"); } });
+  assert.equal(posts.length, 0);
+  await postSignal(core, { projectRoot: "/p", loopId: "L", kind: "run_finished", payload: () => ({ a: 1 }) });
+  assert.deepEqual(posts[0].payload, { a: 1 });
+});

@@ -123,3 +123,13 @@ test("sendBack reports the user's note and the provider comments through onUserS
   assert.deepEqual(signals, [{ kind: "sent_back", runId: "r1", payload: { note: "Keep it small.", comments: [{ author: "rev", body: status.comments[0].body }], ciFailed: true } }]);
   await sendBack({ fs, projectRoot: "/p", start: () => "r1", onUserSignal: () => { throw new Error("boom"); } }, item, status, "");
 });
+
+test("sent_back comments are capped per body and in total, dropping the oldest", async () => {
+  const many = Array.from({ length: 8 }, (_, i) => ({ author: `a${i}`, body: "x".repeat(6000), at: "t" }));
+  const signals = [];
+  await sendBack({ fs: memFs(), projectRoot: "/p", start: () => "r1", onUserSignal: (s) => signals.push(s) }, item, { ...status, comments: many }, "");
+  const got = signals[0].payload.comments;
+  assert.ok(got.every((c) => c.body.length === 4000));
+  assert.equal(got.length, 5);
+  assert.deepEqual(got.map((c) => c.author), ["a3", "a4", "a5", "a6", "a7"]);
+});
