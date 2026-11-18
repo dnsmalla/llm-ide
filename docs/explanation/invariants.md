@@ -556,7 +556,7 @@ A review proposes changes to a loop; a person accepts them. Design: [Loop Engine
 ### ❌ DO NOT do these
 
 - **Do NOT add an auto-apply path**, including an automatic revert on a "worse" outcome.
-- **Do NOT propose without evidence**: at least 2 runs, or at least 1 user signal or `improvement_outcome`.
+- **Do NOT propose without evidence**: at least 2 runs, or at least 1 user signal; an `improvement_outcome` never counts on its own. A "worse" outcome is only highlighted in the panel with Undo.
 
 ## Factory runs and worktrees (`desktop/src-tauri/src/loop_worktree.rs`, `ui/screens/loop/native/{runner,artifact,factory}.ts`, `extension/agents/factory-ship.mjs`)
 

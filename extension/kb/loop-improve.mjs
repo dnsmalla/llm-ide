@@ -88,8 +88,8 @@ const toSignal = (row) => ({
 
 /**
  * What the next review reads. `cursor` is the stored position (pass it back as `expectedCursor`);
- * `lastId` is the highest signal id returned (pass it as the new `cursor`). A "worse" outcome verdict
- * older than the cursor is carried along until its improvement is reverted, so the review keeps seeing it.
+ * `lastId` is the highest signal id returned (pass it as the new `cursor`). Only signals after the
+ * cursor are returned; an old outcome is never carried over (the panel highlights a "worse" one with Undo).
  */
 export function signalsSinceReview(db, userId, projectId, loopId, { limit = 200 } = {}) {
   const cursor = storedCursor(db, userId, projectId, loopId);
@@ -98,23 +98,12 @@ export function signalsSinceReview(db, userId, projectId, loopId, { limit = 200 
      ORDER BY id LIMIT ?`,
   ).all(userId, projectId, loopId, cursor, limit).map(toSignal);
 
-  const carried = db.prepare(
-    `SELECT * FROM loop_signals WHERE user_id = ? AND project_id = ? AND loop_id = ? AND id <= ?
-       AND kind = 'improvement_outcome'
-     ORDER BY id`,
-  ).all(userId, projectId, loopId, cursor).map(toSignal).filter((signal) => {
-    if (signal.payload?.verdict !== 'worse') return false;
-    const row = db.prepare('SELECT status FROM loop_improvements WHERE id = ? AND user_id = ?')
-      .get(signal.payload.improvementId, userId);
-    return row?.status === 'accepted';
-  });
-
   const finishedRuns = db.prepare(
     `SELECT COUNT(*) AS n FROM loop_signals
      WHERE user_id = ? AND project_id = ? AND loop_id = ? AND id > ? AND kind = 'run_finished'`,
   ).get(userId, projectId, loopId, cursor).n;
   const lastId = fresh.length ? fresh[fresh.length - 1].id : cursor;
-  return { cursor, lastId, signals: [...carried, ...fresh], finishedRuns };
+  return { cursor, lastId, signals: fresh, finishedRuns };
 }
 
 /**

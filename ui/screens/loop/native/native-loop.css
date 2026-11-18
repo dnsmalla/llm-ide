@@ -132,5 +132,7 @@
 .loop-imp-badge { padding: 2px 8px; border-radius: 999px; border: var(--lp-hair); font-size: 11px; font-weight: 600; color: var(--tok-color-text-muted); background: var(--tok-color-surface2); }
 .loop-imp-badge[data-verdict="better"] { color: var(--tok-color-accent3); border-color: var(--tok-color-accent3); }
 .loop-imp-badge[data-verdict="worse"] { color: var(--tok-color-danger); border-color: var(--tok-color-danger); }
+.loop-imp-card[data-worse="true"] { border-color: var(--tok-color-danger); }
+.loop-imp-worse { margin: 0; color: var(--tok-color-danger); font-size: var(--lp-fs-small); font-weight: 600; }
 .loop-imp-error { color: var(--tok-color-danger); }
 .loop-row-badge { min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--tok-color-accent); color: var(--tok-color-body); font-size: 11px; font-weight: 700; text-align: center; }

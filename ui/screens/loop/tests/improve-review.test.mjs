@@ -55,9 +55,10 @@ test("unknown signal ids do not count as evidence", () => {
   assert.equal(parseProposals(reply([prop(timeoutChange(900), [99, 98])]), loop(), twoRuns).proposals.length, 0);
 });
 
-test("an improvement_outcome signal is enough on its own", () => {
-  const s = [sig(7, "improvement_outcome", null, { verdict: "worse" })];
-  assert.equal(parseProposals(reply([prop(timeoutChange(900), [7])]), loop(), s).proposals.length, 1);
+test("an improvement_outcome signal is not evidence on its own, but may be cited alongside other evidence", () => {
+  const s = [sig(7, "improvement_outcome", null, { verdict: "worse" }), sig(8, "sent_back")];
+  assert.equal(parseProposals(reply([prop(timeoutChange(900), [7])]), loop(), s).proposals.length, 0);
+  assert.equal(parseProposals(reply([prop(timeoutChange(900), [7, 8])]), loop(), s).proposals.length, 1);
 });
 
 test("a check-weakening change is dropped with validateChange's reason", () => {
@@ -94,13 +95,13 @@ test("signal text is fenced and cannot close the fence", () => {
   assert.ok(message.includes("never weaken a check") || message.includes("Never weaken a check"));
 });
 
-test("a worse accepted improvement is answered with its inverse and its outcome signal is kept", () => {
+test("a worse accepted improvement is shown in the history without an inverse instruction, and its outcome signal is kept", () => {
   const history = [{ id: 4, status: "accepted", change: timeoutChange(900), outcome: { verdict: "worse" } }];
   const signals = [sig(1, "improvement_outcome", null, { verdict: "worse" }), ...Array.from({ length: 30 }, (_, i) => sig(i + 2, "run_finished", `r${i}`, { n: "y".repeat(400) }))];
   const head = buildReviewMessage(loop(), [], 1e9, history).length;
   const message = buildReviewMessage(loop(), signals, head + 2500, history);
-  assert.ok(message.includes("WORSE"));
-  assert.ok(message.includes('"before":900,"after":600'));
+  assert.ok(message.includes("outcome worse"));
+  assert.ok(!/inverse/i.test(message));
   assert.ok(message.includes("Signal id 1 "));
 });
 

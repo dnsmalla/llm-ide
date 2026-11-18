@@ -691,8 +691,8 @@ A review runs every N finished runs of a loop (`reviewEveryRuns`, default 5) or 
 **Review now**. It goes through `POST /kb/loop/agent-run` with `readOnly: true`
 (Read, Glob and Grep only), so it cannot write. All loop, history, stats and signal
 text is fenced as data, never instructions. A proposal needs evidence: the pattern
-in at least 2 runs, or at least 1 user signal or `improvement_outcome`. Proposals
-that miss this are dropped.
+in at least 2 runs, or at least 1 user signal (an `improvement_outcome` may be cited
+alongside other evidence but never counts on its own). Proposals that miss this are dropped.
 
 ### What may change
 
@@ -724,8 +724,9 @@ and by the loop template key for loop-level changes.
 
 After 5 more runs the change is compared with a baseline of up to 10 runs before it.
 Fewer than 3 runs on either side is reported as not enough data. A "worse" result
-is recorded as an `improvement_outcome` signal, which the next review cites to
-propose the inverse change as an undo suggestion.
+is recorded as an `improvement_outcome` signal and shown in the history the next review reads, but
+the review is never asked for an inverse. In the Improvements panel the accepted change is highlighted
+with "This change made runs worse. Undo it?" beside its **Undo** button; the person decides.
 
 ## Every run is journalled
 
@@ -860,8 +861,8 @@ against the same working tree, whichever trigger starts it.
   the `faults.csv` format the in-app Regression view and the release checklist
   both read.
 - **Automatic application of improvements.** Self-improvement proposes; a person
-  always accepts. There is no auto-apply mode, and a "worse" outcome only leads to
-  an undo suggestion, never an automatic revert.
+  always accepts. There is no auto-apply mode, and a "worse" outcome only highlights
+  the change with an Undo button, never an automatic revert.
 
 ## See also
 

@@ -202,18 +202,14 @@ test('loopState evaluates an accepted improvement once after 5 later runs', () =
   assert.equal(countOutcomes(), 1);
 });
 
-test("signalsSinceReview keeps a 'worse' outcome older than the cursor until the improvement is reverted", () => {
+test("signalsSinceReview returns no carried-over 'worse' outcome: only signals after the cursor", () => {
   const loop = 'worse';
   for (let i = 0; i < 4; i += 1) finish(userA, 'P1', loop, run(true));
-  const row = accept(userA, 'P1', loop, { stageKey: null });
+  accept(userA, 'P1', loop, { stageKey: null });
   for (let i = 0; i < 5; i += 1) finish(userA, 'P1', loop, run(false));
   loopState(db, userA.id, { projectId: 'P1', loops: [{ loopId: loop, templateKey: 'tpl', stageKeys: [] }] });
   const read = signalsSinceReview(db, userA.id, 'P1', loop);
   saveProposals(db, userA.id, { projectId: 'P1', loopId: loop, cursor: read.lastId, expectedCursor: read.cursor, proposals: [] });
-  const kept = signalsSinceReview(db, userA.id, 'P1', loop);
-  assert.deepEqual(kept.signals.map((x) => x.kind), ['improvement_outcome']);
-  assert.equal(kept.signals[0].payload.verdict, 'worse');
-  decide(db, userA.id, { projectId: 'P1', id: row.id, action: 'revert' });
   assert.equal(signalsSinceReview(db, userA.id, 'P1', loop).signals.length, 0);
 });
 

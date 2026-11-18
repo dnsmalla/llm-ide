@@ -8,14 +8,14 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 ### API v150: Loop self-improvement
 
 - **A loop now learns from use** (`SERVER_API_VERSION` 149 → 150). The core records signals (run finished, loop edited,
-  sent back, human review, output edited, improvement outcome), reviews them every N finished runs (default 5) or on
-  **Review now**, and offers evidence-backed proposals in a new Improvements panel on the Loop page. You accept, reject or
+  sent back, human review, output edited, improvement outcome), and the desktop app reviews them (through the read-only Loop agent) every N finished runs (default 5) or on
+  **Review now**, offering evidence-backed proposals in a new Improvements panel on the Loop page. You accept, reject or
   undo each one; nothing applies on its own. Guide: [Loop Engineering](docs/explanation/loop-engineering.md#self-improvement).
 - New routes `POST /kb/loop/improve/signal`, `/state`, `/proposals` and `/decide` (feature `auto_tasks`, migration
   `0078_loop_improve.sql`). `POST /kb/loop/agent-run` accepts `readOnly: true` (Read, Glob, Grep only).
 - New stage field `promptAddendum` ("Accepted lessons") and loop setting `reviewEveryRuns`.
 - Changes are allowlisted and cannot weaken a loop's checks; Factory loops accept only the addendum, `maxRepairsPerStage` and
-  `stageDelaySeconds`. An applied change is measured over the next 5 runs; a worse result suggests an undo.
+  `stageDelaySeconds`. An applied change is measured over the next 5 runs; a worse result is highlighted with an Undo button.
 
 ### API v149: removed endpoints with no caller
 

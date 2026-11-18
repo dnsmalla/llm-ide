@@ -205,8 +205,9 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
             {accepted.map((row) => {
               const label = outcomeLabel(row.outcome) ?? (row.status === "accepted" ? "Not enough data yet" : null);
               return (
-                <li key={row.id} className="loop-imp-card">
+                <li key={row.id} className="loop-imp-card" data-worse={row.status === "accepted" && row.outcome?.verdict === "worse" ? "true" : undefined}>
                   <ChangeView change={row.change} />
+                  {row.status === "accepted" && row.outcome?.verdict === "worse" ? <p className="loop-imp-worse" role="status">This change made runs worse. Undo it?</p> : null}
                   <div className="loop-imp-actions">
                     {row.status === "reverted" ? <span className="loop-imp-badge">Undone</span> : label ? <span className="loop-imp-badge" data-verdict={row.outcome?.verdict ?? "not_enough_data"}>{label}</span> : null}
                     {row.status === "accepted" ? (
