@@ -226,3 +226,12 @@ test("stageName comes from the resolved stage; addendum tabs and bidi characters
   assert.equal(accepts({ ...addendum("a", null, "x"), stageName: "evil" }).stageName, "A");
   assert.equal(accepts(addendum("a", null, "a\u202Eb\u200Bc\ufeffd\te")).after, "abcd e");
 });
+
+test("revert restores a nullable config field to null", () => {
+  const l = loopOf(); l.config.refactorBatchesPerRun = null;
+  const ch = accepts(cfg("refactorBatchesPerRun", null, 3), l);
+  const applied = applyChange(l, ch, FWD);
+  assert.equal(applied.config.refactorBatchesPerRun, 3);
+  assert.deepEqual(applyChange(applied, invertChange(ch), REV), l);
+  assert.throws(() => applyChange(loopOf(), cfg("stageDelaySeconds", 2, null), REV), /empty/);
+});

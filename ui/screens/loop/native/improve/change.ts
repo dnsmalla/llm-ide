@@ -93,7 +93,7 @@ function checkConfig(raw: Record<string, unknown>, strict: boolean): Verdict {
   const { before, after } = raw;
   if (!isNumOrNull(before) || !isNumOrNull(after)) return no(`${field} must be a number`);
   const change: ImprovementChange = { op: "setConfig", field, before, after };
-  const nullable = field === "maxCostUsd" || field === "wallClockBudgetSeconds";
+  const nullable = field === "maxCostUsd" || field === "wallClockBudgetSeconds" || field === "refactorBatchesPerRun";
   if (!strict) return !nullable && (before === null || after === null) ? no(`${field} cannot be empty`) : { ok: true, change };
   if (after === null) return no(`${field} needs a value`);
   if (field === "maxCostUsd") {
