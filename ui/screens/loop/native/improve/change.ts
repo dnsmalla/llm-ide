@@ -30,10 +30,13 @@ const isNumOrNull = (v: unknown): v is number | null => v === null || (typeof v 
 const no = (reason: string): Verdict => ({ ok: false, reason });
 const sorted = (loop: LoopDefinition): LoopStage[] => [...loop.config.stages].sort((a, b) => a.order - b.order);
 
-/** Strip control characters except newline, then trim. */
+/** Tabs become a space; other control characters (except newline) and bidi/zero-width characters are removed; then trim. */
 function cleanAddendum(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, "").trim();
+  return text
+    .replace(/\t/g, " ")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    .trim();
 }
 
 /** A skill stage that is not one of the pinned gate skills. */
@@ -51,13 +54,16 @@ export function resolveStage(change: ImprovementChange, loop: LoopDefinition): L
   return null;
 }
 
-function stageHead(raw: Record<string, unknown>): { stageId: string; stageKey: string | null; stageName: string } | null {
+type Head = { stageId: string; stageKey: string | null; stageName: string };
+const MAX_NAME_CHARS = 120;
+
+function stageHead(raw: Record<string, unknown>): Head | null {
   if (typeof raw.stageId !== "string" || typeof raw.stageName !== "string") return null;
   if (raw.stageKey !== null && typeof raw.stageKey !== "string") return null;
-  return { stageId: raw.stageId, stageKey: raw.stageKey, stageName: raw.stageName };
+  return { stageId: raw.stageId, stageKey: raw.stageKey, stageName: raw.stageName.slice(0, MAX_NAME_CHARS) };
 }
 
-function checkStageField(head: ReturnType<typeof stageHead> & object, raw: Record<string, unknown>, stage: LoopStage, strict: boolean): Verdict {
+function checkStageField(head: Head, raw: Record<string, unknown>, stage: LoopStage, strict: boolean): Verdict {
   const field = raw.field as StageField;
   if (!STAGE_FIELDS.includes(field)) return no(`field ${String(raw.field)} cannot be changed`);
   const { before, after } = raw;
@@ -68,7 +74,10 @@ function checkStageField(head: ReturnType<typeof stageHead> & object, raw: Recor
     return { ok: true, change };
   }
   if ((before !== null && typeof before !== "boolean") || (after !== null && typeof after !== "boolean")) return no(`${field} must be a boolean`);
-  if (!strict) return { ok: true, change };
+  if (!strict) {
+    if ((field === "enabled" || field === "runOnce") && (typeof before !== "boolean" || typeof after !== "boolean")) return no(`${field} cannot be empty`);
+    return { ok: true, change };
+  }
   if (field === "enabled") {
     if (typeof after !== "boolean") return no("enabled must be true or false");
     if (after === false && stage.severity !== "advisory") return no("only an advisory step can be turned off");
@@ -84,7 +93,8 @@ function checkConfig(raw: Record<string, unknown>, strict: boolean): Verdict {
   const { before, after } = raw;
   if (!isNumOrNull(before) || !isNumOrNull(after)) return no(`${field} must be a number`);
   const change: ImprovementChange = { op: "setConfig", field, before, after };
-  if (!strict) return { ok: true, change };
+  const nullable = field === "maxCostUsd" || field === "wallClockBudgetSeconds";
+  if (!strict) return !nullable && (before === null || after === null) ? no(`${field} cannot be empty`) : { ok: true, change };
   if (after === null) return no(`${field} needs a value`);
   if (field === "maxCostUsd") {
     if (!(after > 0)) return no("maxCostUsd must be above 0");
@@ -96,7 +106,7 @@ function checkConfig(raw: Record<string, unknown>, strict: boolean): Verdict {
   return { ok: true, change };
 }
 
-function checkMove(head: ReturnType<typeof stageHead> & object, raw: Record<string, unknown>, loop: LoopDefinition, stage: LoopStage, strict: boolean): Verdict {
+function checkMove(head: Head, raw: Record<string, unknown>, loop: LoopDefinition, stage: LoopStage, strict: boolean): Verdict {
   const { beforeIndex, afterIndex } = raw;
   const list = sorted(loop);
   if (!isInt(beforeIndex) || !isInt(afterIndex)) return no("move positions must be whole numbers");
@@ -121,10 +131,11 @@ function check(raw: unknown, loop: LoopDefinition, strict: boolean): Verdict {
     if (!allowed) return no(FACTORY_OWNED);
   }
   if (op === "setConfig") return checkConfig(raw, strict);
-  const head = stageHead(raw);
-  if (!head) return no("the step is not identified");
-  const stage = resolveStage({ op: "moveStage", ...head, beforeIndex: 0, afterIndex: 0 }, loop);
+  const given = stageHead(raw);
+  if (!given) return no("the step is not identified");
+  const stage = resolveStage({ op: "moveStage", ...given, beforeIndex: 0, afterIndex: 0 }, loop);
   if (!stage) return no("the loop has no such step");
+  const head: Head = { ...given, stageName: stage.name };
   if (op === "setStageField") return checkStageField(head, raw, stage, strict);
   if (op === "moveStage") return checkMove(head, raw, loop, stage, strict);
   const { before, after } = raw;
@@ -152,11 +163,13 @@ export function isStale(change: ImprovementChange, loop: LoopDefinition): boolea
 }
 
 /**
- * Apply a change to a copy of the loop. Throws on a stale change, a missing step or a malformed change. It does not
- * re-check direction (a Revert loosens on purpose), so callers MUST gate proposals through validateChange first.
+ * Apply a change to a copy of the loop. Throws on a stale change, a missing step or an invalid change.
+ * `forward` re-runs the full validateChange against the CURRENT loop (the loop may have changed since the proposal);
+ * `revert` restores the user's own earlier value, so it skips direction and range rules but keeps the allowlist,
+ * the Factory restriction and the non-null rules.
  */
-export function applyChange(loop: LoopDefinition, change: ImprovementChange): LoopDefinition {
-  const verdict = check(change, loop, false);
+export function applyChange(loop: LoopDefinition, change: ImprovementChange, opts: { mode: "forward" | "revert" }): LoopDefinition {
+  const verdict = check(change, loop, opts.mode === "forward");
   if (!verdict.ok) throw new Error(verdict.reason);
   const safe = verdict.change;
   if (isStale(safe, loop)) throw new Error("This suggestion is out of date");

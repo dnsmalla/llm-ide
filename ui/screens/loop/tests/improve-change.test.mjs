@@ -4,6 +4,8 @@ import { applyChange, invertChange, isStale, resolveStage, shareableScope, valid
 import { FACTORY_TEMPLATE } from "../native/factory.ts";
 import { applyTemplate, defaultFactoryTemplate } from "../native/factory-template.ts";
 
+const FWD = { mode: "forward" };
+const REV = { mode: "revert" };
 const stage = (over) => ({
   id: "s", taskId: null, name: "Step", kind: "skill", command: null, order: 0, skillId: "skills/writing-plans", targetPath: null, outputPath: null,
   prompt: null, isDefault: false, enabled: true, defaultKey: "k", severity: "blocking", timeoutSeconds: 600, detectedCommand: null, check: null,
@@ -81,7 +83,7 @@ test("maxCostUsd: positive and never above before", () => {
 
 test("addendum: non-empty, capped, control characters stripped", () => {
   const c = accepts(addendum("a", null, "  keep\tit\u0000 short\nline2\u001b  "));
-  assert.equal(c.after, "keepit short\nline2");
+  assert.equal(c.after, "keep it short\nline2");
   accepts(addendum("a", null, "x".repeat(2000)));
   rejects(addendum("a", null, "x".repeat(2001)));
   rejects(addendum("a", null, "   "));
@@ -102,7 +104,7 @@ test("moveStage: skill stages only, nothing moved past a gate", () => {
 test("moveStage uses the order field, not array position", () => {
   const l = loopOf({}, [stage({ id: "x", order: 2 }), stage({ id: "y", order: 0 }), stage({ id: "z", order: 1 })]);
   accepts(move("y", 0, 2), l);
-  const out = applyChange(l, move("y", 0, 2));
+  const out = applyChange(l, move("y", 0, 2), FWD);
   assert.deepEqual(out.config.stages.map((s) => [s.id, s.order]), [["z", 0], ["x", 1], ["y", 2]]);
 });
 
@@ -142,14 +144,14 @@ test("isStale: true once the user edits the field (Review Focus 1)", () => {
 test("applyChange throws on stale and on a missing stage (Review Focus 2)", () => {
   const l = loopOf();
   l.config.maxIterations = 8;
-  assert.throws(() => applyChange(l, cfg("maxIterations", 5, 3)), /out of date/);
-  assert.throws(() => applyChange(loopOf(), field("nope", "runOnce", false, true)), /no such step/);
-  assert.throws(() => applyChange(loopOf(), { op: "setConfig", field: "goal", before: 1, after: 2 }));
+  assert.throws(() => applyChange(l, cfg("maxIterations", 5, 3), FWD), /out of date/);
+  assert.throws(() => applyChange(loopOf(), field("nope", "runOnce", false, true), FWD), /no such step/);
+  assert.throws(() => applyChange(loopOf(), { op: "setConfig", field: "goal", before: 1, after: 2 }, FWD));
 });
 
 test("applyChange does not mutate the input", () => {
   const l = loopOf(); const snap = structuredClone(l);
-  applyChange(l, field("a", "runOnce", false, true));
+  applyChange(l, field("a", "runOnce", false, true), FWD);
   assert.deepEqual(l, snap);
 });
 
@@ -158,20 +160,20 @@ test("apply then invert restores the loop deep-equal", () => {
     cfg("maxCostUsd", 10, 5), cfg("maxIterations", 5, 2), addendum("a", null, "lesson"), move("a", 0, 2), move("c", 2, 0)]) {
     const l = loopOf();
     const ch = accepts(c, l);
-    const applied = applyChange(l, ch);
+    const applied = applyChange(l, ch, FWD);
     assert.notDeepEqual(applied, l);
-    assert.deepEqual(applyChange(applied, invertChange(ch)), l, JSON.stringify(c));
+    assert.deepEqual(applyChange(applied, invertChange(ch), REV), l, JSON.stringify(c));
   }
   const withAdd = loopOf(); withAdd.config.stages[0].promptAddendum = "old";
   const ch = accepts(addendum("a", "old", "new"), withAdd);
-  assert.deepEqual(applyChange(applyChange(withAdd, ch), invertChange(ch)), withAdd);
+  assert.deepEqual(applyChange(applyChange(withAdd, ch, FWD), invertChange(ch), REV), withAdd);
 });
 
 test("a shared addendum resolves by stageKey when the stageId differs", () => {
   const l = loopOf();
   const c = accepts(addendum("other-id", null, "tip", "kb"), l);
   assert.equal(resolveStage(c, l).id, "b");
-  assert.equal(applyChange(l, c).config.stages[1].promptAddendum, "tip");
+  assert.equal(applyChange(l, c, FWD).config.stages[1].promptAddendum, "tip");
   assert.equal(resolveStage(addendum("other-id", null, "t", "missing"), l), null);
   rejects(addendum("other-id", null, "tip", "missing"));
 });
@@ -182,4 +184,45 @@ test("shareableScope", () => {
   assert.equal(shareableScope(addendum("c", null, "x"), l), "projectOnly");
   assert.equal(shareableScope(cfg("maxIterations", 5, 3), l), "general");
   assert.equal(shareableScope(cfg("maxIterations", 5, 3), loopOf({ defaultKey: null })), "projectOnly");
+});
+
+test("forward apply re-checks the rules against the current loop", () => {
+  const l = loopOf();
+  const ch = accepts(field("b", "enabled", true, false), l);
+  const blocking = structuredClone(l); blocking.config.stages[1].severity = "blocking";
+  assert.throws(() => applyChange(blocking, ch, FWD), /advisory/);
+  assert.equal(applyChange(l, ch, FWD).config.stages[1].enabled, false);
+  assert.throws(() => applyChange(l, cfg("maxCostUsd", 10, 20), FWD), /cannot be raised/);
+  const mv = accepts(move("a", 0, 1), l);
+  const changed = structuredClone(l); changed.config.stages[1].kind = "shellCommand"; changed.config.stages[1].skillId = null;
+  assert.throws(() => applyChange(changed, mv, FWD), /cannot be moved/);
+});
+
+test("revert applies loosening values but keeps allowlist, Factory rule and non-null", () => {
+  const l = loopOf(); l.config.maxCostUsd = 5;
+  assert.equal(applyChange(l, cfg("maxCostUsd", 5, 10), REV).config.maxCostUsd, 10);
+  assert.throws(() => applyChange(loopOf(), field("a", "enabled", true, null), REV), /empty/);
+  assert.throws(() => applyChange(loopOf(), cfg("maxIterations", 5, null), REV), /empty/);
+  assert.throws(() => applyChange(loopOf(), field("a", "severity", "blocking", "advisory"), REV));
+  assert.throws(() => applyChange(loopOf({ defaultKey: "factory" }), cfg("maxIterations", 5, 4), REV), /Factory/);
+});
+
+test("severity and command fields are refused; extras ignored; stageKey and before required", () => {
+  for (const f of ["severity", "command"]) {
+    rejects(field("a", f, "x", "y"));
+    assert.throws(() => applyChange(loopOf(), field("a", f, "x", "y"), FWD));
+  }
+  const raw = JSON.parse('{"__proto__":{"polluted":1},"extra":1,"op":"setConfig","field":"maxIterations","before":5,"after":3}');
+  const ok = accepts(raw);
+  assert.deepEqual(Object.keys(ok).sort(), ["after", "before", "field", "op"]);
+  assert.equal({}.polluted, undefined);
+  const { stageKey, ...noKey } = field("a", "runOnce", false, true); rejects(noKey);
+  const { before, ...noBefore } = field("a", "runOnce", false, true); rejects(noBefore);
+  const { before: b2, ...noBefore2 } = cfg("maxIterations", 5, 3); rejects(noBefore2);
+});
+
+test("stageName comes from the resolved stage; addendum tabs and bidi characters", () => {
+  assert.equal(accepts(addendum("a", null, "x")).stageName, "A");
+  assert.equal(accepts({ ...addendum("a", null, "x"), stageName: "evil" }).stageName, "A");
+  assert.equal(accepts(addendum("a", null, "a\u202Eb\u200Bc\ufeffd\te")).after, "abcd e");
 });
