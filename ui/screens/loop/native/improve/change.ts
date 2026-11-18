@@ -142,6 +142,8 @@ function check(raw: unknown, loop: LoopDefinition, strict: boolean): Verdict {
   if (op === "moveStage") return checkMove(head, raw, loop, stage, strict);
   const { before, after } = raw;
   if ((before !== null && typeof before !== "string") || typeof after !== "string") return no("the addendum must be text");
+  // Pinned skills judge the run; a lesson there could talk the judge into approving.
+  if (strict && stage.skillId !== null && PINNED_SKILLS.has(stage.skillId)) return no("a gate step cannot take a lesson");
   const text = cleanAddendum(after);
   if (strict && (text === "" || text.length > MAX_ADDENDUM_CHARS)) return no(`the addendum must be 1 to ${MAX_ADDENDUM_CHARS} characters`);
   return { ok: true, change: { op: "setPromptAddendum", ...head, before, after: text } };

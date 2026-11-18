@@ -1195,7 +1195,7 @@ test("recordFindings never writes over a PLAN.md it could not read", async () =>
   assert.ok(log.some((line) => /PLAN\.md could not be read/.test(line)));
 });
 
-test("an addendum follows the stage prompt and precedes the loop goal; repair and step review carry it too", async () => {
+test("an addendum follows the stage prompt and precedes the loop goal; repair carries it, step review does not", async () => {
   const { host } = fakeHost({ loop_worktree_diff: { text: "+x", truncated: false } });
   const { core, calls } = fakeCore({ reply: "ok", resultSubtype: "success", changedPaths: [], createdPaths: [] });
   const { ctx } = ctxOf({ host, core, fs: fakeFs({ ".factory/reviews/s1.md": "Verdict: approve\n" }).fs });
@@ -1208,7 +1208,9 @@ test("an addendum follows the stage prompt and precedes the loop goal; repair an
   await deps.repair(s, "1 failing", 1);
   assert.match(calls[1][1].body.message, /Project lessons for this step \(accepted by the user\):\nNever touch vendor\//);
   await deps.reviewStep(s, { tree: "t" }, 1);
-  assert.match(calls[2][1].body.message, /Project lessons for this step \(accepted by the user\):\nNever touch vendor\//);
+  // A lesson guides doing a step, never judging it.
+  assert.doesNotMatch(calls[2][1].body.message, /Project lessons/);
+  assert.doesNotMatch(calls[2][1].body.message, /Never touch vendor/);
   const plain = { ...s, promptAddendum: null };
   await createStageDeps(ctx, { ...loop, config: { ...loop.config, stages: [plain] } }).runStage(plain, []);
   assert.doesNotMatch(calls[3][1].body.message, /Project lessons/);

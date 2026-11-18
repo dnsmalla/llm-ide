@@ -32,10 +32,11 @@ export interface ImprovementsPanelProps {
 }
 
 const MAX_SHOWN = 600;
-const v = (x: unknown): string => {
+/** `full` shows the whole value: an addendum (up to 2000 characters) must be fully visible before the user accepts it. */
+const v = (x: unknown, full = false): string => {
   if (x === null || x === undefined || x === "") return "none";
   const text = String(x);
-  return text.length > MAX_SHOWN ? `${text.slice(0, MAX_SHOWN)}…` : text;
+  return !full && text.length > MAX_SHOWN ? `${text.slice(0, MAX_SHOWN)}…` : text;
 };
 
 /** "Before → after" in plain words for one change. */
@@ -43,7 +44,7 @@ export function describeChange(c: ImprovementChange): { what: string; before: st
   if (c.op === "setConfig") return { what: `Setting: ${c.field}`, before: v(c.before), after: v(c.after) };
   if (c.op === "setStageField") return { what: `${c.stageName}: ${c.field}`, before: v(c.before), after: v(c.after) };
   if (c.op === "moveStage") return { what: `Move ${c.stageName}`, before: `position ${c.beforeIndex + 1}`, after: `position ${c.afterIndex + 1}` };
-  return { what: `${c.stageName}: extra instructions`, before: v(c.before), after: v(c.after) };
+  return { what: `${c.stageName}: extra instructions`, before: v(c.before, true), after: v(c.after, true) };
 }
 
 function ChangeView({ change }: { change: ImprovementChange }): ReactNode {

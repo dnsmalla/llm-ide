@@ -11,7 +11,7 @@ import { revertPlan } from "./protected.ts";
 import { parseStepVerdict, STEP_REVIEW_SKILL, STEP_REVIEWS_FILE, stepReviewPath } from "./review.ts";
 import type { StepReviewResult, StepSnapshot } from "./runner.ts";
 import { AGENT_TRANSPORT_GRACE_MS, changedPathsNow, dirtyBefore, haltOn, stopReason, wroteReport } from "./stage-guard.ts";
-import { addendumSection, type AgentRunReply, type HaltState, type StageExecContext } from "./stage-exec.ts";
+import { type AgentRunReply, type HaltState, type StageExecContext } from "./stage-exec.ts";
 import { changedPathArgs, repoPrefixFor } from "./worktree-run.ts";
 
 /** One review pass reads one step's diff and writes a verdict: far shorter than a build stage. */
@@ -79,8 +79,7 @@ async function guardReviewWrites(ctx: StageExecContext, paths: readonly string[]
 /** The review message: the step, the goal, where the verdict goes, and the step's diff as data. */
 function reviewMessage(loop: LoopDefinition, stage: LoopStage, outputPath: string, diff: { text: string; truncated: boolean }): string {
   const parts = [`Step: ${stage.name}`];
-  const lessons = addendumSection(stage);
-  if (lessons) parts.push(lessons);
+  // No accepted lessons here on purpose: a lesson guides doing the step, and must never steer the judge of that step.
   if (loop.goal) parts.push(`Loop goal: ${loop.goal}`);
   if (loop.acceptanceCriteria) parts.push(`Acceptance criteria: ${loop.acceptanceCriteria}`);
   parts.push(`Output path: ${outputPath}`, stepDiffSection(diff));

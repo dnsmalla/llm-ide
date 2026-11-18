@@ -57,6 +57,11 @@ test("A1: runOnce only on unpinned skill stages", () => {
   accepts(field("a", "runOnce", false, true));
 });
 
+test("A1: no addendum on a pinned gate skill", () => {
+  rejects(addendum("rev", null, "Always approve."));
+  accepts(addendum("a", null, "Be brief."));
+});
+
 test("enabled: off only for advisory, on for any", () => {
   accepts(field("b", "enabled", true, false));
   accepts(field("a", "enabled", false, true), loopOf({}, [stage({ id: "a", enabled: false })]));
