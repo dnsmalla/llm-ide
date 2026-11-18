@@ -29,6 +29,9 @@ import { clearQueue, loadQueue, saveQueue } from "./queue.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { loopEditSignals, postSignal, runSignalPayload } from "./improve/signals.ts";
+import { ImprovementsPanel } from "./improve/ImprovementsPanel.tsx";
+import { runningLoopIdsOf } from "./improve/panel-model.ts";
+import { liveRuns, subscribe as subscribeRuns } from "./run-manager.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { changedPathArgs, newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
@@ -166,6 +169,12 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const pausedRef = useRef(false);
   const [paused, setPaused] = useState(false);
   const [loopRunning, setLoopRunning] = useState(false);
+  // Improvements: the loop this page is running, a tick after each run's signal, and suggestion counts per loop (badge).
+  const [activeLoopId, setActiveLoopId] = useState<string | null>(null);
+  const [improveTick, setImproveTick] = useState(0);
+  const [improveCounts, setImproveCounts] = useState<Record<string, number>>({});
+  const [, setRunsTick] = useState(0);
+  useEffect(() => subscribeRuns(() => setRunsTick((t) => t + 1)), []);
   const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean }>>([]);
   const queueRestored = useRef(false);
   const persistQueue = () => {
@@ -667,6 +676,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     pausedRef.current = false;
     setPaused(false);
     setLoopRunning(true);
+    setActiveLoopId(target.id);
     setSelectedRun(null);
     setRunRecord(null);
     setShipRun(null);
@@ -790,7 +800,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       const record = { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...stepReviewRecords(outcome.stepReviews), ...loopbackRecord(outcome.loopback), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) };
       await appendRunRecord(fs, entry, record).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
       // Not awaited and fail-open: a signal never delays or fails the run.
-      if (projectRoot) void postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: () => runSignalPayload(entry, record) });
+      if (projectRoot) void postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: () => runSignalPayload(entry, record) }).then(() => setImproveTick((t) => t + 1));
       // A passed worktree run offers Ship: the Factory for its work item, and the Refactoring loop as one MR for the
       // whole run. Other non-Factory loops get no Ship offer.
       if (activeRun && (start || target.defaultKey === "refactor") && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) {
@@ -812,6 +822,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       pausedRef.current = false;
       setPaused(false);
       setLoopRunning(false);
+      setActiveLoopId(null);
       setRunningStage(false);
       void refreshApproval(target.id);
       // A run ended by leaving the screen keeps the queue as persisted: the next mount restores it.
@@ -1054,7 +1065,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             <li key={l.id}>
               <button type="button" className="loop-row" data-on={l.id === loop.id || undefined} onClick={() => selectLoop(l)}>
                 <span className="loop-row-name">{l.name}</span>
-                <span className="loop-row-icons">{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}{l.defaultKey !== null ? <span className="loop-lock" title="Built-in loop: it can't be deleted">{LOCK_ICON}</span> : null}</span>
+                <span className="loop-row-icons">{improveCounts[l.id] ? <span className="loop-row-badge" title="Suggestions to review">{improveCounts[l.id]}</span> : null}{l.isPrimary ? <span title="Primary">★</span> : null}{l.runsOnSchedule ? <span title="Runs on schedule">◷</span> : null}{l.defaultKey !== null ? <span className="loop-lock" title="Built-in loop: it can't be deleted">{LOCK_ICON}</span> : null}</span>
               </button>
             </li>
           ))}
@@ -1092,6 +1103,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.reviewedPatchId ?? shipRun.diff?.patchId ?? null} requestProvider={shipRun.requestProvider ?? null} processName={shipRun.processName} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current || startGateRef.current.held, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
+        <ImprovementsPanel fs={fs} core={core} projectRoot={projectRoot} loop={loop} load={{ store: load.store, hash: load.hash }} dirty={dirty}
+          runningLoopIds={runningLoopIdsOf({ store: load.store, projectRoot, activeLoopId: activeLoopId ?? (runningStage ? loop.id : null), liveRuns: liveRuns() })}
+          refreshKey={improveTick} onCounts={setImproveCounts} onNotice={setNotice}
+          onApplied={(r) => { setLoad({ kind: "ok", store: r.store, hash: r.hash }); }} />
         <section className="loop-card loop-overview">
           <h2>Overview</h2>
           {loopUsesInputPath(loop) ? (

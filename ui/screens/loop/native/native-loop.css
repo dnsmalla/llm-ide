@@ -116,3 +116,21 @@
 /* Unsaved Loop: the Save action sits with Run so it is always in view. */
 .loop-save-btn[data-dirty="true"] { background: var(--tok-color-danger); border-color: var(--tok-color-danger); color: var(--tok-color-body); }
 .loop-save-btn[data-dirty="true"]:hover:not(:disabled) { background: var(--tok-color-danger); border-color: var(--tok-color-danger); filter: brightness(1.08); }
+
+/* Improvements panel */
+.loop-imp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.loop-imp-head h2 { margin: 0; flex: 1; }
+.loop-imp h3 { margin: 14px 0 6px; }
+.loop-imp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.loop-imp-card { border: var(--lp-hair); border-radius: var(--lp-r); background: var(--tok-color-body); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.loop-imp-diff { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: var(--lp-fs-small); }
+.loop-imp-before { color: var(--tok-color-text-muted); text-decoration: line-through; overflow-wrap: anywhere; }
+.loop-imp-after { color: var(--tok-color-text); font-weight: 600; overflow-wrap: anywhere; }
+.loop-imp-evidence { margin: 0; padding-left: 18px; color: var(--tok-color-text-muted); font-size: var(--lp-fs-small); }
+.loop-imp-scope { display: flex; gap: 14px; flex-wrap: wrap; font-size: var(--lp-fs-small); }
+.loop-imp-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.loop-imp-badge { padding: 2px 8px; border-radius: 999px; border: var(--lp-hair); font-size: 11px; font-weight: 600; color: var(--tok-color-text-muted); background: var(--tok-color-surface2); }
+.loop-imp-badge[data-verdict="better"] { color: var(--tok-color-accent3); border-color: var(--tok-color-accent3); }
+.loop-imp-badge[data-verdict="worse"] { color: var(--tok-color-danger); border-color: var(--tok-color-danger); }
+.loop-imp-error { color: var(--tok-color-danger); }
+.loop-row-badge { min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--tok-color-accent); color: var(--tok-color-body); font-size: 11px; font-weight: 700; text-align: center; }
