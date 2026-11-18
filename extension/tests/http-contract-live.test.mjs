@@ -255,6 +255,14 @@ const SKIP_RULES = [
       || (fx.endpoint === 'POST /kb/projects/register' && (fx.status === 200 || fx.status === 409)),
   },
   {
+    // Loop self-improvement: every success and every 409 needs a registered project (a real folder on the host,
+    // POST /kb/projects/register) and, for proposals/decide, rows and a review cursor left by earlier calls of
+    // the same user; the replay gives each fixture its own fresh account. The 400 (checked before the project
+    // lookup) and 404 PROJECT_UNKNOWN replays stand. tests/loop-improve-routes.test.mjs runs the same exchanges.
+    why: 'needs a registered project folder and earlier improvement rows (covered by tests/loop-improve-routes.test.mjs)',
+    when: (fx) => /^POST \/kb\/loop\/improve\//.test(fx.endpoint) && (fx.status === 200 || fx.status === 409),
+  },
+  {
     why: 'handler parses structured JSON from the model; the canned stub replies in plain text',
     when: (fx) => fx.status === 200 && (fx.endpoint === 'POST /extract-entities' || fx.endpoint === 'POST /generate-docx'),
   },
