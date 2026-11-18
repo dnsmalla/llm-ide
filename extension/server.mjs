@@ -484,7 +484,14 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          POST /kb/usage/record, POST /kb/custom-providers, POST /kb/providers/turn, POST /code-assist/decision and
 //          POST /agent-sdk/spike. Each now answers the generic unknown-route 404. POST /code-assist still answers 410.
 //          The code_graph_3d feature key remains (desktop toggle) but owns no route.
-const SERVER_API_VERSION = 149;
+//   v150 — Loop self-improvement, additive: POST /kb/loop/improve/signal { projectRoot, loopId, stageKey?, kind, runId?, payload }
+//          → { id, duplicate }, POST /kb/loop/improve/state { projectRoot, loops: [{ loopId, templateKey, stageKeys }],
+//          reviewInputFor? } → { loops, offers, reviewInput? }, POST /kb/loop/improve/proposals { projectRoot, loopId,
+//          expectedCursor, cursor, proposals } → { ids } (409 REVIEW_RACE) and POST /kb/loop/improve/decide { projectRoot,
+//          action: accept|reject|revert|adopt|dismiss, id, scope?, loopId? } → { improvement }. An unregistered folder is
+//          404 PROJECT_UNKNOWN. POST /kb/loop/agent-run accepts `readOnly: true` (no Edit/Write; anything else non-null is
+//          400 invalid_read_only, and readOnly with writeScope is 400). Feature auto_tasks.
+const SERVER_API_VERSION = 150;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -516,6 +523,10 @@ const ALL_ENDPOINTS = [
   '/kb/tasks/:id/run',
   '/kb/loop/ship',
   '/kb/loop/ship-status',
+  '/kb/loop/improve/signal',
+  '/kb/loop/improve/state',
+  '/kb/loop/improve/proposals',
+  '/kb/loop/improve/decide',
   '/kb/complete',
   '/generate-questions',
   '/extract-entities',
@@ -793,6 +804,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/providers/catalog/connect' || url === '/kb/providers/catalog/disconnect') return 'kbWrite';
   if (url === '/kb/dispatch')            return 'dispatch';
   if (url === '/kb/repos/check-token')   return 'dispatch';   // one outbound provider /user call
+  if (url.startsWith('/kb/loop/improve/')) return 'kbWrite';   // local SQLite only; signals are small and frequent
   if (url === '/kb/loop/ship-status')    return 'dispatch';   // reads GitHub / GitLab PR or MR status
   if (url === '/kb/issues/create' || url === '/kb/issues/comment' || url === '/kb/issues/close' || url === '/kb/issues/update') return 'dispatch';   // one outbound GitHub/GitLab write
   if (url.startsWith('/bus/'))           return 'kbWrite';        // command bus: enqueue, cancel, approve, deny

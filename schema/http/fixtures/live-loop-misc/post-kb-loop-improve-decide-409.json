@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/loop/improve/decide",
+  "status": 409,
+  "description": "Only a proposed improvement can be accepted.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "action": "accept",
+      "id": "imp-1",
+      "scope": "project",
+      "loopId": "loop-1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "CONFLICT",
+      "message": "Only a proposed improvement can be accepted"
+    }
+  }
+}

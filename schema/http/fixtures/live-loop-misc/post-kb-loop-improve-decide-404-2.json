@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/loop/improve/decide",
+  "status": 404,
+  "description": "A folder that is not a registered project.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "action": "accept",
+      "id": "imp-1",
+      "scope": "project",
+      "loopId": "loop-1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROJECT_UNKNOWN",
+      "message": "This folder is not in the project registry"
+    }
+  }
+}

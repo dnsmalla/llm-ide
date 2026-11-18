@@ -262,8 +262,12 @@ export const ROUTE_POLICY = Object.freeze([
   ...rules('self.read', 'POST', [
     '/chat',
     '/code-assist',
+    '/kb/loop/improve/state',
   ]),
   ...rules('self.write', 'POST', [
+    '/kb/loop/improve/decide',
+    '/kb/loop/improve/proposals',
+    '/kb/loop/improve/signal',
     '/agent/v2/cancel',
     '/agent/v2/sessions/purge',
     '/auth/google/start',

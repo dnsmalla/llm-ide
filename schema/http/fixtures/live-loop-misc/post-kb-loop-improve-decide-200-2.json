@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/loop/improve/decide",
+  "status": 200,
+  "description": "Dismiss hides an offer and returns no improvement.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "action": "dismiss",
+      "id": "imp-1",
+      "scope": "project",
+      "loopId": "loop-1"
+    }
+  },
+  "response": {
+    "improvement": null
+  }
+}

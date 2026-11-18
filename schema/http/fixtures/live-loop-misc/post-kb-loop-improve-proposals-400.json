@@ -1,0 +1,315 @@
+{
+  "endpoint": "POST /kb/loop/improve/proposals",
+  "status": 400,
+  "description": "More than 20 proposals is refused.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "loopId": "loop-1",
+      "expectedCursor": 0,
+      "cursor": 1,
+      "proposals": [
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        },
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "proposals must be an array of at most 20"
+    }
+  }
+}

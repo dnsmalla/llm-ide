@@ -1,0 +1,25 @@
+{
+  "endpoint": "POST /kb/loop/improve/state",
+  "status": 404,
+  "description": "Answers 404 feature_disabled when the core runs with auto_tasks off.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "loops": [
+        {
+          "loopId": "loop-1",
+          "templateKey": "build",
+          "stageKeys": [
+            "plan",
+            "code"
+          ]
+        }
+      ],
+      "reviewInputFor": "loop-1"
+    }
+  },
+  "response": {
+    "error": "feature_disabled",
+    "feature": "auto_tasks"
+  }
+}

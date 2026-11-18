@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /kb/loop/improve/signal",
+  "status": 400,
+  "description": "An empty loopId is refused.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "loopId": "",
+      "stageKey": "code",
+      "kind": "run_finished",
+      "runId": "run-1",
+      "payload": {
+        "ok": true,
+        "costUsd": 0.12
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "loopId is required"
+    }
+  }
+}

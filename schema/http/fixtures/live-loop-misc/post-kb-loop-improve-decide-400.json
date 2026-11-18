@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/loop/improve/decide",
+  "status": 400,
+  "description": "adopt needs a loopId.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "action": "adopt",
+      "id": "imp-9"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "adopt needs a loopId"
+    }
+  }
+}

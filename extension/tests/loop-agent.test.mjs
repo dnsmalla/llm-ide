@@ -1575,3 +1575,52 @@ test('runLoopAgent: R-034 #6 the run carries the same USD budget as a chat turn,
     (e) => e.code === 'BUDGET_UNAVAILABLE',
   );
 }));
+
+test('route accepts readOnly true, passes it to the engine, and refuses any other non-null value', async () => {
+  const fakeOut = {
+    reply: '', changedPaths: [], changedExtraPaths: [], createdPaths: [],
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, numTurns: 0 },
+    byModel: [], resolvedSkills: [], unresolvedSkills: [], truncatedSkills: [], ran: true,
+    resultSubtype: 'success', denied: [], toolEvents: [],
+  };
+  for (const [body, want] of [
+    [{ message: 'x', repoRoot: REPO, readOnly: true }, true],
+    [{ message: 'x', repoRoot: REPO, readOnly: false }, undefined],
+    [{ message: 'x', repoRoot: REPO }, undefined],
+  ]) {
+    let seen = null;
+    const res = makeRes();
+    await handleLoopAgentRoutes(makeReq({ body, user }), res, { userId: user.id }, {
+      runAgent: async (args) => { seen = args; return fakeOut; },
+    });
+    assert.equal(res.statusCode, 200, res._body);
+    assert.equal(seen.readOnly, want);
+  }
+  for (const readOnly of ['true', 1, [], {}]) {
+    let ran = false;
+    const res = makeRes();
+    await handleLoopAgentRoutes(makeReq({ body: { message: 'x', repoRoot: REPO, readOnly }, user }), res, { userId: user.id },
+      { runAgent: async () => { ran = true; return {}; } });
+    assert.equal(res.statusCode, 400, JSON.stringify(readOnly));
+    assert.equal(res.json().error.code, 'invalid_read_only');
+    assert.equal(ran, false);
+  }
+  const res = makeRes();
+  await handleLoopAgentRoutes(makeReq({ body: { message: 'x', repoRoot: REPO, readOnly: true, writeScope: '.factory' }, user }), res,
+    { userId: user.id }, { runAgent: async () => ({}) });
+  assert.equal(res.statusCode, 400);
+});
+
+test('a readOnly run through the route refuses an Edit and lets it not land', () => withKey(async () => {
+  const root = path.join(SANDBOX, 'readonly-run');
+  fs.mkdirSync(root, { recursive: true });
+  const target = path.join(root, 'a.txt');
+  const capture = {};
+  const out = await runLoopAgent({
+    message: 'review', root, userId: user.id, readOnly: true,
+    queryFactory: toolPlayingQuery(capture, [{ tool: 'Write', input: { file_path: target, content: 'x' }, run: write }]),
+  }, noSkill);
+  assert.deepEqual(capture.verdicts.map((v) => v.allowed), [false]);
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(out.denied.length, 1);
+}));

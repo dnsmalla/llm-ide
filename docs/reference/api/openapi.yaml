@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 149
+  x-api-version: 150
 servers:
   - url: "https://{host}"
     variables:
@@ -11335,6 +11335,9 @@ paths:
                   enum:
                     - ".factory"
                   description: "Edit/Write everywhere inside <repoRoot> EXCEPT under .factory/ (Factory Implement and every repair); any other value is 400 invalid_deny_write (API 134)"
+                readOnly:
+                  type: "boolean"
+                  description: "No Edit/Write at all (the self-improvement review); any other non-null value is 400 invalid_read_only, and readOnly with writeScope is 400 (API 150)"
       responses:
         "200":
           description: "The run finished (or did not start because a skill is missing — see `ran`)"
@@ -11446,6 +11449,317 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/loop/improve/decide:
+    post:
+      tags:
+        - "live-loop-misc"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "projectRoot"
+                - "action"
+                - "id"
+              properties:
+                projectRoot:
+                  type: "string"
+                action:
+                  type: "string"
+                  enum:
+                    - "accept"
+                    - "reject"
+                    - "revert"
+                    - "adopt"
+                    - "dismiss"
+                id:
+                  type: "string"
+                scope:
+                  type: "string"
+                loopId:
+                  type: "string"
+                  description: "Required for adopt"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: "object"
+                    required:
+                      - "improvement"
+                    properties:
+                      improvement:
+                        "$ref": "#/components/schemas/LoopImprovement"
+                  - type: "object"
+                    required:
+                      - "improvement"
+                    description: "dismiss: an offer is hidden, no improvement row is returned"
+                    properties:
+                      improvement:
+                        type: "null"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - "$ref": "#/components/schemas/FeatureDisabled"
+                  - "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/loop/improve/proposals:
+    post:
+      tags:
+        - "live-loop-misc"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "projectRoot"
+                - "loopId"
+                - "expectedCursor"
+                - "cursor"
+                - "proposals"
+              properties:
+                projectRoot:
+                  type: "string"
+                loopId:
+                  type: "string"
+                expectedCursor:
+                  type: "integer"
+                cursor:
+                  type: "integer"
+                proposals:
+                  type: "array"
+                  description: "At most 20; each change at most 10000 characters of JSON"
+                  items:
+                    "$ref": "#/components/schemas/LoopImproveProposal"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "ids"
+                properties:
+                  ids:
+                    type: "array"
+                    items:
+                      type: "string"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - "$ref": "#/components/schemas/FeatureDisabled"
+                  - "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/loop/improve/signal:
+    post:
+      tags:
+        - "live-loop-misc"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "projectRoot"
+                - "loopId"
+                - "kind"
+                - "payload"
+              properties:
+                projectRoot:
+                  type: "string"
+                loopId:
+                  type: "string"
+                stageKey:
+                  type:
+                    - "string"
+                    - "null"
+                kind:
+                  type: "string"
+                  enum:
+                    - "run_finished"
+                    - "loop_edited"
+                    - "sent_back"
+                    - "human_review"
+                    - "output_edited"
+                    - "improvement_outcome"
+                runId:
+                  type:
+                    - "string"
+                    - "null"
+                payload:
+                  type: "object"
+                  additionalProperties: true
+                  description: "Free-form per kind; any text field is cut at 20000 characters"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "id"
+                  - "duplicate"
+                properties:
+                  id:
+                    type: "integer"
+                  duplicate:
+                    type: "boolean"
+                    description: "true when this run_finished run id was already stored"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - "$ref": "#/components/schemas/FeatureDisabled"
+                  - "$ref": "#/components/schemas/Error"
+  /kb/loop/improve/state:
+    post:
+      tags:
+        - "live-loop-misc"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "projectRoot"
+                - "loops"
+              properties:
+                projectRoot:
+                  type: "string"
+                loops:
+                  type: "array"
+                  description: "At most 50"
+                  items:
+                    type: "object"
+                    required:
+                      - "loopId"
+                      - "stageKeys"
+                    properties:
+                      loopId:
+                        type: "string"
+                      templateKey:
+                        type:
+                          - "string"
+                          - "null"
+                      stageKeys:
+                        type: "array"
+                        items:
+                          type: "string"
+                reviewInputFor:
+                  type: "string"
+                  description: "A loopId from loops; adds reviewInput"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "loops"
+                  - "offers"
+                properties:
+                  loops:
+                    type: "object"
+                    description: "Keyed by loopId"
+                    additionalProperties:
+                      type: "object"
+                      properties:
+                        finishedRunsSinceReview:
+                          type: "integer"
+                        proposals:
+                          type: "array"
+                          items:
+                            "$ref": "#/components/schemas/LoopImprovement"
+                        history:
+                          type: "array"
+                          items:
+                            "$ref": "#/components/schemas/LoopImprovement"
+                      required:
+                        - "finishedRunsSinceReview"
+                        - "proposals"
+                        - "history"
+                  offers:
+                    type: "array"
+                    description: "General improvements accepted in other projects that fit a loop here"
+                    items:
+                      "$ref": "#/components/schemas/LoopImproveOffer"
+                  reviewInput:
+                    type: "object"
+                    properties:
+                      cursor:
+                        type: "integer"
+                      lastId:
+                        type: "integer"
+                      signals:
+                        type: "array"
+                        items:
+                          "$ref": "#/components/schemas/LoopImproveSignal"
+                    required:
+                      - "cursor"
+                      - "lastId"
+                      - "signals"
+                    description: "cursor goes back as expectedCursor, lastId as the new cursor"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - "$ref": "#/components/schemas/FeatureDisabled"
+                  - "$ref": "#/components/schemas/Error"
   /kb/loop/ship:
     post:
       summary: "Commit, push and open a draft PR/MR for a Factory run worktree"
@@ -19613,6 +19927,233 @@ components:
             - "null"
         message:
           type: "string"
+    LoopImproveChange:
+      type: "object"
+      properties:
+        op:
+          type: "string"
+        stageName:
+          type: "string"
+        addendum:
+          type: "string"
+      required:
+        - "op"
+      additionalProperties: true
+    LoopImproveOffer:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+        projectId:
+          type: "string"
+        loopId:
+          type: "string"
+        templateKey:
+          type:
+            - "string"
+            - "null"
+        stageKey:
+          type:
+            - "string"
+            - "null"
+        change:
+          "$ref": "#/components/schemas/LoopImproveChange"
+        rationale:
+          type: "string"
+        evidence:
+          type: "array"
+          items:
+            type: "integer"
+        suggestedScope:
+          type:
+            - "string"
+            - "null"
+        status:
+          type: "string"
+          enum:
+            - "proposed"
+            - "accepted"
+            - "rejected"
+            - "reverted"
+            - "superseded"
+        scope:
+          type:
+            - "string"
+            - "null"
+        origin:
+          type:
+            - "string"
+            - "null"
+        baseline:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        outcome:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        createdAt:
+          type: "string"
+        decidedAt:
+          type:
+            - "string"
+            - "null"
+        fromProjectName:
+          type: "string"
+        forLoopId:
+          type: "string"
+          description: "The loop in this project the offer applies to"
+      required:
+        - "id"
+        - "projectId"
+        - "loopId"
+        - "templateKey"
+        - "stageKey"
+        - "change"
+        - "rationale"
+        - "evidence"
+        - "suggestedScope"
+        - "status"
+        - "scope"
+        - "origin"
+        - "baseline"
+        - "outcome"
+        - "createdAt"
+        - "decidedAt"
+        - "fromProjectName"
+        - "forLoopId"
+    LoopImproveProposal:
+      type: "object"
+      properties:
+        templateKey:
+          type:
+            - "string"
+            - "null"
+        stageKey:
+          type:
+            - "string"
+            - "null"
+        change:
+          "$ref": "#/components/schemas/LoopImproveChange"
+        rationale:
+          type: "string"
+        evidence:
+          type: "array"
+          items:
+            type: "integer"
+        suggestedScope:
+          type:
+            - "string"
+            - "null"
+      required:
+        - "change"
+    LoopImproveSignal:
+      type: "object"
+      properties:
+        id:
+          type: "integer"
+        kind:
+          type: "string"
+        stageKey:
+          type:
+            - "string"
+            - "null"
+        runId:
+          type:
+            - "string"
+            - "null"
+        payload:
+          type: "object"
+          additionalProperties: true
+        createdAt:
+          type: "string"
+      required:
+        - "id"
+        - "kind"
+        - "stageKey"
+        - "runId"
+        - "payload"
+        - "createdAt"
+    LoopImprovement:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+        projectId:
+          type: "string"
+        loopId:
+          type: "string"
+        templateKey:
+          type:
+            - "string"
+            - "null"
+        stageKey:
+          type:
+            - "string"
+            - "null"
+        change:
+          "$ref": "#/components/schemas/LoopImproveChange"
+        rationale:
+          type: "string"
+        evidence:
+          type: "array"
+          items:
+            type: "integer"
+        suggestedScope:
+          type:
+            - "string"
+            - "null"
+        status:
+          type: "string"
+          enum:
+            - "proposed"
+            - "accepted"
+            - "rejected"
+            - "reverted"
+            - "superseded"
+        scope:
+          type:
+            - "string"
+            - "null"
+        origin:
+          type:
+            - "string"
+            - "null"
+        baseline:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        outcome:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        createdAt:
+          type: "string"
+        decidedAt:
+          type:
+            - "string"
+            - "null"
+      required:
+        - "id"
+        - "projectId"
+        - "loopId"
+        - "templateKey"
+        - "stageKey"
+        - "change"
+        - "rationale"
+        - "evidence"
+        - "suggestedScope"
+        - "status"
+        - "scope"
+        - "origin"
+        - "baseline"
+        - "outcome"
+        - "createdAt"
+        - "decidedAt"
     LoopUsage:
       type: "object"
       required:

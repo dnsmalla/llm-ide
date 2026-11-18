@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/loop/improve/signal",
+  "status": 200,
+  "description": "A finished run is stored; a repeat of the same run id answers duplicate true.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "loopId": "loop-1",
+      "stageKey": "code",
+      "kind": "run_finished",
+      "runId": "run-1",
+      "payload": {
+        "ok": true,
+        "costUsd": 0.12
+      }
+    }
+  },
+  "response": {
+    "id": 1,
+    "duplicate": false
+  }
+}

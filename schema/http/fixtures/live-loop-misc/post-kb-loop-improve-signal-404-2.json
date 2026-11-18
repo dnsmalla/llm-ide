@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /kb/loop/improve/signal",
+  "status": 404,
+  "description": "A folder that is not a registered project.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "loopId": "loop-1",
+      "stageKey": "code",
+      "kind": "run_finished",
+      "runId": "run-1",
+      "payload": {
+        "ok": true,
+        "costUsd": 0.12
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROJECT_UNKNOWN",
+      "message": "This folder is not in the project registry"
+    }
+  }
+}

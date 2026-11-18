@@ -1,0 +1,34 @@
+{
+  "endpoint": "POST /kb/loop/improve/proposals",
+  "status": 200,
+  "description": "The batch is stored and the review cursor advances.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "loopId": "loop-1",
+      "expectedCursor": 0,
+      "cursor": 1,
+      "proposals": [
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        }
+      ]
+    }
+  },
+  "response": {
+    "ids": [
+      "imp-1"
+    ]
+  }
+}

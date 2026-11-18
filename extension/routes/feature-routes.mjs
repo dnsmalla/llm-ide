@@ -45,8 +45,10 @@ export const FEATURE_ROUTE_GROUPS = Object.freeze({
     prefixes: Object.freeze(['/kb/loop/', '/kb/tasks']),
     load: async () => {
       const loop = (await import('./loop-agent.mjs')).handleLoopAgentRoutes;
+      // Loop self-improvement (/kb/loop/improve/*) belongs to the same feature as the Loop it improves.
+      const improve = (await import('./loop-improve-routes.mjs')).handleLoopImproveRoutes;
       const tasks = (await import('./tasks.mjs')).handleTaskRoutes;
-      return async (req, res, ctx) => (await loop(req, res, ctx)) || (await tasks(req, res, ctx));
+      return async (req, res, ctx) => (await loop(req, res, ctx)) || (await improve(req, res, ctx)) || (await tasks(req, res, ctx));
     },
   }),
 });

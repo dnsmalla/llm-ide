@@ -1,0 +1,35 @@
+{
+  "endpoint": "POST /kb/loop/improve/proposals",
+  "status": 404,
+  "description": "A folder that is not a registered project.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "loopId": "loop-1",
+      "expectedCursor": 0,
+      "cursor": 1,
+      "proposals": [
+        {
+          "templateKey": "build",
+          "stageKey": "code",
+          "change": {
+            "op": "append_instruction",
+            "stageName": "code",
+            "addendum": "Run the tests."
+          },
+          "rationale": "Tests were skipped.",
+          "evidence": [
+            1
+          ],
+          "suggestedScope": "project"
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROJECT_UNKNOWN",
+      "message": "This folder is not in the project registry"
+    }
+  }
+}

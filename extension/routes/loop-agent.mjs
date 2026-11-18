@@ -5,7 +5,8 @@
 // metering and the response shape.
 //
 // Request  { message, skills?: [id], repoRoot, extraRoots?: [abs], language?,
-//            model?, provider?, role?: "loop"|"autoTasks", timeoutMs?, writeScope?: ".factory", denyWrite?: ".factory" }
+//            model?, provider?, role?: "loop"|"autoTasks", timeoutMs?, writeScope?: ".factory", denyWrite?: ".factory",
+//            readOnly?: true (API 150: no Edit/Write at all; the self-improvement review) }
 //
 // `role` (API v147): with neither model nor provider, the run takes that Settings → Model routing role's tier
 // (default loop; an unset role takes Standard), when it can run on the Claude engine; else the SDK default.
@@ -210,6 +211,15 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     return validationError(res, 'denyWrite must be ".factory"', 'invalid_deny_write');
   }
   const denyWrite = body.denyWrite === '.factory' ? '.factory' : undefined;
+  // Loop self-improvement review: a read-only run may read and search but never edit. Refused alongside
+  // writeScope because "write only under .factory" and "write nothing" contradict each other.
+  if (body.readOnly != null && typeof body.readOnly !== 'boolean') {
+    return validationError(res, 'readOnly must be a boolean', 'invalid_read_only');
+  }
+  if (body.readOnly === true && writeScope) {
+    return validationError(res, 'readOnly cannot be combined with writeScope', 'invalid_read_only');
+  }
+  const readOnly = body.readOnly === true ? true : undefined;
 
   // R-021 #1: the Loop root decides the project. A body projectId that names another project is a mismatch, and a
   // hub run in an unregistered folder is refused. R-020 Q1: the project grant may only narrow the team grant.
@@ -321,6 +331,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       provider,
       writeScope,
       denyWrite,
+      readOnly,
       authorityCheck,
       projectId,
       abortController: ac,

@@ -1,0 +1,128 @@
+{
+  "endpoint": "POST /kb/loop/improve/state",
+  "status": 200,
+  "description": "One loop with a pending proposal; reviewInput carries the cursor pair and the unreviewed signals.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "loops": [
+        {
+          "loopId": "loop-1",
+          "templateKey": "build",
+          "stageKeys": [
+            "plan",
+            "code"
+          ]
+        }
+      ],
+      "reviewInputFor": "loop-1"
+    }
+  },
+  "response": {
+    "loops": {
+      "loop-1": {
+        "finishedRunsSinceReview": 1,
+        "proposals": [
+          {
+            "id": "imp-1",
+            "projectId": "proj-a",
+            "loopId": "loop-1",
+            "templateKey": "build",
+            "stageKey": "code",
+            "change": {
+              "op": "append_instruction",
+              "stageName": "code",
+              "addendum": "Run the tests."
+            },
+            "rationale": "Tests were skipped.",
+            "evidence": [
+              1
+            ],
+            "suggestedScope": "project",
+            "status": "proposed",
+            "scope": null,
+            "origin": null,
+            "baseline": null,
+            "outcome": null,
+            "createdAt": "2026-11-18 10:00:00",
+            "decidedAt": null
+          }
+        ],
+        "history": [
+          {
+            "id": "imp-0",
+            "projectId": "proj-a",
+            "loopId": "loop-1",
+            "templateKey": "build",
+            "stageKey": "code",
+            "change": {
+              "op": "append_instruction",
+              "stageName": "code",
+              "addendum": "Run the tests."
+            },
+            "rationale": "Tests were skipped.",
+            "evidence": [
+              1
+            ],
+            "suggestedScope": "project",
+            "status": "accepted",
+            "scope": "project",
+            "origin": null,
+            "baseline": {
+              "runs": 4
+            },
+            "outcome": null,
+            "createdAt": "2026-11-18 10:00:00",
+            "decidedAt": "2026-11-17 09:05:00"
+          }
+        ]
+      }
+    },
+    "offers": [
+      {
+        "id": "imp-9",
+        "projectId": "proj-b",
+        "loopId": "loop-9",
+        "templateKey": "build",
+        "stageKey": "code",
+        "change": {
+          "op": "append_instruction",
+          "stageName": "code",
+          "addendum": "Run the tests."
+        },
+        "rationale": "Tests were skipped.",
+        "evidence": [
+          3
+        ],
+        "suggestedScope": "general",
+        "status": "accepted",
+        "scope": "general",
+        "origin": null,
+        "baseline": {
+          "runs": 4
+        },
+        "outcome": null,
+        "createdAt": "2026-11-17 09:00:00",
+        "decidedAt": "2026-11-17 09:05:00",
+        "fromProjectName": "Project B",
+        "forLoopId": "loop-1"
+      }
+    ],
+    "reviewInput": {
+      "cursor": 0,
+      "lastId": 1,
+      "signals": [
+        {
+          "id": 1,
+          "kind": "run_finished",
+          "stageKey": "code",
+          "runId": "run-1",
+          "payload": {
+            "ok": true
+          },
+          "createdAt": "2026-11-18 10:00:00"
+        }
+      ]
+    }
+  }
+}

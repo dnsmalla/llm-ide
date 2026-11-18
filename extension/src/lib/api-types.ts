@@ -1605,6 +1605,72 @@ export type AuditItem = {
   userAgent: string | null;
 };
 
+export type LoopImproveChange = {
+  op: string;
+  stageName?: string;
+  addendum?: string;
+  [key: string]: unknown;
+};
+
+export type LoopImproveProposal = {
+  templateKey?: string | null;
+  stageKey?: string | null;
+  change: LoopImproveChange;
+  rationale?: string;
+  evidence?: number[];
+  suggestedScope?: string | null;
+};
+
+export type LoopImprovement = {
+  id: string;
+  projectId: string;
+  loopId: string;
+  templateKey: string | null;
+  stageKey: string | null;
+  change: LoopImproveChange;
+  rationale: string;
+  evidence: number[];
+  suggestedScope: string | null;
+  status: "proposed" | "accepted" | "rejected" | "reverted" | "superseded";
+  scope: string | null;
+  origin: string | null;
+  baseline: Record<string, unknown> | null;
+  outcome: Record<string, unknown> | null;
+  createdAt: string;
+  decidedAt: string | null;
+};
+
+export type LoopImproveSignal = {
+  id: number;
+  kind: string;
+  stageKey: string | null;
+  runId: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type LoopImproveOffer = {
+  id: string;
+  projectId: string;
+  loopId: string;
+  templateKey: string | null;
+  stageKey: string | null;
+  change: LoopImproveChange;
+  rationale: string;
+  evidence: number[];
+  suggestedScope: string | null;
+  status: "proposed" | "accepted" | "rejected" | "reverted" | "superseded";
+  scope: string | null;
+  origin: string | null;
+  baseline: Record<string, unknown> | null;
+  outcome: Record<string, unknown> | null;
+  createdAt: string;
+  decidedAt: string | null;
+  fromProjectName: string;
+  /** The loop in this project the offer applies to */
+  forLoopId: string;
+};
+
 /** One prior chat turn. role is 'user' or 'assistant'; the server maps any other role to 'Assistant' in the /chat prompt. */
 export type Turn = {
   role?: string;
@@ -6401,6 +6467,8 @@ export type PostKbLoopAgentRunRequest = {
     writeScope?: ".factory";
     /** Edit/Write everywhere inside <repoRoot> EXCEPT under .factory/ (Factory Implement and every repair); any other value is 400 invalid_deny_write (API 134) */
     denyWrite?: ".factory";
+    /** No Edit/Write at all (the self-improvement review); any other non-null value is 400 invalid_read_only, and readOnly with writeScope is 400 (API 150) */
+    readOnly?: boolean;
   };
 };
 
@@ -6764,6 +6832,112 @@ export type GetAuthMcpConnectorStatusResponse200 = {
 export type GetAuthMcpConnectorStatusResponse400 = CommonError;
 
 export type GetAuthMcpConnectorStatusResponse401 = CommonError;
+
+/** Request parts for `POST /kb/loop/improve/signal` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLoopImproveSignalRequest = {
+  body: {
+    projectRoot: string;
+    loopId: string;
+    stageKey?: string | null;
+    kind: "run_finished" | "loop_edited" | "sent_back" | "human_review" | "output_edited" | "improvement_outcome";
+    runId?: string | null;
+    /** Free-form per kind; any text field is cut at 20000 characters */
+    payload: Record<string, unknown>;
+  };
+};
+
+export type PostKbLoopImproveSignalResponse200 = {
+  id: number;
+  /** true when this run_finished run id was already stored */
+  duplicate: boolean;
+};
+
+export type PostKbLoopImproveSignalResponse400 = CommonError;
+
+export type PostKbLoopImproveSignalResponse404 = FeatureDisabled | CommonError;
+
+/** Request parts for `POST /kb/loop/improve/state` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLoopImproveStateRequest = {
+  body: {
+    projectRoot: string;
+    /** At most 50 */
+    loops: ({
+      loopId: string;
+      templateKey?: string | null;
+      stageKeys: string[];
+    })[];
+    /** A loopId from loops; adds reviewInput */
+    reviewInputFor?: string;
+  };
+};
+
+export type PostKbLoopImproveStateResponse200 = {
+  /** Keyed by loopId */
+  loops: Record<string, {
+      finishedRunsSinceReview: number;
+      proposals: LoopImprovement[];
+      history: LoopImprovement[];
+    }>;
+  /** General improvements accepted in other projects that fit a loop here */
+  offers: LoopImproveOffer[];
+  /** cursor goes back as expectedCursor, lastId as the new cursor */
+  reviewInput?: {
+    cursor: number;
+    lastId: number;
+    signals: LoopImproveSignal[];
+  };
+};
+
+export type PostKbLoopImproveStateResponse400 = CommonError;
+
+export type PostKbLoopImproveStateResponse404 = FeatureDisabled | CommonError;
+
+/** Request parts for `POST /kb/loop/improve/proposals` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLoopImproveProposalsRequest = {
+  body: {
+    projectRoot: string;
+    loopId: string;
+    expectedCursor: number;
+    cursor: number;
+    /** At most 20; each change at most 10000 characters of JSON */
+    proposals: LoopImproveProposal[];
+  };
+};
+
+export type PostKbLoopImproveProposalsResponse200 = {
+  ids: string[];
+};
+
+export type PostKbLoopImproveProposalsResponse400 = CommonError;
+
+export type PostKbLoopImproveProposalsResponse404 = FeatureDisabled | CommonError;
+
+/** REVIEW_RACE: another review already moved the cursor */
+export type PostKbLoopImproveProposalsResponse409 = CommonError;
+
+/** Request parts for `POST /kb/loop/improve/decide` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLoopImproveDecideRequest = {
+  body: {
+    projectRoot: string;
+    action: "accept" | "reject" | "revert" | "adopt" | "dismiss";
+    id: string;
+    scope?: string;
+    /** Required for adopt */
+    loopId?: string;
+  };
+};
+
+export type PostKbLoopImproveDecideResponse200 = {
+  improvement: LoopImprovement;
+} | {
+  improvement: null;
+};
+
+export type PostKbLoopImproveDecideResponse400 = CommonError;
+
+export type PostKbLoopImproveDecideResponse404 = FeatureDisabled | CommonError;
+
+export type PostKbLoopImproveDecideResponse409 = CommonError;
 
 /** Request parts for `POST /generate-notes` (schema/http/notes-generation.schema.json). */
 export type PostGenerateNotesRequest = {
@@ -10555,6 +10729,40 @@ export interface ApiEndpoints {
       200: GetAuthMcpConnectorStatusResponse200;
       400: GetAuthMcpConnectorStatusResponse400;
       401: GetAuthMcpConnectorStatusResponse401;
+    };
+  };
+  "POST /kb/loop/improve/signal": {
+    request: PostKbLoopImproveSignalRequest;
+    responses: {
+      200: PostKbLoopImproveSignalResponse200;
+      400: PostKbLoopImproveSignalResponse400;
+      404: PostKbLoopImproveSignalResponse404;
+    };
+  };
+  "POST /kb/loop/improve/state": {
+    request: PostKbLoopImproveStateRequest;
+    responses: {
+      200: PostKbLoopImproveStateResponse200;
+      400: PostKbLoopImproveStateResponse400;
+      404: PostKbLoopImproveStateResponse404;
+    };
+  };
+  "POST /kb/loop/improve/proposals": {
+    request: PostKbLoopImproveProposalsRequest;
+    responses: {
+      200: PostKbLoopImproveProposalsResponse200;
+      400: PostKbLoopImproveProposalsResponse400;
+      404: PostKbLoopImproveProposalsResponse404;
+      409: PostKbLoopImproveProposalsResponse409;
+    };
+  };
+  "POST /kb/loop/improve/decide": {
+    request: PostKbLoopImproveDecideRequest;
+    responses: {
+      200: PostKbLoopImproveDecideResponse200;
+      400: PostKbLoopImproveDecideResponse400;
+      404: PostKbLoopImproveDecideResponse404;
+      409: PostKbLoopImproveDecideResponse409;
     };
   };
   "POST /generate-notes": {

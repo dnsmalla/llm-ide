@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/loop/improve/signal",
+  "status": 404,
+  "description": "Answers 404 feature_disabled when the core runs with auto_tasks off.",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "loopId": "loop-1",
+      "stageKey": "code",
+      "kind": "run_finished",
+      "runId": "run-1",
+      "payload": {
+        "ok": true,
+        "costUsd": 0.12
+      }
+    }
+  },
+  "response": {
+    "error": "feature_disabled",
+    "feature": "auto_tasks"
+  }
+}
