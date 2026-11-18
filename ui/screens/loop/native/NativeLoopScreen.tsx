@@ -31,7 +31,7 @@ import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { loopEditSignals, postSignal, runSignalPayload } from "./improve/signals.ts";
 import { ImprovementsPanel } from "./improve/ImprovementsPanel.tsx";
 import { runningLoopIdsOf } from "./improve/panel-model.ts";
-import { liveRuns, subscribe as subscribeRuns } from "./run-manager.ts";
+import { liveRuns, subscribe as subscribeRuns, trackExternalRun } from "./run-manager.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { changedPathArgs, newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
@@ -171,6 +171,8 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const [loopRunning, setLoopRunning] = useState(false);
   // Improvements: the loop this page is running, a tick after each run's signal, and suggestion counts per loop (badge).
   const [activeLoopId, setActiveLoopId] = useState<string | null>(null);
+  // Mirrors the start gate so the panel re-renders: a start holds it from the click until the run has ended.
+  const [starting, setStarting] = useState(false);
   const [improveTick, setImproveTick] = useState(0);
   const [improveCounts, setImproveCounts] = useState<Record<string, number>>({});
   const [, setRunsTick] = useState(0);
@@ -708,10 +710,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       else setRunLog((l) => [...l, `issue trail: no issue — ${trailRepo.provider} ${trailRepo.slug} could not be opened (see the line above)`]);
       if (activeRun && isFactoryLoop(target) && start) {
         try {
-          const [intake, manager] = await Promise.all([import("../../factory/intake.ts"), import("./run-manager.ts")]);
+          const intake = await import("../../factory/intake.ts");
           const put = await intake.putRunOnBoard(fs, start.item, activeRun.runId);
           if ("error" in put) setRunLog((l) => [...l, put.error]);
-          else releaseBoardRun = manager.trackExternalRun({ runId: activeRun.runId, itemKey: put.key, projectRoot: projectRoot ?? "" });
+          else releaseBoardRun = trackExternalRun({ runId: activeRun.runId, itemKey: put.key, projectRoot: projectRoot ?? "" });
         } catch (e) {
           setRunLog((l) => [...l, `The run is not on the Factory board: ${e instanceof Error ? e.message : String(e)}`]);
         }
@@ -853,10 +855,12 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       return;
     }
     ranRef.current = false;
+    setStarting(true);
     try {
       await executeLoopGated(target, scheduled, start);
     } finally {
       startGateRef.current.release();
+      setStarting(false);
       // After a real run, `waitingRef` was just set by the run's own drain (above) and must survive for the next start.
       const waiting = ranRef.current ? new Set<string>() : waitingRef.current;
       if (!ranRef.current) waitingRef.current = new Set();
@@ -1104,7 +1108,8 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.reviewedPatchId ?? shipRun.diff?.patchId ?? null} requestProvider={shipRun.requestProvider ?? null} processName={shipRun.processName} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current || startGateRef.current.held, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <ImprovementsPanel fs={fs} core={core} projectRoot={projectRoot} loop={loop} load={{ store: load.store, hash: load.hash }} dirty={dirty}
-          runningLoopIds={runningLoopIdsOf({ store: load.store, projectRoot, activeLoopId: activeLoopId ?? (runningStage ? loop.id : null), liveRuns: liveRuns() })}
+          runningLoopIds={runningLoopIdsOf({ store: load.store, projectRoot, activeLoopId: activeLoopId ?? (runningStage || starting ? loop.id : null), liveRuns: liveRuns() })}
+          isRunning={() => runningRef.current || startingRef.current || startGateRef.current.held || runningStageRef.current}
           refreshKey={improveTick} onCounts={setImproveCounts} onNotice={setNotice}
           onApplied={(r) => { setLoad({ kind: "ok", store: r.store, hash: r.hash }); }} />
         <section className="loop-card loop-overview">

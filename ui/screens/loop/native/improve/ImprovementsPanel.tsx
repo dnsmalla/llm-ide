@@ -21,6 +21,8 @@ export interface ImprovementsPanelProps {
   /** Unsaved edits on the page: applying would write them too, so it waits for Save. */
   dirty: boolean;
   runningLoopIds: ReadonlySet<string>;
+  /** Click-time check against the page refs (see ApplyDeps.isRunning). */
+  isRunning?: () => boolean;
   /** Changes after a run finished on this page; triggers the background review check. */
   refreshKey: number;
   onApplied(result: ApplyResult): void;
@@ -29,7 +31,12 @@ export interface ImprovementsPanelProps {
   onNotice(text: string): void;
 }
 
-const v = (x: unknown): string => (x === null || x === undefined || x === "" ? "none" : String(x));
+const MAX_SHOWN = 600;
+const v = (x: unknown): string => {
+  if (x === null || x === undefined || x === "") return "none";
+  const text = String(x);
+  return text.length > MAX_SHOWN ? `${text.slice(0, MAX_SHOWN)}…` : text;
+};
 
 /** "Before → after" in plain words for one change. */
 export function describeChange(c: ImprovementChange): { what: string; before: string; after: string } {
@@ -73,7 +80,7 @@ function ProposalCard({ row, loop, busy, blocked, onAccept, onReject }: { row: I
 }
 
 export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
-  const { fs, core, projectRoot, loop, load, dirty, runningLoopIds, refreshKey, onApplied, onCounts, onNotice } = props;
+  const { fs, core, projectRoot, loop, load, dirty, runningLoopIds, isRunning, refreshKey, onApplied, onCounts, onNotice } = props;
   const [available, setAvailable] = useState<boolean | null>(null);
   const [state, setState] = useState<ImproveState | null>(null);
   const [unavailableText, setUnavailableText] = useState<string | null>(null);
@@ -138,7 +145,7 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
   const blocked = runningLoopIds.has(loop.id) ? "Finish or stop the run first" : dirty ? "Save your changes first" : null;
   const offers = (state?.offers ?? []).filter((o) => o.forLoopId === undefined || o.forLoopId === loop.id);
   const accepted = (mine?.history ?? []).filter((h) => h.status === "accepted" || h.status === "reverted");
-  const deps = () => ({ fs, core, projectRoot, load, runningLoopIds });
+  const deps = () => ({ fs, core, projectRoot, load, runningLoopIds, isRunning });
 
   const act = async (row: ImproveRow, run: () => Promise<ApplyResult | void>) => {
     setBusyId(row.id);

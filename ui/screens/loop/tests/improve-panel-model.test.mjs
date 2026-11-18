@@ -147,9 +147,20 @@ test("revert restores the before-value and decides revert", async () => {
 
 test("runningLoopIdsOf adds the Factory loop while the manager has a run for this project", () => {
   const { store } = fixture();
-  const factory = store.loops.find((l) => l.defaultKey === "factory" || l.name.toLowerCase().includes("factory"));
+  const factory = store.loops.find((l) => l.defaultKey === "factory");
+  assert.ok(factory, "fixture has a Factory loop");
   const ids = runningLoopIdsOf({ store, projectRoot: "/p", activeLoopId: "x", liveRuns: [{ projectRoot: "/p" }, { projectRoot: "/q" }] });
   assert.ok(ids.has("x"));
-  if (factory) assert.ok(ids.has(factory.id));
+  assert.ok(ids.has(factory.id));
   assert.equal(runningLoopIdsOf({ store, projectRoot: "/p", activeLoopId: null, liveRuns: [{ projectRoot: "/q" }] }).size, 0);
+});
+
+test("the click-time check refuses when a run started after render, with zero writes", async () => {
+  const d = await deps();
+  let running = false;
+  const run = { fs: d.fs, core: d.core, load: d.load, ...d.base, isRunning: () => running };
+  running = true; // flips after the panel rendered with an empty runningLoopIds
+  await assert.rejects(acceptImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project"), /Finish or stop the run first/);
+  await assert.rejects(revertImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7) }), /Finish or stop the run first/);
+  assert.equal(d.state.events.length, 0);
 });

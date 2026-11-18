@@ -15,6 +15,8 @@ export interface ApplyDeps {
   projectRoot: string;
   load: LoadState;
   runningLoopIds: ReadonlySet<string>;
+  /** Evaluated at click time, right before the write: a run may have started since the panel rendered. */
+  isRunning?: () => boolean;
 }
 export type ApplyResult = LoadState & { notice?: string };
 
@@ -71,7 +73,7 @@ function withChange(store: LoopProjectStore, loopId: string, change: Improvement
 
 /** Apply + hash-checked save. One reload and re-check when another writer changed the file in between. */
 async function applyAndSave(deps: ApplyDeps, loopId: string, change: ImprovementChange, mode: "forward" | "revert"): Promise<LoadState> {
-  if (deps.runningLoopIds.has(loopId)) throw new Error("Finish or stop the run first");
+  if (deps.runningLoopIds.has(loopId) || deps.isRunning?.()) throw new Error("Finish or stop the run first");
   let load = deps.load;
   for (let attempt = 0; ; attempt++) {
     const next = withChange(load.store, loopId, change, mode); // stale throws here, before any write
