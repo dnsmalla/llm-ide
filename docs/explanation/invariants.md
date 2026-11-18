@@ -548,7 +548,7 @@ A review proposes changes to a loop; a person accepts them. Design: [Loop Engine
 ### ✅ MUST preserve
 
 - **Changes pass `validateChange` only.** It is deny-by-default and runs on parse and again on apply; nothing else edits a loop on the AI's behalf.
-- **A loop never weakens its own checks.** Only advisory steps can be turned off, `runOnce`/`reviewAfter` only on, `maxCostUsd` never raised, gate skills never moved. Factory loops accept only the addendum, `maxRepairsPerStage` and `stageDelaySeconds`.
+- **A loop never weakens its own checks.** Only advisory steps can be turned off, `reviewAfter` only on, `runOnce` only on regular skill steps, no addendum on gate skills or in step-review messages, `maxCostUsd` never raised, gate skills never moved. Factory loops accept only the addendum, `maxRepairsPerStage` and `stageDelaySeconds`.
 - **The review is read-only and fenced.** It runs with `readOnly: true` and all loop, history and signal text is data inside fences. Improvement data and `system/loop.json` stay out of the agent's write scope.
 - **Signals are fail-open.** A failed post never blocks a run or an edit.
 - **Apply is refused while any run is starting or running**, and re-checks against the current loop.

@@ -67,6 +67,17 @@ test("postSignal posts once when available and never rejects on 404 or network e
   await postSignal(old, { projectRoot: "/p", loopId: "L", kind: "run_finished", payload: {} });
 });
 
+test("loadCoreApiVersion does not cache a failed read", async () => {
+  let fail = true;
+  let reads = 0;
+  const core = { async request() { reads += 1; if (fail) throw new Error("starting"); return { apiVersion: 150 }; } };
+  assert.equal(await loadCoreApiVersion(core), undefined);
+  fail = false;
+  assert.equal(await loadCoreApiVersion(core), 150);
+  assert.equal(await loadCoreApiVersion(core), 150);
+  assert.equal(reads, 2, "a successful read is cached");
+});
+
 test("runSignalPayload is total and an awaiting_review run counts as passed", () => {
   for (const bad of [null, undefined, 5, "x", []]) assert.doesNotThrow(() => runSignalPayload(entry, bad));
   assert.doesNotThrow(() => runSignalPayload(null, null));

@@ -101,11 +101,13 @@ export function improveAvailable(apiVersion: unknown): boolean {
 }
 
 const versions = new WeakMap<object, Promise<unknown>>();
-/** The core's apiVersion from one /health read per core object; a failed read resolves to undefined (unavailable). */
+/** The core's apiVersion from one /health read per core object; a failed or unknown read resolves to undefined and is not cached, so the next call retries. */
 export function loadCoreApiVersion(core: CoreFetch): Promise<unknown> {
   let p = versions.get(core);
   if (!p) {
-    p = Promise.resolve().then(() => core.request<{ apiVersion?: unknown }>("/health", { auth: false })).then((h) => h?.apiVersion, () => undefined);
+    const read = Promise.resolve().then(() => core.request<{ apiVersion?: unknown }>("/health", { auth: false })).then((h) => h?.apiVersion, () => undefined);
+    // Why: a core that is still starting would otherwise pin "unavailable" for the whole session.
+    p = read.then((version) => { if (version === undefined && versions.get(core) === p) versions.delete(core); return version; });
     versions.set(core, p);
   }
   return p;

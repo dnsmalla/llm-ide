@@ -105,6 +105,14 @@ test("a worse accepted improvement is shown in the history without an inverse in
   assert.ok(message.includes("Signal id 1 "));
 });
 
+test("history shows rejected rows with their status and tells the model not to re-propose", () => {
+  const history = [{ id: 9, status: "rejected", change: timeoutChange(1200), outcome: null }, { id: 10, status: "proposed", change: timeoutChange(300), outcome: null }];
+  const message = buildReviewMessage(loop(), [], 1e6, history);
+  assert.ok(message.includes("improvement 9 (rejected)"));
+  assert.ok(!message.includes("improvement 10"));
+  assert.match(message, /Never propose a change that is already listed as rejected/);
+});
+
 function fakeCore({ signals = twoRuns, agentReply = reply([prop(timeoutChange(900), [1, 2])]), postError = null, gate = null } = {}) {
   const calls = [];
   return {

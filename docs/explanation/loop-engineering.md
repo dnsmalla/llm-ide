@@ -700,8 +700,8 @@ alongside other evidence but never counts on its own). Proposals that miss this 
 runs when proposals are parsed and again on apply. Allowed:
 
 - the stage prompt addendum (`promptAddendum`, shown as "Accepted lessons", at most
-  2000 characters; the stage's own prompt is never rewritten);
-- stage fields `timeoutSeconds`, `runOnce`, `reviewAfter`, `enabled`;
+  2000 characters; the stage's own prompt is never rewritten; refused on the gate skills, and never added to a step review: a lesson guides doing a step, not judging it);
+- stage fields `timeoutSeconds`, `runOnce`, `reviewAfter`, `enabled` (`runOnce` only on a regular, unpinned skill step: it makes the runner skip the step after the first pass, so on a check or gate it would weaken verification);
 - moving a stage;
 - config `maxIterations`, `maxRepairsPerStage`, `stageDelaySeconds`,
   `refactorBatchesPerRun`, `maxCostUsd`, `wallClockBudgetSeconds`, each in a fixed range.
