@@ -9,12 +9,12 @@ import { displayText } from "../explorer/scm/model.ts";
 export type Column = "inbox" | "needsDecision" | "working" | "needsYou" | "readyToShip" | "shipped" | "done";
 
 export interface ShipComment { author: string; body: string; at: string; /** Posted by an integration, not a person. */ bot?: boolean }
-export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; ci: "none" | "pending" | "success" | "failed"; ciSummary: string | null; comments: ShipComment[] }
+export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; ci: "none" | "pending" | "success" | "failed"; ciSummary: string | null; comments: ShipComment[]; /** The MR's commits, oldest first; absent when the provider list could not be read. */ commits?: { sha: string }[] }
 export interface LoopbackFacts { rounds: number; maxRounds: number; reason: "tests" | "review" | "limit"; findings: string }
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
 export interface RunRecordFacts {
   runId: string; mode: RunMode; statusCode: string; needsDecision: string | null;
-  ship: { provider: "github" | "gitlab"; url: string; secretOverride?: { rule: string; file: string | null; line: number | null; at: string; hits?: { rule: string; file: string | null; line: number }[]; total?: number } | null } | null;
+  ship: { provider: "github" | "gitlab"; url: string; /** The commit the loop pushed. */ commit?: string; secretOverride?: { rule: string; file: string | null; line: number | null; at: string; hits?: { rule: string; file: string | null; line: number }[]; total?: number } | null } | null;
   costUsd: number | null; durationSeconds: number | null;
   verdict: string | null;
   changed: { files: number; additions: number | null; deletions: number | null; truncated: boolean } | null;
@@ -68,7 +68,8 @@ export function decodeRunRecordFacts(raw: unknown, entry: { id: string; startedA
       const so = isRecord(raw.ship) && isRecord(raw.ship.secretOverride) && typeof raw.ship.secretOverride.rule === "string"
         ? { rule: raw.ship.secretOverride.rule, file: typeof raw.ship.secretOverride.file === "string" ? raw.ship.secretOverride.file : null, line: typeof raw.ship.secretOverride.line === "number" ? raw.ship.secretOverride.line : null, at: typeof raw.ship.secretOverride.at === "string" ? raw.ship.secretOverride.at : "" }
         : null;
-      ship = { provider, url, ...(so ? { secretOverride: so } : {}) };
+      const commit = typeof raw.ship.commit === "string" && /^[0-9a-f]{40}$/.test(raw.ship.commit) ? raw.ship.commit : null;
+      ship = { provider, url, ...(commit ? { commit } : {}), ...(so ? { secretOverride: so } : {}) };
     }
   }
   const mode = typeof raw.factoryMode === "string" && RUN_MODES.includes(raw.factoryMode) ? (raw.factoryMode as RunMode) : "full";

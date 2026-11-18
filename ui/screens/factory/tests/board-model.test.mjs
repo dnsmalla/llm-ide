@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   ACTION_LABELS, EMPTY_FACTS, laneFor, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, cardTone, chunkShipRequests, loopbackTitle, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
-  shipRequestsFor, toWorkItem,
+  shipRequestsFor, toWorkItem, foreignCommits, outputEditedSignals,
 } from "../board-model.ts";
 import { formatStepReviews } from "../../loop/native/issue-trail.ts";
 import { NOTE } from "../columns.ts";
@@ -392,4 +392,37 @@ test("a stopped loop card is an alert with the findings and a title", () => {
   assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "tests", findings: "" }), "Tests still failing after 3 rounds");
   assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "review", findings: "" }), "Review still requests changes after 3 rounds");
   assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "limit", findings: "" }), "Stopped at its limit in round 3 of 3");
+});
+
+test("decodeShipResults keeps a valid commit list and drops non-sha rows", () => {
+  const a = "a".repeat(40);
+  const url = "https://github.com/a/b/pull/1";
+  const m = decodeShipResults({ results: [{ url, state: "open", ci: "none", ciSummary: null, comments: [], commits: [{ sha: a }, { sha: "zz" }, 5] }] });
+  assert.deepEqual(m.get(url).commits, [{ sha: a }]);
+  const none = decodeShipResults({ results: [{ url, state: "open", ci: "none", comments: [] }] });
+  assert.equal("commits" in none.get(url), false);
+});
+
+test("foreignCommits are the SHAs after the loop's own commit; unknown own commit or rewritten history posts nothing", () => {
+  const [a, b, c] = ["a", "b", "c"].map((x) => x.repeat(40));
+  assert.deepEqual(foreignCommits(a, [{ sha: a }, { sha: b }, { sha: c }]), [b, c]);
+  assert.equal(foreignCommits(a, [{ sha: a }]), null);
+  assert.equal(foreignCommits(c, [{ sha: a }, { sha: b }]), null, "own commit not in the list (force-push)");
+  assert.equal(foreignCommits(undefined, [{ sha: a }]), null);
+  assert.equal(foreignCommits(a, undefined), null);
+  const many = [{ sha: a }, ...Array.from({ length: 60 }, (_, i) => ({ sha: i.toString(16).padStart(40, "0") }))];
+  assert.equal(foreignCommits(a, many).length, 50);
+});
+
+test("outputEditedSignals posts once per run per newest foreign SHA and never for the run's own commit", () => {
+  const [a, b, c] = ["a", "b", "c"].map((x) => x.repeat(40));
+  const url = "https://github.com/a/b/pull/1";
+  const records = new Map([["r1", rec("r1", { ship: { provider: "github", url, commit: a } })], ["r2", rec("r2")]]);
+  const status = (commits) => new Map([[url, { url, state: "open", ci: "none", ciSummary: null, comments: [], commits }]]);
+  const posted = new Map();
+  assert.deepEqual(outputEditedSignals(records, status([{ sha: a }]), posted), [], "only the loop's own commit");
+  assert.deepEqual(outputEditedSignals(records, status([{ sha: a }, { sha: b }]), posted), [{ runId: "r1", payload: { extraCommits: [b] } }]);
+  assert.deepEqual(outputEditedSignals(records, status([{ sha: a }, { sha: b }]), posted), [], "polling again does not re-post");
+  assert.deepEqual(outputEditedSignals(records, status([{ sha: a }, { sha: b }, { sha: c }]), posted), [{ runId: "r1", payload: { extraCommits: [b, c] } }]);
+  assert.deepEqual(outputEditedSignals(records, new Map([[url, "error"]]), posted), []);
 });

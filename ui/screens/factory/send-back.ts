@@ -8,7 +8,9 @@ import type { WorkItemRecord } from "./items.ts";
 
 export type StartRunFn = (projectRoot: string, item: WorkItemRecord, mode: RunMode, opts?: { runId?: string }) => string;
 /** Reports a user's correction of a finished run to the improvement log; the caller decides where it goes. */
-export type UserSignalFn = (s: { kind: "sent_back" | "human_review"; runId: string; payload: { note: string; comments?: { author: string; body: string }[]; ciFailed?: boolean } }) => void;
+export type UserSignalFn = (s:
+  | { kind: "sent_back" | "human_review"; runId: string; payload: { note: string; comments?: { author: string; body: string }[]; ciFailed?: boolean } }
+  | { kind: "output_edited"; runId: string; payload: { extraCommits: string[] } }) => void;
 export type SendBackFs = Pick<FsApi, "read" | "write" | "create">;
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;

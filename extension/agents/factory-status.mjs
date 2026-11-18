@@ -12,11 +12,13 @@ import { parseGithubUrl } from './outcome-providers.mjs';
 export const MAX_SHIP_STATUS_REQUESTS = 20;
 export const MAX_COMMENTS = 20;
 export const MAX_COMMENT_CHARS = 4_000;
+export const MAX_COMMITS = 100;
 const MAX_SUMMARY_NAMES = 10;
 const MAX_SUMMARY_CHARS = 500;
 const TIMEOUT_MS = 15_000;
 const GITHUB_API = 'https://api.github.com';
 const GITLAB_API = 'https://gitlab.com/api/v4';
+const asArray = (v) => (Array.isArray(v) ? v : []);
 const SHA_RE = /^[0-9a-f]{40}$/;
 // Same project-path shape as routes/issue-writes.mjs REPO_SHAPE.gitlab (2 to 20 segments).
 const GITLAB_MR_RE = /^https?:\/\/gitlab\.com\/([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){1,19})\/-\/merge_requests\/(\d+)(?:[/?#]|$)/;
@@ -74,8 +76,21 @@ function newComments(rows, since) {
     .map((c) => ({ author: c.author, body: c.body.slice(0, MAX_COMMENT_CHARS), at: c.at, bot: c.bot === true }));
 }
 
+/**
+ * The MR's commits as [{ sha }], oldest first, or undefined on any failure: the list only feeds a best-effort
+ * signal, so an error here must never fail the status result. Only plain 40-hex shas are kept.
+ */
+async function commitList(fetchFn, url, headers, key, newestFirst) {
+  try {
+    const rows = asArray(await getJson(fetchFn, url, headers));
+    const shas = rows.map((c) => c?.[key]).filter((v) => typeof v === 'string' && SHA_RE.test(v)).slice(0, MAX_COMMITS);
+    return (newestFirst ? shas.reverse() : shas).map((sha) => ({ sha }));
+  } catch {
+    return undefined;
+  }
+}
+
 const summary = (prefix, names) => `${prefix}: ${names.slice(0, MAX_SUMMARY_NAMES).join(', ') || 'unnamed'}`.slice(0, MAX_SUMMARY_CHARS);
-const asArray = (v) => (Array.isArray(v) ? v : []);
 
 function githubCi(checks, status) {
   const runs = asArray(checks?.check_runs);
@@ -104,11 +119,12 @@ async function pollGithubPr(pr, since, token) {
   // The sha goes into a URL path: only a plain 40-hex sha is used.
   const sha = typeof data?.head?.sha === 'string' && SHA_RE.test(data.head.sha) ? data.head.sha : null;
   const sinceQuery = since ? `&since=${encodeURIComponent(since)}` : '';
-  const [checks, status, issueComments, reviewComments] = await Promise.all([
+  const [checks, status, issueComments, reviewComments, commits] = await Promise.all([
     sha ? getJson(fetchFn, `${base}/commits/${sha}/check-runs?per_page=100`, headers) : null,
     sha ? getJson(fetchFn, `${base}/commits/${sha}/status`, headers) : null,
     getJson(fetchFn, `${base}/issues/${pr.number}/comments?per_page=100${sinceQuery}`, headers),
     getJson(fetchFn, `${base}/pulls/${pr.number}/comments?per_page=100${sinceQuery}`, headers),
+    commitList(fetchFn, `${base}/pulls/${pr.number}/commits?per_page=${MAX_COMMITS}`, headers, 'sha', false),
   ]);
   const rows = [...asArray(issueComments), ...asArray(reviewComments)].map((c) => ({
     author: typeof c?.user?.login === 'string' ? c.user.login : '',
@@ -117,7 +133,7 @@ async function pollGithubPr(pr, since, token) {
     // Integrations (coverage, Sonar, Renovate) comment on every PR; the Factory must not treat them as a person's review.
     bot: c?.user?.type === 'Bot' || (typeof c?.user?.login === 'string' && c.user.login.endsWith('[bot]')),
   }));
-  return { state, ...githubCi(checks, status), comments: newComments(rows, since) };
+  return { state, ...githubCi(checks, status), comments: newComments(rows, since), ...(commits ? { commits } : {}) };
 }
 
 async function pollGitlabMr(mr, since, token) {
@@ -125,9 +141,11 @@ async function pollGitlabMr(mr, since, token) {
   const headers = { 'User-Agent': 'llm-ide-extension' };
   if (token) headers['PRIVATE-TOKEN'] = token;
   const base = `${GITLAB_API}/projects/${encodeURIComponent(mr.project)}`;
-  const [data, notes] = await Promise.all([
+  const [data, notes, commits] = await Promise.all([
     getJson(fetchFn, `${base}/merge_requests/${mr.iid}`, headers),
     getJson(fetchFn, `${base}/merge_requests/${mr.iid}/notes?sort=desc&order_by=created_at&per_page=100`, headers),
+    // GitLab lists an MR's commits newest first; the status result is oldest first for both providers.
+    commitList(fetchFn, `${base}/merge_requests/${mr.iid}/commits?per_page=${MAX_COMMITS}`, headers, 'id', true),
   ]);
   const state = data?.state === 'merged' ? 'merged' : data?.state === 'closed' ? 'closed' : 'open';
   const pipeline = data?.head_pipeline;
@@ -147,7 +165,7 @@ async function pollGitlabMr(mr, since, token) {
   const rows = asArray(notes)
     .filter((n) => n?.system === false)
     .map((n) => ({ author: typeof n?.author?.username === 'string' ? n.author.username : '', body: n?.body, at: n?.created_at, bot: n?.author?.bot === true }));
-  return { state, ci, ciSummary, comments: newComments(rows, since) };
+  return { state, ci, ciSummary, comments: newComments(rows, since), ...(commits ? { commits } : {}) };
 }
 
 /**
@@ -155,7 +173,8 @@ async function pollGitlabMr(mr, since, token) {
  * @param {string} url the PR/MR web URL
  * @param {{ since?: string|null, creds?: { github?: { token?: string }, gitlab?: { token?: string } } }} [opts]
  * @returns {Promise<{ url: string, state: 'open'|'merged'|'closed', ci: 'none'|'pending'|'success'|'failed',
- *   ciSummary: string|null, comments: { author: string, body: string, at: string }[] }>}
+ *   ciSummary: string|null, comments: { author: string, body: string, at: string }[],
+ *   commits?: { sha: string }[] }>} commits: the MR's first 100, oldest first; absent when the list could not be read
  * @throws {ShipStatusError} code provider_error | unauthorized | unsupported_url
  */
 export async function pollRequest(url, { since = null, creds = {} } = {}) {

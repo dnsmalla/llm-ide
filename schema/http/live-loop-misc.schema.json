@@ -748,6 +748,22 @@
                     ],
                     "x-optional": true
                   },
+                  "commits": {
+                    "type": "array",
+                    "x-optional": true,
+                    "description": "The MR's first 100 commits, oldest first (GitLab's newest-first list is reversed); absent when the commit list could not be read",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "sha"
+                      ],
+                      "properties": {
+                        "sha": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
                   "comments": {
                     "type": "array",
                     "x-optional": true,

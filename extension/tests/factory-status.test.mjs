@@ -97,7 +97,7 @@ test('github: merged PR with failing check returns merged and failed', async () 
         { author: 'sonarcloud[bot]', body: 'Quality gate passed', at: '2026-11-03T10:00:00Z', bot: true },
       ],
     });
-    assert.equal(seen.length, 5);
+    assert.equal(seen.length, 6);
     assert.ok(seen.every((s) => s.url.startsWith('https://api.github.com/repos/o/r/')), 'fixed host only');
     assert.ok(seen.every((s) => s.headers.Authorization === 'Bearer ghp_test_token_1234567890'));
   } finally { _setPinnedFetchForTests(null); }
@@ -197,5 +197,50 @@ test('more than 20 requests is rejected with 400', async () => {
     assert.ok(ok.body.results.every((x) => x.error === 'provider_error'), 'the fake answers 404 → provider_error');
     const bad = await callRoute({ requests: [{ url: 'https://github.com/o/r/pull/1', since: 'yesterday' }] });
     assert.equal(bad.status, 400, 'since must be an ISO date or null');
+  } finally { _setPinnedFetchForTests(null); }
+});
+
+test('github: commits are listed oldest to newest, sha only', async () => {
+  const base = 'https://api.github.com/repos/o/r';
+  const SHA2 = 'b'.repeat(40);
+  fakeProvider({
+    [`${base}/pulls/8`]: () => json(200, { state: 'open', merged: false, head: { sha: SHA2 } }),
+    [`${base}/commits/${SHA2}/check-runs`]: () => json(200, { check_runs: [] }),
+    [`${base}/commits/${SHA2}/status`]: () => json(200, { statuses: [] }),
+    [`${base}/issues/8/comments`]: () => json(200, []),
+    [`${base}/pulls/8/comments`]: () => json(200, []),
+    [`${base}/pulls/8/commits`]: () => json(200, [{ sha: SHA, commit: { message: 'secret text' } }, { sha: SHA2 }, { nosha: 1 }]),
+  });
+  try {
+    const out = await pollRequest('https://github.com/o/r/pull/8');
+    assert.deepEqual(out.commits, [{ sha: SHA }, { sha: SHA2 }]);
+  } finally { _setPinnedFetchForTests(null); }
+});
+
+test('gitlab: commits (returned newest first) are reversed to oldest to newest', async () => {
+  const base = 'https://gitlab.com/api/v4/projects/g%2Fp';
+  const SHA2 = 'b'.repeat(40);
+  fakeProvider({
+    [`${base}/merge_requests/3`]: () => json(200, { state: 'opened', head_pipeline: null }),
+    [`${base}/merge_requests/3/notes`]: () => json(200, []),
+    [`${base}/merge_requests/3/commits`]: () => json(200, [{ id: SHA2 }, { id: SHA }]),
+  });
+  try {
+    const out = await pollRequest('https://gitlab.com/g/p/-/merge_requests/3');
+    assert.deepEqual(out.commits, [{ sha: SHA }, { sha: SHA2 }]);
+  } finally { _setPinnedFetchForTests(null); }
+});
+
+test('a failing commit list is omitted and does not fail the status', async () => {
+  const base = 'https://gitlab.com/api/v4/projects/g%2Fp';
+  fakeProvider({
+    [`${base}/merge_requests/3`]: () => json(200, { state: 'opened', head_pipeline: null }),
+    [`${base}/merge_requests/3/notes`]: () => json(200, []),
+    [`${base}/merge_requests/3/commits`]: () => json(500, {}),
+  });
+  try {
+    const out = await pollRequest('https://gitlab.com/g/p/-/merge_requests/3');
+    assert.equal(out.state, 'open');
+    assert.equal('commits' in out, false);
   } finally { _setPinnedFetchForTests(null); }
 });

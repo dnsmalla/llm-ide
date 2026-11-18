@@ -270,13 +270,66 @@ export function decodeShipResults(body: unknown): Map<string, ShipStatus | "erro
         if (comments.length >= SHIP_STATUS_BATCH) break;
       }
     }
+    const commits = decodeCommits(row.commits);
     out.set(url, {
       url,
       state: row.state as ShipStatus["state"],
       ci: row.ci as ShipStatus["ci"],
       ciSummary: typeof row.ciSummary === "string" ? row.ciSummary.slice(0, 4000) : null,
       comments,
+      ...(commits ? { commits } : {}),
     });
+  }
+  return out;
+}
+
+const SHA40 = /^[0-9a-f]{40}$/;
+const MAX_COMMITS_READ = 100;
+const MAX_EXTRA_COMMITS = 50;
+
+function decodeCommits(v: unknown): { sha: string }[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: { sha: string }[] = [];
+  for (const c of v) {
+    if (isRecord(c) && typeof c.sha === "string" && SHA40.test(c.sha)) out.push({ sha: c.sha });
+    if (out.length >= MAX_COMMITS_READ) break;
+  }
+  return out;
+}
+
+/**
+ * The commits on a run's MR that the loop did not push: every SHA listed after `ship.commit`. Null when there is
+ * nothing foreign, when the commit list is unknown, or when `ship.commit` is not in the list (a force-push rewrote
+ * history, so "after" means nothing). Capped at 50.
+ */
+export function foreignCommits(ownCommit: string | undefined, commits: readonly { sha: string }[] | undefined): string[] | null {
+  if (!ownCommit || !commits) return null;
+  const at = commits.findIndex((c) => c.sha === ownCommit);
+  if (at < 0) return null;
+  const extra = commits.slice(at + 1).map((c) => c.sha);
+  return extra.length ? extra.slice(0, MAX_EXTRA_COMMITS) : null;
+}
+
+/**
+ * The output_edited signals to post now: one per run whose MR gained foreign commits that were not posted yet.
+ * `posted` (run id to the newest foreign SHA already posted; the caller keeps it in memory) is updated here, so a
+ * 5-minute poll does not post the same set again, and a further push posts once more.
+ */
+export function outputEditedSignals(
+  records: ReadonlyMap<string, RunRecordFacts>,
+  ship: ReadonlyMap<string, ShipStatus | "error">,
+  posted: Map<string, string>,
+): { runId: string; payload: { extraCommits: string[] } }[] {
+  const out: { runId: string; payload: { extraCommits: string[] } }[] = [];
+  for (const [runId, rec] of records) {
+    const status = rec.ship ? ship.get(rec.ship.url) : undefined;
+    if (!rec.ship || !status || status === "error") continue;
+    const extra = foreignCommits(rec.ship.commit, status.commits);
+    if (!extra) continue;
+    const newest = extra[extra.length - 1];
+    if (posted.get(runId) === newest) continue;
+    posted.set(runId, newest);
+    out.push({ runId, payload: { extraCommits: extra } });
   }
   return out;
 }

@@ -6442,6 +6442,10 @@ export type PostKbLoopShipStatusResponse200 = {
     state?: "open" | "merged" | "closed";
     ci?: "none" | "pending" | "success" | "failed";
     ciSummary?: string | null;
+    /** The MR's first 100 commits, oldest first (GitLab's newest-first list is reversed); absent when the commit list could not be read */
+    commits?: {
+      sha: string;
+    }[];
     /** Untrusted text: newest 20 comments after `since`, each body at most 4,000 characters */
     comments?: {
       author: string;

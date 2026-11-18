@@ -16,7 +16,7 @@ import "../loop/native/native-loop.css";
 import "./board.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, outputEditedSignals, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { interruptedRunPlan, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
 import { isFactoryLoop, pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
 import { processHasIntake, processSteps } from "../loop/native/factory-template.ts";
@@ -147,6 +147,9 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const lastKnown = useRef<Map<string, Column>>(new Map());
   const liveIds = useRef("");
   const lastStatusAt = useRef(0);
+  // run id -> newest foreign commit already reported as an output_edited signal (memory only; the core does not dedupe).
+  const editSignalRef = useRef<UserSignalFn>(() => undefined);
+  const editedPosted = useRef<Map<string, string>>(new Map());
 
   // Another project: nothing of the previous one (items, facts, last known columns) may leak into this board.
   useEffect(() => {
@@ -154,6 +157,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     itemsRef.current = [];
     recordsRef.current = new Map();
     lastStatusAt.current = 0;
+    editedPosted.current = new Map();
     setItems([]);
     setRecords(new Map());
     setWorktrees(new Map());
@@ -218,7 +222,12 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       for (const q of chunk) if (!next.has(q.url)) next.set(q.url, "error");
     }
     // Rate limited: keep the statuses already shown instead of marking every card "status unavailable".
-    if (!rateLimited) { setShip(next); setRetryAt(null); }
+    if (!rateLimited) {
+      setShip(next);
+      setRetryAt(null);
+      // Best effort: commits a person pushed onto the loop's MR say what the loop got wrong.
+      try { for (const e of outputEditedSignals(recordsRef.current, next, editedPosted.current)) editSignalRef.current({ kind: "output_edited", runId: e.runId, payload: e.payload }); } catch { /* never breaks status polling */ }
+    }
     else setRetryAt(Date.now() + (retryAfterMs ?? STATUS_MIN_GAP_MS));
   }, []);
 
@@ -307,6 +316,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       if (loop) void postSignal(core, { projectRoot: root, loopId: loop.id, kind: s.kind, runId: s.runId, payload: s.payload });
     }, () => undefined).catch(() => undefined);
   };
+  editSignalRef.current = projectRoot ? userSignal(projectRoot) : () => undefined;
   const act = async (fn: () => Promise<void>) => {
     try {
       await fn();
