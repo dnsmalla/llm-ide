@@ -40,6 +40,23 @@ export function recordSignal(db, userId, {
 }) {
   if (!SIGNAL_KINDS.includes(kind)) throw err('VALIDATION', `Unknown signal kind: ${kind}`);
   const text = JSON.stringify(clampStrings(payload ?? {}));
+  if (kind === 'output_edited' && runId != null) {
+    // The desktop dedupes in memory only, so a restart or remount re-posts; dedupe here on the newest foreign commit.
+    return db.transaction(() => {
+      const newest = (value) => { try { const list = JSON.parse(value)?.extraCommits; return Array.isArray(list) ? list[list.length - 1] ?? null : null; } catch { return null; } };
+      const last = db.prepare(
+        `SELECT id, payload FROM loop_signals WHERE user_id = ? AND loop_id = ? AND run_id = ? AND kind = 'output_edited'
+         ORDER BY id DESC LIMIT 1`,
+      ).get(userId, loopId, runId);
+      const incoming = newest(text);
+      if (last && incoming !== null && newest(last.payload) === incoming) return { id: last.id, duplicate: true };
+      const info = db.prepare(
+        `INSERT INTO loop_signals (user_id, project_id, loop_id, stage_key, kind, run_id, payload)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(userId, projectId, loopId, stageKey, kind, runId, text);
+      return { id: Number(info.lastInsertRowid), duplicate: false };
+    })();
+  }
   try {
     const info = db.prepare(
       `INSERT INTO loop_signals (user_id, project_id, loop_id, stage_key, kind, run_id, payload)

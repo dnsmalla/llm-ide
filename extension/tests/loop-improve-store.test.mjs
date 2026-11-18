@@ -216,3 +216,14 @@ test("signalsSinceReview keeps a 'worse' outcome older than the cursor until the
   decide(db, userA.id, { projectId: 'P1', id: row.id, action: 'revert' });
   assert.equal(signalsSinceReview(db, userA.id, 'P1', loop).signals.length, 0);
 });
+
+test('output_edited: the same newest SHA is recorded once, a new newest SHA again', () => {
+  const edit = (commits) => recordSignal(db, userA.id, { projectId: 'P1', loopId: 'oe', kind: 'output_edited', runId: 'oe-run', payload: { extraCommits: commits } });
+  const first = edit(['a1']);
+  const again = edit(['a1']);
+  assert.equal(first.duplicate, false);
+  assert.equal(again.duplicate, true);
+  assert.equal(edit(['a1', 'b2']).duplicate, false);
+  assert.equal(edit(['a1', 'b2']).duplicate, true);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM loop_signals WHERE loop_id = 'oe'").get().n, 2);
+});
