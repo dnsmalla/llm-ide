@@ -115,3 +115,11 @@ test("rework writes the MR feedback and restarts the card's own worktree from th
   assert.match(fs.files.get(FEEDBACK), /closed without merging/);
   assert.match(fs.files.get(FEEDBACK), /Please handle the empty password/);
 });
+
+test("sendBack reports the user's note and the provider comments through onUserSignal", async () => {
+  const fs = memFs();
+  const signals = [];
+  await sendBack({ fs, projectRoot: "/p", start: () => "r1", onUserSignal: (s) => signals.push(s) }, item, status, " Keep it small. ");
+  assert.deepEqual(signals, [{ kind: "sent_back", runId: "r1", payload: { note: "Keep it small.", comments: [{ author: "rev", body: status.comments[0].body }], ciFailed: true } }]);
+  await sendBack({ fs, projectRoot: "/p", start: () => "r1", onUserSignal: () => { throw new Error("boom"); } }, item, status, "");
+});

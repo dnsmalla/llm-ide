@@ -7,6 +7,8 @@ import type { ShipStatus } from "./columns.ts";
 import type { WorkItemRecord } from "./items.ts";
 
 export type StartRunFn = (projectRoot: string, item: WorkItemRecord, mode: RunMode, opts?: { runId?: string }) => string;
+/** Reports a user's correction of a finished run to the improvement log; the caller decides where it goes. */
+export type UserSignalFn = (s: { kind: "sent_back" | "human_review"; runId: string; payload: { note: string; comments?: { author: string; body: string }[]; ciFailed?: boolean } }) => void;
 export type SendBackFs = Pick<FsApi, "read" | "write" | "create">;
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -44,10 +46,13 @@ export async function prepareSendBack(fs: SendBackFs, runRootPrefix: string, sta
 }
 
 /** Writes the feedback, then starts a sendBack run in the card's own worktree (never a new one). */
-export async function sendBack(deps: { fs: SendBackFs; start: StartRunFn; projectRoot: string }, item: WorkItemRecord, status: ShipStatus, userNote: string): Promise<string> {
+export async function sendBack(deps: { fs: SendBackFs; start: StartRunFn; projectRoot: string; onUserSignal?: UserSignalFn }, item: WorkItemRecord, status: ShipStatus, userNote: string): Promise<string> {
   const runId = item.runIds.at(-1);
   if (!runId) throw new Error("This card has no run to send back to.");
   await prepareSendBack(deps.fs, worktreePrefix(runId), status, userNote);
+  try {
+    deps.onUserSignal?.({ kind: "sent_back", runId, payload: { note: userNote.trim().slice(0, MAX_NOTE), comments: status.comments.map((c) => ({ author: c.author, body: c.body })), ciFailed: status.ci === "failed" } });
+  } catch { /* a signal never blocks the send-back */ }
   return deps.start(deps.projectRoot, item, "sendBack", { runId });
 }
 

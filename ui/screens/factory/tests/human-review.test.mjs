@@ -38,3 +38,9 @@ test("a second request overwrites, and the text is trimmed to 4000 chars", async
   assert.match(text, /second/);
   assert.ok(text.length < 4100);
 });
+
+test("requestChanges reports the note through onUserSignal", async () => {
+  const signals = [];
+  await requestChanges({ fs: memFs(), projectRoot: "/p", start: () => "r1", onUserSignal: (s) => signals.push(s) }, item, "  Rename it.  ");
+  assert.deepEqual(signals, [{ kind: "human_review", runId: "r1", payload: { note: "Rename it." } }]);
+});

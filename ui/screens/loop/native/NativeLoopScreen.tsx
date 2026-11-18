@@ -28,6 +28,7 @@ import { writeRunArchive } from "./summary.ts";
 import { clearQueue, loadQueue, saveQueue } from "./queue.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
+import { loopEditSignals, postSignal, runSignalPayload } from "./improve/signals.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { changedPathArgs, newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
@@ -786,7 +787,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, costUsd: o.usage?.costUsd ?? null, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
       // Awaited: Ship's record update (setRunRecordShip) needs the record on disk, so the panel opens only after it.
-      await appendRunRecord(fs, entry, { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...stepReviewRecords(outcome.stepReviews), ...loopbackRecord(outcome.loopback), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) }).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      const record = { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...stepReviewRecords(outcome.stepReviews), ...loopbackRecord(outcome.loopback), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) };
+      await appendRunRecord(fs, entry, record).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      // Not awaited and fail-open: a signal never delays or fails the run.
+      if (projectRoot) void postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: runSignalPayload(entry, record) });
       // A passed worktree run offers Ship: the Factory for its work item, and the Refactoring loop as one MR for the
       // whole run. Other non-Factory loops get no Ship offer.
       if (activeRun && (start || target.defaultKey === "refactor") && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) {
@@ -988,6 +992,15 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       setLoad({ kind: "ok", store, hash: r.hash });
       setDirty(false);
       setNotice("Loop configuration saved.");
+      // After the save only; loops that are new or deleted give no signal. Fail-open and not awaited.
+      if (projectRoot) {
+        const previous = new Map(load.store.loops.map((l) => [l.id, l]));
+        for (const loop of store.loops) {
+          const prev = previous.get(loop.id);
+          if (!prev) continue;
+          for (const sig of loopEditSignals(prev, loop)) void postSignal(core, { projectRoot, loopId: loop.id, stageKey: sig.stageKey, kind: "loop_edited", payload: sig.payload });
+        }
+      }
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "The Loop file could not be saved.");
     } finally { setSaving(false); }

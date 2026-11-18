@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { StatusBanner } from "@llmide/ui-kit";
 import { createHostFs } from "../explorer/fs";
 import { invokeHost } from "../shell/host";
-import { core } from "../shell/runtime";
 import { setRunRecordShip } from "../loop/native/history.ts";
 import { LOOP_PAGE_NOTE, cancelRun, concurrency, liveRuns, setConcurrency, shipHeldRun, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
 import { installRunManagerHost } from "../loop/native/run-manager-host.ts";
@@ -23,8 +22,10 @@ import { isFactoryLoop, pickerIssues, repoForIssue, type PickerIssue } from "../
 import { processHasIntake, processSteps } from "../loop/native/factory-template.ts";
 import { loadLoops } from "../loop/native/store.ts";
 import { readRepoConfig } from "../settings/repo-config.ts";
-import { answerDecision, sendBack } from "./send-back.ts";
+import { answerDecision, sendBack, type UserSignalFn } from "./send-back.ts";
 import { requestChanges } from "./human-review.ts";
+import { postSignal } from "../loop/native/improve/signals.ts";
+import { core } from "../shell/runtime";
 import { readReviewMode, writeReviewMode } from "./review-mode.ts";
 import { Card } from "./Card.tsx";
 import { LaneBoard } from "./LaneBoard.tsx";
@@ -299,6 +300,13 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
 
   const startingKeys = useRef(new Set<string>());
   const [startingTick, setStartingTick] = useState(0);
+  // The user's correction of a run, recorded against the Factory loop. Resolves the loop id lazily; fail-open.
+  const userSignal = (root: string): UserSignalFn => (s) => {
+    void loadLoops(fs).then((r) => {
+      const loop = r.kind === "ok" ? r.store.loops.find(isFactoryLoop) : undefined;
+      if (loop) void postSignal(core, { projectRoot: root, loopId: loop.id, kind: s.kind, runId: s.runId, payload: s.payload });
+    }, () => undefined);
+  };
   const act = async (fn: () => Promise<void>) => {
     try {
       await fn();
@@ -404,7 +412,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         return;
       }
       case "requestChanges":
-        void act(async () => { await requestChanges({ fs, start: startRun, projectRoot: root }, item, note ?? ""); });
+        void act(async () => { await requestChanges({ fs, start: startRun, projectRoot: root, onUserSignal: userSignal(root) }, item, note ?? ""); });
         return;
       case "sendBack": {
         const f = facts.get(item.key);
@@ -413,7 +421,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           setError("Send back needs the PR/MR status (failing CI or new comments) and the card's worktree. Refresh and try again.");
           return;
         }
-        void act(async () => { await sendBack({ fs, start: startRun, projectRoot: root }, item, status, note ?? ""); });
+        void act(async () => { await sendBack({ fs, start: startRun, projectRoot: root, onUserSignal: userSignal(root) }, item, status, note ?? ""); });
         return;
       }
     }

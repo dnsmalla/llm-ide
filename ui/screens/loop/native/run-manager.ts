@@ -14,6 +14,7 @@ import { readPending, writePending, type PendingRecord } from "./pending-records
 import { LOOPBACK_STOPPED_CODE, loopbackRecord } from "./loopback.ts";
 import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent } from "./runner.ts";
 import { autoShipKind, holdsForHuman, type AutoShipKind } from "./ship-model.ts";
+import { postSignal, runSignalPayload } from "./improve/signals.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
@@ -652,6 +653,8 @@ async function writeHeld(d: RunManagerDeps, fs: FsApi, held: PendingRecord): Pro
     return;
   }
   await d.appendRecord(fs, held.entry, held.record);
+  // Fire-and-forget and fail-open: the core also counts a repeated run_finished for the same run once.
+  void postSignal(d.core, { projectRoot: held.projectRoot, loopId: held.entry.loopId, kind: "run_finished", runId: held.entry.id, payload: runSignalPayload(held.entry, held.record) });
   if (held.copy) await d.copyReadiness(fs, held.copy.prefix, held.copy.runId, new Date(held.copy.endedAt));
   await clearMarker(fs, held.marker);
 }

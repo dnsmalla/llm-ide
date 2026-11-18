@@ -887,3 +887,28 @@ test("a loopback event marks the Verify row failed and clears the sub-state", as
   assert.equal(progress.substate, null);
   await finish(a);
 });
+
+test("a record held for a closed project posts exactly one run_finished when it is flushed on reopen", async () => {
+  const posts = [];
+  const core = { async request(path, opts) { if (path === "/health") return { apiVersion: 150 }; if (path === "/kb/loop/improve/signal") { posts.push(opts.body); return { duplicate: false }; } return {}; } };
+  setup({ core });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await switchProject("/other");
+  await finish(a);
+  assert.equal(posts.length, 0, "nothing is posted while the record is held");
+  await switchProject("/p");
+  await switchProject("/other");
+  await switchProject("/p");
+  assert.equal(world.records.length, 1);
+  assert.equal(posts.length, 1);
+  assert.deepEqual({ kind: posts[0].kind, projectRoot: posts[0].projectRoot, loopId: posts[0].loopId, runId: posts[0].runId, passed: posts[0].payload.passed }, { kind: "run_finished", projectRoot: "/p", loopId: "F", runId: world.records[0].entry.id, passed: true });
+});
+
+test("a failing core never breaks the record write", async () => {
+  setup({ core: { async request() { throw new Error("down"); } } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  assert.equal(world.records.length, 1);
+});

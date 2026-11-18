@@ -1,7 +1,7 @@
 // Human review: a person's Request changes note goes to the held run's worktree as `.factory/HUMAN-REVIEW.md`, then a
 // humanReview run (the sendBack roles with the HUMAN-REVIEW prompt line) repairs, verifies and reviews it.
 import { HUMAN_REVIEW_FILE } from "../loop/native/review.ts";
-import { worktreePrefix, type SendBackFs, type StartRunFn } from "./send-back.ts";
+import { worktreePrefix, type SendBackFs, type StartRunFn, type UserSignalFn } from "./send-back.ts";
 import type { WorkItemRecord } from "./items.ts";
 
 const MAX_NOTE = 4000;
@@ -24,9 +24,10 @@ export async function prepareHumanReview(fs: SendBackFs, runRootPrefix: string, 
 }
 
 /** Writes the note, then starts a humanReview run in the card's own worktree (never a new one). */
-export async function requestChanges(deps: { fs: SendBackFs; start: StartRunFn; projectRoot: string }, item: WorkItemRecord, text: string): Promise<string> {
+export async function requestChanges(deps: { fs: SendBackFs; start: StartRunFn; projectRoot: string; onUserSignal?: UserSignalFn }, item: WorkItemRecord, text: string): Promise<string> {
   const runId = item.runIds.at(-1);
   if (!runId) throw new Error("This card has no run to request changes on.");
   await prepareHumanReview(deps.fs, worktreePrefix(runId), text);
+  try { deps.onUserSignal?.({ kind: "human_review", runId, payload: { note: text.trim().slice(0, MAX_NOTE) } }); } catch { /* a signal never blocks the request */ }
   return deps.start(deps.projectRoot, item, "humanReview", { runId });
 }
