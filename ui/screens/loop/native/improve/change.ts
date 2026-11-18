@@ -84,6 +84,8 @@ function checkStageField(head: Head, raw: Record<string, unknown>, stage: LoopSt
     return { ok: true, change };
   }
   if (after !== true) return no(`${field} can only be turned on`);
+  // runOnce makes the runner skip the step after the first pass, so on a check (shell, artifact) or a gate skill it would silently weaken verification.
+  if (field === "runOnce" && !isMovable(stage)) return no("only a regular skill step can be set to run once");
   return { ok: true, change };
 }
 

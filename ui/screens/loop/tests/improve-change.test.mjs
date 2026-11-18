@@ -48,6 +48,15 @@ test("A1: weakening changes are refused", () => {
   rejects(null); rejects("x"); rejects({ op: "nope" });
 });
 
+test("A1: runOnce only on unpinned skill stages", () => {
+  rejects(field("sh", "runOnce", false, true)); // blocking test command would be skipped after the first pass
+  rejects(field("rev", "runOnce", false, true)); // pinned gate skill
+  const art = stage({ id: "ar", name: "Art", order: 5, kind: "artifactCheck", skillId: null, defaultKey: "kar" });
+  const withArt = loopOf({}, [...loopOf().config.stages, art]);
+  rejects(field("ar", "runOnce", false, true), withArt);
+  accepts(field("a", "runOnce", false, true));
+});
+
 test("enabled: off only for advisory, on for any", () => {
   accepts(field("b", "enabled", true, false));
   accepts(field("a", "enabled", false, true), loopOf({}, [stage({ id: "a", enabled: false })]));
