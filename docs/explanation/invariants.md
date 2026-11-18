@@ -541,6 +541,23 @@ not the repo-kb MOVE above and it never writes to the old folder. It runs only a
 - **Do NOT approve a command the host did not read and display**, and do not truncate the approved command set in the dialog. If it is too large to show, refuse rather than approve unseen commands.
 - **Do NOT blanket-approve every shell command in every project.** A grant is scoped to the shown hashes, loop/stage, canonical folder and expiry; a changed command or another loop/folder is refused.
 
+## Loop self-improvement (`extension/kb/loop-improve.mjs`, `ui/screens/loop/native/improve/`)
+
+A review proposes changes to a loop; a person accepts them. Design: [Loop Engineering](loop-engineering.md#self-improvement).
+
+### ✅ MUST preserve
+
+- **Changes pass `validateChange` only.** It is deny-by-default and runs on parse and again on apply; nothing else edits a loop on the AI's behalf.
+- **A loop never weakens its own checks.** Only advisory steps can be turned off, `runOnce`/`reviewAfter` only on, `maxCostUsd` never raised, gate skills never moved. Factory loops accept only the addendum, `maxRepairsPerStage` and `stageDelaySeconds`.
+- **The review is read-only and fenced.** It runs with `readOnly: true` and all loop, history and signal text is data inside fences. Improvement data and `system/loop.json` stay out of the agent's write scope.
+- **Signals are fail-open.** A failed post never blocks a run or an edit.
+- **Apply is refused while any run is starting or running**, and re-checks against the current loop.
+
+### ❌ DO NOT do these
+
+- **Do NOT add an auto-apply path**, including an automatic revert on a "worse" outcome.
+- **Do NOT propose without evidence**: at least 2 runs, or at least 1 user signal or `improvement_outcome`.
+
 ## Factory runs and worktrees (`desktop/src-tauri/src/loop_worktree.rs`, `ui/screens/loop/native/{runner,artifact,factory}.ts`, `extension/agents/factory-ship.mjs`)
 
 A Factory run takes one work item through intake → plan → implement → verify → review in its own git worktree; after a pass the user may ship it as a draft PR/MR.

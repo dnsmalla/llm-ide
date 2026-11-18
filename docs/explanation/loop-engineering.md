@@ -32,7 +32,7 @@ The industry framing that matches this system's shape is a nesting of four loops
 | 1 | **Agent loop** — call tools until done | Repair via `AgentLoopStageRepairer`; `.skill` generate stages |
 | 2 | **Verification loop** — a grader gates the output, failures feed back | Every stage is a grader; failures return to the agent with measured evidence |
 | 3 | **Event-driven loop** — cron/webhook, not a human pressing Run | Auto Tasks cron, manual Run |
-| 4 | **Hill-climbing loop** — analyse traces, improve the harness itself | Not built. The run journal is its prerequisite and exists now |
+| 4 | **Hill-climbing loop** — analyse traces, improve the harness itself | Built as a propose-and-approve review of the run journal's signals; see [Self-improvement](#self-improvement) |
 
 ## The loop
 
@@ -668,6 +668,65 @@ not a hard kill of a running stage; that is the per-stage timeout's job. A run
 always gets one complete pass, so a budget too small to finish startup produces a
 fast failure rather than a confusing no-op.
 
+## Self-improvement
+
+A loop learns from how it is used, but only a person changes it. The core records
+signals, a periodic review turns them into evidence-backed proposals, and the
+Improvements panel on the Loop page lets the user accept, reject or undo each one.
+Data lives in the core database (migration `0078_loop_improve.sql`,
+`extension/kb/loop-improve.mjs`), per user, and is reached through
+`POST /kb/loop/improve/{signal,state,proposals,decide}` (API 150).
+
+### Signals
+
+Signals are recorded fail-open, like the journal: a failed post is ignored and never
+blocks a run or an edit. The kinds are `run_finished`, `loop_edited`, `sent_back`,
+`human_review`, `output_edited` and `improvement_outcome`. `loop_edited`, `sent_back`,
+`human_review` and `output_edited` are user signals. `awaiting_review` counts as a
+passed run. Only terminal runs count.
+
+### Review
+
+A review runs every N finished runs of a loop (`reviewEveryRuns`, default 5) or on
+**Review now**. It goes through `POST /kb/loop/agent-run` with `readOnly: true`
+(Read, Glob and Grep only), so it cannot write. All loop, history, stats and signal
+text is fenced as data, never instructions. A proposal needs evidence: the pattern
+in at least 2 runs, or at least 1 user signal or `improvement_outcome`. Proposals
+that miss this are dropped.
+
+### What may change
+
+`validateChange` in `ui/screens/loop/native/improve/change.ts` is deny-by-default and
+runs when proposals are parsed and again on apply. Allowed:
+
+- the stage prompt addendum (`promptAddendum`, shown as "Accepted lessons", at most
+  2000 characters; the stage's own prompt is never rewritten);
+- stage fields `timeoutSeconds`, `runOnce`, `reviewAfter`, `enabled`;
+- moving a stage;
+- config `maxIterations`, `maxRepairsPerStage`, `stageDelaySeconds`,
+  `refactorBatchesPerRun`, `maxCostUsd`, `wallClockBudgetSeconds`, each in a fixed range.
+
+The loop cannot weaken its own checks: only an advisory step can be turned off,
+`runOnce` and `reviewAfter` can only be turned on, `maxCostUsd` cannot be raised,
+and the Factory intake and review skills never move and nothing moves past them.
+A Factory loop accepts only the addendum plus `maxRepairsPerStage` and
+`stageDelaySeconds`; the Factory template owns the rest.
+
+### Apply, undo and sharing
+
+Apply re-checks the change against the current loop (the loop may have been edited
+since the review) and is refused while any run is starting or running. Undo uses a
+revert mode that inverts the applied change. A proposal has scope project or general.
+Sharing is by stage `defaultKey` for stage-level changes, even inside custom loops,
+and by the loop template key for loop-level changes.
+
+### Outcome
+
+After 5 more runs the change is compared with a baseline of up to 10 runs before it.
+Fewer than 3 runs on either side is reported as not enough data. A "worse" result
+is recorded as an `improvement_outcome` signal, which the next review cites to
+propose the inverse change as an undo suggestion.
+
 ## Every run is journalled
 
 `LoopEngineRunner`'s live log is in-memory and dies with the app process. The
@@ -800,9 +859,9 @@ against the same working tree, whichever trigger starts it.
   held-out set would be stronger than today's single fault list, but it changes
   the `faults.csv` format the in-app Regression view and the release checklist
   both read.
-- **Level-4 hill climbing.** Failure clustering, per-stage pass rates, and
-  mean-iterations-to-green over the journal, surfaced as harness-change
-  *suggestions* requiring approval. Worth building once real journal data exists.
+- **Automatic application of improvements.** Self-improvement proposes; a person
+  always accepts. There is no auto-apply mode, and a "worse" outcome only leads to
+  an undo suggestion, never an automatic revert.
 
 ## See also
 
