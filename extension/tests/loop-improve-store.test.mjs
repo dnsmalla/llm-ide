@@ -45,7 +45,7 @@ const accept = (user, projectId, loopId, extra = {}, scope = 'general') => {
   const { ids } = saveProposals(db, user.id, {
     projectId, loopId, cursor: 0, expectedCursor: storedCursor(user, projectId, loopId), proposals: [proposal(extra)],
   });
-  return decide(db, user.id, { id: ids[0], action: 'accept', scope });
+  return decide(db, user.id, { projectId, id: ids[0], action: 'accept', scope });
 };
 const storedCursor = (user, projectId, loopId) => signalsSinceReview(db, user.id, projectId, loopId).cursor;
 
@@ -123,6 +123,9 @@ test('offers: stage-level matching, never to the source project, gone after dism
   assert.equal(offered('P1', ['offer-stage']).length, 0);
   dismissOffer(db, userA.id, { projectId: 'P2', offerId: row.id });
   assert.equal(offered('P2', ['offer-stage']).length, 0);
+  assert.throws(() => dismissOffer(db, userA.id, { projectId: 'P2', offerId: 'no-such-id' }), { code: 'NOT_FOUND' });
+  assert.throws(() => dismissOffer(db, userA.id, { projectId: 'P1', offerId: row.id }), { code: 'NOT_FOUND' }, 'own project is no offer');
+  assert.throws(() => decide(db, userA.id, { projectId: 'P2', id: row.id, action: 'revert' }), { code: 'NOT_FOUND' }, 'another project');
 
   const row2 = accept(userA, 'P1', 'off-src2', { stageKey: 'adopt-stage' });
   const adopted = adoptOffer(db, userA.id, { projectId: 'P2', loopId: 'off-dst', offerId: row2.id });
@@ -210,6 +213,6 @@ test("signalsSinceReview keeps a 'worse' outcome older than the cursor until the
   const kept = signalsSinceReview(db, userA.id, 'P1', loop);
   assert.deepEqual(kept.signals.map((x) => x.kind), ['improvement_outcome']);
   assert.equal(kept.signals[0].payload.verdict, 'worse');
-  decide(db, userA.id, { id: row.id, action: 'revert' });
+  decide(db, userA.id, { projectId: 'P1', id: row.id, action: 'revert' });
   assert.equal(signalsSinceReview(db, userA.id, 'P1', loop).signals.length, 0);
 });

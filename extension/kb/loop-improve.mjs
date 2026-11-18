@@ -166,11 +166,15 @@ function baselineFor(db, userId, row) {
   });
 }
 
-/** Accepts, rejects or reverts one improvement. Accept fixes its scope and snapshots the baseline. */
-export function decide(db, userId, { id, action, scope }) {
+/**
+ * Accepts, rejects or reverts one improvement. Accept fixes its scope and snapshots the baseline.
+ * `projectId` is the project the caller was authorized for: an improvement of another project is NOT_FOUND,
+ * so a grant on project A cannot decide project B's rows.
+ */
+export function decide(db, userId, { projectId, id, action, scope }) {
   return db.transaction(() => {
     const row = getRow(db, userId, id);
-    if (!row) throw err('NOT_FOUND', 'Improvement not found', 404);
+    if (!row || row.project_id !== projectId) throw err('NOT_FOUND', 'Improvement not found', 404);
     if (action === 'accept') {
       if (row.status !== 'proposed') throw err('CONFLICT', 'Only a proposed improvement can be accepted', 409);
       const finalScope = scope ?? row.suggested_scope ?? 'project';
@@ -216,7 +220,12 @@ export function adoptOffer(db, userId, { projectId, loopId, offerId }) {
   })();
 }
 
+/** Hides an offer in this project. Only a real offer qualifies, so junk ids never reach the table. */
 export function dismissOffer(db, userId, { projectId, offerId }) {
+  const src = getRow(db, userId, offerId);
+  if (!src || src.status !== 'accepted' || src.scope !== 'general' || src.project_id === projectId) {
+    throw err('NOT_FOUND', 'Offer not found', 404);
+  }
   db.prepare(
     'INSERT OR IGNORE INTO loop_improve_dismissals (user_id, project_id, improvement_id) VALUES (?, ?, ?)',
   ).run(userId, projectId, offerId);

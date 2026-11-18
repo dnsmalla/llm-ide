@@ -351,10 +351,20 @@
           "type": "string"
         },
         "evidence": {
-          "type": "array",
-          "items": {
-            "type": "integer"
-          }
+          "type": "object",
+          "required": [
+            "signalIds"
+          ],
+          "properties": {
+            "signalIds": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          "additionalProperties": true,
+          "description": "The signals the proposal rests on"
         },
         "suggestedScope": {
           "type": [
@@ -399,10 +409,20 @@
           "type": "string"
         },
         "evidence": {
-          "type": "array",
-          "items": {
-            "type": "integer"
-          }
+          "type": "object",
+          "required": [
+            "signalIds"
+          ],
+          "properties": {
+            "signalIds": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          "additionalProperties": true,
+          "description": "The signals the proposal rests on"
         },
         "suggestedScope": {
           "type": [
@@ -544,10 +564,20 @@
           "type": "string"
         },
         "evidence": {
-          "type": "array",
-          "items": {
-            "type": "integer"
-          }
+          "type": "object",
+          "required": [
+            "signalIds"
+          ],
+          "properties": {
+            "signalIds": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          "additionalProperties": true,
+          "description": "The signals the proposal rests on"
         },
         "suggestedScope": {
           "type": [

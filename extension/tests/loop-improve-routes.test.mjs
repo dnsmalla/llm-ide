@@ -137,15 +137,15 @@ test('proposals validates shape and caps', async () => {
   assert.equal((await call('proposals', { ...base, expectedCursor: 'x' })).status, 400);
   assert.equal((await call('proposals', { ...base, cursor: -1 })).status, 400);
   assert.equal((await call('proposals', { ...base, proposals: 'x' })).status, 400);
-  const many = Array.from({ length: 21 }, () => ({ change: CHANGE, rationale: 'r', evidence: [] }));
+  const many = Array.from({ length: 21 }, () => ({ change: CHANGE, rationale: 'r', evidence: { signalIds: [] } }));
   assert.equal((await call('proposals', { ...base, proposals: many })).status, 400);
-  const huge = [{ change: { op: 'append_instruction', addendum: 'x'.repeat(10_001) }, rationale: 'r', evidence: [] }];
+  const huge = [{ change: { op: 'append_instruction', addendum: 'x'.repeat(10_001) }, rationale: 'r', evidence: { signalIds: [] } }];
   assert.equal((await call('proposals', { ...base, proposals: huge })).status, 400);
 });
 
 test('proposals stores, a stale cursor is 409 REVIEW_RACE, decide accept lands in history with a baseline', async () => {
   const input = (await call('state', { projectRoot: ROOT, loops: [LOOP], reviewInputFor: 'loop-1' })).body.reviewInput;
-  const proposals = [{ templateKey: 'build', stageKey: 'code', change: CHANGE, rationale: 'Tests were skipped.', evidence: [1], suggestedScope: 'project' }];
+  const proposals = [{ templateKey: 'build', stageKey: 'code', change: CHANGE, rationale: 'Tests were skipped.', evidence: { signalIds: [1] }, suggestedScope: 'project' }];
   const saved = await call('proposals', {
     projectRoot: ROOT, loopId: 'loop-1', expectedCursor: input.cursor, cursor: input.lastId, proposals,
   });
@@ -179,8 +179,61 @@ test('decide validates, maps NOT_FOUND to 404 and CONFLICT to 409', async () => 
   assert.equal((await call('decide', { projectRoot: ROOT, action: 'revert', id: accepted.id })).status, 200);
 });
 
-test('dismiss of an offer answers 200 and stores a dismissal', async () => {
-  const out = await call('decide', { projectRoot: ROOT, action: 'dismiss', id: 'some-offer' });
+// A second project whose improvements must stay out of reach of project A's grant.
+const ROOT_B = path.join(SANDBOX, 'proj-b');
+fs.mkdirSync(ROOT_B);
+registerProject(getDb(), user.id, { id: 'proj-b', root: ROOT_B, name: 'B' });
+const LOOP_B = { loopId: 'loop-b', templateKey: 'build', stageKeys: ['plan', 'code'] };
+
+async function acceptedIn(root, loop, scope) {
+  const input = (await call('state', { projectRoot: root, loops: [loop], reviewInputFor: loop.loopId })).body.reviewInput;
+  const saved = await call('proposals', {
+    projectRoot: root, loopId: loop.loopId, expectedCursor: input.cursor, cursor: input.lastId,
+    proposals: [{ templateKey: 'build', stageKey: 'code', change: CHANGE, rationale: 'r', evidence: { signalIds: [] }, suggestedScope: scope }],
+  });
+  const id = saved.body.ids[0];
+  await call('decide', { projectRoot: root, action: 'accept', id, scope });
+  return id;
+}
+
+test('decide with another project root cannot touch that project\'s improvement', async () => {
+  const id = await acceptedIn(ROOT_B, LOOP_B, 'project');
+  for (const action of ['reject', 'revert', 'accept']) {
+    const out = await call('decide', { projectRoot: ROOT, action, id });
+    assert.equal(out.status, 404, action);
+  }
+  const state = await call('state', { projectRoot: ROOT_B, loops: [LOOP_B] });
+  assert.equal(state.body.loops['loop-b'].history.find((row) => row.id === id).status, 'accepted', 'row unchanged');
+});
+
+test('dismiss refuses an id that is not an offer, then dismiss hides a real offer; adopt moves it into the project', async () => {
+  assert.equal((await call('decide', { projectRoot: ROOT, action: 'dismiss', id: 'some-offer' })).status, 404);
+  const offerA = await acceptedIn(ROOT, LOOP, 'general');
+  const offered = async (loop) => (await call('state', { projectRoot: ROOT_B, loops: [loop] })).body.offers.filter((o) => o.id === offerA);
+  assert.equal((await offered(LOOP_B)).length, 1, 'general improvement of A is offered to B');
+  const adopted = await call('decide', { projectRoot: ROOT_B, action: 'adopt', id: offerA, loopId: 'loop-b' });
+  assert.equal(adopted.status, 200);
+  assert.equal(adopted.body.improvement.status, 'accepted');
+  assert.equal(adopted.body.improvement.origin, `shared:${offerA}`);
+  const afterAdopt = await call('state', { projectRoot: ROOT_B, loops: [LOOP_B] });
+  assert.ok(afterAdopt.body.loops['loop-b'].history.some((row) => row.id === adopted.body.improvement.id), 'in B history');
+  assert.equal((await offered(LOOP_B)).length, 0, 'no longer offered');
+
+  const offerA2 = await acceptedIn(ROOT, LOOP, 'general');
+  const countOffers = async () => (await call('state', { projectRoot: ROOT_B, loops: [LOOP_B] })).body.offers.filter((o) => o.id === offerA2).length;
+  assert.equal(await countOffers(), 1);
+  const out = await call('decide', { projectRoot: ROOT_B, action: 'dismiss', id: offerA2 });
   assert.equal(out.status, 200);
   assert.deepEqual(out.body, { improvement: null });
+  assert.equal(await countOffers(), 0, 'dismissed offer is gone from state.offers');
+});
+
+test('proposals checks rationale, evidence and suggestedScope', async () => {
+  const good = { change: CHANGE, rationale: 'r', evidence: { signalIds: [1] }, suggestedScope: 'project' };
+  const send = (item) => call('proposals', { projectRoot: ROOT, loopId: 'loop-1', expectedCursor: 0, cursor: 1, proposals: [item] });
+  assert.equal((await send({ ...good, rationale: 5 })).status, 400);
+  assert.equal((await send({ ...good, rationale: undefined })).status, 400);
+  assert.equal((await send({ ...good, evidence: [1] })).status, 400);
+  assert.equal((await send({ ...good, evidence: { signalIds: 'x' } })).status, 400);
+  assert.equal((await send({ ...good, suggestedScope: 'everyone' })).status, 400);
 });

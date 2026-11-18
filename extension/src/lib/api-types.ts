@@ -1617,7 +1617,11 @@ export type LoopImproveProposal = {
   stageKey?: string | null;
   change: LoopImproveChange;
   rationale?: string;
-  evidence?: number[];
+  /** The signals the proposal rests on */
+  evidence?: {
+    signalIds: number[];
+    [key: string]: unknown;
+  };
   suggestedScope?: string | null;
 };
 
@@ -1629,7 +1633,11 @@ export type LoopImprovement = {
   stageKey: string | null;
   change: LoopImproveChange;
   rationale: string;
-  evidence: number[];
+  /** The signals the proposal rests on */
+  evidence: {
+    signalIds: number[];
+    [key: string]: unknown;
+  };
   suggestedScope: string | null;
   status: "proposed" | "accepted" | "rejected" | "reverted" | "superseded";
   scope: string | null;
@@ -1657,7 +1665,11 @@ export type LoopImproveOffer = {
   stageKey: string | null;
   change: LoopImproveChange;
   rationale: string;
-  evidence: number[];
+  /** The signals the proposal rests on */
+  evidence: {
+    signalIds: number[];
+    [key: string]: unknown;
+  };
   suggestedScope: string | null;
   status: "proposed" | "accepted" | "rejected" | "reverted" | "superseded";
   scope: string | null;

@@ -71,6 +71,13 @@ function validateProposals(body) {
   }
   for (const item of body.proposals) {
     if (!item || typeof item !== 'object' || !item.change || typeof item.change !== 'object') return 'each proposal needs a change object';
+    if (typeof item.rationale !== 'string') return 'each proposal needs a rationale string';
+    if (item.evidence != null && (typeof item.evidence !== 'object' || !Array.isArray(item.evidence.signalIds))) {
+      return 'evidence must be an object with a signalIds array';
+    }
+    if (item.suggestedScope != null && !['project', 'general'].includes(item.suggestedScope)) {
+      return "suggestedScope must be 'project' or 'general'";
+    }
     if (JSON.stringify(item.change).length > MAX_CHANGE_CHARS) return `a change must be at most ${MAX_CHANGE_CHARS} characters of JSON`;
   }
   return null;
@@ -108,7 +115,7 @@ function run(route, db, userId, projectId, body) {
     dismissOffer(db, userId, { projectId, offerId: body.id });
     return { improvement: null };
   }
-  return { improvement: decide(db, userId, { id: body.id, action: body.action, scope: body.scope }) };
+  return { improvement: decide(db, userId, { projectId, id: body.id, action: body.action, scope: body.scope }) };
 }
 
 export async function handleLoopImproveRoutes(req, res, { userId } = {}, deps = {}) {

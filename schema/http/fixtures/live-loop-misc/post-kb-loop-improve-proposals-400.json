@@ -18,9 +18,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -32,9 +34,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -46,9 +50,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -60,9 +66,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -74,9 +82,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -88,9 +98,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -102,9 +114,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -116,9 +130,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -130,9 +146,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -144,9 +162,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -158,9 +178,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -172,9 +194,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -186,9 +210,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -200,9 +226,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -214,9 +242,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -228,9 +258,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -242,9 +274,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -256,9 +290,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -270,9 +306,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -284,9 +322,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         },
         {
@@ -298,9 +338,11 @@
             "addendum": "Run the tests."
           },
           "rationale": "Tests were skipped.",
-          "evidence": [
-            1
-          ],
+          "evidence": {
+            "signalIds": [
+              1
+            ]
+          },
           "suggestedScope": "project"
         }
       ]
