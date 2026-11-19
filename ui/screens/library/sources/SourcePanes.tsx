@@ -974,8 +974,8 @@ export function ReposPane({ env }: { env: PaneEnv }): ReactNode {
 
 // ---- Connector catalog (MCP-backed) ----------------------------------------------------------
 
-export function ConnectorsPane({ env }: { env: PaneEnv }): ReactNode {
-  const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
+export function ConnectorsPane({ env, initialCatalog }: { env: PaneEnv; initialCatalog?: CatalogEntry[] }): ReactNode {
+  const [catalog, setCatalog] = useState<CatalogEntry[] | null>(initialCatalog ?? null);
   const [n, setN] = useState(0);
   const [info, setInfo] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, FetchProgress>>({});
@@ -1009,7 +1009,8 @@ export function ConnectorsPane({ env }: { env: PaneEnv }): ReactNode {
         <ul className="lib-items" aria-label="Connectors" style={{ gap: "var(--tok-space-md)" }}>
           {catalog.map((e) => {
             const p = progress[e.id];
-            const mcpReady = e.pipelineReady && /oauth/.test(e.authKind) && e.id !== "box" && e.id !== "slack";
+            // Only the MCP-backed connectors (Miro today) get the MCP buttons; the rest are set up in their own pane.
+            const mcpReady = e.pipelineReady && e.authKind === "miro-oauth";
             return (
               <li key={e.id} style={{ display: "block", width: "100%" }}>
                 <section className="lib-pane-section" aria-label={e.name}>
@@ -1025,6 +1026,7 @@ export function ConnectorsPane({ env }: { env: PaneEnv }): ReactNode {
                   {!e.pipelineReady && <p className="lib-muted">{T.NOT_READY}</p>}
                   {e.id === "box" && <p className="lib-muted">Set up in the Box pane.</p>}
                   {e.id === "slack" && <p className="lib-muted">Set up in the Slack pane.</p>}
+                  {(e.id === "gdrive" || e.id === "gcal") && <p className="lib-muted">Set up in the Google pane.</p>}
                   <div className="lib-editor-bar">
                     {e.selected ? (
                       <button type="button" className="lib-btn" disabled={task.busy} onClick={() => setRemoving(e)}>

@@ -24,16 +24,13 @@ test('every entry is fully described and ids are unique', () => {
   }
 });
 
-test('box, slack and miro are pipeline-ready; gdrive and gcal are not', () => {
+test('every catalog connector is pipeline-ready', () => {
   // miro flipped when SourceRegistry started registering it and the ingest
   // driver began sweeping it — the Library detail view must not say
   // "Pipeline coming soon" for a connector that is actively ingesting.
-  for (const id of ['box', 'slack', 'miro']) {
+  // gdrive and gcal ready through the Google connector (/kb/google/*, indexed into sources).
+  for (const id of ['box', 'slack', 'miro', 'gdrive', 'gcal']) {
     assert.equal(catalogEntry(id).pipelineReady, true, id);
-  }
-  // No server descriptor exists for these two yet.
-  for (const id of ['gdrive', 'gcal']) {
-    assert.equal(catalogEntry(id).pipelineReady, false, id);
   }
 });
 

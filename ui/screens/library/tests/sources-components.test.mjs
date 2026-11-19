@@ -128,3 +128,12 @@ test("created hook: notes created by a fetch reach the list store without a resc
   await assert.rejects(wrapped.create("source/emails/2026/10/a.md", "x"));
   assert.equal(store.getSnapshot().records.length, 1, "a refused create changes nothing");
 });
+
+test("catalog: Google rows point to the Google pane; only Miro gets the MCP buttons", () => {
+  const row = (id, authKind) => ({ id, name: id, description: "", authKind, docsUrl: null, pipelineReady: true, selected: true });
+  const out = html(h(L.ConnectorsPane, { env: mkEnv(), initialCatalog: [row("gdrive", "google-oauth"), row("miro", "miro-oauth")] }));
+  const [g, m] = out.split('aria-label="miro"');
+  assert.match(g, /Set up in the Google pane\./);
+  assert.ok(!/>Connect<|Test connection|Fetch now/.test(g));
+  assert.match(m, />Connect<[\s\S]*Test connection[\s\S]*Fetch now/);
+});

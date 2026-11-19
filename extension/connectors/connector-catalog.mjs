@@ -4,9 +4,10 @@
 //
 // pipelineReady marks whether the fetch→folder→llm-doc pipeline exists:
 // true only for connectors that already work today. Miro flipped true once it
-// gained a server descriptor and the ingest driver started sweeping it; gdrive
-// and gcal have no descriptor yet and flip in phase 3 of the connector-catalog
-// spec.
+// gained a server descriptor and the ingest driver started sweeping it. gdrive
+// and gcal are ready through the Google connector (connectors/google/, routes
+// /kb/google/*, swept by agents/tasks/sources-update.mjs), set up in the
+// Library's Google pane rather than as MCP connectors.
 //
 // icon is an SF Symbol name; the Mac app renders it directly.
 export const CONNECTOR_CATALOG = Object.freeze([
@@ -15,14 +16,14 @@ export const CONNECTOR_CATALOG = Object.freeze([
     description: 'Fetch files from Drive folders into llm-doc notes.',
     icon: 'externaldrive.fill.badge.icloud', authKind: 'google-oauth',
     docsUrl: 'https://developers.google.com/drive/api/guides/enable-sdk',
-    pipelineReady: false,
+    pipelineReady: true,
   }),
   Object.freeze({
     id: 'gcal', name: 'Google Calendar',
     description: 'Fetch recent and upcoming calendar events into llm-doc notes.',
     icon: 'calendar', authKind: 'google-oauth',
     docsUrl: 'https://developers.google.com/calendar/api/quickstart/js',
-    pipelineReady: false,
+    pipelineReady: true,
   }),
   Object.freeze({
     id: 'miro', name: 'Miro',
