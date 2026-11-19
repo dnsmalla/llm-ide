@@ -126,3 +126,20 @@ test('C1c: in-root links, including ../../ targets, stay allowed', () => {
   assert.equal(writePathGate(path.join(ws, 'CLAUDE.md'), [ws]), 'prompt');
   assert.equal(writePathGate(path.join(ws, 'pkg', 'inner', 'CLAUDE.md'), [ws]), 'prompt');
 });
+
+test('no tool writes the learned-knowledge folder; a shell command naming it is asked about every time', async () => {
+  const { isLearnedKnowledgePath, mentionsLearnedKnowledge, bashNeedsPerCallApproval } = await import('../llm_agent/tools/gates.mjs');
+  const f = makeFixture();
+  fs.mkdirSync(path.join(f.workspace, 'system', 'self-improvement'), { recursive: true });
+  assert.equal(isLearnedKnowledgePath('system/self-improvement/memory.md', f.workspace), true);
+  assert.equal(isLearnedKnowledgePath(path.join(f.workspace, 'System', 'Self-Improvement', 'lessons.json'), f.workspace), true, 'case-folding filesystems');
+  assert.equal(isLearnedKnowledgePath(path.join(f.workspace, 'code', 'app', 'system', 'self-improvement', 'x'), f.workspace), true);
+  assert.equal(isLearnedKnowledgePath('src/../system/self-improvement/changes.jsonl', f.workspace), true, 'no .. walk around it');
+  fs.symlinkSync(path.join(f.workspace, 'system', 'self-improvement'), path.join(f.workspace, 'notes-link'), 'dir');
+  assert.equal(isLearnedKnowledgePath('notes-link/memory.md', f.workspace), true, 'no symlink around it');
+  assert.equal(isLearnedKnowledgePath('src/a.txt', f.workspace), false);
+  assert.equal(isLearnedKnowledgePath('docs/self-improvement-guide.md', f.workspace), false);
+  assert.equal(mentionsLearnedKnowledge('echo x >> system/self-improvement/memory.md'), true);
+  assert.equal(bashNeedsPerCallApproval('cat system/self-improvement/lessons.json', f.workspace), true);
+  assert.equal(bashNeedsPerCallApproval('ls src', f.workspace), false);
+});

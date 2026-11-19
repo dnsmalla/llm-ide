@@ -86,7 +86,7 @@ import {
   isAllowedByRule, suggestRule, addRule, grantSessionEdits, hasSessionEdits,
   NETWORK_TOOL, networkHost,
 } from '../../kb/tool-permissions.mjs';
-import { runBashGate, writePathGate, bashNeedsPerCallApproval } from '../tools/gates.mjs';
+import { runBashGate, writePathGate, bashNeedsPerCallApproval, isLearnedKnowledgePath, mentionsLearnedKnowledge } from '../tools/gates.mjs';
 import { AGENT_SDK_PROVIDER, RESERVED_MCP_NAME } from './constants.mjs';
 import { resolveAnthropicKey, agentSdkHomeFor } from './auth.mjs';
 import { requireClaudeExecutable, invalidateClaudePath } from '../../providers/claude-path.mjs';
@@ -1615,7 +1615,8 @@ export async function runAgentV2Turn(
         if (decision === 'blocked') return { behavior: 'deny', message: 'Command blocked for safety.' };
         // `allowAll` is checked AFTER the blocklist, never before it: the
         // user asked not to be interrupted, not to disable the safety rail.
-        if (decision === 'auto' || allowAll || ruleAllows('Bash', input)) {
+        // A command naming the learned-knowledge folder is asked about every time, whatever the settings say.
+        if (!mentionsLearnedKnowledge(input?.command) && (decision === 'auto' || allowAll || ruleAllows('Bash', input))) {
           return { behavior: 'allow', updatedInput: input };
         }
         return awaitToolApproval({
@@ -1626,6 +1627,9 @@ export async function runAgentV2Turn(
       // Edit / Write — containment first; a 'blocked' path is final.
       if (writePathGate(input?.file_path, allowedWriteRoots) === 'blocked') {
         return { behavior: 'deny', message: `${toolName} refused: the target must stay inside the project workspace.` };
+      }
+      if (isLearnedKnowledgePath(input?.file_path, allowedWriteRoots[0])) {
+        return { behavior: 'deny', message: `${toolName} refused: system/self-improvement/ (memory, lessons, accepted changes) changes only through the app, never by a tool.` };
       }
       // Containment first, then the user's setting: allow-all means "don't
       // ask me about edits", never "write outside the workspace".

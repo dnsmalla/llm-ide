@@ -43,7 +43,7 @@ import {
   AGENT_SDK_PROVIDER, resolveAgentEngineAuth, agentEngineHomeFor, agentEngineEnv, normalizeModelUsage,
   resolveMaxBudgetUsd,
 } from './engine.mjs';
-import { resolveWriteLanding, writePathGate } from '../tools/gates.mjs';
+import { isLearnedKnowledgePath, resolveWriteLanding, writePathGate } from '../tools/gates.mjs';
 import {
   buildTrustedRoots, isDeniedPath, isTooBroadRoot, isWithinRoots,
 } from '../tools/handlers/repo-files.mjs';
@@ -315,6 +315,10 @@ export function loopToolRefusal(toolName, input, roots, { readOnly = false, writ
   if (toolName === 'Read' || WRITE_TOOLS.has(toolName)) {
     if (!inside(input?.file_path, !WRITE_TOOLS.has(toolName))) {
       return `${toolName} refused: ${String(input?.file_path ?? '(no path)')} is outside the Loop's repository ${where} (or is a protected secret path).`;
+    }
+    // Learned knowledge steers later prompts: a run never writes it (the Loop UI also reverts it after the run).
+    if (WRITE_TOOLS.has(toolName) && isLearnedKnowledgePath(input?.file_path, allowed[0])) {
+      return `${toolName} refused: system/self-improvement/ (memory, lessons, accepted changes) changes only through the app.`;
     }
     // A scoped run (Factory Intake / Plan / Review) may write only its own reports under <git root>/<writeScope>/.
     if (writeScope && WRITE_TOOLS.has(toolName) && !insideWriteScope(input?.file_path, allowed[0], writeScope)) {

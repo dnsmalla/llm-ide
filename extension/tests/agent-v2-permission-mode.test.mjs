@@ -206,6 +206,22 @@ test('accept-edits: an in-workspace edit runs unasked, a shell command still ask
     assert.equal(escape.behavior, 'deny', 'accept-edits never writes outside the workspace');
   }));
 
+test('no permission mode lets a tool write the learned-knowledge folder; a shell command naming it always asks',
+  withAnthropicKey('sk-ant-perm-12b', async () => {
+    const user = newUser('learned');
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-learned-'));
+    fs.mkdirSync(path.join(workspace, 'system', 'self-improvement'), { recursive: true });
+    const canUseTool = await gateFor({ permissionMode: 'accept-edits', userId: user.id, events: [], workspace });
+    const w = await settledOrParked(canUseTool('Write', { file_path: path.join(workspace, 'system', 'self-improvement', 'lessons.json'), content: '{}' }, {}));
+    assert.notEqual(w, PARKED);
+    assert.equal(w.behavior, 'deny');
+    assert.match(w.message, /changes only through the app/);
+    assert.equal(await settledOrParked(canUseTool('Bash', { command: 'echo x >> system/self-improvement/memory.md' }, {})), PARKED, 'asked, never auto-run');
+    const bypass = await gateFor({ permissionMode: 'bypass', userId: user.id, events: [], workspace });
+    assert.equal(await settledOrParked(bypass('Bash', { command: 'echo x >> system/self-improvement/memory.md' }, {})), PARKED, 'even Bypass asks');
+    assert.equal((await settledOrParked(bypass('Edit', { file_path: path.join(workspace, 'system', 'self-improvement', 'memory.md'), old_string: 'a', new_string: 'b' }, {}))).behavior, 'deny');
+  }));
+
 test('answering always-allow on a command saves exactly the suggested project prefix rule',
   withAnthropicKey('sk-ant-perm-13', async () => {
     const user = newUser('save-rule');

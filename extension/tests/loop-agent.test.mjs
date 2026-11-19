@@ -209,6 +209,8 @@ test('loopToolRefusal: file tools inside the root pass; outside, symlink escapes
   assert.equal(loopToolRefusal('Edit', { file_path: path.join(REPO, 'src', 'a.txt') }, REPO), null);
   assert.equal(loopToolRefusal('Write', { file_path: path.join(REPO, 'src', 'new.txt') }, REPO), null);
   assert.equal(loopToolRefusal('Read', { file_path: 'src/a.txt' }, REPO), null);
+  assert.match(loopToolRefusal('Write', { file_path: path.join(REPO, 'system', 'self-improvement', 'lessons.json') }, REPO), /changes only through the app/);
+  assert.equal(loopToolRefusal('Read', { file_path: path.join(REPO, 'system', 'self-improvement', 'lessons.json') }, REPO), null, 'reading what was learned is fine');
   assert.equal(loopToolRefusal('Grep', { pattern: 'old' }, REPO), null);
   assert.equal(loopToolRefusal('Glob', { pattern: 'src/**/*.txt', path: REPO }, REPO), null);
 

@@ -212,7 +212,24 @@ export function runBashGate(command, cwd, { trustedRoots } = {}) {
  */
 export function bashNeedsPerCallApproval(command, cwd) {
   const cmd = typeof command === 'string' ? command : '';
-  return hasUnquotedExpansion(cmd) || namesSensitivePath(cmd, cwd);
+  return hasUnquotedExpansion(cmd) || namesSensitivePath(cmd, cwd) || mentionsLearnedKnowledge(cmd);
+}
+
+// Learned knowledge (`<project>/system/self-improvement/`: memory, lessons, accepted changes, Self-Heal notes) steers
+// later prompts, so no tool may write it: it changes only through the app (memory viewer, Loop page, Self-Heal).
+// Plan 2026-11-19 (self-improvement folder). Reads stay allowed.
+const LEARNED_SEGMENT = /(^|[\\/])system[\\/]+self-improvement([\\/]|$)/i;
+
+/** True when `filePath` (relative to `primary`) lands inside a project's system/self-improvement/ folder. */
+export function isLearnedKnowledgePath(filePath, primary) {
+  if (typeof filePath !== 'string' || !filePath) return false;
+  const landing = typeof primary === 'string' && primary ? (resolveWriteLanding(filePath, primary) ?? path.resolve(primary, filePath)) : filePath;
+  return LEARNED_SEGMENT.test(landing) || LEARNED_SEGMENT.test(filePath);
+}
+
+/** A shell command that names the folder: never auto-run, never covered by allow-all or a saved rule. */
+export function mentionsLearnedKnowledge(command) {
+  return /self-improvement/i.test(typeof command === 'string' ? command : '');
 }
 
 export function autoGate() {
