@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { selfImprovementDir } from './paths.mjs';
-import { ensureOwnFolder, INBOX, MANIFEST, SOURCE_RE } from './self-improvement-folder.mjs';
+import { ensureOwnFolder, INBOX, MANIFEST, noteAppWrite, SOURCE_RE } from './self-improvement-folder.mjs';
 import { appendChatMemory, factIndex, parseChatMemoryFacts, renderChatMemoryFile } from './memory-writer.mjs';
 import { appendNotes } from '../core/self-heal-batch.mjs';
 
@@ -62,6 +62,7 @@ export function readInbox(root) {
 export function decideInboxItem(root, { source, kind, key, action }) {
   if (typeof source !== 'string' || !SOURCE_RE.test(source) || !sourceDirs(root).includes(source)) return false;
   const dir = join(selfImprovementDir(root), INBOX, source);
+  noteAppWrite(selfImprovementDir(root));
   if (kind === 'memory') {
     const file = join(dir, 'memory.md');
     const facts = parseChatMemoryFacts(readText(file) ?? '');

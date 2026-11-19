@@ -23,7 +23,7 @@ import { config } from '../core/config.mjs';
 import {
   chatMemoryFile, chatMemoryReadPaths, legacyChatMemoryFile, previousChatMemoryFile, selfImprovementDir,
 } from './paths.mjs';
-import { ensureOwnFolder } from './self-improvement-folder.mjs';
+import { ensureOwnFolder, noteAppWrite } from './self-improvement-folder.mjs';
 
 // How many facts the store may hold. The reader ranks these against the current
 // question and inlines only the most relevant, so this is a disk budget, not a
@@ -205,6 +205,7 @@ export function writeChatMemoryFacts(root, facts) {
   try {
     mkdirSync(selfImprovementDir(root), { recursive: true });
     ensureOwnFolder(root);
+    noteAppWrite(selfImprovementDir(root));
     // Atomic write: write to a temp file in the SAME directory (so the rename
     // stays on one filesystem and is atomic), then rename over the target. A
     // crash mid-write can only leave the temp file — never a half-written

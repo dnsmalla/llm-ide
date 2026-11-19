@@ -70,6 +70,8 @@ import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { selectSessionMemory } from '../memory/session-memory-select.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
+import { selfImprovementDir } from '../../graphkit/paths.mjs';
+import { createLearnedGuard, withLearnedGuard } from './learned-guard.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
 import { resolveCustomProviderDispatch, isDecisionOnlyProvider, DECISION_ONLY_MESSAGE } from '../../providers/providers.mjs';
@@ -895,7 +897,7 @@ export function buildEngineOptions(
     // model chain. Off by default: it can change which model answers.
     ...(() => { const fb = fallbackModelOption(userId, typeof model === 'string' ? model : ''); return fb ? { fallbackModel: fb } : {}; })(),
     // Explicit command sandbox (A11); absent under the default `inherit`.
-    ...(sandboxOptionFromEnv() ? { sandbox: sandboxOptionFromEnv() } : {}),
+    ...(sandboxOptionFromEnv(undefined, { denyWrite: workspaceRoot ? [selfImprovementDir(workspaceRoot)] : [] }) ? { sandbox: sandboxOptionFromEnv(undefined, { denyWrite: workspaceRoot ? [selfImprovementDir(workspaceRoot)] : [] }) } : {}),
     ...(typeof model === 'string' && model ? { model } : {}),
     // See effortForTurn. The runner drops it on a gateway turn.
     ...(turnEffort ? { effort: turnEffort } : {}),
@@ -1072,10 +1074,14 @@ export async function readContextUsage(q, { timeoutMs = CONTEXT_USAGE_TIMEOUT_MS
  * Anything else is `inherit`, so a typo never changes the posture. Read per
  * call (the env is the operator's switch, not a cached constant).
  */
-export function sandboxOptionFromEnv(raw = process.env.LLMIDE_V2_SANDBOX) {
+export function sandboxOptionFromEnv(raw = process.env.LLMIDE_V2_SANDBOX, { denyWrite = [] } = {}) {
   const v = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   if (v === 'off') return { enabled: false };
-  if (v === 'on') return { enabled: true, failIfUnavailable: false, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false };
+  if (v === 'on') {
+    // The learned-knowledge folder is denied to sandboxed commands by the OS (the shell guard covers the rest).
+    return { enabled: true, failIfUnavailable: false, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
+      ...(denyWrite.length ? { filesystem: { denyWrite } } : {}) };
+  }
   return null;
 }
 
@@ -1845,7 +1851,8 @@ export async function runAgentV2Turn(
     // Plugin hooks plus the native-tool output cap (tool-output-cap.mjs): a
     // huge Bash/Grep result is re-read on every later hop, so it is trimmed
     // before the model sees it (not with native plugins — see there).
-    hooks: withToolOutputCap(pluginDelivery.hooks, { nativePlugins: pluginDelivery.sdkPlugins.length }),
+    // The shell guard for system/self-improvement/ (learned-guard.mjs) brackets every native Bash call.
+    hooks: withLearnedGuard(withToolOutputCap(pluginDelivery.hooks, { nativePlugins: pluginDelivery.sdkPlugins.length }), createLearnedGuard(allowedWriteRoots)),
     mcpServers: {
       llmide: buildLlmIdeServer(userId, agentContext, message, {
         runClaude,

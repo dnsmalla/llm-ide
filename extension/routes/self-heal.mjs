@@ -20,7 +20,8 @@ import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { redactIncidentText } from '../core/incident.mjs';
 import { appendNotes, BATCH_MAX, NOTES_MAX, NOTES_REL, notesFor, parseResults, renderBatch, renderNote } from '../core/self-heal-batch.mjs';
 import { buildTrustedRoots } from '../llm_agent/tools/handlers/repo-files.mjs';
-import { ensureOwnFolder } from '../graphkit/self-improvement-folder.mjs';
+import { ensureOwnFolder, noteAppWrite } from '../graphkit/self-improvement-folder.mjs';
+import { selfImprovementDir } from '../graphkit/paths.mjs';
 import {
   applyRunOutcome, clearIncidents, ignoreIncident, listIncidents, recordIncident, reopenIncidents, resolveProposal, triageIncidents,
 } from '../kb/incidents.mjs';
@@ -69,6 +70,7 @@ export function writeNotes(repo, notes) {
   try {
     mkdirSync(dirname(target), { recursive: true });
     ensureOwnFolder(repo); // a new folder gets this repo's manifest before its first file
+    noteAppWrite(selfImprovementDir(repo));
     writeFileSync(tmp, appendNotes(readNotes(repo), notes), 'utf8');
     renameSync(tmp, target);
     return true;

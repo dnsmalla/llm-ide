@@ -13,6 +13,12 @@ export const INBOX = 'inbox';
 export const LEARNED_FILES = Object.freeze(['memory.md', 'lessons.json', 'changes.jsonl', 'self-heal.md']);
 export const SOURCE_RE = /^[A-Za-z0-9._-]{1,100}$/;
 
+// When this process last wrote each folder (ms). The shell guard (llm_agent/sdk/learned-guard.mjs) leaves a folder
+// alone when the app itself wrote it while a command ran, so it never undoes the app's own change.
+const appWrites = new Map();
+export function noteAppWrite(dir, at = Date.now()) { appWrites.set(dir, at); }
+export function lastAppWriteAt(dir) { return appWrites.get(dir) ?? 0; }
+
 const realOrResolved = (p) => { try { return realpathSync(p); } catch { return p; } };
 const samePath = (a, b) => (process.platform === 'linux' ? a === b : String(a).toLowerCase() === String(b).toLowerCase());
 
@@ -62,6 +68,7 @@ export function ensureOwnFolder(root, now = new Date()) {
     const known = m !== null && m !== 'corrupt';
     if (known && m.root !== null && samePath(m.root, project)) return { moved: null };
     const learned = LEARNED_FILES.filter((f) => existsSync(join(dir, f)));
+  noteAppWrite(dir);
     if ((known && m.root === null) || (m === null && learned.length === 0)) {
       writeAtomic(join(dir, MANIFEST), `${JSON.stringify(own, null, 2)}\n`);
       return { moved: null };

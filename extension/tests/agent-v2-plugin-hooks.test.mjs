@@ -95,12 +95,13 @@ const { getDb } = await import('../kb/db.mjs');
 const { buildReadableRoots } = await import('../llm_agent/tools/handlers/repo-files.mjs');
 
 const { TOOL_OUTPUT_CAP_HOOK } = await import('../llm_agent/sdk/tool-output-cap.mjs');
-// The turn's hooks minus llm-ide's own tool-output cap (present on every turn):
+const { LEARNED_GUARD_HOOKS } = await import('../llm_agent/sdk/learned-guard.mjs');
+// The turn's hooks minus llm-ide's own tool-output cap and learned-folder guard (present on every turn):
 // what these tests are about is which PLUGIN hooks llm-ide runs itself.
 function pluginHooksOf(hooks = {}) {
   const out = {};
   for (const [event, entries] of Object.entries(hooks || {})) {
-    const own = entries.filter((e) => e !== TOOL_OUTPUT_CAP_HOOK);
+    const own = entries.filter((e) => e !== TOOL_OUTPUT_CAP_HOOK && !LEARNED_GUARD_HOOKS.has(e));
     if (own.length) out[event] = own;
   }
   return out;
