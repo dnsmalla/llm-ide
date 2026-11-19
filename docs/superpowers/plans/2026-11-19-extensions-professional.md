@@ -1,6 +1,6 @@
 # Extensions: one screen, visible health, one-click repair — plan
 
-Date: 2026-11-19 · Status: in progress · Owner decisions: see "Decisions"
+Date: 2026-11-19 · Status: done (2026-11-20) · Owner decisions: see "Decisions"
 
 ## Goal
 
@@ -42,14 +42,14 @@ No environment variable names, file names, git commands or tool-id patterns in u
 
 ## Phases (each ships on its own, tests first, gates green)
 
-### Phase 1 — dead ends and safety
+### Phase 1 — dead ends and safety (done: 8f28dc21c, c10176207, 39179a266)
 - Git plugin clone runs with the scrubbed child environment, like skill-kit clones.
 - Remove and Update for legacy plugins in the UI (`DELETE /auth/me/plugins/uninstall/:name`, `…/claude-plugins/update`).
 - `/mcp`, `/plugin`, `/agents`, `/hooks` open the matching pane.
 - New-project skills: a real Retry (re-run `/kb/project/install-skills`), and wording that matches what happens.
 - The MCP detail states when a server runs without asking per call.
 
-### Phase 2 — health check and fixes (core)
+### Phase 2 — health check and fixes (core) (done: a2d9d0a51)
 - `POST /auth/me/extensions/check { kind, id }` → `{ status: ok|problem|unknown, problems: [{ code, message, fix }] }`.
   Checks, none with a model: MCP server starts and lists its tools (bounded time, stdio and remote); the program a
   stdio server needs exists; a credential is present; a catalog item's files match its pinned tree hash and its
@@ -59,17 +59,17 @@ No environment variable names, file names, git commands or tool-id patterns in u
 - Results are cached briefly per item; a failing MCP server in a chat turn updates the same record.
 - A problem is recorded as a Self-Heal incident (source `server`, category `extension`) where Self-Heal is on.
 
-### Phase 3 — health in the UI
+### Phase 3 — health in the UI (done: 4428bdb20)
 - A status on every row (Working / Problem / Not checked), a Check button, the problem text and its fix button.
 - A "Problems" filter and a count on the Library entry. The chat notice for a failed MCP server links to the item.
 
-### Phase 4 — one Extensions screen
+### Phase 4 — one Extensions screen (done: 4b464951b)
 - The Installed tab lists all four kinds from both stores with the same row, detail, switch, update and remove.
 - Add: one dialog (catalog, GitHub address, or for an MCP server a command or URL), replacing the per-pane dialogs.
 - The three older Library entries are removed; their routes stay (the screen calls them).
 - All text follows the vocabulary table.
 
-### Phase 5 — loose ends
+### Phase 5 — loose ends (done: c1a8017cf, 7f19c13b1; the MCP tool list already shipped in Phase 3)
 - Loop skill stage: a picker instead of a free-text field.
 - An MCP server's tool list in its detail (from the health check).
 - Connector catalog flags that no longer match their pipelines.
