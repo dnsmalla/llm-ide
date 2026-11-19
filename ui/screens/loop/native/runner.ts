@@ -14,9 +14,10 @@ export interface StepReviewResult { verdict: "approve" | "changes" | "skipped"; 
 /** One review episode for a step: it ends approved, unresolved (budget spent, or findings stopped changing), or skipped. */
 export interface StepReviewOutcome { stageId: string; stageName: string; verdict: "approve" | "unresolved" | "skipped"; attempts: number; findings: string; reason?: string }
 
-/** A stage that runs once per run, not once per iteration: a passed one is skipped, so a repair never re-plans or re-applies. */
+/** A stage that runs once per run, not once per iteration: a passed one is skipped, so a repair never re-plans or re-applies.
+ *  The refactor Test Baseline is one too: a loopback round would otherwise re-run it on the batch's broken tree. */
 export function runsOncePerRun(stage: LoopStage): boolean {
-  return stage.runOnce || (stage.kind === "codeGraph" && stage.graphOp === "snapshot") || (stage.kind === "skill" && ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform"].includes(stage.skillId ?? ""));
+  return stage.runOnce || stage.defaultKey === "refactor-test-baseline" || (stage.kind === "codeGraph" && stage.graphOp === "snapshot") || (stage.kind === "skill" && ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform"].includes(stage.skillId ?? ""));
 }
 export type ProgressEvent =
   | { type: "iteration"; iteration: number }

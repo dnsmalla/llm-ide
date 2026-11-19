@@ -115,8 +115,16 @@ function scriptedAgent(workTree, calls, opts = {}) {
       if (opts.weakenGolden) write("tests/test_golden.py", "def test_the_report_for_the_sample_orders_is_unchanged():\n    assert True\n");
       reply = "Covered: tests/test_tax.py — the JP tax rate";
     } else if (skill === "skills/refactor-apply") {
+      // A loopback round (the batch is already done): fix what broke the tests, unless the batch is unrepairable.
+      const planText = fs.readFileSync(path.join(workTree, PLAN), "utf8");
+      const todo = /### (R\d+) .*\(status: todo\)/.exec(planText);
+      if (!todo) {
+        const done = [...planText.matchAll(/### (R\d+) .*\(status: done\)/g)].pop()[1];
+        if (!opts.unrepairable) git(workTree, "checkout", "--", "shop.py");
+        return { ran: true, resultSubtype: "success", reply: `Applied: ${done}`, changedPaths: opts.unrepairable ? [] : ["shop.py"], createdPaths: [] };
+      }
       // Applies the first todo batch: R1 removes legacy.py, R2 adds fmt.py.
-      const id = /### (R\d+) .*\(status: todo\)/.exec(fs.readFileSync(path.join(workTree, PLAN), "utf8"))[1];
+      const id = todo[1];
       if (opts.editOutside) fs.appendFileSync(path.join(workTree, opts.editOutside), "\n# a body change outside the input path\n");
       else if (id === "R1") fs.rmSync(path.join(workTree, "legacy.py"));
       else write("fmt.py", 'def money(x):\n    return f"{x:.2f}"\n');
@@ -299,8 +307,8 @@ test("a batch that breaks the tests is repaired, and iteration 2 neither re-plan
   const summary = outcome.stages.map((o) => `${o.ok ? "ok  " : "FAIL"} ${o.stage.name}`).join("\n");
   if (DISCOVER) console.log(`--- repair run: ${outcome.statusSummary}\n${summary}\n--- log ---\n${log.join("\n")}`);
   assert.equal(outcome.passed, true, `${outcome.statusSummary}\n${summary}`);
-  assert.ok(outcome.iterationsUsed >= 2, "the failed Test was repaired and the loop went round again");
-  assert.deepEqual(agentCalls.filter((c) => c !== "repair"), ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform"], "each skill ran once");
+  assert.ok(outcome.iterationsUsed >= 2, "the failed Test looped back to Apply and the loop went round again");
+  assert.deepEqual(agentCalls, ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform", "skills/refactor-apply", "skills/refactor-conform"], "only the code step re-ran");
   const before = JSON.parse(fs.readFileSync(path.join(p.project, "system/loop-runs/r3/graph/before.json"), "utf8"));
   assert.ok(before.nodes.some((n) => n.id === "file:legacy.py"), "the baseline is the tree before the batch, not the refactored one");
   assert.ok(!fs.existsSync(path.join(worktree, "legacy.py")));
@@ -321,7 +329,7 @@ test("two batches are both applied in one Refactoring run, each with its own bas
   const summary = outcome.stages.map((o) => `${o.ok ? "ok  " : "FAIL"} ${o.stage.name}`).join("\n");
   if (DISCOVER) console.log(`--- two batches: ${outcome.statusSummary}\n${summary}\n--- log ---\n${log.join("\n")}`);
   assert.equal(outcome.passed, true, `${outcome.statusSummary}\n${summary}\n--- log tail ---\n${log.slice(-25).join("\n")}`);
-  assert.equal(outcome.statusSummary, "2 batches applied (R1, R2)");
+  assert.match(outcome.statusSummary, /^2 batches applied \(R1, R2\)( · |$)/);
   assert.deepEqual(agentCalls, ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform"]);
   const plan = fs.readFileSync(path.join(worktree, PLAN_REL), "utf8");
   assert.match(plan, /### R1 .*\(status: done\)/);
@@ -346,7 +354,7 @@ test("a batch that breaks the tests and cannot be repaired is rolled back, and t
   assert.equal(fs.readFileSync(path.join(worktree, "shop.py"), "utf8"), fs.readFileSync(path.join(p.repo, "shop.py"), "utf8"), "R2's edit is reverted");
   const plan = fs.readFileSync(path.join(worktree, PLAN_REL), "utf8");
   assert.match(plan, /### R1 .*\(status: done\)/);
-  assert.match(plan, /### R2 .*\(status: blocked\)\n- Blocked: Test — Test failed; repair did not complete\n/);
+  assert.match(plan, /### R2 .*\(status: blocked\)\n- Blocked: Refactor Apply — Refactor Apply failed; repair did not complete/);
 });
 
 test("the Test loop's map finds untested functions even when the project has no graph yet", { skip, timeout: 240_000 }, async () => {
