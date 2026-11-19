@@ -29,16 +29,21 @@ const PROOF = busHostProof();
 
 let n = 0;
 const user = () => users.registerUser(kb.getDb(), { email: `sr-${Date.now()}-${++n}@example.com`, password: 'CorrectHorseBattery', displayName: 'r' }).id;
-async function call(method, url, { userId, body, proof = true, deps } = {}) {
+async function call(method, url, { userId, body, proof = true, deps, hub } = {}) {
   const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
   const req = { method, url, user: userId ? { id: userId } : undefined, headers: proof ? { 'x-llmide-host-nonce': PROOF } : {},
     socket: { remoteAddress: '127.0.0.1' }, pause() {}, resume() {},
     on(event, cb) { if (event === 'data') chunks.forEach((c) => cb(c)); else if (event === 'end') cb(); return req; } };
   let status = 0; let payload = '';
   const res = { headersSent: false, writeHead(s) { status = s; this.headersSent = true; }, setHeader() {}, end(b) { payload = b ?? ''; } };
-  await handleSyncRoute(req, res, deps ? { deps } : {});
+  await handleSyncRoute(req, res, { ...(deps ? { deps } : {}), ...(hub ? { hub } : {}) });
   return { status, body: payload ? JSON.parse(payload) : null };
 }
+test('a hub refuses every sync route with SYNC_LOCAL_ONLY', async () => {
+  const r = await call('GET', '/kb/sync/status', { userId: user(), hub: true });
+  assert.equal(r.status, 403);
+  assert.equal(r.body.error.code, 'SYNC_LOCAL_ONLY');
+});
 const MEGA = { email: 'llmide-sync@example.com', password: 'a long dedicated password', folder: 'llmide-sync' };
 
 test('routes need the bus host proof, then a user', async () => {

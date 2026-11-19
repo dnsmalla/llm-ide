@@ -77,9 +77,11 @@ async function commitBox(userId, c, { storeFor }) {
   });
 }
 
-export async function handleSyncRoute(req, res, { deps = {}, env = process.env } = {}) {
+export async function handleSyncRoute(req, res, { deps = {}, env = process.env, hub = config.hub } = {}) {
   const storeFor = deps.storeFor ?? defaultStoreFor;
   const path = String(req.url || '').split('?')[0];
+  // Sync is local-mode only (docs/how-to/run-a-hub.md): a hub would publish members' data to one user's storage.
+  if (hub) return fail(res, 403, 'SYNC_LOCAL_ONLY', 'Sync is not available on a team hub');
   if (req.method === 'GET' && path === '/kb/sync/box/callback') {
     const text = await finishBoxConnect(new URL(req.url, 'http://127.0.0.1').searchParams, { port: config.port, fetchImpl: deps.fetchImpl, commit: (uid, c) => commitBox(uid, c, { storeFor }) });
     oauthCallbackHtml(res, text); return true;

@@ -1860,7 +1860,7 @@ server.listen(PORT, HOST, () => {
   if (config.enginePrewarm) {
     setImmediate(() => { void prewarmAgentEngine(); });
   }
-  if (process.env.NODE_ENV !== 'test') {
+  if (process.env.NODE_ENV !== 'test' && !config.hub) { // sync is local-mode only
     void import('./routes/sync/scheduler.mjs').then((m) => { syncScheduler = m.startSyncScheduler({ logger }); }).catch((e) => logger.warn('sync_scheduler_failed', { message: e.message }));
   }
   // Host API v1 listener ('tls' pinned on every interface, or 'dev' plaintext loopback): dynamic imports keep the

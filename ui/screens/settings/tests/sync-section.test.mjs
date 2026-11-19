@@ -36,6 +36,11 @@ test("calls go to the sync routes with the typed body", async () => {
   assert.ok(c.calls[0].startsWith("POST /kb/sync/mega"));
 });
 
+test("a team hub's SYNC_LOCAL_ONLY hides the card", async () => {
+  const c = fake({ "GET /kb/sync/status": { status: 403, body: { error: { code: "SYNC_LOCAL_ONLY", message: "x" } } } });
+  assert.equal(await m.loadSyncStatus(c), null);
+});
+
 test("MEGA error codes read as guidance", () => {
   assert.match(m.syncErrorText("SYNC_MFA_REQUIRED"), /two-factor/);
   assert.match(m.syncErrorText("SYNC_AUTH_FAILED"), /email or password/);

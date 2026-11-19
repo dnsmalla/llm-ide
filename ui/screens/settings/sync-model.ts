@@ -64,7 +64,7 @@ export const describeSyncError = (e: unknown, kind: string | null = "mega"): str
 
 export async function loadSyncStatus(client: CoreClient): Promise<SyncStatus | null> {
   try { return decodeSyncStatus(await call(client, "GET", "/kb/sync/status")); }
-  catch (e) { if (e instanceof ApiError && e.code === "HOST_PROOF_REQUIRED") return null; throw e; }
+  catch (e) { if (e instanceof ApiError && (e.code === "HOST_PROOF_REQUIRED" || e.code === "SYNC_LOCAL_ONLY")) return null; throw e; } // SYNC_LOCAL_ONLY: a team hub
 }
 export const saveMega = async (client: CoreClient, cfg: MegaSetup) => decodeSyncStatus(await call(client, "POST", "/kb/sync/mega", cfg));
 export const saveSftp = async (client: CoreClient, cfg: SftpSetup) => decodeSyncStatus(await call(client, "POST", "/kb/sync/sftp", cfg));
