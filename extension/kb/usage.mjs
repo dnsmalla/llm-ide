@@ -557,18 +557,23 @@ function costOrNull(v) {
 // for a month after one Stop click, and wrote spend that never happened into `usage_ledger.cost_usd`.
 //
 // These rates are an order-of-magnitude ESTIMATE only, never a bill: the caller clamps the result to
-// the USD budget the turn was allowed to spend. USD per MILLION tokens. They follow the published
-// Anthropic 4.5-generation list prices (Opus 4.5 / Sonnet 4.5 / Haiku 4.5); a future id in the same
-// family is close enough for an estimate. An unknown family falls back to the Sonnet rates — the
-// middle tier, never the most expensive one, because this number is money the user is shown.
+// the USD budget the turn was allowed to spend. USD per MILLION tokens, from the published list prices of
+// the CURRENT model of each family as of 2026-11 (Fable 5.2 $8/$40, Opus 5.5 $4/$20, Sonnet 5.5 $2/$10,
+// Haiku 5.5 $0.10/$0.50 for prompts up to 100K tokens). Cache reads are the published rate where one is
+// published (Fable and Opus $0.20, Sonnet $0.10) and 0.1x input for Haiku; cache writes are 1.25x input (the
+// 5-minute cache). An older id of a family is priced at its family's current rate: close enough for an
+// estimate, and re-check this table when a family's price changes. An unknown family falls back to the
+// Sonnet rates, the middle tier, never the most expensive one, because this number is money the user is shown.
 export const MODEL_FAMILY_PRICES = Object.freeze({
-  opus: Object.freeze({ input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }),
-  sonnet: Object.freeze({ input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }),
-  haiku: Object.freeze({ input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 }),
-  generic: Object.freeze({ input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }),
+  fable: Object.freeze({ input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 }),
+  mythos: Object.freeze({ input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 }),
+  opus: Object.freeze({ input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 }),
+  sonnet: Object.freeze({ input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 }),
+  haiku: Object.freeze({ input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 }),
+  generic: Object.freeze({ input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 }),
 });
 
-/** The price row for `model` by family substring (`opus`, `sonnet`, `haiku`), else `generic`. */
+/** The price row for `model` by family substring (`fable`, `mythos`, `opus`, `sonnet`, `haiku`), else `generic`. */
 function priceForModel(model) {
   const id = String(model ?? '').toLowerCase();
   for (const family of Object.keys(MODEL_FAMILY_PRICES)) {

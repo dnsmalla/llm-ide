@@ -109,9 +109,9 @@ test('usedUsdMonth sums only this month and only this user', () => {
 
 test('R-034 #6: recordUsage estimates a cost from tokens when the engine reported none', () => {
   const u = member(0);
-  // Sonnet rates: 3 USD/M input + 15 USD/M output → 1M + 1M = 18 USD.
+  // Sonnet 5.5 rates: 2 USD/M input + 10 USD/M output → 1M + 1M = 12 USD.
   const id = recordUsage(getDb(), { userId: u, provider: 'anthropic', model: MODEL, inputTokens: 1_000_000, outputTokens: 1_000_000 });
-  assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE id = ?').get(id).cost_usd, 18);
+  assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE id = ?').get(id).cost_usd, 12);
   // A reported cost still wins over the estimate.
   const reported = recordUsage(getDb(), { userId: u, provider: 'anthropic', model: MODEL, inputTokens: 1_000_000, outputTokens: 1_000_000, costUsd: 0.5 });
   assert.equal(getDb().prepare('SELECT cost_usd FROM usage_ledger WHERE id = ?').get(reported).cost_usd, 0.5);

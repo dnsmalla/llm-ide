@@ -387,7 +387,7 @@ test('R-034 #6: a Loop run stores its project and a cost; a zero reported cost i
     "SELECT cost_usd, project_id FROM usage_ledger WHERE user_id = ? AND endpoint = '/kb/loop/agent-run' ORDER BY id DESC LIMIT 1",
   ).get(user.id);
   assert.equal(row.project_id, 'p-meter-loop');
-  assert.equal(row.cost_usd, 18, 'an unreported cost is estimated from the tokens, not NULL');
+  assert.equal(row.cost_usd, 12, 'an unreported cost is estimated from the tokens, not NULL');
 });
 
 test('route: other paths fall through', async () => {
