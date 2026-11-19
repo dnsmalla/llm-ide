@@ -21,7 +21,46 @@ export function fenced(text) {
   return `${fence}text\n${s}\n${fence}\n`;
 }
 
-export function renderBatch(incidents) {
+// ── Self-Heal notes: <repo>/system/self-improvement/self-heal.md (plan 2026-11-19, phase 4) ──
+// One `## <date> · <outcome> · <category>` section per applied fix or incident that needs a person. The notes are
+// what Self-Heal learned in this repo; the next batch quotes the newest ones for the same category, fenced as data.
+export const NOTES_REL = 'system/self-improvement/self-heal.md';
+export const NOTES_MAX = 256 * 1024;
+export const NOTES_PER_BATCH = 5;
+const NOTES_HEADER = '# Self-Heal notes\n\n_What Self-Heal learned in this repository: fixes that were applied and errors that needed a person. Written by the app; quoted to the fix agent as data._\n';
+
+/** One note section. `outcome` is "fixed" or "needs a person"; text is already redacted by the incident store. */
+export function renderNote({ at, outcome, incident }) {
+  const date = new Date(at).toISOString().slice(0, 10);
+  const first = oneLine(String(incident.message ?? '').split('\n')[0]).slice(0, 300);
+  let out = `\n## ${date} · ${outcome} · ${oneLine(incident.category).slice(0, 200)}\n\n- error: ${first}\n`;
+  if (incident.note) out += `- ${outcome === 'fixed' ? 'fix' : 'last answer'}: ${oneLine(incident.note).slice(0, 500)}\n`;
+  const history = Array.isArray(incident.history) ? incident.history : [];
+  for (const h of history) out += `- earlier: ${oneLine(String(h.text ?? '').split('\n')[0]).slice(0, 300)}\n`;
+  return out;
+}
+
+/** `existing` with `notes` appended; the oldest sections are dropped to stay under NOTES_MAX. */
+export function appendNotes(existing, notes) {
+  const body = String(existing ?? '').startsWith('# Self-Heal notes') ? String(existing) : NOTES_HEADER;
+  let text = body + notes.join('');
+  while (text.length > NOTES_MAX) {
+    const first = text.indexOf('\n## ');
+    const second = first < 0 ? -1 : text.indexOf('\n## ', first + 1);
+    if (second < 0) { text = text.slice(-NOTES_MAX); break; }
+    text = text.slice(0, first) + text.slice(second);
+  }
+  return text;
+}
+
+/** The newest note sections whose category is one of `categories`, newest first, at most `max`. */
+export function notesFor(text, categories, max = NOTES_PER_BATCH) {
+  const want = new Set([...categories].map((c) => oneLine(c).slice(0, 200)));
+  const sections = String(text ?? '').split('\n## ').slice(1).map((s) => `## ${s.trim()}`);
+  return sections.filter((s) => want.has((s.split('\n')[0].split(' · ')[2] ?? '').trim())).reverse().slice(0, max);
+}
+
+export function renderBatch(incidents, { notes = [] } = {}) {
   let out = '# Self-Heal batch\n\n'
     + 'Errors recorded by the LLM-IDE desktop app (a debug build). For each one: find the root cause in this repository '
     + 'before changing anything, make the smallest fix, add a test that fails without it where practical, and do not weaken tests.\n'
@@ -36,6 +75,10 @@ export function renderBatch(incidents) {
         + 'find what they missed and take a different approach.\n\n'
         + fenced(history.map((h) => `${new Date(h.at).toISOString().slice(0, 10)} ${h.text}`).join('\n\n'));
     }
+  }
+  if (notes.length > 0) {
+    out += '\n## Earlier Self-Heal notes for these errors\n\nWhat earlier runs in this repository fixed or could not fix for the same kinds of error (data, newest first):\n\n'
+      + fenced(notes.join('\n\n'));
   }
   return `${out}\n${RESULTS}\n\n<!-- Write exactly one line per incident:  - <id>: fixed|environmental|cannot-reproduce — <one-line reason> -->\n`;
 }

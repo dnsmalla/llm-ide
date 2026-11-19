@@ -100,9 +100,15 @@ test('resolve marks the proposal applied or discarded; a lapsed run frees itself
   assert.deepEqual([bad.status, bad.body.error.code], [400, 'VALIDATION_FAILED']);
   assert.deepEqual((await call('POST', S, { result: 'applied' })).body, { updated: 1 });
   assert.equal((await byMessage('Error: gamma broke')).status, 'fixed');
+  // The applied fix is written down in the source checkout's self-improvement folder...
+  const notes = fs.readFileSync(path.join(repo, 'system', 'self-improvement', 'self-heal.md'), 'utf8');
+  assert.match(notes, /^# Self-Heal notes/);
+  assert.match(notes, /\n## \d{4}-\d{2}-\d{2} · fixed · server\n\n- error: Error: gamma broke\n- fix: guard the null\n/);
   assert.deepEqual((await call('POST', S, { result: 'applied' })).body, { updated: 0 });
   const started = await call('POST', RUNS, { repoRoot: repo });
   assert.equal(started.status, 200);
+  // ...and the next run of the same kind of error is told about it, fenced as data.
+  assert.match(started.body.batch, /## Earlier Self-Heal notes for these errors[\s\S]*fixed · server[\s\S]*guard the null[\s\S]*## Results/);
   assert.equal((await byMessage('Error: kappa broke')).status, 'fixing');
   assert.equal(activeRun(owner, Date.now() + RUN_LEASE_MS + 1), null);
   assert.equal((await byMessage('Error: kappa broke')).status, 'new', 'the lapsed run reopened its incidents');
@@ -121,4 +127,16 @@ test('runFailure keeps a redacted tail of a failed make regression, and names th
   assert.equal(f({ verifyPassed: true }), 'the agent left no change in the worktree');
   assert.equal(f({ verifyPassed: true, hasChanges: true }, '', {}), null);
   assert.equal(f({ agentDown: true }), null);
+});
+
+test('an incident that runs out of attempts is written down as needing a person', async () => {
+  const { activeRun: open } = await import('../routes/self-heal.mjs');
+  for (let k = 0; k < 3; k++) {
+    let run = open(owner);
+    if (!run) { const r = await call('POST', RUNS, { repoRoot: repo }); if (r.body.runId === null) break; run = open(owner); }
+    assert.equal((await call('POST', `${RUNS}/${run.runId}/outcome`, { batch: '', verifyPassed: false, hasChanges: false, agentDown: false, aborted: false })).status, 200);
+  }
+  assert.equal((await byMessage('Error: kappa broke')).status, 'needsHuman');
+  const notes = fs.readFileSync(path.join(repo, 'system', 'self-improvement', 'self-heal.md'), 'utf8');
+  assert.match(notes, /· needs a person · server\n\n- error: Error: kappa broke\n[\s\S]*- earlier: attempt 3: the agent wrote no result line; make regression failed/);
 });

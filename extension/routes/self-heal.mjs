@@ -13,12 +13,12 @@
 //   POST   /kb/self-heal/runs/:id/outcome       { proposed }           the run's result; ends it
 //   POST   /kb/self-heal/runs/:id/resolve       { updated }            the user applied or discarded its proposal
 import { randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import { send, readJson } from '../server/route-http.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { redactIncidentText } from '../core/incident.mjs';
-import { BATCH_MAX, parseResults, renderBatch } from '../core/self-heal-batch.mjs';
+import { appendNotes, BATCH_MAX, NOTES_MAX, NOTES_REL, notesFor, parseResults, renderBatch, renderNote } from '../core/self-heal-batch.mjs';
 import { buildTrustedRoots } from '../llm_agent/tools/handlers/repo-files.mjs';
 import {
   applyRunOutcome, clearIncidents, ignoreIncident, listIncidents, recordIncident, reopenIncidents, resolveProposal, triageIncidents,
@@ -42,6 +42,38 @@ const fail = (res, status, code, message, details) => {
   return true;
 };
 const samePath = (a, b) => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase());
+
+/** `repoRoot`'s real path when it is one of the user's allow-listed repos, else null. */
+function trustedRepo(userId, repoRoot) {
+  if (typeof repoRoot !== 'string' || !isAbsolute(repoRoot)) return null;
+  let real = null;
+  try { real = realpathSync(repoRoot); } catch { return null; }
+  return buildTrustedRoots(userId).some((t) => samePath(t, real)) ? real : null;
+}
+
+/** The repo's Self-Heal notes, or '' (missing or unreadable: notes are best effort). */
+function readNotes(repo) {
+  try { return readFileSync(join(repo, NOTES_REL), 'utf8').slice(-NOTES_MAX); } catch { return ''; }
+}
+
+/**
+ * Appends note sections to <repo>/system/self-improvement/self-heal.md (atomic: temp file + rename). Best effort: a
+ * failed write never fails the route, since the incident store already holds the outcome.
+ */
+export function writeNotes(repo, notes) {
+  if (!repo || notes.length === 0) return false;
+  const target = join(repo, NOTES_REL);
+  const tmp = `${target}.tmp-${process.pid}`;
+  try {
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(tmp, appendNotes(readNotes(repo), notes), 'utf8');
+    renameSync(tmp, target);
+    return true;
+  } catch {
+    try { unlinkSync(tmp); } catch { /* gone */ }
+    return false;
+  }
+}
 
 // userId → { runId, ids, startedAt }. In memory on purpose: a core restart ends every run, and the boot step
 // reopenOrphanedIncidents puts their `fixing` incidents back to `new`.
@@ -143,11 +175,8 @@ export async function handleSelfHealRoute(req, res, { env = process.env } = {}) 
     const open = activeRun(userId);
     if (open) return fail(res, 409, 'RUN_ACTIVE', 'A Self-Heal run is already in progress', { runId: open.runId });
     // The Loop agent accepts a worktree only of an allow-listed repo: refuse before the host makes one.
-    let real = null;
-    try { real = realpathSync(repoRoot); } catch { /* refused below */ }
-    if (!real || !buildTrustedRoots(userId).some((t) => samePath(t, real))) {
-      return fail(res, 409, 'REPO_NOT_ALLOWED', 'Add the source checkout under Settings → Repositories first');
-    }
+    const real = trustedRepo(userId, repoRoot);
+    if (!real) return fail(res, 409, 'REPO_NOT_ALLOWED', 'Add the source checkout under Settings → Repositories first');
     const picked = triageIncidents(userId, max);
     if (picked.length === 0) {
       send(res, 200, { runId: null, incidentIds: [], batch: null });
@@ -155,8 +184,9 @@ export async function handleSelfHealRoute(req, res, { env = process.env } = {}) 
     }
     const runId = randomUUID();
     const ids = picked.map((i) => i.id);
-    runs.set(userId, { runId, ids, startedAt: Date.now() });
-    send(res, 200, { runId, incidentIds: ids, batch: renderBatch(picked) });
+    runs.set(userId, { runId, ids, startedAt: Date.now(), repo: real });
+    const notes = notesFor(readNotes(real), picked.map((i) => i.category));
+    send(res, 200, { runId, incidentIds: ids, batch: renderBatch(picked, { notes }) });
     return true;
   }
   const run = req.method === 'POST' ? RUN_RE.exec(path) : null;
@@ -171,13 +201,25 @@ export async function handleSelfHealRoute(req, res, { env = process.env } = {}) 
       runs.delete(userId);
       const runSucceeded = o.flags.verifyPassed && o.flags.hasChanges && o.proposal !== null;
       const proposed = applyRunOutcome(userId, open.ids, parseResults(o.batch), { runSucceeded, agentDown: o.flags.agentDown, aborted: o.flags.aborted, failure: runFailure(o) }, o.proposal);
+      // An incident that just ran out of attempts is written down for the next person or run.
+      const now = Date.now();
+      const stuck = listIncidents(userId).filter((i) => open.ids.includes(i.id) && i.status === 'needsHuman');
+      writeNotes(open.repo, stuck.map((incident) => renderNote({ at: now, outcome: 'needs a person', incident })));
       send(res, 200, { proposed });
       return true;
     }
     if (body?.result !== 'applied' && body?.result !== 'discarded') {
       return fail(res, 400, 'VALIDATION_FAILED', 'result must be applied or discarded');
     }
-    send(res, 200, { updated: resolveProposal(userId, `self-heal/${runId}`, body.result === 'applied') });
+    const branch = `self-heal/${runId}`;
+    const applied = body.result === 'applied';
+    const resolving = applied ? listIncidents(userId).filter((i) => i.status === 'proposed' && i.proposal?.branch === branch) : [];
+    const updated = resolveProposal(userId, branch, applied);
+    // An applied fix is written down in the repo it was applied to (re-checked against the allow-list).
+    const repo = resolving.length > 0 ? trustedRepo(userId, resolving[0].proposal.mainRepo) : null;
+    const now = Date.now();
+    writeNotes(repo, resolving.map((incident) => renderNote({ at: now, outcome: 'fixed', incident })));
+    send(res, 200, { updated });
     return true;
   }
   return fail(res, 404, 'NOT_FOUND', 'Unknown Self-Heal route');
