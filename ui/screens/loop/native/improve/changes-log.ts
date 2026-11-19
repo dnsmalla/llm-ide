@@ -5,7 +5,7 @@
 // again on the next panel load instead of leaving the change applied but unrecorded.
 import { redactSecrets } from "../../../chat/approvals/redact.ts";
 import type { LoopFs } from "../store.ts";
-import { createSelfImprovementFolder } from "../lessons.ts";
+import { beforeLearnedWrite, createSelfImprovementFolder } from "../lessons.ts";
 import type { ImprovementChange } from "./change.ts";
 import type { ImproveRow, ImproveState } from "./panel-model.ts";
 
@@ -76,6 +76,7 @@ export function parseChangeLog(text: string): ChangeLine[] {
 export async function appendChangeLines(fs: LoopFs, lines: readonly ChangeLine[]): Promise<void> {
   if (lines.length === 0) return;
   const add = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
+  await beforeLearnedWrite();
   for (let attempt = 0; ; attempt++) {
     let text = "";
     let hash: string | null = null;
@@ -122,7 +123,10 @@ export function unrecordedDecisions(log: readonly ChangeLine[], state: ImproveSt
     if (!l.decide) continue;
     // An adopt's line carries the new row's id; the DB still lists it under the offer's id until it is recorded.
     const offerId = String(l.decide.id ?? id);
-    if ((l.action === "accept" && proposals.has(id)) || (l.action === "adopt" && offered.has(offerId)) || (l.action === "revert" && accepted.has(id))) out.push(l.decide);
+    // Only the decide fields go out (the file is data: a `projectRoot` or anything else in it is never sent).
+    const { action, id: did, scope, loopId, newId, logged } = l.decide as Record<string, unknown>;
+    const body = Object.fromEntries(Object.entries({ action, id: did, scope, loopId, newId, logged }).filter(([, v]) => v !== undefined));
+    if ((l.action === "accept" && proposals.has(id)) || (l.action === "adopt" && offered.has(offerId)) || (l.action === "revert" && accepted.has(id))) out.push(body);
   }
   return out;
 }

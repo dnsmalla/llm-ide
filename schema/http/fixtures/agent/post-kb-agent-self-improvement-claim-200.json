@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /kb/agent/self-improvement/claim",
+  "status": 200,
+  "request": {
+    "body": {
+      "workspaceRoot": "/example/workspace"
+    }
+  },
+  "response": {
+    "moved": null
+  }
+}

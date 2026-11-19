@@ -161,11 +161,16 @@ const LOGGED = { change: 'null', rationale: '', evidence: 'null' };
 const isLogged = (row) => row?.change === LOGGED.change;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** The row for the UI with its text filled from the log; null when a logged row's record cannot be found. */
+/**
+ * The row for the UI with its text filled from the log. A logged row whose record is gone from the log stays listed
+ * with `change: null` and `recordMissing: true` (its status, scope and outcome are still true), so it never silently
+ * disappears; it just cannot be shown, undone or offered.
+ */
 function withText(row, textFor) {
   if (!isLogged(row)) return toRow(row);
   const text = textFor?.(row) ?? null;
-  return text ? { ...toRow(row), change: text.change, rationale: text.rationale ?? '', evidence: text.evidence ?? null } : null;
+  if (!text) return { ...toRow(row), change: null, rationale: '', evidence: null, recordMissing: true };
+  return { ...toRow(row), change: text.change, rationale: text.rationale ?? '', evidence: text.evidence ?? null };
 }
 
 const getRow = (db, userId, id) => db.prepare(
@@ -194,7 +199,7 @@ function baselineFor(db, userId, row) {
  * `projectId` is the project the caller was authorized for: an improvement of another project is NOT_FOUND,
  * so a grant on project A cannot decide project B's rows.
  */
-export function decide(db, userId, { projectId, id, action, scope, logged = false }) {
+export function decide(db, userId, { projectId, id, action, scope, logged = false, textFor = null }) {
   return db.transaction(() => {
     const row = getRow(db, userId, id);
     if (!row || row.project_id !== projectId) throw err('NOT_FOUND', 'Improvement not found', 404);
@@ -217,8 +222,9 @@ export function decide(db, userId, { projectId, id, action, scope, logged = fals
     } else {
       throw err('VALIDATION', `Unknown action: ${action}`);
     }
-    // Accepted or reverted with its record written to the project's log: the text lives only there now.
-    if (logged && action !== 'reject') {
+    // Accepted or reverted with its record in the project's log: the text lives only there now. The log is checked,
+    // never taken on the client's word: without the line, the DB keeps its copy.
+    if (logged && action !== 'reject' && textFor?.(row)) {
       db.prepare('UPDATE loop_improvements SET change = ?, rationale = ?, evidence = ? WHERE id = ? AND user_id = ?')
         .run(LOGGED.change, LOGGED.rationale, LOGGED.evidence, id, userId);
     }
@@ -231,6 +237,8 @@ export function decide(db, userId, { projectId, id, action, scope, logged = fals
  * comes from its project's log (`textFor`); `newId` lets the client log the adoption under the row's own id first.
  */
 export function adoptOffer(db, userId, { projectId, loopId, offerId, newId = null, logged = false, textFor = null }) {
+  // The adopted row's own line (under newId) must be in this project's log before its text may live only there.
+  const inLog = logged && newId !== null && !!textFor?.({ project_id: projectId, id: newId });
   return db.transaction(() => {
     const src = getRow(db, userId, offerId);
     if (!src || src.status !== 'accepted' || src.scope !== 'general' || src.project_id === projectId) {
@@ -252,7 +260,7 @@ export function adoptOffer(db, userId, { projectId, loopId, offerId, newId = nul
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', 'project', ?, ?, datetime('now'))`,
     ).run(
       id, userId, projectId, loopId, src.template_key, src.stage_key,
-      ...(logged ? [LOGGED.change, LOGGED.rationale, LOGGED.evidence] : [text.change, text.rationale, text.evidence]),
+      ...(inLog ? [LOGGED.change, LOGGED.rationale, LOGGED.evidence] : [text.change, text.rationale, text.evidence]),
       src.suggested_scope, `shared:${offerId}`, baselineFor(db, userId, draft),
     );
     return toRow(getRow(db, userId, id));
@@ -365,7 +373,7 @@ function offersFor(db, userId, projectId, loops, textFor) {
       : (row.template_key != null ? templateToLoop.get(row.template_key) : undefined);
     if (forLoopId === undefined) continue;
     const shown = withText(row, textFor);
-    if (!shown) continue; // its record left the source project's log: nothing left to offer
+    if (shown.change === null) continue; // its record left the source project's log: nothing left to offer
     offers.push({ ...shown, fromProjectName: row.from_project_name ?? row.project_id, forLoopId });
   }
   return offers;
@@ -380,7 +388,7 @@ export function loopState(db, userId, { projectId, loops }, { textFor = null } =
     const rows = db.prepare(
       `SELECT * FROM loop_improvements WHERE user_id = ? AND project_id = ? AND loop_id = ?
        ORDER BY created_at DESC, rowid DESC`,
-    ).all(userId, projectId, loop.loopId).map((r) => withText(r, textFor)).filter(Boolean);
+    ).all(userId, projectId, loop.loopId).map((r) => withText(r, textFor));
     result[loop.loopId] = {
       finishedRunsSinceReview: db.prepare(
         `SELECT COUNT(*) AS n FROM loop_signals

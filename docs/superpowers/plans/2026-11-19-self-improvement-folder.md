@@ -113,6 +113,21 @@ the app did not make is put back and kept in `inbox/from-shell-<date>/` (`llm_ag
   Bash command naming it always asks, and Loop agents are refused (`isLearnedKnowledgePath`, `llm_agent/tools/gates.mjs`).
   Reading it stays allowed.
 
+### Review fixes (2026-11-19, API 154)
+- Identity: a manifest carries a random `folderId`; the core records the ids it claimed on this install (beside its DB,
+  `<db>-self-improvement-folders.json`). Only an id this install claimed, whose recorded root is gone, is a MOVED
+  project (claimed again). A copy here (source still exists) or a folder from another computer goes to review.
+- `POST /kb/agent/self-improvement/claim` (fs.write): the Loop page calls it before writing lessons/changes and after
+  creating the folder, so the shell guard never undoes the app's own write and a new manifest gets the real root.
+- `logged: true` drops DB text only when the core finds the line in the project's log; a row whose line is gone is
+  listed with `recordMissing` (no Undo) instead of hidden. The whole log is read (up to 64 MB).
+- The Loop load hash carries lessons.json's hash: a save from a stale view that would overwrite a newer lesson is a
+  conflict. Re-sent decisions carry only the decide fields (never a `projectRoot` from the file).
+- Inbox adopt of a memory fact is verified before the item leaves the inbox; the Self-Heal agent's reasons are
+  redacted before they are stored; Self-Heal notes use the same folder the manifest check guards.
+- Left as is: the inbox GET may move a copied folder aside under `fs.read` (a safety move, never a user write); the
+  shell guard skips a folder over 400 files / 16 MB and only covers native Bash in chat turns.
+
 ### Phase 5 — original sketch
 - `manifest.json.projectId` ≠ this project's id → the folder (or a copied `inbox/`) is foreign. Its items are listed in
   the Loop page's Improvements panel ("From <projectName>") and in the memory viewer, each with Adopt / Dismiss.

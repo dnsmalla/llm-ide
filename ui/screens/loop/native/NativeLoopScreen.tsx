@@ -13,7 +13,7 @@ import { core } from "../../shell/runtime";
 import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, reviewEveryRunsOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
-import { MAX_LESSON_CHARS } from "./lessons.ts";
+import { MAX_LESSON_CHARS, setLearnedWriteHook } from "./lessons.ts";
 import { reviewSwitch, setReviewAfter } from "./review-ui.ts";
 import { stepReviewRecords } from "./review.ts";
 import { loopbackLogLine, loopbackRecord } from "./loopback.ts";
@@ -178,6 +178,13 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const [improveCounts, setImproveCounts] = useState<Record<string, number>>({});
   const [, setRunsTick] = useState(0);
   useEffect(() => subscribeRuns(() => setRunsTick((t) => t + 1)), []);
+  // While this project's Loop page is open, the desktop's own writes to system/self-improvement/ are announced to the
+  // core first (its shell guard then never undoes them) and a folder it creates is claimed with the real root.
+  useEffect(() => {
+    if (!projectRoot) return undefined;
+    setLearnedWriteHook(() => core.request("/kb/agent/self-improvement/claim", { method: "POST", body: { workspaceRoot: projectRoot } }));
+    return () => setLearnedWriteHook(null);
+  }, [projectRoot]);
   const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean }>>([]);
   const queueRestored = useRef(false);
   const persistQueue = () => {

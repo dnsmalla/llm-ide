@@ -147,3 +147,43 @@ test('origin rules: a UI-made folder (root null) is claimed; no manifest or a da
   fs.mkdirSync(si(empty), { recursive: true });
   assert.deepEqual(ensureOwnFolder(empty), { moved: null }, 'an empty new folder is simply claimed');
 });
+
+test('a project moved on this computer keeps its folder; a copy here or a folder from another computer goes to review', () => {
+  const original = project(null, 'before-move');
+  writer.appendChatMemory({ root: original, facts: ['still mine'] });
+  const { folderId } = JSON.parse(fs.readFileSync(si(original, 'manifest.json'), 'utf8'));
+  assert.match(folderId, /^[0-9a-f-]{36}$/);
+  // A copy on this computer: same id, but its source still exists.
+  const copy = project(null, 'copy-here');
+  fs.cpSync(si(original), si(copy), { recursive: true });
+  assert.match(ensureOwnFolder(copy).moved, /^_si-before-move-/);
+  assert.notEqual(JSON.parse(fs.readFileSync(si(copy, 'manifest.json'), 'utf8')).folderId, folderId, 'the copy gets an id of its own');
+  // Moved: the old path is gone.
+  const moved = `${original}-moved`;
+  fs.renameSync(original, moved);
+  roots.push(moved);
+  assert.deepEqual(ensureOwnFolder(moved), { moved: null });
+  assert.deepEqual(writer.readChatMemoryFacts(moved).map(stripFactStamp), ['still mine']);
+  assert.equal(JSON.parse(fs.readFileSync(si(moved, 'manifest.json'), 'utf8')).folderId, folderId);
+  // From another computer: a root that does not exist here and an id this install never claimed.
+  const shared = project(null, 'shared');
+  copyForeign(shared, '/Users/someone-else/web-shop');
+  assert.match(ensureOwnFolder(shared).moved, /^web-shop-/);
+});
+
+test('POST claim stamps this project\'s root into a UI-made manifest and records the app write', async () => {
+  const { Readable } = await import('node:stream');
+  const { handleAgentRoutes } = await import('../routes/agent.mjs');
+  const { lastAppWriteAt } = await import('../graphkit/self-improvement-folder.mjs');
+  const u = user();
+  const root = project(u, 'claim');
+  fs.mkdirSync(si(root), { recursive: true });
+  fs.writeFileSync(si(root, 'manifest.json'), JSON.stringify({ format: 1, root: null, createdBy: 'desktop' }));
+  const out = { statusCode: 0, body: null, headersSent: false, writeHead(c) { this.statusCode = c; }, setHeader() {}, end(s) { this.body = s ? JSON.parse(s) : null; } };
+  const r = new Readable({ read() {} }); r.method = 'POST'; r.url = '/kb/agent/self-improvement/claim'; r.push(Buffer.from(JSON.stringify({ workspaceRoot: root }))); r.push(null);
+  const before = Date.now();
+  await handleAgentRoutes(r, out, { userId: u, url: r.url });
+  assert.deepEqual([out.statusCode, out.body], [200, { moved: null }]);
+  assert.equal(JSON.parse(fs.readFileSync(si(root, 'manifest.json'), 'utf8')).root, root);
+  assert.ok(lastAppWriteAt(si(root)) >= before);
+});

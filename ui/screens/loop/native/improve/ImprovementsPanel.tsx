@@ -249,11 +249,13 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
               const label = outcomeLabel(row.outcome) ?? (row.status === "accepted" ? "Not enough data yet" : null);
               return (
                 <li key={row.id} className="loop-imp-card" data-worse={row.status === "accepted" && row.outcome?.verdict === "worse" ? "true" : undefined}>
-                  <ChangeView change={row.change} />
+                  {row.recordMissing || !row.change
+                    ? <p className="loop-native-hint">The record of this change is no longer in system/self-improvement/changes.jsonl, so it cannot be shown or undone here. The loop itself is unchanged.</p>
+                    : <ChangeView change={row.change} />}
                   {row.status === "accepted" && row.outcome?.verdict === "worse" ? <p className="loop-imp-worse" role="status">This change made runs worse. Undo it?</p> : null}
                   <div className="loop-imp-actions">
                     {row.status === "reverted" ? <span className="loop-imp-badge">Undone</span> : label ? <span className="loop-imp-badge" data-verdict={row.outcome?.verdict ?? "not_enough_data"}>{label}</span> : null}
-                    {row.status === "accepted" ? (
+                    {row.status === "accepted" && !row.recordMissing && row.change ? (
                       <button type="button" className="loop-btn" disabled={busyId === row.id || blocked !== null} title={blocked ?? undefined}
                         onClick={() => void act(row, () => revertImprovement(deps(), { id: row.id, loopId: loop.id, change: row.change, row }))}>Undo</button>
                     ) : null}

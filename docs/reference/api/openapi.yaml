@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 153
+  x-api-version: 154
 servers:
   - url: "https://{host}"
     variables:
@@ -6828,6 +6828,43 @@ paths:
                             - "reason"
                             - "score"
                             - "asked"
+  /kb/agent/self-improvement/claim:
+    post:
+      tags:
+        - "agent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "workspaceRoot"
+              properties:
+                workspaceRoot:
+                  type: "string"
+                  description: "the open project folder; resolved against the allow-list"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "moved"
+                properties:
+                  moved:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "the inbox folder a copied-in folder was just moved to, else null. The desktop calls this before it writes system/self-improvement/ itself (the shell guard then never undoes that write) and after creating it (a new manifest gets this project's root)."
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/agent/self-improvement/inbox:
     get:
       tags:

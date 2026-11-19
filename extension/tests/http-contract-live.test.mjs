@@ -267,7 +267,7 @@ const SKIP_RULES = [
     // replay account cannot have. The GET, the 400 and the 404 replay live; tests/self-improvement-inbox.test.mjs
     // runs the adopt and dismiss exchanges through the real handler.
     why: 'needs an allow-listed repo with an item in its inbox (covered by tests/self-improvement-inbox.test.mjs)',
-    when: (fx) => fx.endpoint === 'POST /kb/agent/self-improvement/inbox' && fx.status === 200,
+    when: (fx) => (fx.endpoint === 'POST /kb/agent/self-improvement/inbox' || fx.endpoint === 'POST /kb/agent/self-improvement/claim') && fx.status === 200,
   },
   {
     why: 'handler parses structured JSON from the model; the canned stub replies in plain text',

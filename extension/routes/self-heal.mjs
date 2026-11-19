@@ -18,7 +18,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { send, readJson } from '../server/route-http.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { redactIncidentText } from '../core/incident.mjs';
-import { appendNotes, BATCH_MAX, NOTES_MAX, NOTES_REL, notesFor, parseResults, renderBatch, renderNote } from '../core/self-heal-batch.mjs';
+import { appendNotes, BATCH_MAX, NOTES_MAX, notesFor, parseResults, renderBatch, renderNote } from '../core/self-heal-batch.mjs';
 import { buildTrustedRoots } from '../llm_agent/tools/handlers/repo-files.mjs';
 import { ensureOwnFolder, noteAppWrite } from '../graphkit/self-improvement-folder.mjs';
 import { selfImprovementDir } from '../graphkit/paths.mjs';
@@ -54,9 +54,11 @@ function trustedRepo(userId, repoRoot) {
 }
 
 /** The repo's Self-Heal notes, or '' (missing or unreadable: notes are best effort). */
+const notesFile = (repo) => join(selfImprovementDir(repo), 'self-heal.md');
+
 function readNotes(repo) {
   ensureOwnFolder(repo);
-  try { return readFileSync(join(repo, NOTES_REL), 'utf8').slice(-NOTES_MAX); } catch { return ''; }
+  try { return readFileSync(notesFile(repo), 'utf8').slice(-NOTES_MAX); } catch { return ''; }
 }
 
 /**
@@ -65,7 +67,7 @@ function readNotes(repo) {
  */
 export function writeNotes(repo, notes) {
   if (!repo || notes.length === 0) return false;
-  const target = join(repo, NOTES_REL);
+  const target = notesFile(repo);
   const tmp = `${target}.tmp-${process.pid}`;
   try {
     mkdirSync(dirname(target), { recursive: true });
@@ -205,7 +207,9 @@ export async function handleSelfHealRoute(req, res, { env = process.env } = {}) 
       if (!o) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid outcome');
       runs.delete(userId);
       const runSucceeded = o.flags.verifyPassed && o.flags.hasChanges && o.proposal !== null;
-      const proposed = applyRunOutcome(userId, open.ids, parseResults(o.batch), { runSucceeded, agentDown: o.flags.agentDown, aborted: o.flags.aborted, failure: runFailure(o) }, o.proposal);
+      // The agent's one-line reasons are stored (incident note, history, notes file): redacted like incident text.
+      const results = new Map([...parseResults(o.batch)].map(([id, r]) => [id, { ...r, reason: redactIncidentText(r.reason, 500) }]));
+      const proposed = applyRunOutcome(userId, open.ids, results, { runSucceeded, agentDown: o.flags.agentDown, aborted: o.flags.aborted, failure: runFailure(o) }, o.proposal);
       // An incident that just ran out of attempts is written down for the next person or run.
       const now = Date.now();
       const stuck = listIncidents(userId).filter((i) => open.ids.includes(i.id) && i.status === 'needsHuman');

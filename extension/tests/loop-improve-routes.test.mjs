@@ -266,18 +266,29 @@ test('a logged decision keeps its text only in the project log: state, offers an
   assert.equal((await call('state', { projectRoot: ROOT_B, loops: [LB] })).body.offers.some((o) => o.id === id), false);
   const missing = await call('decide', { projectRoot: ROOT_B, action: 'adopt', id, loopId: 'loop-b', logged: true });
   assert.equal(missing.status, 404);
-  assert.equal((await call('state', { projectRoot: ROOT, loops: [L9] })).body.loops['loop-9'].history.some((r) => r.id === id), false);
+  const missingRow = (await call('state', { projectRoot: ROOT, loops: [L9] })).body.loops['loop-9'].history.find((r) => r.id === id);
+  assert.deepEqual([missingRow.status, missingRow.change, missingRow.recordMissing], ['accepted', null, true], 'listed as missing, never hidden');
   fs.renameSync(`${logFile}.away`, logFile);
 
   // Adopt under the id the client logged it with; the adopted row keeps no text either.
   const newId = '1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed';
   assert.equal((await call('decide', { projectRoot: ROOT_B, action: 'adopt', id, loopId: 'loop-b', newId: 'not-a-uuid' })).status, 400);
+  // The client writes its log line first (as the panel does), then adopts with logged: true.
+  fs.mkdirSync(path.join(ROOT_B, 'system', 'self-improvement'), { recursive: true });
+  fs.writeFileSync(path.join(ROOT_B, 'system', 'self-improvement', 'changes.jsonl'), `${JSON.stringify({ ...line, id: newId, action: 'adopt', loopId: 'loop-b', origin: `shared:${id}` })}\n`);
   const adopted = await call('decide', { projectRoot: ROOT_B, action: 'adopt', id, loopId: 'loop-b', newId, logged: true });
   assert.equal(adopted.body.improvement.id, newId);
   assert.equal(getDb().prepare('SELECT change FROM loop_improvements WHERE id = ?').get(newId).change, 'null');
-  fs.mkdirSync(path.join(ROOT_B, 'system', 'self-improvement'), { recursive: true });
-  fs.writeFileSync(path.join(ROOT_B, 'system', 'self-improvement', 'changes.jsonl'), `${JSON.stringify({ ...line, id: newId, action: 'adopt', loopId: 'loop-b', origin: `shared:${id}` })}\n`);
   entry = (await call('state', { projectRoot: ROOT_B, loops: [LB] })).body.loops['loop-b'].history.find((r) => r.id === newId);
   assert.deepEqual([entry.change, entry.origin], [CHANGE, `shared:${id}`]);
   assert.equal((await call('decide', { projectRoot: ROOT_B, action: 'accept', id, newId })).status, 400, 'newId is only for adopt');
+});
+
+test('logged: true is checked against the log: without the line the DB keeps its copy', async () => {
+  const L8 = { loopId: 'loop-8', templateKey: 'build', stageKeys: ['code'] };
+  const input = (await call('state', { projectRoot: ROOT, loops: [L8], reviewInputFor: 'loop-8' })).body.reviewInput;
+  const proposals = [{ templateKey: 'build', stageKey: 'code', change: CHANGE, rationale: 'r', evidence: { signalIds: [1] }, suggestedScope: 'project' }];
+  const [id] = (await call('proposals', { projectRoot: ROOT, loopId: 'loop-8', expectedCursor: input.cursor, cursor: input.lastId, proposals })).body.ids;
+  assert.equal((await call('decide', { projectRoot: ROOT, action: 'accept', id, logged: true })).status, 200);
+  assert.equal(getDb().prepare('SELECT change FROM loop_improvements WHERE id = ?').get(id).change, JSON.stringify(CHANGE), 'the client said logged, but the log has no line');
 });

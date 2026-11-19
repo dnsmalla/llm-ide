@@ -500,7 +500,10 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //   v153 — Loop changes keep their text in the project's log, additive: POST /kb/loop/improve/decide accepts
 //          `logged: true` (the decision is in system/self-improvement/changes.jsonl: the row keeps no text and
 //          state/offers read it from that file) and, on adopt, `newId` (the adopted row's uuid, chosen by the client).
-const SERVER_API_VERSION = 153;
+//   v154 — Review fixes, additive: POST /kb/agent/self-improvement/claim { workspaceRoot } → { moved } (the desktop
+//          records its own writes to the folder and claims a new one); a logged Loop row whose log line is missing is
+//          listed with change null + recordMissing instead of hidden; logged:true wipes DB text only when the line exists.
+const SERVER_API_VERSION = 154;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -640,6 +643,7 @@ const ALL_ENDPOINTS = [
   '/kb/agent/skill-library',
   '/kb/agent/project-memory',
   '/kb/agent/self-improvement/inbox',
+  '/kb/agent/self-improvement/claim',
   '/kb/agent/session-memory',
   '/kb/agent/tool-approvals',
   '/kb/chat/sessions',

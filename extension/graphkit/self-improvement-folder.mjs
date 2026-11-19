@@ -4,7 +4,9 @@
 // into `inbox/<project>-<date>/`, where they wait for an Adopt or Dismiss, and a manifest for this project is written.
 // Depends only on paths.mjs, so every reader and writer can call ensureOwnFolder without an import cycle.
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { basename, join } from 'node:path';
+import { config } from '../core/config.mjs';
 import { projectRootOf, selfImprovementDir } from './paths.mjs';
 
 export const MANIFEST = 'manifest.json';
@@ -43,6 +45,23 @@ function readManifest(dir) {
   }
 }
 
+// This install's own folders: folderId → the project root it was claimed for. A manifest names its folderId; only an
+// id this install claimed can be a project that MOVED (claimed again). Any other id is another computer's or another
+// project's folder, and goes to review. Kept beside the core DB (per install), best effort.
+const registryFile = () => `${config.dbPath}-self-improvement-folders.json`;
+function readRegistry() {
+  try {
+    const r = JSON.parse(readFileSync(registryFile(), 'utf8'));
+    return r && typeof r === 'object' && !Array.isArray(r) ? r : {};
+  } catch { return {}; }
+}
+function remember(folderId, root) {
+  const r = readRegistry();
+  if (r[folderId] === root) return;
+  r[folderId] = root;
+  try { writeAtomic(registryFile(), `${JSON.stringify(r, null, 2)}\n`); } catch { /* the next claim tries again */ }
+}
+
 /** A folder-name-safe label for an inbox source. */
 export function sourceName(projectName, now = new Date()) {
   const base = String(projectName || 'imported').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|-+$/g, '').slice(0, 60) || 'imported';
@@ -62,17 +81,24 @@ export function ensureOwnFolder(root, now = new Date()) {
   const dir = selfImprovementDir(root);
   if (!existsSync(dir)) return { moved: null };
   const project = realOrResolved(projectRootOf(root));
-  const own = { format: 1, root: project, projectName: basename(project), createdAt: now.toISOString() };
+  const own = (folderId) => ({ format: 1, folderId, root: project, projectName: basename(project), createdAt: now.toISOString() });
+  const claim = (folderId) => { writeAtomic(join(dir, MANIFEST), `${JSON.stringify(own(folderId), null, 2)}\n`); remember(folderId, project); };
   try {
     const m = readManifest(dir);
     const known = m !== null && m !== 'corrupt';
-    if (known && m.root !== null && samePath(m.root, project)) return { moved: null };
-    const learned = LEARNED_FILES.filter((f) => existsSync(join(dir, f)));
-  noteAppWrite(dir);
-    if ((known && m.root === null) || (m === null && learned.length === 0)) {
-      writeAtomic(join(dir, MANIFEST), `${JSON.stringify(own, null, 2)}\n`);
+    if (known && m.root !== null && samePath(m.root, project)) {
+      // This project's own folder; one from before folder ids gets one now.
+      if (typeof m.folderId === 'string') remember(m.folderId, project); else claim(randomUUID());
       return { moved: null };
     }
+    const learned = LEARNED_FILES.filter((f) => existsSync(join(dir, f)));
+    noteAppWrite(dir);
+    // Moved or renamed: an id this install claimed, recorded at the manifest's root, and that root is gone. A copy on
+    // this computer still has its source; a folder from another computer has an id this install never claimed.
+    const recorded = known && typeof m.folderId === 'string' ? readRegistry()[m.folderId] : undefined;
+    const movedHere = recorded !== undefined && m.root !== null && samePath(recorded, m.root) && !existsSync(m.root);
+    if (movedHere) { claim(m.folderId); return { moved: null }; }
+    if ((known && m.root === null) || (m === null && learned.length === 0)) { claim(randomUUID()); return { moved: null }; }
     // Another project's folder, or one whose origin cannot be told: it waits for review, never used as is.
     const label = known ? (m.projectName || basename(m.root)) : 'unknown-origin';
     let name = sourceName(label, now);
@@ -82,7 +108,7 @@ export function ensureOwnFolder(root, now = new Date()) {
     for (const f of learned) renameSync(join(dir, f), join(target, f));
     if (known) writeAtomic(join(target, MANIFEST), `${JSON.stringify(m, null, 2)}\n`);
     if (m === 'corrupt') renameSync(join(dir, MANIFEST), join(target, `${MANIFEST}.bak`));
-    writeAtomic(join(dir, MANIFEST), `${JSON.stringify(own, null, 2)}\n`);
+    claim(randomUUID()); // this project's folder from now on, under an id of its own
     return { moved: name };
   } catch (error) {
     return { moved: null, error };

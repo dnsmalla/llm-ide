@@ -38,6 +38,8 @@ export interface ImproveRow {
   decidedAt: string | null;
   fromProjectName?: string;
   forLoopId?: string;
+  /** The core could not find this decided change's line in system/self-improvement/changes.jsonl (`change` is null). */
+  recordMissing?: boolean;
 }
 export interface ImproveState {
   loops: Record<string, { finishedRunsSinceReview: number; proposals: ImproveRow[]; history: ImproveRow[] }>;
@@ -91,7 +93,7 @@ async function applyAndSave(deps: ApplyDeps, loopId: string, change: Improvement
 
 async function decide(deps: ApplyDeps, body: Record<string, unknown>, saved: LoadState): Promise<ApplyResult> {
   try {
-    await deps.core.request("/kb/loop/improve/decide", { method: "POST", body: { projectRoot: deps.projectRoot, ...body } });
+    await deps.core.request("/kb/loop/improve/decide", { method: "POST", body: { ...body, projectRoot: deps.projectRoot } });
     return saved;
   } catch {
     // The file is already changed; the row then reads as stale on the next refresh.
@@ -152,7 +154,7 @@ export async function syncChangeLog(fs: LoopFs, core: CoreFetch, projectRoot: st
   let resent = false;
   for (const body of unrecordedDecisions(log, state)) {
     try {
-      await core.request("/kb/loop/improve/decide", { method: "POST", body: { projectRoot, ...body } });
+      await core.request("/kb/loop/improve/decide", { method: "POST", body: { ...body, projectRoot } });
       resent = true;
     } catch { /* tried again on the next load */ }
   }

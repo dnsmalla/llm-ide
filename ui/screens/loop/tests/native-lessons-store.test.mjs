@@ -97,3 +97,21 @@ test("the first lesson creates the self-improvement folder", async () => {
   assert.ok(map.has(LESSONS) && !map.get(LOOP).includes("Keep the plan short"));
   assert.deepEqual(JSON.parse(map.get("system/self-improvement/manifest.json")), { format: 1, root: null, createdBy: "desktop" }, "a new folder gets a manifest at once");
 });
+
+test("a save from a stale view never overwrites a lesson written since it was loaded", async () => {
+  const { store, loop, stage } = storeWithLesson("first");
+  const { fs, map } = memFs({});
+  await saveLoops(fs, store, null);
+  const a = await loadLoops(fs); // window A
+  const b = await loadLoops(fs); // window B
+  b.store.loops.find((l) => l.id === loop.id).config.stages.find((s) => s.id === stage.id).promptAddendum = "second";
+  await saveLoops(fs, b.store, b.hash);
+  // A still holds "first" and changes something else: its lessons differ from the file, so it must not win.
+  a.store.loops.find((l) => l.id === loop.id).config.stages.find((s) => s.id === stage.id).promptAddendum = "first, edited";
+  await assert.rejects(saveLoops(fs, a.store, a.hash), (e) => e.code === "conflict");
+  assert.match(map.get(LESSONS), /"second"/);
+  // A save that leaves the lessons as the file has them goes through even from an older view.
+  const c = await loadLoops(fs);
+  c.store.loops[0].name = "renamed";
+  await saveLoops(fs, c.store, c.hash);
+});

@@ -95,7 +95,8 @@ function validateDecide(body) {
   return null;
 }
 
-const LOG_MAX = 4_000_000;
+// The whole log is read (a line is ~1 KB, so this is tens of thousands of decisions); only a larger file is cut.
+const LOG_MAX = 64 * 1024 * 1024;
 
 /**
  * Reads decided changes back from each project's system/self-improvement/changes.jsonl (the one copy of their text;
@@ -152,7 +153,7 @@ function run(route, db, userId, projectId, body) {
     dismissOffer(db, userId, { projectId, offerId: body.id });
     return { improvement: null };
   }
-  return { improvement: decide(db, userId, { projectId, id: body.id, action: body.action, scope: body.scope, logged: body.logged === true }) };
+  return { improvement: decide(db, userId, { projectId, id: body.id, action: body.action, scope: body.scope, logged: body.logged === true, textFor: logTextReader(db) }) };
 }
 
 export async function handleLoopImproveRoutes(req, res, { userId } = {}, deps = {}) {

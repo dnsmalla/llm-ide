@@ -3,7 +3,7 @@
 // reported and never overwritten silently. The desktop UI owns the edit; the Mac remains able to read the same file.
 import type { FsApi } from "../../explorer/fs";
 import { decodeProjectStore, encodeProjectStore, type LoopProjectStore } from "./model.ts";
-import { createSelfImprovementFolder, decodeLessons, encodeLessons, LESSONS_FILE, lessonsOf, overlayLessons, withoutLessons, type LessonEntry } from "./lessons.ts";
+import { beforeLearnedWrite, createSelfImprovementFolder, decodeLessons, encodeLessons, LESSONS_FILE, lessonsOf, overlayLessons, withoutLessons, type LessonEntry } from "./lessons.ts";
 
 export const LOOP_FILE = "system/loop.json";
 
@@ -42,7 +42,7 @@ export async function loadLoops(fs: LoopFs, path = LOOP_FILE): Promise<LoopLoad>
   const lessons = await readLessons(fs);
   if (lessons.kind === "corrupt") {
     overlayLessons(store, []);
-    return { kind: "ok", store, hash: read.hash, lessonsProblem: LESSONS_PROBLEM };
+    return { kind: "ok", store, hash: withLessonsHash(read.hash, null), lessonsProblem: LESSONS_PROBLEM };
   }
   // A loop.json from before the move still carries lessons: move them now (lessons.json first, then loop.json without
   // them). A failed move changes nothing that matters: the lessons are on the stages either way and the next save
@@ -50,8 +50,20 @@ export async function loadLoops(fs: LoopFs, path = LOOP_FILE): Promise<LoopLoad>
   if (overlayLessons(store, lessons.kind === "ok" ? lessons.entries : []) && path === LOOP_FILE) {
     try { return { kind: "ok", store, hash: (await saveLoops(fs, store, read.hash, path)).hash }; } catch { /* moved on the next save */ }
   }
-  return { kind: "ok", store, hash: read.hash };
+  return { kind: "ok", store, hash: withLessonsHash(read.hash, lessons.kind === "ok" ? lessons.hash : "") };
 }
+
+// The load hash callers pass back to saveLoops carries lessons.json's hash too ("" = no file), so a save from a stale
+// view cannot silently overwrite a lesson another window or an adopt wrote since: it is refused as a conflict, like an
+// edited loop.json. A bare loop.json hash (or null) skips the lessons check.
+const LESSONS_MARK = "#L:";
+const withLessonsHash = (loopHash: string, lessonsHash: string | null): string => (lessonsHash === null ? loopHash : `${loopHash}${LESSONS_MARK}${lessonsHash}`);
+function splitHash(h: string | null): { loop: string | null; lessons: string | undefined } {
+  if (h === null) return { loop: null, lessons: undefined };
+  const at = h.lastIndexOf(LESSONS_MARK);
+  return at < 0 ? { loop: h, lessons: undefined } : { loop: h.slice(0, at), lessons: h.slice(at + LESSONS_MARK.length) };
+}
+const conflict = (message: string) => Object.assign(new Error(message), { code: "conflict" });
 
 const LESSONS_PROBLEM = "system/self-improvement/lessons.json is not a valid lessons file, so its lessons were not loaded. Fix or remove it; it is never overwritten.";
 
@@ -77,8 +89,11 @@ async function readLessons(fs: LoopFs): Promise<LessonsRead> {
  * with lessons to save, the save is refused.
  */
 export async function saveLoops(fs: LoopFs, store: LoopProjectStore, expectedHash: string | null, path = LOOP_FILE): Promise<{ hash: string }> {
+  const expected = splitHash(expectedHash);
+  let lessonsHash: string | null = null;
   if (path === LOOP_FILE) {
     const current = await readLessons(fs);
+    lessonsHash = current.kind === "ok" ? current.hash : current.kind === "missing" ? "" : null;
     const hasLessons = store.loops.some((l) => l.config.stages.some((st) => typeof st.promptAddendum === "string" && st.promptAddendum.trim() !== ""));
     if (current.kind === "corrupt") {
       if (hasLessons) throw new Error(LESSONS_PROBLEM);
@@ -86,23 +101,27 @@ export async function saveLoops(fs: LoopFs, store: LoopProjectStore, expectedHas
       const entries = lessonsOf(store, current.kind === "ok" ? current.entries : [], new Date().toISOString());
       // Compared by content, so an unchanged file is never rewritten just to reformat it.
       if (current.kind === "ok" ? JSON.stringify(current.entries) !== JSON.stringify(entries) : entries.length > 0) {
-        await writeLessons(fs, encodeLessons(entries), current.kind === "ok" ? current.hash : null);
+        if (expected.lessons !== undefined && expected.lessons !== lessonsHash) {
+          throw conflict("system/self-improvement/lessons.json changed since this loop was opened. Reload, then make the change again.");
+        }
+        lessonsHash = await writeLessons(fs, encodeLessons(entries), current.kind === "ok" ? current.hash : null);
       }
     }
   }
-  const r = await fs.write(path, encodeProjectStore(path === LOOP_FILE ? withoutLessons(store) : store), { expected_hash: expectedHash, encoding: "utf-8", bom: false });
-  return { hash: r.hash };
+  const r = await fs.write(path, encodeProjectStore(path === LOOP_FILE ? withoutLessons(store) : store), { expected_hash: expected.loop, encoding: "utf-8", bom: false });
+  return { hash: withLessonsHash(r.hash, lessonsHash) };
 }
 
-async function writeLessons(fs: LoopFs, text: string, expectedHash: string | null): Promise<void> {
+async function writeLessons(fs: LoopFs, text: string, expectedHash: string | null): Promise<string> {
   const opts = { expected_hash: expectedHash, encoding: "utf-8" as const, bom: false };
+  await beforeLearnedWrite(); // the core's shell guard must know this write is the app's own
   try {
-    await fs.write(LESSONS_FILE, text, opts);
+    return (await fs.write(LESSONS_FILE, text, opts)).hash;
   } catch (e) {
     // The first lesson: make the folder (its parent system/ holds loop.json, so it exists), then write again.
     if (expectedHash !== null || !fs.create) throw e;
     await createSelfImprovementFolder(fs);
-    await fs.write(LESSONS_FILE, text, opts);
+    return (await fs.write(LESSONS_FILE, text, opts)).hash;
   }
 }
 

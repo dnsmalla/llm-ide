@@ -1705,6 +1705,42 @@
         }
       }
     },
+    "POST /kb/agent/self-improvement/claim": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "workspaceRoot"
+          ],
+          "properties": {
+            "workspaceRoot": {
+              "type": "string",
+              "description": "the open project folder; resolved against the allow-list"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "moved"
+          ],
+          "properties": {
+            "moved": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "the inbox folder a copied-in folder was just moved to, else null. The desktop calls this before it writes system/self-improvement/ itself (the shell guard then never undoes that write) and after creating it (a new manifest gets this project's root)."
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
     "GET /kb/agent/tool-approvals": {
       "responses": {
         "200": {

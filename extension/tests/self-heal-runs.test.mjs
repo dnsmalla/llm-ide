@@ -134,9 +134,12 @@ test('an incident that runs out of attempts is written down as needing a person'
   for (let k = 0; k < 3; k++) {
     let run = open(owner);
     if (!run) { const r = await call('POST', RUNS, { repoRoot: repo }); if (r.body.runId === null) break; run = open(owner); }
-    assert.equal((await call('POST', `${RUNS}/${run.runId}/outcome`, { batch: '', verifyPassed: false, hasChanges: false, agentDown: false, aborted: false })).status, 200);
+    const kappaId = (await byMessage('Error: kappa broke')).id;
+    const batch = `## Results\n\n- ${kappaId}: cannot-reproduce — saw token ghp_${'a'.repeat(36)} in the log\n`;
+    assert.equal((await call('POST', `${RUNS}/${run.runId}/outcome`, { batch, verifyPassed: false, hasChanges: false, agentDown: false, aborted: false })).status, 200);
   }
   assert.equal((await byMessage('Error: kappa broke')).status, 'needsHuman');
   const notes = fs.readFileSync(path.join(repo, 'system', 'self-improvement', 'self-heal.md'), 'utf8');
-  assert.match(notes, /· needs a person · server\n\n- error: Error: kappa broke\n[\s\S]*- earlier: attempt 3: the agent wrote no result line; make regression failed/);
+  assert.match(notes, /· needs a person · server\n\n- error: Error: kappa broke\n[\s\S]*- earlier: attempt 3: the agent answered cannot-reproduce — saw \[REDACTED\] in the log; make regression failed/);
+  assert.ok(!notes.includes('ghp_'), 'the agent\'s reason is redacted before it is stored');
 });

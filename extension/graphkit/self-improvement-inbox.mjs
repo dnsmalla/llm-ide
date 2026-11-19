@@ -8,7 +8,7 @@ import { readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from
 import { join } from 'node:path';
 import { selfImprovementDir } from './paths.mjs';
 import { ensureOwnFolder, INBOX, MANIFEST, noteAppWrite, SOURCE_RE } from './self-improvement-folder.mjs';
-import { appendChatMemory, factIndex, parseChatMemoryFacts, renderChatMemoryFile } from './memory-writer.mjs';
+import { appendChatMemory, factIndex, parseChatMemoryFacts, readChatMemoryFacts, renderChatMemoryFile } from './memory-writer.mjs';
 import { appendNotes } from '../core/self-heal-batch.mjs';
 
 const NOTE_MAX = 4000;
@@ -68,7 +68,12 @@ export function decideInboxItem(root, { source, kind, key, action }) {
     const facts = parseChatMemoryFacts(readText(file) ?? '');
     const fact = facts.find((f) => factIndex(f) === factIndex(String(key ?? '')));
     if (!fact) return false;
-    if (action === 'adopt') appendChatMemory({ root, facts: [fact] });
+    if (action === 'adopt') {
+      appendChatMemory({ root, facts: [fact] });
+      // appendChatMemory is best effort: the fact leaves the inbox only once it is really in this project's memory.
+      const kept = readChatMemoryFacts(root).some((f) => factIndex(f) === factIndex(fact));
+      if (!kept) throw Object.assign(new Error('The fact could not be written to project memory'), { code: 'WRITE_FAILED' });
+    }
     writeAtomic(file, renderChatMemoryFile(facts.filter((f) => f !== fact)));
     return true;
   }

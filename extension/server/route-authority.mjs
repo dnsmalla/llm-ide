@@ -385,6 +385,7 @@ export const ROUTE_POLICY = Object.freeze([
   ...rules('fs.write', 'POST', [
     '/auth/me/repos',
     '/kb/agent/self-improvement/inbox',
+    '/kb/agent/self-improvement/claim',
     '/kb/docs/seed',
     '/kb/projects/register',
   ]),

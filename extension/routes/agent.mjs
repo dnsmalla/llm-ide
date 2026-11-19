@@ -20,6 +20,8 @@ import {
   factIndex,
 } from '../graphkit/index.mjs';
 import { decideInboxItem, readInbox } from '../graphkit/self-improvement-inbox.mjs';
+import { ensureOwnFolder, noteAppWrite } from '../graphkit/self-improvement-folder.mjs';
+import { selfImprovementDir } from '../graphkit/paths.mjs';
 import { deleteSessionMemory, listSessionMemory } from '../kb/session-memory.mjs';
 import { listAlwaysAllow, clearAlwaysAllow, clearAllAlwaysAllow } from '../kb/tool-approvals.mjs';
 import { listRules, removeRule, removeAllRules } from '../kb/tool-permissions.mjs';
@@ -231,11 +233,32 @@ export async function handleAgentRoutes(req, res, ctx) {
     const allowed = buildAllowedRoots(userId, typeof body.workspaceRoot === 'string' ? body.workspaceRoot : undefined);
     const root = allowed ? resolveAllowedRepoRoot(body.repo, allowed) : null;
     if (!root) { sendJSON(res, 404, { error: { code: 'REPO_NOT_ALLOWED', message: 'repo not in allow-list' } }); return true; }
-    if (!decideInboxItem(root, body)) {
+    let decided;
+    try { decided = decideInboxItem(root, body); } catch (e) {
+      sendJSON(res, 500, { error: { code: 'WRITE_FAILED', message: e instanceof Error ? e.message : 'The item could not be adopted' } });
+      return true;
+    }
+    if (!decided) {
       sendJSON(res, 404, { error: { code: 'INBOX_ITEM_NOT_FOUND', message: 'That item is no longer in the inbox' } });
       return true;
     }
     sendJSON(res, 200, { repo: root, ...readInbox(root) });
+    return true;
+  }
+
+  // POST /kb/agent/self-improvement/claim   body: { workspaceRoot }   → { moved }
+  //   The desktop UI calls this before it writes the folder itself (lessons.json, changes.jsonl) and right after it
+  //   creates it: the folder is checked and claimed for this project (a new UI-made manifest gets the real root), and
+  //   the write is recorded so the shell guard (llm_agent/sdk/learned-guard.mjs) never undoes the app's own change.
+  if (req.method === 'POST' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/self-improvement/claim') {
+    const body = parseJSON(await readBody(req, 8 * 1024)) || {};
+    const ws = typeof body.workspaceRoot === 'string' ? body.workspaceRoot : '';
+    const allowed = ws ? buildAllowedRoots(userId, ws) : null;
+    const root = allowed ? resolveAllowedRepoRoot(ws, allowed) : null;
+    if (!root) { sendJSON(res, 404, { error: { code: 'REPO_NOT_ALLOWED', message: 'repo not in allow-list' } }); return true; }
+    const { moved } = ensureOwnFolder(root);
+    noteAppWrite(selfImprovementDir(root));
+    sendJSON(res, 200, { moved });
     return true;
   }
 

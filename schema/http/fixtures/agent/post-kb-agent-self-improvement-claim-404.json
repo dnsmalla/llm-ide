@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/agent/self-improvement/claim",
+  "status": 404,
+  "request": {
+    "body": {
+      "workspaceRoot": ""
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REPO_NOT_ALLOWED",
+      "message": "repo not in allow-list"
+    }
+  },
+  "description": "No folder named: nothing to claim."
+}

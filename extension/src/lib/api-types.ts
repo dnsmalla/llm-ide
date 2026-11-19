@@ -2973,6 +2973,21 @@ export type PostKbAgentSelfImprovementInboxResponse400 = CommonError;
 
 export type PostKbAgentSelfImprovementInboxResponse404 = CommonError;
 
+/** Request parts for `POST /kb/agent/self-improvement/claim` (schema/http/agent.schema.json). */
+export type PostKbAgentSelfImprovementClaimRequest = {
+  body: {
+    /** the open project folder; resolved against the allow-list */
+    workspaceRoot: string;
+  };
+};
+
+export type PostKbAgentSelfImprovementClaimResponse200 = {
+  /** the inbox folder a copied-in folder was just moved to, else null. The desktop calls this before it writes system/self-improvement/ itself (the shell guard then never undoes that write) and after creating it (a new manifest gets this project's root). */
+  moved: string | null;
+};
+
+export type PostKbAgentSelfImprovementClaimResponse404 = CommonError;
+
 /** Request parts for `GET /kb/agent/tool-approvals` (schema/http/agent.schema.json). */
 export type GetKbAgentToolApprovalsRequest = Record<string, never>;
 
@@ -9197,6 +9212,13 @@ export interface ApiEndpoints {
       200: PostKbAgentSelfImprovementInboxResponse200;
       400: PostKbAgentSelfImprovementInboxResponse400;
       404: PostKbAgentSelfImprovementInboxResponse404;
+    };
+  };
+  "POST /kb/agent/self-improvement/claim": {
+    request: PostKbAgentSelfImprovementClaimRequest;
+    responses: {
+      200: PostKbAgentSelfImprovementClaimResponse200;
+      404: PostKbAgentSelfImprovementClaimResponse404;
     };
   };
   "GET /kb/agent/tool-approvals": {

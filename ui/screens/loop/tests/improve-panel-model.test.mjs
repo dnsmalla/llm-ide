@@ -95,7 +95,7 @@ test("accept saves first, then decides with the scope", async () => {
   assert.deepEqual(line.decide, { action: "accept", id: "9", scope: "general", logged: true });
   assert.doesNotMatch(line.rationale, /ghp_/, "the shared log is redacted");
   assert.equal(out.store.loops.find((l) => l.id === d.loop.id).config.maxIterations, 7);
-  assert.equal(out.hash, d.state.hash);
+  assert.equal(out.hash, `${d.state.hash}#L:`, "loop.json's hash, plus lessons.json's (none yet)");
   assert.equal(d.core.calls[0].path, "/kb/loop/improve/decide");
   assert.deepEqual(d.core.calls[0].body, { projectRoot: "/p", action: "accept", id: "9", scope: "general", logged: true }, "the log has it, so the DB keeps no copy");
 });
