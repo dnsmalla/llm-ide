@@ -44,6 +44,8 @@
 .ext-finding-where { color: var(--tok-color-text-muted); font-family: var(--tok-type-mono-family); font-size: var(--tok-type-caption-size); }
 .ext-excerpt { display: block; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-caption-size); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--tok-color-text-muted); }
 .ext-actions { display: flex; flex-wrap: wrap; gap: var(--tok-space-sm); margin-top: var(--tok-space-sm); }
+.ext-confirm { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: var(--tok-space-sm) var(--tok-space-md); margin-top: var(--tok-space-sm); }
+.ext-command { margin: var(--tok-space-xs) 0 0; padding: var(--tok-space-xs) var(--tok-space-sm); background: var(--tok-color-row-alt); border-radius: var(--tok-radius-sm); white-space: pre-wrap; word-break: break-all; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); }
 .lib-btn[data-danger="true"] { border-color: color-mix(in srgb, var(--tok-color-accent2) 70%, var(--tok-color-border)); }
 .ext-browse { display: flex; flex-direction: column; gap: var(--tok-space-sm); flex: 1; min-height: 0; }
 .ext-browse-bar { display: flex; gap: var(--tok-space-sm); align-items: center; flex-wrap: wrap; }

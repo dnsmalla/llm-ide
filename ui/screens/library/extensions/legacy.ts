@@ -457,6 +457,10 @@ export interface LegacyApi {
   installPluginGit(url: string, ref?: string, signal?: AbortSignal): Promise<void>;
   importCodex(name: string, source: "installed" | "marketplace", signal?: AbortSignal): Promise<void>;
   removeLlmSource(id: string, signal?: AbortSignal): Promise<void>;
+  /** Remove an installed plugin and its files (server-wide install; the caller needs the install grant). */
+  removePlugin(name: string, signal?: AbortSignal): Promise<void>;
+  /** Update a plugin imported from Claude Code. `accept` is the id of the command the user agreed to run. */
+  updateClaudePlugin(name: string, accept?: string, signal?: AbortSignal): Promise<PluginUpdateResult>;
   consentMcp(id: string, consented: boolean, signal?: AbortSignal): Promise<void>;
   toggleMcp(id: string, enabled: boolean, signal?: AbortSignal): Promise<boolean>;
   reloadPlugins(signal?: AbortSignal): Promise<ReloadResult>;
@@ -466,6 +470,32 @@ export interface LegacyApi {
   discovery(id: string, signal?: AbortSignal): Promise<Discovery>;
   setItems(req: { sourceId: string; kind: string; names: readonly string[]; enabled: boolean }, signal?: AbortSignal): Promise<void>;
   updateSource(id: string, signal?: AbortSignal): Promise<SourceUpdated>;
+}
+
+/** What an update attempt came to: done, a command the user must agree to first, or a reason it did not happen. */
+export type PluginUpdateResult =
+  | { kind: "done"; to: string | null; trustReset: boolean }
+  | { kind: "confirm"; command: string; accept: string }
+  | { kind: "failed"; text: string };
+
+const PLUGIN_UPDATE_TEXT: Readonly<Record<string, string>> = {
+  BUSY: "A chat is running. Update the plugin when it has finished.",
+  UPDATE_IN_PROGRESS: "Another update is still running. Try again in a moment.",
+  NOT_FOUND: "This plugin is no longer installed in Claude Code, so it cannot be updated from there.",
+  CLI_FAILED: "Claude Code could not update the plugin. Check that Claude Code is installed and signed in.",
+  REIMPORT_FAILED: "Claude Code updated the plugin, but the new version could not be copied in. Import it again.",
+};
+
+/** Decodes the update route's answers (flat `{ code }` bodies, not the usual error envelope). Pure. */
+export function decodePluginUpdate(status: number, body: unknown): PluginUpdateResult {
+  const o = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+  if (status === 200 && o.ok === true) return { kind: "done", to: typeof o.to === "string" ? o.to : null, trustReset: o.trustReset === true };
+  if (status === 409 && o.code === "NEEDS_CONFIRMATION" && typeof o.command === "string" && typeof o.sha256 === "string") {
+    return { kind: "confirm", command: o.command.slice(0, 600), accept: o.sha256 };
+  }
+  const nested = typeof o.error === "object" && o.error !== null ? (o.error as Record<string, unknown>).code : undefined;
+  const code = typeof o.code === "string" ? o.code : typeof nested === "string" ? nested : "";
+  return { kind: "failed", text: PLUGIN_UPDATE_TEXT[code] ?? "The plugin could not be updated. Try again." };
 }
 
 export function createLegacyApi(core: ExtCore): LegacyApi {
@@ -501,6 +531,13 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
     installPluginGit: async (url, ref, s) => { await call("POST", "/auth/me/plugins/install-git", { url, ...(ref ? { ref } : {}) }, decodeAdded, s); },
     importCodex: async (name, source, s) => { await call("POST", "/auth/me/codex-plugins/import", { name, source }, decodeSourceAdded, s); },
     removeLlmSource: async (id, s) => { await call("DELETE", "/auth/me/llm-sources/" + encodeURIComponent(id), undefined, decodeRemoved, s); },
+    removePlugin: async (name, s) => { await call("DELETE", "/auth/me/plugins/uninstall/" + encodeURIComponent(name), undefined, decodeRemoved, s); },
+    updateClaudePlugin: async (name, accept, s) => {
+      let res: ExtResponse;
+      try { res = await core.request("POST", "/auth/me/claude-plugins/update", accept ? { name, acceptCommand: accept } : { name }, { signal: s }); }
+      catch (e) { throw new ExtApiError(0, s?.aborted ? "ABORTED" : shellCode(e)); }
+      return decodePluginUpdate(res.status, res.body);
+    },
     consentMcp: async (id, consented, s) => void (await call("POST", "/auth/me/mcp-plugins/consent", { id, consented }, decodeConsented, s)),
     toggleMcp: async (id, enabled, s) => (await call("POST", "/auth/me/mcp-plugins/toggle", { id, enabled }, decodeToggled, s)).enabled,
     reloadPlugins: (s) => call("POST", "/auth/me/plugins/reload", {}, decodeReload, s),
@@ -554,6 +591,8 @@ export interface LegacyState extends LegacyStatus {
   /** The list's name filter and the rows ticked for a bulk switch. */
   filter: string;
   checked: readonly string[];
+  /** A plugin update waiting for the user to agree to the command Claude Code will run. */
+  pendingUpdate: { name: string; command: string; accept: string } | null;
 }
 
 /** Rows whose id, name or description matches the filter (case-insensitive). Pure. */
@@ -619,6 +658,7 @@ export class LegacyModel {
       discovery: null,
       filter: "",
       checked: [],
+      pendingUpdate: null,
       statusLoading: false,
       statusError: null,
       pluginUpdates: byId(),
@@ -900,6 +940,39 @@ export class LegacyModel {
         this.fail(e);
       }
     });
+  }
+
+  /** Remove an installed plugin and its files. */
+  async removePlugin(name: string): Promise<void> {
+    await this.withBusy(name, async () => {
+      try {
+        await this.api.removePlugin(name, this.life.signal);
+        if (this.state.selected === name) this.set({ selected: null });
+        await this.load(true);
+        this.set({ notice: { text: `Removed ${name}.`, error: false } });
+      } catch (e) {
+        this.fail(e);
+      }
+    });
+  }
+
+  /** Update a plugin imported from Claude Code. With `accept`, the user agreed to the command shown. */
+  async updatePlugin(name: string, accept?: string): Promise<void> {
+    await this.withBusy(name, async () => {
+      try {
+        const r = await this.api.updateClaudePlugin(name, accept, this.life.signal);
+        if (r.kind === "confirm") { this.set({ pendingUpdate: { name, command: r.command, accept: r.accept } }); return; }
+        this.set({ pendingUpdate: null });
+        if (r.kind === "failed") { this.set({ notice: { text: r.text, error: true } }); return; }
+        await this.load(true);
+        this.set({ notice: { text: `Updated ${name}${r.to ? ` to version ${r.to}` : ""}.${r.trustReset ? " Its code changed, so approve its hooks and MCP servers again." : ""}`, error: false } });
+      } catch (e) {
+        this.fail(e);
+      }
+    });
+  }
+  cancelPluginUpdate(): void {
+    this.set({ pendingUpdate: null });
   }
 
   /** Remove an MCP server from the registry. No files are touched. */

@@ -265,3 +265,33 @@ test("legacy filter: rows match by id, name or description; select all ticks onl
   model.toggleAllShown();
   assert.deepEqual(model.getSnapshot().checked, ["runner"]);
 });
+
+test("plugin: Remove sends the uninstall and reloads; Update asks before running Claude Code's command, then reports", async () => {
+  const { decodePluginUpdate } = await import("../legacy.ts");
+  let step = 0;
+  const { core, model } = setup("plugins", {
+    "DELETE /auth/me/plugins/uninstall/runner": () => ok({ removed: true }),
+    "POST /auth/me/claude-plugins/update": () => {
+      step += 1;
+      return step === 1
+        ? { status: 409, body: { code: "NEEDS_CONFIRMATION", command: "claude plugin update runner@market", sha256: "ab".repeat(32) } }
+        : ok({ ok: true, from: "1.0.0", to: "1.1.0", trustReset: true, claudeUpdated: true });
+    },
+  });
+  await model.load();
+  await model.updatePlugin("runner");
+  assert.deepEqual(model.getSnapshot().pendingUpdate, { name: "runner", command: "claude plugin update runner@market", accept: "ab".repeat(32) }, "nothing runs until the user agrees");
+  await model.updatePlugin("runner", "ab".repeat(32));
+  assert.deepEqual(posts(core, "claude-plugins/update").map((c) => c.body), [{ name: "runner" }, { name: "runner", acceptCommand: "ab".repeat(32) }]);
+  const s = model.getSnapshot();
+  assert.equal(s.pendingUpdate, null);
+  assert.match(s.notice!.text, /Updated runner to version 1\.1\.0\. Its code changed, so approve its hooks and MCP servers again\./);
+  await model.removePlugin("runner");
+  assert.ok(core.calls.some((c) => c.method === "DELETE" && c.path === "/auth/me/plugins/uninstall/runner"));
+  assert.match(model.getSnapshot().notice!.text, /Removed runner\./);
+  // The route's flat failure bodies read as plain guidance, never a raw code.
+  assert.deepEqual(decodePluginUpdate(409, { code: "BUSY" }), { kind: "failed", text: "A chat is running. Update the plugin when it has finished." });
+  assert.equal(decodePluginUpdate(200, { ok: false, code: "REIMPORT_FAILED" }).kind, "failed");
+  assert.equal(decodePluginUpdate(500, { error: { code: "UPDATE_FAILED", message: "x" } }).kind, "failed");
+  assert.equal(decodePluginUpdate(409, { code: "NEEDS_CONFIRMATION", command: 5 }).kind, "failed", "a malformed confirmation never runs");
+});
