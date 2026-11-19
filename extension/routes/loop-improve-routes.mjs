@@ -5,6 +5,8 @@
 // Contract (mirrors the sibling route modules):
 //   handleLoopImproveRoutes(req, res, { userId }, deps) → Promise<boolean>
 // `deps.getDb` is the tests' seam for the database.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { getDb } from '../kb/db.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { AppError } from '../core/errors.mjs';
@@ -85,10 +87,43 @@ function validateProposals(body) {
 
 function validateDecide(body) {
   if (!DECIDE_ACTIONS.includes(body.action)) return `action must be one of ${DECIDE_ACTIONS.join(', ')}`;
+  if (body.logged != null && typeof body.logged !== 'boolean') return 'logged must be a boolean';
+  if (body.newId != null && (typeof body.newId !== 'string' || body.action !== 'adopt')) return 'newId is only for adopt';
   if (!isId(body.id)) return 'id is required';
   if (body.action === 'adopt' && !isId(body.loopId)) return 'adopt needs a loopId';
   if (body.scope != null && typeof body.scope !== 'string') return 'scope must be a string';
   return null;
+}
+
+const LOG_MAX = 4_000_000;
+
+/**
+ * Reads decided changes back from each project's system/self-improvement/changes.jsonl (the one copy of their text;
+ * plan 2026-11-19). The folder comes from the project registry, never from the request. Per request, each project's
+ * file is read once. The newest line for an id that carries a change wins.
+ */
+export function logTextReader(db) {
+  const cache = new Map();
+  const linesOf = (projectId) => {
+    if (cache.has(projectId)) return cache.get(projectId);
+    const byId = new Map();
+    const root = db.prepare('SELECT root FROM projects WHERE id = ?').get(projectId)?.root;
+    let text = '';
+    try { if (root) text = readFileSync(join(root, 'system', 'self-improvement', 'changes.jsonl'), 'utf8').slice(-LOG_MAX); } catch { /* no log */ }
+    for (const raw of text.split('\n')) {
+      if (!raw.trim()) continue;
+      try {
+        const l = JSON.parse(raw);
+        if (typeof l?.id === 'string' && l.change && typeof l.change === 'object') byId.set(l.id, l);
+      } catch { /* a damaged line is skipped */ }
+    }
+    cache.set(projectId, byId);
+    return byId;
+  };
+  return (row) => {
+    const l = linesOf(row.project_id).get(row.id);
+    return l ? { change: l.change, rationale: typeof l.rationale === 'string' ? l.rationale : '', evidence: { signalIds: [], excerpts: Array.isArray(l.excerpts) ? l.excerpts : [] } } : null;
+  };
 }
 
 const VALIDATORS = { signal: validateSignal, state: validateLoops, proposals: validateProposals, decide: validateDecide };
@@ -100,7 +135,7 @@ function run(route, db, userId, projectId, body) {
     });
   }
   if (route === 'state') {
-    const state = loopState(db, userId, { projectId, loops: body.loops });
+    const state = loopState(db, userId, { projectId, loops: body.loops }, { textFor: logTextReader(db) });
     if (!body.reviewInputFor) return state;
     const { cursor, lastId, signals } = signalsSinceReview(db, userId, projectId, body.reviewInputFor);
     return { ...state, reviewInput: { cursor, lastId, signals } };
@@ -110,12 +145,14 @@ function run(route, db, userId, projectId, body) {
       projectId, loopId: body.loopId, cursor: body.cursor, expectedCursor: body.expectedCursor, proposals: body.proposals,
     });
   }
-  if (body.action === 'adopt') return { improvement: adoptOffer(db, userId, { projectId, loopId: body.loopId, offerId: body.id }) };
+  if (body.action === 'adopt') {
+    return { improvement: adoptOffer(db, userId, { projectId, loopId: body.loopId, offerId: body.id, newId: body.newId ?? null, logged: body.logged === true, textFor: logTextReader(db) }) };
+  }
   if (body.action === 'dismiss') {
     dismissOffer(db, userId, { projectId, offerId: body.id });
     return { improvement: null };
   }
-  return { improvement: decide(db, userId, { projectId, id: body.id, action: body.action, scope: body.scope }) };
+  return { improvement: decide(db, userId, { projectId, id: body.id, action: body.action, scope: body.scope, logged: body.logged === true }) };
 }
 
 export async function handleLoopImproveRoutes(req, res, { userId } = {}, deps = {}) {

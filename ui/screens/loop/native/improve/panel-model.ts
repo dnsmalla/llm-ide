@@ -104,36 +104,41 @@ type LogRow = Partial<Pick<ImproveRow, "rationale" | "evidence" | "origin" | "st
 
 /**
  * Records the decision in system/self-improvement/changes.jsonl after the loop file changed and before the DB call,
- * so the log (the shareable record) never misses an applied change. A failed log write never undoes the change.
+ * so the log (the shareable record) never misses an applied change. Once the line is written the DB is told
+ * `logged: true` and keeps no copy of the text (the log is its one home); a failed write keeps the DB copy and never
+ * undoes the change. `lineId` is the improvement's own id (for an adopt, the new row's id the client chose).
  */
-async function logDecision(deps: ApplyDeps, action: "accept" | "adopt" | "revert", item: { id: string | number; loopId: string; change: ImprovementChange; row?: LogRow }, body: Record<string, unknown>, saved: LoadState, scope?: string): Promise<string | null> {
+async function logDecision(deps: ApplyDeps, action: "accept" | "adopt" | "revert", item: { id: string | number; loopId: string; change: ImprovementChange; row?: LogRow }, lineId: string, body: Record<string, unknown>, saved: LoadState, scope?: string, origin?: string): Promise<{ body: Record<string, unknown>; problem: string | null }> {
   const loop = saved.store.loops.find((l) => l.id === item.loopId);
   const r = item.row ?? {};
+  const logged = { ...body, logged: true };
   try {
     await appendChangeLines(deps.fs, [changeLine(action, {
-      id: item.id, loopId: item.loopId, change: item.change, rationale: r.rationale ?? "", evidence: r.evidence ?? null, origin: r.origin,
+      id: lineId, loopId: item.loopId, change: item.change, rationale: r.rationale ?? "", evidence: r.evidence ?? null, origin: origin ?? r.origin,
       stageKey: r.stageKey ?? ("stageKey" in item.change ? item.change.stageKey : null),
-    }, body, { scope, loopKey: loop?.defaultKey ?? r.templateKey ?? null })]);
-    return null;
+    }, logged, { scope, loopKey: loop?.defaultKey ?? r.templateKey ?? null })]);
+    return { body: logged, problem: null };
   } catch {
-    return "The change was applied, but system/self-improvement/changes.jsonl could not be written.";
+    return { body, problem: "The change was applied, but system/self-improvement/changes.jsonl could not be written." };
   }
 }
 
 export async function acceptImprovement(deps: ApplyDeps, item: { id: string | number; loopId: string; change: ImprovementChange; kind: "proposal" | "offer"; row?: LogRow }, scope: "project" | "general"): Promise<ApplyResult> {
   const saved = await applyAndSave(deps, item.loopId, item.change, "forward");
-  const body = item.kind === "offer" ? { action: "adopt", id: item.id, loopId: item.loopId } : { action: "accept", id: item.id, scope };
-  const logProblem = await logDecision(deps, item.kind === "offer" ? "adopt" : "accept", item, body, saved, item.kind === "offer" ? "project" : scope);
-  const result = await decide(deps, body, saved);
-  return logProblem && !result.notice ? { ...result, notice: logProblem } : result;
+  const offer = item.kind === "offer";
+  // An adopted offer becomes a new row here; its id is chosen now so the log line and the row share it.
+  const lineId = offer ? globalThis.crypto.randomUUID() : String(item.id);
+  const body = offer ? { action: "adopt", id: item.id, loopId: item.loopId, newId: lineId } : { action: "accept", id: item.id, scope };
+  const logged = await logDecision(deps, offer ? "adopt" : "accept", item, lineId, body, saved, offer ? "project" : scope, offer ? `shared:${item.id}` : undefined);
+  const result = await decide(deps, logged.body, saved);
+  return logged.problem && !result.notice ? { ...result, notice: logged.problem } : result;
 }
 
 export async function revertImprovement(deps: ApplyDeps, item: { id: string | number; loopId: string; change: ImprovementChange; row?: LogRow }): Promise<ApplyResult> {
   const saved = await applyAndSave(deps, item.loopId, invertChange(item.change), "revert");
-  const body = { action: "revert", id: item.id };
-  const logProblem = await logDecision(deps, "revert", item, body, saved);
-  const result = await decide(deps, body, saved);
-  return logProblem && !result.notice ? { ...result, notice: logProblem } : result;
+  const logged = await logDecision(deps, "revert", item, String(item.id), { action: "revert", id: item.id }, saved);
+  const result = await decide(deps, logged.body, saved);
+  return logged.problem && !result.notice ? { ...result, notice: logged.problem } : result;
 }
 
 /**

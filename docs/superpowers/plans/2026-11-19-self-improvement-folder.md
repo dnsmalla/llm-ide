@@ -26,9 +26,14 @@ reads it from there. Copy the folder into another repo and that repo offers each
 | Session memory, learned rate limits, usage | DB | DB (unchanged: per chat / per machine) |
 | `graph-notes.md`, `doc-notes.md`, `environment.md` | `system/memory/` | `system/memory/` (graph output, not learned knowledge) |
 
-"Bookkeeping only" means the DB row keeps `status`, `baseline` and `outcome` for the before/after check and the
-cross-project offers inside one install. The text of what was learned (the change, rationale, evidence) is read from
-the folder. This is a split by job, not a second copy.
+"Bookkeeping only" means the DB row keeps `status`, `scope`, `origin`, `baseline` and `outcome`. As built (API 153):
+once a decision's line is in `changes.jsonl` the row's change, rationale and evidence are cleared, and the core reads
+them back from the project's log for the panel, Undo, the review and the cross-project offers. Proposals and rejected
+rows keep their text in the DB (they are not learned knowledge). A failed log write keeps the DB copy.
+
+Shell writes: besides the Edit/Write refusal, every chat Bash call is bracketed by a snapshot of the folder; a change
+the app did not make is put back and kept in `inbox/from-shell-<date>/` (`llm_agent/sdk/learned-guard.mjs`); with
+`LLMIDE_V2_SANDBOX=on` the folder is also in the sandbox's `filesystem.denyWrite`.
 
 ## Folder layout
 

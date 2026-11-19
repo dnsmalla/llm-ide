@@ -154,6 +154,20 @@ const toRow = (row) => (row ? {
   createdAt: row.created_at, decidedAt: row.decided_at,
 } : null);
 
+// A decided change whose record is in the project's system/self-improvement/changes.jsonl (the client says so with
+// `logged: true`) keeps no text here: the file is the one copy of what was learned (plan 2026-11-19). The row keeps
+// the bookkeeping (status, scope, origin, baseline, outcome); `textFor` (from the route) reads the text back.
+const LOGGED = { change: 'null', rationale: '', evidence: 'null' };
+const isLogged = (row) => row?.change === LOGGED.change;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The row for the UI with its text filled from the log; null when a logged row's record cannot be found. */
+function withText(row, textFor) {
+  if (!isLogged(row)) return toRow(row);
+  const text = textFor?.(row) ?? null;
+  return text ? { ...toRow(row), change: text.change, rationale: text.rationale ?? '', evidence: text.evidence ?? null } : null;
+}
+
 const getRow = (db, userId, id) => db.prepare(
   'SELECT * FROM loop_improvements WHERE id = ? AND user_id = ?',
 ).get(id, userId);
@@ -180,7 +194,7 @@ function baselineFor(db, userId, row) {
  * `projectId` is the project the caller was authorized for: an improvement of another project is NOT_FOUND,
  * so a grant on project A cannot decide project B's rows.
  */
-export function decide(db, userId, { projectId, id, action, scope }) {
+export function decide(db, userId, { projectId, id, action, scope, logged = false }) {
   return db.transaction(() => {
     const row = getRow(db, userId, id);
     if (!row || row.project_id !== projectId) throw err('NOT_FOUND', 'Improvement not found', 404);
@@ -203,26 +217,42 @@ export function decide(db, userId, { projectId, id, action, scope }) {
     } else {
       throw err('VALIDATION', `Unknown action: ${action}`);
     }
+    // Accepted or reverted with its record written to the project's log: the text lives only there now.
+    if (logged && action !== 'reject') {
+      db.prepare('UPDATE loop_improvements SET change = ?, rationale = ?, evidence = ? WHERE id = ? AND user_id = ?')
+        .run(LOGGED.change, LOGGED.rationale, LOGGED.evidence, id, userId);
+    }
     return toRow(getRow(db, userId, id));
   })();
 }
 
-/** Takes a general improvement from another project as a new accepted, project-scoped one here. */
-export function adoptOffer(db, userId, { projectId, loopId, offerId }) {
+/**
+ * Takes a general improvement from another project as a new accepted, project-scoped one here. A logged source's text
+ * comes from its project's log (`textFor`); `newId` lets the client log the adoption under the row's own id first.
+ */
+export function adoptOffer(db, userId, { projectId, loopId, offerId, newId = null, logged = false, textFor = null }) {
   return db.transaction(() => {
     const src = getRow(db, userId, offerId);
     if (!src || src.status !== 'accepted' || src.scope !== 'general' || src.project_id === projectId) {
       throw err('NOT_FOUND', 'Offer not found', 404);
     }
-    const id = randomUUID();
-    const draft = { ...src, project_id: projectId, loop_id: loopId };
+    let text = { change: src.change, rationale: src.rationale, evidence: src.evidence };
+    if (isLogged(src)) {
+      const t = textFor?.(src);
+      if (!t) throw err('NOT_FOUND', "The offer's record is no longer in its project's changes.jsonl", 404);
+      text = { change: JSON.stringify(t.change), rationale: t.rationale ?? '', evidence: JSON.stringify(t.evidence ?? null) };
+    }
+    if (newId !== null && (!UUID_RE.test(newId) || getRow(db, userId, newId))) throw err('VALIDATION', 'newId must be a new uuid');
+    const id = newId ?? randomUUID();
+    const draft = { ...src, change: text.change, project_id: projectId, loop_id: loopId };
     db.prepare(
       `INSERT INTO loop_improvements
          (id, user_id, project_id, loop_id, template_key, stage_key, change, rationale, evidence,
           suggested_scope, status, scope, origin, baseline, decided_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', 'project', ?, ?, datetime('now'))`,
     ).run(
-      id, userId, projectId, loopId, src.template_key, src.stage_key, src.change, src.rationale, src.evidence,
+      id, userId, projectId, loopId, src.template_key, src.stage_key,
+      ...(logged ? [LOGGED.change, LOGGED.rationale, LOGGED.evidence] : [text.change, text.rationale, text.evidence]),
       src.suggested_scope, `shared:${offerId}`, baselineFor(db, userId, draft),
     );
     return toRow(getRow(db, userId, id));
@@ -311,7 +341,7 @@ function evaluateOutcomes(db, userId, projectId, loopId) {
   }
 }
 
-function offersFor(db, userId, projectId, loops) {
+function offersFor(db, userId, projectId, loops, textFor) {
   const stageToLoop = new Map();
   const templateToLoop = new Map();
   for (const loop of loops) {
@@ -334,13 +364,15 @@ function offersFor(db, userId, projectId, loops) {
       ? stageToLoop.get(row.stage_key)
       : (row.template_key != null ? templateToLoop.get(row.template_key) : undefined);
     if (forLoopId === undefined) continue;
-    offers.push({ ...toRow(row), fromProjectName: row.from_project_name ?? row.project_id, forLoopId });
+    const shown = withText(row, textFor);
+    if (!shown) continue; // its record left the source project's log: nothing left to offer
+    offers.push({ ...shown, fromProjectName: row.from_project_name ?? row.project_id, forLoopId });
   }
   return offers;
 }
 
 /** The per-project snapshot the UI renders: pending proposals, history and offers. Also settles due outcomes. */
-export function loopState(db, userId, { projectId, loops }) {
+export function loopState(db, userId, { projectId, loops }, { textFor = null } = {}) {
   const result = {};
   for (const loop of loops) {
     evaluateOutcomes(db, userId, projectId, loop.loopId);
@@ -348,7 +380,7 @@ export function loopState(db, userId, { projectId, loops }) {
     const rows = db.prepare(
       `SELECT * FROM loop_improvements WHERE user_id = ? AND project_id = ? AND loop_id = ?
        ORDER BY created_at DESC, rowid DESC`,
-    ).all(userId, projectId, loop.loopId).map(toRow);
+    ).all(userId, projectId, loop.loopId).map((r) => withText(r, textFor)).filter(Boolean);
     result[loop.loopId] = {
       finishedRunsSinceReview: db.prepare(
         `SELECT COUNT(*) AS n FROM loop_signals
@@ -358,5 +390,5 @@ export function loopState(db, userId, { projectId, loops }) {
       history: rows.filter((r) => r.status !== 'proposed' && r.status !== 'superseded'),
     };
   }
-  return { loops: result, offers: offersFor(db, userId, projectId, loops) };
+  return { loops: result, offers: offersFor(db, userId, projectId, loops, textFor) };
 }

@@ -92,12 +92,12 @@ test("accept saves first, then decides with the scope", async () => {
   assert.deepEqual(d.state.events, ["write", "log", "decide"], "loop file, then the change log, then the DB");
   const [line] = d.state.changes.trim().split("\n").map((l) => JSON.parse(l));
   assert.deepEqual([line.id, line.action, line.loopId, line.scope, line.change.after, line.excerpts], ["9", "accept", d.loop.id, "general", 7, ["run 4 failed"]]);
-  assert.deepEqual(line.decide, { action: "accept", id: "9", scope: "general" });
+  assert.deepEqual(line.decide, { action: "accept", id: "9", scope: "general", logged: true });
   assert.doesNotMatch(line.rationale, /ghp_/, "the shared log is redacted");
   assert.equal(out.store.loops.find((l) => l.id === d.loop.id).config.maxIterations, 7);
   assert.equal(out.hash, d.state.hash);
   assert.equal(d.core.calls[0].path, "/kb/loop/improve/decide");
-  assert.deepEqual(d.core.calls[0].body, { projectRoot: "/p", action: "accept", id: "9", scope: "general" });
+  assert.deepEqual(d.core.calls[0].body, { projectRoot: "/p", action: "accept", id: "9", scope: "general", logged: true }, "the log has it, so the DB keeps no copy");
 });
 
 test("a hash conflict reloads and retries once; a real change in between makes it stale", async () => {
@@ -144,7 +144,10 @@ test("an offer applies by stageKey and is adopted with the loop id, no scope", a
   const change = { op: "setPromptAddendum", stageId: "other-project-id", stageKey: stage.defaultKey, stageName: "x", before: null, after: "Be brief." };
   const out = await acceptImprovement({ fs: d.fs, core: d.core, load: d.load, ...d.base }, { id: "5", loopId: d.loop.id, change, kind: "offer" }, "project");
   assert.equal(out.store.loops.find((l) => l.id === d.loop.id).config.stages.find((s) => s.id === stage.id).promptAddendum, "Be brief.");
-  assert.deepEqual(d.core.calls[0].body, { projectRoot: "/p", action: "adopt", id: "5", loopId: d.loop.id });
+  const { newId, ...rest } = d.core.calls[0].body;
+  assert.deepEqual(rest, { projectRoot: "/p", action: "adopt", id: "5", loopId: d.loop.id, logged: true });
+  const adopted = JSON.parse(d.state.changes.trim().split("\n").pop());
+  assert.deepEqual([adopted.id, adopted.action, adopted.origin], [newId, "adopt", "shared:5"], "the log line and the new row share one id");
   // The lesson is saved in the self-improvement folder, never in loop.json.
   assert.doesNotMatch(d.state.text, /Be brief/);
   assert.deepEqual(JSON.parse(d.state.lessons).lessons.map((e) => [e.loopId, e.stageId, e.stageKey, e.text]), [[d.loop.id, stage.id, stage.defaultKey, "Be brief."]]);
@@ -184,4 +187,14 @@ test("the click-time check refuses when a run started after render, with zero wr
 
 test("reviewStatusLine shows a failed review with its reason", () => {
   assert.match(reviewStatusLine({ failed: "the reply was not valid JSON" }), /^Review failed: the reply was not valid JSON/);
+});
+
+test("when the change log cannot be written the DB keeps its copy (no logged flag) and the user is told", async () => {
+  const d = await deps();
+  const write = d.fs.write;
+  d.fs.write = async (path, next, opts) => { if (path.endsWith("changes.jsonl")) throw Object.assign(new Error("disk full"), { code: "io" }); return write(path, next, opts); };
+  d.fs.create = async () => { throw new Error("no"); };
+  const out = await acceptImprovement({ fs: d.fs, core: d.core, load: d.load, ...d.base }, { id: "11", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project");
+  assert.deepEqual(d.core.calls[0].body, { projectRoot: "/p", action: "accept", id: "11", scope: "project" });
+  assert.match(out.notice, /changes\.jsonl could not be written/);
 });

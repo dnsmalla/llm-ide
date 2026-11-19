@@ -7018,6 +7018,10 @@ export type PostKbLoopImproveDecideRequest = {
     scope?: string;
     /** Required for adopt */
     loopId?: string;
+    /** true when the client wrote this decision to the project's system/self-improvement/changes.jsonl first: an accepted, adopted or reverted row then keeps no text in the DB, and state/offers read it from that file (API 153) */
+    logged?: boolean;
+    /** adopt only: the uuid the adopted row gets, chosen by the client so its log line and the row share one id (API 153) */
+    newId?: string;
   };
 };
 

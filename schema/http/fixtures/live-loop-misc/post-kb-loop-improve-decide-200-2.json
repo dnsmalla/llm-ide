@@ -8,7 +8,8 @@
       "action": "dismiss",
       "id": "imp-1",
       "scope": "project",
-      "loopId": "loop-1"
+      "loopId": "loop-1",
+      "logged": false
     }
   },
   "response": {

@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/loop/improve/decide",
+  "status": 400,
+  "description": "newId is accepted only on adopt (it names the adopted row).",
+  "request": {
+    "body": {
+      "projectRoot": "/example/repo",
+      "action": "accept",
+      "id": "imp-1",
+      "newId": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+      "logged": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "newId is only for adopt"
+    }
+  }
+}

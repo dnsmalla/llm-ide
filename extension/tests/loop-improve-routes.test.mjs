@@ -237,3 +237,47 @@ test('proposals checks rationale, evidence and suggestedScope', async () => {
   assert.equal((await send({ ...good, evidence: { signalIds: 'x' } })).status, 400);
   assert.equal((await send({ ...good, suggestedScope: 'everyone' })).status, 400);
 });
+
+test('a logged decision keeps its text only in the project log: state, offers and adopt read it from there', async () => {
+  const L9 = { loopId: 'loop-9', templateKey: 'build', stageKeys: ['code'] };
+  const input = (await call('state', { projectRoot: ROOT, loops: [L9], reviewInputFor: 'loop-9' })).body.reviewInput;
+  const proposals = [{ templateKey: 'build', stageKey: 'code', change: CHANGE, rationale: 'Tests were skipped.', evidence: { signalIds: [1] }, suggestedScope: 'general' }];
+  const [id] = (await call('proposals', { projectRoot: ROOT, loopId: 'loop-9', expectedCursor: input.cursor, cursor: input.lastId, proposals })).body.ids;
+  const logDir = path.join(ROOT, 'system', 'self-improvement');
+  const logFile = path.join(logDir, 'changes.jsonl');
+  fs.mkdirSync(logDir, { recursive: true });
+  const line = { id, action: 'accept', at: 't', loopId: 'loop-9', loopKey: 'build', stageKey: 'code', change: CHANGE, rationale: 'Tests were skipped.', excerpts: ['run 3: no tests'] };
+  fs.writeFileSync(logFile, `${JSON.stringify(line)}\n`);
+  assert.equal((await call('decide', { projectRoot: ROOT, action: 'accept', id, scope: 'general', logged: true })).status, 200);
+  const stored = getDb().prepare('SELECT change, rationale, evidence, baseline FROM loop_improvements WHERE id = ?').get(id);
+  assert.deepEqual([stored.change, stored.rationale, stored.evidence], ['null', '', 'null'], 'the DB keeps no copy of the text');
+  assert.equal(JSON.parse(stored.baseline).stageName, 'code', 'the baseline was taken before the text left');
+  let entry = (await call('state', { projectRoot: ROOT, loops: [L9] })).body.loops['loop-9'].history.find((r) => r.id === id);
+  assert.deepEqual([entry.change, entry.rationale, entry.evidence.excerpts], [CHANGE, 'Tests were skipped.', ['run 3: no tests']]);
+
+  // Another project sees it as an offer, read from project A's log through the registry's folder.
+  // ROOT_B / proj-b is registered at the top of this file.
+  const LB = { loopId: 'loop-b', templateKey: 'build', stageKeys: ['code'] };
+  const offer = (await call('state', { projectRoot: ROOT_B, loops: [LB] })).body.offers.find((o) => o.id === id);
+  assert.deepEqual([offer.change, offer.fromProjectName, offer.forLoopId], [CHANGE, 'A', 'loop-b']);
+
+  // Its record gone from A's log: no offer, no adopt, and A's history no longer lists a change it cannot show.
+  fs.renameSync(logFile, `${logFile}.away`);
+  assert.equal((await call('state', { projectRoot: ROOT_B, loops: [LB] })).body.offers.some((o) => o.id === id), false);
+  const missing = await call('decide', { projectRoot: ROOT_B, action: 'adopt', id, loopId: 'loop-b', logged: true });
+  assert.equal(missing.status, 404);
+  assert.equal((await call('state', { projectRoot: ROOT, loops: [L9] })).body.loops['loop-9'].history.some((r) => r.id === id), false);
+  fs.renameSync(`${logFile}.away`, logFile);
+
+  // Adopt under the id the client logged it with; the adopted row keeps no text either.
+  const newId = '1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed';
+  assert.equal((await call('decide', { projectRoot: ROOT_B, action: 'adopt', id, loopId: 'loop-b', newId: 'not-a-uuid' })).status, 400);
+  const adopted = await call('decide', { projectRoot: ROOT_B, action: 'adopt', id, loopId: 'loop-b', newId, logged: true });
+  assert.equal(adopted.body.improvement.id, newId);
+  assert.equal(getDb().prepare('SELECT change FROM loop_improvements WHERE id = ?').get(newId).change, 'null');
+  fs.mkdirSync(path.join(ROOT_B, 'system', 'self-improvement'), { recursive: true });
+  fs.writeFileSync(path.join(ROOT_B, 'system', 'self-improvement', 'changes.jsonl'), `${JSON.stringify({ ...line, id: newId, action: 'adopt', loopId: 'loop-b', origin: `shared:${id}` })}\n`);
+  entry = (await call('state', { projectRoot: ROOT_B, loops: [LB] })).body.loops['loop-b'].history.find((r) => r.id === newId);
+  assert.deepEqual([entry.change, entry.origin], [CHANGE, `shared:${id}`]);
+  assert.equal((await call('decide', { projectRoot: ROOT_B, action: 'accept', id, newId })).status, 400, 'newId is only for adopt');
+});

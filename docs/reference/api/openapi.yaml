@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 152
+  x-api-version: 153
 servers:
   - url: "https://{host}"
     variables:
@@ -11655,6 +11655,12 @@ paths:
                 loopId:
                   type: "string"
                   description: "Required for adopt"
+                logged:
+                  type: "boolean"
+                  description: "true when the client wrote this decision to the project's system/self-improvement/changes.jsonl first: an accepted, adopted or reverted row then keeps no text in the DB, and state/offers read it from that file (API 153)"
+                newId:
+                  type: "string"
+                  description: "adopt only: the uuid the adopted row gets, chosen by the client so its log line and the row share one id (API 153)"
       responses:
         "200":
           description: "OK"

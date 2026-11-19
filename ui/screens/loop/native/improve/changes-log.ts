@@ -120,7 +120,9 @@ export function unrecordedDecisions(log: readonly ChangeLine[], state: ImproveSt
   const out: Record<string, unknown>[] = [];
   for (const [id, l] of last) {
     if (!l.decide) continue;
-    if ((l.action === "accept" && proposals.has(id)) || (l.action === "adopt" && offered.has(id)) || (l.action === "revert" && accepted.has(id))) out.push(l.decide);
+    // An adopt's line carries the new row's id; the DB still lists it under the offer's id until it is recorded.
+    const offerId = String(l.decide.id ?? id);
+    if ((l.action === "accept" && proposals.has(id)) || (l.action === "adopt" && offered.has(offerId)) || (l.action === "revert" && accepted.has(id))) out.push(l.decide);
   }
   return out;
 }

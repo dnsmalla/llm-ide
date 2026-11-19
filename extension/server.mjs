@@ -497,7 +497,10 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //   v152 — Self-improvement inbox, additive: GET /kb/agent/self-improvement/inbox → { repo, moved, sources } and POST
 //          /kb/agent/self-improvement/inbox { repo, source, kind: memory|note, key, action: adopt|dismiss }. A folder
 //          copied in from another project is moved to system/self-improvement/inbox/ before anything reads it.
-const SERVER_API_VERSION = 152;
+//   v153 — Loop changes keep their text in the project's log, additive: POST /kb/loop/improve/decide accepts
+//          `logged: true` (the decision is in system/self-improvement/changes.jsonl: the row keeps no text and
+//          state/offers read it from that file) and, on adopt, `newId` (the adopted row's uuid, chosen by the client).
+const SERVER_API_VERSION = 153;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

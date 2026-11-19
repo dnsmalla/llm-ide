@@ -724,6 +724,12 @@ redacted evidence excerpts, the scope and the exact decide call, written after t
 file and before the DB. When the panel loads, a decision the log has but the DB missed
 (the app quit, the core was down) is sent again, and each before/after verdict is added
 as an `outcome` line, so the log alone is the shareable record of what the Loop learned.
+Once its line is written, the decide call carries `logged: true` and the DB row keeps no
+text (change, rationale, evidence): only status, scope, origin, baseline and outcome.
+`/kb/loop/improve/state` and the cross-project offers read the text back from each
+project's log (folder from the project registry); a row whose line is gone is not shown
+or offered. An adopt names its new row (`newId`) so its line and row share one id. A
+failed log write keeps the DB copy.
 Sharing is by stage `defaultKey` for stage-level changes, even inside custom loops,
 and by the loop template key for loop-level changes.
 
