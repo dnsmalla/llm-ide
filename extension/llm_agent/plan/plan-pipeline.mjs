@@ -126,8 +126,8 @@ const FACTS_CLAUSE =
   + 'Start with `find-code`: one call returns the definition site, its callers/'
   + 'callees/importers from the code graph, and full-text hits. Then read '
   + 'narrowly from the line it gave you (your file-read tool with a line '
-  + 'range, or a bounded `sed -n`) rather than pulling whole files into context. '
-  + '`search-kb` covers the Library, meetings and notes; `project-memory` '
+  + 'range) rather than pulling whole files into context. '
+  + '`search-kb` covers the Library, meetings and notes; `project_memory` '
   + 'covers what was recorded about this project before. Those four are the '
   + 'cheap path — use them before you consider anything broader.';
 
@@ -355,7 +355,7 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite
   // classic-engine turn came to be told to call a tool it was never given.
   const questionClause = engine === 'agent' ? QUESTION_CLAUSE_AGENT : QUESTION_CLAUSE_LEGACY;
   return `You are in ${modeLabel} mode. ${named.charAt(0).toUpperCase()}${named.slice(1)} `
-    + 'in the skills block above is your process for this turn — follow it as '
+    + 'in the skills block of this prompt is your process for this turn — follow it as '
     + 'written. The bindings below are the parts of this environment that skill '
     + 'cannot know about; where they and the skill disagree, these win.\n\n'
     + '- **Where you are in the process.** There is no separate stage tracker — '
@@ -383,7 +383,7 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite
 export function buildExecuteBinding({ skillName, hasSubagents, engine = 'legacy' } = {}) {
   const named = skillName ? `The **${skillName}** skill` : 'The skill';
   return 'You are executing a plan the user already approved and saved. '
-    + `${named} in the skills block above is your process — follow it as `
+    + `${named} in the skills block of this prompt is your process — follow it as `
     + 'written, starting at its first task.\n\n'
     + `- **Which execution skill.** ${hasSubagents
       ? 'You have subagents available (`ask-subagent`), which is why the '

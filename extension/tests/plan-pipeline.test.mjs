@@ -268,7 +268,7 @@ test('every binding carries the cheap-facts rule', () => {
   ]) {
     assert.match(binding, /find-code/);
     assert.match(binding, /search-kb/);
-    assert.match(binding, /project-memory/);
+    assert.match(binding, /`project_memory`/);
     assert.match(binding, /never ask the user\s+for a fact|never open with a repo-wide/);
   }
 });

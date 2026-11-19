@@ -30,7 +30,7 @@ for (const mode of ['plan', 'assist_plan']) {
     assert.match(persona, /skills\/writing-plans/);
     assert.match(persona, /find-code/);
     assert.match(persona, /search-kb/);
-    assert.match(persona, /project-memory/);
+    assert.match(persona, /`project_memory`/);
     // Names the injected skill so the binding and the skills block agree.
     assert.match(persona, /grilling/);
   });
