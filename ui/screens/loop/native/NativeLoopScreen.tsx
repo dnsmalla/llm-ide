@@ -13,6 +13,7 @@ import { core } from "../../shell/runtime";
 import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, reviewEveryRunsOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
+import { MAX_LESSON_CHARS } from "./lessons.ts";
 import { reviewSwitch, setReviewAfter } from "./review-ui.ts";
 import { stepReviewRecords } from "./review.ts";
 import { loopbackLogLine, loopbackRecord } from "./loopback.ts";
@@ -227,6 +228,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       let saved = false;
       let saveError: string | null = null;
       if (r.kind === "ok") {
+        if (r.lessonsProblem) setNotice(r.lessonsProblem);
         const env = await detectProjectTestCommand(fs).catch(() => ({ command: null, reason: "", prefix: "" }));
         if (!live) return;
         const persisted = await persistEnsuredDefaults(fs, r, env.command, defaults);
@@ -1237,7 +1239,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
                 <label className="loop-field"><span>Output path (optional)</span><input value={stage.outputPath ?? ""} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.outputPath = e.target.value || null; })} /></label>
                 <label className="loop-field"><span>Prompt (optional)</span><textarea rows={3} value={shownStagePrompt(stage)} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) { s.prompt = e.target.value || null; Object.assign(s, detachedFields()); } })} />{followsRegistry(stage) ? <small className="loop-native-hint">Built-in prompt, revision {registrySource(stage)?.revision}. Editing it makes this stage your own.</small> : null}</label>
               </> : null}
-              <label className="loop-field"><span>Accepted lessons</span><textarea rows={3} value={stage.promptAddendum ?? ""} placeholder="Optional; added to this step's prompt without changing it." onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.promptAddendum = e.target.value || null; })} /></label>
+              <label className="loop-field"><span>Accepted lessons</span><textarea rows={3} maxLength={MAX_LESSON_CHARS} value={stage.promptAddendum ?? ""} placeholder="Optional; added to this step's prompt without changing it. Saved in system/self-improvement/lessons.json." onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.promptAddendum = e.target.value || null; })} /></label>
               {stage.kind === "testMap" ? <label className="loop-field"><span>Test map operation</span><select value={stage.testOp ?? "structure"} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.testOp = e.target.value as "structure" | "map" | "ledger"; })}><option value="structure">Structure</option><option value="map">Map</option><option value="ledger">Ledger</option></select></label> : null}
               {stage.kind === "codeGraph" ? <label className="loop-field"><span>Code graph operation</span><select value={stage.graphOp ?? "snapshot"} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.graphOp = e.target.value as "snapshot" | "verify"; })}><option value="snapshot">Snapshot</option><option value="verify">Verify</option></select></label> : null}
               <label className="loop-field"><span>Timeout (seconds, empty = runner default)</span><input type="number" min={0} value={stage.timeoutSeconds ?? ""} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.timeoutSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)); })} /></label>

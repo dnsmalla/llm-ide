@@ -700,7 +700,7 @@ alongside other evidence but never counts on its own). Proposals that miss this 
 runs when proposals are parsed and again on apply. Allowed:
 
 - the stage prompt addendum (`promptAddendum`, shown as "Accepted lessons", at most
-  2000 characters; the stage's own prompt is never rewritten; refused on the gate skills, and never added to a step review: a lesson guides doing a step, not judging it);
+  2000 characters; the stage's own prompt is never rewritten; refused on the gate skills, and never added to a step review: a lesson guides doing a step, not judging it). Lessons are stored in `system/self-improvement/lessons.json` (one entry per loop and stage, with the shared `defaultKey`s so another repo can match the step), never in `loop.json`: `store.ts` puts them on the stages on load, takes them out on save, and moves any left in an older `loop.json` on the first load. A hand-typed lesson gets the same cleaning and 2000-character cap. A corrupt lessons file is reported and never overwritten;
 - stage fields `timeoutSeconds`, `runOnce`, `reviewAfter`, `enabled` (`runOnce` only on a regular, unpinned skill step: it makes the runner skip the step after the first pass, so on a check or gate it would weaken verification);
 - moving a stage;
 - config `maxIterations`, `maxRepairsPerStage`, `stageDelaySeconds`,

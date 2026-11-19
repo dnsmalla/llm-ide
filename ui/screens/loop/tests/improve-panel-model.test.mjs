@@ -12,10 +12,15 @@ function fixture() {
 }
 /** An fs that keeps one file and records every write; `conflicts` makes the first N writes throw a hash conflict. */
 function stubFs(text, { conflicts = 0, onConflict } = {}) {
-  const state = { text, hash: "h0", writes: [], events: [], left: conflicts };
+  const state = { text, hash: "h0", writes: [], events: [], left: conflicts, lessons: null };
+  const missing = () => { throw Object.assign(new Error("missing"), { code: "not_found" }); };
   const fs = {
-    read: async () => ({ status: "ok", text: state.text, hash: state.hash }),
-    write: async (_path, next, opts) => {
+    // system/loop.json is the one file under test; lessons.json is kept apart so the loop.json assertions stay exact.
+    read: async (path) => (path === "system/loop.json" ? { status: "ok", text: state.text, hash: state.hash }
+      : path === "system/self-improvement/lessons.json" && state.lessons !== null ? { status: "ok", text: state.lessons, hash: "L" } : missing()),
+    create: async (path) => path,
+    write: async (path, next, opts) => {
+      if (path === "system/self-improvement/lessons.json") { state.lessons = next; return { hash: "L" }; }
       state.events.push("write");
       if (state.left > 0) {
         state.left -= 1;
@@ -131,6 +136,9 @@ test("an offer applies by stageKey and is adopted with the loop id, no scope", a
   const out = await acceptImprovement({ fs: d.fs, core: d.core, load: d.load, ...d.base }, { id: "5", loopId: d.loop.id, change, kind: "offer" }, "project");
   assert.equal(out.store.loops.find((l) => l.id === d.loop.id).config.stages.find((s) => s.id === stage.id).promptAddendum, "Be brief.");
   assert.deepEqual(d.core.calls[0].body, { projectRoot: "/p", action: "adopt", id: "5", loopId: d.loop.id });
+  // The lesson is saved in the self-improvement folder, never in loop.json.
+  assert.doesNotMatch(d.state.text, /Be brief/);
+  assert.deepEqual(JSON.parse(d.state.lessons).lessons.map((e) => [e.loopId, e.stageId, e.stageKey, e.text]), [[d.loop.id, stage.id, stage.defaultKey, "Be brief."]]);
 });
 
 test("revert restores the before-value and decides revert", async () => {

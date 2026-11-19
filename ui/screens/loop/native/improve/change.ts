@@ -2,6 +2,7 @@
 // Pure (no I/O). Deny-by-default: the loop must never be able to weaken its own checks (spec anti-goal A1).
 import type { LoopDefinition, LoopStage } from "../model.ts";
 import { isFactoryLoop } from "../factory.ts";
+import { cleanLesson, MAX_LESSON_CHARS } from "../lessons.ts";
 
 export type StageField = "timeoutSeconds" | "runOnce" | "reviewAfter" | "enabled";
 export type ConfigField = "maxIterations" | "maxRepairsPerStage" | "stageDelaySeconds" | "refactorBatchesPerRun" | "maxCostUsd" | "wallClockBudgetSeconds";
@@ -13,7 +14,7 @@ export type ImprovementChange =
 
 type Verdict = { ok: true; change: ImprovementChange } | { ok: false; reason: string };
 
-const MAX_ADDENDUM_CHARS = 2000;
+const MAX_ADDENDUM_CHARS = MAX_LESSON_CHARS;
 const STAGE_FIELDS: readonly StageField[] = ["timeoutSeconds", "runOnce", "reviewAfter", "enabled"];
 const CONFIG_FIELDS: readonly ConfigField[] = ["maxIterations", "maxRepairsPerStage", "stageDelaySeconds", "refactorBatchesPerRun", "maxCostUsd", "wallClockBudgetSeconds"];
 /** Inclusive integer bounds of each config field; maxCostUsd is checked separately (no upper bound but `before`). */
@@ -30,14 +31,7 @@ const isNumOrNull = (v: unknown): v is number | null => v === null || (typeof v 
 const no = (reason: string): Verdict => ({ ok: false, reason });
 const sorted = (loop: LoopDefinition): LoopStage[] => [...loop.config.stages].sort((a, b) => a.order - b.order);
 
-/** Tabs become a space; other control characters (except newline) and bidi/zero-width characters are removed; then trim. */
-function cleanAddendum(text: string): string {
-  return text
-    .replace(/\t/g, " ")
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
-    .trim();
-}
+const cleanAddendum = cleanLesson;
 
 /** A skill stage that is not one of the pinned gate skills. */
 function isMovable(stage: LoopStage): boolean {
