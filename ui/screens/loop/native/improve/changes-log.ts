@@ -37,13 +37,13 @@ const clip = (s: string, n: number) => redactSecrets(s).slice(0, n);
 
 /** A line for `action` on `row`; text is redacted and capped (the folder is meant to be shared). */
 export function changeLine(action: Exclude<ChangeAction, "outcome">, row: Pick<ImproveRow, "id" | "loopId" | "stageKey" | "change" | "rationale" | "evidence" | "origin"> & { templateKey?: string | null },
-  decide: Record<string, unknown>, extra: { scope?: string; loopKey?: string | null; at?: string } = {}): ChangeLine {
+  decide: Record<string, unknown> | null, extra: { scope?: string; loopKey?: string | null; at?: string } = {}): ChangeLine {
   return {
     id: String(row.id), action, at: extra.at ?? new Date().toISOString(), loopId: row.loopId,
     loopKey: extra.loopKey ?? row.templateKey ?? null, stageKey: row.stageKey ?? null, change: row.change,
     rationale: clip(row.rationale ?? "", RATIONALE_CHARS),
     excerpts: (row.evidence?.excerpts ?? []).slice(0, MAX_EXCERPTS).map((e) => clip(String(e), EXCERPT_CHARS)),
-    ...(extra.scope ? { scope: extra.scope } : {}), ...(row.origin ? { origin: row.origin } : {}), decide,
+    ...(extra.scope ? { scope: extra.scope } : {}), ...(row.origin ? { origin: row.origin } : {}), ...(decide ? { decide } : {}),
   };
 }
 

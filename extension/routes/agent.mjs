@@ -19,6 +19,7 @@ import {
   writeChatMemoryFacts,
   factIndex,
 } from '../graphkit/index.mjs';
+import { decideInboxItem, readInbox } from '../graphkit/self-improvement-inbox.mjs';
 import { deleteSessionMemory, listSessionMemory } from '../kb/session-memory.mjs';
 import { listAlwaysAllow, clearAlwaysAllow, clearAllAlwaysAllow } from '../kb/tool-approvals.mjs';
 import { listRules, removeRule, removeAllRules } from '../kb/tool-permissions.mjs';
@@ -197,6 +198,44 @@ export async function handleAgentRoutes(req, res, ctx) {
     }
     if (!root) { sendJSON(res, 200, { facts: [], repo: null }); return true; }
     sendJSON(res, 200, { facts: readChatMemoryFacts(root), repo: root });
+    return true;
+  }
+
+  // GET /kb/agent/self-improvement/inbox?repo=<path>[&repo=…][&workspaceRoot=…]
+  //   Learned knowledge from another project waiting for review (plan 2026-11-19 phase 5). Resolves the same root as
+  //   the project-memory GET; listing first moves a folder copied from another project into the inbox, so nothing of
+  //   it reaches a prompt. { repo, moved, sources: [{ name, projectName, memory, notes, lessons, changes }] }
+  if (req.method === 'GET' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/self-improvement/inbox') {
+    const params = new URL(url, 'http://127.0.0.1').searchParams;
+    const workspaceRoot = params.get('workspaceRoot') || undefined;
+    const candidates = [...params.getAll('repo'), ...(workspaceRoot ? [workspaceRoot] : [])];
+    const allowed = buildAllowedRoots(userId, workspaceRoot);
+    let root = null;
+    if (allowed) {
+      for (const c of candidates) { root = resolveAllowedRepoRoot(c, allowed); if (root) break; }
+    }
+    if (!root) { sendJSON(res, 200, { repo: null, moved: null, sources: [] }); return true; }
+    sendJSON(res, 200, { repo: root, ...readInbox(root) });
+    return true;
+  }
+
+  // POST /kb/agent/self-improvement/inbox   body: { repo, workspaceRoot?, source, kind: memory|note, key, action: adopt|dismiss }
+  //   Adopt writes the fact or note into this project's own file (same writer and caps as a local one); both remove it
+  //   from the inbox. 404 INBOX_ITEM_NOT_FOUND when it was already decided. Returns the inbox like the GET.
+  if (req.method === 'POST' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/self-improvement/inbox') {
+    const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+    if (!['memory', 'note'].includes(body.kind) || !['adopt', 'dismiss'].includes(body.action) || typeof body.source !== 'string' || typeof body.key !== 'string') {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'source, key, kind (memory|note) and action (adopt|dismiss) are required' } });
+      return true;
+    }
+    const allowed = buildAllowedRoots(userId, typeof body.workspaceRoot === 'string' ? body.workspaceRoot : undefined);
+    const root = allowed ? resolveAllowedRepoRoot(body.repo, allowed) : null;
+    if (!root) { sendJSON(res, 404, { error: { code: 'REPO_NOT_ALLOWED', message: 'repo not in allow-list' } }); return true; }
+    if (!decideInboxItem(root, body)) {
+      sendJSON(res, 404, { error: { code: 'INBOX_ITEM_NOT_FOUND', message: 'That item is no longer in the inbox' } });
+      return true;
+    }
+    sendJSON(res, 200, { repo: root, ...readInbox(root) });
     return true;
   }
 

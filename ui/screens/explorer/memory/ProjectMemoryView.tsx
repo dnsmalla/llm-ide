@@ -6,7 +6,11 @@ import { StatusBanner } from "@llmide/ui-kit";
 import type { CoreClient } from "../../settings/core-api.ts";
 import {
   clearProjectFacts,
+  decideInbox,
   deleteProjectFact,
+  loadInbox,
+  noteTitle,
+  type Inbox,
   factLearned,
   factText,
   forgetSessionMemory,
@@ -89,6 +93,40 @@ export function MemoryBody({ state, busy = false, actions }: { state: MemoryStat
   );
 }
 
+/**
+ * Learned knowledge another project brought (a copied self-improvement folder): nothing of it is used until adopted.
+ * Lessons and Loop changes are decided on the Loop page, so they are only counted here.
+ */
+export function InboxSection({ inbox, busy = false, onDecide }: { inbox: Inbox; busy?: boolean; onDecide?: (source: string, kind: "memory" | "note", key: string, action: "adopt" | "dismiss") => void }) {
+  const shown = inbox.sources.filter((s) => s.memory.length + s.notes.length + s.lessons + s.changes > 0);
+  if (shown.length === 0) return null;
+  const buttons = (source: string, kind: "memory" | "note", key: string, label: string) => onDecide && (
+    <span className="mem-inbox-actions">
+      <button type="button" className="mem-link" aria-label={`Adopt ${label}`} disabled={busy} onClick={() => onDecide(source, kind, key, "adopt")}>Adopt</button>
+      <button type="button" className="mem-link" aria-label={`Dismiss ${label}`} disabled={busy} onClick={() => onDecide(source, kind, key, "dismiss")}>Dismiss</button>
+    </span>
+  );
+  return (
+    <div className="mem-sections">
+      {shown.map((s) => (
+        <section key={s.name} aria-label={`From ${s.projectName}`}>
+          <div className="mem-section-head">
+            <div>
+              <h3 className="mem-heading">{`From ${s.projectName}`}</h3>
+              <p className="mem-sub">Learned in another project. Nothing here is used until you adopt it.</p>
+            </div>
+          </div>
+          <ul className="mem-list" aria-label={`Waiting from ${s.projectName}`}>
+            {s.memory.map((f) => <li key={`m${f}`} className="mem-fact mem-fact-row"><span>{factText(f)}</span>{buttons(s.name, "memory", f, factText(f))}</li>)}
+            {s.notes.map((n) => <li key={`n${n}`} className="mem-fact mem-fact-row"><span>{`Self-Heal note: ${noteTitle(n)}`}</span>{buttons(s.name, "note", n, noteTitle(n))}</li>)}
+          </ul>
+          {s.lessons + s.changes > 0 && <p className="mem-sub">{`${s.lessons} Loop lesson${s.lessons === 1 ? "" : "s"} and ${s.changes} Loop change${s.changes === 1 ? "" : "s"} wait on the Loop page.`}</p>}
+        </section>
+      ))}
+    </div>
+  );
+}
+
 type Confirm = "project" | "session";
 
 export function ProjectMemoryView({ client, repos, workspaceRoot, sessionId, onClose }: ProjectMemoryViewProps) {
@@ -96,6 +134,7 @@ export function ProjectMemoryView({ client, repos, workspaceRoot, sessionId, onC
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [inbox, setInbox] = useState<Inbox | null>(null);
   // The effect re-runs when the candidates change, not when the array identity does.
   const reposKey = repos.join("\n");
   const sid = (sessionId ?? "").trim();
@@ -104,10 +143,16 @@ export function ProjectMemoryView({ client, repos, workspaceRoot, sessionId, onC
     const ac = new AbortController();
     setState({ status: "loading" });
     setActionError(null);
-    loadMemory(client, { repos: reposKey ? reposKey.split("\n") : [], workspaceRoot, sessionId }, ac.signal).then(
-      (data) => setState({ status: "ready", data }),
-      () => { if (!ac.signal.aborted) setState({ status: "ready", data: { project: null, projectFailed: true, session: [] } }); },
-    );
+    const target = { repos: reposKey ? reposKey.split("\n") : [], workspaceRoot, sessionId };
+    // The inbox first: listing it moves a folder copied from another project aside before memory is read.
+    void (target.repos.length > 0 || workspaceRoot ? loadInbox(client, target, ac.signal).catch(() => null) : Promise.resolve(null)).then((ib) => {
+      if (ac.signal.aborted) return;
+      setInbox(ib);
+      return loadMemory(client, target, ac.signal).then(
+        (data) => setState({ status: "ready", data }),
+        () => { if (!ac.signal.aborted) setState({ status: "ready", data: { project: null, projectFailed: true, session: [] } }); },
+      );
+    });
     return () => ac.abort();
   }, [client, reposKey, workspaceRoot, sessionId]);
 
@@ -139,6 +184,20 @@ export function ProjectMemoryView({ client, repos, workspaceRoot, sessionId, onC
     }).finally(() => setBusy(false));
   };
 
+  const decide = (source: string, kind: "memory" | "note", key: string, action: "adopt" | "dismiss") => {
+    const repo = inbox?.repo;
+    if (!repo || busy) return;
+    setBusy(true);
+    setActionError(null);
+    void decideInbox(client, { workspaceRoot }, repo, { source, kind, key, action }).then(async (next) => {
+      setInbox(next);
+      // An adopted fact is now project memory: show it.
+      if (kind === "memory" && action === "adopt") setState({ status: "ready", data: await loadMemory(client, { repos: reposKey ? reposKey.split("\n") : [], workspaceRoot, sessionId }) });
+    }).catch(() => {
+      setActionError("Couldn't update the inbox. Reopen Memory to see what is still waiting.");
+    }).finally(() => setBusy(false));
+  };
+
   const forgetSession = () => {
     setConfirm(null);
     if (!sid || busy) return;
@@ -165,6 +224,7 @@ export function ProjectMemoryView({ client, repos, workspaceRoot, sessionId, onC
       </header>
       {actionError && <StatusBanner severity="error" message={actionError} />}
       <MemoryBody state={state} busy={busy} actions={{ onDeleteFact: deleteFact, onForgetSession: () => setConfirm("session") }} />
+      {inbox && <InboxSection inbox={inbox} busy={busy} onDecide={decide} />}
       {confirm && (
         <div className="mem-confirm" role="alertdialog" aria-label={confirm === "project" ? "Clear all project memory?" : "Forget this chat's memory?"}>
           <strong>{confirm === "project" ? "Clear all project memory?" : "Forget this chat's memory?"}</strong>

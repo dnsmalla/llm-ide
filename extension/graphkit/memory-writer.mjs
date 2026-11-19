@@ -23,6 +23,7 @@ import { config } from '../core/config.mjs';
 import {
   chatMemoryFile, chatMemoryReadPaths, legacyChatMemoryFile, previousChatMemoryFile, selfImprovementDir,
 } from './paths.mjs';
+import { ensureOwnFolder } from './self-improvement-folder.mjs';
 
 // How many facts the store may hold. The reader ranks these against the current
 // question and inlines only the most relevant, so this is a disk budget, not a
@@ -184,6 +185,7 @@ export function renderChatMemoryFile(facts) {
 // older location, the facts are migrated at once: written to the canonical self-improvement/memory.md, read back,
 // and only then is the old file retired (see writeChatMemoryFacts). A failed migration still returns the facts.
 export function readChatMemoryFacts(root) {
+  ensureOwnFolder(root); // a folder copied from another project goes to the inbox before it is read
   for (const path of chatMemoryReadPaths(root)) {
     let text;
     try { text = readFileSync(path, 'utf8'); } catch { continue; }
@@ -202,6 +204,7 @@ export function writeChatMemoryFacts(root, facts) {
   const target = memFilePath(root);
   try {
     mkdirSync(selfImprovementDir(root), { recursive: true });
+    ensureOwnFolder(root);
     // Atomic write: write to a temp file in the SAME directory (so the rename
     // stays on one filesystem and is atomic), then rename over the target. A
     // crash mid-write can only leave the temp file — never a half-written

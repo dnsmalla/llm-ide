@@ -2900,6 +2900,79 @@ export type DeleteKbAgentProjectMemoryResponse200 = {
 
 export type DeleteKbAgentProjectMemoryResponse404 = CommonError;
 
+/** Request parts for `GET /kb/agent/self-improvement/inbox` (schema/http/agent.schema.json). */
+export type GetKbAgentSelfImprovementInboxRequest = {
+  query: {
+    /** an indexed repo path; resolved against the allow-list */
+    repo?: string;
+    /** the open workspace folder */
+    workspaceRoot?: string;
+  };
+};
+
+export type GetKbAgentSelfImprovementInboxResponse200 = {
+  /** the resolved absolute root, or null when no candidate is allow-listed */
+  repo: string | null;
+  /** the inbox folder a copied-in folder was just moved to, else null */
+  moved: string | null;
+  sources: {
+    /** the inbox folder name under system/self-improvement/inbox/ */
+    name: string;
+    /** the project the items came from (its manifest, else the folder name) */
+    projectName: string;
+    /** memory facts waiting for review */
+    memory: string[];
+    /** Self-Heal note sections waiting for review */
+    notes: string[];
+    /** Loop lessons waiting (decided on the Loop page) */
+    lessons: number;
+    /** Loop change lines waiting (decided on the Loop page) */
+    changes: number;
+  }[];
+};
+
+/** Request parts for `POST /kb/agent/self-improvement/inbox` (schema/http/agent.schema.json). */
+export type PostKbAgentSelfImprovementInboxRequest = {
+  body: {
+    /** Absolute root from the GET above */
+    repo: string;
+    workspaceRoot?: string;
+    /** the inbox folder name */
+    source: string;
+    /** memory | note */
+    kind: string;
+    /** the fact, or the whole note section, as the GET listed it */
+    key: string;
+    /** adopt | dismiss */
+    action: string;
+  };
+};
+
+export type PostKbAgentSelfImprovementInboxResponse200 = {
+  /** the resolved absolute root, or null when no candidate is allow-listed */
+  repo: string | null;
+  /** the inbox folder a copied-in folder was just moved to, else null */
+  moved: string | null;
+  sources: {
+    /** the inbox folder name under system/self-improvement/inbox/ */
+    name: string;
+    /** the project the items came from (its manifest, else the folder name) */
+    projectName: string;
+    /** memory facts waiting for review */
+    memory: string[];
+    /** Self-Heal note sections waiting for review */
+    notes: string[];
+    /** Loop lessons waiting (decided on the Loop page) */
+    lessons: number;
+    /** Loop change lines waiting (decided on the Loop page) */
+    changes: number;
+  }[];
+};
+
+export type PostKbAgentSelfImprovementInboxResponse400 = CommonError;
+
+export type PostKbAgentSelfImprovementInboxResponse404 = CommonError;
+
 /** Request parts for `GET /kb/agent/tool-approvals` (schema/http/agent.schema.json). */
 export type GetKbAgentToolApprovalsRequest = Record<string, never>;
 
@@ -9106,6 +9179,20 @@ export interface ApiEndpoints {
     responses: {
       200: DeleteKbAgentProjectMemoryResponse200;
       404: DeleteKbAgentProjectMemoryResponse404;
+    };
+  };
+  "GET /kb/agent/self-improvement/inbox": {
+    request: GetKbAgentSelfImprovementInboxRequest;
+    responses: {
+      200: GetKbAgentSelfImprovementInboxResponse200;
+    };
+  };
+  "POST /kb/agent/self-improvement/inbox": {
+    request: PostKbAgentSelfImprovementInboxRequest;
+    responses: {
+      200: PostKbAgentSelfImprovementInboxResponse200;
+      400: PostKbAgentSelfImprovementInboxResponse400;
+      404: PostKbAgentSelfImprovementInboxResponse404;
     };
   };
   "GET /kb/agent/tool-approvals": {

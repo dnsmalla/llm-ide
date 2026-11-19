@@ -20,6 +20,7 @@ import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { redactIncidentText } from '../core/incident.mjs';
 import { appendNotes, BATCH_MAX, NOTES_MAX, NOTES_REL, notesFor, parseResults, renderBatch, renderNote } from '../core/self-heal-batch.mjs';
 import { buildTrustedRoots } from '../llm_agent/tools/handlers/repo-files.mjs';
+import { ensureOwnFolder } from '../graphkit/self-improvement-folder.mjs';
 import {
   applyRunOutcome, clearIncidents, ignoreIncident, listIncidents, recordIncident, reopenIncidents, resolveProposal, triageIncidents,
 } from '../kb/incidents.mjs';
@@ -53,6 +54,7 @@ function trustedRepo(userId, repoRoot) {
 
 /** The repo's Self-Heal notes, or '' (missing or unreadable: notes are best effort). */
 function readNotes(repo) {
+  ensureOwnFolder(repo);
   try { return readFileSync(join(repo, NOTES_REL), 'utf8').slice(-NOTES_MAX); } catch { return ''; }
 }
 

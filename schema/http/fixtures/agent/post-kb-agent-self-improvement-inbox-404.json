@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/agent/self-improvement/inbox",
+  "status": 404,
+  "request": {
+    "body": {
+      "repo": "/example/workspace",
+      "source": "web-shop-2026-11-19",
+      "kind": "note",
+      "key": "## gone",
+      "action": "dismiss"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INBOX_ITEM_NOT_FOUND",
+      "message": "That item is no longer in the inbox"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/agent/self-improvement/inbox",
+  "status": 400,
+  "request": {
+    "body": {
+      "repo": "/example/workspace",
+      "source": "x",
+      "kind": "lesson",
+      "key": "k",
+      "action": "adopt"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "source, key, kind (memory|note) and action (adopt|dismiss) are required"
+    }
+  }
+}

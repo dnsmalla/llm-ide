@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /kb/agent/self-improvement/inbox",
+  "status": 200,
+  "request": {
+    "query": {
+      "repo": "/not/allowed"
+    }
+  },
+  "response": {
+    "repo": null,
+    "moved": null,
+    "sources": []
+  }
+}

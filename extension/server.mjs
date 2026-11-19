@@ -494,7 +494,10 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //   v151 — Self-Heal attempt history, additive: an incident carries `history` ([{ at, text }], at most 4, migration 0079),
 //          and POST /kb/self-heal/runs/:id/outcome accepts `verifyOutput` (a failed make regression's output; its
 //          redacted tail is kept). The next run's BATCH.md lists earlier attempts so the agent takes another approach.
-const SERVER_API_VERSION = 151;
+//   v152 — Self-improvement inbox, additive: GET /kb/agent/self-improvement/inbox → { repo, moved, sources } and POST
+//          /kb/agent/self-improvement/inbox { repo, source, kind: memory|note, key, action: adopt|dismiss }. A folder
+//          copied in from another project is moved to system/self-improvement/inbox/ before anything reads it.
+const SERVER_API_VERSION = 152;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -633,6 +636,7 @@ const ALL_ENDPOINTS = [
   '/kb/agent/commands',
   '/kb/agent/skill-library',
   '/kb/agent/project-memory',
+  '/kb/agent/self-improvement/inbox',
   '/kb/agent/session-memory',
   '/kb/agent/tool-approvals',
   '/kb/chat/sessions',

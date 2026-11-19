@@ -371,6 +371,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/auth/me/codex-plugins/installed',
     '/auth/me/codex-plugins/marketplace',
     '/kb/agent/project-memory',
+    '/kb/agent/self-improvement/inbox',
     '/kb/docs/commands',
     '/kb/docs/templates',
   ]),
@@ -383,6 +384,7 @@ export const ROUTE_POLICY = Object.freeze([
   ]),
   ...rules('fs.write', 'POST', [
     '/auth/me/repos',
+    '/kb/agent/self-improvement/inbox',
     '/kb/docs/seed',
     '/kb/projects/register',
   ]),

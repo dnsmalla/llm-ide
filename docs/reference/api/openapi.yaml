@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 151
+  x-api-version: 152
 servers:
   - url: "https://{host}"
     variables:
@@ -6828,6 +6828,180 @@ paths:
                             - "reason"
                             - "score"
                             - "asked"
+  /kb/agent/self-improvement/inbox:
+    get:
+      tags:
+        - "agent"
+      parameters:
+        - name: "repo"
+          in: "query"
+          required: false
+          description: "an indexed repo path; resolved against the allow-list"
+          schema:
+            type: "string"
+        - name: "workspaceRoot"
+          in: "query"
+          required: false
+          description: "the open workspace folder"
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "repo"
+                  - "moved"
+                  - "sources"
+                properties:
+                  repo:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "the resolved absolute root, or null when no candidate is allow-listed"
+                  moved:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "the inbox folder a copied-in folder was just moved to, else null"
+                  sources:
+                    type: "array"
+                    items:
+                      type: "object"
+                      required:
+                        - "name"
+                        - "projectName"
+                        - "memory"
+                        - "notes"
+                        - "lessons"
+                        - "changes"
+                      properties:
+                        name:
+                          type: "string"
+                          description: "the inbox folder name under system/self-improvement/inbox/"
+                        projectName:
+                          type: "string"
+                          description: "the project the items came from (its manifest, else the folder name)"
+                        memory:
+                          type: "array"
+                          items:
+                            type: "string"
+                          description: "memory facts waiting for review"
+                        notes:
+                          type: "array"
+                          items:
+                            type: "string"
+                          description: "Self-Heal note sections waiting for review"
+                        lessons:
+                          type: "integer"
+                          description: "Loop lessons waiting (decided on the Loop page)"
+                        changes:
+                          type: "integer"
+                          description: "Loop change lines waiting (decided on the Loop page)"
+    post:
+      tags:
+        - "agent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "repo"
+                - "source"
+                - "kind"
+                - "key"
+                - "action"
+              properties:
+                repo:
+                  type: "string"
+                  description: "Absolute root from the GET above"
+                workspaceRoot:
+                  type: "string"
+                source:
+                  type: "string"
+                  description: "the inbox folder name"
+                kind:
+                  type: "string"
+                  description: "memory | note"
+                key:
+                  type: "string"
+                  description: "the fact, or the whole note section, as the GET listed it"
+                action:
+                  type: "string"
+                  description: "adopt | dismiss"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "repo"
+                  - "moved"
+                  - "sources"
+                properties:
+                  repo:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "the resolved absolute root, or null when no candidate is allow-listed"
+                  moved:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "the inbox folder a copied-in folder was just moved to, else null"
+                  sources:
+                    type: "array"
+                    items:
+                      type: "object"
+                      required:
+                        - "name"
+                        - "projectName"
+                        - "memory"
+                        - "notes"
+                        - "lessons"
+                        - "changes"
+                      properties:
+                        name:
+                          type: "string"
+                          description: "the inbox folder name under system/self-improvement/inbox/"
+                        projectName:
+                          type: "string"
+                          description: "the project the items came from (its manifest, else the folder name)"
+                        memory:
+                          type: "array"
+                          items:
+                            type: "string"
+                          description: "memory facts waiting for review"
+                        notes:
+                          type: "array"
+                          items:
+                            type: "string"
+                          description: "Self-Heal note sections waiting for review"
+                        lessons:
+                          type: "integer"
+                          description: "Loop lessons waiting (decided on the Loop page)"
+                        changes:
+                          type: "integer"
+                          description: "Loop change lines waiting (decided on the Loop page)"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/agent/session-memory:
     get:
       tags:

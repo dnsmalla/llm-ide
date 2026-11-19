@@ -263,6 +263,13 @@ const SKIP_RULES = [
     when: (fx) => /^POST \/kb\/loop\/improve\//.test(fx.endpoint) && (fx.status === 200 || fx.status === 409),
   },
   {
+    // Self-improvement inbox decide: a 200 needs an allow-listed repo whose inbox holds the named item, which a fresh
+    // replay account cannot have. The GET, the 400 and the 404 replay live; tests/self-improvement-inbox.test.mjs
+    // runs the adopt and dismiss exchanges through the real handler.
+    why: 'needs an allow-listed repo with an item in its inbox (covered by tests/self-improvement-inbox.test.mjs)',
+    when: (fx) => fx.endpoint === 'POST /kb/agent/self-improvement/inbox' && fx.status === 200,
+  },
+  {
     why: 'handler parses structured JSON from the model; the canned stub replies in plain text',
     when: (fx) => fx.status === 200 && (fx.endpoint === 'POST /extract-entities' || fx.endpoint === 'POST /generate-docx'),
   },

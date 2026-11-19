@@ -124,3 +124,52 @@ export async function clearProjectFacts(client: CoreClient, target: Pick<MemoryT
 export async function forgetSessionMemory(client: CoreClient, sessionId: string, signal?: AbortSignal): Promise<void> {
   await call(client, "DELETE", "/kb/agent/session-memory", { sessionId }, signal);
 }
+
+// ── Inbox: learned knowledge from another project (plan 2026-11-19, phase 5) ──
+// GET/POST /kb/agent/self-improvement/inbox. Items are untrusted text from another project: rendered as text only,
+// and nothing is used until the user adopts it.
+export interface InboxSource {
+  name: string;
+  projectName: string;
+  memory: string[];
+  notes: string[];
+  /** Waiting on the Loop page. */
+  lessons: number;
+  changes: number;
+}
+export interface Inbox { repo: string | null; moved: string | null; sources: InboxSource[] }
+
+const MAX_NOTE_CHARS = 4_000;
+const count = (v: unknown): number => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : 0);
+
+export function decodeInbox(raw: unknown): Inbox {
+  if (!isRecord(raw) || !Array.isArray(raw.sources)) throw new TypeError("inbox reply is not an object");
+  const sources = raw.sources.filter(isRecord).slice(0, 50).flatMap((s): InboxSource[] => (typeof s.name === "string" ? [{
+    name: s.name.slice(0, 100),
+    projectName: displayLine(typeof s.projectName === "string" ? s.projectName.slice(0, 100) : s.name),
+    memory: Array.isArray(s.memory) ? factList(s.memory) : [],
+    notes: Array.isArray(s.notes) ? s.notes.filter((n): n is string => typeof n === "string").slice(0, 200).map((n) => n.slice(0, MAX_NOTE_CHARS)) : [],
+    lessons: count(s.lessons), changes: count(s.changes),
+  }] : []));
+  return { repo: typeof raw.repo === "string" ? raw.repo : null, moved: typeof raw.moved === "string" ? raw.moved : null, sources };
+}
+
+export function inboxPath(target: Pick<MemoryTarget, "repos" | "workspaceRoot">): string {
+  return projectMemoryPath(target).replace("/kb/agent/project-memory?", "/kb/agent/self-improvement/inbox?");
+}
+
+export async function loadInbox(client: CoreClient, target: Pick<MemoryTarget, "repos" | "workspaceRoot">, signal?: AbortSignal): Promise<Inbox> {
+  return decodeInbox(await call(client, "GET", inboxPath(target), undefined, signal));
+}
+
+export async function decideInbox(client: CoreClient, target: Pick<MemoryTarget, "workspaceRoot">, repo: string,
+  item: { source: string; kind: "memory" | "note"; key: string; action: "adopt" | "dismiss" }, signal?: AbortSignal): Promise<Inbox> {
+  const body: Record<string, unknown> = { repo, ...item };
+  if (target.workspaceRoot) body.workspaceRoot = target.workspaceRoot;
+  return decodeInbox(await call(client, "POST", "/kb/agent/self-improvement/inbox", body, signal));
+}
+
+/** The first line of a note section without its `## `, for display. */
+export function noteTitle(note: string): string {
+  return displayLine(note.split("\n")[0].replace(/^##\s*/, ""));
+}

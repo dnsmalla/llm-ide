@@ -2,6 +2,7 @@
 // was accepted. Applying/reverting goes through panel-model.ts; this file only renders and wires events.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { LoopFs } from "../store.ts";
+import { adoptInboxItem, dismissInboxItem, inboxSources, readLoopInbox, type InboxLoopItem } from "./inbox.ts";
 import type { LoopDefinition, LoopProjectStore } from "../model.ts";
 import type { CoreFetch } from "../stage-exec.ts";
 import { improveAvailable, loadCoreApiVersion } from "./signals.ts";
@@ -89,6 +90,7 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
   const [status, setStatus] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [busyId, setBusyId] = useState<string | number | null>(null);
+  const [imports, setImports] = useState<InboxLoopItem[]>([]);
   const attempted = useRef(new Set<string>());
   const live = useRef(true);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
@@ -104,6 +106,9 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
       if (await syncChangeLog(fs, core, projectRoot, next)) next = await loadImproveState(core, projectRoot, storeRef.current);
       if (!live.current) return null;
       setState(next); setErrorText(null); setUnavailableText(null);
+      // Lessons and changes copied from another project wait in the self-improvement inbox (best effort).
+      const waiting = await readLoopInbox(fs, storeRef.current, await inboxSources(core, projectRoot)).catch(() => []);
+      if (live.current) setImports(waiting);
       onCounts(Object.fromEntries(Object.entries(next.loops).map(([id, l]) => [id, l.proposals.length])));
       return next;
     } catch (e) {
@@ -161,6 +166,19 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
     } finally { if (live.current) setBusyId(null); }
   };
 
+  const inboxItems = imports.filter((i) => i.loopId === loop.id || i.loopId === null);
+  const actInbox = async (item: InboxLoopItem, adopt: boolean) => {
+    const id = `inbox:${item.source}:${item.key}`;
+    setBusyId(id);
+    try {
+      if (adopt) onApplied(await adoptInboxItem({ fs, load, runningLoopIds, isRunning }, item));
+      else await dismissInboxItem(fs, item);
+      await refresh();
+    } catch (e) {
+      onNotice(e instanceof Error ? e.message : "That did not work.");
+    } finally { if (live.current) setBusyId(null); }
+  };
+
   return (
     <section className="loop-card loop-imp" aria-label="Improvements">
       <div className="loop-imp-head">
@@ -196,6 +214,29 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
                 </div>
               </li>
             ))}
+          </ul>
+        </>
+      ) : null}
+
+      {inboxItems.length > 0 ? (
+        <>
+          <h3>Copied from other projects</h3>
+          <p className="loop-native-hint">Waiting in system/self-improvement/inbox. Nothing here is used until you adopt it.</p>
+          <ul className="loop-imp-list">
+            {inboxItems.map((item) => {
+              const id = `inbox:${item.source}:${item.key}`;
+              return (
+                <li key={id} className="loop-imp-card">
+                  <p>{item.kind === "lesson" ? `Lesson for ${item.stageName ?? "a step this project does not have"}: ` : ""}{v(item.text, true)}</p>
+                  <p className="loop-native-hint">From {item.projectName}{item.loopId === null ? " · no matching loop or step here" : ""}</p>
+                  <div className="loop-imp-actions">
+                    <button type="button" className="loop-btn loop-btn-primary" disabled={busyId === id || blocked !== null || item.loopId === null} title={blocked ?? undefined}
+                      onClick={() => void actInbox(item, true)}>Adopt</button>
+                    <button type="button" className="loop-btn" disabled={busyId === id} onClick={() => void actInbox(item, false)}>Dismiss</button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </>
       ) : null}

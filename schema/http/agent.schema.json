@@ -1499,6 +1499,212 @@
         }
       }
     },
+    "GET /kb/agent/self-improvement/inbox": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "description": "an indexed repo path; resolved against the allow-list"
+            },
+            "workspaceRoot": {
+              "type": "string",
+              "description": "the open workspace folder"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "repo",
+            "moved",
+            "sources"
+          ],
+          "properties": {
+            "repo": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "the resolved absolute root, or null when no candidate is allow-listed"
+            },
+            "moved": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "the inbox folder a copied-in folder was just moved to, else null"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "projectName",
+                  "memory",
+                  "notes",
+                  "lessons",
+                  "changes"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "the inbox folder name under system/self-improvement/inbox/"
+                  },
+                  "projectName": {
+                    "type": "string",
+                    "description": "the project the items came from (its manifest, else the folder name)"
+                  },
+                  "memory": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "memory facts waiting for review"
+                  },
+                  "notes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Self-Heal note sections waiting for review"
+                  },
+                  "lessons": {
+                    "type": "integer",
+                    "description": "Loop lessons waiting (decided on the Loop page)"
+                  },
+                  "changes": {
+                    "type": "integer",
+                    "description": "Loop change lines waiting (decided on the Loop page)"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/agent/self-improvement/inbox": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "repo",
+            "source",
+            "kind",
+            "key",
+            "action"
+          ],
+          "properties": {
+            "repo": {
+              "type": "string",
+              "description": "Absolute root from the GET above"
+            },
+            "workspaceRoot": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string",
+              "description": "the inbox folder name"
+            },
+            "kind": {
+              "type": "string",
+              "description": "memory | note"
+            },
+            "key": {
+              "type": "string",
+              "description": "the fact, or the whole note section, as the GET listed it"
+            },
+            "action": {
+              "type": "string",
+              "description": "adopt | dismiss"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "repo",
+            "moved",
+            "sources"
+          ],
+          "properties": {
+            "repo": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "the resolved absolute root, or null when no candidate is allow-listed"
+            },
+            "moved": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "the inbox folder a copied-in folder was just moved to, else null"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "projectName",
+                  "memory",
+                  "notes",
+                  "lessons",
+                  "changes"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "the inbox folder name under system/self-improvement/inbox/"
+                  },
+                  "projectName": {
+                    "type": "string",
+                    "description": "the project the items came from (its manifest, else the folder name)"
+                  },
+                  "memory": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "memory facts waiting for review"
+                  },
+                  "notes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Self-Heal note sections waiting for review"
+                  },
+                  "lessons": {
+                    "type": "integer",
+                    "description": "Loop lessons waiting (decided on the Loop page)"
+                  },
+                  "changes": {
+                    "type": "integer",
+                    "description": "Loop change lines waiting (decided on the Loop page)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
     "GET /kb/agent/tool-approvals": {
       "responses": {
         "200": {

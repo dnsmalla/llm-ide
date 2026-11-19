@@ -1,6 +1,6 @@
 # Self-improvement folder — plan
 
-Date: 2026-11-19 · Status: proposed (waiting on the user's go-ahead) · Owner decisions: see "Decisions"
+Date: 2026-11-19 · Status: **built** (phases 1-5 on main, 2026-11-19) · Owner decisions: see "Decisions"
 
 ## Goal
 
@@ -92,7 +92,18 @@ the folder. This is a split by job, not a second copy.
   attempts from `history`, what fixed it or that it needs a person) to `<repo>/system/self-improvement/self-heal.md`.
 - `renderBatch` adds the newest lessons for the same category (at most 5, fenced as data).
 
-### Phase 5 — import on review
+### Phase 5 — import on review (as built)
+- `manifest.json` holds `root` (this project's real path). `graphkit/self-improvement-folder.mjs` `ensureOwnFolder` runs
+  before every read (memory reader and writer, prompt reader, Self-Heal notes, the inbox listing): a manifest naming
+  another root moves `memory.md`, `lessons.json`, `changes.jsonl`, `self-heal.md` into `inbox/<project>-<date>/`.
+  A user may also copy another project's folder straight into `inbox/<name>/`.
+- Memory facts and Self-Heal notes: `GET/POST /kb/agent/self-improvement/inbox` (API 152), shown in the memory viewer
+  ("From <project>", Adopt / Dismiss). Lessons and Loop changes: the Loop page's Improvements panel ("Copied from
+  other projects"), matched by the shared keys, applied through `applyChange` (full rules + stale check), logged as
+  `adopt` with origin `imported:<project>`.
+- A folder made before manifests existed (no manifest) is claimed as this project's own.
+
+### Phase 5 — original sketch
 - `manifest.json.projectId` ≠ this project's id → the folder (or a copied `inbox/`) is foreign. Its items are listed in
   the Loop page's Improvements panel ("From <projectName>") and in the memory viewer, each with Adopt / Dismiss.
 - Adopt writes the item into this project's files with `origin: "imported:<projectName>"` and applies the lesson or

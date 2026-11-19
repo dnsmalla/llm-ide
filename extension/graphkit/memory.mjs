@@ -32,6 +32,7 @@ import { parseChatMemoryFacts } from './memory-writer.mjs';
 import { factStamp } from '../core/fact-key.mjs';
 import { memoryLedgerFor, ledgerKey } from '../kb/memory-ledger.mjs';
 import { termTokens } from '../core/text-tokens.mjs';
+import { ensureOwnFolder } from './self-improvement-folder.mjs';
 import { chatMemoryReadPaths, memoryDir, legacyMemoryDir, legacySystemDir, legacySystemMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
 
 // Expand a leading `~`/`~/` to the home directory. The Mac client sends
@@ -371,6 +372,8 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, 
   if (!repo) return null;
   const root = resolveAllowedRepoRoot(repo.path, allowedRoots);
   if (!root) return null;
+  // Learned knowledge copied from another project waits in the inbox and never reaches a prompt unreviewed.
+  if (!stableOnly) ensureOwnFolder(root);
   const memDir = memoryDir(root);
   const sysDir = systemDir(root);
   const repoName = repo.name || 'Repository';

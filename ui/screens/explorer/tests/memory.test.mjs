@@ -160,3 +160,24 @@ test("review: facts are capped in count and length", async () => {
   assert.equal(many.facts.length, 1000);
   assert.equal(many.facts[0].length, 2000);
 });
+
+test("the inbox decodes the contract fixture, posts one decision, and renders items as text with Adopt and Dismiss", async () => {
+  const { InboxSection } = await load("memory/ProjectMemoryView.tsx");
+  const got = fixture("get-kb-agent-self-improvement-inbox-200.json");
+  const inbox = model.decodeInbox(got.response);
+  assert.equal(inbox.sources[0].projectName, "web-shop");
+  assert.throws(() => model.decodeInbox({ sources: "x" }));
+  const posted = fixture("post-kb-agent-self-improvement-inbox-200.json");
+  const client = fakeClient({ "POST /kb/agent/self-improvement/inbox": posted.response, "GET /kb/agent/self-improvement/inbox": got.response });
+  assert.equal(model.inboxPath({ repos: ["/a"], workspaceRoot: "/w" }), "/kb/agent/self-improvement/inbox?repo=%2Fa&workspaceRoot=%2Fw");
+  const next = await model.decideInbox(client, { workspaceRoot: "/w" }, "/example/workspace", { source: "web-shop-2026-11-19", kind: "memory", key: "x", action: "adopt" });
+  assert.deepEqual(client.calls[0].body, { repo: "/example/workspace", source: "web-shop-2026-11-19", kind: "memory", key: "x", action: "adopt", workspaceRoot: "/w" });
+  assert.deepEqual(next.sources[0].memory, []);
+  const out = html(h(InboxSection, { inbox: { ...inbox, sources: [{ ...inbox.sources[0], memory: ["<b>x</b>"] }] }, onDecide: () => {} }));
+  assert.match(out, /From web-shop/);
+  assert.match(out, /&lt;b&gt;x&lt;\/b&gt;/, "untrusted text is escaped");
+  assert.match(out, /Self-Heal note: 2026-11-18 · fixed · server/);
+  assert.match(out, /aria-label="Adopt .*>Adopt<\/button>/);
+  assert.match(out, /1 Loop lesson and 2 Loop changes wait on the Loop page/);
+  assert.equal(html(h(InboxSection, { inbox: { repo: null, moved: null, sources: [] } })), "");
+});

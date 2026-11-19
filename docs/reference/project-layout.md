@@ -64,6 +64,9 @@ truth for these paths; its header comment states the same rule.
 │   │                    memory.md (project memory, rewritten in place); lessons,
 │   │                    accepted Loop changes and Self-Heal notes follow (plan
 │   │                    2026-11-19-self-improvement-folder). Agents cannot edit it.
+│   │                    manifest.json names the project it belongs to; a folder
+│   │                    copied from another project is moved to inbox/<name>/
+│   │                    and each item waits for Adopt or Dismiss.
 │   ├── q&a/             Q&A store (MemoryStore)
 │   ├── faults/          fault log entries (MemoryStore)
 │   ├── repo.md          no longer written; the code summary is graph/index.md

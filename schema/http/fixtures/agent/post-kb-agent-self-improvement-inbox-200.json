@@ -1,0 +1,30 @@
+{
+  "endpoint": "POST /kb/agent/self-improvement/inbox",
+  "status": 200,
+  "request": {
+    "body": {
+      "repo": "/example/workspace",
+      "workspaceRoot": "/example/workspace",
+      "source": "web-shop-2026-11-19",
+      "kind": "memory",
+      "key": "[convention] Tests run with pnpm test",
+      "action": "adopt"
+    }
+  },
+  "response": {
+    "repo": "/example/workspace",
+    "moved": null,
+    "sources": [
+      {
+        "name": "web-shop-2026-11-19",
+        "projectName": "web-shop",
+        "memory": [],
+        "notes": [
+          "## 2026-11-18 · fixed · server\n\n- error: Error: db is locked\n- fix: retry the write once"
+        ],
+        "lessons": 1,
+        "changes": 2
+      }
+    ]
+  }
+}
