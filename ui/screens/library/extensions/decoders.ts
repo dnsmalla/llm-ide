@@ -459,3 +459,44 @@ export function decodeActive(body: unknown): ActiveSummary {
     })(),
   };
 }
+
+// ---- health check ---------------------------------------------------------------------------------
+export const HEALTH_STATUSES = ["ok", "problem", "unknown"] as const;
+export type HealthStatus = (typeof HEALTH_STATUSES)[number];
+export const HEALTH_FIXES = ["repair", "consent", "set-credential", "install-program", "switch-off", "none"] as const;
+export type HealthFix = (typeof HEALTH_FIXES)[number];
+export const MAX_HEALTH_PROBLEMS = 10;
+export const MAX_HEALTH_TOOLS = 48;
+
+export interface HealthProblem {
+  /** For logic only; never shown. */
+  code: string;
+  message: string;
+  fix: HealthFix;
+  program?: string;
+}
+export interface HealthResult {
+  status: HealthStatus;
+  checkedAt: number;
+  problems: HealthProblem[];
+  tools: Array<{ name: string; description: string }>;
+}
+
+/** A status outside the known three is refused; an unknown fix becomes "none" (no button), never a guess. */
+export function decodeHealth(body: unknown): HealthResult {
+  const o = rec(body, "health");
+  const status = o.status;
+  if (!(HEALTH_STATUSES as readonly unknown[]).includes(status)) throw new DecodeError("health.status", "ok | problem | unknown");
+  const problems = arr(o.problems ?? [], "health.problems", MAX_HEALTH_PROBLEMS).map((v, i): HealthProblem => {
+    const p = rec(v, `health.problems[${i}]`);
+    const fix = (HEALTH_FIXES as readonly unknown[]).includes(p.fix) ? (p.fix as HealthFix) : "none";
+    const d = isRec(p.detail) ? p.detail : {};
+    const program = optText(d.program, `health.problems[${i}].detail.program`, 120);
+    return { code: text(p.code, `health.problems[${i}].code`, 60), message: text(p.message, `health.problems[${i}].message`), fix, ...(program ? { program } : {}) };
+  });
+  const tools = arr(o.tools ?? [], "health.tools", MAX_HEALTH_TOOLS).map((v, i) => {
+    const t = rec(v, `health.tools[${i}]`);
+    return { name: text(t.name, `health.tools[${i}].name`, 120), description: optText(t.description, `health.tools[${i}].description`) ?? "" };
+  });
+  return { status: status as HealthStatus, checkedAt: int(o.checkedAt, "health.checkedAt"), problems, tools };
+}

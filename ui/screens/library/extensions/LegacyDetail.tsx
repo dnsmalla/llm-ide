@@ -4,6 +4,9 @@
 // the same calls the list uses. Consent, hook trust and removal stay on the list rows and their sheets.
 import { Fragment, useState, type ReactNode } from "react";
 import { Badge } from "./ui.tsx";
+import { Health } from "./Health.tsx";
+import { healthKey, type FixAction } from "./health-model.ts";
+import { HEALTH_KIND } from "./legacy.ts";
 import type { DiscoveryItem, LegacyKind, LegacyRow, LegacyState, LlmSourceRow, McpRow, PluginRow } from "./legacy.ts";
 import type { LegacyModel } from "./legacy.ts";
 import { componentRowText, hookTrustState, hooksHeading, installSourceText, mcpSourceLabel, outdatedTrustText, type LocationReveal } from "./legacy-labels.ts";
@@ -32,6 +35,23 @@ export function LegacyDetail({ model, state, revealer }: { model: LegacyModel; s
   if (model.kind === "plugins") return <PluginDetail model={model} state={state} p={row as PluginRow} />;
   if (model.kind === "mcp-plugins") return <McpDetail model={model} state={state} m={row as McpRow} />;
   return <SourceDetail model={model} state={state} s={row as LlmSourceRow} revealer={revealer} />;
+}
+
+/** The health line of one row; each fix is an action the pane already has. */
+function RowHealth({ model, state, id, actions }: { model: LegacyModel; state: LegacyState; id: string; actions: Partial<Record<FixAction, () => void>> }): ReactNode {
+  const kind = HEALTH_KIND[model.kind];
+  const key = healthKey(kind, id);
+  return (
+    <Health
+      kind={kind}
+      id={id}
+      result={state.health[key]}
+      checking={state.healthChecking.includes(key)}
+      busy={state.busy.includes(id)}
+      onCheck={(force) => void model.check(id, force)}
+      actions={actions}
+    />
+  );
 }
 
 function Facts({ rows }: { rows: readonly [string, string][] }): ReactNode {
@@ -106,6 +126,7 @@ function PluginDetail({ model, state, p }: { model: LegacyModel; state: LegacySt
         {hasHooks && <Badge tone="warn">{hookState}</Badge>}
       </span>
       <Facts rows={[["Format", p.format || "unknown"], ["Skills", String(p.skillCount)], ["MCP servers", String(p.mcpServerCount)]]} />
+      <RowHealth model={model} state={state} id={p.name} actions={{ consent: () => model.requestHookTrust(p.name), "switch-off": () => void model.setEnabled(p.name, false) }} />
       <PluginActions model={model} state={state} p={p} />
       {p.description && (
         <section>
@@ -238,6 +259,7 @@ function McpDetail({ model, state, m }: { model: LegacyModel; state: LegacyState
         {m.credentialMissing && <Badge tone="warn">Credential missing</Badge>}
         {m.enabled && m.effective === false && <Badge tone="warn">Not loaded in chats</Badge>}
       </span>
+      <RowHealth model={model} state={state} id={m.id} actions={{ consent: () => void model.setEnabled(m.id, true), "switch-off": () => void model.setEnabled(m.id, false) }} />
       <Facts rows={facts} />
       <p className="lib-muted">Consent before enabling — an enabled-but-unconsented server is never offered to the agent.</p>
       {m.enabled && <p className="lib-muted">The assistant can use this server's tools in chats.</p>}
@@ -300,6 +322,7 @@ function SourceDetail({ model, state, s, revealer }: { model: LegacyModel; state
           ["MCP servers", String(s.mcpCount)],
         ]}
       />
+      <RowHealth model={model} state={state} id={s.id} actions={{ repair: () => void model.updateSource(s.id), "switch-off": () => void model.setEnabled(s.id, false) }} />
       {s.builtin && !s.installed && <p className="lib-muted">The bundled .skills submodule isn&apos;t checked out. Install to fetch it.</p>}
       <section aria-label="Upstream status">
         {state.statusLoading && !st ? (

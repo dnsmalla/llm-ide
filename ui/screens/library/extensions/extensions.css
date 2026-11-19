@@ -101,3 +101,10 @@ span.ext-row-check { display: inline-block; cursor: default; }
 .ext-notloaded summary { cursor: pointer; color: var(--tok-color-accent4); font-weight: 600; }
 .ext-notloaded ul, .ext-confirm-list { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
 .ext-confirm-list { max-height: 240px; overflow: auto; }
+
+/* Health line of an extension detail. */
+.ext-health { margin-block: var(--tok-space-md); }
+.ext-health-line { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; }
+.ext-health-problems { list-style: none; margin: var(--tok-space-sm) 0 0; padding: 0; display: grid; gap: var(--tok-space-sm); }
+.ext-health-problems li { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; padding: var(--tok-space-sm); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); }
+.ext-health-tools { margin-top: var(--tok-space-sm); }

@@ -4,7 +4,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { ExtCore } from "./api.ts";
-import { createLegacyApi, filterRows, LegacyModel, RELOAD_BUSY, type ClaudePluginRow, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
+import { healthKey, rowBadge } from "./health-model.ts";
+import { createLegacyApi, filterRows, HEALTH_KIND, LegacyModel, RELOAD_BUSY, type ClaudePluginRow, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
 import { LegacyDetail } from "./LegacyDetail.tsx";
 import { mcpSourceBadge, type LocationReveal } from "./legacy-labels.ts";
 import { browseWindow, BROWSE_ROW_HEIGHT } from "./list-model.ts";
@@ -56,6 +57,7 @@ function Row({ model, kind, row, state, index, total }: { model: LegacyModel; ki
           {m?.credentialMissing && <Badge tone="warn">Credential missing</Badge>}
           {m && enabled && m.effective === false && <Badge tone="warn">Not loaded in chats</Badge>}
           {mcpVersion?.status === "update-available" && <Badge tone="accent" title={`A newer version is available: ${mcpVersion.latest ?? ""}`}>Update</Badge>}
+          {rowBadge(state.health[healthKey(HEALTH_KIND[kind], row.id)]) && <Badge tone="warn">Problem</Badge>}
           {src && !src.installed && <Badge>not installed</Badge>}
           {sourceUpdate?.status === "update-available" && <Badge tone="accent" title="A newer version is available: open the source and press Update">update</Badge>}
         </span>

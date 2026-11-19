@@ -6,6 +6,8 @@ import { filterItems, type ExtensionsModel, type ExtensionsState } from "./model
 import { consentTitle, hasUpdate, hasWarnings, kindLabel, repoName, runsCode, trustLabel } from "./presentation.ts";
 import { shortCommit } from "./sanitize.ts";
 import { Badge, FindingList } from "./ui.tsx";
+import { Health } from "./Health.tsx";
+import { healthKey, rowBadge } from "./health-model.ts";
 import { useScroller } from "../use-library.ts";
 
 export function ItemBadges({ item }: { item: InstalledItem }): ReactNode {
@@ -26,7 +28,7 @@ export function ItemBadges({ item }: { item: InstalledItem }): ReactNode {
   );
 }
 
-function Row({ item, selected, checked, top, onCheck }: { item: InstalledItem; selected: boolean; checked: boolean; top: number; onCheck: () => void }): ReactNode {
+function Row({ item, selected, checked, top, onCheck, problem }: { item: InstalledItem; selected: boolean; checked: boolean; top: number; onCheck: () => void; problem: boolean }): ReactNode {
   return (
     <div
       id={`ext-row-${item.id}`}
@@ -45,6 +47,7 @@ function Row({ item, selected, checked, top, onCheck }: { item: InstalledItem; s
         {kindLabel(item.kind)} · {repoName(item.sourceUrl)} · {shortCommit(item.pinnedCommit)}
       </span>
       <ItemBadges item={item} />
+      {problem && <Badge tone="warn">Problem</Badge>}
     </div>
   );
 }
@@ -52,7 +55,7 @@ function Row({ item, selected, checked, top, onCheck }: { item: InstalledItem; s
 export function InstalledList({ model, state, initialHeight }: { model: ExtensionsModel; state: ExtensionsState; initialHeight?: number }): ReactNode {
   const ref = useRef<HTMLDivElement>(null);
   const { scrollTop, height } = useScroller(ref, initialHeight ?? 560);
-  const shown = useMemo(() => filterItems(state.items, state.filter), [state.items, state.filter]);
+  const shown = useMemo(() => filterItems(state.items, state.filter, { only: state.problemsOnly, health: state.health }), [state.items, state.filter, state.problemsOnly, state.health]);
   const rows = useMemo(() => flattenGroups(shown), [shown]);
   const offsets = useMemo(() => offsetsOf(rows), [rows]);
   const w = visibleRows(offsets, scrollTop, height);
@@ -104,7 +107,7 @@ export function InstalledList({ model, state, initialHeight }: { model: Extensio
             );
           }
           const id = r.item.id;
-          return <Row key={id} item={r.item} selected={id === selected} checked={state.checked.includes(id)} top={offsets[idx]!} onCheck={() => model.toggleChecked(id)} />;
+          return <Row key={id} item={r.item} selected={id === selected} checked={state.checked.includes(id)} top={offsets[idx]!} onCheck={() => model.toggleChecked(id)} problem={rowBadge(state.health[healthKey("catalog", id)]) !== null} />;
         })}
       </div>
     </div>
@@ -113,7 +116,7 @@ export function InstalledList({ model, state, initialHeight }: { model: Extensio
 
 const MEMBER_PAGE = 100;
 
-export function ItemDetail({ model, item, busy }: { model: ExtensionsModel; item: InstalledItem; busy: boolean }): ReactNode {
+export function ItemDetail({ model, item, busy, state }: { model: ExtensionsModel; item: InstalledItem; busy: boolean; state: ExtensionsState }): ReactNode {
   const [allMembers, setAllMembers] = useState(false);
   const members = allMembers ? item.members : item.members.slice(0, MEMBER_PAGE);
   const switchId = `ext-switch-${item.id}`;
@@ -142,6 +145,16 @@ export function ItemDetail({ model, item, busy }: { model: ExtensionsModel; item
         <label htmlFor={switchId}>{item.enabled ? "Enabled" : "Disabled"}</label>
         {runsCode(item) && !item.enabled && <span className="lib-muted">Switching on asks for your consent first.</span>}
       </div>
+
+      <Health
+        kind="catalog"
+        id={item.id}
+        result={state.health[healthKey("catalog", item.id)]}
+        checking={state.healthChecking.includes(healthKey("catalog", item.id))}
+        busy={busy}
+        onCheck={(force) => void model.check(item.id, force)}
+        actions={{ repair: () => model.requestRepair(item), consent: () => void model.requestEnable(item), "switch-off": () => void model.disable(item) }}
+      />
 
       <dl className="ext-facts">
         <dt>Source</dt>
@@ -287,7 +300,7 @@ export function InstalledTab({ model, state, initialHeight }: { model: Extension
       </div>
       <div className="ext-split-detail">
         {selected ? (
-          <ItemDetail key={selected.id} model={model} item={selected} busy={state.busy.includes(selected.id)} />
+          <ItemDetail key={selected.id} model={model} item={selected} busy={state.busy.includes(selected.id)} state={state} />
         ) : (
           <div className="lib-empty" role="status">
             <p className="lib-empty-title">Select an item</p>
@@ -301,13 +314,16 @@ export function InstalledTab({ model, state, initialHeight }: { model: Extension
 
 /** Above the list: the filter, "select all shown", and the bulk switch for the ticked rows. */
 function SelectionBar({ model, state }: { model: ExtensionsModel; state: ExtensionsState }): ReactNode {
-  const shown = filterItems(state.items, state.filter);
+  const shown = filterItems(state.items, state.filter, { only: state.problemsOnly, health: state.health });
   const n = state.checked.length;
   const allShown = shown.length > 0 && shown.every((i) => state.checked.includes(i.id));
   const busy = state.busy.length > 0;
   return (
     <div className="ext-selbar">
       <input type="search" className="ext-filter" value={state.filter} placeholder={`Filter ${state.items.length.toLocaleString()} installed…`} aria-label="Filter installed extensions" onChange={(e) => model.setFilter(e.target.value)} />
+      <button type="button" className="lib-btn" aria-pressed={state.problemsOnly} onClick={() => model.setProblemsOnly(!state.problemsOnly)}>
+        Problems
+      </button>
       <div className="ext-selbar-row">
         <label className="ext-selall">
           <input type="checkbox" checked={allShown} disabled={shown.length === 0} onChange={() => model.toggleAllShown()} />
@@ -322,7 +338,7 @@ function SelectionBar({ model, state }: { model: ExtensionsModel; state: Extensi
           </span>
         ) : <span className="lib-muted">Tick items to switch several on or off at once.</span>}
       </div>
-      {shown.length === 0 ? <p className="lib-muted" role="status">Nothing matches “{state.filter.trim()}”.</p> : null}
+      {shown.length === 0 ? <p className="lib-muted" role="status">{state.problemsOnly ? "No item has a known problem. Open an item and press Check." : `Nothing matches “${state.filter.trim()}”.`}</p> : null}
     </div>
   );
 }

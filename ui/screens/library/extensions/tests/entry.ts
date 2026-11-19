@@ -7,3 +7,4 @@ export { InstalledList, ItemDetail } from "../InstalledTab.tsx";
 export { LegacyView } from "../LegacyPane.tsx";
 export { LegacyModel, createLegacyApi } from "../legacy.ts";
 export { LegacyDetail } from "../LegacyDetail.tsx";
+export { Health } from "../Health.tsx";

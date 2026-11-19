@@ -4,9 +4,10 @@
 // apply-update dialogs are parity rows (see the checklist). Same rules as the catalog screen: decoders at the boundary,
 // untrusted text cleaned and capped, one request per row at a time, nothing is enabled without its consent.
 import { cleanText, hasUnsafeChars } from "./sanitize.ts";
-import { DecodeError } from "./decoders.ts";
+import { DecodeError, type HealthResult } from "./decoders.ts";
 import { ExtApiError, shellCode, errorText, toExtApiError, type ExtResponse } from "./errors.ts";
-import type { ExtCore } from "./api.ts";
+import { checkHealth, type ExtCore, type HealthKind } from "./api.ts";
+import { autoChecksOnOpen, healthKey, linkedSignal, withKey, withoutKey } from "./health-model.ts";
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -462,6 +463,7 @@ export interface LegacyApi {
   /** Update a plugin imported from Claude Code. `accept` is the id of the command the user agreed to run. */
   updateClaudePlugin(name: string, accept?: string, signal?: AbortSignal): Promise<PluginUpdateResult>;
   consentMcp(id: string, consented: boolean, signal?: AbortSignal): Promise<void>;
+  check(kind: HealthKind, id: string, force: boolean, signal?: AbortSignal): Promise<HealthResult>;
   toggleMcp(id: string, enabled: boolean, signal?: AbortSignal): Promise<boolean>;
   reloadPlugins(signal?: AbortSignal): Promise<ReloadResult>;
   legacyUpdates(origin: "claude" | "codex", signal?: AbortSignal): Promise<LegacyUpdate[]>;
@@ -538,6 +540,7 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
       catch (e) { throw new ExtApiError(0, s?.aborted ? "ABORTED" : shellCode(e)); }
       return decodePluginUpdate(res.status, res.body);
     },
+    check: (kind, id, force, s) => checkHealth(core, kind, id, force, s),
     consentMcp: async (id, consented, s) => void (await call("POST", "/auth/me/mcp-plugins/consent", { id, consented }, decodeConsented, s)),
     toggleMcp: async (id, enabled, s) => (await call("POST", "/auth/me/mcp-plugins/toggle", { id, enabled }, decodeToggled, s)).enabled,
     reloadPlugins: (s) => call("POST", "/auth/me/plugins/reload", {}, decodeReload, s),
@@ -552,6 +555,8 @@ export function createLegacyApi(core: ExtCore): LegacyApi {
 
 // ---- model ------------------------------------------------------------------------------------------
 export type LegacyKind = "plugins" | "llm-sources" | "mcp-plugins";
+/** The health-check kind of a pane's rows. */
+export const HEALTH_KIND: Record<LegacyKind, HealthKind> = { plugins: "plugin", "llm-sources": "skill-kit", "mcp-plugins": "mcp" };
 export type LegacyRow = PluginRow | LlmSourceRow | McpRow;
 
 export type LegacySheet =
@@ -593,6 +598,9 @@ export interface LegacyState extends LegacyStatus {
   checked: readonly string[];
   /** A plugin update waiting for the user to agree to the command Claude Code will run. */
   pendingUpdate: { name: string; command: string; accept: string } | null;
+  /** Last health result per item this session (never stored), and the items being checked now. */
+  health: Readonly<Record<string, HealthResult>>;
+  healthChecking: readonly string[];
 }
 
 /** Rows whose id, name or description matches the filter (case-insensitive). Pure. */
@@ -639,6 +647,9 @@ export class LegacyModel {
   private seq = 0;
   private statusSeq = 0;
   private busySet = new Set<string>();
+  /** See ExtensionsModel: keys the user (or a no-program open) checked, and keys whose automatic check failed. */
+  private userChecked = new Set<string>();
+  private autoFailed = new Set<string>();
   private readonly api: LegacyApi;
   readonly kind: LegacyKind;
 
@@ -659,6 +670,8 @@ export class LegacyModel {
       filter: "",
       checked: [],
       pendingUpdate: null,
+      health: {},
+      healthChecking: [],
       statusLoading: false,
       statusError: null,
       pluginUpdates: byId(),
@@ -700,7 +713,11 @@ export class LegacyModel {
       const rows = this.kind === "plugins" ? await this.api.plugins(s) : this.kind === "llm-sources" ? await this.api.llmSources(s) : await this.api.mcpPlugins(s);
       if (mine !== this.seq) return;
       // A selected row that vanished keeps its pane, which then says it was not found.
-      this.set({ rows, loaded: true, loading: false, error: null });
+      const ids = new Set(rows.map((r) => r.id));
+      const pre = `${HEALTH_KIND[this.kind]}:`;
+      const health = Object.fromEntries(Object.entries(this.state.health).filter(([k]) => !k.startsWith(pre) || ids.has(k.slice(pre.length))));
+      for (const k of [...this.userChecked, ...this.autoFailed]) if (k.startsWith(pre) && !ids.has(k.slice(pre.length))) { this.userChecked.delete(k); this.autoFailed.delete(k); }
+      this.set({ rows, health, loaded: true, loading: false, error: null });
     } catch (e) {
       if (mine !== this.seq) return;
       if (e instanceof ExtApiError && e.code === "ABORTED") return;
@@ -782,6 +799,9 @@ export class LegacyModel {
     if (id !== null && !this.row(id)) return;
     this.set({ selected: id, discovery: null });
     if (id !== null && this.kind === "llm-sources") void this.loadDiscovery(id);
+    // Plugins and skill kits start no program, so opening one checks it; an MCP server waits for the button.
+    const key = id === null ? "" : healthKey(HEALTH_KIND[this.kind], id);
+    if (id !== null && !this.state.health[key] && !this.autoFailed.has(key) && autoChecksOnOpen(HEALTH_KIND[this.kind], false)) void this.check(id, false, undefined, true);
   }
 
   async loadDiscovery(id: string): Promise<void> {
@@ -842,6 +862,7 @@ export class LegacyModel {
         if (this.state.selected === id) await this.loadDiscovery(id);
         const warn = r.warnings.length > 0 ? ` ${r.warnings.join(" ")}` : "";
         this.set({ notice: { text: `Updated: ${r.added} added, ${r.removed} removed.${warn}`, error: false } });
+        await this.recheck(id);
       } catch (e) {
         this.fail(e);
       }
@@ -966,6 +987,7 @@ export class LegacyModel {
         if (r.kind === "failed") { this.set({ notice: { text: r.text, error: true } }); return; }
         await this.load(true);
         this.set({ notice: { text: `Updated ${name}${r.to ? ` to version ${r.to}` : ""}.${r.trustReset ? " Its code changed, so approve its hooks and MCP servers again." : ""}`, error: false } });
+        await this.recheck(name);
       } catch (e) {
         this.fail(e);
       }
@@ -1010,8 +1032,43 @@ export class LegacyModel {
     return this.state.rows.find((r) => r.id === id);
   }
 
+  /** Runs the health check of one row and keeps the answer. `force` skips the core's short cache. */
+  async check(id: string, force = true, signal?: AbortSignal, auto = false): Promise<void> {
+    const kind = HEALTH_KIND[this.kind];
+    const key = healthKey(kind, id);
+    if (this.state.healthChecking.includes(key)) return;
+    if (!auto) this.userChecked.add(key); // an open-time check was allowed only because no program starts
+    this.set({ healthChecking: withKey(this.state.healthChecking, key) });
+    try {
+      const r = await this.api.check(kind, id, force, linkedSignal(this.life.signal, signal));
+      this.set({ health: { ...this.state.health, [key]: r } });
+    } catch (e) {
+      // An automatic check never raises a notice (an older core may not have the route); only the button reports.
+      if (auto) this.autoFailed.add(key);
+      else this.fail(e);
+    } finally {
+      this.set({ healthChecking: withoutKey(this.state.healthChecking, key) });
+    }
+  }
+  /** After a fix: a result already shown is re-checked, so the line never keeps a stale "Problem". */
+  private async recheck(id: string): Promise<void> {
+    const key = healthKey(HEALTH_KIND[this.kind], id);
+    if (!this.state.health[key]) return;
+    // An MCP server is started by a check: re-check only if the user pressed Check on it (also after "Allow…"), else clear the result.
+    if (this.kind === "mcp-plugins" && !this.userChecked.has(key)) {
+      this.dropHealth([id]);
+      return;
+    }
+    await this.check(id, true);
+  }
+  private dropHealth(ids: readonly string[]): void {
+    const health = { ...this.state.health };
+    for (const i of ids) { const k = healthKey(HEALTH_KIND[this.kind], i); delete health[k]; this.userChecked.delete(k); }
+    this.set({ health });
+  }
+
   /** The switch. MCP servers need their consent first (a sheet naming what would run); the others switch directly. */
-  async setEnabled(id: string, enabled: boolean): Promise<void> {
+  async setEnabled(id: string, enabled: boolean, opts: { recheck: boolean } = { recheck: true }): Promise<void> {
     const row = this.row(id);
     if (!row) return;
     if (this.kind === "mcp-plugins" && enabled && !(row as McpRow).consented) {
@@ -1034,6 +1091,7 @@ export class LegacyModel {
           this.patchRow(id, { enabled: now });
         }
         this.set({ notice: { text: `${(this.row(id) as { name: string }).name} is ${enabled ? "on" : "off"}.`, error: false } });
+        if (opts.recheck) await this.recheck(id);
       } catch (e) {
         if (e instanceof ExtApiError && e.code === "CONSENT_REQUIRED") await this.load();
         this.fail(e);
@@ -1069,7 +1127,9 @@ export class LegacyModel {
     const plain = rows.filter((r) => !needConsent.includes(r));
     for (const r of plain) {
       if (this.life.signal.aborted) return;
-      await this.setEnabled(r.id, on);
+      // Bulk switching never re-checks (that would start servers one by one); the old results are cleared instead.
+      await this.setEnabled(r.id, on, { recheck: false });
+      this.dropHealth([r.id]);
     }
     const changed = plain.filter((r) => (this.row(r.id) as { enabled?: boolean } | undefined)?.enabled === on).length;
     const verb = on ? "on" : "off";
@@ -1144,6 +1204,7 @@ export class LegacyModel {
           const t = await this.api.trustHooks(sh.name, true, sh.kinds, this.life.signal);
           this.patchRow(sh.name, { hooksTrusted: t, trustOutdated: false });
           this.set({ notice: { text: "Hook trust granted for the kinds you saw.", error: false } });
+          await this.recheck(sh.name);
         } catch (e) {
           if (e instanceof ExtApiError && e.status === 409) await this.load();
           this.fail(e);
@@ -1159,6 +1220,7 @@ export class LegacyModel {
         const now = await this.api.toggleMcp(sh.id, true, s);
         this.patchRow(sh.id, { enabled: now });
         this.set({ notice: { text: `${sh.label} is on.`, error: false } });
+        await this.recheck(sh.id);
       } catch (e) {
         await this.load();
         this.fail(e);

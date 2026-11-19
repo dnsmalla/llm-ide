@@ -4,6 +4,7 @@ import { editPreviewFor } from "./plan/EditPreview";
 import { memo, useState } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { Markdown } from "./MarkdownView";
+import { shellBus } from "../shell/bus";
 import { ModeBadge, ModelBadge } from "./badges/Badges";
 import { textOf, type AssistantMessage, type Message, type Notice, type TextPart, type ToolPart } from "./state";
 import { billableTokens, compactTokenCount, usageTooltip } from "./usage";
@@ -139,6 +140,8 @@ function NoticeLine({ n, host }: { n: Notice; host: MessageHost }) {
   const text = n.count > 1 ? `${n.text} (x${n.count})` : n.text;
   const message = n.kind === "chat_continued" && host.onFullHistoryNext
     ? <>{text} <button type="button" className="chat-link-btn" onClick={host.onFullHistoryNext}>Send the full history with my next message</button></>
+    : n.kind === "mcp_status"
+    ? <>{text} <button type="button" className="chat-link-btn" onClick={() => shellBus.publish({ type: "goto-section", section: "library", anchor: "mcp-plugins" })}>Open</button></>
     : text;
   return <StatusBanner severity={n.level === "error" ? "error" : n.level === "warning" ? "warning" : "info"} message={message} />;
 }

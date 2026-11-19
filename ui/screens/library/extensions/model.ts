@@ -16,7 +16,8 @@
 //  - search results of a superseded request are dropped (sequence guard);
 //  - the tab changes only when the action behind it succeeded.
 import type { ExtensionsApi } from "./api.ts";
-import type { ActiveSummary, CatalogEntry, CatalogPage, CatalogSource, InstalledItem, ItemResult, UpdatePreview } from "./decoders.ts";
+import { autoChecksOnOpen, healthKey, itemHasMcp, linkedSignal, withKey, withoutKey } from "./health-model.ts";
+import type { ActiveSummary, CatalogEntry, CatalogPage, CatalogSource, HealthResult, InstalledItem, ItemResult, UpdatePreview } from "./decoders.ts";
 import { ExtApiError, errorText, isRetryable } from "./errors.ts";
 import { consentLines, catalogNeverFetched, hasUpdate, orderKinds, outcomeText, refreshSummary, repairText, validateInstallPath, validateInstallUrl, type ConsentLine } from "./presentation.ts";
 
@@ -99,6 +100,11 @@ export interface ExtensionsState {
   install: InstallState;
   /** Installed tab: the name filter and the rows ticked for a bulk switch. */
   filter: string;
+  /** Installed tab: show only rows whose known health result is a problem. */
+  problemsOnly: boolean;
+  /** Last health result per item this session (never stored), and the items being checked now. */
+  health: Readonly<Record<string, HealthResult>>;
+  healthChecking: readonly string[];
   checked: readonly string[];
   /** Browse tab: entries ticked for "Install selected". */
   browseChecked: readonly string[];
@@ -123,12 +129,16 @@ const INITIAL: ExtensionsState = {
   browse: { query: "", kind: null, results: [], total: 0, sources: [], loaded: false, loading: false, loadingMore: false, error: null, refreshing: false },
   install: { url: "", path: "", installing: false, fieldError: null, last: null },
   filter: "",
+  problemsOnly: false,
+  health: {},
+  healthChecking: [],
   checked: [],
   browseChecked: [],
 };
 
 /** Installed items whose name, kind, publisher or source matches the filter (case-insensitive). Pure. */
-export function filterItems(items: readonly InstalledItem[], filter: string): readonly InstalledItem[] {
+export function filterItems(items: readonly InstalledItem[], filter: string, problems?: { only: boolean; health: Readonly<Record<string, HealthResult>> }): readonly InstalledItem[] {
+  if (problems?.only) items = items.filter((i) => problems.health[healthKey("catalog", i.id)]?.status === "problem");
   const q = filter.trim().toLowerCase();
   if (!q) return items;
   return items.filter((i) => `${i.name} ${i.kind} ${i.publisherId} ${i.sourceUrl ?? ""} ${i.description ?? ""}`.toLowerCase().includes(q));
@@ -152,6 +162,10 @@ export class ExtensionsModel {
   private installedSeq = 0;
   private searchSeq = 0;
   private busySet = new Set<string>();
+  /** Health keys the user (or an open of a no-program item) checked this session: only these may be re-checked after a fix when a check could start a program. */
+  private userChecked = new Set<string>();
+  /** Keys whose automatic check failed: not retried on every open. */
+  private autoFailed = new Set<string>();
 
   private readonly api: ExtensionsApi;
   constructor(api: ExtensionsApi) {
@@ -244,6 +258,10 @@ export class ExtensionsModel {
   }
   select(id: string | null): void {
     this.set({ selectedId: id });
+    // Opening an item checks it only when no program starts; an MCP-carrying item waits for the Check button.
+    const item = id ? this.item(id) : undefined;
+    const key = id ? healthKey("catalog", id) : "";
+    if (item && !this.state.health[key] && !this.autoFailed.has(key) && autoChecksOnOpen("catalog", itemHasMcp(item))) void this.check(id!, false, undefined, true);
   }
 
   // ---- installed ----------------------------------------------------------------------------
@@ -259,7 +277,10 @@ export class ExtensionsModel {
       const list = await this.api.installed(this.signal);
       if (mine !== this.installedSeq) return;
       const sel = this.state.selectedId;
-      this.set({ items: list.items, corrupt: list.corrupt, loaded: true, loading: false, loadError: null, selectedId: sel && list.items.some((i) => i.id === sel) ? sel : null });
+      const ids = new Set(list.items.map((i) => i.id));
+      const health = Object.fromEntries(Object.entries(this.state.health).filter(([k]) => ids.has(k.slice("catalog:".length))));
+      for (const k of [...this.userChecked, ...this.autoFailed]) if (!ids.has(k.slice("catalog:".length))) { this.userChecked.delete(k); this.autoFailed.delete(k); }
+      this.set({ health, items: list.items, corrupt: list.corrupt, loaded: true, loading: false, loadError: null, selectedId: sel && list.items.some((i) => i.id === sel) ? sel : null });
     } catch (e) {
       if (mine !== this.installedSeq) return;
       if (e instanceof ExtApiError && e.code === "ABORTED") return;
@@ -329,12 +350,13 @@ export class ExtensionsModel {
     await this.toggle(item, false, null);
   }
 
-  private async toggle(item: InstalledItem, enabled: boolean, consents: string[] | null, commit?: string): Promise<void> {
+  private async toggle(item: InstalledItem, enabled: boolean, consents: string[] | null, commit?: string, opts: { recheck: boolean } = { recheck: true }): Promise<void> {
     await this.withBusy(item.id, async () => {
       try {
         const r = await this.api.toggle({ id: item.id, enabled, consents: consents ?? undefined, commit: enabled ? (commit ?? item.pinnedCommit) : undefined }, this.signal);
         this.replace(r.item);
         this.succeed(enabled ? `${item.name} is on.` : `${item.name} is off.`);
+        if (opts.recheck) await this.recheck(item.id);
       } catch (e) {
         if (enabled && e instanceof ExtApiError && e.code === "COMMIT_CHANGED") {
           await this.loadInstalled();
@@ -576,10 +598,52 @@ export class ExtensionsModel {
         const r = await this.api.repair(item.id, this.signal);
         this.replace(r.item);
         this.succeed(repairText(r));
+        await this.recheck(item.id);
       } catch (e) {
         this.fail(e);
       }
     });
+  }
+
+  // ---- health ---------------------------------------------------------------------------------
+  /** Runs the health check of one item and keeps the answer. `force` skips the core's short cache. */
+  async check(id: string, force = true, signal?: AbortSignal, auto = false): Promise<void> {
+    const key = healthKey("catalog", id);
+    if (this.state.healthChecking.includes(key)) return;
+    if (!auto) this.userChecked.add(key); // an open-time check was allowed only because no program starts
+    this.set({ healthChecking: withKey(this.state.healthChecking, key) });
+    try {
+      const r = await this.api.check("catalog", id, force, linkedSignal(this.signal, signal));
+      this.set({ health: { ...this.state.health, [key]: r } });
+    } catch (e) {
+      // An automatic check never raises a notice (an older core may not have the route); only the button reports.
+      if (auto) this.autoFailed.add(key);
+      else this.fail(e);
+    } finally {
+      this.set({ healthChecking: withoutKey(this.state.healthChecking, key) });
+    }
+  }
+  /** After a fix: a result already shown is re-checked, so the line never keeps a stale "Problem". */
+  private async recheck(id: string): Promise<void> {
+    const key = healthKey("catalog", id);
+    if (!this.state.health[key]) return;
+    const cur = this.item(id);
+    if (!cur) return;
+    // A fix may have given the item an MCP server; a check would start it, so only a user-pressed Check earns a re-check.
+    if (itemHasMcp(cur) && !this.userChecked.has(key)) {
+      this.dropHealth([id]);
+      return;
+    }
+    await this.check(id, true);
+  }
+  private dropHealth(ids: readonly string[]): void {
+    const keys = new Set(ids.map((i) => healthKey("catalog", i)));
+    const health = { ...this.state.health };
+    for (const k of keys) { delete health[k]; this.userChecked.delete(k); }
+    this.set({ health });
+  }
+  setProblemsOnly(on: boolean): void {
+    this.set({ problemsOnly: on });
   }
 
   // ---- updates ------------------------------------------------------------------------------
@@ -668,6 +732,7 @@ export class ExtensionsModel {
         const r = await this.api.applyUpdate({ id: item.id, commit, consents }, this.signal);
         this.replace(r.item);
         this.succeed(outcomeText(r.summary, "Updated"));
+        await this.recheck(item.id);
       } catch (e) {
         const code = e instanceof ExtApiError ? e.code : null;
         if (code === "UPDATE_CHANGED") follow = "repreview";
@@ -714,7 +779,9 @@ export class ExtensionsModel {
     for (const item of plain) {
       if (this.signal.aborted) return;
       this.set({ notice: null });
-      await this.toggle(item, on, null);
+      // Bulk switching never re-checks (that would start servers one by one); the old results are cleared instead.
+      await this.toggle(item, on, null, undefined, { recheck: false });
+      this.dropHealth([item.id]);
       if (this.item(item.id)?.enabled !== on) failed.push({ name: item.name, reason: this.lastErrorText() });
     }
     this.set({ checked: [] });

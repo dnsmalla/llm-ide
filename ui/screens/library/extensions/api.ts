@@ -8,6 +8,7 @@ import {
   decodeActive,
   decodeCatalog,
   decodeCheck,
+  decodeHealth,
   decodeInstalled,
   decodeItemResult,
   decodeOk,
@@ -19,6 +20,7 @@ import {
   type ActiveSummary,
   type CatalogPage,
   type CheckResult,
+  type HealthResult,
   type InstalledList,
   type ItemResult,
   type RefreshResult,
@@ -51,9 +53,28 @@ export interface ExtensionsApi {
   applyUpdate(req: { id: string; commit: string; consents: readonly string[] | null }, signal?: AbortSignal): Promise<UpdateApplied>;
   rollback(id: string, signal?: AbortSignal): Promise<UpdateApplied>;
   repair(id: string, signal?: AbortSignal): Promise<RepairResult>;
+  check(kind: HealthKind, id: string, force: boolean, signal?: AbortSignal): Promise<HealthResult>;
 }
 
 const BASE = "/auth/me/extensions";
+export type HealthKind = "mcp" | "plugin" | "skill-kit" | "catalog";
+
+/** The one health-check call, shared by the catalog API and the older panes (one decoder, one path). */
+export const checkHealth = async (core: ExtCore, kind: HealthKind, id: string, force: boolean, signal?: AbortSignal): Promise<HealthResult> => {
+  let res: ExtResponse;
+  try {
+    res = await core.request("POST", `${BASE}/check`, force ? { kind, id, force: true } : { kind, id }, { signal, slow: true });
+  } catch (e) {
+    throw new ExtApiError(0, signal?.aborted ? "ABORTED" : shellCode(e));
+  }
+  if (res.status < 200 || res.status >= 300) throw toExtApiError(res);
+  try {
+    return decodeHealth(res.body);
+  } catch (e) {
+    if (e instanceof DecodeError) throw new ExtApiError(res.status, "BAD_RESPONSE");
+    throw e;
+  }
+};
 
 export function createExtensionsApi(core: ExtCore): ExtensionsApi {
   async function call<T>(method: "GET" | "POST", path: string, body: unknown, decode: (b: unknown) => T, opts: ExtRequestOptions = {}): Promise<T> {
@@ -95,6 +116,7 @@ export function createExtensionsApi(core: ExtCore): ExtensionsApi {
     previewUpdate: (req, signal) => post(`${BASE}/update/preview`, req.commit ? { id: req.id, commit: req.commit } : { id: req.id }, decodePreview, signal, true),
     applyUpdate: (req, signal) => post(`${BASE}/update`, req.consents && req.consents.length > 0 ? { id: req.id, commit: req.commit, consents: [...req.consents] } : { id: req.id, commit: req.commit }, decodeUpdateApplied, signal, true),
     rollback: (id, signal) => post(`${BASE}/rollback`, { id }, decodeRollback, signal),
+    check: (kind, id, force, signal) => checkHealth(core, kind, id, force, signal),
     repair: (id, signal) => post(`${BASE}/repair`, { id }, decodeRepair, signal, true),
   };
 }

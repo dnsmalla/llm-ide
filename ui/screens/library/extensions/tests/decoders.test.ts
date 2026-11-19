@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  DecodeError, decodeActive, decodeCatalog, decodeCheck, decodeInstalled, decodeItem, decodeItemResult, decodeOk, decodePreview, decodeRefresh, decodeRepair, decodeRollback, decodeUpdateApplied, decodeUpdates,
+  DecodeError, decodeActive, decodeCatalog, decodeCheck, decodeHealth, decodeInstalled, decodeItem, decodeItemResult, decodeOk, decodePreview, decodeRefresh, decodeRepair, decodeRollback, decodeUpdateApplied, decodeUpdates,
 } from "../decoders.ts";
 import { cleanText, capChars, hasUnsafeChars } from "../sanitize.ts";
 import { allFixtureNames, fx } from "./helpers.ts";
@@ -22,6 +22,7 @@ const DECODERS: Record<string, (b: unknown) => unknown> = {
   "POST /auth/me/extensions/update": decodeUpdateApplied,
   "POST /auth/me/extensions/rollback": decodeRollback,
   "POST /auth/me/extensions/repair": decodeRepair,
+  "POST /auth/me/extensions/check": decodeHealth,
 };
 const SETTINGS_OWNED = /allowlist|workspace-trust/;
 
