@@ -123,7 +123,7 @@ Rules:
   // on every 90-second tick.
   const QUESTION_MAX_TOKENS = 512;
   // Tier routing (`features.internal`); unrouted → runClaude's default model.
-  const claudeOpts = { userId, maxTokens: QUESTION_MAX_TOKENS, ...routeOpts(userId, 'internal') };
+  const claudeOpts = { userId, maxTokens: QUESTION_MAX_TOKENS, jsonSchema: QUESTION_SCHEMA, ...routeOpts(userId, 'internal') };
 
   let raw;
   try {
@@ -206,6 +206,18 @@ function formatPlan(plan) {
   if (s.length > MAX_PLAN_CHARS) s = s.slice(0, MAX_PLAN_CHARS) + '\n…';
   return s;
 }
+
+// The reply shape as a structured-output schema (the five fields the prompt lists): the reply is then the JSON object
+// alone, guaranteed to parse, so the "strict" re-ask is not needed. The checks after parsing still apply.
+export const QUESTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    shouldAsk: { type: 'boolean' }, question: { type: 'string' }, score: { type: 'number' },
+    planTaskId: { type: 'string' }, reason: { type: 'string' },
+  },
+  required: ['shouldAsk', 'question', 'score', 'planTaskId', 'reason'],
+  additionalProperties: false,
+};
 
 function extractLastJSONLine(raw) {
   if (typeof raw !== 'string') return '';

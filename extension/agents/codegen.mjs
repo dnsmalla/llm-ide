@@ -139,6 +139,15 @@ export function selectRelevantFiles(files, symbols) {
   return confirmed.length > 0 ? confirmed : all;
 }
 
+// The reply shape as a structured-output schema (the shape the prompt spells out). Whole files ride inside JSON
+// strings, where one bad escape used to break the parse; with the schema the reply is guaranteed to parse.
+// validate() still checks every path, size and the modify rule.
+const CG_OBJECT = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+const CG_FILE = CG_OBJECT({ path: { type: 'string' }, kind: { type: 'string', enum: ['create', 'modify'] }, language: { type: 'string' }, content: { type: 'string' } });
+export const CODEGEN_SCHEMA = CG_OBJECT({
+  summary: { type: 'string' }, files: { type: 'array', items: CG_FILE }, tests: { type: 'array', items: CG_FILE }, notes: { type: 'string' },
+});
+
 function buildPrompt({ task, plan, lang, filesCtx }) {
   const refsBlock = filesCtx.length === 0
     ? '(no related files were retrieved from the KB code index)'
@@ -282,7 +291,7 @@ export async function generateCodeForTask(userId, { taskId, language, includeFil
   const prompt = buildPrompt({ task, plan, lang, filesCtx });
 
   // Tier routing (`features.pipeline`); unrouted → runClaude's default.
-  const claudeOpts = { userId, maxTokens: MAX_OUTPUT_TOKENS, ...routeOpts(userId, 'pipeline') };
+  const claudeOpts = { userId, maxTokens: MAX_OUTPUT_TOKENS, jsonSchema: CODEGEN_SCHEMA, ...routeOpts(userId, 'pipeline') };
   let parsed = tryParseJSON(await _runClaude(prompt, claudeOpts));
   let validated = validate(parsed, { modifiable });
   if (!validated) {

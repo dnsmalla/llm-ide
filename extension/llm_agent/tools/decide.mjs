@@ -86,6 +86,30 @@ function describeQuestion(id, q) {
   return lines.join('\n');
 }
 
+/**
+ * The reply shape for THESE questions as a structured-output schema: one answer object per question id, of the
+ * question's own type, with exactly its option keys or level indexes. The reply is then guaranteed to parse and to
+ * answer every question; normalizeAll still clamps and normalizes the numbers.
+ */
+export function decideSchema(questions) {
+  const object = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+  const number = { type: 'number' };
+  const typeOf = (t) => ({ type: 'string', enum: [t] });
+  const answers = {};
+  for (const [id, q] of Object.entries(questions)) {
+    if (q.type === 'choice') {
+      const keys = Object.keys(q.criteria);
+      answers[id] = object({ type: typeOf('choice'), choice: { type: 'string', enum: keys }, probabilities: object(Object.fromEntries(keys.map((k) => [k, number]))), confidence: number });
+    } else if (q.type === 'score') {
+      const levels = q.criteria.map((_, i) => String(i));
+      answers[id] = object({ type: typeOf('score'), score: { type: 'integer' }, probabilities: object(Object.fromEntries(levels.map((k) => [k, number]))), confidence: number });
+    } else {
+      answers[id] = object({ type: typeOf('noul'), noul: number });
+    }
+  }
+  return object({ answers: object(answers) });
+}
+
 // Size: state ≤ MAX_STATE_CHARS (200k) and questions ≤ MAX_QUESTIONS_CHARS
 // (64k) are enforced by validation before this runs, so the prompt stays well
 // under runClaude's 500k-char cap — no truncation needed here.
@@ -222,6 +246,7 @@ async function decideViaLlm({ userId, state, questions, signal, runClaude, route
     signal,
     endpoint: 'decide',
     maxTokens: Math.min(MAX_TOKENS_CAP, BASE_MAX_TOKENS + n * PER_QUESTION_TOKENS),
+    jsonSchema: decideSchema(questions),
     ...routeOpts(userId, DECISIONS_FEATURE, LLM_MODEL ? { model: LLM_MODEL } : {}),
   };
   let ranModel = claudeOpts.model ?? null;

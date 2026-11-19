@@ -621,6 +621,10 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
   // has passed — a fresh `claude` spawn would overrun it.
   if (signal?.aborted) throw new Error('runClaude: deadline reached before CLI fallback');
   let lastError;
+  // The same schema on the CLI path: `--json-schema` makes `claude -p` return the validated JSON as its result
+  // (confirmed against a real run, with `--tools ''`). An older `claude` without the flag fails naming it; the
+  // schema is then dropped for the rest of the call, as on the API path.
+  let cliSchema = jsonSchema && typeof jsonSchema === 'object' ? jsonSchema : null;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
       // Pass a minimal allowlist rather than spreading all of process.env.
@@ -645,6 +649,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
       // spawnCli also closes the child's stdin (else the CLI blocks ~3s on
       // piped input and warns on stderr) and forwards `signal` so an in-flight
       // call is killed when the caller's deadline fires.
+      const schemaArgs = cliSchema ? ['--json-schema', JSON.stringify(cliSchema)] : [];
       const { stdout } = await spawnCli('anthropic', prompt, {
         env,
         timeoutMs: CLAUDE_TIMEOUT_MS,
@@ -665,7 +670,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
         // idle `claude` already running answers; see providers/warm-cli-pool.mjs.
         warm,
         userId,
-        args: ['--output-format', 'json', ...buildAnthropicCliArgs(prompt, mcpConfig, resolvedModel)],
+        args: [...schemaArgs, '--output-format', 'json', ...buildAnthropicCliArgs(prompt, mcpConfig, resolvedModel)],
       });
       const parsed = parseCliJsonResult(stdout);
       meterUsage({
@@ -681,6 +686,12 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
     } catch (err) {
       if (err.code === 'ENOENT') {
         throw new Error('Claude CLI not found. Install: npm install -g @anthropic-ai/claude-code');
+      }
+      if (cliSchema && /json-schema|unknown option|schema/i.test(`${err.stderr ?? ''} ${err.stdout ?? ''} ${err.message ?? ''}`)) {
+        cliSchema = null;
+        log.warn('runClaude CLI rejected --json-schema, retrying without it');
+        attempt -= 1; // not a retry of the work: the same call, minus the flag
+        continue;
       }
       const e = new Error(`Claude error: ${formatCliSpawnError(err, { bin: err.bin || 'claude', apiKey })}`);
       // A hang-breaker kill must not be re-run on a route fallback.

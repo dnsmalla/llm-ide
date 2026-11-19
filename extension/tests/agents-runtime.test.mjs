@@ -182,3 +182,42 @@ test('jsonSchema is sent as output_config.format, and a rejected schema is dropp
     assert.deepEqual(bodies.map((b) => !!b.output_config), [true, false]);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+// ── The same schema on the CLI path (the default `claude login` route) ──
+function stubCli({ rejectSchema }) {
+  const dir = fs.mkdtempSync(path.join(__dirname, '_stub-cli-'));
+  const log = path.join(dir, 'calls.jsonl');
+  const bin = path.join(dir, 'claude.cjs');
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+if (${rejectSchema} && args.includes('--json-schema')) { process.stderr.write("error: unknown option '--json-schema'\\n"); process.exit(1); }
+process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '{"ok":true}', usage: { input_tokens: 1, output_tokens: 1 }, modelUsage: {} }) + '\\n');
+`);
+  fs.chmodSync(bin, 0o755);
+  const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+  return { bin, calls, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+test('the CLI path sends --json-schema, and an older claude that rejects it is asked again without it', async () => {
+  resetDb();
+  const schema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false };
+  const { runClaude } = await import('../providers/runtime.mjs');
+  const before = process.env.LLMIDE_ANTHROPIC_CLI;
+  for (const rejectSchema of [false, true]) {
+    const cli = stubCli({ rejectSchema });
+    process.env.LLMIDE_ANTHROPIC_CLI = cli.bin;
+    try {
+      assert.equal(await runClaude('q', { jsonSchema: schema }), '{"ok":true}');
+      const calls = cli.calls();
+      const at = calls[0].indexOf('--json-schema');
+      assert.ok(at >= 0 && JSON.parse(calls[0][at + 1]).required[0] === 'ok', 'the schema rides the first call');
+      assert.equal(calls.length, rejectSchema ? 2 : 1);
+      if (rejectSchema) assert.ok(!calls[1].includes('--json-schema'), 'the second call drops the flag');
+    } finally {
+      cli.cleanup();
+      if (before === undefined) delete process.env.LLMIDE_ANTHROPIC_CLI; else process.env.LLMIDE_ANTHROPIC_CLI = before;
+    }
+  }
+});
