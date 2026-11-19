@@ -1626,3 +1626,15 @@ test('a readOnly run through the route refuses an Edit and lets it not land', ()
   assert.equal(fs.existsSync(target), false);
   assert.equal(out.denied.length, 1);
 }));
+
+test('a Loop step states its effort: high when it writes, medium for a read-only review, pinned by LLMIDE_LOOP_EFFORT', () => withKey(async () => {
+  const { loopEffort } = await import('../llm_agent/sdk/loop-agent.mjs');
+  assert.deepEqual([loopEffort({ env: '' }), loopEffort({ readOnly: true, env: '' })], ['high', 'medium']);
+  assert.deepEqual([loopEffort({ env: ' XHIGH ' }), loopEffort({ env: 'default' }), loopEffort({ env: 'typo' })], ['xhigh', null, 'high']);
+  const write = {};
+  await runLoopAgent({ message: 'fix it', root: REPO, userId: user.id, queryFactory: toolPlayingQuery(write, []) }, noSkill);
+  assert.equal(write.options.effort, 'high');
+  const read = {};
+  await runLoopAgent({ message: 'review it', root: REPO, userId: user.id, readOnly: true, queryFactory: toolPlayingQuery(read, []) }, noSkill);
+  assert.equal(read.options.effort, 'medium');
+}));

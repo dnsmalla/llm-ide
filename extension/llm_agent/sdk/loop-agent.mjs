@@ -299,6 +299,20 @@ function insideWriteScope(filePath, root, scope) {
  * and canUseTool apply. `writeScope` (e.g. ".factory"): Edit/Write only under
  * `<roots[0]>/<writeScope>/`; reads are unchanged.
  */
+const LOOP_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+/**
+ * The effort of one Loop / Factory / Auto Task / Self-Heal step. `LLMIDE_LOOP_EFFORT` pins a level for every step
+ * (`default` = send none, the model's own default); otherwise long agentic work that changes files runs at `high`
+ * and a read-only review at `medium`.
+ */
+export function loopEffort({ readOnly = false, env = process.env.LLMIDE_LOOP_EFFORT } = {}) {
+  const pinned = typeof env === 'string' ? env.trim().toLowerCase() : '';
+  if (pinned === 'default') return null;
+  if (LOOP_EFFORT_LEVELS.has(pinned)) return pinned;
+  return readOnly ? 'medium' : 'high';
+}
+
 export function loopToolRefusal(toolName, input, roots, { readOnly = false, writeScope = null, denyWrite = null } = {}) {
   const allowed = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
   const where = allowed.join(', ');
@@ -735,9 +749,12 @@ export async function runLoopAgent(
     // A one-shot step: nothing resumes it, so nothing is written to disk.
     persistSession: false,
     ...(typeof model === 'string' && model ? { model } : {}),
+    // Effort is stated, never left to the model's default (Opus 5.5 defaults to
+    // medium): a step that writes code or reports runs at high, a read-only
+    // review at medium. A gateway may not accept the parameter, so it gets none.
+    ...(() => { const effort = gatewayBaseUrl ? null : loopEffort({ readOnly }); return effort ? { effort } : {}; })(),
     // The chat engine's env, gateway included (engine.mjs agentEngineEnv):
-    // server secrets stripped, no claude.ai connectors. No `effort` is ever
-    // set on a Loop step, so a gateway has nothing to drop.
+    // server secrets stripped, no claude.ai connectors.
     env: agentEngineEnv({ key, baseUrl: gatewayBaseUrl, sdkHome }),
     abortController: stepAc,
   });

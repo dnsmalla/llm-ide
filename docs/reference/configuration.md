@@ -99,6 +99,7 @@ two starred entries are required in production.
 | `LLMIDE_MODEL` | `claude-sonnet-4-6` | Default Claude model id. |
 | `LLMIDE_SUMMARIZE_MODEL` | `claude-opus-4-8` | Override for meeting summaries. |
 | `LLMIDE_CHAT_EFFORT` | unset | Pin the Agent-engine chat's reasoning effort for every turn (`low`/`medium`/`high`/`xhigh`/`max`, or `default` to send none). Unset: `high` for Plan/Assist Plan/Execute, `medium` for Ask/Review/Document and bare greetings. Never sent on a gateway turn. |
+| `LLMIDE_LOOP_EFFORT` | unset | Pin the reasoning effort of every Loop / Factory / Auto Task / Self-Heal agent step (`low`/`medium`/`high`/`xhigh`/`max`, or `default` to send none). Unset: `high` for a step that may write files, `medium` for a read-only review. A gateway step sends none. |
 | `BIND_HOST` | `127.0.0.1` | Used by `start.sh` only; container deployments set `0.0.0.0`. |
 
 ## Agent skills
