@@ -27,7 +27,7 @@
 //    chatter ("fix this typo", "what does foo do").
 
 import { tryParseJSON } from '../../providers/runtime.mjs';
-import { fastModelFor } from '../../kb/usage.mjs';
+import { helperModelFor } from '../../kb/usage.mjs';
 import { factKey, factIndex } from '../../graphkit/memory-writer.mjs';
 import { rankFactsByRelevance } from '../../graphkit/memory.mjs';
 
@@ -36,9 +36,10 @@ import { rankFactsByRelevance } from '../../graphkit/memory.mjs';
 // minutes on the server's default model, pure overhead for a task the
 // chain's smallest model handles. Chain-derived (kb/usage.mjs), never a
 // hard-coded literal; env overrides keep working.
-export const EXTRACT_MODEL = process.env.LLMIDE_SUMMARIZE_MODEL
-  || process.env.LLMIDE_MODEL
-  || fastModelFor('anthropic');
+// Its own LLMIDE_MEMORY_MODEL wins; LLMIDE_SUMMARIZE_MODEL / LLMIDE_MODEL apply only when they are not a premium
+// model (helperModelFor): a "heavier model for meeting summaries" must not also run after every chat turn.
+export const EXTRACT_MODEL = helperModelFor('anthropic', process.env.LLMIDE_MEMORY_MODEL,
+  [process.env.LLMIDE_SUMMARIZE_MODEL, process.env.LLMIDE_MODEL]);
 const MAX_NEW_FACTS = 5;
 // Session facts per turn. More than project facts: a turn that settles a
 // design can legitimately fix several decisions at once.

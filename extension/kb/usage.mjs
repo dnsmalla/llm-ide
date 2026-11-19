@@ -73,6 +73,17 @@ export function fastModelFor(provider) {
   if (!Array.isArray(chain) || chain.length === 0) return null;
   return (chain.find((entry) => entry.fast === true) ?? chain.at(-1)).model;
 }
+/**
+ * The model of a small helper call that runs on every chat turn (memory extraction, the mode classifier). Its own
+ * setting wins. A GENERAL setting (LLMIDE_MODEL and the like) applies only when it is not a premium model: a helper
+ * never inherits Opus, Fable or Mythos from a setting meant for the main work, which would bill every turn's
+ * bookkeeping at the top rate. Otherwise the provider's fast model.
+ */
+export function helperModelFor(provider, own, general = []) {
+  if (typeof own === 'string' && own.trim()) return own.trim();
+  const inherited = general.find((m) => typeof m === 'string' && m.trim() && !/opus|fable|mythos/i.test(m));
+  return inherited ? inherited.trim() : fastModelFor(provider);
+}
 const VALID_UNITS = new Set(['runs', 'tokens']);
 const VALID_WINDOWS = new Set(['daily', 'monthly']);
 const VALID_SOURCES = new Set(['api', 'cli', 'auto-task', 'bus']);

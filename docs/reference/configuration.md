@@ -96,8 +96,10 @@ two starred entries are required in production.
 | `LLMIDE_LOG_JSON` | `true` (prod) / `false` (dev) | Force JSON log output. |
 | `LLMIDE_DISABLE_REGISTRATION` | `false` | Close `/auth/register` after bootstrap. |
 | `LLMIDE_CORS_ORIGINS` | `""` | Extra comma-separated allowed origins. |
-| `LLMIDE_MODEL` | `claude-sonnet-4-6` | Default Claude model id. |
-| `LLMIDE_SUMMARIZE_MODEL` | `claude-opus-4-8` | Override for meeting summaries. |
+| `LLMIDE_MODEL` | `claude-sonnet-5-5` (the catalog default) | Default Claude model id. A retired id runs as its successor. |
+| `LLMIDE_SUMMARIZE_MODEL` | unset | Override for meeting summaries (a heavier model is fine here; the calls are rare). |
+| `LLMIDE_MEMORY_MODEL` | unset | Model for memory extraction, which runs after every chat turn. Unset: `LLMIDE_SUMMARIZE_MODEL` or `LLMIDE_MODEL` when that is not a premium model (Opus, Fable, Mythos), else the fast model. A per-turn helper never inherits a premium model from a general setting. |
+| `LLMIDE_MODE_CLASSIFY_MODEL` | unset | Model for the `auto` mode classifier (every `auto` turn). Unset: `LLMIDE_MODEL` when it is not a premium model, else the fast model. |
 | `LLMIDE_CHAT_EFFORT` | unset | Pin the Agent-engine chat's reasoning effort for every turn (`low`/`medium`/`high`/`xhigh`/`max`, or `default` to send none). Unset: `high` for Plan/Assist Plan/Execute, `medium` for Ask/Review/Document and bare greetings. Never sent on a gateway turn. |
 | `LLMIDE_LOOP_EFFORT` | unset | Pin the reasoning effort of every Loop / Factory / Auto Task / Self-Heal agent step (`low`/`medium`/`high`/`xhigh`/`max`, or `default` to send none). Unset: `high` for a step that may write files, `medium` for a read-only review. A gateway step sends none. |
 | `BIND_HOST` | `127.0.0.1` | Used by `start.sh` only; container deployments set `0.0.0.0`. |

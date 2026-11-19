@@ -7,7 +7,7 @@
 // behavior they didn't ask for.
 
 import { runClaude as defaultRunClaude, tryParseJSON } from '../../providers/runtime.mjs';
-import { fastModelFor } from '../../kb/usage.mjs';
+import { helperModelFor } from '../../kb/usage.mjs';
 import { logger } from '../../core/logger.mjs';
 import { restrictsTools } from './mode-personas.mjs';
 import { tasks } from '../tools/handlers/session-tasks.mjs';
@@ -72,9 +72,8 @@ export function clampToReadOnly(mode) {
 // every 'auto' turn (and before the v2 per-chat lock) — on the CLI path each
 // spawn of a big default model added seconds of pure pre-turn latency.
 // Chain-derived (kb/usage.mjs), never a hard-coded literal; env wins.
-export const MODEL = process.env.LLMIDE_MODE_CLASSIFY_MODEL
-           || process.env.LLMIDE_MODEL
-           || fastModelFor('anthropic');
+// Its own LLMIDE_MODE_CLASSIFY_MODEL wins; LLMIDE_MODEL applies only when it is not a premium model (helperModelFor).
+export const MODEL = helperModelFor('anthropic', process.env.LLMIDE_MODE_CLASSIFY_MODEL, [process.env.LLMIDE_MODEL]);
 
 // The classifier sees at most this much of the message. It decides between
 // five modes from what the user is ASKING, which is in the opening lines (and
