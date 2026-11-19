@@ -4,7 +4,7 @@
 // A stage that runs once per run (runsOncePerRun) is skipped in later iterations once it has passed.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
 import { effectiveReviewAfter } from "./review.ts";
-import { LOOPBACK_IDENTICAL_STOP, LOOPBACK_MAX_ROUNDS, LOOPBACK_STOPPED_CODE, failureSignature, findingsText, groupOfCode, groupOfVerify, loopbackGroups, stoppedSummary, type FindingsEntry, type LoopbackContext, type LoopbackGroup, type LoopbackSummary } from "./loopback.ts";
+import { LOOPBACK_IDENTICAL_STOP, LOOPBACK_MAX_ROUNDS, LOOPBACK_STOPPED_CODE, failureSignature, findingsText, headAndTail, groupOfCode, groupOfVerify, loopbackGroups, stoppedSummary, type FindingsEntry, type LoopbackContext, type LoopbackGroup, type LoopbackSummary } from "./loopback.ts";
 
 export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 
@@ -371,7 +371,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       if (haltAfterRound) return haltAfterRound;
       if (deps.isCancelled?.()) return cancelledOutcome();
       const code = trigger.group.codeStages[0];
-      const entry: FindingsEntry = { round: iteration, source: trigger.source, text: trigger.text.length > 12_000 ? trigger.text.slice(0, 12_000) : trigger.text };
+      const entry: FindingsEntry = { round: iteration, source: trigger.source, text: headAndTail(trigger.text, 12_000) };
       const signature = failureSignature(trigger.source, trigger.text);
       unchanged = signature === loopSignature ? unchanged + 1 : 1;
       loopSignature = signature;

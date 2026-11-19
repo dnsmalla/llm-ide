@@ -24,6 +24,18 @@ const FINDINGS_MAX_CHARS = 12_000;
 const RECORD_FINDINGS_MAX_CHARS = 4000;
 const SIGNATURE_MAX_CHARS = 2000;
 
+/**
+ * `text` cut to about `max` characters for a model: the first quarter and the last three quarters, with a note saying
+ * how much is missing. Test and build tools print what failed and the summary at the END, so a head-only cut hands the
+ * fixing agent the setup noise and drops the failure it was asked to fix.
+ */
+export function headAndTail(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = Math.floor(max / 4);
+  const tail = max - head;
+  return `${text.slice(0, head)}\n… [${text.length - max} characters of output omitted here; the end of the output follows] …\n${text.slice(text.length - tail)}`;
+}
+
 export function isCodeWritingStage(stage: LoopStage): boolean {
   return stage.kind === "skill" && effectiveReviewAfter(stage);
 }

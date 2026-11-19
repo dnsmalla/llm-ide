@@ -79,3 +79,14 @@ test("runStatusCode with stoppedAtLimit", () => {
   assert.equal(runStatusCode({ passed: false, stoppedAtLimit: true, awaitingReview: true }), "awaiting_review");
   assert.equal(runStatusCode({ passed: false }), "failed");
 });
+
+test("headAndTail keeps the end of long output, where a test run prints what failed", async () => {
+  const { headAndTail } = await import("../native/loopback.ts");
+  assert.equal(headAndTail("short", 100), "short");
+  const out = `$ pytest\n${"collecting noise\n".repeat(5000)}FAILED tests/test_tax.py::test_jp - assert 0.12 == 0.1\n1 failed, 40 passed`;
+  const cut = headAndTail(out, 12_000);
+  assert.ok(cut.startsWith("$ pytest\n"), "the command stays");
+  assert.ok(cut.endsWith("FAILED tests/test_tax.py::test_jp - assert 0.12 == 0.1\n1 failed, 40 passed"), "the failure and summary stay");
+  assert.match(cut, /… \[\d+ characters of output omitted here; the end of the output follows\] …/);
+  assert.ok(cut.length < 12_200);
+});

@@ -9,7 +9,7 @@ import { guardedAgentCall, type AgentWrites, type GuardedCallOutcome } from "./a
 import { evaluateArtifact } from "./artifact.ts";
 import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, agentRunBody, fencedBlock, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
-import type { FindingsEntry, LoopbackContext } from "./loopback.ts";
+import { headAndTail, type FindingsEntry, type LoopbackContext } from "./loopback.ts";
 import { importOnlyFiles } from "./import-only.ts";
 import { followsRegistry, registrySource, stagePromptText } from "./default-stage.ts";
 import { graphDigest, rulesDigest } from "./graph-digest.ts";
@@ -174,7 +174,7 @@ async function runRegressionStage(ctx: StageExecContext, s: LoopStage, prefix: s
     async judge(saved, fresh) {
       const prompt = ["Compare two answers about a software fault.", "Are they the same meaning for the fault and its fix? Reply with JSON only: {\"same\":true} or {\"same\":false}.", `Saved answer:\n${saved.slice(0, 12_000)}`, `Fresh answer:\n${fresh.slice(0, 12_000)}`].join("\n\n");
       const j = await ctx.core.request<{ reply?: string }>("/kb/complete", { method: "POST", body: { prompt }, timeoutMs: 180_000 });
-      const m = /\{[\s\S]*?\}/.exec(j.reply ?? "");
+      const m = /\{[\s\S]*\}/.exec(j.reply ?? ""); // greedy: the whole object, not up to the first `}`
       if (!m) return false;
       try { return (JSON.parse(m[0]) as { same?: unknown }).same === true; } catch { return false; }
     },
@@ -456,8 +456,8 @@ export function addendumSection(stage: Pick<LoopStage, "promptAddendum">): strin
 async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, attempt: number, target: LoopDefinition, halt: HaltState, opts?: { review?: boolean }): Promise<StageRunResult> {
   // A review repair starts from a step that passed its checks, so the message says so and carries the findings to fix.
   const message = opts?.review
-    ? [`A review of the step “${s.name}” found the problems below. The step's own checks passed; fix what the review asks for in this repository.`, `Attempt ${attempt}.`, `Review findings:\n${output.slice(0, 12_000)}`]
-    : [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${output.slice(0, 12_000)}`];
+    ? [`A review of the step “${s.name}” found the problems below. The step's own checks passed; fix what the review asks for in this repository.`, `Attempt ${attempt}.`, `Review findings:\n${headAndTail(output, 12_000)}`]
+    : [`Fix the failing Loop stage “${s.name}” in this repository.`, `Attempt ${attempt}.`, `Stage output:\n${headAndTail(output, 12_000)}`];
   const lessons = addendumSection(s);
   if (lessons) message.push(lessons);
   if (target.goal) message.push(`Loop goal: ${target.goal}`);
