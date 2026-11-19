@@ -30,6 +30,11 @@ const dbAuthority = (userId) => classRefusal(getMember(getDb(), userId), 'model.
 let authority = dbAuthority;
 /** Test seam: these tests run without a DB. */
 export function _setAuthorityForTests(fn) { authority = fn; }
+// Test seams for one tick: the drafting model call and the plan lookup (null restores the real one).
+let draft = draftQuestion;
+let loadPlan = getPlan;
+export function _setTickDepsForTests({ draftQuestion: d = null, getPlan: g = null } = {}) { draft = d ?? draftQuestion; loadPlan = g ?? getPlan; }
+export function _tickForTests(sessionId) { const run = runs.get(sessionId); return run ? tickRun(run) : null; }
 
 // ── Question-loop tunables ────────────────────────────────────────────
 // Held in module scope so tests can override.  Numbers come from §6 of
@@ -488,6 +493,12 @@ async function tickRun(run) {
     return logCandidate(run, { shouldAsk: false, score: 0, reason: 'no-plan-id' });
   }
 
+  // Nothing new was said since the last draft: the model would get the same transcript and give the same answer.
+  // Without this, a quiet room re-sent an unchanged window every MIN_LLM_CALL_INTERVAL_MS for as long as it stayed quiet.
+  if (lastTs <= (run.lastDraftedCaptionTs ?? 0)) {
+    return recordDecision(run, 'nothing new since the last draft');
+  }
+
   // Hard rate floor — sits ABOVE plan loading too, so name-call
   // bypass can't spam CLI invocations on a meeting with no plan
   // yet either.
@@ -498,7 +509,7 @@ async function tickRun(run) {
   }
 
   let plan;
-  try { plan = getPlan(run.userId, run.planId); }
+  try { plan = loadPlan(run.userId, run.planId); }
   catch (err) {
     recordDecision(run, `plan-load-error: ${err.message?.slice(0, 40)}`);
     return logCandidate(run, { shouldAsk: false, score: 0, reason: `plan-load-error: ${err.message?.slice(0, 60)}` });
@@ -511,7 +522,8 @@ async function tickRun(run) {
   // Mark the LLM call BEFORE awaiting — if the call takes 4s and
   // the next tick fires at 3s, that tick will see the rate floor.
   run.lastLLMCallAt = now;
-  const candidate = await draftQuestion({
+  run.lastDraftedCaptionTs = lastTs;
+  const candidate = await draft({
     plan,
     transcriptWindow: window,
     recentQuestions: run.recentQuestions,

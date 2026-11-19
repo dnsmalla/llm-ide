@@ -242,3 +242,36 @@ test('a tick refuses to draft a question once the member may no longer run the m
   await meetingAgent.stopAgent({ userId: 'user-1', sessionId: 'sess-auth' });
   reset();
 });
+
+// ── One draft per new speech (LLM usage review 2026-11-19) ──────────
+test('a quiet room is drafted on once: the same transcript is never sent to the model again', async () => {
+  reset();
+  let drafts = 0;
+  meetingAgent._setTickDepsForTests({
+    draftQuestion: async () => { drafts += 1; return { shouldAsk: false, score: 0.1, reason: 'nothing to ask' }; },
+    getPlan: () => ({ id: 'plan-1', tasks: [] }),
+  });
+  const said = (text, agoMs) => liveSessions.appendCaptions('user-q', 'sess-Q', [{ speaker: 'Alice', text, ts: Date.now() - agoMs, source: 'extension-cc' }]);
+  said('we should ship the importer', 9000);
+  said('yes on friday', 8000);
+  said('and the tests first', 7000);
+  await meetingAgent.dispatchAgent({ userId: 'user-q', sessionId: 'sess-Q', planId: 'plan-1' });
+  const run = meetingAgent.getRunBySessionId('sess-Q');
+  try {
+    await meetingAgent._tickForTests('sess-Q');
+    assert.equal(drafts, 1, 'the first tick drafts');
+    // The rate floor has passed and nobody spoke: without the check this is where the same window went out again.
+    run.lastLLMCallAt = 0;
+    await meetingAgent._tickForTests('sess-Q');
+    assert.equal(drafts, 1, 'nothing new was said, so no second call');
+    assert.match(run.lastDecision?.reason ?? String(run.lastDecision), /nothing new since the last draft/);
+    // New speech (already followed by enough silence) is drafted on again.
+    said('what about the migration', 3000);
+    run.lastLLMCallAt = 0;
+    await meetingAgent._tickForTests('sess-Q');
+    assert.equal(drafts, 2);
+  } finally {
+    meetingAgent._setTickDepsForTests();
+    await meetingAgent.stopAgent({ userId: 'user-q', sessionId: 'sess-Q' });
+  }
+});
