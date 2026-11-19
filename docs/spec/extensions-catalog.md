@@ -271,6 +271,7 @@ The check never starts what a chat would not start, and never judges what only a
 | `SKILL_INVALID` | skill-kit | `none` (`detail.file`) |
 
 Safety rules (each has a test in `tests/extensions-health.test.mjs`):
+
 1. An item the user has not consented to, or has switched off, is never started or loaded.
 2. A stdio server is never started on a hub.
 3. Whatever was started is closed (`finally`), also on an error, a timeout, an aborted request or a late connection.
