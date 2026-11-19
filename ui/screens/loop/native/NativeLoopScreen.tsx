@@ -10,6 +10,7 @@ import { createHostFs } from "../../explorer/fs";
 import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
+import { SkillIdField, decodeSkillChoices, type SkillChoice } from "./SkillIdField";
 import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, reviewEveryRunsOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
@@ -123,6 +124,13 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const [selectedLoopId, setSelectedLoopId] = useState<string | null>(null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [skillChoices, setSkillChoices] = useState<SkillChoice[] | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const ac = new AbortController();
+    void core.request<unknown>("/kb/agent/skill-library", { signal: ac.signal }).then((r) => { if (!ac.signal.aborted) setSkillChoices(decodeSkillChoices(r)); }, () => { if (!ac.signal.aborted) setSkillChoices(null); });
+    return () => ac.abort();
+  }, [active]);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   /** What the input-path field shows while typing; the loop keeps only the last valid value. */
@@ -1241,7 +1249,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
               {reviewSwitch(stage).eligible && isFactoryLoop(loop) ? <p className="loop-native-hint">Step reviews for a Factory loop are set in the Factory process (Process tab).</p> : null}
               {stage.kind === "shellCommand" ? <label className="loop-field"><span>Command</span><input value={stage.command ?? ""} placeholder="npm test" onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.command = e.target.value; })} />{testCommand && stage.command !== testCommand ? <button type="button" className="loop-btn" onClick={() => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.command = testCommand; })}>Use detected: {testCommand}</button> : null}</label> : null}
               {stage.kind === "skill" ? <>
-                <label className="loop-field"><span>Skill id</span><input value={stage.skillId ?? ""} placeholder="family/skill" onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.skillId = e.target.value || null; })} /></label>
+                <SkillIdField value={stage.skillId ?? ""} skills={skillChoices} onChange={(id) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.skillId = id || null; })} />
                 <label className="loop-field"><span>Target path (optional)</span><input value={stage.targetPath ?? ""} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.targetPath = e.target.value || null; })} /></label>
                 <label className="loop-field"><span>Output path (optional)</span><input value={stage.outputPath ?? ""} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) s.outputPath = e.target.value || null; })} /></label>
                 <label className="loop-field"><span>Prompt (optional)</span><textarea rows={3} value={shownStagePrompt(stage)} onChange={(e) => patchLoop((l) => { const s = l.config.stages.find((x) => x.id === stage.id); if (s) { s.prompt = e.target.value || null; Object.assign(s, detachedFields()); } })} />{followsRegistry(stage) ? <small className="loop-native-hint">Built-in prompt, revision {registrySource(stage)?.revision}. Editing it makes this stage your own.</small> : null}</label>
