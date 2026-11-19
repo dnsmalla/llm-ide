@@ -84,6 +84,17 @@ export function chatRemovedBody() {
   };
 }
 
+const normalizeForQuote = (text) => String(text ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * True when `quote` is a fragment of the (normalized) transcript, ignoring case, whitespace, wrapping quote marks
+ * and a trailing ellipsis from a cut. An empty quote is "no quote", not a fabricated one.
+ */
+export function quoteIsFrom(normalizedTranscript, quote) {
+  const q = normalizeForQuote(quote).replace(/^["'“”「『]+|["'“”」』]+$/g, '').replace(/(…|\.\.\.)$/, '').trim();
+  return q === '' ? false : normalizedTranscript.includes(q);
+}
+
 export async function handleAIRoutes(req, res) {
   // Generate markdown notes
   if (req.method === 'POST' && req.url === '/generate-notes') {
@@ -315,9 +326,15 @@ export async function handleAIRoutes(req, res) {
     };
 
     const ALLOWED_SEVERITY = new Set(['low', 'med', 'high']);
+    const transcriptForQuotes = normalizeForQuote(transcript);
     const validate = (obj) => {
       if (!obj || typeof obj !== 'object') return null;
-      const cleanQuote = (q) => sanitizeLine(typeof q === 'string' ? q : '', 200);
+      // The prompt requires each quote to be a fragment of the transcript; the model's word is not taken for it.
+      // A quote that is not there is dropped (the item stays: the fact may be right, its "evidence" was invented).
+      const cleanQuote = (q) => {
+        const quote = sanitizeLine(typeof q === 'string' ? q : '', 200);
+        return quoteIsFrom(transcriptForQuotes, quote) ? quote : '';
+      };
       const cleanText = (t) => sanitizeLine(typeof t === 'string' ? t : '', 500);
       const cleanOwner = (o) => (typeof o === 'string' ? (sanitizeLine(o, 50) || null) : null);
       const cleanDue = (d) => (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.trim()) ? d.trim() : null);
