@@ -17,6 +17,19 @@ const MODEL = process.env.LLMIDE_SUMMARIZE_MODEL
            || process.env.LLMIDE_MODEL
            || ANTHROPIC_DEFAULT_MODEL;
 
+// The reply shape as a structured-output schema (direct API path: the reply is then guaranteed to parse). Optional
+// fields are nullable here, because a schema must list every key; nulls are dropped again before returning.
+const S = { type: 'string' };
+const N = { type: ['string', 'null'] };
+const O = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+export const SUMMARY_SCHEMA = O({
+  gist: S, tldr: { type: 'array', items: S }, full: S,
+  actions: { type: 'array', items: O({ owner: N, text: S, due: N }) },
+  decisions: { type: 'array', items: O({ text: S }) },
+  blockers: { type: 'array', items: O({ text: S }) },
+});
+const withoutNulls = (list) => list.map((x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).filter(([, v]) => v !== null)) : x));
+
 function buildPrompt({ transcript, title, language, started_at, duration_seconds, participants }, { strict = false } = {}) {
   const meta = JSON.stringify({ title, started_at, duration_seconds, participants, language });
   const header = strict
@@ -52,7 +65,7 @@ export async function summarizeTranscript(opts) {
   // audit logging the same way all other agent calls do.
   // Tier routing (`features.internal`) replaces the default model when it
   // resolves; otherwise the call is exactly as before.
-  const claudeOpts = { userId, maxTokens: 2048, ...routeOpts(userId, 'internal', { model: MODEL }) };
+  const claudeOpts = { userId, maxTokens: 2048, jsonSchema: SUMMARY_SCHEMA, ...routeOpts(userId, 'internal', { model: MODEL }) };
   // The model that actually answered (a routed call may fall back to MODEL);
   // only the real runClaude reports it — a test stub leaves the routed one.
   let ranModel = claudeOpts.model;
@@ -72,7 +85,7 @@ export async function summarizeTranscript(opts) {
     gist: String(parsed.gist).slice(0, 200),
     tldr: parsed.tldr.slice(0, 5).map(x => String(x).slice(0, 280)),
     full: String(parsed.full || ''),
-    actions:   Array.isArray(parsed.actions)   ? parsed.actions   : [],
+    actions:   Array.isArray(parsed.actions)   ? withoutNulls(parsed.actions) : [],
     decisions: Array.isArray(parsed.decisions) ? parsed.decisions : [],
     blockers:  Array.isArray(parsed.blockers)  ? parsed.blockers  : [],
     model: ranModel,

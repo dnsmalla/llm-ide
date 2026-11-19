@@ -156,3 +156,29 @@ test('a retired model id is sent as its successor, and the catalog offers the cu
   const million = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
   assert.deepEqual(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'].map((m) => estimateTurnCostUsd(m, million)), [24, 12, 0.6, 48]);
 });
+
+test('jsonSchema is sent as output_config.format, and a rejected schema is dropped, not fatal', async () => {
+  const schema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false };
+  await withUserKey([{ stop_reason: 'end_turn', usage, content: [{ type: 'text', text: '{"ok":true}' }] }], async (ask, bodies) => {
+    assert.equal(await ask('q', { jsonSchema: schema }), '{"ok":true}');
+    assert.deepEqual(bodies[0].output_config, { format: { type: 'json_schema', schema } });
+    await ask('q');
+    assert.equal(bodies[1].output_config, undefined, 'only when a caller asks');
+  });
+  // A 400 naming the schema: one more call without it.
+  resetDb();
+  const u = users.registerUser(db.getDb(), { email: `schema-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 'r' });
+  vault.setSecret(db.getDb(), u.id, 'claude.apiKey', 'sk-user-scoped-xyz');
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  globalThis.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    if (bodies.length === 1) return { ok: false, status: 400, headers: new Headers(), async text() { return '{"error":{"message":"output_config.format.schema: unsupported keyword"}}'; } };
+    return { ok: true, status: 200, headers: new Headers(), async json() { return { stop_reason: 'end_turn', usage, content: [{ type: 'text', text: '{"ok":true}' }] }; } };
+  };
+  const { runClaude } = await import('../providers/runtime.mjs');
+  try {
+    assert.equal(await runClaude('q', { userId: u.id, jsonSchema: schema }), '{"ok":true}');
+    assert.deepEqual(bodies.map((b) => !!b.output_config), [true, false]);
+  } finally { globalThis.fetch = originalFetch; }
+});

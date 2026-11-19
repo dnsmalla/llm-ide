@@ -34,6 +34,17 @@ const CATEGORIES = new Set([
 ]);
 const SKIP = new Set(['chatter', 'noise']);
 const PRIORITIES = new Set(['low', 'med', 'high']);
+// The reply shape as a structured-output schema, built from the sets above so they cannot drift apart. On the direct
+// API path the reply is then guaranteed to parse; the normalizers below still clean and bound every field.
+const SCHEMA_OBJECT = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+export const CLASSIFY_SCHEMA = SCHEMA_OBJECT({
+  category: { type: 'string', enum: [...CATEGORIES] },
+  noteWorthy: { type: 'boolean' },
+  summary: { type: 'string' },
+  todos: { type: 'array', items: SCHEMA_OBJECT({
+    title: { type: 'string' }, detail: { type: 'string' }, due: { type: ['string', 'null'] }, priority: { type: 'string', enum: [...PRIORITIES] },
+  }) },
+});
 const MAX_TEXT_CHARS = 20_000;
 
 function buildPrompt({ source, title, date, text }, { strict = false } = {}) {
@@ -78,7 +89,7 @@ export async function classifyConnectorItem(opts) {
   const { _runClaude = defaultRunClaude, userId } = opts;
   // Tier routing (`features.internal`) replaces the default model when it
   // resolves; otherwise the call is exactly as before.
-  const claudeOpts = { userId, maxTokens: 1024, ...routeOpts(userId, 'internal', { model: MODEL }) };
+  const claudeOpts = { userId, maxTokens: 1024, jsonSchema: CLASSIFY_SCHEMA, ...routeOpts(userId, 'internal', { model: MODEL }) };
   let parsed = tryParseJSON(await _runClaude(buildPrompt(opts), claudeOpts));
   if (!parsed) {
     parsed = tryParseJSON(await _runClaude(buildPrompt(opts, { strict: true }), claudeOpts));

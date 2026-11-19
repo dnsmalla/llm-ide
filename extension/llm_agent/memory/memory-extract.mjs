@@ -112,6 +112,17 @@ function normalizeKey(k) {
 // else its text — so a model that emits the same subject twice in one response
 // yields one fact (the last wins, matching the writer's upsert), rather than two
 // rows that then fight each other.
+// The reply shape as a structured-output schema (the shape the prompt spells out). On the direct API path the reply
+// is then guaranteed to parse, so a turn's facts are not lost to a malformed reply; the sanitizers still bound it.
+const EXTRACT_OBJECT = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+const EXTRACT_STRING = { type: 'string' };
+export const EXTRACT_SCHEMA = EXTRACT_OBJECT({
+  facts: { type: 'array', items: EXTRACT_OBJECT({ category: EXTRACT_STRING, key: EXTRACT_STRING, fact: EXTRACT_STRING }) },
+  session: { type: 'array', items: EXTRACT_OBJECT({ key: EXTRACT_STRING, fact: EXTRACT_STRING }) },
+  superseded: { type: 'array', items: EXTRACT_STRING },
+  session_superseded: { type: 'array', items: EXTRACT_STRING },
+});
+
 export function sanitizeFacts(parsed) {
   if (!Array.isArray(parsed)) return [];
   const out = [];
@@ -411,6 +422,7 @@ export async function extractMemories({
       // design-settling turn filled both, and a clipped response parses as
       // nothing — every fact of that turn lost, not just the last one.
       maxTokens: 768,
+      jsonSchema: EXTRACT_SCHEMA,
     });
     // Optional observability sink: rough token cost of THIS extraction call
     // (prompt + response, ~4 chars/token — the same estimate the memory_context

@@ -84,6 +84,17 @@ export function chatRemovedBody() {
   };
 }
 
+// The reply shape of /extract-entities as a structured-output schema (the same shape the prompt spells out). On the
+// direct API path the reply is then guaranteed to parse; validate() below still cleans and bounds every field.
+const str = { type: 'string' };
+const nullableStr = { type: ['string', 'null'] };
+const obj = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+export const ENTITIES_SCHEMA = obj({
+  actions: { type: 'array', items: obj({ text: str, owner: nullableStr, due: nullableStr, quote: str }) },
+  decisions: { type: 'array', items: obj({ text: str, participants: { type: 'array', items: str }, quote: str }) },
+  blockers: { type: 'array', items: obj({ text: str, severity: { type: 'string', enum: ['low', 'med', 'high'] }, quote: str }) },
+});
+
 const normalizeForQuote = (text) => String(text ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 /**
@@ -347,8 +358,8 @@ export async function handleAIRoutes(req, res) {
       };
     };
 
-    let validated = validate(tryParse(await runClaude(buildPrompt(false), { userId: req.user?.id, maxTokens: 2048, ...routeOpts(req.user?.id, 'internal') })));
-    if (!validated) validated = validate(tryParse(await runClaude(buildPrompt(true), { userId: req.user?.id, maxTokens: 2048, ...routeOpts(req.user?.id, 'internal') })));
+    let validated = validate(tryParse(await runClaude(buildPrompt(false), { userId: req.user?.id, maxTokens: 2048, jsonSchema: ENTITIES_SCHEMA, ...routeOpts(req.user?.id, 'internal') })));
+    if (!validated) validated = validate(tryParse(await runClaude(buildPrompt(true), { userId: req.user?.id, maxTokens: 2048, jsonSchema: ENTITIES_SCHEMA, ...routeOpts(req.user?.id, 'internal') })));
     if (!validated) {
       sendJSON(res, 500, { error: { code: 'AI_PARSE_FAILED', message: 'Failed to parse entity JSON after retry. Try again.' } });
       return true;

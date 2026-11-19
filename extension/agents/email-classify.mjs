@@ -27,6 +27,17 @@ const CATEGORIES = new Set([
 // Categories that are never note-worthy regardless of what the model says.
 const SKIP = new Set(['newsletter', 'marketing', 'receipt', 'notification', 'otp']);
 const PRIORITIES = new Set(['low', 'med', 'high']);
+// The reply shape as a structured-output schema, built from the sets above so they cannot drift apart. On the direct
+// API path the reply is then guaranteed to parse; the normalizers below still clean and bound every field.
+const SCHEMA_OBJECT = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+export const CLASSIFY_SCHEMA = SCHEMA_OBJECT({
+  category: { type: 'string', enum: [...CATEGORIES] },
+  noteWorthy: { type: 'boolean' },
+  summary: { type: 'string' },
+  todos: { type: 'array', items: SCHEMA_OBJECT({
+    title: { type: 'string' }, detail: { type: 'string' }, due: { type: ['string', 'null'] }, priority: { type: 'string', enum: [...PRIORITIES] },
+  }) },
+});
 
 function buildPrompt({ subject, from, date, body }, { strict = false } = {}) {
   const header = strict
@@ -71,7 +82,7 @@ export async function classifyEmail(opts) {
   const { _runClaude = defaultRunClaude, userId } = opts;
   // Tier routing (`features.internal`) replaces the default model when it
   // resolves; otherwise the call is exactly as before.
-  const claudeOpts = { userId, maxTokens: 1024, ...routeOpts(userId, 'internal', { model: MODEL }) };
+  const claudeOpts = { userId, maxTokens: 1024, jsonSchema: CLASSIFY_SCHEMA, ...routeOpts(userId, 'internal', { model: MODEL }) };
   // The model that actually answered (a routed call may fall back to MODEL);
   // only the real runClaude reports it — a test stub leaves the routed one.
   let ranModel = claudeOpts.model;

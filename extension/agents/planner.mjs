@@ -81,6 +81,21 @@ ${(meeting.transcriptText || '').slice(0, 200_000)}
 <<<END>>>`;
 }
 
+// The plan shape as a structured-output schema (the shape the prompt spells out). On the direct API path the reply is
+// then guaranteed to parse; validatePlan still bounds every field, checks owners and resolves dependsOn.
+const PLAN_OBJECT = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+export const PLAN_SCHEMA = PLAN_OBJECT({
+  title: { type: 'string' },
+  goal: { type: 'string' },
+  milestones: { type: 'array', items: PLAN_OBJECT({
+    name: { type: 'string' },
+    tasks: { type: 'array', items: PLAN_OBJECT({
+      title: { type: 'string' }, description: { type: 'string' }, owner: { type: ['string', 'null'] },
+      estimateDays: { type: ['number', 'null'] }, dependsOn: { type: 'array', items: { type: 'string' } },
+    }) },
+  }) },
+});
+
 export function validatePlan(raw, meeting, goal) {
   if (!raw || typeof raw !== 'object') return null;
   const title = sanitizeStr(raw.title, 200) || meeting.title || 'Plan';
@@ -149,7 +164,7 @@ export async function generatePlan(userId, { meetingId, goal, language, _runClau
 
   // Cap output tokens — plan JSON schema is bounded by task count (max ~30).
   // Tier routing (`features.pipeline`); unrouted → runClaude's default.
-  const claudeOpts = { userId, maxTokens: 3000, ...routeOpts(userId, 'pipeline') };
+  const claudeOpts = { userId, maxTokens: 3000, jsonSchema: PLAN_SCHEMA, ...routeOpts(userId, 'pipeline') };
   let parsed = tryParseJSON(await _runClaude(
     buildPrompt({ meeting, goal, lang, context, strict: false }), claudeOpts));
   let plan = validatePlan(parsed, meeting, goal);

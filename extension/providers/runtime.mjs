@@ -267,7 +267,7 @@ function ranOn({ model, provider: explicitProvider }) {
   return { provider, model: (provider === 'anthropic' ? resolveModel(model) : model) ?? null };
 }
 
-async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, requestId, autoFallback = true, mcpConfig, cwd, warm = false } = {}) {
+async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, requestId, autoFallback = true, mcpConfig, cwd, warm = false, jsonSchema = null } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -440,6 +440,10 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
     let attemptMaxTokens = resolvedMaxTokens;
     let overflowRetried = false;
     let truncationRetried = false;
+    // Structured output (`output_config.format`): the API guarantees JSON that matches the caller's schema, so a
+    // JSON job needs no "strict" re-ask. Direct Anthropic API only; the CLI path keeps the caller's own parsing.
+    // Dropped for the rest of the call if the API rejects the schema, so a schema mistake never breaks the job.
+    let schema = jsonSchema && typeof jsonSchema === 'object' ? jsonSchema : null;
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       try {
         const response = await fixedHostFetch('https://api.anthropic.com/v1/messages', {
@@ -453,6 +457,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
             model: resolvedModel,
             max_tokens: attemptMaxTokens,
             messages,
+            ...(schema ? { output_config: { format: { type: 'json_schema', schema } } } : {}),
           }),
           // Hang breaker only — see SOCKET_HANG_BREAKER_MS. This used to be a
           // 60 s ceiling, which cut off any completion that legitimately took
@@ -545,6 +550,11 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
         if (response.status === 400 || response.status === 404) {
           let bodyText = '';
           try { bodyText = (await response.text()).slice(0, 500); } catch { /* ignore */ }
+          if (schema && /output_config|json_schema|schema|format/i.test(bodyText)) {
+            schema = null;
+            log.warn('runClaude structured-output schema rejected, retrying without it', { model: resolvedModel, detail: redactKey(bodyText.slice(0, 200), apiKey) });
+            continue;
+          }
           const overflow = /max_tokens|too long|context/i.test(bodyText);
           if (overflow && !overflowRetried && attemptMaxTokens > MIN_OVERFLOW_TOKENS) {
             overflowRetried = true;
