@@ -39,6 +39,7 @@ export function MemoryBody({ state, busy = false, actions }: { state: MemoryStat
   if (state.status === "loading") return <div className="mem-empty" role="status">Loading memory</div>;
   const { project, projectFailed, session } = state.data;
   const facts = project?.facts ?? [];
+  const stale = new Set(project?.stale ?? []);
   const banner = projectFailed ? <StatusBanner severity="error" message="Couldn't load project memory." /> : null;
   if (facts.length === 0 && session.length === 0) {
     // A failed project load says so and nothing else (the empty-state text would claim "nothing learned").
@@ -80,6 +81,7 @@ export function MemoryBody({ state, busy = false, actions }: { state: MemoryStat
                     <div>
                       <span>{factText(f)}</span>
                       {learned && <span className="mem-learned">{`Learned ${learned}`}</span>}
+                      {stale.has(f) && <span className="mem-learned" role="note">May be outdated: every file this mentions is gone from the project</span>}
                     </div>
                     {actions && <button type="button" className="mem-trash" aria-label={`Forget ${factText(f)}`} title="Forget this fact" disabled={busy} onClick={() => actions.onDeleteFact(f)}>×</button>}
                   </li>

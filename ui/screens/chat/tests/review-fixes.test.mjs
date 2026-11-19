@@ -36,7 +36,7 @@ test("the viewer loads project and session memory through the chat adapter (open
     "GET /kb/agent/session-memory": { facts: ["Decided on the importer"] },
   } });
   const out = await loadMemory(c.memoryClient(core), { repos: [], workspaceRoot: "/work/app", sessionId: "s1" });
-  assert.deepEqual(out.project, { facts: ["Uses pnpm (t:2026-10-01)"], repo: "/work/app" });
+  assert.deepEqual(out.project, { facts: ["Uses pnpm (t:2026-10-01)"], repo: "/work/app", stale: [] });
   assert.deepEqual(out.session, ["Decided on the importer"]);
   assert.equal(out.projectFailed, false);
   assert.match(core.calls[0].path, /^\/kb\/agent\/project-memory\?workspaceRoot=%2Fwork%2Fapp$/);

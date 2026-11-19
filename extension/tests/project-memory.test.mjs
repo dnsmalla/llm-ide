@@ -749,7 +749,7 @@ test('GET /kb/agent/project-memory is gated and returns facts for an allow-liste
   res = mkRes();
   await handleAgentRoutes(mkReq('GET', badUrl), res, { userId: u, url: badUrl });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { facts: [], repo: null });
+  assert.deepEqual(res.body, { facts: [], repo: null, stale: [] });
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -1463,4 +1463,19 @@ test('a cloned code/<child> repo\'s own system/memory is copied into the project
   assert.ok(fs.existsSync(paths.chatMemoryFile(child)) && paths.chatMemoryFile(child).startsWith(project + path.sep));
   assert.equal(fs.readFileSync(repoCopy, 'utf8'), '# Chat memory\n- child fact\n', 'the repo is input only');
   fs.rmSync(project, { recursive: true, force: true });
+});
+
+test('GET /kb/agent/project-memory flags the facts whose cited files are all gone', async () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'stale');
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src', 'kept.ts'), '');
+  writer.appendChatMemory({ root, facts: ['The entry point is src/kept.ts', 'The old worker was src/worker.ts', 'Deploys on Fridays'] });
+  const url = `/kb/agent/project-memory?repo=${encodeURIComponent(root)}`;
+  const res = mkRes();
+  await handleAgentRoutes(mkReq('GET', url), res, { userId: u, url });
+  assert.equal(res.body.facts.length, 3, 'nothing is removed');
+  assert.deepEqual(res.body.stale.map(stripFactStamp), ['The old worker was src/worker.ts']);
+  fs.rmSync(root, { recursive: true, force: true });
 });

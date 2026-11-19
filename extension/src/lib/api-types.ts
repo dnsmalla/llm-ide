@@ -2879,6 +2879,8 @@ export type GetKbAgentProjectMemoryResponse200 = {
   facts: string[];
   /** the resolved absolute root, or null when no candidate is allow-listed */
   repo: string | null;
+  /** the facts (verbatim, a subset of `facts`) whose cited files are ALL gone from the project: probably outdated. Flagged for the viewer and labelled in prompts, never removed (API 155) */
+  stale: string[];
 };
 
 /** Request parts for `DELETE /kb/agent/project-memory` (schema/http/agent.schema.json). */

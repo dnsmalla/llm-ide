@@ -33,6 +33,7 @@ import { factStamp } from '../core/fact-key.mjs';
 import { memoryLedgerFor, ledgerKey } from '../kb/memory-ledger.mjs';
 import { termTokens } from '../core/text-tokens.mjs';
 import { ensureOwnFolder } from './self-improvement-folder.mjs';
+import { STALE_NOTE, staleFactChecker } from './memory-check.mjs';
 import { chatMemoryReadPaths, memoryDir, legacyMemoryDir, legacySystemDir, legacySystemMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
 
 // Expand a leading `~`/`~/` to the home directory. The Mac client sends
@@ -265,14 +266,18 @@ function queryTokens(userMessage) {
 // degrades to pure newest-first — which already fixes the old raw-clip that
 // kept the OLDEST facts and dropped the newest. Pure + exported for unit
 // tests. Returns a `- fact` bullet body (no header), or ''.
-export function selectChatMemoryFacts(content, { userMessage = '', room = 0, ledger = null } = {}) {
+export function selectChatMemoryFacts(content, { userMessage = '', room = 0, ledger = null, isStale = null } = {}) {
   const facts = parseChatMemoryFacts(content);
   if (facts.length === 0 || room <= 0) return '';
-  const scored = rankFactsByRelevance(facts, { userMessage, ledger });
+  const ranked = rankFactsByRelevance(facts, { userMessage, ledger });
+  // A fact whose cited files are all gone (memory-check.mjs) goes last and says so: it is still shown, because it
+  // may be the only record of something, but it never crowds out a fact the code still supports.
+  const stale = typeof isStale === 'function' ? new Set(ranked.filter((f) => isStale(f))) : new Set();
+  const scored = [...ranked.filter((f) => !stale.has(f)), ...ranked.filter((f) => stale.has(f))];
   const chosen = [];
   let used = 0;
   for (const fact of scored) {
-    const line = `- ${fact}`;
+    const line = `- ${fact}${stale.has(fact) ? STALE_NOTE : ''}`;
     const cost = line.length + (chosen.length > 0 ? 1 : 0); // +1 for the joining newline
     if (used + cost > room) continue;   // skip; a later shorter fact may still fit
     chosen.push(line);
@@ -446,7 +451,7 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, 
   const chatBody = stableOnly ? '' : selectChatMemoryFacts(
     // The same ordered list the viewer/writer reads (paths.mjs), so a moved memory file is never missed here.
     chatMemoryReadPaths(root).reduce((found, path) => found ?? safeRead(path, CHAT_STORE_CHARS), null),
-    { userMessage, room: Math.min(budget, CHAT_INJECT_CHARS), ledger },
+    { userMessage, room: Math.min(budget, CHAT_INJECT_CHARS), ledger, isStale: stableOnly ? null : staleFactChecker(root) },
   );
   const chatFloor = Math.min(Math.floor(budget * 0.5), chatBody.length);
 

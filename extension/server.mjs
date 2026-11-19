@@ -503,7 +503,9 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //   v154 — Review fixes, additive: POST /kb/agent/self-improvement/claim { workspaceRoot } → { moved } (the desktop
 //          records its own writes to the folder and claims a new one); a logged Loop row whose log line is missing is
 //          listed with change null + recordMissing instead of hidden; logged:true wipes DB text only when the line exists.
-const SERVER_API_VERSION = 154;
+//   v155 — Memory checked against the code, additive: GET /kb/agent/project-memory returns `stale` (the facts whose
+//          cited files are all gone); such a fact is ranked last and labelled where the model reads memory.
+const SERVER_API_VERSION = 155;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

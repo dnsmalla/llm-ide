@@ -6,6 +6,8 @@ import { displayLine } from "../scm/model.ts";
 
 export interface ProjectMemory {
   facts: string[];
+  /** Facts whose cited files are all gone from the project (API 155; empty from an older core). */
+  stale: string[];
   /** The allow-listed repo root the core resolved, or null when no candidate was allowed. */
   repo: string | null;
 }
@@ -39,7 +41,7 @@ function factList(raw: unknown): string[] {
 /** Decodes `{ facts, repo }`; anything else throws, so a malformed reply is never shown as "nothing remembered". */
 export function decodeProjectMemory(raw: unknown): ProjectMemory {
   if (!isRecord(raw)) throw new TypeError("project memory reply is not an object");
-  return { facts: factList(raw.facts), repo: typeof raw.repo === "string" ? raw.repo : null };
+  return { facts: factList(raw.facts), repo: typeof raw.repo === "string" ? raw.repo : null, stale: Array.isArray(raw.stale) ? factList(raw.stale) : [] };
 }
 
 /** Decodes `{ facts }`. */

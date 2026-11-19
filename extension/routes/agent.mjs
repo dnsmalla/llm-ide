@@ -21,6 +21,7 @@ import {
 } from '../graphkit/index.mjs';
 import { decideInboxItem, readInbox } from '../graphkit/self-improvement-inbox.mjs';
 import { ensureOwnFolder, noteAppWrite } from '../graphkit/self-improvement-folder.mjs';
+import { staleFactChecker } from '../graphkit/memory-check.mjs';
 import { selfImprovementDir } from '../graphkit/paths.mjs';
 import { deleteSessionMemory, listSessionMemory } from '../kb/session-memory.mjs';
 import { listAlwaysAllow, clearAlwaysAllow, clearAllAlwaysAllow } from '../kb/tool-approvals.mjs';
@@ -198,8 +199,11 @@ export async function handleAgentRoutes(req, res, ctx) {
     if (allowed) {
       for (const c of candidates) { root = resolveAllowedRepoRoot(c, allowed); if (root) break; }
     }
-    if (!root) { sendJSON(res, 200, { facts: [], repo: null }); return true; }
-    sendJSON(res, 200, { facts: readChatMemoryFacts(root), repo: root });
+    if (!root) { sendJSON(res, 200, { facts: [], repo: null, stale: [] }); return true; }
+    const facts = readChatMemoryFacts(root);
+    // Facts whose cited files are all gone (graphkit/memory-check.mjs): flagged for the viewer, never removed.
+    const isStale = staleFactChecker(root);
+    sendJSON(res, 200, { facts, repo: root, stale: facts.filter((f) => isStale(f)) });
     return true;
   }
 

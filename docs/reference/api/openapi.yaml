@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 154
+  x-api-version: 155
 servers:
   - url: "https://{host}"
     variables:
@@ -6717,6 +6717,7 @@ paths:
                 required:
                   - "facts"
                   - "repo"
+                  - "stale"
                 properties:
                   facts:
                     type: "array"
@@ -6727,6 +6728,11 @@ paths:
                       - "string"
                       - "null"
                     description: "the resolved absolute root, or null when no candidate is allow-listed"
+                  stale:
+                    type: "array"
+                    items:
+                      type: "string"
+                    description: "the facts (verbatim, a subset of `facts`) whose cited files are ALL gone from the project: probably outdated. Flagged for the viewer and labelled in prompts, never removed (API 155)"
     delete:
       summary: "Remove one captured fact, or clear a repo's captured facts"
       tags:

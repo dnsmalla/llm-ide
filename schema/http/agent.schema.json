@@ -1433,7 +1433,8 @@
           "type": "object",
           "required": [
             "facts",
-            "repo"
+            "repo",
+            "stale"
           ],
           "properties": {
             "facts": {
@@ -1448,6 +1449,13 @@
                 "null"
               ],
               "description": "the resolved absolute root, or null when no candidate is allow-listed"
+            },
+            "stale": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "the facts (verbatim, a subset of `facts`) whose cited files are ALL gone from the project: probably outdated. Flagged for the viewer and labelled in prompts, never removed (API 155)"
             }
           }
         }

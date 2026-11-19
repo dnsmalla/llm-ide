@@ -35,8 +35,9 @@ test("fixtures decode: project facts with a repo, an empty project, and a sessio
   assert.deepEqual(model.decodeProjectMemory(withFacts), {
     facts: ["[db|engine] The project stores data in SQLite.", "[perf|store] The project keeps its cache in memory."],
     repo: "/example/workspace",
+    stale: ["[perf|store] The project keeps its cache in memory."],
   });
-  assert.deepEqual(model.decodeProjectMemory(fixture("get-kb-agent-project-memory-200-empty.json").response), { facts: [], repo: null });
+  assert.deepEqual(model.decodeProjectMemory(fixture("get-kb-agent-project-memory-200-empty.json").response), { facts: [], repo: null, stale: [] });
   assert.deepEqual(model.decodeSessionMemory(fixture("get-kb-agent-session-memory-200.json").response), ["The user prefers short answers."]);
 });
 
@@ -46,7 +47,7 @@ test("decoders are strict: a malformed reply throws instead of reading as nothin
   assert.throws(() => model.decodeProjectMemory({ facts: "x", repo: null }));
   assert.throws(() => model.decodeSessionMemory({}));
   // Non-string items are dropped, and a non-string repo is "no repo", not a crash.
-  assert.deepEqual(model.decodeProjectMemory({ facts: ["ok", 3, null], repo: 7 }), { facts: ["ok"], repo: null });
+  assert.deepEqual(model.decodeProjectMemory({ facts: ["ok", 3, null], repo: 7 }), { facts: ["ok"], repo: null, stale: [] });
 });
 
 test("paths: each candidate is a repo parameter in order, the open folder goes last, values are encoded", () => {
@@ -180,4 +181,14 @@ test("the inbox decodes the contract fixture, posts one decision, and renders it
   assert.match(out, /aria-label="Adopt .*>Adopt<\/button>/);
   assert.match(out, /1 Loop lesson and 2 Loop changes wait on the Loop page/);
   assert.equal(html(h(InboxSection, { inbox: { repo: null, moved: null, sources: [] } })), "");
+});
+
+test("a fact the core flags as stale is labelled in the viewer; an older core without the field flags nothing", () => {
+  const facts = ["The old worker was src/worker.ts", "Deploys on Fridays"];
+  const decoded = model.decodeProjectMemory({ facts, repo: "/r", stale: [facts[0]] });
+  assert.deepEqual(decoded.stale, [facts[0]]);
+  assert.deepEqual(model.decodeProjectMemory({ facts, repo: "/r" }).stale, []);
+  const out = html(h(MemoryBody, { state: { status: "ready", data: { project: decoded, projectFailed: false, session: [] } } }));
+  assert.equal(out.match(/May be outdated/g).length, 1);
+  assert.match(out, /src\/worker\.ts<\/span>.*May be outdated: every file this mentions is gone/s);
 });

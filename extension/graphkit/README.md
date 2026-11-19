@@ -8,6 +8,7 @@ The graph + memory module. Five files, all in production use:
 | `graph.mjs` | Code-graph queries — `findRelatedCode` (FTS-backed) and `findRelatedSymbols` (symbol graph) |
 | `memory.mjs` | Renders a repo's memory into the agent's system prompt (READ half) |
 | `memory-writer.mjs` | Persists LLM-curated facts to `system/self-improvement/memory.md` (WRITE half) |
+| `memory-check.mjs` | Checks facts against the code, no model call: a fact whose cited files are ALL gone is ranked last and labelled in the prompt, and flagged (`stale`) for the memory viewer. Never removes a fact. |
 | `index.mjs` | Public surface — agents and context renderers import from here |
 
 ## On-disk layout (canonical)
