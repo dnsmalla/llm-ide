@@ -11,18 +11,18 @@ import { rebuildMessage, type RebuildProgress } from "./index-rebuild.ts";
 export interface LibraryExtension {
   id: string;
   label: string;
+  /** How many extensions have a known problem this session; shown as a small indicator. */
+  problems?: number;
   /** Shown while there is no `render`. */
   note?: string;
   /** How many of this group's items are switched on; null/absent = unknown (no badge). */
   count?: number | null;
-  render?: () => ReactNode;
+  /** `request` is the deep link that opened this entry, when one did. */
+  render?: (request?: { id: string; n: number } | null) => ReactNode;
 }
 
 export const EXTENSION_PLACEHOLDERS: readonly LibraryExtension[] = [
-  { id: "plugins", label: "Plugins", note: "Plugins arrive with the Extensions screen." },
-  { id: "llm-sources", label: "LLM Sources", note: "LLM sources arrive with the Extensions screen." },
-  { id: "mcp-plugins", label: "MCP Plugins", note: "MCP plugins arrive with the Extensions screen." },
-  { id: "extensions", label: "Extensions", note: "The extensions catalog arrives with the Extensions screen." },
+  { id: "extensions", label: "Extensions", note: "Extensions arrive with the Extensions screen." },
 ];
 
 export interface LibraryNavProps {
@@ -142,6 +142,7 @@ export function LibraryNav(p: LibraryNavProps): ReactNode {
             >
               <span className="lib-nav-chevron" aria-hidden="true">{open(x.id) ? "▾" : "▸"}</span><PuzzleIcon /> <span className="lib-nav-label">{x.label}</span>
               {x.count !== null && x.count !== undefined ? <span className="lib-count" aria-label={`${x.count} switched on`} title={`${x.count} switched on`}>{x.count.toLocaleString()}</span> : null}
+              {x.problems ? <span className="ext-dot" role="img" aria-label={`${x.problems} with a problem found this session`} title={`${x.problems} with a problem found this session`} /> : null}
             </button>
             <button type="button" className="lib-plus" aria-label={`Open ${x.label}`} title={`Open ${x.label}`} onClick={() => p.onExtension(x.id)}>＋</button>
             {open(x.id) ? <button type="button" className="lib-nav-close" aria-label={`Close ${x.label}`} title={`Close ${x.label}`} onClick={() => toggle(x.id)}>×</button> : null}

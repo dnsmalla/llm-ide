@@ -1,8 +1,7 @@
-// The Library's older lists: Plugins (/auth/me/plugins), LLM Sources (/auth/me/llm-sources) and MCP Plugins
-// (/auth/me/mcp-plugins). List, switch on/off, the two consent gates, read-only status (update checks, versions),
-// read-only detail panes and the reload and per-item selection writes are here; add, remove, import and
-// apply-update dialogs are parity rows (see the checklist). Same rules as the catalog screen: decoders at the boundary,
-// untrusted text cleaned and capped, one request per row at a time, nothing is enabled without its consent.
+// The Plugins (/auth/me/plugins), skill kits (/auth/me/llm-sources) and MCP servers (/auth/me/mcp-plugins) lists.
+// List, switch on/off, the two consent gates, status (update checks, versions), detail panes, add, remove, import and
+// update. Same rules as the catalog screen: decoders at the boundary, untrusted text cleaned and capped, one request
+// per row at a time, nothing is switched on without its consent.
 import { cleanText, hasUnsafeChars } from "./sanitize.ts";
 import { DecodeError, type HealthResult } from "./decoders.ts";
 import { ExtApiError, shellCode, errorText, toExtApiError, type ExtResponse } from "./errors.ts";
@@ -595,6 +594,8 @@ export interface LegacyState extends LegacyStatus {
   discovery: DiscoveryState | null;
   /** The list's name filter and the rows ticked for a bulk switch. */
   filter: string;
+  /** Show only rows whose known health result is a problem. */
+  problemsOnly: boolean;
   checked: readonly string[];
   /** A plugin update waiting for the user to agree to the command Claude Code will run. */
   pendingUpdate: { name: string; command: string; accept: string } | null;
@@ -604,7 +605,8 @@ export interface LegacyState extends LegacyStatus {
 }
 
 /** Rows whose id, name or description matches the filter (case-insensitive). Pure. */
-export function filterRows(rows: readonly LegacyRow[], filter: string): readonly LegacyRow[] {
+export function filterRows(rows: readonly LegacyRow[], filter: string, problems?: { only: boolean; kind: LegacyKind; health: Readonly<Record<string, HealthResult>> }): readonly LegacyRow[] {
+  if (problems?.only) rows = rows.filter((r) => problems.health[healthKey(HEALTH_KIND[problems.kind], r.id)]?.status === "problem");
   const q = filter.trim().toLowerCase();
   if (!q) return rows;
   return rows.filter((r) => {
@@ -668,6 +670,7 @@ export class LegacyModel {
       selected: null,
       discovery: null,
       filter: "",
+      problemsOnly: false,
       checked: [],
       pendingUpdate: null,
       health: {},
@@ -705,6 +708,14 @@ export class LegacyModel {
   }
 
   /** Reads the core's list (local data only), then the status (reused within its TTL unless `forceStatus`). */
+  private ensured = false;
+  /** Loads the list the first time it is needed; later calls do nothing (Reload and every write still call `load`). */
+  ensureLoaded(): Promise<void> {
+    if (this.ensured) return Promise.resolve();
+    this.ensured = true;
+    return this.load();
+  }
+
   async load(forceStatus = false): Promise<void> {
     const mine = ++this.seq;
     this.set({ loading: true });
@@ -813,7 +824,7 @@ export class LegacyModel {
       if (e instanceof ExtApiError && e.code === "ABORTED") return;
       if (this.state.selected !== id) return;
       const gone = e instanceof ExtApiError && e.status === 404;
-      this.set({ discovery: { id, data: null, error: gone ? "Source not found — it may have been removed." : errorText(e), loading: false } });
+      this.set({ discovery: { id, data: null, error: gone ? "Skill kit not found — it may have been removed." : errorText(e), loading: false } });
     }
   }
 
@@ -824,7 +835,7 @@ export class LegacyModel {
         const r = await this.api.reloadPlugins(this.life.signal);
         await this.load(true);
         const warn = r.warnings.length > 0 ? ` ${r.warnings.join(" ")}` : "";
-        this.set({ notice: { text: `Reloaded ${r.count.toLocaleString()} ${r.count === 1 ? "plugin" : "plugins"} from disk.${warn}`, error: false } });
+        this.set({ notice: { text: `Reloaded ${r.count.toLocaleString()} ${r.count === 1 ? "plugin" : "plugins"}.${warn}`, error: false } });
       } catch (e) {
         this.fail(e);
       }
@@ -941,7 +952,7 @@ export class LegacyModel {
     try {
       await this.api.addLlmSource(input, this.life.signal);
       await this.load(true);
-      this.set({ notice: { text: `Added ${input.name || input.url || input.path || "source"}.`, error: false } });
+      this.set({ notice: { text: `Added ${input.name || input.url || input.path || "skill kit"}.`, error: false } });
       return true;
     } catch (e) {
       this.fail(e);
@@ -1103,13 +1114,16 @@ export class LegacyModel {
   setFilter(filter: string): void {
     this.set({ filter });
   }
+  setProblemsOnly(on: boolean): void {
+    this.set({ problemsOnly: on });
+  }
   toggleChecked(id: string): void {
     const c = this.state.checked;
     this.set({ checked: c.includes(id) ? c.filter((x) => x !== id) : [...c, id] });
   }
   /** Ticks every row the filter shows, or clears them when all are already ticked. */
   toggleAllShown(): void {
-    const shown = filterRows(this.state.rows, this.state.filter).map((r) => r.id);
+    const shown = filterRows(this.state.rows, this.state.filter, { only: this.state.problemsOnly, kind: this.kind, health: this.state.health }).map((r) => r.id);
     const all = shown.length > 0 && shown.every((id) => this.state.checked.includes(id));
     this.set({ checked: all ? this.state.checked.filter((id) => !shown.includes(id)) : [...new Set([...this.state.checked, ...shown])] });
   }

@@ -12,7 +12,7 @@ const many = (n: number) => {
 
 test("rows: one header per kind, then its items", () => {
   const rows = flattenGroups(many(8));
-  assert.deepEqual(rows.filter((r) => r.kind === "header").map((r) => (r as { label: string }).label), ["Skills", "Plugins", "MCP servers", "Skill bundles"]);
+  assert.deepEqual(rows.filter((r) => r.kind === "header").map((r) => (r as { label: string }).label), ["Skills", "Plugins", "MCP servers", "Skill kits"]);
   assert.equal(rows.length, 12);
   assert.equal(rows[0]?.kind, "header");
 });

@@ -83,11 +83,12 @@ export function componentStatus(component: string, p: Pick<PluginRow, "executabl
 }
 
 /** The row text for one unsupported component, following the trust grant and the enabled state. */
-export function componentRowText(component: string, p: Pick<PluginRow, "executableKinds" | "sdkReadable" | "nativePluginsOn" | "hooksTrusted" | "enabled">): string {
-  switch (componentStatus(component, p)) {
+export function componentRowText(rawComponent: string, p: Pick<PluginRow, "executableKinds" | "sdkReadable" | "nativePluginsOn" | "hooksTrusted" | "enabled">): string {
+  const component = rawComponent === ".lsp.json" ? "Language servers" : rawComponent;
+  switch (componentStatus(rawComponent, p)) {
     case "agentEngine":
       if (!p.hooksTrusted) return `${component} — run by the agent engine once you trust this plugin`;
-      return p.enabled ? `${component} — run by the agent engine (trusted)` : `${component} — will run once you enable this plugin (trusted)`;
+      return p.enabled ? `${component} — run by the agent engine (trusted)` : `${component} — will run once you switch this plugin on (trusted)`;
     case "nativeOff":
       return `${component} — not run while native plugin loading is off (Settings → Preferences)`;
     default:

@@ -123,8 +123,8 @@ test("source Update opens a confirmation and runs nothing before Confirm; Cancel
   assert.match(dialog, /Update Team kit\?/);
   assert.match(dialog, /reset to its remote version/);
   // The core refuses a dirty folder (409) before reset --hard; only commits not on the remote are dropped.
-  assert.match(dialog, /uncommitted changes, the update is refused and nothing changes/);
-  assert.match(dialog, /\(origin\/main\) with git reset --hard, so commits in its folder that are not on the remote are discarded/);
+  assert.match(dialog, /unsaved changes, the update is refused and nothing changes/);
+  assert.match(dialog, /remote version \(main\), so versions in its folder that are not on the remote are discarded/);
   assert.doesNotMatch(dialog, /local changes in its folder are discarded/, "uncommitted edits are refused, never discarded");
   const cancelAt = dialog.indexOf(">Cancel<");
   const confirmAt = dialog.indexOf(">Update<", dialog.indexOf('role="dialog"'));
@@ -203,10 +203,10 @@ test("Central Skills confirmation says what the server does: refused on local ch
   await tick();
   model.requestSourceUpdate("builtin");
   const dialog = html(h(X.LegacyView, { model }));
-  assert.match(dialog, /fast-forwards/);
+  assert.match(dialog, /moves to the latest version/);
   assert.match(dialog, /refused/);
-  assert.match(dialog, /scripts\/sync-skills\.sh/);
-  assert.match(dialog, /\.skills folder and it moved, scripts\/sync-skills\.sh then/, "the core runs sync-skills.sh only for this checkout's .skills, and only when HEAD moved");
+  assert.match(dialog, /When the kit moved, its skill list and agent tool definitions are then synced/, "the core syncs only for this checkout's kit, and only when it moved");
+  assert.doesNotMatch(dialog, /sync-skills\.sh/, "no file names reach the user");
   assert.doesNotMatch(dialog, /local changes in its folder are discarded|git reset --hard/, "the reset wording belongs to git sources only");
 });
 
@@ -349,7 +349,7 @@ test("hook trust block is read-only: it states the core's trust state and offers
   const block = out.slice(out.indexOf('aria-label="Hook trust"'), out.indexOf("</section>", out.indexOf('aria-label="Hook trust"')));
   assert.match(block, /Not trusted/);
   assert.match(block, /http hooks are not run here/);
-  assert.match(block, /Enable the plugin first/);
+  assert.match(block, /Switch the plugin on first/);
   assert.doesNotMatch(block, /<button|<input|type="checkbox"/, "no control in the read-only block");
 });
 
@@ -447,7 +447,7 @@ test("component rows: native loading on says the agent engine runs it (with the 
     "GET /auth/me/plugins": () => ({ plugins: [plugin({ unsupportedComponents: ["monitors"], executableKinds: ["monitors"], hooksTrusted: true, enabled: false })] }),
   });
   trusted.select("runner");
-  assert.match(html(h(X.LegacyView, { model: trusted })), /monitors — will run once you enable this plugin \(trusted\)/);
+  assert.match(html(h(X.LegacyView, { model: trusted })), /monitors — will run once you switch this plugin on \(trusted\)/);
 
   const off = await legacy("plugins", {
     "GET /auth/me/plugins": () => ({ plugins: [plugin({ unsupportedComponents: ["monitors"], executableKinds: ["monitors"], nativePluginsOn: false })] }),
@@ -464,6 +464,6 @@ test("component rows: native loading on says the agent engine runs it (with the 
 
 test("componentRowText: a trusted, enabled plugin's component says it runs", () => {
   const p = { executableKinds: ["lsp"], sdkReadable: true, nativePluginsOn: true, hooksTrusted: true, enabled: true };
-  assert.equal(L.componentRowText(".lsp.json", p), ".lsp.json — run by the agent engine (trusted)");
+  assert.equal(L.componentRowText(".lsp.json", p), "Language servers — run by the agent engine (trusted)");
   assert.equal(L.componentRowText("themes", p), "themes — unsupported, ignored");
 });

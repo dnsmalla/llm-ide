@@ -1,13 +1,13 @@
 // Mount points for the Library's Extensions group. `libraryExtensions(core)` returns the entries the Library
-// nav shows (Plugins, LLM Sources, MCP Plugins and the catalog "Extensions") with their renderers; index.tsx of the
+// nav shows (the one "Extensions" entry) with its renderer; index.tsx of the
 // Library only passes this list through `LibraryScreenProps.extensions`.
 import "./extensions.css";
 import type { ReactNode } from "react";
 import type { CoreClient } from "../../shell/core";
 import type { LibraryExtension } from "../LibraryNav";
 import { createExtensionsApi, type ExtCore, type ExtensionsApi } from "./api.ts";
-import { ExtensionsScreen } from "./ExtensionsScreen";
-import { createLegacyApi, LegacyScreen } from "./LegacyPane";
+import { ExtensionsScreen, type OpenRequest } from "./ExtensionsScreen";
+import { createLegacyApi } from "./LegacyPane";
 import type { LegacyApi } from "./legacy.ts";
 import type { LocationReveal } from "./legacy-labels.ts";
 import { host as shellHost, inSshMode, invokeHost, projectStore } from "@llmide/screens/shell";
@@ -59,11 +59,8 @@ export function libraryExtensions(client: Pick<CoreClient, "requestRaw">, base: 
   const getApi = (): ExtensionsApi => (api ??= createExtensionsApi(extCoreFrom(client)));
   let legacy: LegacyApi | null = null;
   const getLegacy = (): LegacyApi => (legacy ??= createLegacyApi(extCoreFrom(client)));
-  const renderers: Record<string, () => ReactNode> = {
-    extensions: () => <ExtensionsScreen api={getApi()} openRepository={openRepository} />,
-    plugins: () => <LegacyScreen api={getLegacy()} kind="plugins" />,
-    "llm-sources": () => <LegacyScreen api={getLegacy()} kind="llm-sources" revealer={projectReveal()} />,
-    "mcp-plugins": () => <LegacyScreen api={getLegacy()} kind="mcp-plugins" />,
+  const renderers: Record<string, (request?: OpenRequest | null) => ReactNode> = {
+    extensions: (request) => <ExtensionsScreen api={getApi()} legacyApi={getLegacy()} openRepository={openRepository} revealer={projectReveal()} request={request} />,
   };
   return base.map((e) => (renderers[e.id] ? { ...e, render: renderers[e.id] } : e));
 }

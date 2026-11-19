@@ -1,11 +1,11 @@
-// Plugins, LLM Sources and MCP Plugins panes of the Library: a windowed list with an on/off switch per row, the
-// two consent gates (plugin hook trust, MCP server consent), read-only status badges and a detail pane per row.
-// Add, remove, import and apply-update dialogs are parity rows.
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+// The Plugins, MCP servers and Skill kits views of the Extensions screen: a windowed list with an on/off switch per
+// row, the two consent gates (plugin hook trust, MCP server consent), status badges and a detail pane per row.
+// The add and import dialogs are exported so the screen's Add tab opens the same ones.
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import type { ExtCore } from "./api.ts";
 import { healthKey, rowBadge } from "./health-model.ts";
-import { createLegacyApi, filterRows, HEALTH_KIND, LegacyModel, RELOAD_BUSY, type ClaudePluginRow, type LegacyApi, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
+import { createLegacyApi, filterRows, HEALTH_KIND, LegacyModel, RELOAD_BUSY, type ClaudePluginRow, type LegacyKind, type LegacyRow, type LegacyState, type LlmSourceRow, type McpRow, type PluginRow } from "./legacy.ts";
 import { LegacyDetail } from "./LegacyDetail.tsx";
 import { mcpSourceBadge, type LocationReveal } from "./legacy-labels.ts";
 import { browseWindow, BROWSE_ROW_HEIGHT } from "./list-model.ts";
@@ -14,9 +14,9 @@ import { Badge, Modal } from "./ui.tsx";
 import { useScroller } from "../use-library.ts";
 
 const TITLES: Record<LegacyKind, { title: string; empty: string; intro: string }> = {
-  plugins: { title: "Plugins", empty: "No plugins are installed.", intro: "Claude-format plugins found in the plugin folder. Hooks need their own trust before they run." },
-  "llm-sources": { title: "LLM Sources", empty: "No LLM sources are registered.", intro: "Skill, agent and command sources the assistant can use." },
-  "mcp-plugins": { title: "MCP Plugins", empty: "No MCP servers are registered.", intro: "A server runs only after you consent to it and switch it on." },
+  plugins: { title: "Plugins", empty: "No plugins are installed.", intro: "Plugins you have added. Hooks need their own trust before they run." },
+  "llm-sources": { title: "Skill kits", empty: "No skill kits are added.", intro: "Folders of skills, agents and commands the assistant can use." },
+  "mcp-plugins": { title: "MCP servers", empty: "No MCP servers are added.", intro: "A server runs only after you consent to it and switch it on." },
 };
 
 function rowMeta(kind: LegacyKind, r: LegacyRow): string {
@@ -59,7 +59,7 @@ function Row({ model, kind, row, state, index, total }: { model: LegacyModel; ki
           {mcpVersion?.status === "update-available" && <Badge tone="accent" title={`A newer version is available: ${mcpVersion.latest ?? ""}`}>Update</Badge>}
           {rowBadge(state.health[healthKey(HEALTH_KIND[kind], row.id)]) && <Badge tone="warn">Problem</Badge>}
           {src && !src.installed && <Badge>not installed</Badge>}
-          {sourceUpdate?.status === "update-available" && <Badge tone="accent" title="A newer version is available: open the source and press Update">update</Badge>}
+          {sourceUpdate?.status === "update-available" && <Badge tone="accent" title="A newer version is available: open the skill kit and press Update">update</Badge>}
         </span>
       </div>
       <div className="ext-entry-act">
@@ -110,14 +110,14 @@ function LegacySheetView({ model, state }: { model: LegacyModel; state: LegacySt
       <Modal titleId="ext-leg-title" title={`Update ${sh.label}?`} onClose={() => model.dismissSheet()} footer={footer("Update")}>
         {sh.builtin ? (
           <>
-            <p>Central Skills fast-forwards to the latest kit on its remote branch. Nothing is discarded: the update is refused, and nothing changes, if its folder has uncommitted changes or commits that are not on the remote.</p>
-            <p>When the kit is this checkout&apos;s .skills folder and it moved, scripts/sync-skills.sh then re-syncs the kit&apos;s skill lock and agent tool definitions.</p>
+            <p>Central Skills moves to the latest version of the kit on its remote branch. Nothing is discarded: the update is refused, and nothing changes, if its folder has unsaved changes or versions that are not on the remote.</p>
+            <p>When the kit moved, its skill list and agent tool definitions are then synced for you.</p>
           </>
         ) : (
-          // Same rules as the core's updateSource: a dirty folder is refused (409) before anything runs; a clean one is
-          // moved with git reset --hard FETCH_HEAD, which drops commits that exist only in the folder.
+          // Same rules as the core's updateSource: a folder with unsaved changes is refused (409) before anything runs;
+          // a clean one is reset to the remote version, which drops commits that exist only in the folder.
           <p>
-            If its folder has uncommitted changes, the update is refused and nothing changes. Otherwise the source is reset to its remote version (origin/{sh.ref ?? "main"}) with git reset --hard, so commits in its folder that are not on the remote are discarded. New items it brings in are switched on.
+            If its folder has unsaved changes, the update is refused and nothing changes. Otherwise the kit is reset to its remote version ({sh.ref ?? "main"}), so versions in its folder that are not on the remote are discarded. New items it brings in are switched on.
           </p>
         )}
       </Modal>
@@ -139,7 +139,7 @@ function LegacySheetView({ model, state }: { model: LegacyModel; state: LegacySt
   }
   return (
     <Modal titleId="ext-leg-title" title={`Trust the hooks of ${sh.label}?`} onClose={() => model.dismissSheet()} footer={footer("Trust hooks")}>
-      <p>Trusting lets these kinds of code from this plugin run shell commands on your machine during a turn. Tick each one to continue. Enabling the plugin never grants this by itself.</p>
+      <p>Trusting lets these kinds of code from this plugin run shell commands on your machine during a turn. Tick each one to continue. Switching the plugin on never grants this by itself.</p>
       <ul className="ext-consent-list" aria-label="Kinds of code that would run">
         {sh.kinds.map((k) => {
           const id = `ext-leg-hook-${k}`;
@@ -168,14 +168,14 @@ function LegacySheetView({ model, state }: { model: LegacyModel; state: LegacySt
 }
 
 /** Install a plugin from a public git URL (the server clones and packages it). */
-function InstallPluginGitDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
+export function InstallPluginGitDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
   const [url, setUrl] = useState("");
   const [ref, setRef] = useState("");
   const [busy, setBusy] = useState(false);
   const valid = url.trim().startsWith("https://") || url.trim().startsWith("git@");
   return (
-    <Modal titleId="plugin-git-title" title="Install plugin from Git URL" onClose={onClose} footer={<><button type="button" className="lib-btn" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="lib-btn lib-btn-primary" disabled={!valid || busy} onClick={() => { setBusy(true); void model.installPluginGit(url.trim(), ref.trim() || undefined).then((ok) => { if (ok) onClose(); }).finally(() => setBusy(false)); }}>{busy ? "Installing…" : "Install"}</button></>}>
-      <div className="ext-form" aria-label="Install plugin from Git URL">
+    <Modal titleId="plugin-git-title" title="Add a plugin from Git" onClose={onClose} footer={<><button type="button" className="lib-btn" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="lib-btn lib-btn-primary" disabled={!valid || busy} onClick={() => { setBusy(true); void model.installPluginGit(url.trim(), ref.trim() || undefined).then((ok) => { if (ok) onClose(); }).finally(() => setBusy(false)); }}>{busy ? "Installing…" : "Install"}</button></>}>
+      <div className="ext-form" aria-label="Add a plugin from Git">
         <p className="lib-muted">Public HTTPS or git@ URL. The server clones it shallowly, packages and validates it before install. The plugin is installed switched off.</p>
         <div className="ext-field"><label htmlFor="plugin-git-url">Git URL</label><input id="plugin-git-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/owner/repo" spellCheck={false} /></div>
         <div className="ext-field"><label htmlFor="plugin-git-ref">Branch or tag (optional)</label><input id="plugin-git-ref" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" spellCheck={false} /></div>
@@ -185,7 +185,7 @@ function InstallPluginGitDialog({ model, onClose }: { model: LegacyModel; onClos
 }
 
 /** Import one plugin already installed in Claude Code (the Mac's ClaudePluginImportSheet, installed tab). */
-function ImportClaudeDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
+export function ImportClaudeDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
   const [tab, setTab] = useState<"installed" | "marketplace">("installed");
   const [installed, setInstalled] = useState<Array<ClaudePluginRow> | null>(null);
   const [marketplace, setMarketplace] = useState<Array<ClaudePluginRow> | null>(null);
@@ -207,7 +207,7 @@ function ImportClaudeDialog({ model, onClose }: { model: LegacyModel; onClose: (
           <button type="button" role="tab" aria-selected={tab === "installed"} className="ext-tab" data-selected={tab === "installed"} onClick={() => setTab("installed")}>Installed in Claude</button>
           <button type="button" role="tab" aria-selected={tab === "marketplace"} className="ext-tab" data-selected={tab === "marketplace"} onClick={() => setTab("marketplace")}>Marketplace</button>
         </div>
-        <p className="lib-muted">{tab === "installed" ? "Plugins installed in Claude Code. Import copies one into LLM-IDE; it stays switched off until you enable it." : "Plugins from the Claude marketplace. Import copies one into LLM-IDE; it stays switched off until you enable it."}</p>
+        <p className="lib-muted">{tab === "installed" ? "Plugins installed in Claude Code. Import copies one into LLM-IDE; it stays switched off until you switch it on." : "Plugins from the Claude marketplace. Import copies one into LLM-IDE; it stays switched off until you switch it on."}</p>
         <input className="chat-input" type="search" aria-label="Filter Claude plugins" placeholder="Filter plugins…" value={query} onChange={(e) => setQuery(e.target.value)} />
         {rows === null && !error ? <p className="lib-muted" role="status">{tab === "installed" ? "Scanning Claude Code…" : "Loading the marketplace…"}</p> : null}
         {error ? <p role="alert" className="ext-inline-error">{error}</p> : null}
@@ -225,7 +225,7 @@ function ImportClaudeDialog({ model, onClose }: { model: LegacyModel; onClose: (
   );
 }
 
-function ImportCodexDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
+export function ImportCodexDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
   const [rows, setRows] = useState<Array<{ name: string; version: string; skillCount: number; commandCount: number; alreadyImported: boolean; hasUpdate: boolean }> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -239,8 +239,8 @@ function ImportCodexDialog({ model, onClose }: { model: LegacyModel; onClose: ()
   return (
     <Modal titleId="codex-import-title" title="Import from Codex" onClose={onClose} footer={<button type="button" className="lib-btn" onClick={onClose}>Done</button>}>
       <div className="ext-form" aria-label="Codex plugins">
-        <p className="lib-muted">Plugins installed in Codex. Import copies one into LLM-IDE; it stays switched off until you enable it.</p>
-        <input className="chat-input" type="search" aria-label="Filter Claude plugins" placeholder="Filter plugins…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <p className="lib-muted">Plugins installed in Codex. Import copies one into LLM-IDE; it stays switched off until you switch it on.</p>
+        <input className="chat-input" type="search" aria-label="Filter Codex plugins" placeholder="Filter plugins…" value={query} onChange={(e) => setQuery(e.target.value)} />
         {rows === null && !error ? <p className="lib-muted" role="status">Scanning Codex…</p> : null}
         {error ? <p role="alert" className="ext-inline-error">{error}</p> : null}
         {rows !== null && shown.length === 0 ? <p className="lib-muted">{rows.length === 0 ? "No Codex plugins found." : "No plugins match."}</p> : null}
@@ -257,8 +257,8 @@ function ImportCodexDialog({ model, onClose }: { model: LegacyModel; onClose: ()
   );
 }
 
-/** Add a public git or local LLM source (the Mac's LlmSourceAddSheet). The core validates the real shape. */
-function AddSourceDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
+/** Add a public git or local skill kit (the Mac's LlmSourceAddSheet). The core validates the real shape. */
+export function AddSourceDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
   const [mode, setMode] = useState<"git" | "local">("git");
   const [url, setUrl] = useState("");
   const [ref, setRef] = useState("");
@@ -267,14 +267,14 @@ function AddSourceDialog({ model, onClose }: { model: LegacyModel; onClose: () =
   const [busy, setBusy] = useState(false);
   const valid = mode === "git" ? url.trim().startsWith("https://") : path.trim() !== "";
   return (
-    <Modal titleId="source-add-title" title="Add LLM source" onClose={onClose} footer={<><button type="button" className="lib-btn" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className="lib-btn lib-btn-primary" disabled={!valid || busy} onClick={() => {
+    <Modal titleId="source-add-title" title="Add a skill kit" onClose={onClose} footer={<><button type="button" className="lib-btn" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className="lib-btn lib-btn-primary" disabled={!valid || busy} onClick={() => {
       setBusy(true);
       const body = mode === "git"
         ? { url: url.trim(), ...(ref.trim() ? { ref: ref.trim() } : {}), ...(name.trim() ? { name: name.trim() } : {}) }
         : { path: path.trim(), ...(name.trim() ? { name: name.trim() } : {}) };
       void model.addLlmSource(body).then((ok) => { if (ok) onClose(); }).finally(() => setBusy(false));
     }}>{busy ? "Adding…" : "Add"}</button></>}>
-      <div className="ext-form" aria-label="Add LLM source">
+      <div className="ext-form" aria-label="Add a skill kit">
         <div className="ext-field"><label htmlFor="source-add-mode">Kind</label><select id="source-add-mode" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}><option value="git">Git URL</option><option value="local">Local path</option></select></div>
         {mode === "git" ? (
           <>
@@ -282,7 +282,7 @@ function AddSourceDialog({ model, onClose }: { model: LegacyModel; onClose: () =
             <div className="ext-field"><label htmlFor="source-add-ref">Branch or tag (optional)</label><input id="source-add-ref" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" spellCheck={false} /></div>
           </>
         ) : (
-          <div className="ext-field"><label htmlFor="source-add-path">Local path</label><input id="source-add-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/path/to/repo" spellCheck={false} /><p className="lib-muted">A directory containing registry.yaml, .claude-plugin/plugin.json + skills/, an agents/ dir, or a hooks manifest.</p></div>
+          <div className="ext-field"><label htmlFor="source-add-path">Local path</label><input id="source-add-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/path/to/repo" spellCheck={false} /><p className="lib-muted">A folder that holds skills, agents, commands or a plugin.</p></div>
         )}
         <div className="ext-field"><label htmlFor="source-add-name">Name (optional)</label><input id="source-add-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name" maxLength={120} /></div>
       </div>
@@ -291,7 +291,7 @@ function AddSourceDialog({ model, onClose }: { model: LegacyModel; onClose: () =
 }
 
 /** Add one hand-written MCP server (the Mac's McpAddSheet manual form). The core stores it switched off. */
-function AddMcpDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
+export function AddMcpDialog({ model, onClose }: { model: LegacyModel; onClose: () => void }): ReactNode {
   const [name, setName] = useState("");
   const [transport, setTransport] = useState<"stdio" | "http" | "sse">("stdio");
   const [commandLine, setCommandLine] = useState("");
@@ -326,7 +326,7 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
   const ref = useRef<HTMLDivElement>(null);
   const { scrollTop, height } = useScroller(ref, initialHeight ?? 520);
   const t = TITLES[model.kind];
-  const rows = filterRows(state.rows, state.filter);
+  const rows = filterRows(state.rows, state.filter, { only: state.problemsOnly, kind: model.kind, health: state.health });
   const w = browseWindow(rows.length, scrollTop, height);
   const detail = state.selected !== null;
   const [adding, setAdding] = useState(false);
@@ -343,21 +343,21 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
           Reload list
         </button>
         {model.kind === "mcp-plugins" && (
-          <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setAdding(true)}>Add server</button>
+          <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setAdding(true)}>Add MCP server</button>
         )}
         {model.kind === "llm-sources" && (
-          <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setAddingSource(true)}>Add source</button>
+          <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setAddingSource(true)}>Add skill kit</button>
         )}
         {model.kind === "plugins" && (
           <>
-            <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setImportingClaude(true)}>Import from Claude…</button>
+            <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setImportingClaude(true)}>Import from Claude Code…</button>
             <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setImportingCodex(true)}>Import from Codex…</button>
-            <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setInstallingGit(true)}>Install from Git…</button>
+            <button type="button" className="lib-btn" disabled={state.loading} onClick={() => setInstallingGit(true)}>Plugin from Git…</button>
           </>
         )}
         {model.kind === "plugins" && (
           <button type="button" className="lib-btn" disabled={state.loading || state.busy.includes(RELOAD_BUSY)} onClick={() => void model.reloadPlugins()}>
-            Reload from disk
+            Reload plugins
           </button>
         )}
       </header>
@@ -413,15 +413,6 @@ export function LegacyView({ model, initialHeight, revealer }: { model: LegacyMo
   );
 }
 
-export function LegacyScreen({ api, kind, initialHeight, revealer }: { api: LegacyApi; kind: LegacyKind; initialHeight?: number; revealer?: LocationReveal }): ReactNode {
-  const model = useMemo(() => new LegacyModel(api, kind), [api, kind]);
-  useEffect(() => {
-    void model.load();
-    return () => model.dispose();
-  }, [model]);
-  return <LegacyView model={model} initialHeight={initialHeight} revealer={revealer} />;
-}
-
 export { createLegacyApi };
 export type { ExtCore };
 
@@ -433,6 +424,9 @@ function LegacySelectionBar({ model, state, shown }: { model: LegacyModel; state
   return (
     <div className="ext-selbar">
       <input type="search" className="ext-filter" value={state.filter} placeholder={`Filter ${state.rows.length.toLocaleString()}…`} aria-label={`Filter ${TITLES[model.kind].title}`} onChange={(e) => model.setFilter(e.target.value)} />
+      <button type="button" className="lib-btn" aria-pressed={state.problemsOnly} onClick={() => model.setProblemsOnly(!state.problemsOnly)}>
+        Problems
+      </button>
       <div className="ext-selbar-row">
         <label className="ext-selall">
           <input type="checkbox" checked={allShown} disabled={shown.length === 0} onChange={() => model.toggleAllShown()} />
@@ -447,7 +441,7 @@ function LegacySelectionBar({ model, state, shown }: { model: LegacyModel; state
           </span>
         ) : <span className="lib-muted">Tick several to switch them on or off together.</span>}
       </div>
-      {shown.length === 0 ? <p className="lib-muted" role="status">Nothing matches “{state.filter.trim()}”.</p> : null}
+      {shown.length === 0 ? <p className="lib-muted" role="status">{state.problemsOnly ? "No item has a known problem. Open an item and press Check." : `Nothing matches “${state.filter.trim()}”.`}</p> : null}
     </div>
   );
 }

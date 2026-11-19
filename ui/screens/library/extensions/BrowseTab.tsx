@@ -15,7 +15,7 @@ const KINDS: { id: string | null; label: string }[] = [
   { id: "skill", label: "Skills" },
   { id: "plugin", label: "Plugins" },
   { id: "mcp", label: "MCP servers" },
-  { id: "llm-source", label: "Skill bundles" },
+  { id: "llm-source", label: "Skill kits" },
 ];
 
 function EntryRow({ model, entry, index, total, busy, checked, openRepository }: { model: ExtensionsModel; entry: CatalogEntry; index: number; total: number; busy: boolean; checked: boolean; openRepository?: (url: string) => void }): ReactNode {

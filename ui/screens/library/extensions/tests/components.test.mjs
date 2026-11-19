@@ -69,7 +69,7 @@ test("detail: an enable switch with a label, member checkboxes with labels, the 
   model.select("plugin:acme/runner");
   const out = html(h(X.ExtensionsView, { model }));
   assert.match(out, /<input id="ext-switch-plugin:acme\/runner" type="checkbox" role="switch" aria-checked="false"/);
-  assert.match(out, /<label for="ext-switch-plugin:acme\/runner">Disabled<\/label>/);
+  assert.match(out, /<label for="ext-switch-plugin:acme\/runner">Off<\/label>/);
   assert.match(out, /Switching on asks for your consent first/);
   assert.equal(count(out, /type="checkbox" (?:checked="" )?id="ext-member-|id="ext-member-[^"]*" type="checkbox"/g), 2);
   assert.match(out, new RegExp(`<code class="ext-commit">${E}</code>`));
@@ -280,7 +280,7 @@ const legacy = async (kind, routes) => {
 test("mcp pane: list with a labelled switch per row, consent badge, the command is shown as text", async () => {
   const model = await legacy("mcp-plugins", { "GET /auth/me/mcp-plugins": () => hx("get-auth-me-mcp-plugins-200") });
   const out = html(h(X.LegacyView, { model }));
-  assert.match(out, /role="list" aria-label="MCP Plugins"/);
+  assert.match(out, /role="list" aria-label="MCP servers"/);
   assert.match(out, /role="switch" aria-checked="false"/);
   assert.match(out, /<label for="ext-leg-mcp-plugins-filesystem"><span class="ext-sr">Filesystem: <\/span>Off<\/label>/);
   assert.match(out, /No consent yet/);
@@ -319,7 +319,7 @@ test("llm sources pane: counts as text, empty state when none", async () => {
   assert.match(out, /Central Skills/);
   assert.match(out, /60 skills · 1 agents · 15 commands/);
   const none = await legacy("llm-sources", { "GET /auth/me/llm-sources": () => ({ sources: [] }) });
-  assert.match(html(h(X.LegacyView, { model: none })), /No LLM sources are registered/);
+  assert.match(html(h(X.LegacyView, { model: none })), /No skill kits are added/);
 });
 
 test("active: the scope note says which chats ignore the switches, as a note", async () => {

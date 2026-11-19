@@ -15,7 +15,7 @@ export function kindTitle(kind: string): string {
     case "mcp":
       return "MCP servers";
     case "llm-source":
-      return "Skill bundles";
+      return "Skill kits";
     default:
       return kind.charAt(0).toUpperCase() + kind.slice(1);
   }
@@ -30,7 +30,7 @@ export function kindLabel(kind: string): string {
     case "mcp":
       return "MCP server";
     case "llm-source":
-      return "Skill bundle";
+      return "Skill kit";
     default:
       return kind;
   }
@@ -242,7 +242,7 @@ export function validateInstallPath(raw: string): string | null {
 export function activeScopeNote(a: ActiveSummary): string | null {
   if (!a.turns) return null;
   const parts: string[] = [];
-  if (!a.turns.claude) parts.push("Claude chats do not use these switches yet: they load what the Plugins, MCP and Skill bundle panes turned on, and no item installed here.");
+  if (!a.turns.claude) parts.push("Claude chats do not use these switches yet: they load what you switched on under Plugins, MCP servers and Skill kits, and no item from the catalog.");
   if (!a.turns.providers) parts.push("Provider-model chats do not load MCP servers from here (turned off on this computer).");
   return parts.length ? parts.join(" ") : null;
 }

@@ -107,7 +107,7 @@ test("reload from disk posts an empty body, reloads the list and reports the cou
   await model.load();
   await model.reloadPlugins();
   assert.deepEqual(posts(core, "plugins/reload")[0]!.body, {});
-  assert.equal(model.getSnapshot().notice?.text, "Reloaded 2 plugins from disk. skipped bad.json");
+  assert.equal(model.getSnapshot().notice?.text, "Reloaded 2 plugins. skipped bad.json");
   assert.equal(model.getSnapshot().busy.includes(RELOAD_BUSY), false);
 });
 
@@ -146,7 +146,7 @@ test("a source that vanished says so; a row removed from the list keeps its pane
   await model.load();
   model.select("builtin");
   await new Promise((r) => setTimeout(r, 0));
-  assert.equal(model.getSnapshot().discovery?.error, "Source not found — it may have been removed.");
+  assert.equal(model.getSnapshot().discovery?.error, "Skill kit not found — it may have been removed.");
 });
 
 test("check for updates forces the upstream check; an update posts the id and reports the counts", async () => {

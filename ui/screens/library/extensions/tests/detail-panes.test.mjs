@@ -125,14 +125,14 @@ test("plugin detail: a row that disappears keeps its pane with the not-found tex
   model.select("runner");
   rows = [];
   await model.load();
-  assert.match(html(h(X.LegacyView, { model })), /Plugin not found — it may have been uninstalled\./);
+  assert.match(html(h(X.LegacyView, { model })), /Plugin not found — it may have been removed\./);
 });
 
 test("reload from disk is a labelled header button on the Plugins pane only", async () => {
   const plugins = await legacy("plugins", {});
-  assert.match(html(h(X.LegacyView, { model: plugins })), /<button[^>]*>Reload from disk<\/button>/);
+  assert.match(html(h(X.LegacyView, { model: plugins })), /<button[^>]*>Reload plugins<\/button>/);
   const llm = await legacy("llm-sources", {});
-  assert.doesNotMatch(html(h(X.LegacyView, { model: llm })), /Reload from disk/);
+  assert.doesNotMatch(html(h(X.LegacyView, { model: llm })), /Reload plugins/);
 });
 
 test("LLM source rows show a not-installed tag and the update badge; the detail names the update and its Update button", async () => {
@@ -143,7 +143,7 @@ test("LLM source rows show a not-installed tag and the update badge; the detail 
   });
   const list = html(h(X.LegacyView, { model }));
   assert.match(list, /not installed/);
-  assert.match(list, /title="A newer version is available: open the source and press Update"[^>]*>update</);
+  assert.match(list, /title="A newer version is available: open the skill kit and press Update"[^>]*>update</);
   model.select("team");
   await tick();
   const out = html(h(X.LegacyView, { model }));
@@ -159,8 +159,8 @@ test("LLM source detail: contents with counts, All and None, New markers, agents
   await tick();
   const out = html(h(X.LegacyView, { model }));
   assert.match(out, /Skills \(60 of 60 on\)/);
-  assert.match(out, /Agents from a source aren&#x27;t run by LLM-IDE yet|Agents from a source aren't run by LLM-IDE yet/);
-  assert.match(out, /Listed for visibility only — hooks from a registered source are never executed\./);
+  assert.match(out, /Agents from a skill kit aren&#x27;t run by LLM-IDE yet|Agents from a skill kit aren't run by LLM-IDE yet/);
+  assert.match(out, /Listed for visibility only — hooks from a skill kit are never executed\./);
   // Like the Mac (LlmSourceDetailView.mcpServersBlock), an empty kind has no section: the fixture has no MCP servers.
   assert.doesNotMatch(out, /MCP servers \(0\)|never connects to or spawns/);
   assert.match(out, /aria-label="Check for updates"|>Check for updates</);
@@ -176,7 +176,7 @@ test("LLM source detail: listed MCP servers show their command, for visibility o
   await tick();
   const out = html(h(X.LegacyView, { model }));
   assert.match(out, /MCP servers \(1\)/);
-  assert.match(out, /never connects to or spawns a source/);
+  assert.match(out, /never connects to or starts a skill kit/);
   assert.match(out, /<code>npx -y srv<\/code>/);
 });
 
@@ -185,7 +185,7 @@ test("LLM source detail: a missing source says so", async () => {
   const model = await legacy("llm-sources", {});
   model.select("builtin");
   await tick();
-  assert.match(html(h(X.LegacyView, { model })), /Source not found — it may have been removed\./);
+  assert.match(html(h(X.LegacyView, { model })), /Skill kit not found — it may have been removed\./);
 });
 
 test("MCP detail: command and environment names as text, values never shown; version lookup error and a newer version named", async () => {
@@ -214,12 +214,12 @@ test("MCP detail: command and environment names as text, values never shown; ver
   assert.match(out, /Update<\/span>|>Update</);
 });
 
-test("empty Installed state has an Install from URL button that opens the Install tab", async () => {
+test("empty Installed state has an Add from GitHub button that opens the Install tab", async () => {
   const model = new X.ExtensionsModel(X.createExtensionsApi(core({ [`GET ${P}/installed`]: () => ({ corrupt: false, items: [] }), [`GET ${P}/active`]: () => fx("get-auth-me-extensions-active-200") })));
   await model.init();
   const out = html(h(X.ExtensionsView, { model }));
   assert.match(out, /Nothing installed yet/);
-  assert.match(out, /<button[^>]*>Install from URL<\/button>/);
+  assert.match(out, /<button[^>]*>Add from GitHub<\/button>/);
 });
 
 test("browse-only catalog entries get an Open repository button for a public https address only", async () => {

@@ -108,3 +108,8 @@ span.ext-row-check { display: inline-block; cursor: default; }
 .ext-health-problems { list-style: none; margin: var(--tok-space-sm) 0 0; padding: 0; display: grid; gap: var(--tok-space-sm); }
 .ext-health-problems li { display: flex; align-items: center; gap: var(--tok-space-sm); flex-wrap: wrap; padding: var(--tok-space-sm); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); }
 .ext-health-tools { margin-top: var(--tok-space-sm); }
+
+/* One Extensions screen: the Installed view switcher and the Add tab's list of choices. */
+.ext-views { margin-bottom: 8px; }
+.ext-add-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.ext-add-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

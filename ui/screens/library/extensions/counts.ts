@@ -13,7 +13,7 @@ const onCount = async <T>(rows: Promise<readonly T[]>, isOn: (r: T) => boolean):
   }
 };
 
-/** Switched-on counts keyed by the Library extension ids (plugins, llm-sources, mcp-plugins, extensions). */
+/** Switched-on counts per kind (plugins, llm-sources, mcp-plugins, catalog); `extensions` is their total, the one sidebar entry's count (null when any list could not be read, so a partial total is never shown). */
 export async function loadExtensionCounts(legacy: LegacyApi, api: ExtensionsApi, signal?: AbortSignal): Promise<ExtensionCounts> {
   const [plugins, sources, mcp, catalog] = await Promise.all([
     onCount(legacy.plugins(signal), (r) => r.enabled),
@@ -24,5 +24,7 @@ export async function loadExtensionCounts(legacy: LegacyApi, api: ExtensionsApi,
     onCount(api.installed(signal).then((l) => l.items), (r) => r.enabled),
   ]);
   signal?.throwIfAborted();
-  return { plugins, "llm-sources": sources, "mcp-plugins": mcp, extensions: catalog };
+  const all = [plugins, sources, mcp, catalog];
+  const known = all.filter((n): n is number => n !== null);
+  return { plugins, "llm-sources": sources, "mcp-plugins": mcp, catalog, extensions: known.length < all.length ? null : known.reduce((a, b) => a + b, 0) };
 }

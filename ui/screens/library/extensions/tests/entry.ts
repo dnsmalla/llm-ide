@@ -8,3 +8,8 @@ export { LegacyView } from "../LegacyPane.tsx";
 export { LegacyModel, createLegacyApi } from "../legacy.ts";
 export { LegacyDetail } from "../LegacyDetail.tsx";
 export { Health } from "../Health.tsx";
+export { AddTab, ADD_CHOICES } from "../AddTab.tsx";
+export { targetFor, entryFor } from "../anchors.ts";
+export { problemStore, countProblems } from "../problems.ts";
+export { filterRows, HEALTH_KIND } from "../legacy.ts";
+export { ExtensionsScreen } from "../ExtensionsScreen.tsx";

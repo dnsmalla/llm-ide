@@ -84,7 +84,7 @@ export function extErrorText(e: ExtApiError): string {
   if (isRateLimited(e)) return "Too many requests to GitHub or the registry in a short time. Wait a minute, then try again. Nothing was changed.";
   switch (e.code) {
     case "CATALOG_DISABLED":
-      return "The extension catalog is turned off on this server (LLMIDE_EXT_CATALOG=off). Installing, updating and refreshing are unavailable until it is turned on.";
+      return "The extension catalog is turned off on this server. Installing, updating and refreshing are unavailable until the server's operator turns it on.";
     case "SOURCE_NOT_ALLOWED":
       return "This source is not on the allowed list. Add owner/repo (or owner/*) in Settings under Extension sources, then try again. If Settings refuses it, the operator's limit does not cover it and the operator has to allow it on the server.";
     case "SOURCE_BLOCKED":

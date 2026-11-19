@@ -59,7 +59,8 @@ test("loaded: navigation landmark, sections with counts, aria-current, Unsorted,
   assert.match(out, /<span class="lib-nav-label">Meetings<\/span><span class="lib-count" aria-label="1 notes">1</);
   assert.match(out, /<span class="lib-nav-label">Unsorted<\/span>/);
   assert.match(out, /<span class="lib-nav-label">Emails?<\/span>|<span class="lib-nav-label">Emails<\/span>/);
-  for (const label of ["Plugins", "LLM Sources", "MCP Plugins", "Extensions"]) assert.match(out, new RegExp(`>${label}</span>`));
+  assert.equal((out.match(/>Extensions<\/span>/g) ?? []).length, 1, "one Extensions entry");
+  for (const label of ["Plugins", "LLM Sources", "MCP Plugins"]) assert.doesNotMatch(out, new RegExp(`>${label}</span>`));
   assert.match(out, /aria-label="Refresh notes"/);
   assert.match(out, /Change notes folder/);
   assert.ok(!out.includes("Rebuild search index"), "no rebuild button without a runner");
@@ -144,7 +145,7 @@ test("empty folder and listing states are announced politely", async () => {
 
 test("Extensions entries: a supplied render replaces the placeholder (S-J seam)", async () => {
   const { host, store } = await mkStore((hh) => hh.add("a.md", L.meetingText(1)));
-  const custom = [...L.EXTENSION_PLACEHOLDERS.slice(0, 1), { id: "extensions", label: "Extensions", render: () => h("div", { id: "ext-pane" }, "pane") }];
+  const custom = [{ id: "extensions", label: "Extensions", render: () => h("div", { id: "ext-pane" }, "pane") }];
   const nav = html(screen(store, host, { extensions: custom }));
   assert.ok(!nav.includes("lib-ext"), "the pane shows only when its entry is selected");
   assert.match(nav, /Extensions/);
@@ -215,14 +216,23 @@ test("a long document renders in sections: the first ones now, a labelled contro
 test("Extensions groups show how many items are switched on, like the note sections; unknown shows no badge", async () => {
   const { store } = await mkStore();
   const extensions = [
-    { id: "plugins", label: "Plugins", count: 3 },
-    { id: "llm-sources", label: "LLM Sources", count: 0 },
-    { id: "mcp-plugins", label: "MCP Plugins", count: null },
-    { id: "extensions", label: "Extensions" },
+    { id: "extensions", label: "Extensions", count: 3 },
+    { id: "other", label: "Zero", count: 0 },
+    { id: "unknown", label: "Unknown", count: null },
+    { id: "bare", label: "Bare" },
   ];
   const out = html(h(L.LibraryNav, { state: store.getSnapshot(), extensionId: null, extensions, onSection() {}, onExtension() {}, onRefresh() {}, onChangeFolder: null, rebuild: null, onRebuild: null, onCancelRebuild() {} }));
-  assert.match(out, /Plugins<\/span><span class="lib-count" aria-label="3 switched on"[^>]*>3<\/span>/);
-  assert.match(out, /LLM Sources<\/span><span class="lib-count" aria-label="0 switched on"[^>]*>0<\/span>/, "zero is a real count");
-  assert.doesNotMatch(out, /MCP Plugins<\/span><span class="lib-count"/, "a list that could not be read shows nothing, not 0");
-  assert.doesNotMatch(out, /Extensions<\/span><span class="lib-count"/);
+  assert.match(out, /Extensions<\/span><span class="lib-count" aria-label="3 switched on"[^>]*>3<\/span>/);
+  assert.match(out, /Zero<\/span><span class="lib-count" aria-label="0 switched on"[^>]*>0<\/span>/, "zero is a real count");
+  assert.doesNotMatch(out, /Unknown<\/span><span class="lib-count"/, "a list that could not be read shows nothing, not 0");
+  assert.doesNotMatch(out, /Bare<\/span><span class="lib-count"/);
+  assert.doesNotMatch(out, /with a problem/, "no indicator without a known problem");
+});
+
+test("the Extensions entry shows a problem indicator with an accessible label only when a problem is known", async () => {
+  const { store } = await mkStore();
+  const nav = (problems) => html(h(L.LibraryNav, { state: store.getSnapshot(), extensionId: null, extensions: [{ id: "extensions", label: "Extensions", count: 2, problems }], onSection() {}, onExtension() {}, onRefresh() {}, onChangeFolder: null, rebuild: null, onRebuild: null, onCancelRebuild() {} }));
+  assert.match(nav(2), /aria-label="2 with a problem found this session"/);
+  assert.doesNotMatch(nav(0), /with a problem/);
+  assert.doesNotMatch(nav(undefined), /with a problem/);
 });

@@ -1,4 +1,4 @@
-// Read-only detail panes for the Library's Plugins, MCP Plugins and LLM Sources lists. Everything shown is text
+// Read-only detail panes for the Plugins, MCP servers and Skill kits views. Everything shown is text
 // from the core (plugin and source text is untrusted: rendered as React text only, already cleaned and capped by
 // the decoders). The only controls are the source's per-item switches and its Update / Check buttons, which are
 // the same calls the list uses. Consent, hook trust and removal stay on the list rows and their sheets.
@@ -14,9 +14,9 @@ import { componentRowText, hookTrustState, hooksHeading, installSourceText, mcpS
 export { mcpSourceBadge, mcpSourceLabel } from "./legacy-labels.ts";
 
 export const NOT_FOUND: Record<LegacyKind, string> = {
-  plugins: "Plugin not found — it may have been uninstalled.",
-  "mcp-plugins": "Plugin not found — it may have been removed.",
-  "llm-sources": "Source not found — it may have been removed.",
+  plugins: "Plugin not found — it may have been removed.",
+  "mcp-plugins": "MCP server not found — it may have been removed.",
+  "llm-sources": "Skill kit not found — it may have been removed.",
 };
 
 export function LegacyDetail({ model, state, revealer }: { model: LegacyModel; state: LegacyState; revealer?: LocationReveal }): ReactNode {
@@ -174,7 +174,7 @@ function PluginDetail({ model, state, p }: { model: LegacyModel; state: LegacySt
             {p.pendingComponents.includes("mcp") && (
               <li className="lib-muted">
                 {p.mcpServerCount > 0
-                  ? `${p.mcpServerCount} MCP ${p.mcpServerCount === 1 ? "server" : "servers"} declared — consent to each under MCP Plugins to activate`
+                  ? `${p.mcpServerCount} MCP ${p.mcpServerCount === 1 ? "server" : "servers"} declared — allow each under MCP servers to switch it on`
                   : "MCP servers — declared, none registered"}
               </li>
             )}
@@ -199,7 +199,7 @@ function PluginDetail({ model, state, p }: { model: LegacyModel; state: LegacySt
           <h3>{hooksHeading(p)}</h3>
           <Facts rows={[["State", hookTrustState(p)]]} />
           {p.trustOutdated && !p.hooksTrusted && <p>{outdatedTrustText(p)}</p>}
-          {!p.enabled && <p className="lib-muted">Enable the plugin first — its hooks and scripts only run for an enabled plugin.</p>}
+          {!p.enabled && <p className="lib-muted">Switch the plugin on first — its hooks and scripts only run while the plugin is on.</p>}
           {!p.nativeDelivery && p.hookNotes.length > 0 && (
             <ul aria-label="Hook notes">
               {p.hookNotes.map((n, i) => (
@@ -261,14 +261,14 @@ function McpDetail({ model, state, m }: { model: LegacyModel; state: LegacyState
       </span>
       <RowHealth model={model} state={state} id={m.id} actions={{ consent: () => void model.setEnabled(m.id, true), "switch-off": () => void model.setEnabled(m.id, false) }} />
       <Facts rows={facts} />
-      <p className="lib-muted">Consent before enabling — an enabled-but-unconsented server is never offered to the agent.</p>
+      <p className="lib-muted">Allow it before switching it on — a server that is on but not allowed is never offered to the assistant.</p>
       {m.enabled && <p className="lib-muted">The assistant can use this server's tools in chats.</p>}
       <p className="lib-muted">Once you allow this server, its tools run without asking each time. A server installed from the catalog asks before every call.</p>
       {m.credentialMissing && <p className="lib-muted">No value is stored for this server&apos;s credential, so it will fail to authenticate.</p>}
       <details className="ext-remove">
         <summary>Remove…</summary>
-        <p className="lib-muted">Remove this server from the registry? No files are touched. This cannot be undone.</p>
-        <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => void model.removeMcp(m.id)}>Remove server</button>
+        <p className="lib-muted">Remove this MCP server? Nothing on your computer is deleted. This cannot be undone.</p>
+        <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => void model.removeMcp(m.id)}>Remove</button>
       </details>
       {m.versionLabel !== undefined && (
         <section aria-label="Version">
@@ -277,7 +277,7 @@ function McpDetail({ model, state, m }: { model: LegacyModel; state: LegacyState
           {v === undefined && state.statusLoading && <p className="lib-muted">Checking the version…</p>}
           {v?.status === "unknown" && <p className="lib-muted">Could not look up the latest version{v.reason ? `: ${v.reason}` : "."}</p>}
           {v?.status === "update-available" && <p>A newer version is available{v.latest ? `: v${v.latest}` : "."}</p>}
-          {v?.status === "unpinned" && <p className="lib-muted">Not pinned: it runs whatever version the registry serves.</p>}
+          {v?.status === "unpinned" && <p className="lib-muted">Not pinned: it runs whatever version the server offers.</p>}
           {v?.status === "up-to-date" && <p className="lib-muted">Up to date.</p>}
           {v === undefined && !state.statusLoading && state.statusError && <p className="lib-muted">Could not check the version: {state.statusError}</p>}
         </section>
@@ -334,9 +334,9 @@ function SourceDetail({ model, state, s, revealer }: { model: LegacyModel; state
         ) : st?.status === "up-to-date" ? (
           <p className="lib-muted">Up to date.</p>
         ) : st?.status === "local" ? (
-          <p className="lib-muted">Local folder — a rescan picks up changes made on disk.</p>
+          <p className="lib-muted">Local folder — a reload picks up changes you make in the folder.</p>
         ) : st?.status === "diverged" ? (
-          <p>{st.message ?? "This source has local commits; update it with git."}</p>
+          <p>{st.message ?? "This skill kit has changes in its folder that are not on the remote, so it cannot be updated here."}</p>
         ) : st ? (
           <p className="lib-muted">Couldn&apos;t check for updates{st.message ? `: ${st.message}` : "."}</p>
         ) : state.statusError ? (
@@ -370,8 +370,8 @@ function SourceDetail({ model, state, s, revealer }: { model: LegacyModel; state
       </section>
       <details className="ext-remove">
         <summary>Remove…</summary>
-        <p className="lib-muted">Remove this source registration? Its files are not touched. This cannot be undone.</p>
-        <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => void model.removeLlmSource(s.id)}>Remove source</button>
+        <p className="lib-muted">Remove this skill kit? Its files are not deleted. This cannot be undone.</p>
+        <button type="button" className="lib-btn lib-btn-danger" disabled={busy} onClick={() => void model.removeLlmSource(s.id)}>Remove</button>
       </details>
       {d?.loading && (
         <p className="lib-muted" role="status">
@@ -386,13 +386,13 @@ function SourceDetail({ model, state, s, revealer }: { model: LegacyModel; state
       {d?.data && (
         <>
           <ItemsBlock model={model} busy={busy} title="Skills" kind="skill" items={d.data.skills} />
-          <ItemsBlock model={model} busy={busy} title="Agents" kind="agent" items={d.data.agents} caption="Agents from a source aren't run by LLM-IDE yet — your selection is saved for when they are." />
+          <ItemsBlock model={model} busy={busy} title="Agents" kind="agent" items={d.data.agents} caption="Agents from a skill kit aren't run by LLM-IDE yet — your selection is saved for when they are." />
           <ItemsBlock model={model} busy={busy} title="Commands" kind="command" items={d.data.commands} />
           <ItemsBlock model={model} busy={busy} title="Templates" kind="template" items={d.data.templates} />
           {d.data.hooks.length > 0 && (
             <section aria-label="Hooks">
               <h3>Hooks ({d.data.hooks.length})</h3>
-              <p className="lib-muted">Listed for visibility only — hooks from a registered source are never executed.</p>
+              <p className="lib-muted">Listed for visibility only — hooks from a skill kit are never executed.</p>
               <ul className="ext-members">
                 {d.data.hooks.map((h, i) => (
                   <li key={`${h.event}-${i}`}>
@@ -407,7 +407,7 @@ function SourceDetail({ model, state, s, revealer }: { model: LegacyModel; state
           {d.data.mcpServers.length > 0 && (
             <section aria-label="MCP servers">
               <h3>MCP servers ({d.data.mcpServers.length})</h3>
-              <p className="lib-muted">Listed for visibility only — this app never connects to or spawns a source&apos;s MCP servers.</p>
+              <p className="lib-muted">Listed for visibility only — this app never connects to or starts a skill kit&apos;s MCP servers.</p>
               <ul className="ext-members">
                 {d.data.mcpServers.map((m) => (
                   <li key={m.name}>

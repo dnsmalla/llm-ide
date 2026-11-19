@@ -2,6 +2,7 @@
 // (`dock.tsx`). ONE transport, store, Bypass gate, controller and UI-state store per app (`chatRuntime()`), so a turn
 // started in the dock is the same turn the Chat section shows, and nothing forks. Each surface only adds its own
 // per-screen host services (slash menu, mentions, attachments) and renders `ChatScreen` with the shared state.
+import { splitSectionTarget } from "./slash/section-target.ts";
 import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { chatBinding, core as shellCore, host as shellHost, invokeHost, relativeToProject, shellBus } from "@llmide/screens/shell";
 import { coreTransportFrom } from "./adapter";
@@ -173,7 +174,7 @@ export function useChatSurface(projectRoot: string | null, active: boolean, init
       attachHost: services.attachHost,
       // `<section>` or `<section>:<pane>`: the pane rides as the anchor, which the Library opens (library/index.tsx).
       openSection: (section) => {
-        const [base, pane] = section.split(":");
+        const { base, pane } = splitSectionTarget(section);
         const target = sections[base];
         if (!target) return false;
         shellBus.publish({ type: "goto-section", section: target, ...(pane ? { anchor: pane } : {}) });

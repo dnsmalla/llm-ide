@@ -17,6 +17,7 @@ import { makeSearchRun } from "./search.ts";
 import { LibraryScreen } from "./LibraryScreen";
 import { EXTENSION_PLACEHOLDERS } from "./LibraryNav";
 import { extensionCounter, libraryExtensions } from "./extensions/index.tsx";
+import { problemStore } from "./extensions/problems.ts";
 import { sourcesCoreFrom, summarizeCoreFrom } from "./sources/adapter.ts";
 import { withCreatedHook } from "./sources/created-hook.ts";
 import { sourceConnections } from "./sources/SourcePanes";
@@ -78,6 +79,16 @@ export default function Library({ active, projectRoot, mode }: SectionProps) {
       shellBus.takePending("goto-section");
       take(ev);
     });
+  }, []);
+  // Problems found this session belong to one user and one project: forget them when either changes.
+  useEffect(() => {
+    let who = shellCore.getSnapshot().user?.id ?? null;
+    const offSession = shellCore.subscribe(() => {
+      const now = shellCore.getSnapshot().user?.id ?? null;
+      if (now !== who) { who = now; problemStore.reset(); }
+    });
+    const offProject = shellBus.subscribe("project-changed", () => problemStore.reset());
+    return () => { offSession(); offProject(); };
   }, []);
   const loadExtensionCounts = useMemo(() => extensionCounter(shellCore), []);
   // The write side exists only inside the desktop app (it needs the notes_write host commands).

@@ -142,7 +142,7 @@ export function ItemDetail({ model, item, busy, state }: { model: ExtensionsMode
           disabled={busy}
           onChange={(e) => void (e.target.checked ? model.requestEnable(item) : model.disable(item))}
         />
-        <label htmlFor={switchId}>{item.enabled ? "Enabled" : "Disabled"}</label>
+        <label htmlFor={switchId}>{item.enabled ? "On" : "Off"}</label>
         {runsCode(item) && !item.enabled && <span className="lib-muted">Switching on asks for your consent first.</span>}
       </div>
 
@@ -285,9 +285,9 @@ export function InstalledTab({ model, state, initialHeight }: { model: Extension
     return (
       <div className="lib-empty" role="status">
         <p className="lib-empty-title">Nothing installed yet</p>
-        <p className="lib-muted">Use Browse to pick from the catalog, or Install to add a GitHub repository. Installs start switched off.</p>
+        <p className="lib-muted">Use Browse to pick from the catalog, or Add to install from a GitHub repository. Installs start switched off.</p>
         <button type="button" className="lib-btn" onClick={() => void model.showTab("install")}>
-          Install from URL
+          Add from GitHub
         </button>
       </div>
     );

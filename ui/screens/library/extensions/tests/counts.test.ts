@@ -10,13 +10,13 @@ const rows = (...enabled: boolean[]) => enabled.map((e) => ({ enabled: e }));
 test("counts the switched-on items of every group", async () => {
   const legacy = { plugins: async () => rows(true, false, true), llmSources: async () => rows(false), mcpPlugins: async () => rows(true) } as unknown as LegacyApi;
   const api = { installed: async () => ({ corrupt: false, items: rows(true, true, false, true) }) } as unknown as ExtensionsApi;
-  assert.deepEqual(await loadExtensionCounts(legacy, api), { plugins: 2, "llm-sources": 0, "mcp-plugins": 0, extensions: 3 }, "an MCP row without consent is not on");
+  assert.deepEqual(await loadExtensionCounts(legacy, api), { plugins: 2, "llm-sources": 0, "mcp-plugins": 0, catalog: 3, extensions: 5 }, "an MCP row without consent is not on");
 });
 
 test("a group whose list fails is null (no badge), the others still count", async () => {
   const legacy = { plugins: async () => { throw new Error("offline"); }, llmSources: async () => rows(true), mcpPlugins: async () => rows() } as unknown as LegacyApi;
   const api = { installed: async () => { throw new Error("corrupt"); } } as unknown as ExtensionsApi;
-  assert.deepEqual(await loadExtensionCounts(legacy, api), { plugins: null, "llm-sources": 1, "mcp-plugins": 0, extensions: null });
+  assert.deepEqual(await loadExtensionCounts(legacy, api), { plugins: null, "llm-sources": 1, "mcp-plugins": 0, catalog: null, extensions: null }, "a partial total is never shown");
 });
 
 test("an abort rethrows instead of returning stale counts", async () => {

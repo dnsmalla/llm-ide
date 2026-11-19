@@ -1,12 +1,14 @@
 // The Library screen (read side): sidebar sections, the virtualised item list and the note viewer.
 // Everything it needs arrives as props (store, host, optional rebuild runner, link openers), so it
 // renders and tests without Tauri; index.tsx wires the real ones.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { DocIcon, StatusBanner } from "@llmide/ui-kit";
 import type { NotesHost } from "./host.ts";
 import type { LibraryStore } from "./library-store.ts";
 import { IDLE_REBUILD, type RebuildProgress } from "./index-rebuild.ts";
 import type { NoteRecord } from "./notes-model.ts";
+import { entryFor } from "./extensions/anchors.ts";
+import { problemStore } from "./extensions/problems.ts";
 import { EXTENSION_PLACEHOLDERS, LibraryNav, type LibraryExtension } from "./LibraryNav";
 import { NoteList } from "./NoteList";
 import { ProjectFilesNav, ProjectFileView, type ProjectFilesDeps } from "./ProjectFiles.tsx";
@@ -74,9 +76,13 @@ export function LibraryScreen({ openPane = null, store, host, write = null, conn
   const chooseAction = chooseFolder === undefined ? () => void store.chooseRoot() : chooseFolder;
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
+  // The deep link that opened the open entry (so it can pick a tab); a click on the sidebar clears it.
+  const [request, setRequest] = useState<{ id: string; n: number } | null>(null);
+  const problems = useSyncExternalStore(problemStore.subscribe, problemStore.getSnapshot, problemStore.getSnapshot);
   // "Open the Library at this pane" (a chat command such as /mcp): the pane opens when the request arrives.
   useEffect(() => {
-    if (openPane && [...extensions, ...(connections ?? [])].some((x) => x.id === openPane.id)) setExtensionId(openPane.id);
+    const id = openPane ? entryFor(openPane.id) : null;
+    if (id && [...extensions, ...(connections ?? [])].some((x) => x.id === id)) { setExtensionId(id); setRequest(openPane); }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a request is identified by its counter, not by the lists.
   }, [openPane?.n]);
   // Reloaded when the user opens or leaves a pane (not while a pane stays open), so a toggle shows on the way out.
@@ -88,8 +94,8 @@ export function LibraryScreen({ openPane = null, store, host, write = null, conn
     return () => ac.abort();
   }, [loadExtensionCounts, active, extensionId]);
   const countedExtensions = useMemo(
-    () => extensions.map((x) => (x.id in extensionCounts ? { ...x, count: extensionCounts[x.id] } : x)),
-    [extensions, extensionCounts],
+    () => extensions.map((x) => ({ ...(x.id in extensionCounts ? { ...x, count: extensionCounts[x.id] } : x), ...(x.id === "extensions" ? { problems } : {}) })),
+    [extensions, extensionCounts, problems],
   );
   const [rebuild, setRebuild] = useState<RebuildProgress | null>(null);
   const rebuildAbort = useRef<AbortController | null>(null);
@@ -281,7 +287,7 @@ export function LibraryScreen({ openPane = null, store, host, write = null, conn
                   else open();
                 }}
                 onExtension={(id) => {
-                  const open = () => { setProjectFile(null); setProjectFileDirty(false); setExtensionId(id); };
+                  const open = () => { setProjectFile(null); setProjectFileDirty(false); setRequest(null); setExtensionId(id); };
                   if (projectFileDirty || dirtyRef.current) setPendingNav({ proceed: open });
                   else open();
                 }}
@@ -303,7 +309,7 @@ export function LibraryScreen({ openPane = null, store, host, write = null, conn
             <span className="lib-ext-title">{ext.label}</span>
             <button type="button" className="lib-btn" aria-label={`Close ${ext.label}`} onClick={() => setExtensionId(null)}>Close</button>
           </div>
-          {ext.render ? ext.render() : (
+          {ext.render ? ext.render(request) : (
             <>
               <h2>{ext.label}</h2>
               <p className="lib-muted">{ext.note ?? "Coming soon."}</p>
