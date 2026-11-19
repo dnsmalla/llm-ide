@@ -34,7 +34,7 @@ export async function handleWebSearch(args, { userId } = {}) {
   const apiKey = providerApiKey(userId, 'anthropic');
   if (apiKey) {
     try {
-      const { answer, sources } = await searchWebViaAnthropic(args.query, { apiKey });
+      const { answer, sources } = await searchWebViaAnthropic(args.query, { apiKey, userId });
       if (answer) return { answer, sources, count: sources.length };
     } catch (err) { errors.push(`api: ${err.message}`); }
   }

@@ -33,7 +33,7 @@ export async function handleFetchUrl(args, { userId } = {}) {
   const apiKey = providerApiKey(userId, 'anthropic');
   if (apiKey) {
     try {
-      const { title, text } = await fetchUrlViaAnthropic(args.url, { apiKey });
+      const { title, text } = await fetchUrlViaAnthropic(args.url, { apiKey, userId });
       if (text) return { title, text };
     } catch (err) { errors.push(`api: ${err.message}`); }
   }

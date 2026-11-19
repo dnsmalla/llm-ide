@@ -16,7 +16,8 @@ import { spawnCli, minimalCliEnv, anthropicWebCliArgs } from './providers.mjs';
 import { makePinnedFetch } from '../server/pinned-fetch.mjs';
 import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
-import { noteUnmeteredModelCall } from '../kb/usage.mjs';
+import { noteUnmeteredModelCall, recordUsage } from '../kb/usage.mjs';
+import { getDb } from '../kb/db.mjs';
 import { readFileSync } from 'node:fs';
 
 // The one source for Claude model ids (schema/models/anthropic-models.json).
@@ -48,10 +49,11 @@ function webModel() {
 
 // POST a single Messages request and walk pause_turn turns (server-tool loops
 // can pause when they hit the per-turn tool-use cap). Bounded to avoid runaway.
-async function runAnthropicWebTool({ apiKey, tool, userText, timeoutMs, signal }) {
+async function runAnthropicWebTool({ apiKey, tool, userText, timeoutMs, signal, userId = null }) {
   if (!apiKey) throw new Error('Anthropic API key required for native web tools');
   let messages = [{ role: 'user', content: userText }];
   let last;
+  const model = webModel();
   for (let turn = 0; turn < 4; turn++) {
     const res = await fixedHostFetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -60,7 +62,7 @@ async function runAnthropicWebTool({ apiKey, tool, userText, timeoutMs, signal }
         'anthropic-version': ANTHROPIC_VERSION,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ model: webModel(), max_tokens: 2048, tools: [tool], messages }),
+      body: JSON.stringify({ model, max_tokens: 2048, tools: [tool], messages }),
       signal: signal || AbortSignal.timeout(timeoutMs),
     }, { hosts: ['api.anthropic.com'], maxBytes: WEB_TOOL_MAX_BYTES });
     if (!res.ok) {
@@ -69,8 +71,20 @@ async function runAnthropicWebTool({ apiKey, tool, userText, timeoutMs, signal }
       throw new Error(`Anthropic web tool ${res.status}${detail ? `: ${detail}` : ''}`);
     }
     last = await res.json();
-    // Not written to the ledger (no user here) — the turn total must know.
-    noteUnmeteredModelCall();
+    // Metered like any other model call when the caller names the user (the tool handlers do), so web tools count
+    // toward caps and reports. Without a user or a usage block, the turn total is told it is incomplete.
+    let metered = false;
+    if (userId && last?.usage) {
+      try {
+        recordUsage(getDb(), {
+          userId, provider: 'anthropic', model, source: 'api', endpoint: '/tools/web',
+          inputTokens: last.usage.input_tokens, outputTokens: last.usage.output_tokens,
+          cacheReadTokens: last.usage.cache_read_input_tokens, cacheCreationTokens: last.usage.cache_creation_input_tokens,
+        });
+        metered = true;
+      } catch { /* never break a tool call */ }
+    }
+    if (!metered) noteUnmeteredModelCall();
     if (last.stop_reason === 'pause_turn' && Array.isArray(last.content)) {
       messages = [...messages, { role: 'assistant', content: last.content }];
       continue;
@@ -102,10 +116,11 @@ function parseAnthropicWeb(data) {
  * tool. Reuses the caller's Anthropic API key — no SerpAPI.
  * Returns { answer: "synthesized summary", sources: [{title, url}, ...] }.
  */
-export async function searchWebViaAnthropic(query, { apiKey, timeoutMs = ANTHROPIC_TIMEOUT_MS, signal } = {}) {
+export async function searchWebViaAnthropic(query, { apiKey, timeoutMs = ANTHROPIC_TIMEOUT_MS, signal, userId = null } = {}) {
   if (!query || typeof query !== 'string') throw new Error('Query must be a non-empty string');
   const data = await runAnthropicWebTool({
     apiKey,
+    userId,
     tool: { type: WEB_SEARCH_TOOL_TYPE, name: 'web_search', max_uses: 5 },
     userText: `Search the web for: ${query}\n\nReturn a concise summary of what you find, and list the most relevant sources with their URLs.`,
     timeoutMs,
@@ -118,10 +133,11 @@ export async function searchWebViaAnthropic(query, { apiKey, timeoutMs = ANTHROP
  * Native URL read via the Anthropic Messages API's built-in `web_fetch` tool.
  * Returns { title, text } (text is the model's synthesis of the page).
  */
-export async function fetchUrlViaAnthropic(urlString, { apiKey, timeoutMs = ANTHROPIC_TIMEOUT_MS, signal } = {}) {
+export async function fetchUrlViaAnthropic(urlString, { apiKey, timeoutMs = ANTHROPIC_TIMEOUT_MS, signal, userId = null } = {}) {
   if (!urlString || typeof urlString !== 'string') throw new Error('URL must be a non-empty string');
   const data = await runAnthropicWebTool({
     apiKey,
+    userId,
     tool: { type: WEB_FETCH_TOOL_TYPE, name: 'web_fetch', max_uses: 3 },
     userText: `Fetch this URL and report its contents: ${urlString}`,
     timeoutMs,

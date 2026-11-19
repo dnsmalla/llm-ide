@@ -186,3 +186,21 @@ test('Anthropic web tools and SerpAPI reach only their fixed host and refuse a r
     assert.deepEqual(seen, [{ host: 'api.anthropic.com', redirect: 'manual' }, { host: 'api.anthropic.com', redirect: 'manual' }, { host: 'serpapi.com', redirect: 'manual' }]);
   } finally { restore(); }
 });
+
+test('a web tool call is written to the usage ledger when the caller names the user', async () => {
+  const db = await import('../kb/db.mjs');
+  const users = await import('../server/users.mjs');
+  const u = users.registerUser(db.getDb(), { email: `web-${Date.now()}@example.com`, password: 'CorrectHorseBattery', displayName: 'w' }).id;
+  const restore = mockFetch(async () => ({
+    ok: true,
+    json: async () => ({ stop_reason: 'end_turn', usage: { input_tokens: 1200, output_tokens: 80, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, content: [{ type: 'text', text: 'Summary.' }] }),
+  }));
+  try {
+    await searchWebViaAnthropic('q', { apiKey: 'k', userId: u });
+    const row = db.getDb().prepare("SELECT endpoint, input_tokens, output_tokens FROM usage_ledger WHERE user_id = ? AND endpoint = '/tools/web'").get(u);
+    assert.deepEqual(row, { endpoint: '/tools/web', input_tokens: 1200, output_tokens: 80 });
+    // Without a user it still works, and nothing is written.
+    await searchWebViaAnthropic('q', { apiKey: 'k' });
+    assert.equal(db.getDb().prepare("SELECT COUNT(*) AS n FROM usage_ledger WHERE endpoint = '/tools/web'").get().n, 1);
+  } finally { restore(); }
+});
