@@ -15,7 +15,7 @@ test("custom task: draft validation and Review-only desktop runnable", () => {
   assert.equal(validateCustomTask({ name: "x", prompt: "p", mode: "review", cron: "0 * * * *" }), null);
   assert.equal(customTaskRunnable({ mode: "review" }), true);
   assert.equal(customTaskRunnable({ mode: "implement" }), false);
-  assert.match(customTaskStatus({ mode: "implement", cron: "", enabled: true }, true, new Date()), /Mac app only/);
+  assert.match(customTaskStatus({ mode: "implement", cron: "", enabled: true }, true, new Date()), /Implement mode cannot run/);
 });
 
 test("custom task: create, update, enable and per-project isolation", () => {

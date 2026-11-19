@@ -107,7 +107,7 @@ export function customTaskRunnable(task: Pick<CustomAutoTask, "mode">): boolean 
   return task.mode === "review";
 }
 
-export const CUSTOM_IMPLEMENT_MESSAGE = "Implement mode runs on an isolated branch in the Mac app; the desktop does not have the worktree host command yet. Save this task as Review or run it on the Mac.";
+export const CUSTOM_IMPLEMENT_MESSAGE = "Implement mode is not available in the desktop app yet (it needs an isolated worktree run). Save this task as Review instead.";
 
 /** The exact prompt sent for a custom task. Custom tasks have no folder settings yet, so the whole project is the scope. */
 export function customTaskMessage(task: Pick<CustomAutoTask, "prompt">): string {
@@ -123,7 +123,7 @@ export function dueCustomTasks(tasks: readonly CustomAutoTask[], masterEnabled: 
 
 /** One-line status for a custom task, matching the built-in wording where it overlaps. */
 export function customTaskStatus(task: Pick<CustomAutoTask, "mode" | "cron" | "enabled">, masterEnabled: boolean, _now: Date, nextFire?: Date | null): string {
-  if (!customTaskRunnable(task)) return "Mac app only — Implement mode is not available here";
+  if (!customTaskRunnable(task)) return "Not available yet — Implement mode cannot run in the desktop app";
   if (!task.cron) return "Manual only — runs when you press Run";
   if (!masterEnabled) return "Auto Tasks paused — master switch off";
   if (!task.enabled) return "Task disabled — won't run";

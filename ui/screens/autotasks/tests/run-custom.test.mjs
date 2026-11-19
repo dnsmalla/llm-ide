@@ -10,7 +10,7 @@ test("custom runner: Implement is refused before any request", async () => {
     request: async () => { called++; return { status: "ok", model: null }; },
     workRoot: async () => "/p", changedPaths: async () => [], revert: async () => {},
   });
-  assert.equal(r.ok, false); assert.match(r.error, /Mac app/); assert.equal(called, 0);
+  assert.equal(r.ok, false); assert.match(r.error, /Implement mode is not available/); assert.equal(called, 0);
 });
 
 test("custom runner: Review sends the prompt, reverts agent writes and reports success", async () => {
