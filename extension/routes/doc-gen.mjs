@@ -135,6 +135,9 @@ export function packSources(rawSources, { budget = MAX_TOTAL_SOURCE_CHARS } = {}
   };
 }
 
+/** Output room for one generated document (non-streaming, so kept at the 16k that stays inside HTTP timeouts). */
+export const DOC_MAX_TOKENS = 16_000;
+
 /// Assemble the /generate-doc prompt. Exported so the prompt shape can be
 /// unit-tested without spawning a model. `command` and `prompt` are already
 /// sanitized and truncated by the caller.
@@ -234,7 +237,9 @@ export async function handleDocGenRoutes(req, res, ctx) {
 
     const prompt = buildDocPrompt({ templateName, sections, command, prompt: userPrompt, sourceParts: packed.text });
 
-    const content = await runClaude(prompt, { userId: req.user?.id, maxTokens: 2048 });
+    // A whole document, not a summary: 2048 tokens (about 1,500 words) cut longer documents off mid-sentence,
+    // and the cut text was what got saved.
+    const content = await runClaude(prompt, { userId: req.user?.id, maxTokens: DOC_MAX_TOKENS });
     const trimmed = content.trim();
     // Persist the generated markdown so future chats/searches can surface
     // it. docTitle falls back to 'Document' for command-only runs; the ref
