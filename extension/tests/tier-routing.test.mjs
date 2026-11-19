@@ -647,7 +647,7 @@ test('runClaude: a routed provider that fails falls back ONCE to the caller defa
     assert.equal(await runClaude('hi', opts), 'default-reply');
     assert.equal(cli.calls(), 1, 'the routed CLI was tried once');
     assert.equal(api.seen.length, 1);
-    assert.equal(api.seen[0].body.model, 'claude-haiku-4-5', 'fallback ran the caller\'s default model');
+    assert.equal(api.seen[0].body.model, 'claude-haiku-5-5', 'fallback ran the caller\'s default model (a retired id runs as its successor)');
     // A JSON-retry (same opts) goes straight to the default — no second CLI spawn.
     assert.equal(await runClaude('hi again', opts), 'default-reply');
     assert.equal(cli.calls(), 1);

@@ -96,3 +96,63 @@ test('a user-scoped key: a redirect from api.anthropic.com is refused on both pa
     assert.equal(execSpy.mock.callCount(), 0);
   } finally { globalThis.fetch = originalFetch; execSpy.mock.restore(); }
 });
+
+// ── What the model answered, not just content[0] (LLM usage review 2026-11-19) ──
+async function withUserKey(replies, run) {
+  resetDb();
+  const u = users.registerUser(db.getDb(), { email: `runtime-${Date.now()}-${Math.random()}@example.com`, password: 'CorrectHorseBattery', displayName: 'r' });
+  vault.setSecret(db.getDb(), u.id, 'claude.apiKey', 'sk-user-scoped-xyz');
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  globalThis.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    const data = replies[Math.min(bodies.length - 1, replies.length - 1)];
+    return { ok: true, status: 200, headers: new Headers(), async json() { return data; } };
+  };
+  const execSpy = mock.method(childProcess, 'execFile', () => { throw new Error('the CLI must not run'); });
+  const { runClaude } = await import('../providers/runtime.mjs');
+  try { return await run((prompt, opts = {}) => runClaude(prompt, { userId: u.id, ...opts }), bodies); }
+  finally { globalThis.fetch = originalFetch; execSpy.mock.restore(); }
+}
+const usage = { input_tokens: 10, output_tokens: 5 };
+
+test('runClaude returns the text blocks even when a thinking block comes first', async () => {
+  await withUserKey([{ stop_reason: 'end_turn', usage, content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: 'the ' }, { type: 'text', text: 'answer' }] }], async (ask) => {
+    assert.equal(await ask('q'), 'the answer');
+  });
+});
+
+test('runClaude treats a refusal as a refusal: no text returned, no CLI fallback', async () => {
+  await withUserKey([{ stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'cyber' }, usage, content: [{ type: 'text', text: 'partial' }] }], async (ask) => {
+    await assert.rejects(() => ask('q'), (e) => e.code === 'MODEL_REFUSED' && /declined this request \(cyber\)/.test(e.message));
+  });
+});
+
+test('runClaude retries a reply cut off at max_tokens once, with twice the room', async () => {
+  await withUserKey([
+    { stop_reason: 'max_tokens', usage, content: [{ type: 'text', text: '{"half":' }] },
+    { stop_reason: 'end_turn', usage, content: [{ type: 'text', text: '{"half":true}' }] },
+  ], async (ask, bodies) => {
+    assert.equal(await ask('q', { maxTokens: 1000 }), '{"half":true}');
+    assert.deepEqual(bodies.map((b) => b.max_tokens), [1000, 2000]);
+  });
+  // Still cut off after the retry: the text comes back (callers that need JSON reject it themselves).
+  await withUserKey([{ stop_reason: 'max_tokens', usage, content: [{ type: 'text', text: 'long…' }] }], async (ask, bodies) => {
+    assert.equal(await ask('q', { maxTokens: 1000 }), 'long…');
+    assert.equal(bodies.length, 2);
+  });
+});
+
+test('a retired model id is sent as its successor, and the catalog offers the current models', async () => {
+  await withUserKey([{ stop_reason: 'end_turn', usage, content: [{ type: 'text', text: 'ok' }] }], async (ask, bodies) => {
+    await ask('q', { model: 'claude-sonnet-4-6' });
+    await ask('q', { model: 'claude-opus-4-8[1m]' });
+    assert.deepEqual(bodies.map((b) => b.model), ['claude-sonnet-5-5', 'claude-opus-5-5']);
+  });
+  const catalog = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'schema', 'models', 'anthropic-models.json'), 'utf8'));
+  assert.ok(catalog.models.some((m) => m.id === 'claude-fable-5-2'));
+  for (const id of Object.values(catalog.retired)) assert.ok(!Object.hasOwn(catalog.retired, id), `${id} is a successor, never retired itself`);
+  const { estimateTurnCostUsd } = await import('../kb/usage.mjs');
+  const million = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+  assert.deepEqual(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'].map((m) => estimateTurnCostUsd(m, million)), [24, 12, 0.6, 48]);
+});

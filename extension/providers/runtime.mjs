@@ -11,6 +11,7 @@ import { markRouteFailed, routeFailure, ROUTE_BROKEN_TTL_MS, ROUTE_TRANSIENT_TTL
 import { resolveProvider, assertChatProvider, providerApiKey, completeViaApi, runViaCli, cliModelId, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs, extractCliUsage } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits, noteUnmeteredModelCall } from '../kb/usage.mjs';
+import { canonicalModel } from '../kb/model-ids.mjs';
 import { fixedHostFetch } from '../server/fixed-host-fetch.mjs';
 
 // Best-effort metering wrappers — a ledger write or quota flag must NEVER throw
@@ -60,6 +61,15 @@ const DEFAULT_MODEL = process.env.LLMIDE_MODEL || JSON.parse(
 // this produces summaries/answers too truncated to be useful, so we
 // stop retrying and surface the error instead.
 const MIN_OVERFLOW_TOKENS = 256;
+// A reply cut off at max_tokens is retried once with twice the room, up to this much.
+const TRUNCATION_RETRY_MAX_TOKENS = 32_000;
+
+/** The text of a Messages API reply: its text blocks joined (thinking and tool blocks carry no answer text). */
+export function responseText(content) {
+  if (!Array.isArray(content)) return '';
+  // A block with a string `text` and no other type is text; thinking and tool blocks carry none.
+  return content.filter((b) => typeof b?.text === 'string' && (b.type === undefined || b.type === 'text')).map((b) => b.text).join('');
+}
 // Anthropic API version header.  2023-06-01 is the current stable
 // version; overridable so a future version bump is a config change,
 // not a deploy.  Prompt caching is GA on this version — the old
@@ -91,7 +101,8 @@ function resolveModel(model) {
   // suffix is a Claude Code convention, not a Messages API model id, so the
   // direct-API path sends the base model.
   const base = typeof model === 'string' ? model.replace(/\[1m\]$/, '') : model;
-  return (typeof base === 'string' && CLAUDE_MODEL_RE.test(base)) ? base : DEFAULT_MODEL;
+  // A retired id (an old LLMIDE_MODEL, a saved setting) runs on its successor instead of failing at the API.
+  return canonicalModel('anthropic', (typeof base === 'string' && CLAUDE_MODEL_RE.test(base)) ? base : DEFAULT_MODEL);
 }
 
 // Anthropic 529 "overloaded" responses usually clear within 5-30s. Retry
@@ -428,6 +439,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
     // with a halved output budget (see overflow handling below).
     let attemptMaxTokens = resolvedMaxTokens;
     let overflowRetried = false;
+    let truncationRetried = false;
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       try {
         const response = await fixedHostFetch('https://api.anthropic.com/v1/messages', {
@@ -463,23 +475,42 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
 
         if (response.ok) {
           const data = await response.json();
-          if (data.content && data.content.length > 0) {
+          // The reply's TEXT blocks, not content[0]: current models think by default, and a thinking block (empty
+          // when its display is omitted) can come before the text.
+          const text = responseText(data.content);
+          const stopReason = data.stop_reason ?? null;
+          if (data.usage) {
             // Structured usage line so operators can track token spend
-            // and spot prompts creeping toward the context window.
-            if (data.usage) {
-              log.info('runClaude usage', {
-                model: resolvedModel,
-                inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
-                cacheReadTokens: data.usage.cache_read_input_tokens ?? 0,
-              });
-            }
+            // and spot prompts creeping toward the context window. Every
+            // answered call is metered, a refusal or a cut-off one included.
+            log.info('runClaude usage', {
+              model: resolvedModel, stopReason,
+              inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
+              cacheReadTokens: data.usage.cache_read_input_tokens ?? 0,
+            });
             meterUsage({
               userId, provider: 'anthropic', model: resolvedModel, source: 'api', endpoint, requestId,
-              inputTokens: data.usage?.input_tokens, outputTokens: data.usage?.output_tokens,
-              cacheReadTokens: data.usage?.cache_read_input_tokens,
-              cacheCreationTokens: data.usage?.cache_creation_input_tokens,
+              inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
+              cacheReadTokens: data.usage.cache_read_input_tokens,
+              cacheCreationTokens: data.usage.cache_creation_input_tokens,
             });
-            return data.content[0].text;
+          }
+          // A refusal is an answer, not content: never return its text as the result, never re-ask the CLI.
+          if (stopReason === 'refusal') {
+            const category = typeof data.stop_details?.category === 'string' ? ` (${data.stop_details.category})` : '';
+            throw Object.assign(new Error(`The model declined this request${category}`), { code: 'MODEL_REFUSED', status: 422 });
+          }
+          // Cut off at the output limit (thinking counts toward it): one retry with twice the room, so a JSON
+          // caller is not handed half an object to "repair" under the same limit.
+          if (stopReason === 'max_tokens' && !truncationRetried && attemptMaxTokens < TRUNCATION_RETRY_MAX_TOKENS) {
+            truncationRetried = true;
+            attemptMaxTokens = Math.min(TRUNCATION_RETRY_MAX_TOKENS, attemptMaxTokens * 2);
+            log.warn('runClaude output cut off at max_tokens, retrying with more room', { model: resolvedModel, maxTokens: attemptMaxTokens });
+            continue;
+          }
+          if (text) {
+            if (stopReason === 'max_tokens') log.warn('runClaude output is cut off at max_tokens', { model: resolvedModel, maxTokens: attemptMaxTokens });
+            return text;
           }
           if (userScopedKey) {
             throw new Error('Anthropic API returned empty content for user-scoped key');
@@ -553,6 +584,8 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
         // Retrying with backoff or falling through to the CLI would
         // overrun the very loop deadline the signal exists to enforce.
         if (signal?.aborted) throw err;
+        // A refusal is final on every path: the CLI would be asked the same thing under another account.
+        if (err?.code === 'MODEL_REFUSED') throw err;
         // AbortSignal.timeout fires a DOMException named 'TimeoutError'
         // (also surfaced as AbortError in some runtimes). Treat the
         // 60 s ceiling as a transient failure and retry with backoff,
