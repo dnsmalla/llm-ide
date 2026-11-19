@@ -30,6 +30,9 @@ export interface RegisterDeps {
   idFor?: (root: string) => Promise<string>;
 }
 
+/** Where the install can be run again (Settings → Workspace has the button; reopening the project does not retry). */
+export const SKILLS_RETRY_HINT = "To try again, open Settings, go to the project folders, and press Install agent skills.";
+
 const reason = (e: unknown) => safeText(e instanceof Error ? e.message : String(e), 160) || "unknown error";
 
 /**
@@ -55,9 +58,9 @@ export async function registerNewProject(project: ProjectInfo, deps: RegisterDep
   }
   try {
     const res = await deps.core.request<{ ok?: boolean } | null>("/kb/project/install-skills", { method: "POST", body: { path: project.root, language: DEFAULT_LANGUAGE } });
-    if (res && res.ok === false) warnings.push("The agent skills were not installed (the core declined). The project works without them; open it again to retry.");
+    if (res && res.ok === false) warnings.push(`The agent skills were not installed (the core declined). The project works without them. ${SKILLS_RETRY_HINT}`);
   } catch (e) {
-    warnings.push(`The agent skills were not installed (${reason(e)}). The project works without them; open it again to retry.`);
+    warnings.push(`The agent skills were not installed (${reason(e)}). The project works without them. ${SKILLS_RETRY_HINT}`);
   }
   return warnings;
 }

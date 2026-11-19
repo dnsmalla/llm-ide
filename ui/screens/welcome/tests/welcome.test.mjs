@@ -40,6 +40,11 @@ test("registerNewProject: registers with the Doc Gen id, installs skills, failur
   const real = [];
   await model.registerNewProject({ name: "p", root: "/r/p" }, { core: { request: async (_p, o) => (real.push(o.body), { ok: true }) } });
   assert.equal(real[0].id, await projectIdFor("/r/p"));
+  // A failed skills install points at the button that can run it again (reopening the project never retried).
+  const failed = await model.registerNewProject({ name: "p", root: "/r/p" }, { core: { request: async (path) => { if (path.includes("install")) throw new Error("kit busy"); return { ok: true }; } }, idFor: async () => "i" });
+  assert.equal(failed.length, 1);
+  assert.match(failed[0], /press Install agent skills/);
+  assert.doesNotMatch(failed[0], /open it again/);
   assert.match(real[0].id, /^p[0-9a-f]{32}$/);
 
   const down = { request: async () => { throw Object.assign(new Error("Core is not reachable ‮"), { code: "NETWORK" }); } };

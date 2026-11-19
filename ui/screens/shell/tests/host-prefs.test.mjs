@@ -193,3 +193,20 @@ test("notification switches decode with every missing or bad value on", () => {
   assert.deepEqual(m.decodeNotifyPrefs("x"), m.DEFAULT_NOTIFY_PREFS);
   assert.deepEqual(m.decodePrefs({ ...P, notifications: undefined }).notifications, m.DEFAULT_NOTIFY_PREFS, "an old host without the key");
 });
+
+test("Install agent skills: posts the project root, and a refusal reads as plain guidance, never a raw code", async () => {
+  const calls = [];
+  const env = (reply) => m.createSettingsEnv({
+    core: { requestRaw: async (path, opts) => { calls.push([path, opts.method, opts.body]); return reply; }, login: async () => {}, logout: async () => {} },
+    coreStatus: () => ({ trust: "spawned", core_log_path: "/data/core.log" }),
+    invoke: async () => null, hostAvailable: () => true, activeProjectRoot: () => "/p",
+    theme: { get: () => "dark", set() {} }, appVersion: () => "1", platform: () => "test", clipboard: () => null,
+  }).host;
+  assert.deepEqual(await env({ status: 200, body: { ok: true } }).installProjectSkills("/p"), { ok: true });
+  assert.deepEqual(calls[0], ["/kb/project/install-skills", "POST", { path: "/p", language: "en" }]);
+  const refused = await env({ status: 400, body: { error: { code: "NOT_A_PROJECT", message: "x" } } }).installProjectSkills("/p");
+  assert.equal(refused.ok, false);
+  assert.match(refused.reason, /not an LLM-IDE project yet/);
+  assert.doesNotMatch(refused.reason, /NOT_A_PROJECT/);
+  assert.match((await env({ status: 500, body: null }).installProjectSkills("/p")).reason, /could not be installed/);
+});

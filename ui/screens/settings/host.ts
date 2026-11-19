@@ -313,6 +313,8 @@ export interface SettingsHost {
   projectPaths?(): Promise<ProjectPaths>;
   /** Re-create the active project's missing canonical folders (never overwrites existing files). */
   rebuildProjectFolders?(): Promise<void>;
+  /** Install (or repair) the agent skills kit in the project at `root`. Resolves a plain reason when the core declines. */
+  installProjectSkills?(root: string): Promise<{ ok: true } | { ok: false; reason: string }>;
   projectMemory?(): Promise<ProjectMemory>;
   /** Reveals a project-relative path in the OS file manager (the host re-checks it against the root). */
   revealPath?(relPath: string): Promise<void>;

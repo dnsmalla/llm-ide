@@ -74,6 +74,22 @@ export default function PathsSection({ initial }: { initial?: ProjectPaths | nul
     }
   };
 
+  const installSkills = async () => {
+    if (!host.installProjectSkills || !data) return;
+    setRebuilding(true);
+    setError(null);
+    setRebuilt(null);
+    try {
+      const r = await host.installProjectSkills(data.root);
+      if (r.ok) setRebuilt("Agent skills installed in this project.");
+      else setError(r.reason);
+    } catch (e) {
+      setError(projectError(e));
+    } finally {
+      setRebuilding(false);
+    }
+  };
+
   const exportProject = async (kind: "data" | "plans") => {
     if (!data) return;
     setExporting(kind);
@@ -145,6 +161,12 @@ export default function PathsSection({ initial }: { initial?: ProjectPaths | nul
             <div className="st-row">
               <Button disabled={rebuilding} onClick={() => void rebuild()}>{rebuilding ? "Rebuilding…" : "Rebuild missing folders"}</Button>
               <span className="st-hint">Re-creates missing canonical folders and seed files; never overwrites existing ones.</span>
+            </div>
+          ) : null}
+          {host.installProjectSkills ? (
+            <div className="st-row">
+              <Button disabled={rebuilding} onClick={() => void installSkills()}>Install agent skills</Button>
+              <span className="st-hint">Links the agent skills kit into this project, or repairs the links. Safe to run again.</span>
             </div>
           ) : null}
           <div className="st-row">

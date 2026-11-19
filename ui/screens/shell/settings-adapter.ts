@@ -40,6 +40,14 @@ export interface SettingsAdapterDeps {
 }
 
 /** Settings' request shape over the shell client: a non-2xx answer is data, not an exception. */
+/** Plain reasons for the core's install-skills refusals (never a raw code or path). */
+const SKILLS_INSTALL_TEXT: Readonly<Record<string, string>> = {
+  NOT_A_PROJECT: "This folder is not an LLM-IDE project yet. Use Rebuild missing folders first, then try again.",
+  KIT_MISSING: "The agent skills kit is not available in this install, so there is nothing to link.",
+  INVALID_PATH: "The project folder could not be read.",
+  INSTALL_FAILED: "The agent skills could not be installed. Check that the project folder is writable, then try again.",
+};
+
 export function settingsClientFrom(core: Pick<CoreClient, "requestRaw">): SettingsCoreClient {
   return {
     async request(method, path, body, signal): Promise<CoreResponse> {
@@ -308,6 +316,13 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         },
         async rebuildProjectFolders() {
           await d.invoke<unknown>("project_rebuild_folders");
+        },
+        async installProjectSkills(root) {
+          const r = await d.core.requestRaw("/kb/project/install-skills", { method: "POST", body: { path: root, language: "en" } });
+          const body = (typeof r.body === "object" && r.body !== null ? r.body : {}) as { ok?: unknown; error?: { code?: unknown } };
+          if (r.status >= 200 && r.status < 300 && body.ok !== false) return { ok: true as const };
+          const code = typeof body.error?.code === "string" ? body.error.code : "";
+          return { ok: false as const, reason: SKILLS_INSTALL_TEXT[code] ?? "The agent skills could not be installed. Try again." };
         },
         async projectMemory() {
           const m = decodeMemory(await d.invoke<unknown>("project_memory"));
