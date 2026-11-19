@@ -118,3 +118,32 @@ test('the inbox routes: the GET tidies and lists, the POST decides one item, unk
   r = await call('POST', '/kb/agent/self-improvement/inbox', user(), { repo: root, source, kind: 'memory', key: 'x', action: 'adopt' });
   assert.deepEqual([r.statusCode, r.body.error.code], [404, 'REPO_NOT_ALLOWED'], 'another user cannot reach this repo');
 });
+
+test('origin rules: a UI-made folder (root null) is claimed; no manifest or a damaged one sends the files to review', () => {
+  const ui = project(null, 'ui-made');
+  fs.mkdirSync(si(ui), { recursive: true });
+  fs.writeFileSync(si(ui, 'manifest.json'), JSON.stringify({ format: 1, root: null, createdBy: 'desktop' }));
+  fs.writeFileSync(si(ui, 'lessons.json'), JSON.stringify({ format: 1, lessons: [] }));
+  assert.deepEqual(ensureOwnFolder(ui), { moved: null });
+  assert.equal(JSON.parse(fs.readFileSync(si(ui, 'manifest.json'), 'utf8')).root, ui);
+  assert.ok(fs.existsSync(si(ui, 'lessons.json')), 'its own lessons stay');
+
+  const bare = project(null, 'no-manifest');
+  fs.mkdirSync(si(bare), { recursive: true });
+  fs.writeFileSync(si(bare, 'memory.md'), '# Chat memory\n- where did this come from\n');
+  assert.match(ensureOwnFolder(bare).moved, /^unknown-origin-\d{4}-\d{2}-\d{2}$/);
+  assert.deepEqual(writer.readChatMemoryFacts(bare), [], 'not used until reviewed');
+  assert.deepEqual(readInbox(bare).sources[0].memory, ['where did this come from']);
+
+  const damaged = project(null, 'damaged');
+  fs.mkdirSync(si(damaged), { recursive: true });
+  fs.writeFileSync(si(damaged, 'manifest.json'), '{oops');
+  fs.writeFileSync(si(damaged, 'self-heal.md'), '# Self-Heal notes\n');
+  const { moved } = ensureOwnFolder(damaged);
+  assert.match(moved, /^unknown-origin-/);
+  assert.equal(fs.readFileSync(si(damaged, 'inbox', moved, 'manifest.json.bak'), 'utf8'), '{oops', 'the damaged manifest is kept for a person');
+
+  const empty = project(null, 'empty');
+  fs.mkdirSync(si(empty), { recursive: true });
+  assert.deepEqual(ensureOwnFolder(empty), { moved: null }, 'an empty new folder is simply claimed');
+});

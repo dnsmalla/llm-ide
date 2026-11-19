@@ -5,7 +5,7 @@
 // again on the next panel load instead of leaving the change applied but unrecorded.
 import { redactSecrets } from "../../../chat/approvals/redact.ts";
 import type { LoopFs } from "../store.ts";
-import { SELF_IMPROVEMENT_DIR } from "../lessons.ts";
+import { createSelfImprovementFolder } from "../lessons.ts";
 import type { ImprovementChange } from "./change.ts";
 import type { ImproveRow, ImproveState } from "./panel-model.ts";
 
@@ -92,7 +92,7 @@ export async function appendChangeLines(fs: LoopFs, lines: readonly ChangeLine[]
       return;
     } catch (e) {
       if (hash === null && fs.create && attempt === 0 && codeOf(e) !== "conflict" && codeOf(e) !== "exists") {
-        await fs.create(SELF_IMPROVEMENT_DIR, "dir").catch(() => undefined);
+        await createSelfImprovementFolder(fs);
         continue;
       }
       if ((codeOf(e) === "conflict" || codeOf(e) === "exists") && attempt < 2) continue;

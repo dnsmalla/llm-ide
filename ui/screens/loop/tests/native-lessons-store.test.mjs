@@ -95,4 +95,5 @@ test("the first lesson creates the self-improvement folder", async () => {
   const { fs, map } = memFs({});
   await saveLoops(fs, store, null);
   assert.ok(map.has(LESSONS) && !map.get(LOOP).includes("Keep the plan short"));
+  assert.deepEqual(JSON.parse(map.get("system/self-improvement/manifest.json")), { format: 1, root: null, createdBy: "desktop" }, "a new folder gets a manifest at once");
 });

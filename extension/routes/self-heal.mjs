@@ -68,6 +68,7 @@ export function writeNotes(repo, notes) {
   const tmp = `${target}.tmp-${process.pid}`;
   try {
     mkdirSync(dirname(target), { recursive: true });
+    ensureOwnFolder(repo); // a new folder gets this repo's manifest before its first file
     writeFileSync(tmp, appendNotes(readNotes(repo), notes), 'utf8');
     renameSync(tmp, target);
     return true;

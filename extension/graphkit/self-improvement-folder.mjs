@@ -30,7 +30,8 @@ function writeAtomic(path, text) {
 function readManifest(dir) {
   try {
     const m = JSON.parse(readFileSync(join(dir, MANIFEST), 'utf8'));
-    return m && typeof m === 'object' && typeof m.root === 'string' ? m : 'corrupt';
+    // `root: null` is a manifest the desktop UI wrote when it created the folder (it knows no absolute path).
+    return m && typeof m === 'object' && m.format === 1 && (typeof m.root === 'string' || m.root === null) ? m : 'corrupt';
   } catch (e) {
     return e?.code === 'ENOENT' ? null : 'corrupt';
   }
@@ -43,8 +44,12 @@ export function sourceName(projectName, now = new Date()) {
 }
 
 /**
- * Makes sure the folder belongs to this project. Missing folder: nothing to do. No manifest (a folder this app made
- * before manifests existed): one is written. A manifest naming another root: its learned files move to the inbox.
+ * Makes sure the folder belongs to this project. Every writer that creates the folder writes a manifest at once, so:
+ *   - missing folder: nothing to do;
+ *   - this project's manifest: nothing to do;
+ *   - a manifest with `root: null` (the desktop UI made the folder): claimed, this project's root filled in;
+ *   - no manifest, an unreadable one, or one naming another root: the learned files move to the inbox (an empty
+ *     folder without one is simply claimed), and this project's manifest is written.
  * Best effort: a failure leaves files where they are and returns `{ moved: null, error }`.
  */
 export function ensureOwnFolder(root, now = new Date()) {
@@ -54,18 +59,22 @@ export function ensureOwnFolder(root, now = new Date()) {
   const own = { format: 1, root: project, projectName: basename(project), createdAt: now.toISOString() };
   try {
     const m = readManifest(dir);
-    if (m !== null && m !== 'corrupt' && samePath(m.root, project)) return { moved: null };
-    if (m === null || m === 'corrupt') {
-      if (m === 'corrupt') renameSync(join(dir, MANIFEST), join(dir, `${MANIFEST}.bak`));
+    const known = m !== null && m !== 'corrupt';
+    if (known && m.root !== null && samePath(m.root, project)) return { moved: null };
+    const learned = LEARNED_FILES.filter((f) => existsSync(join(dir, f)));
+    if ((known && m.root === null) || (m === null && learned.length === 0)) {
       writeAtomic(join(dir, MANIFEST), `${JSON.stringify(own, null, 2)}\n`);
       return { moved: null };
     }
-    let name = sourceName(m.projectName || basename(m.root), now);
-    for (let k = 2; existsSync(join(dir, INBOX, name)); k++) name = `${sourceName(m.projectName || basename(m.root), now)}-${k}`;
+    // Another project's folder, or one whose origin cannot be told: it waits for review, never used as is.
+    const label = known ? (m.projectName || basename(m.root)) : 'unknown-origin';
+    let name = sourceName(label, now);
+    for (let k = 2; existsSync(join(dir, INBOX, name)); k++) name = `${sourceName(label, now)}-${k}`;
     const target = join(dir, INBOX, name);
     mkdirSync(target, { recursive: true });
-    for (const f of LEARNED_FILES) if (existsSync(join(dir, f))) renameSync(join(dir, f), join(target, f));
-    writeAtomic(join(target, MANIFEST), `${JSON.stringify(m, null, 2)}\n`);
+    for (const f of learned) renameSync(join(dir, f), join(target, f));
+    if (known) writeAtomic(join(target, MANIFEST), `${JSON.stringify(m, null, 2)}\n`);
+    if (m === 'corrupt') renameSync(join(dir, MANIFEST), join(target, `${MANIFEST}.bak`));
     writeAtomic(join(dir, MANIFEST), `${JSON.stringify(own, null, 2)}\n`);
     return { moved: name };
   } catch (error) {

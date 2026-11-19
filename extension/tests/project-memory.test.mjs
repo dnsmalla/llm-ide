@@ -1441,6 +1441,8 @@ test('when both files exist the self-improvement copy wins and the old one is le
   const old = path.join(root, 'system', 'memory', 'chat-memory.md');
   fs.writeFileSync(old, '# Chat memory\n- old fact\n');
   fs.mkdirSync(path.join(root, 'system', 'self-improvement'), { recursive: true });
+  // Every writer that creates the folder writes a manifest (a folder without one is reviewed, not used).
+  fs.writeFileSync(path.join(root, 'system', 'self-improvement', 'manifest.json'), JSON.stringify({ format: 1, root: null }));
   fs.writeFileSync(path.join(root, 'system', 'self-improvement', 'memory.md'), '# Chat memory\n- new fact\n');
   assert.deepEqual(factsOf(root), ['new fact']);
   assert.ok(fs.existsSync(old), 'nothing to migrate, so the old file is untouched');

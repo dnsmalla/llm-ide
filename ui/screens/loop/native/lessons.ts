@@ -7,6 +7,18 @@ import type { LoopProjectStore } from "./model.ts";
 export const LESSONS_FILE = "system/self-improvement/lessons.json";
 export const SELF_IMPROVEMENT_DIR = "system/self-improvement";
 export const MAX_LESSON_CHARS = 2000;
+const MANIFEST_FILE = "system/self-improvement/manifest.json";
+
+/**
+ * Creates system/self-improvement/ with a manifest at once (`root: null`: the core fills in this project's real path
+ * on its next read). A folder without a manifest is treated as of unknown origin and reviewed, so every creator writes
+ * one. Both steps tolerate "already there".
+ */
+export async function createSelfImprovementFolder(fs: { create?: (path: string, kind: "file" | "dir") => Promise<string>; write: (path: string, text: string, opts: { expected_hash: string | null; encoding: "utf-8"; bom: boolean }) => Promise<unknown> }): Promise<void> {
+  if (!fs.create) return;
+  await fs.create(SELF_IMPROVEMENT_DIR, "dir").catch(() => undefined);
+  await fs.write(MANIFEST_FILE, `${JSON.stringify({ format: 1, root: null, createdBy: "desktop" }, null, 2)}\n`, { expected_hash: null, encoding: "utf-8", bom: false }).catch(() => undefined);
+}
 const MAX_ENTRIES = 2000;
 const ID_MAX = 200;
 

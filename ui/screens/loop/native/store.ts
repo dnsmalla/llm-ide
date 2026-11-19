@@ -3,7 +3,7 @@
 // reported and never overwritten silently. The desktop UI owns the edit; the Mac remains able to read the same file.
 import type { FsApi } from "../../explorer/fs";
 import { decodeProjectStore, encodeProjectStore, type LoopProjectStore } from "./model.ts";
-import { decodeLessons, encodeLessons, LESSONS_FILE, lessonsOf, overlayLessons, SELF_IMPROVEMENT_DIR, withoutLessons, type LessonEntry } from "./lessons.ts";
+import { createSelfImprovementFolder, decodeLessons, encodeLessons, LESSONS_FILE, lessonsOf, overlayLessons, withoutLessons, type LessonEntry } from "./lessons.ts";
 
 export const LOOP_FILE = "system/loop.json";
 
@@ -101,7 +101,7 @@ async function writeLessons(fs: LoopFs, text: string, expectedHash: string | nul
   } catch (e) {
     // The first lesson: make the folder (its parent system/ holds loop.json, so it exists), then write again.
     if (expectedHash !== null || !fs.create) throw e;
-    await fs.create(SELF_IMPROVEMENT_DIR, "dir").catch(() => undefined);
+    await createSelfImprovementFolder(fs);
     await fs.write(LESSONS_FILE, text, opts);
   }
 }

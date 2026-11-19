@@ -101,7 +101,12 @@ the folder. This is a split by job, not a second copy.
   ("From <project>", Adopt / Dismiss). Lessons and Loop changes: the Loop page's Improvements panel ("Copied from
   other projects"), matched by the shared keys, applied through `applyChange` (full rules + stale check), logged as
   `adopt` with origin `imported:<project>`.
-- A folder made before manifests existed (no manifest) is claimed as this project's own.
+- Every writer that creates the folder writes a manifest at once (the core with this root; the desktop UI with
+  `root: null`, which the core fills in on its next read). So a folder with learned files but no manifest, or with a
+  damaged one, is of unknown origin and goes to `inbox/unknown-origin-<date>/` for review.
+- No tool writes the folder: the chat engine refuses Edit/Write there in every permission mode (Bypass included), a
+  Bash command naming it always asks, and Loop agents are refused (`isLearnedKnowledgePath`, `llm_agent/tools/gates.mjs`).
+  Reading it stays allowed.
 
 ### Phase 5 — original sketch
 - `manifest.json.projectId` ≠ this project's id → the folder (or a copied `inbox/`) is foreign. Its items are listed in
