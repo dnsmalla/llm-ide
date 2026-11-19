@@ -46,21 +46,21 @@
   {
     "label": "/loop",
     "aliases": [],
-    "description": "Open the Loop Engine",
+    "description": "Open the Loop",
     "insert": "/loop",
     "action": {
       "kind": "openSection",
-      "section": "loopEngine"
+      "section": "loop"
     }
   },
   {
     "label": "/mcp",
     "aliases": [],
-    "description": "Open Library \u2192 MCP Plugins",
+    "description": "Open your MCP servers",
     "insert": "/mcp",
     "action": {
       "kind": "openSection",
-      "section": "library"
+      "section": "library:mcp-plugins"
     }
   },
   {
@@ -68,31 +68,31 @@
     "aliases": [
       "/plugins"
     ],
-    "description": "Open Library \u2192 Plugins",
+    "description": "Open your plugins",
     "insert": "/plugin",
     "action": {
       "kind": "openSection",
-      "section": "library"
+      "section": "library:plugins"
     }
   },
   {
     "label": "/agents",
     "aliases": [],
-    "description": "Open Library \u2192 Plugins (subagents)",
+    "description": "Open your plugins (their subagents)",
     "insert": "/agents",
     "action": {
       "kind": "openSection",
-      "section": "library"
+      "section": "library:plugins"
     }
   },
   {
     "label": "/hooks",
     "aliases": [],
-    "description": "Open Library \u2192 Plugins (hook handlers & trust)",
+    "description": "Open your plugins (hooks and their trust)",
     "insert": "/hooks",
     "action": {
       "kind": "openSection",
-      "section": "library"
+      "section": "library:plugins"
     }
   }
 ]

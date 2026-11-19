@@ -6,8 +6,8 @@
 import "@llmide/ui-kit/styles.css";
 import "./library.css";
 import "./write/write.css";
-import { useCallback, useMemo } from "react";
-import { core as shellCore, host as shellHost, invokeHost } from "@llmide/screens/shell";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { core as shellCore, host as shellHost, invokeHost, shellBus } from "@llmide/screens/shell";
 import type { SectionProps } from "@llmide/screens/shell";
 import { indexCoreFrom, searchCoreFrom } from "./core-adapter.ts";
 import { createNotesHost } from "./host.ts";
@@ -66,6 +66,19 @@ export default function Library({ active, projectRoot, mode }: SectionProps) {
     [host],
   );
   const extensions = useMemo(() => libraryExtensions(shellCore, EXTENSION_PLACEHOLDERS), []);
+  // "Open the Library at <pane>" requests (a chat command such as /mcp): taken on mount, and live afterwards.
+  const [openPane, setOpenPane] = useState<{ id: string; n: number } | null>(null);
+  useEffect(() => {
+    const take = (ev: { section: string; anchor?: string } | null) => {
+      if (ev && ev.section === "library" && ev.anchor) setOpenPane((p) => ({ id: ev.anchor as string, n: (p?.n ?? 0) + 1 }));
+    };
+    take(shellBus.takePending("goto-section"));
+    return shellBus.subscribe("goto-section", (ev) => {
+      if (ev.section !== "library") return;
+      shellBus.takePending("goto-section");
+      take(ev);
+    });
+  }, []);
   const loadExtensionCounts = useMemo(() => extensionCounter(shellCore), []);
   // The write side exists only inside the desktop app (it needs the notes_write host commands).
   const available = shellHost.isAvailable();
@@ -110,6 +123,7 @@ export default function Library({ active, projectRoot, mode }: SectionProps) {
   // ssh mode: "Copy server path" copies the server path under the open project root; local mode reveals the note.
   const revealAction = fileManagerActionFor(mode === "ssh", projectRoot, (relPath) => invokeHost("reveal_in_os", { relPath }));
   return <LibraryScreen
+    openPane={openPane}
     store={store}
     host={host}
     write={write}

@@ -50,6 +50,8 @@ export interface LibraryScreenProps {
   /** Switched-on counts for the Extensions groups' badges; absent = no badges. */
   loadExtensionCounts?: (signal: AbortSignal) => Promise<Readonly<Record<string, number | null>>>;
   /** False while another section is shown (the shell keeps this screen mounted). */
+  /** Open this pane now (a chat command such as /mcp); `n` changes with every request. */
+  openPane?: { id: string; n: number } | null;
   active?: boolean;
   /** True inside the desktop app: the folder dialog exists. */
   hostAvailable?: boolean;
@@ -68,10 +70,15 @@ export interface LibraryScreenProps {
   initialHeight?: number;
 }
 
-export function LibraryScreen({ store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, loadExtensionCounts, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, revealLabel, onExportFile, chooseFolder, exportAvailable = true, initialHeight }: LibraryScreenProps): ReactNode {
+export function LibraryScreen({ openPane = null, store, host, write = null, connections, files, runRebuild = null, onOpenExternal, extensions = EXTENSION_PLACEHOLDERS, loadExtensionCounts, active = true, hostAvailable = true, projectOpen = false, onCopyPath, onRevealPath, revealLabel, onExportFile, chooseFolder, exportAvailable = true, initialHeight }: LibraryScreenProps): ReactNode {
   const chooseAction = chooseFolder === undefined ? () => void store.chooseRoot() : chooseFolder;
   const state = useLibraryState(store);
   const [extensionId, setExtensionId] = useState<string | null>(null);
+  // "Open the Library at this pane" (a chat command such as /mcp): the pane opens when the request arrives.
+  useEffect(() => {
+    if (openPane && [...extensions, ...(connections ?? [])].some((x) => x.id === openPane.id)) setExtensionId(openPane.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a request is identified by its counter, not by the lists.
+  }, [openPane?.n]);
   // Reloaded when the user opens or leaves a pane (not while a pane stays open), so a toggle shows on the way out.
   const [extensionCounts, setExtensionCounts] = useState<Readonly<Record<string, number | null>>>({});
   useEffect(() => {

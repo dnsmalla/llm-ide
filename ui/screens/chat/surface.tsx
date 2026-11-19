@@ -165,14 +165,21 @@ export function useChatSurface(projectRoot: string | null, active: boolean, init
     return { catalog: createCatalogLoader(transport), project, mentions: createMentionSearch({ fs: project, core: transport }), attachHost: desktop ? createHostAttach(invokeHost) : null };
   }, [transport, hasProject]);
   const compose = useMemo<ComposeServices>(() => {
-    const sections: Record<string, "settings" | "library"> = { settings: "settings", library: "library" };
+    const sections: Record<string, "settings" | "library" | "loop"> = { settings: "settings", library: "library", loop: "loop" };
     return {
       catalog: services.catalog,
       project: services.project,
       mentions: services.mentions,
       attachHost: services.attachHost,
-      openSection: (section) => { const target = sections[section]; if (!target) return false; shellBus.publish({ type: "goto-section", section: target }); return true; },
-      openLibraryTarget: () => shellBus.publish({ type: "goto-section", section: "library" }),
+      // `<section>` or `<section>:<pane>`: the pane rides as the anchor, which the Library opens (library/index.tsx).
+      openSection: (section) => {
+        const [base, pane] = section.split(":");
+        const target = sections[base];
+        if (!target) return false;
+        shellBus.publish({ type: "goto-section", section: target, ...(pane ? { anchor: pane } : {}) });
+        return true;
+      },
+      openLibraryTarget: (t) => shellBus.publish({ type: "goto-section", section: "library", anchor: t.kind === "mcp" ? "mcp-plugins" : "plugins" }),
       initialPath: hasProject ? initialPath : null,
     };
   }, [services, hasProject, initialPath]);

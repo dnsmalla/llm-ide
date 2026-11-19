@@ -27,11 +27,12 @@ export const BUILTINS: readonly Builtin[] = [
   b("/model", "Switch the model for the current provider", { kind: "switchModel" }, { insert: "/model " }),
   b("/config", "Open Settings", { kind: "openSection", section: "settings" }, { aliases: ["/settings"] }),
   b("/self-heal", "Report this problem to Self-Heal so the app can try to fix it (debug builds)", { kind: "selfHeal" }, { aliases: ["/heal"], insert: "/self-heal " }),
-  b("/loop", "Open the Loop Engine", { kind: "openSection", section: "loopEngine" }),
-  b("/mcp", "Open Library → MCP Plugins", { kind: "openSection", section: "library" }),
-  b("/plugin", "Open Library → Plugins", { kind: "openSection", section: "library" }, { aliases: ["/plugins"] }),
-  b("/agents", "Open Library → Plugins (subagents)", { kind: "openSection", section: "library" }),
-  b("/hooks", "Open Library → Plugins (hook handlers & trust)", { kind: "openSection", section: "library" }),
+  // `section` is a section id, optionally `:<pane>` for the Library pane to open (see chat/surface.tsx).
+  b("/loop", "Open the Loop", { kind: "openSection", section: "loop" }),
+  b("/mcp", "Open your MCP servers", { kind: "openSection", section: "library:mcp-plugins" }),
+  b("/plugin", "Open your plugins", { kind: "openSection", section: "library:plugins" }, { aliases: ["/plugins"] }),
+  b("/agents", "Open your plugins (their subagents)", { kind: "openSection", section: "library:plugins" }),
+  b("/hooks", "Open your plugins (hooks and their trust)", { kind: "openSection", section: "library:plugins" }),
 ];
 
 /** Menu description with the aliases appended from the same array the recognisers use. */
