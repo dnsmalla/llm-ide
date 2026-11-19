@@ -12,15 +12,20 @@ function fixture() {
 }
 /** An fs that keeps one file and records every write; `conflicts` makes the first N writes throw a hash conflict. */
 function stubFs(text, { conflicts = 0, onConflict } = {}) {
-  const state = { text, hash: "h0", writes: [], events: [], left: conflicts, lessons: null };
+  const state = { text, hash: "h0", writes: [], events: [], left: conflicts, lessons: null, changes: null };
   const missing = () => { throw Object.assign(new Error("missing"), { code: "not_found" }); };
   const fs = {
     // system/loop.json is the one file under test; lessons.json is kept apart so the loop.json assertions stay exact.
     read: async (path) => (path === "system/loop.json" ? { status: "ok", text: state.text, hash: state.hash }
-      : path === "system/self-improvement/lessons.json" && state.lessons !== null ? { status: "ok", text: state.lessons, hash: "L" } : missing()),
+      : path === "system/self-improvement/lessons.json" && state.lessons !== null ? { status: "ok", text: state.lessons, hash: "L" }
+      : path === "system/self-improvement/changes.jsonl" && state.changes !== null ? { status: "ok", text: state.changes, hash: `C${state.changes.length}` } : missing()),
     create: async (path) => path,
     write: async (path, next, opts) => {
       if (path === "system/self-improvement/lessons.json") { state.lessons = next; return { hash: "L" }; }
+      if (path === "system/self-improvement/changes.jsonl") {
+        assert.equal(opts.expected_hash, state.changes === null ? null : `C${state.changes.length}`);
+        state.events.push("log"); state.changes = next; return { hash: `C${next.length}` };
+      }
       state.events.push("write");
       if (state.left > 0) {
         state.left -= 1;
@@ -83,8 +88,12 @@ test("accept refuses a stale change with zero writes and no decide", async () =>
 test("accept saves first, then decides with the scope", async () => {
   const d = await deps();
   const run = { fs: d.fs, core: d.core, load: d.load, ...d.base };
-  const out = await acceptImprovement(run, { id: "9", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "general");
-  assert.deepEqual(d.state.events, ["write", "decide"]);
+  const out = await acceptImprovement(run, { id: "9", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal", row: { rationale: "token ghp_" + "a".repeat(36) + " leaked", evidence: { signalIds: [1], excerpts: ["run 4 failed"] } } }, "general");
+  assert.deepEqual(d.state.events, ["write", "log", "decide"], "loop file, then the change log, then the DB");
+  const [line] = d.state.changes.trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual([line.id, line.action, line.loopId, line.scope, line.change.after, line.excerpts], ["9", "accept", d.loop.id, "general", 7, ["run 4 failed"]]);
+  assert.deepEqual(line.decide, { action: "accept", id: "9", scope: "general" });
+  assert.doesNotMatch(line.rationale, /ghp_/, "the shared log is redacted");
   assert.equal(out.store.loops.find((l) => l.id === d.loop.id).config.maxIterations, 7);
   assert.equal(out.hash, d.state.hash);
   assert.equal(d.core.calls[0].path, "/kb/loop/improve/decide");

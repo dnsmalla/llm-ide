@@ -717,6 +717,13 @@ A Factory loop accepts only the addendum plus `maxRepairsPerStage` and
 Apply re-checks the change against the current loop (the loop may have been edited
 since the review) and is refused while any run is starting or running. Undo uses a
 revert mode that inverts the applied change. A proposal has scope project or general.
+
+Every apply, adopt and undo is recorded in `system/self-improvement/changes.jsonl`
+(`improve/changes-log.ts`): one JSON line with the change, its rationale, at most five
+redacted evidence excerpts, the scope and the exact decide call, written after the loop
+file and before the DB. When the panel loads, a decision the log has but the DB missed
+(the app quit, the core was down) is sent again, and each before/after verdict is added
+as an `outcome` line, so the log alone is the shareable record of what the Loop learned.
 Sharing is by stage `defaultKey` for stage-level changes, even inside custom loops,
 and by the loop template key for loop-level changes.
 

@@ -1,19 +1,19 @@
 // The Improvements panel of the Loop page: suggestions for the selected loop, offers from other projects, and what
 // was accepted. Applying/reverting goes through panel-model.ts; this file only renders and wires events.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { FsApi } from "../../../explorer/fs";
+import type { LoopFs } from "../store.ts";
 import type { LoopDefinition, LoopProjectStore } from "../model.ts";
 import type { CoreFetch } from "../stage-exec.ts";
 import { improveAvailable, loadCoreApiVersion } from "./signals.ts";
 import { runReview } from "./review.ts";
 import { shareableScope, type ImprovementChange } from "./change.ts";
 import {
-  acceptImprovement, decideSimple, improveErrorLine, loadImproveState, outcomeLabel, revertImprovement, reviewStatusLine, shouldAutoReview,
+  acceptImprovement, decideSimple, syncChangeLog, improveErrorLine, loadImproveState, outcomeLabel, revertImprovement, reviewStatusLine, shouldAutoReview,
   type ApplyResult, type ImproveRow, type ImproveState,
 } from "./panel-model.ts";
 
 export interface ImprovementsPanelProps {
-  fs: Pick<FsApi, "read" | "write">;
+  fs: LoopFs;
   core: CoreFetch;
   projectRoot: string;
   loop: LoopDefinition;
@@ -99,7 +99,9 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
 
   const refresh = useCallback(async (): Promise<ImproveState | null> => {
     try {
-      const next = await loadImproveState(core, projectRoot, storeRef.current);
+      let next = await loadImproveState(core, projectRoot, storeRef.current);
+      // The change log is the record: a decision the DB missed is sent again, then the state is read once more.
+      if (await syncChangeLog(fs, core, projectRoot, next)) next = await loadImproveState(core, projectRoot, storeRef.current);
       if (!live.current) return null;
       setState(next); setErrorText(null); setUnavailableText(null);
       onCounts(Object.fromEntries(Object.entries(next.loops).map(([id, l]) => [id, l.proposals.length])));
@@ -109,7 +111,7 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
       if (live.current) { if (line.unavailable) setUnavailableText(line.text); else setErrorText(line.text); }
       return null;
     }
-  }, [core, projectRoot, onCounts]);
+  }, [core, projectRoot, onCounts, fs]);
 
   const review = useCallback(async (manual: boolean) => {
     setReviewing(true); setStatus("Reviewing recent runs…");
@@ -173,7 +175,7 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
         <ul className="loop-imp-list">
           {mine.proposals.map((row) => (
             <ProposalCard key={row.id} row={row} loop={loop} busy={busyId === row.id} blocked={blocked}
-              onAccept={(scope) => void act(row, () => acceptImprovement(deps(), { id: row.id, loopId: loop.id, change: row.change, kind: "proposal" }, scope))}
+              onAccept={(scope) => void act(row, () => acceptImprovement(deps(), { id: row.id, loopId: loop.id, change: row.change, kind: "proposal", row }, scope))}
               onReject={() => void act(row, () => decideSimple(core, projectRoot, { action: "reject", id: row.id }))} />
           ))}
         </ul>
@@ -189,7 +191,7 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
                 <p className="loop-native-hint">From {row.fromProjectName ?? "another project"}{outcomeLabel(row.outcome) ? ` · ${outcomeLabel(row.outcome)}` : ""}</p>
                 <div className="loop-imp-actions">
                   <button type="button" className="loop-btn loop-btn-primary" disabled={busyId === row.id || blocked !== null} title={blocked ?? undefined}
-                    onClick={() => void act(row, () => acceptImprovement(deps(), { id: row.id, loopId: loop.id, change: row.change, kind: "offer" }, "project"))}>Apply</button>
+                    onClick={() => void act(row, () => acceptImprovement(deps(), { id: row.id, loopId: loop.id, change: row.change, kind: "offer", row }, "project"))}>Apply</button>
                   <button type="button" className="loop-btn" disabled={busyId === row.id} onClick={() => void act(row, () => decideSimple(core, projectRoot, { action: "dismiss", id: row.id }))}>Dismiss</button>
                 </div>
               </li>
@@ -212,7 +214,7 @@ export function ImprovementsPanel(props: ImprovementsPanelProps): ReactNode {
                     {row.status === "reverted" ? <span className="loop-imp-badge">Undone</span> : label ? <span className="loop-imp-badge" data-verdict={row.outcome?.verdict ?? "not_enough_data"}>{label}</span> : null}
                     {row.status === "accepted" ? (
                       <button type="button" className="loop-btn" disabled={busyId === row.id || blocked !== null} title={blocked ?? undefined}
-                        onClick={() => void act(row, () => revertImprovement(deps(), { id: row.id, loopId: loop.id, change: row.change }))}>Undo</button>
+                        onClick={() => void act(row, () => revertImprovement(deps(), { id: row.id, loopId: loop.id, change: row.change, row }))}>Undo</button>
                     ) : null}
                   </div>
                 </li>

@@ -1,16 +1,16 @@
 // Page-level model of the Improvements panel: applying, reverting and listing improvements. Every rule (allowlist,
 // direction, staleness) lives in change.ts and is re-checked there against the CURRENT loop; nothing is reimplemented.
-import type { FsApi } from "../../../explorer/fs.ts";
 import { reviewEveryRunsOf, type LoopDefinition } from "../model.ts";
 import type { LoopProjectStore } from "../model.ts";
 import { isFactoryLoop } from "../factory.ts";
-import { loadLoops, saveLoops } from "../store.ts";
+import { loadLoops, saveLoops, type LoopFs } from "../store.ts";
+import { appendChangeLines, changeLine, newOutcomeLines, readChangeLog, unrecordedDecisions } from "./changes-log.ts";
 import type { CoreFetch } from "../stage-exec.ts";
 import { applyChange, invertChange, type ImprovementChange } from "./change.ts";
 
 type LoadState = { store: LoopProjectStore; hash: string };
 export interface ApplyDeps {
-  fs: Pick<FsApi, "read" | "write">;
+  fs: LoopFs;
   core: CoreFetch;
   projectRoot: string;
   load: LoadState;
@@ -99,15 +99,60 @@ async function decide(deps: ApplyDeps, body: Record<string, unknown>, saved: Loa
   }
 }
 
-export async function acceptImprovement(deps: ApplyDeps, item: { id: string | number; loopId: string; change: ImprovementChange; kind: "proposal" | "offer" }, scope: "project" | "general"): Promise<ApplyResult> {
-  const saved = await applyAndSave(deps, item.loopId, item.change, "forward");
-  const body = item.kind === "offer" ? { action: "adopt", id: item.id, loopId: item.loopId } : { action: "accept", id: item.id, scope };
-  return decide(deps, body, saved);
+/** The row as the log needs it; a caller without the full row (tests) logs the change alone. */
+type LogRow = Partial<Pick<ImproveRow, "rationale" | "evidence" | "origin" | "stageKey" | "templateKey">>;
+
+/**
+ * Records the decision in system/self-improvement/changes.jsonl after the loop file changed and before the DB call,
+ * so the log (the shareable record) never misses an applied change. A failed log write never undoes the change.
+ */
+async function logDecision(deps: ApplyDeps, action: "accept" | "adopt" | "revert", item: { id: string | number; loopId: string; change: ImprovementChange; row?: LogRow }, body: Record<string, unknown>, saved: LoadState, scope?: string): Promise<string | null> {
+  const loop = saved.store.loops.find((l) => l.id === item.loopId);
+  const r = item.row ?? {};
+  try {
+    await appendChangeLines(deps.fs, [changeLine(action, {
+      id: item.id, loopId: item.loopId, change: item.change, rationale: r.rationale ?? "", evidence: r.evidence ?? null, origin: r.origin,
+      stageKey: r.stageKey ?? ("stageKey" in item.change ? item.change.stageKey : null),
+    }, body, { scope, loopKey: loop?.defaultKey ?? r.templateKey ?? null })]);
+    return null;
+  } catch {
+    return "The change was applied, but system/self-improvement/changes.jsonl could not be written.";
+  }
 }
 
-export async function revertImprovement(deps: ApplyDeps, item: { id: string | number; loopId: string; change: ImprovementChange }): Promise<ApplyResult> {
+export async function acceptImprovement(deps: ApplyDeps, item: { id: string | number; loopId: string; change: ImprovementChange; kind: "proposal" | "offer"; row?: LogRow }, scope: "project" | "general"): Promise<ApplyResult> {
+  const saved = await applyAndSave(deps, item.loopId, item.change, "forward");
+  const body = item.kind === "offer" ? { action: "adopt", id: item.id, loopId: item.loopId } : { action: "accept", id: item.id, scope };
+  const logProblem = await logDecision(deps, item.kind === "offer" ? "adopt" : "accept", item, body, saved, item.kind === "offer" ? "project" : scope);
+  const result = await decide(deps, body, saved);
+  return logProblem && !result.notice ? { ...result, notice: logProblem } : result;
+}
+
+export async function revertImprovement(deps: ApplyDeps, item: { id: string | number; loopId: string; change: ImprovementChange; row?: LogRow }): Promise<ApplyResult> {
   const saved = await applyAndSave(deps, item.loopId, invertChange(item.change), "revert");
-  return decide(deps, { action: "revert", id: item.id }, saved);
+  const body = { action: "revert", id: item.id };
+  const logProblem = await logDecision(deps, "revert", item, body, saved);
+  const result = await decide(deps, body, saved);
+  return logProblem && !result.notice ? { ...result, notice: logProblem } : result;
+}
+
+/**
+ * Brings the DB and the log together after a state read: re-sends every decision the log has but the DB missed, and
+ * appends outcome verdicts the log lacks. Returns true when a decision was re-sent (the caller reads the state again).
+ * Best effort: a failure here never blocks the panel.
+ */
+export async function syncChangeLog(fs: LoopFs, core: CoreFetch, projectRoot: string, state: ImproveState): Promise<boolean> {
+  let log;
+  try { log = await readChangeLog(fs); } catch { return false; }
+  let resent = false;
+  for (const body of unrecordedDecisions(log, state)) {
+    try {
+      await core.request("/kb/loop/improve/decide", { method: "POST", body: { projectRoot, ...body } });
+      resent = true;
+    } catch { /* tried again on the next load */ }
+  }
+  await appendChangeLines(fs, newOutcomeLines(log, state)).catch(() => undefined);
+  return resent;
 }
 
 export async function loadImproveState(core: CoreFetch, projectRoot: string, store: LoopProjectStore): Promise<ImproveState> {
