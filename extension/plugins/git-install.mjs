@@ -8,6 +8,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { scrubbedChildEnv } from '../core/child-env.mjs';
 
 const run = promisify(execFile);
 const MAX_ZIP_BYTES = 5 * 1024 * 1024;
@@ -47,7 +48,7 @@ export async function clonePluginZip({ url, ref, runCommand = run } = {}) {
   const zipPath = join(root, 'plugin.zip');
   try {
     const args = ['clone', '--depth', '1', ...(ref ? ['--branch', ref] : []), '--', url, repo];
-    await runCommand('git', args, { timeout: GIT_TIMEOUT_MS, maxBuffer: 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    await runCommand('git', args, { timeout: GIT_TIMEOUT_MS, maxBuffer: 1024 * 1024, env: scrubbedChildEnv({ GIT_TERMINAL_PROMPT: '0' }) });
     const head = await runCommand('git', ['rev-parse', 'HEAD'], { cwd: repo, timeout: 30_000, maxBuffer: 1024 * 1024 });
     const commit = String(head.stdout || '').trim();
     if (!/^[0-9a-f]{40}$/.test(commit)) throw Object.assign(new Error('could not read the cloned commit'), { code: 'GIT_FAILED', status: 502 });

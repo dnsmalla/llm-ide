@@ -18,3 +18,16 @@ test('git plugin refs: safe branch/tag names only', () => {
   assert.equal(validGitPluginRef(null), true);
   for (const bad of ['--upload-pack=evil', 'a b', '..', 'a;b']) assert.equal(validGitPluginRef(bad), false, bad);
 });
+
+test('the clone never sees the core\'s secrets', async () => {
+  const { clonePluginZip } = await import('../plugins/git-install.mjs');
+  process.env.LLMIDE_JWT_SECRET = 'jwt-secret-value';
+  process.env.LLMIDE_VAULT_KEY = 'vault-key-value';
+  let seen = null;
+  const runCommand = async (cmd, args, opts) => { if (cmd === 'git' && args[0] === 'clone') { seen = opts.env; throw new Error('stop after the clone call'); } return { stdout: '' }; };
+  await assert.rejects(clonePluginZip({ url: 'https://github.com/owner/repo', ref: null, runCommand }));
+  assert.ok(seen, 'the clone was attempted');
+  assert.equal(seen.GIT_TERMINAL_PROMPT, '0');
+  assert.ok(!Object.keys(seen).some((k) => k.startsWith('LLMIDE_')), 'no LLMIDE_* variable reaches git');
+  assert.ok(seen.PATH, 'git still gets PATH');
+});
