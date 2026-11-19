@@ -263,3 +263,30 @@ test('active: turns says which chats follow the switches, read at request time',
     assert.deepEqual((await call('GET', '/auth/me/extensions/active', undefined, u)).body.turns, { claude: false, providers: false });
   } finally { delete process.env.LLMIDE_EXT_ACTIVE_SET; delete process.env.LLMIDE_EXT_ADAPTER; }
 });
+
+// ---- health check (API 156) -------------------------------------------------
+
+test('POST /auth/me/extensions/check validates its body, answers 404 for an unknown item and a result for a real one', async () => {
+  const url = '/auth/me/extensions/check';
+  assert.equal(isExtensionRoute(url), true);
+  assert.equal((await call('POST', url, {}, null)).status, 401);
+  assert.equal((await call('GET', url)).status, 405);
+  for (const bad of [{}, { kind: 'widget', id: 'x' }, { kind: 'mcp' }, { kind: 'mcp', id: 'x', force: 'yes' }, { kind: 'mcp', id: 'x'.repeat(201) }]) {
+    const r = await call('POST', url, bad);
+    assert.equal(r.status, 400, JSON.stringify(bad));
+    assert.equal(r.body.error.code, 'VALIDATION_FAILED');
+  }
+  for (const kind of ['mcp', 'plugin', 'skill-kit', 'catalog']) {
+    const r = await call('POST', url, { kind, id: 'nobody' });
+    assert.equal(r.status, 404, kind);
+    assert.equal(r.body.error.code, 'NOT_FOUND');
+  }
+  // Installed but not consented: a problem with the one fix, and nothing started.
+  const ins = await call('POST', '/auth/me/extensions/install', { url: 'https://github.com/acme/runner', commit: SHA }, { id: 'u-health' });
+  const r = await call('POST', url, { kind: 'catalog', id: ins.body.item.id }, { id: 'u-health' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.status, 'problem');
+  assert.deepEqual([r.body.problems[0].code, r.body.problems[0].fix], ['NOT_ALLOWED', 'consent']);
+  assert.equal(typeof r.body.checkedAt, 'number');
+  assert.equal((await call('POST', url, { kind: 'catalog', id: ins.body.item.id }, { id: 'u-other' })).status, 404, 'another user has no such item');
+});

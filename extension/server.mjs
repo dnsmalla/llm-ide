@@ -505,7 +505,9 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          listed with change null + recordMissing instead of hidden; logged:true wipes DB text only when the line exists.
 //   v155 — Memory checked against the code, additive: GET /kb/agent/project-memory returns `stale` (the facts whose
 //          cited files are all gone); such a fact is ranked last and labelled where the model reads memory.
-const SERVER_API_VERSION = 155;
+//   v156 — Extension health check, additive: POST /auth/me/extensions/check { kind, id, force? } → { status, checkedAt,
+//          problems[{ code, message, fix, detail? }], tools? } tests one installed extension (no model) and names one fix per problem.
+const SERVER_API_VERSION = 156;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

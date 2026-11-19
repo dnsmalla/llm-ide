@@ -45,10 +45,11 @@ function pluginGate(pluginEnabled) {
 
 // `serverActive(record)` is an optional extra gate (the extensions catalog's
 // per-item switch, supplied by llm_agent). It can only remove a server.
-export function effectiveMcpServers(userId, { readSecret, pluginEnabled, serverActive } = {}) {
+export function effectiveMcpServers(userId, { readSecret, pluginEnabled, serverActive, only, ignoreEnabled = false } = {}) {
   const allowedByPlugin = pluginGate(pluginEnabled);
   const active = listMcpPluginsWithState(userId).plugins
-    .filter((p) => p.enabled && p.consented)
+    // `only` + `ignoreEnabled`: the health check builds one consented server's config even while it is switched off.
+    .filter((p) => (ignoreEnabled || p.enabled) && p.consented && (only === undefined || p.id === only))
     .filter(allowedByPlugin)
     .filter((p) => (typeof serverActive === 'function' ? serverActive(p) === true : true));
   const mcpServers = {};

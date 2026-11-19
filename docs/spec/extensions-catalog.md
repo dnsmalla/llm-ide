@@ -243,6 +243,43 @@ Threat: opening a repository must not be enough to run code the repository ships
 
 **What changes for an existing project (behaviour list).** Exactly one thing: a Claude turn in an untrusted folder runs with `strictMcpConfig`, so no project `.mcp.json` server (own or parent folder, stdio or remote) is loaded. Everything else is byte-identical, which `tests/workspace-trust.test.mjs` pins (options without `strictMcpConfig`, no notice) for a trusted folder and the kill switch. `LLMIDE_WORKSPACE_TRUST=off` restores the previous behaviour exactly (no detection, no notice, no `strictMcpConfig`).
 
+## §9e Health check (API 156)
+
+`POST /auth/me/extensions/check { kind, id, force? }` tests one installed extension with no model call (`llm_agent/extensions/health.mjs`; class `install`, because it can start the user's own local MCP server). `kind` is `mcp` (legacy MCP registry), `plugin` (legacy plugin), `skill-kit` (LLM source) or `catalog` (catalog install). 400 `VALIDATION_FAILED` for a bad body, 404 `NOT_FOUND` when the user has no such item.
+
+Result: `{ status: ok | problem | unknown, checkedAt, problems: [{ code, message, fix, detail? }], tools?: [{ name, description }] }`. `tools` only when an MCP server connected (at most 48, descriptions cleaned and capped). `detail` is `{ program }` for `PROGRAM_MISSING` and `{ file }` (relative, cleaned, at most 200 characters) for `HOOK_FILE_MISSING` and `SKILL_INVALID`; it never holds a secret, env value or absolute path. Every `message` is a fixed sentence: loader and runtime text is mapped to one, never copied.
+
+The check never starts what a chat would not start, and never judges what only a chat can reach: a server on a loopback or private address (`classifyIp` private, `localhost`, `*.local`) and a server whose catalog entry is `oauth: true` are not probed (the chat connects to local addresses and handles OAuth itself).
+
+| Code | Kind | Fix |
+|---|---|---|
+| `NOT_ALLOWED` | mcp, catalog | `consent` |
+| `CREDENTIAL_MISSING` (also a 401 on a server with no stored header) | mcp | `set-credential` |
+| `CREDENTIAL_REJECTED` (a 403, or a 401 on a server with headers) | mcp | `set-credential` |
+| `HUB_NO_LOCAL_PROGRAMS` (status `unknown`) | mcp, catalog | `none` |
+| `LOCAL_ADDRESS` (status `unknown`, not probed) | mcp, catalog | `none` |
+| `SIGNS_IN_IN_CHAT` (status `unknown`, OAuth server, not probed) | mcp | `none` |
+| `RELATIVE_PROGRAM` (status `unknown`: a relative command with a slash is not resolved against the core's folder) | mcp, catalog | `none` |
+| `SWITCHED_OFF` (status `unknown`: the item, or the plugin that declares the server, is off for this user) | mcp, catalog | `none` |
+| `PROGRAM_MISSING` | mcp | `install-program` |
+| `START_FAILED` (stdio) / `UNREACHABLE` (http, sse) | mcp, catalog | `switch-off` |
+| `FILES_CHANGED` (stored files changed, or a loader read failure) | catalog, plugin | `repair` (plugin: only with a git or marketplace source, else `none`) |
+| `NAME_CLASH` | catalog | `switch-off` |
+| `LOAD_WARNING` ("Part of this extension is not valid, so it was not loaded.") | plugin, catalog | `none` |
+| `HOOK_FILE_MISSING` (a hook path is normalised and must stay inside the plugin folder) | plugin | `repair` only when the plugin has a git or marketplace source record, else `none` |
+| `FILES_MISSING` | skill-kit | `repair` for the built-in kit (update restores it), else `none` |
+| `SKILL_INVALID` | skill-kit | `none` (`detail.file`) |
+
+Safety rules (each has a test in `tests/extensions-health.test.mjs`):
+1. An item the user has not consented to, or has switched off, is never started or loaded.
+2. A stdio server is never started on a hub.
+3. Whatever was started is closed (`finally`), also on an error, a timeout, an aborted request or a late connection.
+4. No secret, env value, header, credential URL or home path in any message, detail or tool text (messages are fixed sentences; server text goes through `cleanServerText` and `redactSecrets`).
+5. One check per (user, kind, id) at a time (a second request shares it); a result is cached 30 s; `force: true` bypasses the cache except within 5 s of the last completed check, which returns that result.
+6. The request's abort signal (client closed the connection) aborts the probe; an abandoned result is neither cached nor recorded.
+
+With Self-Heal on (`config.selfHeal`) one incident `{ source: 'server', category: 'extension', message: '<kind> <id>: <code>' }` is recorded, best effort, for each fault code (`FILES_CHANGED`, `FILES_MISSING`, `LOAD_WARNING`, `HOOK_FILE_MISSING`, `SKILL_INVALID`, `START_FAILED`, `UNREACHABLE`) that was not in the previous completed result for that item. User-setup problems (consent, credential, missing program, local address, sign-in in chat, hub) are never incidents.
+
 ## §10 Not in these phases
 
 User-added index sources (the seed list is code), installing a registry `server.json` item or a package-launcher server, the Mac Extensions screen, an `extensionsFingerprint` column in `turn_composition`, the adapter's skills catalog block (it would add tokens to every provider turn), per-tool MCP deny lists, and write-through to the legacy files.

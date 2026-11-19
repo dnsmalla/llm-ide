@@ -18,6 +18,7 @@
 //   POST /auth/me/extensions/update            { id, commit?, consents? }
 //   POST /auth/me/extensions/rollback          { id }
 //   POST /auth/me/extensions/repair            { id }
+//   POST /auth/me/extensions/check             { kind, id, force? }   health check of one extension (API 156), no model
 //
 // Install allowlist, per user (API 95):
 //   GET  /auth/me/extensions/allowlist          { operator, ceiling, user, ignored, effective }
@@ -41,6 +42,7 @@ import {
 } from '../llm_agent/extensions/install.mjs';
 import { checkUpdates, listUpdates, previewUpdate, applyUpdate, rollback, repair } from '../llm_agent/extensions/update.mjs';
 import { refreshIndexes, searchCatalog } from '../llm_agent/extensions/indexes.mjs';
+import { checkExtension, HealthError, KINDS as HEALTH_KINDS } from '../llm_agent/extensions/health.mjs';
 import { allowlistView, setAllowlist, AllowlistError } from '../llm_agent/extensions/allowlist.mjs';
 
 const PATHS = new Set([
@@ -58,6 +60,7 @@ const PATHS = new Set([
   '/auth/me/extensions/rollback',
   '/auth/me/extensions/repair',
   '/auth/me/extensions/allowlist',
+  '/auth/me/extensions/check',
 ]);
 const GET_PATHS = new Set(['/auth/me/extensions/installed', '/auth/me/extensions/catalog', '/auth/me/extensions/active', '/auth/me/extensions/updates', '/auth/me/extensions/allowlist']);
 
@@ -197,6 +200,18 @@ export async function handleCatalogRoute(req, res, { db, requestId }) {
       const r = await checkUpdates(userId, { id: body.id, signal: abortOnClose(req, res).signal });
       audit('extension.updates_check', body.id ? String(body.id) : 'all', 'success', { updates: r.results.filter((x) => x.updateAvailable).length });
       send(res, 200, r);
+      return;
+    }
+    if (url === '/auth/me/extensions/check') {
+      if (!HEALTH_KINDS.includes(body.kind) || typeof body.id !== 'string' || !body.id || body.id.length > 200 || (body.force !== undefined && typeof body.force !== 'boolean')) {
+        send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'kind must be mcp, plugin, skill-kit or catalog, id a string and force a boolean' } }); return;
+      }
+      const ac = abortOnClose(req, res);
+      try { send(res, 200, await checkExtension(userId, { kind: body.kind, id: body.id, force: body.force === true, signal: ac.signal })); }
+      catch (err) {
+        if (err instanceof HealthError && err.code === 'not_found') { send(res, 404, { error: { code: 'NOT_FOUND', message: 'not installed' } }); return; }
+        throw err;
+      }
       return;
     }
     if (!parseItemId(body.id)) throw new InstallError('not_found', 'not installed');

@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 155
+  x-api-version: 156
 servers:
   - url: "https://{host}"
     variables:
@@ -2031,6 +2031,89 @@ paths:
                         - "status"
                 required:
                   - "results"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/check:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                kind:
+                  type: "string"
+                id:
+                  type: "string"
+                force:
+                  type: "boolean"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  status:
+                    type: "string"
+                  checkedAt:
+                    type: "number"
+                  problems:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        code:
+                          type: "string"
+                        message:
+                          type: "string"
+                        fix:
+                          type: "string"
+                        detail:
+                          type: "object"
+                          properties:
+                            program:
+                              type: "string"
+                      required:
+                        - "code"
+                        - "message"
+                        - "fix"
+                  tools:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        name:
+                          type: "string"
+                        description:
+                          type: "string"
+                      required:
+                        - "name"
+                        - "description"
+                required:
+                  - "status"
+                  - "checkedAt"
+                  - "problems"
         "400":
           description: "Bad Request"
           content:

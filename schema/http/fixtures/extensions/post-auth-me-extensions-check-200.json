@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /auth/me/extensions/check",
+  "status": 200,
+  "request": {
+    "body": {
+      "kind": "mcp",
+      "id": "linear",
+      "force": true
+    }
+  },
+  "response": {
+    "status": "ok",
+    "checkedAt": 1790000000000,
+    "problems": [],
+    "tools": [
+      {
+        "name": "list_issues",
+        "description": "List issues"
+      }
+    ]
+  }
+}

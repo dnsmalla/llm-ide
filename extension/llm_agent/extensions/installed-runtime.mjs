@@ -71,7 +71,7 @@ export function missingConsents(rec) {
   return need.filter((k) => rec.consents?.[k]?.commit !== rec.pinnedCommit);
 }
 
-function safeDir(userId, id, rec) {
+export function safeDir(userId, id, rec) {
   if (typeof rec.pinnedCommit !== 'string' || !SHA_RE.test(rec.pinnedCommit)) return null;
   const dir = join(itemStoreDir(userId, id), rec.pinnedCommit);
   try {

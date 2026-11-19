@@ -4235,6 +4235,38 @@ export type PostAuthMeExtensionsRepairResponse404 = CommonError;
 
 export type PostAuthMeExtensionsRepairResponse409 = CommonError;
 
+/** Request parts for `POST /auth/me/extensions/check` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsCheckRequest = {
+  body: {
+    kind?: string;
+    id?: string;
+    force?: boolean;
+  };
+};
+
+export type PostAuthMeExtensionsCheckResponse200 = {
+  status: string;
+  checkedAt: number;
+  problems: {
+    code: string;
+    message: string;
+    fix: string;
+    detail?: {
+      program?: string;
+    };
+  }[];
+  tools?: {
+    name: string;
+    description: string;
+  }[];
+};
+
+export type PostAuthMeExtensionsCheckResponse400 = CommonError;
+
+export type PostAuthMeExtensionsCheckResponse401 = CommonError;
+
+export type PostAuthMeExtensionsCheckResponse404 = CommonError;
+
 /** Request parts for `GET /auth/me/workspace-trust` (schema/http/extensions.schema.json). */
 export type GetAuthMeWorkspaceTrustRequest = Record<string, never>;
 
@@ -9704,6 +9736,15 @@ export interface ApiEndpoints {
       401: PostAuthMeExtensionsRepairResponse401;
       404: PostAuthMeExtensionsRepairResponse404;
       409: PostAuthMeExtensionsRepairResponse409;
+    };
+  };
+  "POST /auth/me/extensions/check": {
+    request: PostAuthMeExtensionsCheckRequest;
+    responses: {
+      200: PostAuthMeExtensionsCheckResponse200;
+      400: PostAuthMeExtensionsCheckResponse400;
+      401: PostAuthMeExtensionsCheckResponse401;
+      404: PostAuthMeExtensionsCheckResponse404;
     };
   };
   "GET /auth/me/workspace-trust": {

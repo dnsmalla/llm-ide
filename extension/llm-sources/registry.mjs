@@ -224,6 +224,20 @@ function listDiscoverySkills(dir) {
   return skills;
 }
 
+/** Relative paths of skill files whose frontmatter cannot be read (listDiscoverySkills still shows them under their folder name). */
+export function invalidDiscoverySkills(dir) {
+  const bad = [];
+  for (const fam of LIBRARY_FAMILIES) {
+    let entries;
+    try { entries = readdirSync(join(dir, fam), { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      const file = join(dir, fam, e.name, 'SKILL.md');
+      if (bad.length < MAX_DISCOVERY_ENTRIES && e.isDirectory() && existsSync(file) && !readFrontmatterNameDesc(file)) bad.push(`${fam}/${e.name}/SKILL.md`);
+    }
+  }
+  return bad;
+}
+
 // agents/*.md — one file per subagent, same frontmatter shape as SKILL.md
 // (Claude Code's convention for standalone subagent definitions).
 export function listDiscoveryAgents(dir) {

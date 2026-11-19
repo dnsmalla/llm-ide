@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/extensions/check",
+  "status": 404,
+  "request": {
+    "body": {
+      "kind": "plugin",
+      "id": "nobody"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "not installed"
+    }
+  }
+}

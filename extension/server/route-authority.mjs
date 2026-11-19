@@ -454,6 +454,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/auth/me/claude-plugins/update',
     '/auth/me/codex-plugins/import',
     '/auth/me/extensions/catalog/refresh',
+    '/auth/me/extensions/check',
     '/auth/me/extensions/install',
     '/auth/me/extensions/repair',
     '/auth/me/extensions/rollback',

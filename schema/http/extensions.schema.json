@@ -945,10 +945,17 @@
             "turns": {
               "type": "object",
               "properties": {
-                "claude": { "type": "boolean" },
-                "providers": { "type": "boolean" }
+                "claude": {
+                  "type": "boolean"
+                },
+                "providers": {
+                  "type": "boolean"
+                }
               },
-              "required": ["claude", "providers"]
+              "required": [
+                "claude",
+                "providers"
+              ]
             }
           },
           "required": [
@@ -1630,6 +1637,103 @@
           "$ref": "_common#/$defs/Error"
         },
         "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/check": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "force": {
+              "type": "boolean",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string"
+            },
+            "checkedAt": {
+              "type": "number"
+            },
+            "problems": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "fix": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "object",
+                    "x-optional": true,
+                    "properties": {
+                      "program": {
+                        "type": "string",
+                        "x-optional": true
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "fix"
+                ]
+              }
+            },
+            "tools": {
+              "type": "array",
+              "x-optional": true,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "description"
+                ]
+              }
+            }
+          },
+          "required": [
+            "status",
+            "checkedAt",
+            "problems"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
           "$ref": "_common#/$defs/Error"
         }
       }

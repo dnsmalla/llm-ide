@@ -90,6 +90,12 @@ for (const [key, { spec }] of endpoints) for (const s of Object.keys(spec.respon
 // endpoints whose success path is skipped.
 const SKIP_RULES = [
   {
+    // Extension health check (API 156): the 200 rows need an extension already installed for the replay user.
+    // Covered with real handlers and fake servers by tests/extensions-health.test.mjs and tests/extensions-catalog-routes.test.mjs.
+    why: 'extension health check: needs an installed extension; covered by tests/extensions-health.test.mjs',
+    when: (fx) => fx.endpoint === 'POST /auth/me/extensions/check' && fx.status === 200,
+  },
+  {
     // Task registry runs: the route needs the desktop's bus host proof, which a replayed fixture cannot send.
     // The 403 (no proof) replays live; the catalog and the run result are covered by tests/task-routes.test.mjs
     // and tests/task-runner-*.test.mjs with the real handler.

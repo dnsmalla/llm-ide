@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/extensions/check",
+  "status": 400,
+  "request": {
+    "body": {
+      "kind": "widget",
+      "id": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "kind must be mcp, plugin, skill-kit or catalog, id a string and force a boolean"
+    }
+  }
+}
