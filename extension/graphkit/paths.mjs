@@ -9,7 +9,8 @@
 //
 //   <project>/system/graph/index.md          code graph overview (one repo)
 //   <project>/system/graph/<child>/index.md  code graph per repo (2+ code/ repos)
-//   <project>/system/memory/chat-memory.md   LLM-curated durable facts
+//   <project>/system/self-improvement/memory.md  LLM-curated durable facts (all learned knowledge lives in
+//                                                self-improvement/, docs/superpowers/plans/2026-11-19-self-improvement-folder.md)
 //   <project>/system/memory/graph-notes.md   cross-links + dependency hubs
 //   <project>/system/memory/doc-notes.md     doc/InfiniteBrain sections
 //   <project>/system/repo.md                 hand-authored project facts
@@ -32,6 +33,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 export const SYSTEM_DIR = 'system';
 const MEMORY_DIRNAME = 'memory';
+const SELF_IMPROVEMENT_DIRNAME = 'self-improvement';
 const GRAPH_DIRNAME = 'graph';
 
 /** `<project>` for a project root or a `code/<child>` repo root. */
@@ -135,12 +137,32 @@ export function graphIndexFile(root) {
   return existsSync(legacy) ? legacy : current;
 }
 
-/** The canonical chat-memory file (the only path ever written). */
+/** `<project>/system/self-improvement` — everything the system learned about the project (shareable as one folder). */
+export function selfImprovementDir(root) {
+  return join(systemDir(root), SELF_IMPROVEMENT_DIRNAME);
+}
+
+/** The canonical project memory file (the only path ever written). */
 export function chatMemoryFile(root) {
+  return join(selfImprovementDir(root), 'memory.md');
+}
+
+/** Its pre-consolidation location (graphify-out), migrated forward and then deleted. */
+export function legacyChatMemoryFile(root) {
+  return join(legacyMemoryDir(root), 'chat-memory.md');
+}
+
+/** Before the self-improvement folder: `<project>/system/memory/chat-memory.md`, migrated forward and kept as `.bak`. */
+export function previousChatMemoryFile(root) {
   return join(memoryDir(root), 'chat-memory.md');
 }
 
-/** Its pre-consolidation location, migrated forward on first write. */
-export function legacyChatMemoryFile(root) {
-  return join(legacyMemoryDir(root), 'chat-memory.md');
+/**
+ * Every place project memory may be, in read order: the canonical file, then the older locations. The prompt reader
+ * and the viewer/writer share this ONE list, so they can never disagree about where memory is. Deduplicated (for a
+ * project root, the pre-D1 `<repo>/system/memory` is the same folder as `system/memory`).
+ */
+export function chatMemoryReadPaths(root) {
+  const list = [chatMemoryFile(root), previousChatMemoryFile(root), join(legacySystemMemoryDir(root), 'chat-memory.md'), legacyChatMemoryFile(root)];
+  return [...new Set(list)];
 }

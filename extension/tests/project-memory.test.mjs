@@ -202,7 +202,7 @@ test('chat memory left in the legacy tree is read, then migrated forward on writ
 
   // The first write materialises everything at the canonical path...
   writer.appendChatMemory({ root, facts: ['Deploys via CI'] });
-  const canonical = path.join(root, 'system', 'memory', 'chat-memory.md');
+  const canonical = path.join(root, 'system', 'self-improvement', 'memory.md');
   assert.deepEqual(factsOf(root), ['Uses pnpm workspaces', 'Deploys via CI']);
   assert.ok(fs.existsSync(canonical), 'facts now live at the canonical path');
   // ...and retires the old file, so exactly one copy exists afterwards.
@@ -676,7 +676,7 @@ test('persistTurnMemory captures into the workspace root when no repo is indexed
     userId: u, userMessage: 'q', reply: 'a', runClaude,
   });
   assert.ok(Array.isArray(result) && result.some((f) => /build\.sh/.test(f)));
-  const onDisk = fs.readFileSync(path.join(ws, 'system', 'memory', 'chat-memory.md'), 'utf8');
+  const onDisk = fs.readFileSync(path.join(ws, 'system', 'self-improvement', 'memory.md'), 'utf8');
   assert.match(onDisk, /build\.sh/);
   fs.rmSync(ws, { recursive: true, force: true });
 });
@@ -1413,4 +1413,52 @@ test('with fewer facts than the cap, every one is still shown', async () => {
   });
   assert.match(prompt, /Alpha/);
   assert.match(prompt, /Beta/);
+});
+
+// ── self-improvement folder move (plan 2026-11-19, phase 1) ──────────
+test('memory in system/memory is recalled, then moved into self-improvement/memory.md with the old file kept as .bak', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'si-move');
+  const old = path.join(root, 'system', 'memory', 'chat-memory.md');
+  const canonical = path.join(root, 'system', 'self-improvement', 'memory.md');
+  fs.writeFileSync(old, '# Chat memory\n- The build runs offline via build.sh\n');
+  // The prompt reader finds it before anything moved it.
+  assert.match(memory.renderGraphifyMemory({ indexedRepos: [{ path: root, name: 'r' }] }, u), /build runs offline/);
+  assert.ok(!fs.existsSync(canonical), 'rendering a prompt never writes');
+  // The viewer/writer read moves it, verified, and keeps the old file as .bak.
+  assert.deepEqual(factsOf(root), ['The build runs offline via build.sh']);
+  assert.ok(fs.existsSync(canonical));
+  assert.ok(!fs.existsSync(old) && fs.existsSync(`${old}.bak`));
+  assert.match(memory.renderGraphifyMemory({ indexedRepos: [{ path: root, name: 'r' }] }, u), /build runs offline/, 'recalled from the new file');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('when both files exist the self-improvement copy wins and the old one is left alone', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'si-both');
+  const old = path.join(root, 'system', 'memory', 'chat-memory.md');
+  fs.writeFileSync(old, '# Chat memory\n- old fact\n');
+  fs.mkdirSync(path.join(root, 'system', 'self-improvement'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'system', 'self-improvement', 'memory.md'), '# Chat memory\n- new fact\n');
+  assert.deepEqual(factsOf(root), ['new fact']);
+  assert.ok(fs.existsSync(old), 'nothing to migrate, so the old file is untouched');
+  assert.doesNotMatch(memory.renderGraphifyMemory({ indexedRepos: [{ path: root, name: 'r' }] }, u), /old fact/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a cloned code/<child> repo\'s own system/memory is copied into the project but never changed', async () => {
+  const paths = await import('../graphkit/paths.mjs');
+  const project = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '_si-proj-'));
+  fs.mkdirSync(path.join(project, 'system'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'system', 'project.json'), '{}');
+  const child = path.join(project, 'code', 'app');
+  const repoCopy = path.join(child, 'system', 'memory', 'chat-memory.md');
+  fs.mkdirSync(path.dirname(repoCopy), { recursive: true });
+  fs.writeFileSync(repoCopy, '# Chat memory\n- child fact\n');
+  assert.deepEqual(factsOf(child), ['child fact']);
+  assert.ok(fs.existsSync(paths.chatMemoryFile(child)) && paths.chatMemoryFile(child).startsWith(project + path.sep));
+  assert.equal(fs.readFileSync(repoCopy, 'utf8'), '# Chat memory\n- child fact\n', 'the repo is input only');
+  fs.rmSync(project, { recursive: true, force: true });
 });

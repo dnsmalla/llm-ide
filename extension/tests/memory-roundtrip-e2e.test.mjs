@@ -4,7 +4,7 @@
 //   system/graph/index.md          overview
 //   system/memory/graph-notes.md   cross-links + hubs
 //   system/memory/doc-notes.md     doc sections
-//   system/memory/chat-memory.md   curated facts (written by THIS side)
+//   system/self-improvement/memory.md   curated facts (written by THIS side)
 //   system/repo.md                 hand-authored facts
 //
 // Asserts the agent sees each artifact exactly once, and that a capture updates
@@ -78,17 +78,17 @@ test('every generated artifact reaches the agent exactly once', () => {
 test('a captured fact is written to exactly one file and recalled next turn', () => {
   writer.appendChatMemory({ root: repo, facts: ['[tooling] Builds with swift build, never Xcode'] });
 
-  // Exactly one chat-memory.md anywhere under the repo.
+  // Exactly one memory file anywhere under the repo.
   const found = [];
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p);
-      else if (e.name === 'chat-memory.md') found.push(path.relative(repo, p));
+      else if (e.name === 'chat-memory.md' || e.name === 'memory.md') found.push(path.relative(repo, p));
     }
   };
   walk(repo);
-  assert.deepEqual(found, [path.join('system', 'memory', 'chat-memory.md')]);
+  assert.deepEqual(found, [path.join('system', 'self-improvement', 'memory.md')]);
 
   // And it is recalled on the next render.
   const out = memory.renderGraphifyMemory({ indexedRepos: [{ path: repo, name: 'demo' }] }, U, null, 'how do I build?');
@@ -96,14 +96,14 @@ test('a captured fact is written to exactly one file and recalled next turn', ()
 });
 
 test('a second capture UPDATES the same file — facts accumulate, files do not', () => {
-  const before = fs.readFileSync(path.join(repo, 'system/memory/chat-memory.md'), 'utf8');
+  const before = fs.readFileSync(path.join(repo, 'system/self-improvement/memory.md'), 'utf8');
   writer.appendChatMemory({ root: repo, facts: ['[convention] Tests live in Tests/<Target>Tests'] });
-  const after = fs.readFileSync(path.join(repo, 'system/memory/chat-memory.md'), 'utf8');
+  const after = fs.readFileSync(path.join(repo, 'system/self-improvement/memory.md'), 'utf8');
 
   assert.notEqual(before, after, 'the file was updated');
   const facts = writer.readChatMemoryFacts(repo);
   assert.equal(facts.length, 2, 'both facts retained in one file');
-  assert.equal(fs.readdirSync(path.join(repo, 'system/memory')).filter((f) => f.startsWith('chat-memory')).length, 1,
+  assert.equal(fs.readdirSync(path.join(repo, 'system/self-improvement')).filter((f) => f.startsWith('memory')).length, 1,
     'no sibling/backup copy left behind');
 });
 

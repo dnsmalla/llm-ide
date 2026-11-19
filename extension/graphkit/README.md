@@ -7,7 +7,7 @@ The graph + memory module. Five files, all in production use:
 | `paths.mjs` | The one definition of where a repo's generated knowledge lives on disk. **Read this first.** |
 | `graph.mjs` | Code-graph queries — `findRelatedCode` (FTS-backed) and `findRelatedSymbols` (symbol graph) |
 | `memory.mjs` | Renders a repo's memory into the agent's system prompt (READ half) |
-| `memory-writer.mjs` | Persists LLM-curated facts to `chat-memory.md` (WRITE half) |
+| `memory-writer.mjs` | Persists LLM-curated facts to `system/self-improvement/memory.md` (WRITE half) |
 | `index.mjs` | Public surface — agents and context renderers import from here |
 
 ## On-disk layout (canonical)
@@ -20,14 +20,15 @@ system/graph/index.md          repo overview (impact-ranked)
 system/graph/graph.json        adjacency list
 system/memory/graph-notes.md   cross-links + dependency hubs
 system/memory/doc-notes.md     doc sections + module affinity
-system/memory/chat-memory.md   LLM-curated durable facts
+system/self-improvement/memory.md  LLM-curated durable facts (moved from system/memory/chat-memory.md on first read)
 system/memory/environment.md   this machine's venv / PATH / project files
 system/repo.md                 hand-authored project facts
 system/faults/  system/q&a/    archived fault reports + saved Q&A
 ```
 
 The graph half is written by the Mac app (`KnowledgeGraphService`,
-`CodeNoteGenerator`); `chat-memory.md` is written here. Both read through
+`CodeNoteGenerator`); project memory (`self-improvement/memory.md`) is written here. The reader and the writer
+find it through one ordered list, `chatMemoryReadPaths`. Both read through
 `paths.mjs` — do not re-derive these paths anywhere else.
 
 `graphify-out/` is **not** ours: it belongs to the separate `/graphify` skill.

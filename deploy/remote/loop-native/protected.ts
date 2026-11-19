@@ -31,6 +31,8 @@ export const DEFAULT_PROTECTED_GLOBS = [
   "**/pyproject.toml", "**/setup.cfg", ".githooks/**", "**/.githooks/**", "**/jest.config.js", "**/vitest.config.ts",
   ...CI_HOOK_PROTECTED_GLOBS,
   "**/system/faults.csv", "**/system/faults/**", "**/system/loop-runs/**", "**/system/loop/**", "**/system/loop.json",
+  // Learned knowledge (memory, lessons, accepted changes): an agent must never edit what steers its own prompts.
+  "**/system/self-improvement/**",
 ];
 
 // Files the Ship panel calls out before the final confirm: a change to the build, the pipeline or a hook is the kind

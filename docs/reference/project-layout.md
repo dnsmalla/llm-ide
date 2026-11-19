@@ -57,8 +57,13 @@ truth for these paths; its header comment states the same rule.
 │   │                    test/TEST-STRUCTURE.json, refactor/graph/{before,after}.json
 │   ├── loop-runs/       Loop run journal (git-ignored)
 │   ├── loop-worktrees/  Loop git worktrees (git-ignored)
-│   ├── memory/          agent memory artifacts: graph-notes.md, doc-notes.md,
-│   │                    chat-memory.md (rewritten in place)
+│   ├── memory/          graph memory artifacts: graph-notes.md, doc-notes.md,
+│   │                    environment.md (a pre-2026-11-19 chat-memory.md is moved
+│   │                    out and kept here as chat-memory.md.bak)
+│   ├── self-improvement/ everything the system learned, shareable as one folder:
+│   │                    memory.md (project memory, rewritten in place); lessons,
+│   │                    accepted Loop changes and Self-Heal notes follow (plan
+│   │                    2026-11-19-self-improvement-folder). Agents cannot edit it.
 │   ├── q&a/             Q&A store (MemoryStore)
 │   ├── faults/          fault log entries (MemoryStore)
 │   ├── repo.md          no longer written; the code summary is graph/index.md

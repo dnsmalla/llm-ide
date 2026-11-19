@@ -62,7 +62,7 @@ test('a code/<child> repo resolves to the project root for every generated path'
   try {
     assert.equal(paths.projectRootOf(app), project);
     assert.equal(paths.memoryDir(app), path.join(project, 'system', 'memory'));
-    assert.equal(paths.chatMemoryFile(app), path.join(project, 'system', 'memory', 'chat-memory.md'));
+    assert.equal(paths.chatMemoryFile(app), path.join(project, 'system', 'self-improvement', 'memory.md'));
     assert.equal(paths.systemDir(app), path.join(project, 'system'));
     // Single repo: graph is flat at the project root.
     assert.equal(paths.graphDir(app), path.join(project, 'system', 'graph'));

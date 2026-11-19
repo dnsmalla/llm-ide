@@ -7,6 +7,8 @@ test("protected paths cover tests, build config and Loop state", () => {
   assert.equal(isProtectedPath("src/foo.test.ts"), true);
   assert.equal(isProtectedPath("package.json"), true);
   assert.equal(isProtectedPath("system/loop.json"), true);
+  assert.equal(isProtectedPath("system/self-improvement/memory.md"), true, "learned knowledge is never an agent's to edit");
+  assert.equal(isProtectedPath("code/app/system/self-improvement/lessons.json"), true);
   assert.equal(isProtectedPath("src/app.ts"), false);
   assert.deepEqual(protectedPaths(["src/app.ts", "Tests/A.swift"], []), ["Tests/A.swift"]);
   assert.equal(isProtectedPath("Tests/A.swift", ["!Tests/A.swift"]), false);

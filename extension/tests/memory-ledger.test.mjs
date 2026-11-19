@@ -93,7 +93,7 @@ test('persistTurnMemory: restating a stored fact leaves the file untouched and c
       userId: U, userMessage: 'how do I run tests', reply: 'node --test', runClaude,
     });
     await turn();
-    const file = path.join(root, 'system', 'memory', 'chat-memory.md');
+    const file = path.join(root, 'system', 'self-improvement', 'memory.md');
     const before = fs.readFileSync(file, 'utf8');
     await turn();
     assert.equal(fs.readFileSync(file, 'utf8'), before, 'the file is not rewritten for a restatement');

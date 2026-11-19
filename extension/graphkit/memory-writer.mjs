@@ -21,7 +21,7 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, existsSync } from 'node:fs';
 import { config } from '../core/config.mjs';
 import {
-  chatMemoryFile, legacyChatMemoryFile, memoryDir,
+  chatMemoryFile, chatMemoryReadPaths, legacyChatMemoryFile, previousChatMemoryFile, selfImprovementDir,
 } from './paths.mjs';
 
 // How many facts the store may hold. The reader ranks these against the current
@@ -180,21 +180,18 @@ export function renderChatMemoryFile(facts) {
 
 // Read the current fact list for a repo. Best-effort → [] on any error.
 //
-// Falls back to the pre-consolidation location when the canonical file doesn't
-// exist yet, so facts captured before the move aren't lost on a repo the Mac app
-// hasn't regenerated since. The fallback is READ-ONLY — the next write lands at
-// the canonical path (and retires the legacy file), so this converges to one
-// file after a single turn rather than maintaining two.
+// Reads the first file that exists in `chatMemoryReadPaths` (the same list the prompt reader uses). Found at an
+// older location, the facts are migrated at once: written to the canonical self-improvement/memory.md, read back,
+// and only then is the old file retired (see writeChatMemoryFacts). A failed migration still returns the facts.
 export function readChatMemoryFacts(root) {
-  try {
-    return parseChatMemoryFacts(readFileSync(memFilePath(root), 'utf8'));
-  } catch {
-    try {
-      return parseChatMemoryFacts(readFileSync(legacyChatMemoryFile(root), 'utf8'));
-    } catch {
-      return [];
-    }
+  for (const path of chatMemoryReadPaths(root)) {
+    let text;
+    try { text = readFileSync(path, 'utf8'); } catch { continue; }
+    const facts = parseChatMemoryFacts(text);
+    if (path !== memFilePath(root) && facts.length > 0) writeChatMemoryFacts(root, facts);
+    return facts;
   }
+  return [];
 }
 
 // Overwrite the file with exactly `facts` (after caps/dedup). Used by the
@@ -204,7 +201,7 @@ export function writeChatMemoryFacts(root, facts) {
   const content = renderChatMemoryFile(facts);
   const target = memFilePath(root);
   try {
-    mkdirSync(memoryDir(root), { recursive: true });
+    mkdirSync(selfImprovementDir(root), { recursive: true });
     // Atomic write: write to a temp file in the SAME directory (so the rename
     // stays on one filesystem and is atomic), then rename over the target. A
     // crash mid-write can only leave the temp file — never a half-written
@@ -222,13 +219,18 @@ export function writeChatMemoryFacts(root, facts) {
       throw err;
     }
     // The canonical file now holds these facts (including any read forward from
-    // the old location), so retire the legacy one. Done only AFTER a successful
-    // write, so a failure can never leave the facts nowhere. Removing it is what
-    // makes the migration converge — otherwise both files would linger and the
-    // stale one would keep shadowing reads for tools that look there.
+    // an old location), so retire the old ones — only AFTER the write is read back
+    // intact, so a failure can never leave the facts nowhere. The graphify-out copy
+    // is deleted (as before); the pre-folder system/memory/chat-memory.md is kept as
+    // `.bak`. A cloned repo's own `<repo>/system/memory` is never written to.
+    if (readFileSync(target, 'utf8') !== content) return parseChatMemoryFacts(content);
     const legacy = legacyChatMemoryFile(root);
     if (existsSync(legacy)) {
       try { unlinkSync(legacy); } catch { /* leave it; the canonical file wins on read */ }
+    }
+    const previous = previousChatMemoryFile(root);
+    if (existsSync(previous)) {
+      try { renameSync(previous, `${previous}.bak`); } catch { /* leave it; the canonical file wins on read */ }
     }
   } catch { /* best-effort — a failed write leaves the previous file intact */ }
   return parseChatMemoryFacts(content);

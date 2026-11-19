@@ -32,7 +32,7 @@ import { parseChatMemoryFacts } from './memory-writer.mjs';
 import { factStamp } from '../core/fact-key.mjs';
 import { memoryLedgerFor, ledgerKey } from '../kb/memory-ledger.mjs';
 import { termTokens } from '../core/text-tokens.mjs';
-import { memoryDir, legacyMemoryDir, legacySystemDir, legacySystemMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
+import { chatMemoryReadPaths, memoryDir, legacyMemoryDir, legacySystemDir, legacySystemMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
 
 // Expand a leading `~`/`~/` to the home directory. The Mac client sends
 // home-relative repo paths (homeRelativePath → "~/Developer/foo"), but the
@@ -441,7 +441,8 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, 
     try { ledger = memoryLedgerFor(userId, root); } catch { ledger = null; }
   }
   const chatBody = stableOnly ? '' : selectChatMemoryFacts(
-    readMemoryFile('chat-memory.md', CHAT_STORE_CHARS),
+    // The same ordered list the viewer/writer reads (paths.mjs), so a moved memory file is never missed here.
+    chatMemoryReadPaths(root).reduce((found, path) => found ?? safeRead(path, CHAT_STORE_CHARS), null),
     { userMessage, room: Math.min(budget, CHAT_INJECT_CHARS), ledger },
   );
   const chatFloor = Math.min(Math.floor(budget * 0.5), chatBody.length);
