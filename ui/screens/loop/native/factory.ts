@@ -272,11 +272,15 @@ export function stepDiffSection(diff: { text: string; truncated: boolean }): str
 /** A fenced diff under its intro line; a cut diff gets the note the reviewer must repeat. */
 function diffBlock(intro: string, diff: { text: string; truncated: boolean }, cutNote: string): string {
   const cut = diff.truncated || diff.text.length > MAX_REVIEW_DIFF_CHARS;
+  const body = diff.text.slice(0, MAX_REVIEW_DIFF_CHARS) || "(no changes)";
+  // A fence longer than any backtick run in the diff: a changed Markdown file or test fixture routinely holds
+  // ``` lines, and a fixed fence would let the diff close it and speak to the reviewer as instructions.
+  const fence = fenceFor(body);
   return [
     intro,
-    "```diff",
-    diff.text.slice(0, MAX_REVIEW_DIFF_CHARS) || "(no changes)",
-    "```",
+    `${fence}diff`,
+    body,
+    fence,
     ...(cut ? [`The diff was cut to fit. ${cutNote}`] : []),
   ].join("\n");
 }
