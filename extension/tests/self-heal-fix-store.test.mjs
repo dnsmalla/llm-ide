@@ -103,3 +103,43 @@ test('resolving a proposal marks its incidents fixed or ignored and clears it; a
   assert.equal(store.applyRunOutcome(u, [c.id], new Map(), FAILED, null), 0);
   assert.deepEqual(status(u)['Error: lapsed'], ['new', 0, null], 'a row no longer fixing is left alone');
 });
+
+test('history: a failed attempt, an applied fix and its recurrence are remembered, newest four kept, and reach the next batch', async () => {
+  const { renderBatch } = await import('../core/self-heal-batch.mjs');
+  const u = mkUser();
+  const a = rec(u, 'Error: gamma broke');
+  let ids = store.triageIncidents(u, 5).map((i) => i.id);
+  store.applyRunOutcome(u, ids, new Map([[a.id, { verdict: 'fixed', reason: 'guard the null' }]]), { ...FAILED, failure: 'make regression failed; its output ended with:\nFAIL test_gamma' }, null, 1000);
+  let [i] = store.listIncidents(u);
+  assert.deepEqual([i.status, i.attempts], ['new', 1]);
+  assert.deepEqual(i.history, [{ at: 1000, text: 'attempt 1: the agent answered fixed — guard the null; make regression failed; its output ended with:\nFAIL test_gamma' }]);
+
+  ids = store.triageIncidents(u, 5).map((x) => x.id);
+  const batch = renderBatch(store.listIncidents(u));
+  assert.match(batch, /This is attempt 2 of 3\. Earlier attempts did not hold/);
+  assert.match(batch, /FAIL test_gamma/);
+  assert.equal(store.applyRunOutcome(u, ids, new Map([[a.id, { verdict: 'fixed', reason: 'reset the cache' }]]), OK, P()), 1);
+  assert.equal(store.resolveProposal(u, P().branch, true), 1);
+  rec(u, 'Error: gamma broke'); // it comes back
+  [i] = store.listIncidents(u);
+  assert.equal(i.status, 'new');
+  assert.deepEqual(i.history.slice(1).map((h) => h.text), ['a fix was applied: reset the cache', 'it came back after the applied fix, so that fix did not remove the cause']);
+
+  store.triageIncidents(u, 5);
+  store.applyRunOutcome(u, [a.id], new Map(), FAILED); // attempt 3: needs a person, who sees all four entries
+  [i] = store.listIncidents(u);
+  assert.deepEqual([i.status, i.history.length], ['needsHuman', store.HISTORY_MAX]);
+  assert.match(i.history.at(-1).text, /^attempt 3: the agent wrote no result line; the run did not succeed$/);
+});
+
+test('history: a down agent or an aborted run records nothing, and a discarded proposal adds nothing', () => {
+  const u = mkUser();
+  const a = rec(u, 'Error: delta broke');
+  store.triageIncidents(u, 5);
+  store.applyRunOutcome(u, [a.id], new Map(), { ...FAILED, agentDown: true }, null);
+  assert.deepEqual(store.listIncidents(u)[0].history, []);
+  store.triageIncidents(u, 5);
+  store.applyRunOutcome(u, [a.id], new Map([[a.id, { verdict: 'fixed', reason: 'x' }]]), OK, P());
+  store.resolveProposal(u, P().branch, false);
+  assert.deepEqual([store.listIncidents(u)[0].status, store.listIncidents(u)[0].history], ['ignored', []]);
+});

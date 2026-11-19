@@ -285,7 +285,7 @@ test("the endpoint list advertises the grant route and not the redeem route", ()
   const block = src.slice(src.indexOf("const ALL_ENDPOINTS = ["), src.indexOf("];", src.indexOf("const ALL_ENDPOINTS = [")));
   assert.match(block, /'\/kb\/repos\/clone-grant'/);
   assert.equal(block.includes("clone-credential"), false);
-  assert.match(src, /const SERVER_API_VERSION = 150;/);
+  assert.match(src, /const SERVER_API_VERSION = 151;/);
 });
 
 test("no token, grant or redeem key reaches the stderr logger during issue and redeem", async () => {

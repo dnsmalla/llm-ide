@@ -156,6 +156,7 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
   - Review / Apply (`git apply` of the reviewed patch, never a commit) / Discard end with `POST /kb/self-heal/runs/:id/resolve`.
   - The source checkout must be on the user's repo allow-list, and the Auto Tasks feature (which owns the Loop agent) must be on.
   - While a run is open, the core skips `log` and `server` reports.
+  - **Learning across runs (API 151, migration 0079):** each incident keeps `history` (newest 4: a failed attempt's verdict and the redacted 2000-character tail of the failing `make regression`, sent as the outcome's `verifyOutput`; an applied fix; a recurrence after it). `renderBatch` lists it, fenced, as "attempt N of 3 … take a different approach", the prompt asks for a test that fails without the fix, and Settings shows it under "Earlier attempts".
 - **Never** log incident text or send it anywhere. It reaches a model only fenced inside `BATCH.md`, in a run the user started.
 - Tests:
   - node: `tests/incident-rules.test.mjs`, `tests/self-heal-store.test.mjs`, `tests/self-heal-routes.test.mjs`, `tests/self-heal-server.test.mjs` (spawns `server.mjs`; needs local listen), `tests/self-heal-batch.test.mjs`, `tests/self-heal-fix-store.test.mjs`, `tests/self-heal-runs.test.mjs` (local listen)

@@ -62,7 +62,7 @@ test('POST records redacted, deduped incidents; unusable reports are skipped; th
   assert.equal(incidents[0].count, 2);
   assert.equal(incidents[0].message, 'db is locked for [EMAIL]');
   assert.match(incidents[0].id, /^[0-9a-f]{16}$/);
-  assert.deepEqual(Object.keys(incidents[0]).sort(), ['attempts', 'category', 'count', 'environmental', 'firstSeen', 'id', 'lastSeen', 'message', 'note', 'proposal', 'source', 'stack', 'status']);
+  assert.deepEqual(Object.keys(incidents[0]).sort(), ['attempts', 'category', 'count', 'environmental', 'firstSeen', 'history', 'id', 'lastSeen', 'message', 'note', 'proposal', 'source', 'stack', 'status']);
 });
 
 test('ignore is per user, an unknown path is 404, and DELETE clears', async () => {

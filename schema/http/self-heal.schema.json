@@ -3,7 +3,7 @@
   "$defs": {
     "Incident": {
       "type": "object",
-      "required": ["id", "source", "category", "message", "stack", "environmental", "firstSeen", "lastSeen", "count", "attempts", "status", "note", "proposal"],
+      "required": ["id", "source", "category", "message", "stack", "environmental", "firstSeen", "lastSeen", "count", "attempts", "status", "note", "history", "proposal"],
       "properties": {
         "id": { "type": "string", "description": "the signature: first 16 hex of sha256(source, category, normalized message, top own stack frame)" },
         "source": { "type": "string", "enum": ["ui", "log", "crash", "server"] },
@@ -17,6 +17,7 @@
         "attempts": { "type": "integer", "description": "how often a fixed incident came back, plus failed fix attempts (needsHuman at 3)" },
         "status": { "type": "string", "enum": ["new", "fixing", "proposed", "ignored", "needsHuman", "fixed"] },
         "note": { "type": ["string", "null"] },
+        "history": { "type": "array", "description": "earlier fix attempts, oldest first, at most 4: { at (ms since epoch), text } — a failed run's verdict and why it failed, an applied fix, a recurrence (API 151)", "items": { "type": "object", "required": ["at", "text"], "properties": { "at": { "type": "integer" }, "text": { "type": "string" } } } },
         "proposal": { "type": ["object", "null"], "additionalProperties": true, "description": "{ mainRepo, worktreePath, branch, baseCommit } while status is proposed, else null" }
       }
     },
@@ -138,6 +139,7 @@
             "hasChanges": { "type": "boolean" },
             "agentDown": { "type": "boolean" },
             "aborted": { "type": "boolean" },
+            "verifyOutput": { "type": "string", "description": "a failed make regression's output, at most 256 KiB; its redacted 2000-character tail goes into each failed incident's history (API 151)" },
             "proposal": {
               "type": ["object", "null"],
               "required": ["mainRepo", "worktreePath", "branch", "baseCommit"],

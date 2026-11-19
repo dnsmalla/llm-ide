@@ -168,6 +168,12 @@ export default function SelfHealSection() {
               <p>{i.message}</p>
               {i.note ? <p className="st-hint">{i.note}</p> : null}
               <p className="st-hint">Seen {i.count} time{i.count === 1 ? "" : "s"}, last {new Date(i.lastSeen).toLocaleString()}</p>
+              {i.history.length > 0 ? (
+                <details>
+                  <summary>Earlier attempts ({i.history.length})</summary>
+                  <pre>{i.history.map((h) => `${new Date(h.at).toLocaleString()}  ${h.text}`).join("\n\n")}</pre>
+                </details>
+              ) : null}
               {i.stack.length > 0 ? (
                 <details>
                   <summary>Stack</summary>

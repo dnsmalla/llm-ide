@@ -10,7 +10,22 @@ import { cleanIncident } from '../core/incident.mjs';
 import { MAX_ATTEMPTS } from '../core/self-heal-batch.mjs';
 
 export const INCIDENT_CAP = 200;
+/** Attempt history kept per incident (oldest dropped first), and the cap on one entry. */
+export const HISTORY_MAX = 4;
+export const HISTORY_ENTRY_MAX = 3000;
 const BUSY = "('fixing', 'proposed')";
+
+function readHistory(json) {
+  try {
+    const list = JSON.parse(json ?? '[]');
+    return Array.isArray(list) ? list.filter((e) => e && typeof e.text === 'string' && Number.isFinite(e.at)) : [];
+  } catch { return []; }
+}
+/** `json` with one more entry, keeping the newest HISTORY_MAX. */
+function pushHistory(json, text, now = Date.now()) {
+  const entry = { at: now, text: String(text).slice(0, HISTORY_ENTRY_MAX) };
+  return JSON.stringify([...readHistory(json), entry].slice(-HISTORY_MAX));
+}
 
 const toIncident = (r) => ({
   id: r.id,
@@ -25,6 +40,7 @@ const toIncident = (r) => ({
   attempts: r.attempts,
   status: r.status,
   note: r.note,
+  history: readHistory(r.history),
   proposal: r.proposal_worktree
     ? { mainRepo: r.proposal_main_repo, worktreePath: r.proposal_worktree, branch: r.proposal_branch, baseCommit: r.proposal_base_commit }
     : null,
@@ -37,15 +53,15 @@ export function recordIncident(userId, report, now = Date.now()) {
   if (!c) return null;
   const db = getDb();
   return db.transaction(() => {
-    const prev = db.prepare('SELECT status FROM self_heal_incidents WHERE user_id = ? AND id = ?').get(userId, c.id);
+    const prev = db.prepare('SELECT status, history FROM self_heal_incidents WHERE user_id = ? AND id = ?').get(userId, c.id);
     if (prev) {
       db.prepare(`UPDATE self_heal_incidents SET count = count + 1, last_seen = MAX(last_seen, ?), message = ?,
           stack = COALESCE(?, stack), environmental = ? WHERE user_id = ? AND id = ?`)
         .run(now, c.message, c.stack, c.environmental, userId, c.id);
       if (prev.status === 'fixed') {
-        db.prepare(`UPDATE self_heal_incidents SET status = 'new', attempts = attempts + 1, proposal_main_repo = NULL,
+        db.prepare(`UPDATE self_heal_incidents SET status = 'new', attempts = attempts + 1, history = ?, proposal_main_repo = NULL,
             proposal_worktree = NULL, proposal_branch = NULL, proposal_base_commit = NULL WHERE user_id = ? AND id = ?`)
-          .run(userId, c.id);
+          .run(pushHistory(prev.history, 'it came back after the applied fix, so that fix did not remove the cause', now), userId, c.id);
       }
     } else {
       db.prepare(`INSERT INTO self_heal_incidents (user_id, id, source, category, message, stack, environmental, first_seen, last_seen)
@@ -131,19 +147,20 @@ export function reopenIncidents(userId, ids) {
  *   - `fixed` on a run that succeeded (verify passed, the worktree has a diff, `proposal` given) → `proposed`;
  *   - `environmental` → `ignored`;
  *   - the agent was down or the run aborted → back to `new`, nothing else changes;
- *   - anything else is a failed attempt: attempts + 1, `needsHuman` at MAX_ATTEMPTS.
+ *   - anything else is a failed attempt: attempts + 1, `needsHuman` at MAX_ATTEMPTS, and one history entry with the
+ *     agent's verdict and `failure` (why the run did not succeed, e.g. the redacted tail of a failed make regression).
  * Rows no longer `fixing` (cleared, reopened) are left alone. Returns how many were proposed.
  */
-export function applyRunOutcome(userId, ids, results, { runSucceeded, agentDown, aborted }, proposal) {
+export function applyRunOutcome(userId, ids, results, { runSucceeded, agentDown, aborted, failure = null }, proposal, now = Date.now()) {
   requireUser(userId);
   const db = getDb();
   return db.transaction(() => {
-    const get = db.prepare('SELECT status, attempts FROM self_heal_incidents WHERE user_id = ? AND id = ?');
+    const get = db.prepare('SELECT status, attempts, history FROM self_heal_incidents WHERE user_id = ? AND id = ?');
     const propose = db.prepare(`UPDATE self_heal_incidents SET status = 'proposed', note = ?, proposal_main_repo = ?,
         proposal_worktree = ?, proposal_branch = ?, proposal_base_commit = ? WHERE user_id = ? AND id = ?`);
     const setStatus = db.prepare('UPDATE self_heal_incidents SET status = ?, note = ? WHERE user_id = ? AND id = ?');
     const reopen = db.prepare("UPDATE self_heal_incidents SET status = 'new' WHERE user_id = ? AND id = ?");
-    const failed = db.prepare('UPDATE self_heal_incidents SET attempts = ?, status = ?, note = ? WHERE user_id = ? AND id = ?');
+    const failed = db.prepare('UPDATE self_heal_incidents SET attempts = ?, status = ?, note = ?, history = ? WHERE user_id = ? AND id = ?');
     let proposed = 0;
     for (const id of ids) {
       const row = get.get(userId, id);
@@ -158,7 +175,9 @@ export function applyRunOutcome(userId, ids, results, { runSucceeded, agentDown,
         reopen.run(userId, id);
       } else {
         const attempts = row.attempts + 1;
-        failed.run(attempts, attempts >= MAX_ATTEMPTS ? 'needsHuman' : 'new', r?.reason || null, userId, id);
+        const said = r ? `the agent answered ${r.verdict}${r.reason ? ` — ${r.reason}` : ''}` : 'the agent wrote no result line';
+        const entry = `attempt ${attempts}: ${said}${runSucceeded ? '' : `; ${failure || 'the run did not succeed'}`}`;
+        failed.run(attempts, attempts >= MAX_ATTEMPTS ? 'needsHuman' : 'new', r?.reason || null, pushHistory(row.history, entry, now), userId, id);
       }
     }
     return proposed;
@@ -166,10 +185,19 @@ export function applyRunOutcome(userId, ids, results, { runSucceeded, agentDown,
 }
 
 /** The user applied (→ `fixed`) or discarded (→ `ignored`) the proposal on `branch`. Returns the rows changed. */
-export function resolveProposal(userId, branch, applied) {
+export function resolveProposal(userId, branch, applied, now = Date.now()) {
   requireUser(userId);
-  return getDb().prepare(`UPDATE self_heal_incidents SET status = ?, note = COALESCE(?, note), proposal_main_repo = NULL,
-      proposal_worktree = NULL, proposal_branch = NULL, proposal_base_commit = NULL
-      WHERE user_id = ? AND status = 'proposed' AND proposal_branch = ?`)
-    .run(applied ? 'fixed' : 'ignored', applied ? null : 'proposal discarded', userId, String(branch)).changes;
+  const db = getDb();
+  return db.transaction(() => {
+    const rows = db.prepare("SELECT id, note, history FROM self_heal_incidents WHERE user_id = ? AND status = 'proposed' AND proposal_branch = ?")
+      .all(userId, String(branch));
+    const set = db.prepare(`UPDATE self_heal_incidents SET status = ?, note = ?, history = ?, proposal_main_repo = NULL,
+        proposal_worktree = NULL, proposal_branch = NULL, proposal_base_commit = NULL WHERE user_id = ? AND id = ?`);
+    for (const r of rows) {
+      // An applied fix is remembered, so a recurrence tells the next run which fix did not hold.
+      const history = applied ? pushHistory(r.history, `a fix was applied: ${r.note || 'no reason given'}`, now) : r.history;
+      set.run(applied ? 'fixed' : 'ignored', applied ? r.note : 'proposal discarded', history, userId, r.id);
+    }
+    return rows.length;
+  })();
 }

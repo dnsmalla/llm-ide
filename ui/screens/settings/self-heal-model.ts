@@ -20,6 +20,8 @@ export interface IncidentView {
   attempts: number;
   status: IncidentStatus;
   note: string | null;
+  /** Earlier fix attempts, oldest first (API 151; empty from an older core). */
+  history: { at: number; text: string }[];
   /** Set on a `proposed` row only. */
   proposal: ProposalRef | null;
 }
@@ -64,6 +66,12 @@ const STATUSES: ReadonlySet<string> = new Set(Object.keys(STATUS_TEXT));
 const SOURCES: ReadonlySet<string> = new Set(Object.keys(SOURCE_TEXT));
 const ID = /^[0-9a-f]{16}$/;
 const nat = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null);
+const decodeHistory = (v: unknown): { at: number; text: string }[] =>
+  (Array.isArray(v) ? v.slice(-4) : []).flatMap((h) => {
+    const r = h as Record<string, unknown> | null;
+    const at = nat(r?.at);
+    return at !== null && typeof r?.text === "string" ? [{ at, text: r.text.split("\n").slice(0, 60).map((l) => safeText(l, 500)).join("\n") }] : [];
+  });
 
 export function decodeIncidents(raw: unknown): IncidentView[] {
   const list = raw && typeof raw === "object" ? (raw as { incidents?: unknown }).incidents : undefined;
@@ -92,6 +100,7 @@ export function decodeIncidents(raw: unknown): IncidentView[] {
       count,
       attempts,
       note: typeof o.note === "string" ? safeText(o.note, 600) : null,
+      history: decodeHistory(o.history),
       proposal: o.status === "proposed" ? decodeProposal(o.proposal) : null,
     });
   }

@@ -17,6 +17,7 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { send, readJson } from '../server/route-http.mjs';
 import { verifyBusHostProof } from '../core/host-approval.mjs';
+import { redactIncidentText } from '../core/incident.mjs';
 import { BATCH_MAX, parseResults, renderBatch } from '../core/self-heal-batch.mjs';
 import { buildTrustedRoots } from '../llm_agent/tools/handlers/repo-files.mjs';
 import {
@@ -29,6 +30,9 @@ export const MAX_PER_RUN = 20;
 /** A run that never posts its outcome (the page reloaded, the app quit) frees itself after this (the Mac's 4 h window). */
 export const RUN_LEASE_MS = 4 * 60 * 60 * 1000;
 const BODY_MAX = 4 * 1024 * 1024;
+/** How much of a failed make regression's output is kept in the incident history (its tail: where the failure is). */
+export const VERIFY_TAIL = 2000;
+const VERIFY_OUTPUT_MAX = 256 * 1024;
 const IGNORE_RE = /^\/kb\/self-heal\/incidents\/([0-9a-f]{16})\/ignore$/;
 const RUN_RE = /^\/kb\/self-heal\/runs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(outcome|resolve)$/;
 const FLAGS = ['verifyPassed', 'hasChanges', 'agentDown', 'aborted'];
@@ -62,6 +66,7 @@ function readOutcome(body, runId) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   if (FLAGS.some((k) => body[k] !== undefined && typeof body[k] !== 'boolean')) return null;
   if (body.batch != null && (typeof body.batch !== 'string' || body.batch.length > BATCH_MAX)) return null;
+  if (body.verifyOutput != null && (typeof body.verifyOutput !== 'string' || body.verifyOutput.length > VERIFY_OUTPUT_MAX)) return null;
   let proposal = null;
   if (body.proposal != null) {
     const p = body.proposal;
@@ -73,7 +78,20 @@ function readOutcome(body, runId) {
     batch: body.batch ?? '',
     flags: { verifyPassed: body.verifyPassed === true, hasChanges: body.hasChanges === true, agentDown: body.agentDown === true, aborted: body.aborted === true },
     proposal,
+    verifyOutput: body.verifyOutput ?? '',
   };
+}
+
+/** Why a run that reached verify did not succeed, for the incident history; null when it succeeded or never verified. */
+export function runFailure(o) {
+  const { verifyPassed, hasChanges, agentDown, aborted } = o.flags;
+  if (agentDown || aborted) return null;
+  if (!verifyPassed) {
+    const tail = redactIncidentText(o.verifyOutput.trim().slice(-VERIFY_TAIL), VERIFY_TAIL + 100);
+    return tail ? `make regression failed; its output ended with:\n${tail}` : 'make regression failed';
+  }
+  if (!hasChanges) return 'the agent left no change in the worktree';
+  return o.proposal ? null : 'no proposal was kept';
 }
 
 export async function handleSelfHealRoute(req, res, { env = process.env } = {}) {
@@ -152,7 +170,7 @@ export async function handleSelfHealRoute(req, res, { env = process.env } = {}) 
       if (!o) return fail(res, 400, 'VALIDATION_FAILED', 'Invalid outcome');
       runs.delete(userId);
       const runSucceeded = o.flags.verifyPassed && o.flags.hasChanges && o.proposal !== null;
-      const proposed = applyRunOutcome(userId, open.ids, parseResults(o.batch), { runSucceeded, agentDown: o.flags.agentDown, aborted: o.flags.aborted }, o.proposal);
+      const proposed = applyRunOutcome(userId, open.ids, parseResults(o.batch), { runSucceeded, agentDown: o.flags.agentDown, aborted: o.flags.aborted, failure: runFailure(o) }, o.proposal);
       send(res, 200, { proposed });
       return true;
     }

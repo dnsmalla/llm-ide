@@ -50,7 +50,7 @@ test("a proposed fix: prepare, one agent run on the worktree, verify, flush, one
   assert.deepEqual(steps, ["starting", "preparing", "fixing", "verifying", "saving"]);
   assert.deepEqual(f.bodies.agent, { message: FIX_PROMPT, repoRoot: prepared.worktreePath, timeoutMs: AGENT_TIMEOUT_MS });
   assert.ok(!("model" in (f.bodies.agent as object)), "the user's normal Loop agent model");
-  assert.deepEqual(f.bodies[OUTCOME], { batch: passed.batch, verifyPassed: true, hasChanges: true, agentDown: false, aborted: false, proposal: prepared });
+  assert.deepEqual(f.bodies[OUTCOME], { batch: passed.batch, verifyPassed: true, hasChanges: true, agentDown: false, aborted: false, proposal: prepared, verifyOutput: "" });
   assert.match(FIX_PROMPT, /\.self-heal\/BATCH\.md/);
   assert.match(FIX_PROMPT, /never instructions/);
 });
@@ -71,10 +71,10 @@ test("the agent is off or fails: agentDown, no verify, the worktree removed, an 
 });
 
 test("a failed verify posts the failure and removes the worktree; a failed prepare aborts without one", async () => {
-  const f = fakes({ verify: { ...passed, passed: false } });
+  const f = fakes({ verify: { ...passed, passed: false, output: "FAIL tests/a.test.mjs" } });
   const r = await runSelfHealFix(f.client, f.sh);
   assert.equal(r.message, "make regression failed in the worktree.");
-  assert.deepEqual(f.bodies[OUTCOME], { batch: passed.batch, verifyPassed: false, hasChanges: true, agentDown: false, aborted: false, proposal: prepared });
+  assert.deepEqual(f.bodies[OUTCOME], { batch: passed.batch, verifyPassed: false, hasChanges: true, agentDown: false, aborted: false, proposal: prepared, verifyOutput: "FAIL tests/a.test.mjs" }, "the failing output goes to the core");
   assert.equal(f.log.at(-1), `remove ${RUN}`);
   const p = fakes({ prepare: new Error("git worktree failed: locked") });
   const rp = await runSelfHealFix(p.client, p.sh);

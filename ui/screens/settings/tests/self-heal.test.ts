@@ -62,3 +62,9 @@ test("decodeDiff carries changed files and flags test paths", () => {
   assert.equal(isTestFile("extension/server.mjs"), false);
   assert.deepEqual(decodeDiff({ text: "", truncated: false, patchId: "a".repeat(64) })?.files, [], "older host: no list");
 });
+
+test("decodeIncidents keeps the attempt history line by line, cleaned, and tolerates an older core without it", () => {
+  const [i] = decodeIncidents({ incidents: [row({ history: [{ at: 5, text: "attempt 1: fixed\nFAIL a‮b" }, { at: "x", text: "bad" }, null] })] });
+  assert.deepEqual(i.history, [{ at: 5, text: "attempt 1: fixed\nFAIL ab" }]);
+  assert.deepEqual(decodeIncidents({ incidents: [row()] })[0].history, []);
+});

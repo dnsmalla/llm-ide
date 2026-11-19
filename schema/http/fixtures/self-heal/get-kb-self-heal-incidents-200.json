@@ -13,9 +13,15 @@
         "firstSeen": 1793750000000,
         "lastSeen": 1793750100000,
         "count": 2,
-        "attempts": 0,
+        "attempts": 1,
         "status": "new",
         "note": null,
+        "history": [
+          {
+            "at": 1793740000000,
+            "text": "attempt 1: the agent answered fixed — retry the write; make regression failed; its output ended with:\nnot ok 3 - notes save under load"
+          }
+        ],
         "proposal": null
       }
     ]

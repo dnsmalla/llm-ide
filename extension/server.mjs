@@ -491,7 +491,10 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          action: accept|reject|revert|adopt|dismiss, id, scope?, loopId? } → { improvement }. An unregistered folder is
 //          404 PROJECT_UNKNOWN. POST /kb/loop/agent-run accepts `readOnly: true` (no Edit/Write; anything else non-null is
 //          400 invalid_read_only, and readOnly with writeScope is 400). Feature auto_tasks.
-const SERVER_API_VERSION = 150;
+//   v151 — Self-Heal attempt history, additive: an incident carries `history` ([{ at, text }], at most 4, migration 0079),
+//          and POST /kb/self-heal/runs/:id/outcome accepts `verifyOutput` (a failed make regression's output; its
+//          redacted tail is kept). The next run's BATCH.md lists earlier attempts so the agent takes another approach.
+const SERVER_API_VERSION = 151;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

@@ -2351,6 +2351,11 @@ export type Incident = {
   attempts: number;
   status: "new" | "fixing" | "proposed" | "ignored" | "needsHuman" | "fixed";
   note: string | null;
+  /** earlier fix attempts, oldest first, at most 4: { at (ms since epoch), text } — a failed run's verdict and why it failed, an applied fix, a recurrence (API 151) */
+  history: {
+    at: number;
+    text: string;
+  }[];
   /** { mainRepo, worktreePath, branch, baseCommit } while status is proposed, else null */
   proposal: Record<string, unknown> | null;
 };
@@ -8606,6 +8611,8 @@ export type PostKbSelfHealRunsIdOutcomeRequest = {
     hasChanges?: boolean;
     agentDown?: boolean;
     aborted?: boolean;
+    /** a failed make regression's output, at most 256 KiB; its redacted 2000-character tail goes into each failed incident's history (API 151) */
+    verifyOutput?: string;
     proposal?: {
       mainRepo: string;
       worktreePath: string;

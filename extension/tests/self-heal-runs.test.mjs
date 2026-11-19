@@ -82,7 +82,7 @@ test('the outcome is validated, applied once, and ends the run', async () => {
   const proposal = { mainRepo: repo, worktreePath: `/data/self-heal/loop-worktrees/${runId}`, branch: `self-heal/${runId}`, baseCommit: 'a'.repeat(40) };
   let r = await call('POST', `${RUNS}/00000000-0000-4000-8000-000000000000/outcome`, { aborted: true });
   assert.deepEqual([r.status, r.body.error.code], [409, 'RUN_NOT_ACTIVE']);
-  for (const b of [{ verifyPassed: 'yes' }, { batch: 7 }, { proposal: { ...proposal, branch: 'self-heal/other' } }, { proposal: { ...proposal, baseCommit: 'HEAD' } }]) {
+  for (const b of [{ verifyPassed: 'yes' }, { batch: 7 }, { verifyOutput: 5 }, { proposal: { ...proposal, branch: 'self-heal/other' } }, { proposal: { ...proposal, baseCommit: 'HEAD' } }]) {
     r = await call('POST', O, b);
     assert.deepEqual([r.status, r.body.error.code], [400, 'VALIDATION_FAILED'], JSON.stringify(b));
   }
@@ -107,4 +107,18 @@ test('resolve marks the proposal applied or discarded; a lapsed run frees itself
   assert.equal(activeRun(owner, Date.now() + RUN_LEASE_MS + 1), null);
   assert.equal((await byMessage('Error: kappa broke')).status, 'new', 'the lapsed run reopened its incidents');
   assert.equal((await call('POST', RUNS, { repoRoot: repo })).status, 200, 'and a new run can start');
+});
+
+test('runFailure keeps a redacted tail of a failed make regression, and names the other ways a run fails', async () => {
+  const { runFailure, VERIFY_TAIL } = await import('../routes/self-heal.mjs');
+  const f = (flags, verifyOutput = '', proposal = null) => runFailure({ flags: { verifyPassed: false, hasChanges: false, agentDown: false, aborted: false, ...flags }, verifyOutput, proposal });
+  const out = f({}, `${'x'.repeat(10_000)}\nFAIL tests/a.test.mjs\ntoken=ghp_${'a'.repeat(36)} mail me@example.com`);
+  assert.match(out, /^make regression failed; its output ended with:\n/);
+  assert.match(out, /FAIL tests\/a\.test\.mjs/);
+  assert.ok(!out.includes('ghp_') && !out.includes('me@example.com'), out);
+  assert.ok(out.length < VERIFY_TAIL + 200);
+  assert.equal(f({}), 'make regression failed');
+  assert.equal(f({ verifyPassed: true }), 'the agent left no change in the worktree');
+  assert.equal(f({ verifyPassed: true, hasChanges: true }, '', {}), null);
+  assert.equal(f({ agentDown: true }), null);
 });

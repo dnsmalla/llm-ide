@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 150
+  x-api-version: 151
 servers:
   - url: "https://{host}"
     variables:
@@ -14521,6 +14521,9 @@ paths:
                   type: "boolean"
                 aborted:
                   type: "boolean"
+                verifyOutput:
+                  type: "string"
+                  description: "a failed make regression's output, at most 256 KiB; its redacted 2000-character tail goes into each failed incident's history (API 151)"
                 proposal:
                   type:
                     - "object"
@@ -19303,6 +19306,7 @@ components:
         - "attempts"
         - "status"
         - "note"
+        - "history"
         - "proposal"
       properties:
         id:
@@ -19355,6 +19359,19 @@ components:
           type:
             - "string"
             - "null"
+        history:
+          type: "array"
+          description: "earlier fix attempts, oldest first, at most 4: { at (ms since epoch), text } — a failed run's verdict and why it failed, an applied fix, a recurrence (API 151)"
+          items:
+            type: "object"
+            required:
+              - "at"
+              - "text"
+            properties:
+              at:
+                type: "integer"
+              text:
+                type: "string"
         proposal:
           type:
             - "object"
