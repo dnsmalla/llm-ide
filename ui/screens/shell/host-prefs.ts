@@ -116,7 +116,8 @@ export function decodeLoopDefaults(raw: unknown): LoopDefaults {  if (!isObj(raw
   const n = (v: unknown, fallback: number, max: number) => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : fallback);
   const policy = raw.protectedPathPolicy;
   return {
-    maxIterations: n(raw.maxIterations, DEFAULT_LOOP_DEFAULTS.maxIterations, 3) || DEFAULT_LOOP_DEFAULTS.maxIterations,
+    // Same rule as prefs.rs LoopDefaults::clamped: a whole number is pulled into 1..3, anything else is the default.
+    maxIterations: typeof raw.maxIterations === "number" && Number.isInteger(raw.maxIterations) ? Math.min(3, Math.max(1, raw.maxIterations)) : DEFAULT_LOOP_DEFAULTS.maxIterations,
     consecutiveFailureStop: n(raw.consecutiveFailureStop, DEFAULT_LOOP_DEFAULTS.consecutiveFailureStop, 20) || DEFAULT_LOOP_DEFAULTS.consecutiveFailureStop,
     wallClockMinutes: n(raw.wallClockMinutes, DEFAULT_LOOP_DEFAULTS.wallClockMinutes, 1440),
     maxRepairsPerStage: n(raw.maxRepairsPerStage, DEFAULT_LOOP_DEFAULTS.maxRepairsPerStage, 20),

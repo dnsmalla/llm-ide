@@ -441,11 +441,10 @@ test("findingsSection fences the findings as data and caps them at 12000 charact
   assert.ok(fenced.length <= 12_000);
 });
 
-test("the default round count is 3 and an existing loop's old default of 10 maps to 3 in every mode", () => {
+test("the default round count is 3 and any stored count is capped to 1..3 in every mode", () => {
   assert.equal(FACTORY_TEMPLATE.config.maxIterations, 3);
-  assert.equal(f.OLD_DEFAULT_MAX_ITERATIONS, 10);
   for (const mode of ["full", "check", "sendBack", "humanReview", "rework"]) {
-    for (const [stored, expected] of [[10, 3], [7, 7], [3, 3], [11, 11]]) {
+    for (const [stored, expected] of [[10, 3], [7, 3], [3, 3], [2, 2], [1, 1], [0, 1]]) {
       const base = { ...structuredClone(FACTORY_TEMPLATE.config), maxIterations: stored };
       const before = JSON.stringify(base);
       assert.equal(configFor(mode, base).maxIterations, expected, `${mode} ${stored}`);

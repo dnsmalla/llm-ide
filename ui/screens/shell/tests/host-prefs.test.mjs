@@ -165,7 +165,9 @@ test("theme: the host's copy only fills in when the webview lost its own", () =>
 
 test("Loop defaults decode defensively and round-trip through set_prefs", async () => {
   assert.deepEqual(m.decodeLoopDefaults(undefined), LOOP);
-  assert.deepEqual(m.decodeLoopDefaults({ ...LOOP, protectedPathPolicy: "nonsense", maxIterations: 0 }), { ...LOOP, maxIterations: 3 });
+  assert.deepEqual(m.decodeLoopDefaults({ ...LOOP, protectedPathPolicy: "nonsense", maxIterations: 0 }), { ...LOOP, maxIterations: 1 });
+  assert.equal(m.decodeLoopDefaults({ ...LOOP, maxIterations: 500 }).maxIterations, 3, "same clamp as prefs.rs");
+  assert.equal(m.decodeLoopDefaults({ ...LOOP, maxIterations: 2.5 }).maxIterations, 3, "a non-integer is the default");
   const { host, calls, state } = env();
   assert.deepEqual(await host.getLoopDefaults(), LOOP);
   const next = { ...LOOP, maxIterations: 2, protectedPathPolicy: "warn", writeSummaryNote: true };
