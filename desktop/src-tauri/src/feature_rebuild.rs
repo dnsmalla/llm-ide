@@ -6,6 +6,7 @@
 //! build and omitted (`LLMIDE_OMIT_SOURCE_ROOT=1`) for a distributed release, where this command refuses.
 
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
 use serde::Serialize;

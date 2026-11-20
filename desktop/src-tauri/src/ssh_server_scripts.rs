@@ -1704,7 +1704,7 @@ http.createServer((req, res) => {
             "#!/bin/sh\nif [ \"$1\" = \"-e\" ]; then exec '{real}' \"$@\"; fi\n\
              echo $$ > \"$HOME/core-pid\"\n\
              env > \"$HOME/core-env.tmp\" && mv \"$HOME/core-env.tmp\" \"$HOME/core-env.txt\"\n\
-             exec '{real}' -e '{js}'\n",
+             exec '{real}' -e '{js}' -- \"$@\"\n",
             real = real_node.display(),
             js = STUB_HTTP_CORE,
         );
@@ -1848,6 +1848,10 @@ http.createServer((req, res) => {
         assert!(ok, "{out}");
         let state = parse_core_state(&out).expect("START prints a state line");
         assert!(state.running);
+        // STATUS, STOP and the reuse check recognise the core by `server.mjs` in /proc/<pid>/cmdline, so the
+        // stand-in must keep the script path in its own command line the way the real core has it.
+        let cmdline = std::fs::read(format!("/proc/{}/cmdline", started_pid(&out))).expect("cmdline");
+        assert!(String::from_utf8_lossy(&cmdline).contains("server.mjs"), "{cmdline:?}");
         let port = state.port.expect("port");
         assert!((3460..=3479).contains(&port), "port {port}");
         assert_eq!(mode_of(&home.join(".llmide-server/state.json")), 0o600);

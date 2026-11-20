@@ -235,7 +235,7 @@ mod tests {
             assert_eq!(find_in(&[d.to_path_buf()], "rtk"), None, "a non-executable file does not count");
         }
         #[cfg(not(unix))]
-        assert_eq!(find_in(&[d.clone()], "rtk"), None);
+        assert_eq!(find_in(&[d.to_path_buf()], "rtk"), None);
         assert_eq!(find_in(&[d.to_path_buf()], "absent"), None);
         let _ = std::fs::remove_dir_all(&d);
     }

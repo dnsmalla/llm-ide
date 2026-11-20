@@ -1,5 +1,7 @@
 //! Bounded macOS Accessibility read for one meeting app. Only role/title/description/value/windows are copied.
-use crate::capture_model::{AxAppTree, AxNode, AxReadError};
+#[cfg(target_os = "macos")]
+use crate::capture_model::AxNode;
+use crate::capture_model::{AxAppTree, AxReadError};
 use std::time::Instant;
 
 /// Node and time allowance of one tree read. Running out is not an error but the tree is then partial, and a partial
