@@ -136,3 +136,26 @@ test("classify is a pure function of the record", () => {
   const r = recordFromEntry(entry("source/meetings/a.md"));
   assert.equal(classify(r), "meeting");
 });
+
+test("project mode: everything outside source/ is a generated note in LLM DOC; the cached-root layout is unchanged", () => {
+  const run = "loop/2026/11/2026-11-14T08-46-36-test/run.md";
+  assert.deepEqual(areaOf(run, true), { area: "llm-doc", typeDir: "loop" });
+  assert.deepEqual(areaOf("plans/p.md", true), { area: "llm-doc", typeDir: "plans" });
+  assert.deepEqual(areaOf("source/meetings/2026/10/a.md", true), { area: "source", typeDir: "meetings" });
+  assert.deepEqual(areaOf("llm-doc/emails/x.md", true), { area: "llm-doc", typeDir: "emails" });
+  assert.deepEqual(areaOf(run), { area: "other", typeDir: "" }, "outside a project it stays Unsorted");
+  const rec = recordFromEntry(entry(run), true);
+  assert.equal(rec.sourceId, "doc:loop");
+  assert.equal(sectionLabel(rec.sourceId), "Loop runs");
+  assert.equal(recordFromEntry(entry("plans/p.md"), true).sourceId, "doc:plans");
+  assert.equal(recordFromEntry(entry(run), false).sourceId, UNSORTED);
+});
+
+test("a file without a date in its name takes the nearest dated parent folder, and run_at beats the path", () => {
+  const rel = "loop/2026/11/2026-11-14T08-46-36-test/run.md";
+  assert.equal(formatDate(dateFromPath(rel)!), "2026-11-14");
+  assert.equal(formatDate(dateFromPath("loop/2026/11/2026-11-14-x/sub/run.md")!), "2026-11-14");
+  assert.equal(formatDate(dateFromPath("loop/2026/11/run.md")!), "2026-11-01", "no dated folder: /YYYY/MM/ fallback");
+  const rec = applyHead(recordFromEntry(entry(rel), true), head(["run_at: 2026-11-15T10:00:00.000Z"]));
+  assert.equal(rec.dateMs, Date.parse("2026-11-15T10:00:00.000Z"));
+});

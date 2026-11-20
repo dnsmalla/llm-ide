@@ -61,8 +61,8 @@ test("a nested Test input path copies the plan from the nested llm-doc/loop fold
   assert.equal(files.get(`${dir}/TEST-MAP.md`), "# Map\n");
 });
 
-test("the run archive lives under system/loop-runs/archive, never under llm-doc", () => {
+test("the run report lives under llm-doc/loop/runs/<yyyy>/<MM>/<stamp>-<slug>, where the Library shows it", () => {
   const dir = archiveDir(loop, new Date("2026-11-02T01:30:00Z"));
-  assert.match(dir, /^system\/loop-runs\/archive\/2026\/11\//);
-  assert.equal(dir.startsWith("llm-doc/"), false);
+  assert.match(dir, /^llm-doc\/loop\/runs\/2026\/11\/2026-11-02T01-30-00-[a-z0-9-]+$/);
+  assert.match(renderSummary(loop, outcome, new Date("2026-11-02T01:30:00Z")), /^run_at: 2026-11-02T01:30:00.000Z$/m);
 });

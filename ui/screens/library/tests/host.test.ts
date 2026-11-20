@@ -32,10 +32,10 @@ test("createNotesHost maps command names and arguments, and wraps failures", asy
   const host = createNotesHost(async <T,>(cmd: string, args?: Record<string, unknown>) => {
     calls.push([cmd, args]);
     if (cmd === "notes_read") throw "not_found: nope";
-    if (cmd === "notes_root_get") return { name: "notes", root: "/Users/x/notes" } as T;
+    if (cmd === "notes_root_get") return { name: "notes", root: "/Users/x/notes", project: true } as T;
     return { entries: [], next_cursor: null } as T;
   });
-  assert.deepEqual(await host.rootGet(), { name: "notes", root: "/Users/x/notes" });
+  assert.deepEqual(await host.rootGet(), { name: "notes", root: "/Users/x/notes", project: true });
   await host.list("c", 10);
   await assert.rejects(host.read("a.md", 0, 4096), (e: unknown) => e instanceof NotesError && e.code === "not_found");
   await host.heads(["a.md"], 2048);

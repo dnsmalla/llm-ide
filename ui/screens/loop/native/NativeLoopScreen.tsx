@@ -845,7 +845,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
           setRunLog((l) => [...l, `readiness copy failed: ${e instanceof Error ? e.message : String(e)}`]);
         }
       }
-      // Every run is archived under system/loop-runs/archive/, with its plan and full log.
+      // Every run writes its report under llm-doc/loop/runs/ in the main project, with its plan and full log.
       try {
         const dir = await writeRunArchive(fs, target, outcome, archiveLog, new Date(), activeRun ? repoPrefixFor(projectRoot ?? "", activeRun.worktree) : "", target.defaultKey === "test" ? target.inputPath ?? "" : "");
         if (dir) {
@@ -1317,6 +1317,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             <dt>Run journal</dt><dd><span>system/loop-runs/ · one JSON record per run, plus an index</span>{outputExists.journal ? <button type="button" className="loop-btn" onClick={() => revealRel("system/loop-runs")}>{revealText("Reveal")}</button> : <span className="loop-native-hint">not yet</span>}</dd>
             <dt>Fault state</dt><dd><span>system/faults.csv · refreshed by the Regression stage</span>{outputExists.faults ? <button type="button" className="loop-btn" onClick={() => revealRel("system/faults.csv")}>{revealText("Reveal")}</button> : <span className="loop-native-hint">not yet</span>}</dd>
             <dt>Working tree</dt><dd><span>{workRoot ? "repair edits land here and stay; review with git before committing" : "not resolved yet"}</span>{workRoot ? <button type="button" className="loop-btn" onClick={() => revealRel(workRelative)}>{revealText("Reveal")}</button> : null}</dd>
+            <dt>Run reports</dt><dd><span>llm-doc/loop/runs/ · run.md, plan and log per run; shown in Library, LLM DOC</span><button type="button" className="loop-btn" onClick={() => revealRel("llm-doc/loop/runs")}>{revealText("Reveal")}</button></dd>
             <dt>Run log</dt><dd><span>live, in the panel to the right</span></dd>
             {loop.config.writeSummaryNote ? <><dt>Summary notes</dt><dd><span>llm-doc/loop/ · one readable note per run</span>{outputExists.summaries ? <button type="button" className="loop-btn" onClick={() => revealRel("llm-doc/loop")}>{revealText("Reveal")}</button> : <span className="loop-native-hint">none written yet</span>}</dd></> : null}
           </dl>

@@ -24,6 +24,7 @@ const FACTORY_DIR = '.factory';
 // The list is mirrored by desktop/src-tauri/src/loop_worktree.rs::EXCLUDES and pinned by schema/factory/staged-patch.json.
 export const STAGED_PATCH_EXCLUDES = Object.freeze([
   ':(exclude,icase).factory', ':(exclude,icase,glob)**/.factory/**', ':(exclude)system/loop', ':(exclude)llm-doc/loop/test',
+  ':(exclude)llm-doc/loop/runs',
 ]);
 const PUSH_TIMEOUT_MS = 120_000;
 const PROVIDER_TIMEOUT_MS = 15_000;

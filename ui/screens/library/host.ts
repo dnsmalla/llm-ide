@@ -11,6 +11,8 @@ import type { NoteEntry } from "./notes-model.ts";
 export interface NotesRoot {
   name: string;
   root: string;
+  /** The root is the open project's `llm-doc`, so listed paths have no `llm-doc/` prefix. */
+  project?: boolean;
 }
 
 export interface ListPage {
@@ -100,7 +102,7 @@ const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
 function decodeRoot(v: unknown): NotesRoot | null {
-  return isRecord(v) && typeof v.root === "string" ? { name: str(v.name) || "notes", root: v.root } : null;
+  return isRecord(v) && typeof v.root === "string" ? { name: str(v.name) || "notes", root: v.root, project: v.project === true } : null;
 }
 
 function decodeEntry(v: unknown): NoteEntry | null {

@@ -32,13 +32,14 @@ const MAX_DIFF_FILES: usize = 1000;
 const MAX_LISTED: usize = 500;
 /// Never part of the diff, so never part of what Ship commits: the run's work item and reports. The top-level
 /// `.factory` plus `.factory` at ANY depth (`pkg/.factory/x`), both case-insensitively (R-036 A8). Also the Loop's
-/// generated machine data (`system/loop/`, `llm-doc/loop/test/`), root-anchored; `llm-doc/loop/refactor/` is NOT
+/// generated machine data (`system/loop/`, `llm-doc/loop/test/`) and the app's own run reports (`llm-doc/loop/runs/`), root-anchored; `llm-doc/loop/refactor/` is NOT
 /// excluded, its plan and rule review document the change. Mirrored in factory-ship.mjs (STAGED_PATCH_EXCLUDES).
 const EXCLUDES: &[&str] = &[
     ":(exclude,icase).factory",
     ":(exclude,icase,glob)**/.factory/**",
     ":(exclude)system/loop",
     ":(exclude)llm-doc/loop/test",
+    ":(exclude)llm-doc/loop/runs",
 ];
 
 /// True when `p` is excluded from the run's diff and status: any `.factory` segment in any case, or a path under one
@@ -47,6 +48,7 @@ fn is_excluded_rel(p: &str) -> bool {
     p.split('/').any(|seg| seg.eq_ignore_ascii_case(FACTORY_DIR))
         || under(p, "system/loop")
         || under(p, "llm-doc/loop/test")
+        || under(p, "llm-doc/loop/runs")
 }
 
 /// `p` is `dir` or a path under it (whole path segments only, so `system/loopback` is not under `system/loop`).

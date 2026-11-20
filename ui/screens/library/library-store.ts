@@ -273,7 +273,7 @@ export class LibraryStore {
           seen.add(e.rel);
           const old = this.byRel.get(e.rel);
           if (old && old.size === e.size && old.mtimeMs === e.mtimeMs && old.placeholder === e.placeholder && (old.headRead || e.placeholder)) continue;
-          this.byRel.set(e.rel, recordFromEntry(e));
+          this.byRel.set(e.rel, recordFromEntry(e, this.state.root?.project));
           this.queueHead(e.rel, false);
         }
         loaded += page.entries.length;
@@ -353,7 +353,7 @@ export class LibraryStore {
   /** A note was created or saved: refresh its record from the write result (and its text, when known). */
   noteWritten(entry: { rel: string; size: number; mtimeMs: number }, text?: string): void {
     if (this.disposed) return;
-    let rec = recordFromEntry({ rel: entry.rel, size: entry.size, mtimeMs: entry.mtimeMs, placeholder: false });
+    let rec = recordFromEntry({ rel: entry.rel, size: entry.size, mtimeMs: entry.mtimeMs, placeholder: false }, this.state.root?.project);
     if (text !== undefined) rec = applyHead(rec, text.slice(0, HEAD_BYTES));
     this.byRel.set(entry.rel, rec);
     this.writtenDuringScan.add(entry.rel);
@@ -386,7 +386,7 @@ export class LibraryStore {
     const wasSelected = this.state.selectedRel === from;
     const old = this.byRel.get(from);
     this.byRel.delete(from);
-    let rec = recordFromEntry({ rel: entry.rel, size: entry.size, mtimeMs: entry.mtimeMs, placeholder: false });
+    let rec = recordFromEntry({ rel: entry.rel, size: entry.size, mtimeMs: entry.mtimeMs, placeholder: false }, this.state.root?.project);
     if (text !== undefined) rec = applyHead(rec, text.slice(0, HEAD_BYTES));
     else if (old?.headRead) rec = { ...old, rel: rec.rel, name: rec.name, size: rec.size, mtimeMs: rec.mtimeMs, area: rec.area, typeDir: rec.typeDir };
     this.byRel.set(entry.rel, rec);

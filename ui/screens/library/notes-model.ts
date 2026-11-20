@@ -76,11 +76,14 @@ export const SOURCE_LABELS: Readonly<Record<string, string>> = {
 };
 
 const DATE_PREFIX = /^(\d{4})-(\d{2})-(\d{2})(?:[-_ T]?(\d{2})(\d{2}))?/;
+const FOLDER_DATE = /^\d{4}-\d{2}-\d{2}(?!\d)/;
 const ID_SUFFIX = /-[0-9a-f]{8}$/i;
 
-export function areaOf(rel: string): { area: Area; typeDir: string } {
+export function areaOf(rel: string, projectMode = false): { area: Area; typeDir: string } {
   const segs = rel.split("/");
   if (segs.length >= 2 && segs[0] === "source") return { area: "source", typeDir: segs.length > 2 ? segs[1]! : "" };
+  // Project root = `<project>/llm-doc`: anything outside `source/` is a generated note (loop, plans, ...).
+  if (projectMode && segs.length >= 2 && segs[0] !== "llm-doc") return { area: "llm-doc", typeDir: segs[0]! };
   if (segs.length >= 2 && segs[0] === "llm-doc") return { area: "llm-doc", typeDir: segs.length > 2 ? segs[1]! : "" };
   return { area: "other", typeDir: "" };
 }
@@ -97,8 +100,12 @@ export function titleFromName(name: string): string {
 /** Local date from `YYYY-MM-DD[-HHmm]` in the file name (the Mac writes local time), else `/YYYY/MM/` in the path, else null. */
 export function dateFromPath(rel: string): number | null {
   const name = rel.slice(rel.lastIndexOf("/") + 1);
-  const m = DATE_PREFIX.exec(name);
-  if (m) {
+  // The file name's date, else the nearest parent folder named `YYYY-MM-DD[T...]` (a Loop run folder).
+  const segs = rel.split("/");
+  const candidates = [name, ...segs.slice(0, -1).reverse().filter((s) => FOLDER_DATE.test(s))];
+  for (const c of candidates) {
+    const m = DATE_PREFIX.exec(c);
+    if (!m) continue;
     const t = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0), Number(m[5] ?? 0)).getTime();
     if (Number.isFinite(t) && Number(m[2]) >= 1 && Number(m[2]) <= 12) return t;
   }
@@ -108,9 +115,9 @@ export function dateFromPath(rel: string): number | null {
 }
 
 /** The record for a listed file before its head is read. */
-export function recordFromEntry(e: NoteEntry): NoteRecord {
+export function recordFromEntry(e: NoteEntry, projectMode = false): NoteRecord {
   const name = e.rel.slice(e.rel.lastIndexOf("/") + 1);
-  const { area, typeDir } = areaOf(e.rel);
+  const { area, typeDir } = areaOf(e.rel, projectMode);
   const rec: NoteRecord = {
     rel: e.rel,
     name,
@@ -145,7 +152,7 @@ export function applyHead(rec: NoteRecord, head: string): NoteRecord {
     hasFrontmatter: parsed.hasFrontmatter,
     title: title ?? firstHeading(parsed.body) ?? rec.title,
     titleFromPath: title === null && firstHeading(parsed.body) === null,
-    dateMs: fmDateMs(d, "started_at") ?? fmDateMs(d, "date") ?? rec.dateMs,
+    dateMs: fmDateMs(d, "started_at") ?? fmDateMs(d, "run_at") ?? fmDateMs(d, "date") ?? rec.dateMs,
     participants: fmList(d, "participants").slice(0, 50),
     platform: (fmString(d, "platform") ?? fmString(d, "source") ?? "").trim().toLowerCase() || null,
     gist: fmString(d, "gist"),
@@ -186,7 +193,7 @@ export function sectionLabel(id: string): string {
   if (id.startsWith("dir:")) return titleCase(id.slice(4));
   if (id.startsWith("doc:")) {
     const t = id.slice(4);
-    return t === "" ? "General" : titleCase(t);
+    return t === "" ? "General" : t === "loop" ? "Loop runs" : titleCase(t);
   }
   return id;
 }

@@ -166,6 +166,13 @@ test("whether the branch changed comes from the run-end diff, and an unreadable 
   assert.equal(runChanged(null), null);
 });
 
+test("the app writes only its own reports to the main tree: run.md under llm-doc/loop/runs/, never the agent's edits", async () => {
+  const { archiveDir } = await import("../native/summary.ts");
+  const dir = archiveDir({ name: "Test" }, new Date("2026-11-02T01:30:00Z"));
+  assert.ok(dir.startsWith("llm-doc/loop/runs/"), "reports go to the main project's llm-doc/loop/runs");
+  assert.equal(dir.startsWith("system/loop-worktrees/"), false, "never the worktree");
+});
+
 test("a worktree run never works in the main tree: every stage and file read goes to the run's worktree", () => {
   const info = { runId: "regression", worktree: "/p/system/loop-worktrees/regression" };
   assert.equal(runRoot("/p", info, "/p/code/app"), "/p/system/loop-worktrees/regression");

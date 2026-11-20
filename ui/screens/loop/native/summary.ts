@@ -41,12 +41,12 @@ export interface RunArchiveFs extends SummaryFs {
 }
 
 /**
- * One folder per run, holding run.md and the plan it produced. It lives under system/loop-runs/ (the Loop's own
- * ignored, protected journal) rather than llm-doc/: the archive is written into the MAIN tree even for worktree runs,
- * and under llm-doc/ it dirtied the working tree and broke the "main working tree was not touched" guarantee.
+ * One folder per run, holding run.md and the plan it produced: llm-doc/loop/runs/<yyyy>/<MM>/<stamp>-<slug>/. It is
+ * written into the MAIN tree even for worktree runs (the Library shows it under LLM DOC). It is the app's own report,
+ * never the agent's edits, and is excluded from the run's ship diff and state copy.
  */
 export function archiveDir(loop: LoopDefinition, at: Date): string {
-  return summaryPath(loop, at).replace(/^llm-doc\/loop\//, "system/loop-runs/archive/").replace(/\.md$/, "");
+  return summaryPath(loop, at).replace(/^llm-doc\/loop\//, "llm-doc/loop/runs/").replace(/\.md$/, "");
 }
 
 const PLAN_CANDIDATES = [

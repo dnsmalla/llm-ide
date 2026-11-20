@@ -60,6 +60,8 @@ static ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
 pub struct NotesRootInfo {
     pub name: String,
     pub root: String,
+    /// The root is the open project's `llm-doc`: every listed `rel` is relative to it.
+    pub project: bool,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -116,8 +118,8 @@ fn display_name(root: &Path) -> String {
     n.chars().filter(|c| !c.is_control()).take(NAME_MAX_CHARS).collect()
 }
 
-fn info(root: &Path) -> NotesRootInfo {
-    NotesRootInfo { name: display_name(root), root: root.to_string_lossy().into_owned() }
+fn info(root: &Path, project: bool) -> NotesRootInfo {
+    NotesRootInfo { name: display_name(root), root: root.to_string_lossy().into_owned(), project }
 }
 
 /// Canonicalises `p`, requires a folder and refuses a too-broad one.
@@ -507,7 +509,7 @@ where
 /// The configured notes folder, if any (re-validated).
 #[tauri::command]
 pub fn notes_root_get() -> Option<NotesRootInfo> {
-    current_root().ok().map(|r| info(&r))
+    current_root().ok().map(|r| info(&r, crate::project::active_root().is_some()))
 }
 
 /// Opens the native folder dialog and stores the choice; `None` when cancelled.
@@ -525,7 +527,7 @@ pub async fn notes_root_choose() -> Result<Option<NotesRootInfo>, String> {
     if let Ok(mut g) = ROOT.lock() {
         *g = Some(root.clone());
     }
-    Ok(Some(info(&root)))
+    Ok(Some(info(&root, false)))
 }
 
 /// Forgets the notes folder (the files are untouched).
