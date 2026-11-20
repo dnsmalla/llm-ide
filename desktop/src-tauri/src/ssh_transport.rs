@@ -592,7 +592,8 @@ mod tests {
         for opt in ["ForwardAgent=no", "ClearAllForwardings=yes", "PermitLocalCommand=no"] {
             assert!(has_option(&args, opt), "{opt}");
         }
-        assert!(has_option(&args, "GlobalKnownHostsFile=/dev/null"));
+        let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        assert!(has_option(&args, &format!("GlobalKnownHostsFile={null}")));
         assert!(has_option(&args, &format!("UserKnownHostsFile=\"{KNOWN}\"")));
         assert_eq!(args.last().map(String::as_str), Some(COMMAND));
         assert_eq!(args[args.len() - 2], "alice@example.com");
