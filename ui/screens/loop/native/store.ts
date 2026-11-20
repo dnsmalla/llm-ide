@@ -2,6 +2,7 @@
 // LoopEngineConfigStore contract at the file level: current schema first, legacy bare config next, corrupt files are
 // reported and never overwritten silently. The desktop UI owns the edit; the Mac remains able to read the same file.
 import type { FsApi } from "../../explorer/fs";
+import { runsInWorktree } from "./worktree-run.ts";
 import { decodeProjectStore, encodeProjectStore, type LoopProjectStore } from "./model.ts";
 import { beforeLearnedWrite, createSelfImprovementFolder, decodeLessons, encodeLessons, LESSONS_FILE, lessonsOf, overlayLessons, withoutLessons, type LessonEntry } from "./lessons.ts";
 
@@ -152,8 +153,9 @@ export function batchRollbackReason(loop: LoopProjectStore["loops"][number]): st
   const ordered = [...loop.config.stages].sort((a, b) => a.order - b.order);
   const first = ordered.findIndex((s) => s.enabled && s.kind === "skill" && isBatchSkill(s.skillId));
   if (first === -1) return null;
-  if (!loop.config.alwaysUseWorktree) {
-    return `“${loop.name}” applies refactor batches, so it must run in an isolated worktree, where a failed batch is discarded instead of left half-applied in your tree. Turn on “Always run in an isolated worktree” in its options.`;
+  if (!runsInWorktree(loop.config, false)) {
+    const why = loop.config.alwaysUseWorktree ? "its Regression step re-checks faults in your working tree, so turn that step off" : "turn on “Always run in an isolated worktree” in its options";
+    return `“${loop.name}” applies refactor batches, so it must run in an isolated worktree, where a failed batch is discarded instead of left half-applied in your tree: ${why}.`;
   }
   // Code is never edited without a stage after it that runs the tests.
   if (!ordered.slice(first + 1).some((s) => s.enabled && s.kind === "shellCommand" && s.severity === "blocking" && (s.command ?? "").trim() !== "")) {

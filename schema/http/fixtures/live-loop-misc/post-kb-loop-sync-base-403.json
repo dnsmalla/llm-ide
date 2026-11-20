@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/loop/sync-base",
+  "status": 403,
+  "description": "No bus host proof: refused before the body is read.",
+  "request": {
+    "body": {
+      "worktree": "/example/project/system/loop-worktrees/regression-1a2b3c4d",
+      "branch": "loop/regression-1a2b3c4d",
+      "provider": "github",
+      "repo": "octo/repo",
+      "base": "main"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_PROOF_REQUIRED",
+      "message": "This route is for the desktop app only"
+    }
+  }
+}

@@ -46,7 +46,7 @@ import { verifyBusHostProof } from '../core/host-approval.mjs';
 import { getSecret, makeSecretReader } from '../server/vault.mjs';
 import { createDraftPr, assertSafeBaseBranch } from '../agents/github-pr.mjs';
 import {
-  commitAndPush, createDraftMr, findOpenRequest, neutraliseMentions, parseShipBody, scanShipText, isFactoryWorktree, isProviderWebUrl, originMatchesRepo,
+  commitAndPush, createDraftMr, findOpenRequest, neutraliseMentions, parseShipBody, parseSyncBody, scanShipText, isFactoryWorktree, isProviderWebUrl, originMatchesRepo, mergedHeadOf, fetchBase,
 } from '../agents/factory-ship.mjs';
 import { pollRequest, MAX_SHIP_STATUS_REQUESTS } from '../agents/factory-status.mjs';
 
@@ -168,6 +168,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   if (req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/ship') return handleLoopShip(req, res, { userId }, deps);
   const routePath = (req.url || '').split('?')[0];
   if (req.method === 'POST' && routePath === '/kb/loop/ship-status') return handleShipStatus(req, res, userId);
+  if (req.method === 'POST' && routePath === '/kb/loop/sync-base') return handleSyncBase(req, res, { userId }, deps);
   if (!(req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/agent-run')) return false;
 
   const body = parseJSON(await readBody(req, 2 * 1024 * 1024));
@@ -406,13 +407,46 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   return true;
 }
 
+// POST /kb/loop/sync-base { worktree, branch, provider, repo, base } → { base: 'origin/<base>', commit }.
+// Fetches the base branch with the user's git credentials so a loop restarted after its MR merged is cut from the
+// real base (the desktop host's git has no credentials). Same worktree/origin proof as the ship route; nothing is pushed.
+async function handleSyncBase(req, res, { userId } = {}, deps = {}) {
+  if (!verifyBusHostProof(req)) return shipFail(res, 403, 'HOST_PROOF_REQUIRED', 'This route is for the desktop app only');
+  const v = parseSyncBody(parseJSON(await readBody(req, SHIP_BODY_LIMIT)));
+  if (v.error) return shipFail(res, 400, 'VALIDATION_FAILED', v.error);
+  const projectId = projectIdForFolder(getDb(), v.worktree);
+  const hubRefusal = hubFolderRefusal(v.worktree, projectId);
+  if (hubRefusal) return shipFail(res, hubRefusal.status, hubRefusal.code, hubRefusal.message);
+  if (enforceRouteAuthority(getDb(), req, res)) return true;
+  if (projectId) {
+    const decision = authorizeAction(getDb(), userId, 'external.read', { projectId, req });
+    if (!decision.ok) return shipFail(res, decision.status, decision.code, decision.message);
+  }
+  let engine;
+  try { engine = await loadLoopEngine(); } catch { return shipFail(res, 502, 'INTERNAL_ERROR', 'The Loop engine could not be loaded'); }
+  const rootCheck = (deps.validateRoot ?? engine.validateLoopRepoRoot)(userId, v.worktree);
+  if (!rootCheck.ok || !isFactoryWorktree(rootCheck.root, v.branch)) {
+    return shipFail(res, 400, 'invalid_worktree', 'This is not a Loop worktree of a repository on your allow-list.');
+  }
+  try { await assertSafeBaseBranch(rootCheck.root, v.base); } catch { return shipFail(res, 400, 'VALIDATION_FAILED', 'base is not a valid branch name'); }
+  const originOk = await (deps.originMatchesRepo ?? originMatchesRepo)(rootCheck.root, v.provider, v.repo);
+  if (!originOk) return shipFail(res, 400, 'VALIDATION_FAILED', 'The repository origin does not match the target repo on the chosen provider.');
+  try {
+    const commit = await fetchBase(rootCheck.root, v.base);
+    sendJSON(res, 200, { base: `origin/${v.base}`, commit });
+  } catch {
+    return shipFail(res, 502, 'fetch_failed', 'The base branch could not be fetched. Check your git credentials and network.');
+  }
+  return true;
+}
+
 // POST /kb/loop/ship: the Factory's only push, from a user click in the desktop Loop screen.
 // Body { worktree, branch, provider: 'github'|'gitlab', repo, base, title, body?, patchId }
 // → { url, commit, reused }. Commit + secret scan + push happen BEFORE any provider call, so a
 // refused scan or push never opens a PR/MR. A second ship reuses the open PR/MR.
 const SHIP_BODY_LIMIT = 64 * 1024;
 const SHIP_STATUS = Object.freeze({
-  invalid_worktree: 400, diff_changed: 409, secret_detected: 422, push_rejected: 409, commit_failed: 500, provider_error: 502,
+  invalid_worktree: 400, diff_changed: 409, secret_detected: 422, push_rejected: 409, commit_failed: 500, provider_error: 502, fetch_failed: 502, lease_rejected: 409,
 });
 const SHIP_PROVIDER_NAME = Object.freeze({ github: 'GitHub', gitlab: 'GitLab' });
 
@@ -456,7 +490,10 @@ async function handleLoopShip(req, res, { userId } = {}, deps = {}) {
   let commit;
   let secretOverride = null;
   try {
-    ({ commit, secretOverride } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId, allowSecret: v.allowSecret }));
+    // Only when the caller names the loop's previous MR AND the provider itself says it merged from this branch, the first
+    // push of the restarted branch may replace that merged head (and only that head); otherwise it is fast-forward only.
+    const leaseSha = v.mergedMr && v.branch.startsWith('loop/') ? await (deps.mergedHeadOf ?? mergedHeadOf)(v.provider, v.repo, v.branch, v.mergedMr, token) : null;
+    ({ commit, secretOverride } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId, allowSecret: v.allowSecret, leaseSha, providerName: SHIP_PROVIDER_NAME[v.provider] }));
   } catch (err) {
     const known = Object.hasOwn(SHIP_STATUS, err?.code);
     return shipFail(res, known ? SHIP_STATUS[err.code] : 500, known ? err.code : 'commit_failed', known ? err.message : 'The commit could not be made.', err?.details ? { details: err.details } : null);

@@ -77,9 +77,16 @@ test("the rendered prompt of an unedited default stage equals the registry promp
   assert.equal(shownStagePrompt(writer), taskPrompt("loop.test_gap_writer"));
 });
 
-test("a loop.json saved by the build before this change decodes and encodes byte-identically", () => {
+test("a loop.json saved by the build before this change decodes and encodes byte-identically, apart from the one-time isolation move", () => {
   const text = readFileSync(new URL("./fixtures/loop-json-inline.v1.json", import.meta.url), "utf8");
-  assert.equal(encodeProjectStore(decodeProjectStore(JSON.parse(text))), text);
+  // Every loop moves to its own branch once (and records it); nothing else about the file changes.
+  const migrated = JSON.parse(text);
+  for (const l of migrated.loops) {
+    l.config = Object.fromEntries(Object.entries(l.config).flatMap(([k, v]) => (k === "alwaysUseWorktree" ? [[k, true], ["isolationDefault", true]] : [[k, v]])));
+  }
+  const once = encodeProjectStore(decodeProjectStore(JSON.parse(text)));
+  assert.equal(once, JSON.stringify(migrated, null, 2) + "\n");
+  assert.equal(encodeProjectStore(decodeProjectStore(JSON.parse(once))), once, "a second load changes nothing");
 });
 
 test("ensureDefaultLoops upgrades an unedited stage that is behind the registry and reports the loop", () => {

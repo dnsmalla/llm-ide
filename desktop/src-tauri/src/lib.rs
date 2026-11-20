@@ -357,6 +357,8 @@ macro_rules! product_handlers {
                 loop_worktree::loop_worktree_prepare,
                 loop_worktree::loop_worktree_diff,
                 loop_worktree::loop_worktree_remove,
+                loop_worktree::loop_worktree_remove_if_empty,
+                loop_worktree::loop_worktree_state_sync,
                 loop_worktree::loop_worktree_list,
                 loop_worktree::loop_worktree_status,
                 loop_worktree::loop_worktree_checkpoint,

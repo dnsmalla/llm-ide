@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/loop/sync-base",
+  "status": 200,
+  "description": "origin/<base> was fetched. Recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin). Not replayed live: the replay server has no host approval key, so it answers 403.",
+  "request": {
+    "body": {
+      "worktree": "/example/project/system/loop-worktrees/regression-1a2b3c4d",
+      "branch": "loop/regression-1a2b3c4d",
+      "provider": "github",
+      "repo": "octo/repo",
+      "base": "main"
+    }
+  },
+  "response": {
+    "base": "origin/main",
+    "commit": "0123456789abcdef0123456789abcdef01234567"
+  }
+}

@@ -212,9 +212,14 @@ export function needsDecisionSummary(outcome: Pick<LoopRunOutcome, "passed" | "f
 
 const SETUP_FOR_TEST = new Map<string, string>([["npm test", "npm ci"], ["swift test", "swift build"]]);
 
+/** The install step the Factory runs for a detected test command (null when none applies). Every worktree run reuses it. */
+export function setupCommandFor(testCommand: string | null): string | null {
+  return testCommand ? SETUP_FOR_TEST.get(testCommand) ?? null : null;
+}
+
 /** Fills and enables the Set up stage when the detected test command implies an install step. */
 export function withSetupCommand(config: LoopEngineConfig, testCommand: string | null): LoopEngineConfig {
-  const setup = testCommand ? SETUP_FOR_TEST.get(testCommand) ?? null : null;
+  const setup = setupCommandFor(testCommand);
   if (!setup) return config;
   return {
     ...config,

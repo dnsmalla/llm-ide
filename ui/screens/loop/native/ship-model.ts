@@ -8,7 +8,7 @@ import type { RunInfo } from "./worktree-run.ts";
 import { isCiHookPath } from "./protected.ts";
 
 /** The `POST /kb/loop/ship` body. `repo` is the provider slug (owner/name), never a path. */
-export interface ShipBody { worktree: string; branch: string; provider: "github" | "gitlab"; repo: string; base: string; title: string; body: string; patchId: string; allowSecret?: boolean }
+export interface ShipBody { worktree: string; branch: string; provider: "github" | "gitlab"; repo: string; base: string; title: string; body: string; patchId: string; allowSecret?: boolean; /** The loop's previous MR, only on the first ship of a branch restarted after it merged. */ mergedMr?: string }
 export type ShipResult = { ok: true; url: string; commit: string; reused: boolean; secretOverride?: { rule: string; file: string | null; line: number | null; hits?: { rule: string; file: string | null; line: number }[]; total?: number } } | { ok: false; code: string; message?: string; rule?: string; file?: string; line?: number; hits?: { rule: string; file: string | null; line: number }[]; total?: number };
 export type ShipState = "shipped" | "secret" | "rejected" | "changed" | "error";
 export interface WorktreeDiff { text: string; truncated: boolean; patchId: string; files: string[]; additions: number; deletions: number }
@@ -101,6 +101,11 @@ export function shipState(result: ShipResult): ShipState {
 
 /** User copy for a ship result. Never echoes the server message: it may quote the diff or a credential. */
 export function shipCopy(result: ShipResult): string {
+  // The one server sentence shown as written: fixed text naming the provider, never the provider's or git's own words.
+  if (!result.ok && result.code === "lease_rejected") {
+    const m = typeof result.message === "string" ? result.message : "";
+    return /^The branch on (GitHub|GitLab) has commits that are not from the merged MR; nothing was overwritten\.$/.test(m) ? m : "The branch on the provider has commits that are not from the merged MR; nothing was overwritten.";
+  }
   switch (shipState(result)) {
     case "shipped": {
       const r = result as Extract<ShipResult, { ok: true }>;

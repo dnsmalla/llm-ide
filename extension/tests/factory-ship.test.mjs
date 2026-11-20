@@ -75,10 +75,10 @@ setSecret(getDb(), user.id, 'github.token', GH_TOKEN);
 setSecret(getDb(), user.id, 'gitlab.token', GL_TOKEN);
 
 const PROOF = busHostProof();
-function makeReq(body, { proof = PROOF } = {}) {
+function makeReq(body, { proof = PROOF, url = '/kb/loop/ship' } = {}) {
   const chunks = [Buffer.from(JSON.stringify(body))];
   const req = {
-    method: 'POST', url: '/kb/loop/ship', user,
+    method: 'POST', url, user,
     headers: proof ? { 'x-llmide-host-nonce': proof } : {},
     on(event, cb) {
       if (event === 'data') chunks.forEach((c) => cb(c));
@@ -520,4 +520,171 @@ test('ship never runs repo hooks, even a hooksPath the agent controls', async ()
   } finally {
     git(['config', '--unset', 'core.hooksPath'], WT);
   }
+});
+
+test('a loop ships from its own branch: each run adds a fast-forward commit to the same draft MR, and history is never forced', async () => {
+  const LWT = path.join(PROJECT, 'system', 'loop-worktrees', 'regression');
+  git(['worktree', 'add', '-q', '-b', 'loop/regression', LWT, 'HEAD'], REPO);
+  const lbase = git(['rev-parse', 'HEAD'], LWT);
+  const body = (over = {}) => shipBody({ worktree: LWT, branch: 'loop/regression', ...over });
+  const withId = async (o = {}) => body({ patchId: await stagedPatchId(LWT, lbase), ...o });
+  try {
+    // Run 1: a new draft.
+    fs.writeFileSync(path.join(LWT, 'src', 'run1.txt'), '1\n');
+    let seen = fakeProvider((url, init) => (init.method === 'GET' ? json(200, []) : json(201, { html_url: 'https://github.com/o/r/pull/21', number: 21 })));
+    const first = await ship(await withId());
+    assert.equal(first.status, 200, first.raw);
+    assert.equal(first.body.reused, false);
+    assert.deepEqual(seen.map((s) => s.method), ['GET', 'POST']);
+    assert.equal(seen[1].body.head, 'loop/regression');
+    assert.equal(remoteHead('refs/heads/loop/regression'), first.body.commit);
+    // Run 2 on the same branch: a second commit, pushed fast-forward, onto the open MR.
+    fs.writeFileSync(path.join(LWT, 'src', 'run2.txt'), '2\n');
+    seen = fakeProvider((url, init) => (init.method === 'GET' ? json(200, [{ html_url: 'https://github.com/o/r/pull/21', number: 21 }]) : json(500, {})));
+    const second = await ship(await withId());
+    assert.equal(second.status, 200, second.raw);
+    assert.equal(second.body.reused, true);
+    assert.equal(second.body.url, 'https://github.com/o/r/pull/21');
+    assert.deepEqual(seen.map((s) => s.method), ['GET'], 'no second MR');
+    assert.equal(git(['rev-parse', `${second.body.commit}~1`], LWT), first.body.commit, 'a fast-forward child of run 1');
+    assert.equal(remoteHead('refs/heads/loop/regression'), second.body.commit);
+    // The branch is bound to its folder: another loop's branch, or a run-shaped one, is refused from it.
+    for (const branch of ['loop/test', 'factory/regression', 'loop/regression/x']) {
+      const r = await ship(await withId({ branch }));
+      assert.equal(r.status, 400, `${branch}: ${r.raw}`);
+    }
+    // Rewritten history is rejected, never forced over the remote.
+    git(['commit', '--amend', '-q', '-m', 'rewritten'], LWT);
+    fs.writeFileSync(path.join(LWT, 'src', 'run3.txt'), '3\n');
+    const rejected = await ship(await withId());
+    assert.notEqual(rejected.status, 200, rejected.raw);
+    assert.equal(remoteHead('refs/heads/loop/regression'), second.body.commit, 'the remote branch was not overwritten');
+  } finally { _setPinnedFetchForTests(null); }
+});
+
+// ---- a loop restarted after its MR merged (squash or rebase): the first push may replace ONLY the merged head -------
+function leaseWorld(name) {
+  const dir = path.join(PROJECT, 'system', 'loop-worktrees', name);
+  const branch = `loop/${name}`;
+  git(['worktree', 'add', '-q', '-b', branch, dir, 'HEAD'], REPO);
+  const base = git(['rev-parse', 'HEAD'], dir);
+  return { dir, branch, base };
+}
+const prUrl = (n) => `https://github.com/o/r/pull/${n}`;
+function mrAnswers(branch, { merged = true, sha, n = 40 } = {}) {
+  return (url, init) => {
+    if (init.method === 'POST') return json(201, { html_url: prUrl(n + 1), number: n + 1 });
+    if (url.includes(`/pulls/${n}`)) return json(200, { merged, head: { ref: branch, sha, repo: { full_name: 'o/r' } } });
+    return json(200, []);
+  };
+}
+// The first MR's work was squash-merged upstream: the remote branch keeps its old head, the local branch restarts from the base.
+async function firstThenRestart(name) {
+  const w = leaseWorld(name);
+  fs.writeFileSync(path.join(w.dir, 'src', `${name}-1.txt`), '1\n');
+  fakeProvider((url, init) => (init.method === 'GET' ? json(200, []) : json(201, { html_url: prUrl(40), number: 40 })));
+  const first = await ship(shipBody({ worktree: w.dir, branch: w.branch, patchId: await stagedPatchId(w.dir, w.base) }));
+  assert.equal(first.status, 200, first.raw);
+  git(['reset', '-q', '--hard', w.base], w.dir);
+  fs.writeFileSync(path.join(w.dir, 'src', `${name}-2.txt`), '2\n');
+  return { ...w, oldHead: first.body.commit, body: async (over = {}) => shipBody({ worktree: w.dir, branch: w.branch, patchId: await stagedPatchId(w.dir, w.base), ...over }) };
+}
+
+test('after a squash merge the restarted branch replaces the merged head, once, when the provider confirms the merge', async () => {
+  const w = await firstThenRestart('lease-ok');
+  try {
+    const seen = fakeProvider(mrAnswers(w.branch, { sha: w.oldHead }));
+    const r = await ship(await w.body({ mergedMr: prUrl(40) }));
+    assert.equal(r.status, 200, r.raw);
+    assert.equal(remoteHead(`refs/heads/${w.branch}`), r.body.commit, 'the restarted branch is on the remote');
+    assert.ok(seen.some((s) => s.url.endsWith('/pulls/40')), 'the core asked the provider itself');
+    // A normal later ship is fast-forward again: rewriting history after that is refused.
+    git(['commit', '--amend', '-q', '-m', 'rewritten'], w.dir);
+    fs.writeFileSync(path.join(w.dir, 'src', 'lease-ok-3.txt'), '3\n');
+    fakeProvider(mrAnswers(w.branch, { sha: w.oldHead }));
+    const again = await ship(await w.body());
+    assert.notEqual(again.status, 200, again.raw);
+    assert.equal(remoteHead(`refs/heads/${w.branch}`), r.body.commit, 'no lease without mergedMr');
+  } finally { _setPinnedFetchForTests(null); }
+});
+
+test('the lease refuses when the remote branch has a commit beyond the merged head', async () => {
+  const w = await firstThenRestart('lease-extra');
+  try {
+    // Someone else pushed to the branch after the MR's head.
+    const other = path.join(SANDBOX, 'other-clone');
+    git(['clone', '-q', '-b', w.branch, REMOTE, other], SANDBOX);
+    git(['config', 'user.name', 'o'], other); git(['config', 'user.email', 'o@e.com'], other);
+    fs.writeFileSync(path.join(other, 'theirs.txt'), 't\n');
+    git(['add', '.'], other); git(['commit', '-q', '-m', 'theirs'], other); git(['push', '-q', 'origin', w.branch], other);
+    const theirs = remoteHead(`refs/heads/${w.branch}`);
+    fakeProvider(mrAnswers(w.branch, { sha: w.oldHead }));
+    const r = await ship(await w.body({ mergedMr: prUrl(40) }));
+    assert.equal(r.status, 409, r.raw);
+    assert.equal(r.body.error.code, 'lease_rejected');
+    assert.equal(r.body.error.message, 'The branch on GitHub has commits that are not from the merged MR; nothing was overwritten.');
+    assert.equal(remoteHead(`refs/heads/${w.branch}`), theirs, 'their commit was not overwritten');
+  } finally { _setPinnedFetchForTests(null); }
+});
+
+test('the lease is refused unless the provider confirms the merge from this branch of this repository', async () => {
+  const w = await firstThenRestart('lease-open');
+  try {
+    const before = remoteHead(`refs/heads/${w.branch}`);
+    for (const [label, answers, mergedMr] of [
+      ['not merged', mrAnswers(w.branch, { merged: false, sha: w.oldHead }), prUrl(40)],
+      ['another branch', mrAnswers('loop/other', { sha: w.oldHead }), prUrl(40)],
+      ['another repository', mrAnswers(w.branch, { sha: w.oldHead }), 'https://github.com/x/y/pull/40'],
+      ['not an MR url', mrAnswers(w.branch, { sha: w.oldHead }), 'https://evil.example/pull/40'],
+      ['no head sha', mrAnswers(w.branch, { sha: 'zz' }), prUrl(40)],
+    ]) {
+      fakeProvider(answers);
+      const r = await ship(await w.body({ mergedMr }));
+      assert.equal(r.status, 409, `${label}: ${r.raw}`);
+      assert.equal(remoteHead(`refs/heads/${w.branch}`), before, `${label}: remote untouched`);
+    }
+  } finally { _setPinnedFetchForTests(null); }
+});
+
+test('sync-base fetches origin/<base> with the core\'s git, for a Loop worktree only', async () => {
+  const w = leaseWorld('sync-1');
+  const other = path.join(SANDBOX, 'other-main');
+  git(['clone', '-q', '-b', 'main', REMOTE, other], SANDBOX);
+  git(['config', 'user.name', 'o'], other); git(['config', 'user.email', 'o@e.com'], other);
+  fs.writeFileSync(path.join(other, 'upstream.txt'), 'u\n');
+  git(['add', '.'], other); git(['commit', '-q', '-m', 'upstream'], other); git(['push', '-q', 'origin', 'main'], other);
+  const upstream = remoteHead('refs/heads/main');
+  const call = async (body) => {
+    const res = makeRes();
+    await handleLoopAgentRoutes(makeReq(body, { url: '/kb/loop/sync-base' }), res, { userId: user.id }, STUB_ORIGIN);
+    return { status: res.statusCode, body: JSON.parse(res._body) };
+  };
+  const ok = await call({ worktree: w.dir, branch: w.branch, provider: 'github', repo: 'o/r', base: 'main' });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.deepEqual(ok.body, { base: 'origin/main', commit: upstream });
+  assert.equal(git(['rev-parse', 'refs/remotes/origin/main'], REPO), upstream);
+  assert.equal((await call({ worktree: w.dir, branch: 'loop/other', provider: 'github', repo: 'o/r', base: 'main' })).status, 400, 'another loop\'s branch');
+  assert.equal((await call({ worktree: REPO, branch: w.branch, provider: 'github', repo: 'o/r', base: 'main' })).status, 400, 'not a loop worktree');
+  assert.equal((await call({ worktree: w.dir, branch: w.branch, provider: 'github', repo: 'o/r', base: '--upload-pack=x' })).status, 400, 'an option is not a branch');
+});
+
+test('the lease is never used for a Factory branch, even when mergedMr is sent', async () => {
+  // A factory/<run id> branch whose remote head differs: a plain push is rejected and no lease retry happens.
+  const dir = path.join(PROJECT, 'system', 'loop-worktrees', 'fx-lease');
+  git(['worktree', 'add', '-q', '-b', 'factory/fx-lease', dir, 'HEAD'], REPO);
+  const base = git(['rev-parse', 'HEAD'], dir);
+  try {
+    fs.writeFileSync(path.join(dir, 'src', 'f1.txt'), '1\n');
+    fakeProvider((url, init) => (init.method === 'GET' ? json(200, []) : json(201, { html_url: prUrl(50), number: 50 })));
+    const first = await ship(shipBody({ worktree: dir, branch: 'factory/fx-lease', patchId: await stagedPatchId(dir, base) }));
+    assert.equal(first.status, 200, first.raw);
+    git(['reset', '-q', '--hard', base], dir);
+    fs.writeFileSync(path.join(dir, 'src', 'f2.txt'), '2\n');
+    const seen = fakeProvider(mrAnswers('factory/fx-lease', { sha: first.body.commit, n: 50 }));
+    const r = await ship(shipBody({ worktree: dir, branch: 'factory/fx-lease', patchId: await stagedPatchId(dir, base), mergedMr: prUrl(50) }));
+    assert.equal(r.status, 409, r.raw);
+    assert.equal(r.body.error.code, 'push_rejected');
+    assert.equal(seen.some((s) => s.url.includes('/pulls/50')), false, 'the provider was not even asked');
+    assert.equal(remoteHead('refs/heads/factory/fx-lease'), first.body.commit);
+  } finally { _setPinnedFetchForTests(null); }
 });

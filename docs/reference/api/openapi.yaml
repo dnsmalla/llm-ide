@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 156
+  x-api-version: 157
 servers:
   - url: "https://{host}"
     variables:
@@ -12069,7 +12069,7 @@ paths:
   /kb/loop/ship:
     post:
       summary: "Commit, push and open a draft PR/MR for a Factory run worktree"
-      description: "The Software Factory's only push, sent by the desktop Loop screen after a user click (bus host proof required). `worktree` must be a linked git worktree of an allow-listed repo at `<project>/system/loop-worktrees/<run id>` on branch `factory/<run id>`. Every change except `.factory/` is committed, the staged diff is scanned for token-shaped secrets (422 `secret_detected` with `details.rule`/`details.file`/`details.line` and no matched text, nothing committed), the branch is pushed to `origin` (409 `push_rejected`, no PR/MR), and a DRAFT pull request (api.github.com) or merge request (gitlab.com) is opened with the vaulted `github.token` / `gitlab.token`; an open one for the branch is reused (`reused: true`). Provider text and tokens never appear in an error. Rate-limited on the `dispatch` bucket. Server API v131."
+      description: "The Software Factory's only push, sent by the desktop Loop screen after a user click (bus host proof required). `worktree` must be a linked git worktree of an allow-listed repo at `<project>/system/loop-worktrees/<run id>` on branch `factory/<run id>` (Factory) or `loop/<loop slug>` (every other Loop, one branch per loop; the slug is the worktree folder name; API 157). Every change except `.factory/` is committed, the staged diff is scanned for token-shaped secrets (422 `secret_detected` with `details.rule`/`details.file`/`details.line` and no matched text, nothing committed), the branch is pushed to `origin` (409 `push_rejected`, no PR/MR), and a DRAFT pull request (api.github.com) or merge request (gitlab.com) is opened with the vaulted `github.token` / `gitlab.token`; an open one for the branch is reused (`reused: true`). Provider text and tokens never appear in an error. Rate-limited on the `dispatch` bucket. Server API v131."
       tags:
         - "live-loop-misc"
       requestBody:
@@ -12089,10 +12089,10 @@ paths:
               properties:
                 worktree:
                   type: "string"
-                  description: "Absolute path of the Factory worktree, <project>/system/loop-worktrees/<run id>, of an allow-listed repo"
+                  description: "Absolute path of the run worktree, <project>/system/loop-worktrees/<run id or loop slug>, of an allow-listed repo"
                 branch:
                   type: "string"
-                  description: "factory/<run id>, the worktree's checked-out branch"
+                  description: "The worktree's checked-out branch: factory/<run id> (Factory) or loop/<loop slug> (every other Loop; the slug is the worktree folder name)"
                 provider:
                   type: "string"
                   enum:
@@ -12116,6 +12116,9 @@ paths:
                 allowSecret:
                   type: "boolean"
                   description: "Only when the user explicitly confirmed the secret hit: commit and push anyway; the 200 carries secretOverride. Hard block remains the default."
+                mergedMr:
+                  type: "string"
+                  description: "The loop's previous draft MR URL. Send it only on the first ship of a branch restarted after that MR merged: the core asks the provider whether it merged from this branch, and only then retries a rejected first push with --force-with-lease pinned to that MR's head. Every other push is fast-forward only (API 157)"
       responses:
         "200":
           description: "Committed (without .factory/), pushed, and a draft PR/MR opened, or the open one reused. The 200 fixture is recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin, faked provider)."
@@ -12307,6 +12310,81 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/FeatureDisabled"
+  /kb/loop/sync-base:
+    post:
+      tags:
+        - "live-loop-misc"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "worktree"
+                - "branch"
+                - "provider"
+                - "repo"
+                - "base"
+              properties:
+                worktree:
+                  type: "string"
+                  description: "Absolute path of the loop's worktree, <project>/system/loop-worktrees/<slug>, of an allow-listed repo"
+                branch:
+                  type: "string"
+                  description: "loop/<loop slug> or factory/<run id>, the worktree's branch"
+                provider:
+                  type: "string"
+                  enum:
+                    - "github"
+                    - "gitlab"
+                repo:
+                  type: "string"
+                  description: "GitHub owner/name or a gitlab.com project path; must be the worktree's origin"
+                base:
+                  type: "string"
+                  description: "The base branch to fetch as origin/<base>"
+      responses:
+        "200":
+          description: "origin/<base> was fetched with the user's git credentials. Recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin)."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "base"
+                  - "commit"
+                properties:
+                  base:
+                    type: "string"
+                    description: "origin/<base>"
+                  commit:
+                    type: "string"
+                    description: "The fetched commit"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/FeatureDisabled"
+        "502":
+          description: "Bad Gateway"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/mcp-connector/classify:
     post:
       summary: "Classify one ingested connector item and extract to-dos"

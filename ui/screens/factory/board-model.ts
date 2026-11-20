@@ -427,7 +427,9 @@ export interface CleanupPlan { remove: string[]; keep: { runId: string; reason: 
 
 /**
  * Worktrees safe to remove: a merged PR/MR, or an orphan (no card) whose status says no unshipped changes.
- * A live run, an interrupted marker, a card's unshipped run and a missing status are always kept.
+ * A live run, an interrupted marker, a card's unshipped run and a missing status are always kept. A worktree on a
+ * `loop/<loop>` branch is never a candidate: it is its loop's one branch with its draft MR (commits beyond the base, or
+ * a run in progress), so only that loop's own history discards it.
  */
 export function cleanupPlan(
   items: readonly { runIds: readonly string[] }[],
@@ -441,7 +443,9 @@ export function cleanupPlan(
   const busy = new Set(live.map((r) => r.runId));
   const remove: string[] = [];
   const keep: { runId: string; reason: string }[] = [];
-  for (const runId of worktrees.keys()) {
+  for (const [runId, wt] of worktrees) {
+    const branch = typeof (wt as { branch?: unknown } | null)?.branch === "string" ? (wt as { branch: string }).branch : "";
+    if (branch.startsWith("loop/")) { keep.push({ runId, reason: "it is a loop's own branch with its draft MR; discard it from that loop's History" }); continue; }
     if (busy.has(runId) || interrupted.has(runId)) { keep.push({ runId, reason: "a run is still active or was interrupted" }); continue; }
     if (merged.has(runId)) { remove.push(runId); continue; }
     const status = statuses.get(runId);

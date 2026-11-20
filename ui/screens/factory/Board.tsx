@@ -489,7 +489,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       </header>
       {cleanup ? (
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm worktree clean-up">
-          <p>Remove {cleanup.remove.length} worktree{cleanup.remove.length === 1 ? "" : "s"}? Kept: {cleanup.keep.length} (unshipped changes, a card waiting for Ship, a live run or an unreadable status).</p>
+          <p>Remove {cleanup.remove.length} worktree{cleanup.remove.length === 1 ? "" : "s"}? Kept: {cleanup.keep.length} (a loop's own branch with its draft MR, unshipped changes, a card waiting for Ship, a live run or an unreadable status).</p>
           <ul>{cleanup.remove.map((id) => <li key={id}><code>{worktrees.get(id)?.branch ?? id}</code></li>)}</ul>
           <div className="fx-actions">
             <button type="button" className="fx-btn" onClick={() => setCleanup(null)}>Cancel</button>

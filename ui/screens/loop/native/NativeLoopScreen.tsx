@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { SectionProps } from "@llmide/screens/shell";
 import { COPY_SERVER_PATH_LABEL, fileManagerActionFor } from "../../shell/server-path.ts";
 import { createHostFs } from "../../explorer/fs";
+import { displayText } from "../../explorer/scm/model";
 import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../../shell/host";
 import { core } from "../../shell/runtime";
@@ -16,7 +17,7 @@ import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { isNativeRunnable, reviewEveryRunsOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { MAX_LESSON_CHARS, setLearnedWriteHook } from "./lessons.ts";
 import { reviewSwitch, setReviewAfter } from "./review-ui.ts";
-import { stepReviewRecords } from "./review.ts";
+import { reviewModeOf, stepReviewRecords } from "./review.ts";
 import { loopbackLogLine, loopbackRecord } from "./loopback.ts";
 import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, type LoopTemplate } from "./templates.ts";
@@ -35,14 +36,17 @@ import { ImprovementsPanel } from "./improve/ImprovementsPanel.tsx";
 import { runningLoopIdsOf } from "./improve/panel-model.ts";
 import { liveRuns, subscribe as subscribeRuns, trackExternalRun } from "./run-manager.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
-import { changedPathArgs, newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
+import { copyStateBackIfMissed, copyStateIn, endWorktreeRun } from "./run-end.ts";
+import { branchDiscardRefusal, lastShipUrl, providerSaysMerged } from "./loop-branch.ts";
+import { configWithSetup, isSetupStage, markSetupDone, setupNeeded } from "./loop-setup.ts";
+import { changedPathArgs, loopBranchSlug, newRunId, repoPrefixFor, runChanged, runEndAction, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
-import { decodeWorktreeDiff, shipTarget, type WorktreeDiff } from "./ship-model.ts";
+import { decodeWorktreeDiff, decodeWorktreeStatus, shipTarget, type WorktreeDiff } from "./ship-model.ts";
 import { stageIdForLogLine } from "./stage-follow.ts";
 import { clearLiveCard, setLiveCard, updateLiveStage } from "./live-card.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
@@ -215,7 +219,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const [runRecord, setRunRecord] = useState<Record<string, unknown> | null>(null);
   const [runRecordLoaded, setRunRecordLoaded] = useState(false);
   /** The run whose worktree is open in the Review and Ship panel. */
-  const [shipRun, setShipRun] = useState<{ info: RunInfo; item: WorkItem; entry: LoopRunIndexEntry; passed: boolean; diff?: WorktreeDiff; reviewedPatchId?: string | null; requestProvider?: "github" | "gitlab" | null; processName?: string } | null>(null);
+  const [shipRun, setShipRun] = useState<{ info: RunInfo; item: WorkItem; entry: LoopRunIndexEntry; passed: boolean; diff?: WorktreeDiff; reviewedPatchId?: string | null; requestProvider?: "github" | "gitlab" | null; processName?: string; branchDiscard?: boolean; mergedMr?: string | null } | null>(null);
   /** The Factory loop waiting for its work item; the picker is shown while this is set. */
   const [pickerLoop, setPickerLoop] = useState<LoopDefinition | null>(null);
   // A picker card for a loop the user has since left must not start that loop over the one now shown.
@@ -361,9 +365,13 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     try { list = await invokeHost<RunInfo[]>("loop_worktree_list"); } catch (e) { setNotice(e instanceof Error ? e.message : "The worktrees could not be listed."); return; }
     const info = list.find((r) => r.runId === runId);
     if (!info) { setNotice("This run's worktree was removed; only its record is left."); return; }
+    // A loop's branch (loop/…) is shared by all its runs: no panel from an older run, and none while the loop runs or its worktree is in use.
+    const inUse = activeRunRef.current?.runId === info.runId ? entry.loopId : null;
+    const refusal = branchDiscardRefusal(info, runs, entry, activeLoopId ?? inUse);
+    if (refusal) { setNotice(refusal); return; }
     const w = fields.workItem;
     const item: WorkItem = w ? { source: w.source, id: w.id, title: w.title, body: "", repo: null } : { source: "text", id: null, title: entry.loopName, body: "", repo: null };
-    setShipRun({ info, item, entry, passed: entry.statusCode === "success", reviewedPatchId: fields.diffSummary?.patchId ?? null, requestProvider: fields.ship?.provider ?? null, processName: fields.workItem ? undefined : entry.loopName });
+    setShipRun({ info, item, entry, passed: entry.statusCode === "success", reviewedPatchId: fields.diffSummary?.patchId ?? null, requestProvider: fields.ship?.provider ?? null, processName: fields.workItem ? undefined : entry.loopName, branchDiscard: info.branch.startsWith("loop/") });
   };
 
   // ssh mode: the run records and worktree are on the server, so the buttons copy the server path instead.
@@ -593,8 +601,9 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     if (dirty) return;
     const unsupported = target.config.stages.find((s) => s.enabled && !isNativeRunnable(s));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
-    const useWorktree = target.config.alwaysUseWorktree || isFactoryLoop(target);
-    const worktreeBlocked = useWorktree ? worktreeBlockedStage(target.config.stages) : null;
+    // Every loop runs on its own branch unless it opted out or has a Regression stage (it works on the working tree).
+    const useWorktree = runsInWorktree(target.config, isFactoryLoop(target));
+    const worktreeBlocked = useWorktree && isFactoryLoop(target) ? worktreeBlockedStage(target.config.stages) : null;
     if (worktreeBlocked) { setNotice(`“${worktreeBlocked.name}” re-checks faults in the main working tree, so it cannot run in an isolated worktree. Turn that stage off or turn off “Always run in an isolated worktree”.`); return; }
     // A loop.json from a cloned repo can mark a code-applying loop runsOnSchedule; it still never runs unattended.
     // A Factory run needs a picked work item; the schedule and the queue never have one.
@@ -648,6 +657,8 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       }
     }
     let prepared: RunInfo | null = null;
+    // The previous draft MR of a loop restarted after it merged: the core checks with the provider before it lets the first push replace that head.
+    let mergedMr: string | null = null;
     if (useWorktree) {
       const root = projectRoot ?? "";
       const workRel = workRoot === root ? "" : repoPrefixFor(root, workRoot ?? "");
@@ -656,9 +667,31 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         startingRef.current = false;
         return;
       }
+      // One branch per loop: the slug (name + loop id) is the worktree folder, the run id and the branch name (loop/<slug>).
+      const worktrees = isFactoryLoop(target) ? [] : await invokeHost<RunInfo[]>("loop_worktree_list").catch(() => [] as RunInfo[]);
+      const slug = loopBranchSlug(target.name, target.id, worktrees.map((w) => w.runId));
+      let fresh = false;
+      let baseRef: string | null = null;
+      if (!isFactoryLoop(target)) {
+        // Git sees a merge or fast-forward by itself; a squash or rebase merge is only visible to the provider.
+        const last = await lastShipUrl(fs, runs, target.id).catch(() => null);
+        fresh = await providerSaysMerged((path, body) => core.requestRaw(path, { method: "POST", body, timeoutMs: 20_000 }), last);
+        if (fresh && last) mergedMr = last.url;
+        const old = worktrees.find((w) => w.runId === slug);
+        if (fresh && old) {
+          // The restarted branch is cut from the real base: the core fetches it (the host's git has no credentials).
+          try {
+            const to = shipTarget(old, readRepoConfig());
+            const base = await invokeHost<string | null>("loop_repo_branch", { runId: slug });
+            const r = to && base ? await core.requestRaw("/kb/loop/sync-base", { method: "POST", body: { worktree: old.worktree, branch: old.branch, provider: to.provider, repo: to.slug, base }, timeoutMs: 90_000 }) : null;
+            if (r && r.status === 200) baseRef = `origin/${base}`;
+            else setRunLog((l) => [...l, "The base branch could not be fetched, so the restarted branch is cut from your local copy of it."]);
+          } catch { /* cut from the local base */ }
+        }
+      }
       const task = start ? start.task : `# ${target.name}\n\nLoop run in an isolated worktree. No work item was picked; the loop's goal applies.\n`;
       try {
-        prepared = await invokeHost<RunInfo>("loop_worktree_prepare", { repoRel: start ? start.repoRel : workRel, runId: newRunId(new Date(), Math.random), base: null, task });
+        prepared = await invokeHost<RunInfo>("loop_worktree_prepare", { repoRel: start ? start.repoRel : workRel, runId: isFactoryLoop(target) ? newRunId(new Date(), Math.random) : slug, base: baseRef, task, loopSlug: isFactoryLoop(target) ? null : slug, fresh });
       } catch (e) {
         setNotice(`The isolated worktree could not be created: ${e instanceof Error ? e.message : String(e)}. The run did not start.`);
         startingRef.current = false;
@@ -675,6 +708,25 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     }
     const activeRun = prepared;
     let runConfig = target.config;
+    // Edits an earlier run left uncommitted on this loop's branch: say so, and never ship them without a look.
+    // A status that cannot be read (null) counts as "leftovers present": the run holds for review instead of shipping on a guess.
+    const leftoverFiles: number | null = activeRun && !isFactoryLoop(target) ? await invokeHost<unknown>("loop_worktree_status", { runId: activeRun.runId }).then((raw) => decodeWorktreeStatus(raw)?.changedFiles ?? null).catch(() => null) : 0;
+    if (leftoverFiles === null) setNotice("The worktree's state could not be read, so this run's changes will wait for your review instead of opening a merge request.");
+    else if (leftoverFiles > 0) setNotice(`${leftoverFiles} uncommitted file${leftoverFiles === 1 ? "" : "s"} from an earlier run on this loop's branch. This run's changes will wait for your review instead of opening a merge request.`);
+    if (!isFactoryLoop(target)) {
+      let needed = false;
+      if (activeRun) {
+        const copied = await copyStateIn({ syncStateIn: async () => { await invokeHost("loop_worktree_state_sync", { runId: activeRun.runId, direction: "in" }); } }, activeRun.branch);
+        if (!copied.ok) {
+          setNotice(copied.message);
+          startingRef.current = false;
+          return;
+        }
+        const setup = target.config.stages.find((st) => st.enabled && isSetupStage(st));
+        needed = setup ? await setupNeeded(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree), setup.command ?? "") : false;
+      }
+      runConfig = configWithSetup(target.config, needed);
+    }
     if (isFactoryLoop(target) && activeRun) {
       const detected = await detectTestCommand(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree)).catch(() => null);
       const filled = withDetectedVerify(target, detected?.command ?? null);
@@ -700,9 +752,11 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     setRunRecord(null);
     setShipRun(null);
     setRunningStage(true);
-    setRunLog((l) => [...l, `▶ ${target.name}`, ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`] : []), ""]);
+    setRunLog((l) => [...l, `▶ ${target.name}`, ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`, ...(leftoverFiles === null ? ["The worktree's state could not be read; the end of this run waits for your review."] : leftoverFiles > 0 ? [`${leftoverFiles} uncommitted file(s) from an earlier run are in this worktree; the end of this run waits for your review.`] : [])] : []), ""]);
     const started = Date.now();
     let summaryPath: string | null = null;
+    // Set once the Loop's saved state is back in the main tree; the finally block copies it back when the run threw first.
+    let stateSavedBack = false;
     const archiveLog: string[] = [];
     // Shown on the board as Working while it runs; released after the run record is saved (the finally below), so a
     // card can never be left behind. Loaded on demand, so the Loop screen does not hard-depend on the Factory chunk.
@@ -710,7 +764,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     let liveRunId: string | null = null;
     try {
       // The issue trail: a run started from an issue comments there; any other run opens one when the loop asks for it.
-      const trailRunId = activeRun?.runId ?? newRunId(new Date(started), Math.random);
+      const trailRunId = activeRun && isFactoryLoop(target) ? activeRun.runId : newRunId(new Date(started), Math.random);
       liveRunId = trailRunId;
       setLiveCard({ loopName: target.name, runId: trailRunId, stageName: target.config.stages.find((st) => st.enabled)?.name ?? "", startedAt: new Date(started).toISOString() });
       const trailRepo = shipTarget({ repo: activeRun?.repo ?? workRoot ?? projectRoot ?? "" }, readRepoConfig());
@@ -755,11 +809,14 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         },
       };
       const outcome = target.defaultKey === "refactor" && activeRun
-        ? await runRefactorBatches(target.config, runDeps, refactorBatchOpts(activeRun))
-        : await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : target.config, runDeps);
+        ? await runRefactorBatches(runConfig, runDeps, refactorBatchOpts(activeRun))
+        : await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : runConfig, runDeps);
+      const setupStage = target.config.stages.find((st) => isSetupStage(st));
+      if (activeRun && setupStage && outcome.stages.some((o) => isSetupStage(o.stage) && o.ok)) await markSetupDone(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree), setupStage.command ?? "");
+      if (!outcome.passed && !outcome.cancelled && outcome.failedStage && isSetupStage(outcome.failedStage)) outcome.statusSummary = `Setting up the project's dependencies (${setupStage?.command ?? "install"}) failed, so the run stopped before its other steps.${activeRun ? ` Branch ${activeRun.branch} is kept.` : ""}`;
       const needsDecision = isFactoryLoop(target) ? needsDecisionSummary(outcome) : null;
       if (needsDecision) outcome.statusSummary = needsDecision;
-      if (activeRun) setRunLog((l) => [...l, `worktree kept: system/loop-worktrees/${activeRun.runId} (branch ${activeRun.branch}); your main working tree was not touched`]);
+      if (activeRun) setRunLog((l) => [...l, `ran in system/loop-worktrees/${activeRun.runId} on branch ${activeRun.branch}; your main working tree was not touched`]);
       let changedPaths: string[] = [];
       try { changedPaths = await invokeHost<string[]>("loop_changed_paths", changedPathArgs(activeRunRef.current?.runId ?? null, projectRoot)); } catch { changedPaths = []; }
       if (changedPaths.length) setRunLog((l) => [...l, `changed paths: ${changedPaths.join(", ")}`]);
@@ -799,14 +856,19 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       setNotice(outcome.cancelled ? (cancelledRef.current ? "The loop was cancelled." : outcome.statusSummary) : outcome.passed ? "The loop passed." : outcome.statusSummary);
       if (!outcome.cancelled) void notifyTask("loop", outcome.passed);
       const startedAt = new Date(started).toISOString();
-      // factoryRunId + factoryMode: the board finds a card's last run through these fields (the run manager writes them too).
-      const entry: LoopRunIndexEntry & { factoryRunId?: string; factoryMode?: "full" } = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: outcome.statusSummary, trigger: runTrigger(scheduled), ...(activeRun && isFactoryLoop(target) ? { factoryRunId: activeRun.runId, factoryMode: "full" as const } : {}) };
       // One diff read per run end: ShipPanel gets it as a prop instead of re-reading (two parallel reads race on the
       // worktree's index.lock).
       const worktreeDiff = activeRun
         ? await invokeHost<unknown>("loop_worktree_diff", { runId: activeRun.runId }).then(decodeWorktreeDiff).catch(() => null)
         : null;
       const diffSummary = worktreeDiff ? { files: worktreeDiff.files, truncated: worktreeDiff.truncated, patchId: worktreeDiff.patchId || null, additions: worktreeDiff.additions, deletions: worktreeDiff.deletions } : null;
+      // One end-of-run rule for every loop but the Factory (which has its own board): a passed run with changes opens its
+      // draft MR, a passed run with none is removed, anything else keeps its branch. Nothing is removed on doubt.
+      const end = activeRun && !isFactoryLoop(target)
+        ? runEndAction({ passed: outcome.passed, cancelled: outcome.cancelled === true, changed: runChanged(worktreeDiff), humanReview: reviewModeOf(target.config) === "human", leftoverFiles, openMergeRequest: target.config.openMergeRequest })
+        : null;
+      // factoryRunId + factoryMode: the board finds a card's last run through these fields (the run manager writes them too).
+      const entry: LoopRunIndexEntry & { factoryRunId?: string; factoryMode?: "full" } = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: end === "discard" ? `${outcome.statusSummary} No changes.` : outcome.statusSummary, trigger: runTrigger(scheduled), ...(activeRun && isFactoryLoop(target) ? { factoryRunId: activeRun.runId, factoryMode: "full" as const } : {}) };
       const factoryFields: FactoryRunFields = {
         workItem: start ? { source: start.item.source, id: start.item.id, title: start.item.title } : null,
         worktree: activeRun ? { runId: activeRun.runId, branch: activeRun.branch, baseCommit: activeRun.baseCommit, repo: activeRun.repo } : null,
@@ -817,14 +879,33 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, costUsd: o.usage?.costUsd ?? null, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
       // Awaited: Ship's record update (setRunRecordShip) needs the record on disk, so the panel opens only after it.
       const record = { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...stepReviewRecords(outcome.stepReviews), ...loopbackRecord(outcome.loopback), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) };
-      await appendRunRecord(fs, entry, record).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
-      // Not awaited and fail-open: a signal never delays or fails the run.
-      if (projectRoot) void postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: () => runSignalPayload(entry, record) }).then(() => setImproveTick((t) => t + 1));
-      // A passed worktree run offers Ship: the Factory for its work item, and the Refactoring loop as one MR for the
-      // whole run. Other non-Factory loops get no Ship offer.
-      if (activeRun && (start || target.defaultKey === "refactor") && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) {
-        const item: WorkItem = start ? start.item : { source: "text", id: null, title: `${target.name} run ${activeRun.runId}`, body: "", repo: null };
-        setShipRun({ info: activeRun, item, entry, passed: true, reviewedPatchId: diffSummary?.patchId ?? null, requestProvider: null, processName: isFactoryLoop(target) ? undefined : target.name, ...(worktreeDiff ? { diff: worktreeDiff } : {}) });
+      const saveRecord = () => appendRunRecord(fs, entry, record).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch(() => undefined);
+      const manualShip = (item: WorkItem) => activeRun && setShipRun({ info: activeRun, item, entry, passed: true, reviewedPatchId: diffSummary?.patchId ?? null, requestProvider: null, processName: isFactoryLoop(target) ? undefined : target.name, branchDiscard: !isFactoryLoop(target), mergedMr, ...(worktreeDiff ? { diff: worktreeDiff } : {}) });
+      const afterRecord = () => {
+        // Not awaited and fail-open: a signal never delays or fails the run.
+        if (projectRoot) void postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: () => runSignalPayload(entry, record) }).then(() => setImproveTick((t) => t + 1));
+      };
+      if (activeRun && end) {
+        // Every loop but the Factory: saved state back, then the record, then the end rule (run-end.ts).
+        const item: WorkItem = { source: "text", id: null, title: `${target.name} run ${activeRun.runId}`, body: "", repo: null };
+        const done = await endWorktreeRun({
+          syncStateBack: async () => { await invokeHost("loop_worktree_state_sync", { runId: activeRun.runId, direction: "out" }); stateSavedBack = true; },
+          saveRecord: async () => { await saveRecord(); afterRecord(); },
+          removeIfEmpty: () => invokeHost<boolean>("loop_worktree_remove_if_empty", { runId: activeRun.runId }),
+          ship: () => import("./run-manager-host.ts").then((m) => m.shipFinishedRun({ runId: activeRun.runId, projectRoot: projectRoot ?? "", mode: "full", item: { ...item, key: `loop:${activeRun.runId}`, provider: null }, info: activeRun, entry, statusCode: "success", needsDecision: false, failedStage: null, kind: "passed", processName: target.name, mergedMr, runPrefix: repoPrefixFor(projectRoot ?? "", activeRun.worktree) })),
+          log: (line) => setRunLog((l) => [...l, line]),
+        }, end, { branch: activeRun.branch, passed: outcome.passed });
+        if (done.line !== null) {
+          setNotice(`The loop passed. ${done.line}`);
+          void readRecentRuns(fs).then(setRuns).catch(() => undefined);
+        }
+        // Held for review, or the shipper was blocked (secret scan, CI/hook files, large diff, no repository set up): the Ship panel is the manual path.
+        if (done.panel) manualShip(item);
+      } else {
+        await saveRecord();
+        afterRecord();
+        // A Factory run started here offers Ship for its work item.
+        if (activeRun && start && isFactoryLoop(target) && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) manualShip(start.item);
       }
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
@@ -833,6 +914,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       reportUiIncident("loop", e instanceof Error ? e.message : String(e));
       void notifyTask("loop", false);
     } finally {
+      if (activeRun && !isFactoryLoop(target)) await copyStateBackIfMissed({ syncStateBack: async () => { await invokeHost("loop_worktree_state_sync", { runId: activeRun.runId, direction: "out" }); } }, stateSavedBack);
       if (liveRunId) clearLiveCard(liveRunId);
       releaseBoardRun?.();
       runningRef.current = false;
@@ -1065,7 +1147,9 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   if (!store || !loop) return <div className="loop-native-empty"><p>This project has no loops yet.</p></div>;
 
   const enabledGates = loop.config.stages.filter((s) => s.enabled && s.severity === "blocking");
+  const regressionOnTree = loop !== null && !isFactoryLoop(loop) && loop.config.alwaysUseWorktree && worktreeBlockedStage(loop.config.stages) !== null;
   const pastFactory = runRecord ? decodeFactoryFields(runRecord) : null;
+  const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
   return (
     <div className="loop-native" data-active={active}>
       <aside className="loop-pane loop-loops" aria-label="Loops">
@@ -1122,7 +1206,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       <main className="loop-run" aria-label="Run">
         <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}{dirty ? <button type="button" className="loop-btn loop-save-btn" data-dirty="true" disabled={saving} title="Save the Loop changes" onClick={() => void save()}>{saving ? "Saving…" : "● Save changes"}</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
-        {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.reviewedPatchId ?? shipRun.diff?.patchId ?? null} requestProvider={shipRun.requestProvider ?? null} processName={shipRun.processName} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
+        {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.reviewedPatchId ?? shipRun.diff?.patchId ?? null} requestProvider={shipRun.requestProvider ?? null} processName={shipRun.processName} branchDiscard={shipRun.branchDiscard} mergedMr={shipRun.mergedMr ?? null} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current || startGateRef.current.held, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <ImprovementsPanel fs={fs} core={core} projectRoot={projectRoot} loop={loop} load={{ store: load.store, hash: load.hash }} dirty={dirty}
           runningLoopIds={runningLoopIdsOf({ store: load.store, projectRoot, activeLoopId: activeLoopId ?? (runningStage || starting ? loop.id : null), liveRuns: liveRuns() })}
@@ -1171,7 +1255,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             <ol>{loop.config.stages.filter((s) => s.enabled).map((s, i) => <li key={s.id}><span>{i + 1}</span> {s.name} <code>{s.severity === "blocking" ? "verify" : "advisory"}</code> <code>{stageCheck(s)}</code></li>)}</ol>
           </div>
           <dl className="loop-meta">
-            <dt>Runs in</dt><dd>{loop.config.alwaysUseWorktree ? "a new worktree under system/loop-worktrees/ for each run (your working tree is not touched)" : workRoot ?? projectRoot}</dd>
+            <dt>Runs in</dt><dd>{runsInWorktree(loop.config, isFactoryLoop(loop)) ? `its own worktree and branch (loop/${loopBranchSlug(loop.name, loop.id)}), kept between runs: every run continues on that branch and its commits go to one draft merge request, which opens automatically after a passed run. Your working tree is not touched.` : regressionOnTree ? `${workRoot ?? projectRoot ?? ""} (your working tree): the Regression step re-checks faults there, so this loop cannot use its own branch.` : workRoot ?? projectRoot}</dd>
             <dt>Project root</dt><dd>{projectRoot}</dd>
             {loopUsesInputPath(loop) ? <><dt>Working on</dt><dd>{loop.inputPath || "whole repository"}</dd></> : null}
             <dt>Bounded by</dt><dd>{loop.config.maxIterations} iterations (rounds) · {loop.config.wallClockBudgetSeconds ? `${Math.round(loop.config.wallClockBudgetSeconds / 60)} min time limit` : "no time limit"} · stop after {loop.config.consecutiveFailureStop} non-improving · {loop.config.maxRepairsPerStage} repairs/stage</dd>
@@ -1199,10 +1283,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             <label className="loop-field"><span>Extra protected globs (comma separated)</span><input value={loop.config.extraProtectedGlobs.join(", ")} onChange={(e) => patchLoop((l) => { l.config.extraProtectedGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
             <button type="button" className="loop-btn" onClick={() => { void revokeApprovals().then(() => { setApprovalState(null); if (loop) void refreshApproval(loop.id); setNotice("Revoked every host Loop command approval."); }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : "The approvals could not be revoked.")); }}>Revoke command approvals</button>
-            <label className="loop-check"><input type="checkbox" checked={loop.config.openMergeRequest} onChange={(e) => patchLoop((l) => { l.config.openMergeRequest = e.target.checked; })} /> Offer Ship after a passed run</label>
+            <label className="loop-check"><input type="checkbox" checked={loop.config.openMergeRequest} onChange={(e) => patchLoop((l) => { l.config.openMergeRequest = e.target.checked; })} /> Open a draft merge request automatically after a passed run</label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.issueTrail === true} onChange={(e) => patchLoop((l) => { l.config.issueTrail = e.target.checked; })} /> Open an issue per run and comment each step on it</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
-            <label className="loop-check"><input type="checkbox" checked={loop.config.alwaysUseWorktree || isFactoryLoop(loop)} disabled={isFactoryLoop(loop)} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
+            <label className="loop-check"><input type="checkbox" checked={runsInWorktree(loop.config, isFactoryLoop(loop))} disabled={isFactoryLoop(loop) || regressionOnTree} title={regressionOnTree ? "The Regression step re-checks faults in your working tree, so this loop cannot run on its own branch." : undefined} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
           </details>
           <details className="loop-advanced">
             <summary>Desktop limits (explicit)</summary>
@@ -1279,6 +1363,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
               {pastFactory?.worktree ? <p className="loop-native-hint">Worktree branch <code>{pastFactory.worktree.branch}</code> · started from <code>{pastFactory.worktree.baseCommit.slice(0, 7)}</code></p> : null}
               {pastFactory?.diffSummary ? <p className="loop-native-hint">Diff: {pastFactory.diffSummary.files.length} file(s){pastFactory.diffSummary.truncated ? " (list cut)" : ""}{pastFactory.diffSummary.files.length ? ` · ${pastFactory.diffSummary.files.slice(0, 20).join(", ")}` : ""}</p> : null}
               {pastFactory?.ship ? <p className="loop-native-hint">Shipped to {pastFactory.ship.provider}{pastFactory.ship.reused ? " (updated)" : ""}: {pastFactory.ship.url}</p> : null}
+              {!pastFactory?.ship && isRecord(runRecord.autoShip) && typeof runRecord.autoShip.blocked === "string" ? <p className="loop-warn">MR not opened: {displayText(runRecord.autoShip.blocked).slice(0, 300)}{pastFactory?.worktree ? ` The branch ${pastFactory.worktree.branch} is kept.` : ""}</p> : null}
               {pastFactory?.worktree ? <button type="button" className="loop-btn" onClick={() => void reopenWorktree(selectedRun, pastFactory)}>Review worktree…</button> : null}
               {Array.isArray(runRecord.changedPaths) && runRecord.changedPaths.length > 0 ? <p className="loop-native-hint">Changed: {runRecord.changedPaths.map(String).join(", ")}</p> : null}
               {typeof runRecord.summaryPath === "string" && runRecord.summaryPath ? <button type="button" className="loop-btn" onClick={() => shellBus.publish({ type: "open-file", path: runRecord.summaryPath as string })}>Open summary note</button> : null}

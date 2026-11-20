@@ -11,7 +11,7 @@
 //! with `git::base_args()` (hooks, fsmonitor, pager, external diff, credential helpers off) and the inherited GIT_*
 //! overrides stripped (`loop_runner::git_command`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -163,6 +163,22 @@ pub fn valid_run_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
+/// `loop/<slug>` names the loop. The slug is `[a-z0-9-]`, 1 to 32 characters, never starting or
+/// ending with `-`, so it can never be an option, a range (`..`), a `refs/` path or contain a space.
+pub fn valid_loop_slug(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 32
+        && !s.starts_with('-')
+        && !s.ends_with('-')
+        && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// The branch a run may live on: `factory/<run id>` (the Factory) or `loop/<slug>` where the slug IS the run's folder
+/// and id (one branch, one worktree and one draft MR per loop). Nothing else.
+pub fn valid_run_branch(branch: &str, run_id: &str) -> bool {
+    branch == format!("factory/{run_id}") || (valid_loop_slug(run_id) && branch == format!("loop/{run_id}"))
+}
+
 /// A base the user chose: a branch, tag or sha. Never an option (`-...`) and never a range (`..`).
 fn valid_base(base: &str) -> bool {
     !base.is_empty()
@@ -298,6 +314,109 @@ fn refuse_tracked_factory_entries(repo: &Path, base_commit: &str) -> Result<(), 
     Ok(())
 }
 
+/// A loop's own run: worktree `<project>/system/loop-worktrees/<slug>` on branch `loop/<slug>`. The slug is the run id.
+/// - No worktree and no branch: a new branch from `base` (default HEAD).
+/// - The worktree exists: it is reused and the run continues on its branch, so every run's commits join one draft MR.
+///   Exception: when the branch is merged into the repo's checked-out branch (its tip is an ancestor after a fetch) or
+///   the caller says the provider merged it (`fresh`), and the worktree has nothing uncommitted, the old worktree and
+///   branch are removed and a fresh branch is cut from the base. Uncommitted work is never removed.
+/// - A branch with no worktree (the folder was removed) is checked out again unless merged.
+pub fn prepare_loop_in(project: &Path, repo: &Path, slug: &str, base: Option<&str>, task: &str, fresh: bool) -> Result<RunInfo, String> {
+    if !valid_loop_slug(slug) {
+        return Err("invalid loop name for the branch".into());
+    }
+    if task.trim().is_empty() || task.len() > TASK_MAX {
+        return Err("the work item is empty or larger than 1 MiB".into());
+    }
+    let project = crate::fs_ops::checked_root(project).map_err(|e| e.message)?;
+    let repo = checked_repo(&project, repo)?;
+    let branch = format!("loop/{slug}");
+    let dir = worktrees_dir(&project);
+    let wt = dir.join(slug);
+    let branch_ref = format!("refs/heads/{branch}");
+    let branch_exists = git(&repo, &["rev-parse", "--verify", "--quiet", &branch_ref]).is_ok();
+    let merged = branch_exists && (fresh || branch_merged_in(&repo, &branch));
+    if wt.exists() {
+        let info = resolve_in(&project, slug)?;
+        if info.branch != branch || info.repo != lossy(&repo) {
+            return Err("that loop's worktree is not on its own branch; discard it first".into());
+        }
+        let status = status_in(&info)?;
+        // `fresh` (the provider said merged) may drop only what is already pushed; a git-merged branch has nothing to lose.
+        let droppable = merged && status.changed_files == 0 && (!fresh || status.local_commits == 0);
+        if !droppable {
+            refresh_task_file(&wt, task)?;
+            register(info.clone());
+            return Ok(info);
+        }
+        remove_in(&info)?;
+    } else if merged {
+        // The folder is gone but the branch is not: the provider-confirmed restart may drop only what is already pushed.
+        if fresh {
+            let remote = format!("refs/remotes/origin/{branch}");
+            let from = if git(&repo, &["rev-parse", "--verify", "--quiet", &remote]).is_ok() { remote } else { loop_base_of(&repo, slug) };
+            let unpushed = if from.is_empty() { None } else { text(git(&repo, &["rev-list", "--count", &format!("{from}..{branch_ref}")])?).parse::<usize>().ok() };
+            if unpushed != Some(0) {
+                return Err(format!("{branch} has commits that were never pushed, so it was not restarted. Push them or discard that branch first."));
+            }
+        }
+        git(&repo, &["branch", "-D", &branch])?;
+    }
+    let base_commit = base_commit_of(&repo, base)?;
+    refuse_tracked_factory_entries(&repo, &base_commit)?;
+    exclude_worktrees(&project)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create the Loop worktree folder: {e}"))?;
+    if dir.canonicalize().ok().as_deref() != Some(dir.as_path()) {
+        return Err("system/loop-worktrees must be a plain folder inside the project, not a link".into());
+    }
+    let wt_s = lossy(&wt);
+    let still_there = !merged && branch_exists;
+    if still_there {
+        git(&repo, &["worktree", "add", "--quiet", &wt_s, &branch])?;
+    } else {
+        git(&repo, &["worktree", "add", "--quiet", "-b", &branch, &wt_s, &base_commit])?;
+    }
+    if !still_there {
+        git(&repo, &["update-ref", &base_ref(slug), &base_commit])?;
+    }
+    let info = RunInfo { run_id: slug.to_string(), project: lossy(&project), repo: lossy(&repo), worktree: wt_s, branch: branch.clone(), base_commit: if still_there { loop_base_of(&repo, slug) } else { base_commit } };
+    if let Err(e) = write_task_file(&wt, task) {
+        // A new branch goes with its worktree; a continued one keeps its commits.
+        if still_there { let _ = git(&repo, &["worktree", "remove", "--force", &lossy(&wt)]); } else { let _ = remove_in(&info); }
+        return Err(e);
+    }
+    register(info.clone());
+    Ok(info)
+}
+
+/// Starts a reused worktree's `.factory/` over: the previous run's work item and reports go, the new work item is
+/// written. Only a real folder is removed (never a link, never followed); anything else is refused by `write_task_file`.
+fn refresh_task_file(wt: &Path, task: &str) -> Result<(), String> {
+    let dir = wt.join(FACTORY_DIR);
+    if std::fs::symlink_metadata(&dir).is_ok_and(|m| m.file_type().is_dir()) {
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("cannot reset .factory/: {e}"))?;
+    }
+    write_task_file(wt, task)
+}
+
+/// True when `branch` is already in the repo's checked-out branch: its tip is an ancestor of the local base or of the
+/// `origin/<base>` this repo already has. A detached HEAD compares against HEAD. The host never touches the network (its
+/// git has no credentials by design), so nothing is fetched here: the core fetches before a provider-confirmed restart.
+/// A squash or rebase merge leaves no trace in git; the caller asks the provider for that (`fresh`).
+fn branch_merged_in(repo: &Path, branch: &str) -> bool {
+    let name = git(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map(text).unwrap_or_default();
+    let mut targets: Vec<String> = Vec::new();
+    if name.is_empty() {
+        targets.push("HEAD".into());
+    } else {
+        targets.push(format!("refs/remotes/origin/{name}"));
+        targets.push(format!("refs/heads/{name}"));
+    }
+    targets.iter().any(|t| {
+        git(repo, &["rev-parse", "--verify", "--quiet", t]).is_ok() && git(repo, &["merge-base", "--is-ancestor", &format!("refs/heads/{branch}"), t]).is_ok()
+    })
+}
+
 pub fn prepare_in(project: &Path, repo: &Path, run_id: &str, base: Option<&str>, task: &str) -> Result<RunInfo, String> {
     // Every check that needs no git and no folder comes first: a refused call leaves no trace.
     if !valid_run_id(run_id) {
@@ -334,6 +453,24 @@ pub fn prepare_in(project: &Path, repo: &Path, run_id: &str, base: Option<&str>,
 
 /// The commit a run started from: the oldest entry of its branch's reflog ("branch: Created from <base>"), so a later
 /// Ship commit does not move it. Falls back to the worktree's HEAD when reflogs are off.
+/// The base ref of a loop's branch, written when the branch is created (`refs/llmide/base/<slug>`), so it never depends
+/// on a reflog that gc or a config can drop.
+fn base_ref(slug: &str) -> String {
+    format!("refs/llmide/base/{slug}")
+}
+
+/// A loop branch's base: the stored ref, else the merge-base with the repo's checked-out branch, else "" (unknown).
+/// Unknown is never read as empty: `remove_if_empty_in` keeps a branch whose base it cannot name.
+fn loop_base_of(repo: &Path, slug: &str) -> String {
+    let stored = git(repo, &["rev-parse", "--verify", "--quiet", &base_ref(slug)]).map(text).unwrap_or_default();
+    if !stored.is_empty() {
+        return stored;
+    }
+    let name = git(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map(text).unwrap_or_default();
+    let onto = if name.is_empty() { "HEAD".to_string() } else { format!("refs/heads/{name}") };
+    git(repo, &["merge-base", &format!("refs/heads/loop/{slug}"), &onto]).map(text).unwrap_or_default()
+}
+
 fn base_of(wt: &Path, branch: &str) -> String {
     let log = git(wt, &["reflog", "show", "--format=%H", &format!("refs/heads/{branch}")]).map(text).unwrap_or_default();
     match log.lines().last().map(str::trim) {
@@ -368,8 +505,11 @@ pub fn resolve_in(project: &Path, run_id: &str) -> Result<RunInfo, String> {
     if !repo.starts_with(&project) || !repo.join(".git").is_dir() {
         return Err(foreign());
     }
-    let branch = format!("factory/{run_id}");
-    let base_commit = base_of(&wt, &branch);
+    // The branch the worktree is on, when it is one of the two shapes this run may use; anything else falls back to the
+    // Factory name, which the ship check then refuses.
+    let head = git(&wt, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map(text).unwrap_or_default();
+    let branch = if valid_run_branch(&head, run_id) { head } else { format!("factory/{run_id}") };
+    let base_commit = if branch == format!("loop/{run_id}") { loop_base_of(&repo, run_id) } else { base_of(&wt, &branch) };
     Ok(RunInfo { run_id: run_id.to_string(), project: lossy(&project), repo: lossy(&repo), worktree: lossy(&wt), branch, base_commit })
 }
 
@@ -684,15 +824,178 @@ pub fn remove_in(info: &RunInfo) -> Result<(), String> {
         return Err("that is not this run's worktree folder".into());
     }
     let repo = PathBuf::from(&info.repo);
+    // The branch to delete is the one the worktree is really on (read before it goes), never a name guessed from the id:
+    // a detached or foreign HEAD deletes no branch. With the folder already gone, only the run's own recorded branch.
+    let on = if wt.exists() { git(&wt, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map(text).ok() } else { Some(info.branch.clone()) };
     if wt.exists() {
         git(&repo, &["worktree", "remove", "--force", &lossy(&wt)])?;
     } else {
         let _ = git(&repo, &["worktree", "prune"]);
     }
-    let _ = git(&repo, &["branch", "-D", &format!("factory/{}", info.run_id)]);
+    if let Some(branch) = on.filter(|b| valid_run_branch(b, &info.run_id)) {
+        if git(&repo, &["branch", "-D", &branch]).is_ok() && branch == format!("loop/{}", info.run_id) {
+            let _ = git(&repo, &["update-ref", "-d", &base_ref(&info.run_id)]);
+        }
+    }
     unregister(&info.run_id);
     forget_project(&info.run_id);
     Ok(())
+}
+
+/// Removes the run's worktree and branch only when the branch has no commit beyond the commit it was cut from. Returns
+/// false (and removes nothing) when it has some: its work, and its draft MR, stay. Uncommitted changes the caller has
+/// already judged empty (the run diff) are discarded with the worktree.
+pub fn remove_if_empty_in(info: &RunInfo) -> Result<bool, String> {
+    let wt = PathBuf::from(&info.worktree);
+    // A base that cannot be named is not "nothing beyond the base": keep the branch.
+    if info.base_commit.is_empty() || !info.base_commit.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return Ok(false);
+    }
+    if status_in(info)?.changed_files > 0 {
+        return Ok(false);
+    }
+    let ahead = text(git(&wt, &["rev-list", "--count", &format!("{}..HEAD", info.base_commit)])?).parse::<usize>().map_err(|_| "cannot count the branch's commits".to_string())?;
+    if ahead > 0 {
+        return Ok(false);
+    }
+    remove_in(info)?;
+    Ok(true)
+}
+
+// ---- machine state carried between the main tree and a run's worktree ----------------------------------------
+// The Loop's generated state (`system/loop/`, `llm-doc/loop/test/`) is excluded from every diff, so a worktree starts
+// without it and would end holding the only copy. It is copied in at the start of a run and back at the end of every
+// run (passed, failed or cancelled), before any removal. Only these two folders; no link is ever followed.
+
+const STATE_DIRS: &[&str] = &["system/loop", "llm-doc/loop/test"];
+const STATE_MAX_FILES: usize = 20_000;
+const STATE_MAX_BYTES: u64 = 256 * 1024 * 1024;
+
+/// One folder of the copy. `tracked` is `Some` only when copying BACK to the main tree: files git tracks there are never
+/// overwritten or removed (the branch carries them), and the worktree is authoritative, so files it no longer has are
+/// removed from the main tree too and a deletion is not undone by the next copy-in. Copying IN always overwrites: the
+/// main tree is the authority (mtimes mean nothing, `git worktree add` stamps every tracked file with the current time).
+fn copy_state_tree(src: &Path, dst: &Path, rel: &str, depth: usize, files: &mut usize, bytes: &mut u64, tracked: Option<&HashSet<String>>) -> Result<(), String> {
+    if depth > 16 {
+        return Err("the Loop's saved state is nested too deeply to copy".into());
+    }
+    if let Ok(m) = std::fs::symlink_metadata(dst) {
+        if !m.is_dir() {
+            return Err(format!("{} is not a folder; the Loop's saved state was not copied", lossy(dst)));
+        }
+    } else {
+        std::fs::create_dir(dst).map_err(|e| format!("cannot create {}: {e}", lossy(dst)))?;
+    }
+    for entry in std::fs::read_dir(src).map_err(|e| format!("cannot read {}: {e}", lossy(src)))?.flatten() {
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        let child = format!("{rel}/{}", entry.file_name().to_string_lossy());
+        let Ok(meta) = std::fs::symlink_metadata(&from) else { continue };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            copy_state_tree(&from, &to, &child, depth + 1, files, bytes, tracked)?;
+        } else if meta.is_file() {
+            *files += 1;
+            *bytes += meta.len();
+            if *files > STATE_MAX_FILES || *bytes > STATE_MAX_BYTES {
+                return Err("the Loop's saved state is too large to copy".into());
+            }
+            if tracked.is_some_and(|t| t.contains(&child)) {
+                continue;
+            }
+            // Never write through a link or over a folder.
+            if let Ok(m) = std::fs::symlink_metadata(&to) {
+                if !m.is_file() {
+                    continue;
+                }
+            }
+            std::fs::copy(&from, &to).map_err(|e| format!("cannot copy {}: {e}", lossy(&from)))?;
+        }
+    }
+    if let Some(t) = tracked {
+        for entry in std::fs::read_dir(dst).map_err(|e| format!("cannot read {}: {e}", lossy(dst)))?.flatten() {
+            let child = format!("{rel}/{}", entry.file_name().to_string_lossy());
+            let gone = std::fs::symlink_metadata(src.join(entry.file_name())).is_err();
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else { continue };
+            let holds_tracked = t.contains(&child) || t.iter().any(|p| p.starts_with(&format!("{child}/")));
+            if gone && !holds_tracked && !meta.file_type().is_symlink() {
+                let _ = if meta.is_dir() { std::fs::remove_dir_all(entry.path()) } else { std::fs::remove_file(entry.path()) };
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The state files git tracks in the main tree (repo-relative), which a copy back never touches.
+fn tracked_state_files(repo: &Path) -> Result<HashSet<String>, String> {
+    let mut args = vec!["ls-files", "-z", "--"];
+    args.extend(STATE_DIRS.iter().copied());
+    Ok(String::from_utf8_lossy(&git(repo, &args)?).split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+}
+
+/// Present while a run's state is only in its worktree (set when the state goes in, cleared when it is copied back).
+/// It lives in the worktree's git dir, so it survives a `.factory/` reset and goes away with the worktree. Present at
+/// the next copy-in means the previous run never got its state back: the worktree copy is authoritative then.
+fn state_marker(info: &RunInfo) -> Result<PathBuf, String> {
+    let dir = text(git(Path::new(&info.worktree), &["rev-parse", "--absolute-git-dir"])?);
+    Ok(PathBuf::from(dir).join("llmide-state-unsaved"))
+}
+
+/// Copies the Loop's saved state main tree -> worktree (`to_worktree`, at the start of a run) or worktree -> main tree
+/// (at its end). Going in, a leftover marker means the last run's copy-back failed or was skipped: that state is copied
+/// back first, then the main tree is copied in. Returns the number of folders copied.
+pub fn sync_state_in(info: &RunInfo, to_worktree: bool) -> Result<usize, String> {
+    let marker = state_marker(info)?;
+    if to_worktree {
+        if marker.exists() {
+            copy_state_dirs(info, false)?;
+            let _ = std::fs::remove_file(&marker);
+        }
+        let n = copy_state_dirs(info, true)?;
+        std::fs::write(&marker, b"unsaved\n").map_err(|e| format!("cannot record the state marker: {e}"))?;
+        Ok(n)
+    } else {
+        let n = copy_state_dirs(info, false)?;
+        let _ = std::fs::remove_file(&marker);
+        Ok(n)
+    }
+}
+
+/// One direction of the copy. A source folder that is a link, or a destination that resolves outside its root, is refused.
+fn copy_state_dirs(info: &RunInfo, to_worktree: bool) -> Result<usize, String> {
+    let tracked = if to_worktree { None } else { Some(tracked_state_files(Path::new(&info.repo))?) };
+    let (from_root, to_root) = if to_worktree { (PathBuf::from(&info.repo), PathBuf::from(&info.worktree)) } else { (PathBuf::from(&info.worktree), PathBuf::from(&info.repo)) };
+    let to_canon = to_root.canonicalize().map_err(|e| format!("cannot resolve {}: {e}", lossy(&to_root)))?;
+    let mut copied = 0;
+    for rel in STATE_DIRS {
+        let src = from_root.join(rel);
+        match std::fs::symlink_metadata(&src) {
+            Ok(m) if m.is_dir() => {}
+            Ok(_) => return Err(format!("{rel} is not a plain folder; the Loop's saved state was not copied")),
+            Err(_) => continue,
+        }
+        let dst = to_root.join(rel);
+        // Every parent of the destination must be a real folder inside the destination root.
+        let mut cur = to_root.clone();
+        let mut parts = rel.split('/').peekable();
+        while let Some(part) = parts.next() {
+            cur = cur.join(part);
+            match std::fs::symlink_metadata(&cur) {
+                Ok(m) if m.is_dir() => {}
+                Ok(_) => return Err(format!("{rel} is blocked by a file or link in the destination")),
+                Err(_) => { if parts.peek().is_some() { std::fs::create_dir(&cur).map_err(|e| format!("cannot create {}: {e}", lossy(&cur)))?; } }
+            }
+        }
+        let (mut files, mut bytes) = (0usize, 0u64);
+        copy_state_tree(&src, &dst, rel, 0, &mut files, &mut bytes, tracked.as_ref())?;
+        if !dst.canonicalize().map_err(|e| e.to_string())?.starts_with(&to_canon) {
+            return Err("the saved state resolved outside the folder it belongs to".into());
+        }
+        copied += 1;
+    }
+    Ok(copied)
 }
 
 /// Every factory worktree of the project that still passes the ownership check, sorted by run id (oldest first,
@@ -725,14 +1028,17 @@ fn active_project() -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-pub async fn loop_worktree_prepare(repo_rel: String, run_id: String, base: Option<String>, task: String) -> Result<RunInfo, String> {
+pub async fn loop_worktree_prepare(repo_rel: String, run_id: String, base: Option<String>, task: String, loop_slug: Option<String>, fresh: Option<bool>) -> Result<RunInfo, String> {
     blocking(move || {
         let project = active_project()?;
         let repo = crate::fs_ops::resolve_existing(&project, &repo_rel).map_err(|e| e.message)?;
         if !repo.join(".git").exists() {
             return Err("that folder is not a git repository".into());
         }
-        prepare_in(&project, &repo, &run_id, base.as_deref(), &task)
+        match loop_slug.as_deref() {
+            Some(slug) => prepare_loop_in(&project, &repo, slug, base.as_deref(), &task, fresh == Some(true)),
+            None => prepare_in(&project, &repo, &run_id, base.as_deref(), &task),
+        }
     })
     .await
 }
@@ -753,6 +1059,26 @@ pub async fn loop_worktree_diff(run_id: String, since: Option<String>) -> Result
 #[tauri::command]
 pub async fn loop_worktree_remove(run_id: String) -> Result<(), String> {
     blocking(move || remove_in(&resolve(&run_id)?)).await
+}
+
+/// True when the worktree and branch were removed because the branch holds no commit beyond its base.
+#[tauri::command]
+pub async fn loop_worktree_remove_if_empty(run_id: String) -> Result<bool, String> {
+    blocking(move || remove_if_empty_in(&resolve(&run_id)?)).await
+}
+
+/// `direction`: "in" copies the Loop's saved state into the worktree, "out" copies it back to the main tree.
+#[tauri::command]
+pub async fn loop_worktree_state_sync(run_id: String, direction: String) -> Result<usize, String> {
+    blocking(move || {
+        let to_worktree = match direction.as_str() {
+            "in" => true,
+            "out" => false,
+            _ => return Err("direction must be in or out".into()),
+        };
+        sync_state_in(&resolve(&run_id)?, to_worktree)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1121,6 +1447,249 @@ mod tests {
         remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&p);
         let _ = std::fs::remove_dir_all(&remote);
+    }
+
+    #[test]
+    fn the_branch_rule_accepts_two_shapes_and_nothing_else() {
+        assert!(valid_run_branch("factory/r1", "r1"));
+        assert!(valid_run_branch("loop/regression", "regression"));
+        assert!(valid_run_branch("loop/a-1", "a-1"));
+        for (bad, id) in [
+            ("factory/r2", "r1"), ("loop/regression", "other"), ("loop/regression/r1", "r1"), ("loop/regression/r1", "regression"), ("loop/", ""), ("loop//x", "x"),
+            ("loop/-x", "-x"), ("loop/x-", "x-"), ("loop/Up", "Up"), ("loop/a b", "a b"), ("loop/..", ".."), ("loop/a..b", "a..b"),
+            ("refs/heads/loop/x", "x"), ("-loop/x", "x"), ("main", "main"), ("", ""),
+        ] {
+            assert!(!valid_run_branch(bad, id), "{bad} for {id}");
+        }
+        assert!(valid_loop_slug("test-and-fix") && !valid_loop_slug("") && !valid_loop_slug(&"a".repeat(33)) && !valid_loop_slug("a/b"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_loop_keeps_one_worktree_and_branch_across_runs_until_it_is_merged() {
+        let p = project_repo("loop-branch");
+        let main = sh_git(&p, &["symbolic-ref", "--short", "HEAD"]).trim().to_string();
+        assert!(prepare_loop_in(&p, &p, "../x", None, "task", false).is_err(), "a bad slug is refused");
+        let info = prepare_loop_in(&p, &p, "regression", None, "run 1", false).unwrap();
+        assert_eq!((info.run_id.as_str(), info.branch.as_str()), ("regression", "loop/regression"));
+        let wt = PathBuf::from(&info.worktree);
+        assert_eq!(wt, p.join("system/loop-worktrees/regression"));
+        std::fs::write(wt.join("work.txt"), "run 1\n").unwrap();
+        assert!(!p.join("work.txt").exists() && sh_git(&p, &["status", "--porcelain"]).trim().is_empty(), "a run never touches the main working tree");
+        sh_git(&wt, &["add", "work.txt"]);
+        sh_git(&wt, &["commit", "-q", "-m", "run 1"]);
+        // Run 2 continues on the same branch and worktree: the commit is still there, the work item is the new one.
+        let again = prepare_loop_in(&p, &p, "regression", None, "run 2", false).unwrap();
+        assert_eq!((again.worktree.as_str(), again.branch.as_str(), again.base_commit.as_str()), (info.worktree.as_str(), "loop/regression", info.base_commit.as_str()));
+        assert!(wt.join("work.txt").exists());
+        assert_eq!(std::fs::read_to_string(wt.join(TASK_REL)).unwrap(), "run 2");
+        assert_eq!(resolve_in(&p, "regression").unwrap().branch, "loop/regression");
+        // The branch is merged into the base: the next run starts a fresh branch from it and the old worktree is gone.
+        sh_git(&p, &["merge", "-q", "--no-edit", "loop/regression"]);
+        let tip = sh_git(&p, &["rev-parse", "HEAD"]).trim().to_string();
+        let fresh = prepare_loop_in(&p, &p, "regression", None, "run 3", false).unwrap();
+        assert_eq!(fresh.base_commit, tip, "cut from the base, which now holds run 1");
+        assert_eq!(sh_git(&p, &["rev-list", "--count", &format!("{tip}..loop/regression")]).trim(), "0");
+        assert!(sh_git(&p, &["branch", "--list", &main]).contains(&main));
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_merged_branch_with_uncommitted_work_is_reused_not_deleted() {
+        let p = project_repo("loop-dirty");
+        let info = prepare_loop_in(&p, &p, "test", None, "t", false).unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(wt.join("half.txt"), "unsaved\n").unwrap();
+        // Tip == base, so git calls the branch merged; the dirty worktree must survive.
+        let again = prepare_loop_in(&p, &p, "test", None, "t2", false).unwrap();
+        assert!(Path::new(&again.worktree).join("half.txt").exists());
+        // The provider's "merged" (fresh) never drops unpushed commits either.
+        sh_git(&wt, &["add", "half.txt"]);
+        sh_git(&wt, &["commit", "-q", "-m", "x"]);
+        let kept = prepare_loop_in(&p, &p, "test", None, "t3", true).unwrap();
+        assert!(Path::new(&kept.worktree).join("half.txt").exists(), "an unpushed commit is kept");
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_branch_is_removed_but_one_with_commits_stays() {
+        let p = project_repo("loop-empty");
+        let info = prepare_loop_in(&p, &p, "doc", None, "t", false).unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(wt.join("x.txt"), "x\n").unwrap();
+        sh_git(&wt, &["add", "x.txt"]);
+        sh_git(&wt, &["commit", "-q", "-m", "x"]);
+        assert!(!remove_if_empty_in(&info).unwrap());
+        assert!(wt.exists() && sh_git(&p, &["branch", "--list", "loop/doc"]).contains("loop/doc"));
+        let empty = prepare_loop_in(&p, &p, "plan", None, "t", false).unwrap();
+        assert!(remove_if_empty_in(&empty).unwrap());
+        assert!(!Path::new(&empty.worktree).exists());
+        assert_eq!(sh_git(&p, &["branch", "--list", "loop/plan"]).trim(), "");
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_base_is_stored_with_the_branch_and_an_unknown_base_never_means_empty() {
+        let p = project_repo("loop-base");
+        let head = sh_git(&p, &["rev-parse", "HEAD"]).trim().to_string();
+        let info = prepare_loop_in(&p, &p, "plan", None, "t", false).unwrap();
+        assert_eq!(sh_git(&p, &["rev-parse", "refs/llmide/base/plan"]).trim(), head, "written when the branch is created");
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(wt.join("x.txt"), "x\n").unwrap();
+        sh_git(&wt, &["add", "x.txt"]);
+        sh_git(&wt, &["commit", "-q", "-m", "x"]);
+        sh_git(&p, &["reflog", "expire", "--expire=now", "--all"]);
+        assert_eq!(resolve_in(&p, "plan").unwrap().base_commit, head, "a dropped reflog does not move the base");
+        sh_git(&p, &["update-ref", "-d", "refs/llmide/base/plan"]);
+        assert_eq!(resolve_in(&p, "plan").unwrap().base_commit, head, "without the ref it falls back to the merge-base");
+        // A base that cannot be named keeps the branch.
+        let unknown = RunInfo { base_commit: String::new(), ..resolve_in(&p, "plan").unwrap() };
+        assert!(!remove_if_empty_in(&unknown).unwrap());
+        assert!(wt.exists() && sh_git(&p, &["branch", "--list", "loop/plan"]).contains("loop/plan"));
+        // Removing the run removes its base ref too.
+        let empty = prepare_loop_in(&p, &p, "doc", None, "t", false).unwrap();
+        assert!(remove_if_empty_in(&empty).unwrap());
+        assert!(git(&p, &["rev-parse", "--verify", "--quiet", "refs/llmide/base/doc"]).is_err());
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_in_trusts_the_main_tree_unless_the_last_copy_back_never_happened() {
+        let p = project_repo("state-authority");
+        std::fs::create_dir_all(p.join("system/loop")).unwrap();
+        std::fs::write(p.join("system/loop/a.json"), "main v1\n").unwrap();
+        std::fs::write(p.join("system/loop/gone.json"), "main only\n").unwrap();
+        let info = prepare_loop_in(&p, &p, "test", None, "t", false).unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        sync_state_in(&info, true).unwrap();
+        std::fs::write(wt.join("system/loop/a.json"), "worktree v2\n").unwrap();
+        sync_state_in(&info, false).unwrap();
+        assert_eq!(std::fs::read_to_string(p.join("system/loop/a.json")).unwrap(), "worktree v2\n", "copied back");
+        // The user edits the main tree between runs; the worktree file is stamped NEWER (as git stamps checked-out files).
+        std::fs::write(p.join("system/loop/a.json"), "user edit\n").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(wt.join("system/loop/a.json"), "stale but newer\n").unwrap();
+        sync_state_in(&info, true).unwrap();
+        assert_eq!(std::fs::read_to_string(wt.join("system/loop/a.json")).unwrap(), "user edit\n", "the main tree is the authority, mtimes mean nothing");
+        // Deleted in the worktree, then copied back: it stays gone.
+        std::fs::remove_file(wt.join("system/loop/gone.json")).unwrap();
+        sync_state_in(&info, false).unwrap();
+        assert!(!p.join("system/loop/gone.json").exists());
+        sync_state_in(&info, true).unwrap();
+        assert!(!wt.join("system/loop/gone.json").exists(), "and it stays gone");
+        // The run never copied back (crash): its worktree state is copied back FIRST at the next start, not overwritten.
+        std::fs::write(wt.join("system/loop/a.json"), "unsaved work\n").unwrap();
+        sync_state_in(&info, true).unwrap();
+        assert_eq!(std::fs::read_to_string(p.join("system/loop/a.json")).unwrap(), "unsaved work\n", "the unsaved state reached the main tree");
+        assert_eq!(std::fs::read_to_string(wt.join("system/loop/a.json")).unwrap(), "unsaved work\n");
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_state_file_git_tracks_in_the_main_tree_is_never_overwritten_by_a_run() {
+        let p = project_repo("state-tracked");
+        std::fs::create_dir_all(p.join("llm-doc/loop/test")).unwrap();
+        std::fs::write(p.join("llm-doc/loop/test/TEST-MAP.md"), "committed\n").unwrap();
+        sh_git(&p, &["add", "-f", "llm-doc/loop/test/TEST-MAP.md"]);
+        sh_git(&p, &["commit", "-q", "-m", "track the map"]);
+        // The user edits the tracked file and has not committed it.
+        std::fs::write(p.join("llm-doc/loop/test/TEST-MAP.md"), "user edit, uncommitted\n").unwrap();
+        std::fs::write(p.join("llm-doc/loop/test/UNTRACKED.md"), "u1\n").unwrap();
+        let info = prepare_loop_in(&p, &p, "test", None, "t", false).unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        sync_state_in(&info, true).unwrap();
+        // The run rewrites both files in the worktree; the tracked one is the stale committed content plus its changes.
+        std::fs::write(wt.join("llm-doc/loop/test/TEST-MAP.md"), "run output\n").unwrap();
+        std::fs::write(wt.join("llm-doc/loop/test/UNTRACKED.md"), "u2\n").unwrap();
+        std::fs::remove_file(wt.join("llm-doc/loop/test/UNTRACKED.md")).unwrap();
+        std::fs::write(wt.join("llm-doc/loop/test/NEW.md"), "new\n").unwrap();
+        sync_state_in(&info, false).unwrap();
+        assert_eq!(std::fs::read_to_string(p.join("llm-doc/loop/test/TEST-MAP.md")).unwrap(), "user edit, uncommitted\n", "the uncommitted edit survives a full run");
+        assert!(p.join("llm-doc/loop/test/NEW.md").exists(), "untracked state still goes back");
+        assert!(!p.join("llm-doc/loop/test/UNTRACKED.md").exists());
+        // A tracked file deleted in the worktree is not deleted from the main tree either.
+        std::fs::remove_file(wt.join("llm-doc/loop/test/TEST-MAP.md")).unwrap();
+        sync_state_in(&info, true).unwrap();
+        std::fs::remove_file(wt.join("llm-doc/loop/test/TEST-MAP.md")).ok();
+        sync_state_in(&info, false).unwrap();
+        assert!(p.join("llm-doc/loop/test/TEST-MAP.md").exists());
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_restart_after_a_provider_merge_never_drops_unpushed_commits_even_without_a_worktree() {
+        let p = project_repo("fresh-unpushed");
+        let info = prepare_loop_in(&p, &p, "doc", None, "t", false).unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::write(wt.join("x.txt"), "x\n").unwrap();
+        sh_git(&wt, &["add", "x.txt"]);
+        sh_git(&wt, &["commit", "-q", "-m", "never pushed"]);
+        sh_git(&p, &["worktree", "remove", "--force", wt.to_str().unwrap()]);
+        let err = prepare_loop_in(&p, &p, "doc", None, "t", true).unwrap_err();
+        assert!(err.contains("never pushed"), "{err}");
+        assert!(sh_git(&p, &["branch", "--list", "loop/doc"]).contains("loop/doc"), "the branch is kept");
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_deletes_the_branch_the_worktree_is_on_and_nothing_else() {
+        let p = project_repo("remove-real");
+        let info = prepare_loop_in(&p, &p, "x", None, "t", false).unwrap();
+        sh_git(&p, &["branch", "factory/x"]); // an unrelated branch with the fallback name
+        sh_git(&PathBuf::from(&info.worktree), &["checkout", "-q", "--detach"]);
+        remove_in(&resolve_in(&p, "x").unwrap()).unwrap();
+        assert!(sh_git(&p, &["branch", "--list", "factory/x"]).contains("factory/x"), "the lookalike branch survives");
+        assert!(sh_git(&p, &["branch", "--list", "loop/x"]).contains("loop/x"), "a detached worktree names no branch to delete");
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_state_goes_in_and_back_and_never_enters_the_diff() {
+        let p = project_repo("state");
+        std::fs::create_dir_all(p.join("system/loop")).unwrap();
+        std::fs::create_dir_all(p.join("llm-doc/loop/test")).unwrap();
+        std::fs::write(p.join("system/loop/ledger.json"), "main\n").unwrap();
+        std::fs::write(p.join("llm-doc/loop/test/TEST-MAP.md"), "map\n").unwrap();
+        let info = prepare_loop_in(&p, &p, "test", None, "t", false).unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        assert_eq!(sync_state_in(&info, true).unwrap(), 2);
+        assert_eq!(std::fs::read_to_string(wt.join("system/loop/ledger.json")).unwrap(), "main\n");
+        std::fs::write(wt.join("system/loop/ledger.json"), "worktree\n").unwrap();
+        std::fs::write(wt.join("llm-doc/loop/test/NEW.md"), "new\n").unwrap();
+        assert!(diff_in(&info).unwrap().files.is_empty(), "state is never part of the diff");
+        sync_state_in(&info, false).unwrap();
+        assert_eq!(std::fs::read_to_string(p.join("system/loop/ledger.json")).unwrap(), "worktree\n");
+        assert!(p.join("llm-doc/loop/test/NEW.md").exists());
+        // Only those folders move.
+        std::fs::write(wt.join("other.txt"), "o\n").unwrap();
+        sync_state_in(&info, false).unwrap();
+        assert!(!p.join("other.txt").exists());
+        // A link inside the state folder is skipped; a link AS the folder is refused.
+        let outside = temp("state-outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret"), "s\n").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret"), wt.join("system/loop/link")).unwrap();
+        sync_state_in(&info, false).unwrap();
+        assert!(!p.join("system/loop/link").exists());
+        std::fs::remove_dir_all(wt.join("system/loop")).unwrap();
+        std::os::unix::fs::symlink(&outside, wt.join("system/loop")).unwrap();
+        assert!(sync_state_in(&info, false).is_err());
+        std::fs::remove_file(p.join("system/loop/ledger.json")).unwrap();
+        std::fs::remove_file(wt.join("system/loop")).unwrap();
+        std::fs::create_dir_all(wt.join("system")).unwrap();
+        std::os::unix::fs::symlink(&outside, wt.join("system/loop")).unwrap();
+        assert!(sync_state_in(&info, true).is_err(), "a link as the destination is refused");
+        assert!(!outside.join("ledger.json").exists(), "nothing was written through it");
+        let _ = std::fs::remove_dir_all(&p);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[cfg(unix)]

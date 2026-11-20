@@ -421,6 +421,7 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/google/gmail/fetch',
     '/kb/google/sync',
     '/kb/loop/ship-status',
+    '/kb/loop/sync-base',
     '/kb/mcp-connector/fetch',
     '/kb/mcp-connector/test',
     '/kb/outcomes/refresh',

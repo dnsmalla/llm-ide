@@ -183,7 +183,9 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     writeSummaryNote: bool(o.writeSummaryNote, false),
     extraProtectedGlobs: strArray(o.extraProtectedGlobs),
     useWorktreesForConcurrentRuns: bool(o.useWorktreesForConcurrentRuns, false),
-    alwaysUseWorktree: bool(o.alwaysUseWorktree, false),
+    // Every loop runs on its own branch by default. A file saved before that default (no `isolationDefault` mark) is moved
+    // to on once; saving records the mark, so a later opt-out sticks.
+    alwaysUseWorktree: o.isolationDefault === true ? bool(o.alwaysUseWorktree, true) : true,
     openMergeRequest: bool(o.openMergeRequest, true),
     issueTrail: bool(o.issueTrail, false),
     stageDelaySeconds: stageDelay(o.stageDelaySeconds),
@@ -281,6 +283,7 @@ function encodeConfig(c: LoopEngineConfig): Record<string, unknown> {
     writeSummaryNote: c.writeSummaryNote,
     useWorktreesForConcurrentRuns: c.useWorktreesForConcurrentRuns,
     alwaysUseWorktree: c.alwaysUseWorktree,
+    isolationDefault: true,
     openMergeRequest: c.openMergeRequest,
     ...(c.issueTrail ? { issueTrail: true } : {}),
     ...(c.stageDelaySeconds !== 2 ? { stageDelaySeconds: c.stageDelaySeconds } : {}),

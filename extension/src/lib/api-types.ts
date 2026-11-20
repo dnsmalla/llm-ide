@@ -6656,9 +6656,9 @@ export type PostKbLoopAgentRunResponse504 = CommonError;
 /** Request parts for `POST /kb/loop/ship` (schema/http/live-loop-misc.schema.json). */
 export type PostKbLoopShipRequest = {
   body: {
-    /** Absolute path of the Factory worktree, <project>/system/loop-worktrees/<run id>, of an allow-listed repo */
+    /** Absolute path of the run worktree, <project>/system/loop-worktrees/<run id or loop slug>, of an allow-listed repo */
     worktree: string;
-    /** factory/<run id>, the worktree's checked-out branch */
+    /** The worktree's checked-out branch: factory/<run id> (Factory) or loop/<loop slug> (every other Loop; the slug is the worktree folder name) */
     branch: string;
     provider: "github" | "gitlab";
     /** GitHub owner/name or a gitlab.com project path */
@@ -6673,6 +6673,8 @@ export type PostKbLoopShipRequest = {
     patchId: string;
     /** Only when the user explicitly confirmed the secret hit: commit and push anyway; the 200 carries secretOverride. Hard block remains the default. */
     allowSecret?: boolean;
+    /** The loop's previous draft MR URL. Send it only on the first ship of a branch restarted after that MR merged: the core asks the provider whether it merged from this branch, and only then retries a rejected first push with --force-with-lease pinned to that MR's head. Every other push is fast-forward only (API 157) */
+    mergedMr?: string;
   };
 };
 
@@ -6705,6 +6707,37 @@ export type PostKbLoopShipResponse422 = CommonError;
 export type PostKbLoopShipResponse500 = CommonError;
 
 export type PostKbLoopShipResponse502 = CommonError;
+
+/** Request parts for `POST /kb/loop/sync-base` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLoopSyncBaseRequest = {
+  body: {
+    /** Absolute path of the loop's worktree, <project>/system/loop-worktrees/<slug>, of an allow-listed repo */
+    worktree: string;
+    /** loop/<loop slug> or factory/<run id>, the worktree's branch */
+    branch: string;
+    provider: "github" | "gitlab";
+    /** GitHub owner/name or a gitlab.com project path; must be the worktree's origin */
+    repo: string;
+    /** The base branch to fetch as origin/<base> */
+    base: string;
+  };
+};
+
+/** origin/<base> was fetched with the user's git credentials. Recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin). */
+export type PostKbLoopSyncBaseResponse200 = {
+  /** origin/<base> */
+  base: string;
+  /** The fetched commit */
+  commit: string;
+};
+
+export type PostKbLoopSyncBaseResponse400 = CommonError;
+
+export type PostKbLoopSyncBaseResponse403 = CommonError;
+
+export type PostKbLoopSyncBaseResponse404 = FeatureDisabled;
+
+export type PostKbLoopSyncBaseResponse502 = CommonError;
 
 /** Request parts for `GET /kb/issue-schedule` (schema/http/live-loop-misc.schema.json). */
 export type GetKbIssueScheduleRequest = {
@@ -10811,6 +10844,16 @@ export interface ApiEndpoints {
       422: PostKbLoopShipResponse422;
       500: PostKbLoopShipResponse500;
       502: PostKbLoopShipResponse502;
+    };
+  };
+  "POST /kb/loop/sync-base": {
+    request: PostKbLoopSyncBaseRequest;
+    responses: {
+      200: PostKbLoopSyncBaseResponse200;
+      400: PostKbLoopSyncBaseResponse400;
+      403: PostKbLoopSyncBaseResponse403;
+      404: PostKbLoopSyncBaseResponse404;
+      502: PostKbLoopSyncBaseResponse502;
     };
   };
   "GET /kb/issue-schedule": {

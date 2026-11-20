@@ -40,6 +40,8 @@
     "allow-loop-worktree-prepare",
     "allow-loop-worktree-diff",
     "allow-loop-worktree-remove",
+    "allow-loop-worktree-remove-if-empty",
+    "allow-loop-worktree-state-sync",
     "allow-loop-worktree-list",
     "allow-loop-worktree-status",
     "allow-loop-worktree-checkpoint",

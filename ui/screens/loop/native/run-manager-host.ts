@@ -57,6 +57,43 @@ let busDeps: Parameters<typeof pollOnce>[0] | null = null;
 let polling = false;
 const BUS_POLL_MS = 60_000;
 
+/** The `autoShip` event of the run manager (also what a non-Factory loop's run end calls): the one shipper for every loop. */
+export type FinishedRunShip = Parameters<NonNullable<Parameters<typeof configureRunManager>[0]["autoShip"]>>[0];
+
+/**
+ * Opens the draft MR of a finished run through `autoShipRun`, with every block it has (secret scan in the core, CI/hook
+ * files, diff too large, missing GitHub/GitLab setup). Returns "Draft MR: <url>" or "MR not opened: <why>", "" when the
+ * run is not one that ships. Used by the Factory and by every other loop; there is no second shipper.
+ */
+export async function shipFinishedRun(e: FinishedRunShip): Promise<string> {
+  const hostFs = createHostFs();
+  const activeProject = () => projectStore.getSnapshot().project?.root ?? null;
+  const kind = e.kind ?? autoShipKind({ mode: e.mode, statusCode: e.statusCode, needsDecision: e.needsDecision, failedRole: e.failedStage ? factoryRole(e.failedStage) : null });
+  if (!kind) return "";
+  const fs = projectGuardedFs(hostFs, e.projectRoot, activeProject);
+  // A non-Factory loop posts its own issue trail from its screen; only a Factory run's trail lives here.
+  const trail = e.processName ? null : trailFor(e.runId, e.item);
+  const out = await autoShipRun({
+    repoConfig: () => readRepoConfig(),
+    diff: (runId) => invokeHost<unknown>("loop_worktree_diff", { runId }).then(decodeWorktreeDiff),
+    repoBranch: (runId) => invokeHost<string | null>("loop_repo_branch", { runId }),
+    readText: (path) => fs.read(path, 200_000).then((r) => (r.status === "ok" ? r.text : null)),
+    ship: async (body) => {
+      const r = await core.requestRaw("/kb/loop/ship", { method: "POST", body, timeoutMs: 5 * 60_000 });
+      const b = (r.body && typeof r.body === "object" ? r.body : {}) as Record<string, unknown>;
+      if (r.status >= 200 && r.status < 300 && typeof b.url === "string" && typeof b.commit === "string") return { ok: true, url: b.url, commit: b.commit, reused: b.reused === true };
+      const err = (b.error && typeof b.error === "object" ? b.error : {}) as Record<string, unknown>;
+      return { ok: false, code: typeof err.code === "string" ? err.code : "error", ...(err.code === "lease_rejected" && typeof err.message === "string" ? { message: err.message } : {}), ...(typeof err.rule === "string" ? { rule: err.rule } : {}) };
+    },
+    saveShip: (entry, ship) => setRunRecordShip(fs, entry, ship),
+    saveBlocked: (entry, reason) => setRunRecordAutoShip(fs, entry, reason, new Date()),
+    // Queued behind this run's step comments, so the Ship comment lands after them.
+    comment: async (text) => { trail?.post(text); await trail?.idle(); },
+    now: () => new Date(),
+  }, { info: e.info, item: e.item, entry: e.entry, kind, failedStage: e.failedStage?.name ?? null, runPrefix: e.runPrefix, ...(e.processName ? { processName: e.processName } : {}), ...(e.mergedMr ? { mergedMr: e.mergedMr } : {}) });
+  return "shipped" in out ? `Draft MR: ${out.shipped}` : `MR not opened: ${out.blocked}`;
+}
+
 export function installRunManagerHost(): void {
   if (installed) return;
   installed = true;
@@ -81,31 +118,7 @@ export function installRunManagerHost(): void {
         allowed: (provider) => trailDeps.allowed(provider, "commentIssue"),
       }, e));
     },
-    autoShip: async (e) => {
-      const kind = e.kind ?? autoShipKind({ mode: e.mode, statusCode: e.statusCode, needsDecision: e.needsDecision, failedRole: e.failedStage ? factoryRole(e.failedStage) : null });
-      if (!kind) return "";
-      const fs = projectGuardedFs(hostFs, e.projectRoot, activeProject);
-      const trail = trailFor(e.runId, e.item);
-      const out = await autoShipRun({
-        repoConfig: () => readRepoConfig(),
-        diff: (runId) => invokeHost<unknown>("loop_worktree_diff", { runId }).then(decodeWorktreeDiff),
-        repoBranch: (runId) => invokeHost<string | null>("loop_repo_branch", { runId }),
-        readText: (path) => fs.read(path, 200_000).then((r) => (r.status === "ok" ? r.text : null)),
-        ship: async (body) => {
-          const r = await core.requestRaw("/kb/loop/ship", { method: "POST", body, timeoutMs: 5 * 60_000 });
-          const b = (r.body && typeof r.body === "object" ? r.body : {}) as Record<string, unknown>;
-          if (r.status >= 200 && r.status < 300 && typeof b.url === "string" && typeof b.commit === "string") return { ok: true, url: b.url, commit: b.commit, reused: b.reused === true };
-          const err = (b.error && typeof b.error === "object" ? b.error : {}) as Record<string, unknown>;
-          return { ok: false, code: typeof err.code === "string" ? err.code : "error", ...(typeof err.rule === "string" ? { rule: err.rule } : {}) };
-        },
-        saveShip: (entry, ship) => setRunRecordShip(fs, entry, ship),
-        saveBlocked: (entry, reason) => setRunRecordAutoShip(fs, entry, reason, new Date()),
-        // Queued behind this run's step comments, so the Ship comment lands after them.
-        comment: async (text) => { trail?.post(text); await trail?.idle(); },
-        now: () => new Date(),
-      }, { info: e.info, item: e.item, entry: e.entry, kind, failedStage: e.failedStage?.name ?? null, runPrefix: e.runPrefix });
-      return "shipped" in out ? `Draft MR: ${out.shipped}` : `MR not opened: ${out.blocked}`;
-    },
+    autoShip: shipFinishedRun,
     // The bus runner reports a finished Factory run to the phone's claimed command (B5).
     onRunFinished: (info) => {
       noteRunFinished(info.runId, info.statusCode, info.statusSummary);

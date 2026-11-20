@@ -163,6 +163,11 @@ const SKIP_RULES = [
     when: (fx) => fx.endpoint === 'POST /kb/loop/ship' && fx.response?.error?.code !== 'HOST_PROOF_REQUIRED',
   },
   {
+    // Same gate as Ship: only the HOST_PROOF_REQUIRED row replays without the bus host proof.
+    why: 'Loop sync-base: needs the bus host proof and a loop worktree with an origin; covered by tests/factory-ship.test.mjs',
+    when: (fx) => fx.endpoint === 'POST /kb/loop/sync-base' && fx.response?.error?.code !== 'HOST_PROOF_REQUIRED',
+  },
+  {
     // Host API pairing routes check the bus host proof first; the replay server has no LLMIDE_HOST_APPROVAL_KEY and sends
     // no proof, so only the 403 rows replay live. The rest were transcribed from the handler (tests/host-api-routes.test.mjs,
     // and for the push routes tests/host-api-push-routes.test.mjs).

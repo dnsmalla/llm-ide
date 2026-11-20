@@ -21,7 +21,7 @@ export interface AutoShipDeps {
 }
 
 export interface RunEntry { id: string; startedAt: string }
-export interface AutoShipContext { info: RunInfo; item: WorkItem; entry: RunEntry; kind: AutoShipKind; failedStage: string | null; runPrefix: string }
+export interface AutoShipContext { info: RunInfo; item: WorkItem; entry: RunEntry; kind: AutoShipKind; failedStage: string | null; runPrefix: string; /** The loop that ran, when it is not the Factory: it names the MR text. */ processName?: string; /** The loop's previous MR (see the ship route's `mergedMr`). */ mergedMr?: string | null }
 
 const quiet = async <T>(p: () => Promise<T>): Promise<T | null> => { try { return await p(); } catch { return null; } };
 
@@ -42,9 +42,9 @@ export async function autoShipRun(d: AutoShipDeps, c: AutoShipContext): Promise<
   if (block || !diff) return stop(block ?? "The diff could not be read.");
   const base = (await quiet(() => d.repoBranch(c.info.runId))) ?? "main";
   const review = (await quiet(() => d.readText(`${c.runPrefix}/.factory/REVIEW.md`))) ?? "";
-  const req = shipRequest(c.info, c.item, { provider: target.provider, slug: target.slug, base }, review, diff.patchId);
+  const req = shipRequest(c.info, c.item, { provider: target.provider, slug: target.slug, base }, review, diff.patchId, c.processName);
   const lead = autoShipNote(c.kind, c.failedStage);
-  const body: ShipBody = { ...req, title: autoShipTitle(req.title, c.kind), body: (lead ? `${lead}\n\n${req.body}` : req.body).slice(0, 20_000) };
+  const body: ShipBody = { ...req, title: autoShipTitle(req.title, c.kind), body: (lead ? `${lead}\n\n${req.body}` : req.body).slice(0, 20_000), ...(c.mergedMr ? { mergedMr: c.mergedMr } : {}) };
   const result = (await quiet(() => d.ship(body))) ?? { ok: false as const, code: "error" };
   if (!result.ok) return stop(shipCopy(result));
   await quiet(() => d.saveShip(c.entry, { provider: target.provider, url: result.url, commit: result.commit, reused: result.reused }));

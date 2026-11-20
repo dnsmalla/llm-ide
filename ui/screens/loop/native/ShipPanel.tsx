@@ -29,6 +29,10 @@ export interface ShipPanelProps {
   requestProvider?: "github" | "gitlab" | null;
   /** The loop name for a non-Factory run (Refactoring); omitted for the Factory. */
   processName?: string;
+  /** A loop's own branch (shared by all its runs): Discard says so and removes that one branch. */
+  branchDiscard?: boolean;
+  /** The loop's previous MR, when this branch restarted after it merged (see the ship route's `mergedMr`). */
+  mergedMr?: string | null;
   fs: Pick<FsApi, "read" | "gitStatus">;
   /** Project-relative folder of the run's worktree: `system/loop-worktrees/<run id>`. */
   runPrefix: string;
@@ -37,7 +41,7 @@ export interface ShipPanelProps {
   onClose(): void;
 }
 
-export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = null, requestProvider = null, processName, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
+export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = null, requestProvider = null, processName, branchDiscard = false, mergedMr = null, fs, runPrefix, onShipped, onDiscarded, onClose }: ShipPanelProps): ReactNode {
   const [diff, setDiff] = useState<WorktreeDiff | null>(initialDiff ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [review, setReview] = useState("");
@@ -114,7 +118,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       if (!diff?.patchId) throw Object.assign(new Error("the reviewed diff has no patch id"), { code: "diff_changed" });
       const baseReq = shipRequest(info, item, repo, review, diff.patchId, processName);
       if (!title.trim()) { setMessage({ severity: "warning", text: "Enter a title first." }); return; }
-      const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown; secretOverride?: unknown }>("/kb/loop/ship", { method: "POST", body: { ...baseReq, title: title.trim(), body, ...(allowSecret ? { allowSecret: true } : {}) }, timeoutMs: 5 * 60_000 });
+      const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown; secretOverride?: unknown }>("/kb/loop/ship", { method: "POST", body: { ...baseReq, ...(mergedMr ? { mergedMr } : {}), title: title.trim(), body, ...(allowSecret ? { allowSecret: true } : {}) }, timeoutMs: 5 * 60_000 });
       const so = r.secretOverride && typeof r.secretOverride === "object" ? r.secretOverride as Record<string, unknown> : null;
       const soHits = Array.isArray(so?.hits) ? so.hits.filter((h): h is { rule: string; file: string | null; line: number } => typeof h === "object" && h !== null && typeof (h as { rule?: unknown }).rule === "string").slice(0, 20) : [];
       result = { ok: true, url: typeof r.url === "string" ? r.url : "", commit: typeof r.commit === "string" ? r.commit : "", reused: r.reused === true, ...(so && typeof so.rule === "string" ? { secretOverride: { rule: so.rule, file: typeof so.file === "string" ? so.file : null, line: typeof so.line === "number" ? so.line : null, hits: soHits, total: typeof so.total === "number" ? so.total : soHits.length } } : {}) };
@@ -233,7 +237,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       ) : null}
       {confirming === "discard" ? (
         <div className="loop-confirm" role="alertdialog" aria-label="Confirm discard" ref={confirmRef}>
-          <p className="loop-warn">{`Discard this run? ${readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, requestProvider ? { provider: requestProvider } : null)}`}</p>
+          <p className="loop-warn">{`${branchDiscard ? "Discard this loop's branch?" : "Discard this run?"} ${readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, requestProvider ? { provider: requestProvider } : null)}`}</p>
           <div className="loop-inline">
             <button type="button" className="loop-btn loop-btn-primary" disabled={busy || readingDiscard} onClick={() => void discard()}>Confirm discard</button>
             <button type="button" className="loop-btn" disabled={busy} onClick={() => setConfirming(null)}>Cancel</button>
@@ -244,7 +248,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
         <button type="button" className="loop-btn loop-btn-primary" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} ref={opener} onClick={() => { lastOpener.current = opener.current; setConfirming("ship"); }}>{busy ? "Working…" : "Ship as draft…"}</button>
         {secretHit && secretHit.hits.length > 0 ? <button type="button" className="loop-btn" disabled={busy || !passed || blocked !== null || !diff || !diff.patchId || staleReview !== null || files.length === 0} onClick={(e) => { lastOpener.current = e.currentTarget; setConfirming("anyway"); }}>Ship anyway…</button> : null}
         {shippedUrl ? <button type="button" className="loop-btn" onClick={() => { void invokeHost("open_external_url", { url: shippedUrl }).catch(() => undefined); }}>Open {kind}</button> : null}
-        <button type="button" className="loop-btn" disabled={busy} onClick={(e) => { lastOpener.current = e.currentTarget; openDiscard(); }}>Discard…</button>
+        <button type="button" className="loop-btn" disabled={busy} onClick={(e) => { lastOpener.current = e.currentTarget; openDiscard(); }}>{branchDiscard ? "Discard this loop's branch…" : "Discard…"}</button>
       </div>
     </section>
   );

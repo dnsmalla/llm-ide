@@ -29,6 +29,8 @@ const COMMANDS: &[&str] = &[
     "loop_worktree_prepare",
     "loop_worktree_diff",
     "loop_worktree_remove",
+    "loop_worktree_remove_if_empty",
+    "loop_worktree_state_sync",
     "loop_worktree_list",
     "loop_worktree_status",
     "loop_worktree_checkpoint",

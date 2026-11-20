@@ -7,6 +7,7 @@ import { DEFAULT_LOOP_SPECS } from "./defaults.ts";
 import { BUILT_IN_TEMPLATES as GENERATED_RECIPES } from "./templates.generated.ts";
 import { FACTORY_DEFAULT_KEY, FACTORY_TEMPLATE, withSetupCommand } from "./factory.ts";
 import { registrySource, upgradeDefaultStage } from "./default-stage.ts";
+import { withSetupStage } from "./loop-setup.ts";
 
 export interface LoopTemplate {
   id: string;
@@ -22,6 +23,8 @@ export const BUILT_IN_TEMPLATES: LoopTemplate[] = [...GENERATED_RECIPES, FACTORY
  *  with no detected command is dropped, or kept with an empty command when `keepUndetected` (the Factory's Verify). */
 export function applyTemplate(t: LoopTemplate, detected: string | null, keepUndetected = false): LoopEngineConfig {
   const c = structuredClone(t.config);
+  // Every built-in recipe runs on its own branch; a saved custom recipe keeps what it was saved with.
+  if (GENERATED_RECIPES.some((r) => r.id === t.id)) c.alwaysUseWorktree = true;
   c.stages = c.stages.flatMap((s) => {
     // A "custom/" id is what makes a step custom (factoryRole), so it must survive the copy.
     const copy = { ...s, id: s.id.startsWith("custom/") ? s.id : crypto.randomUUID(), isDefault: false, defaultKey: null };
@@ -131,7 +134,8 @@ export function initialProjectStore(testCommand: string | null, defaults?: LoopD
   const loops: LoopDefinition[] = DEFAULT_LOOP_SPECS.map((spec) => {
     const loop = starterLoop(spec, testCommand);
     loop.config = applyLoopDefaults(loop.config, defaults);
-    return loop;
+    // A worktree starts without dependencies: loops that run the tests get the Factory's install step first.
+    return withSetupStage(loop, testCommand);
   });
   loops.push(factoryLoop(testCommand, defaults));
   const first = loops.find((l) => l.defaultKey === "regression") ?? loops[0];
@@ -168,9 +172,9 @@ function starterLoop(spec: (typeof DEFAULT_LOOP_SPECS)[number], testCommand: str
     return isRefactor ? [{ ...stage, enabled: false, disabledByDetection: true }] : [];
   }).map((s, i) => ({ ...s, order: i }));
   const config = structuredClone(spec.config);
-  // The Refactoring loop always runs in an isolated worktree: a batch that fails stays there, and discarding the
-  // worktree is its rollback, so the main tree is never left half-refactored.
-  const isolation = spec.defaultKey === REFACTOR_KEY ? { alwaysUseWorktree: true } : {};
+  // Every default loop runs on its own branch, so the main tree is never edited by a run. For Refactoring the worktree
+  // is also its rollback: a batch that fails stays there and is discarded with it.
+  const isolation = { alwaysUseWorktree: true };
   return {
     ...structuredClone(spec), id: crypto.randomUUID(), isPrimary: Boolean(spec.isPrimary), inputPath: "",
     config: { ...config, ...isolation, stages },
@@ -257,6 +261,8 @@ export function ensureDefaultLoops(store: LoopProjectStore, testCommand: string 
   const current = loops.map((loop) => {
     const repaired = repairDefaultLoop(loop, testCommand);
     if (repaired) { upgraded.push(loop.name); loop = repaired; }
+    const withSetup = withSetupStage(loop, testCommand);
+    if (withSetup !== loop) { if (!upgraded.includes(loop.name)) upgraded.push(loop.name); loop = withSetup; }
     let changed = false;
     const stages = loop.config.stages.map((s) => {
       const source = registrySource(s);

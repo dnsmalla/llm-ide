@@ -80,7 +80,7 @@ export interface RunManagerDeps {
   /** A stage finished (passed or failed): the Factory posts its step comment on the run's issue. */
   onStageResult?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; stage: LoopStage; ok: boolean; iteration: number; runPrefix: string }): void;
   /** The run's record was just written: the Factory opens its draft MR (or records why not). Returns a log line. */
-  autoShip?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; info: WorktreeInfo; entry: { id: string; startedAt: string }; statusCode: string; needsDecision: boolean; failedStage: LoopStage | null; runPrefix: string; /** Set by Approve: the kind the run was held as, so the MR label matches it whatever the loop config says now. */ kind?: AutoShipKind }): Promise<string>;
+  autoShip?(e: { runId: string; projectRoot: string; mode: RunMode; item: RunItem; info: WorktreeInfo; entry: { id: string; startedAt: string }; statusCode: string; needsDecision: boolean; failedStage: LoopStage | null; runPrefix: string; /** The loop that ran, when it is not the Factory (names the MR text). */ processName?: string; /** The loop's previous MR, when its branch restarted after it merged. */ mergedMr?: string | null; /** Set by Approve: the kind the run was held as, so the MR label matches it whatever the loop config says now. */ kind?: AutoShipKind }): Promise<string>;
   /**
    * A finished run's record was written (or held): the Factory bus runner reports it to the phone, and the issue trail
    * posts the run summary. `steps`, `durationSeconds`, `costUsd` and `shipLine` (the autoShip log line,

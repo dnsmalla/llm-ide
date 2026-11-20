@@ -1021,11 +1021,11 @@
           "properties": {
             "worktree": {
               "type": "string",
-              "description": "Absolute path of the Factory worktree, <project>/system/loop-worktrees/<run id>, of an allow-listed repo"
+              "description": "Absolute path of the run worktree, <project>/system/loop-worktrees/<run id or loop slug>, of an allow-listed repo"
             },
             "branch": {
               "type": "string",
-              "description": "factory/<run id>, the worktree's checked-out branch"
+              "description": "The worktree's checked-out branch: factory/<run id> (Factory) or loop/<loop slug> (every other Loop; the slug is the worktree folder name)"
             },
             "provider": {
               "type": "string",
@@ -1057,6 +1057,11 @@
             "allowSecret": {
               "type": "boolean",
               "description": "Only when the user explicitly confirmed the secret hit: commit and push anyway; the 200 carries secretOverride. Hard block remains the default."
+            },
+            "mergedMr": {
+              "type": "string",
+              "x-optional": true,
+              "description": "The loop's previous draft MR URL. Send it only on the first ship of a branch restarted after that MR merged: the core asks the provider whether it merged from this branch, and only then retries a rejected first push with --force-with-lease pinned to that MR's head. Every other push is fast-forward only (API 157)"
             }
           }
         }
@@ -1127,6 +1132,77 @@
         },
         "500": {
           "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/loop/sync-base": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "worktree",
+            "branch",
+            "provider",
+            "repo",
+            "base"
+          ],
+          "properties": {
+            "worktree": {
+              "type": "string",
+              "description": "Absolute path of the loop's worktree, <project>/system/loop-worktrees/<slug>, of an allow-listed repo"
+            },
+            "branch": {
+              "type": "string",
+              "description": "loop/<loop slug> or factory/<run id>, the worktree's branch"
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "github",
+                "gitlab"
+              ]
+            },
+            "repo": {
+              "type": "string",
+              "description": "GitHub owner/name or a gitlab.com project path; must be the worktree's origin"
+            },
+            "base": {
+              "type": "string",
+              "description": "The base branch to fetch as origin/<base>"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "origin/<base> was fetched with the user's git credentials. Recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin).",
+          "type": "object",
+          "required": [
+            "base",
+            "commit"
+          ],
+          "properties": {
+            "base": {
+              "type": "string",
+              "description": "origin/<base>"
+            },
+            "commit": {
+              "type": "string",
+              "description": "The fetched commit"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "#/$defs/FeatureDisabled"
         },
         "502": {
           "$ref": "_common#/$defs/Error"

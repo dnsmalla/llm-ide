@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/loop/sync-base",
+  "status": 400,
+  "description": "The branch does not belong to the worktree folder. Recorded in-process by tests/factory-ship.test.mjs (temp repo, bare origin). Not replayed live: the replay server has no host approval key, so it answers 403.",
+  "request": {
+    "body": {
+      "worktree": "/example/project/system/loop-worktrees/regression-1a2b3c4d",
+      "branch": "loop/regression-1a2b3c4d",
+      "provider": "github",
+      "repo": "octo/repo",
+      "base": "main"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "invalid_worktree",
+      "message": "This is not a Loop worktree of a repository on your allow-list."
+    }
+  }
+}

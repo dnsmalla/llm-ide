@@ -507,7 +507,13 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          cited files are all gone); such a fact is ranked last and labelled where the model reads memory.
 //   v156 — Extension health check, additive: POST /auth/me/extensions/check { kind, id, force? } → { status, checkedAt,
 //          problems[{ code, message, fix, detail? }], tools? } tests one installed extension (no model) and names one fix per problem.
-const SERVER_API_VERSION = 156;
+//   v157 — POST /kb/loop/ship accepts a second branch shape, additive: `loop/<loop slug>` (one branch, one worktree and one
+//          draft MR per Loop; the slug is the worktree folder name) beside `factory/<run id>`. Also additive: ship takes an optional
+//          `mergedMr` (the loop's previous MR URL; the core asks the provider itself whether it merged from this branch and, only
+//          then, retries a rejected first push with --force-with-lease pinned to that MR's head), and a new POST /kb/loop/sync-base
+//          { worktree, branch, provider, repo, base } → { base, commit } fetches origin/<base> with the user's git credentials. A re-ship of a loop's branch
+//          pushes a new fast-forward commit and updates the open draft MR (`reused: true`); a closed MR gets a new draft.
+const SERVER_API_VERSION = 157;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -539,6 +545,7 @@ const ALL_ENDPOINTS = [
   '/kb/tasks/:id/run',
   '/kb/loop/ship',
   '/kb/loop/ship-status',
+  '/kb/loop/sync-base',
   '/kb/loop/improve/signal',
   '/kb/loop/improve/state',
   '/kb/loop/improve/proposals',
@@ -824,6 +831,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/repos/check-token')   return 'dispatch';   // one outbound provider /user call
   if (url.startsWith('/kb/loop/improve/')) return 'kbWrite';   // local SQLite only; signals are small and frequent
   if (url === '/kb/loop/ship-status')    return 'dispatch';   // reads GitHub / GitLab PR or MR status
+  if (url === '/kb/loop/sync-base')      return 'dispatch';   // one git fetch of the base branch
   if (url === '/kb/issues/create' || url === '/kb/issues/comment' || url === '/kb/issues/close' || url === '/kb/issues/update') return 'dispatch';   // one outbound GitHub/GitLab write
   if (url.startsWith('/bus/'))           return 'kbWrite';        // command bus: enqueue, cancel, approve, deny
   if (url === '/host-api/pin')           return 'kbWrite';        // Host API pairing PIN mint

@@ -14,7 +14,10 @@ import { sanitizeLine } from '../core/utils.mjs';
 import { scanForSecretsDetailed, scanForSecretsHits } from './github-pr.mjs';
 
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-export const FACTORY_BRANCH_RE = /^factory\/[A-Za-z0-9_-]{1,64}$/;
+// `factory/<run id>` (the Factory) or `loop/<loop slug>` (every other Loop: one branch, one worktree and one draft MR per
+// loop; the slug is the worktree's folder name). The slug is lowercase letters, digits and inner hyphens (1 to 32), so no
+// `..`, space, `refs/` or leading `-` can pass. Mirrored by the host's `loop_worktree::valid_run_branch`.
+export const FACTORY_BRANCH_RE = /^(?:factory\/[A-Za-z0-9_-]{1,64}|loop\/[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)$/;
 const FACTORY_DIR = '.factory';
 // `.factory/` is never committed or reviewed: the run's own reports. `system/loop/` and `llm-doc/loop/test/` are
 // generated machine data (test map, ledger, prune report), not part of the change. `llm-doc/loop/refactor/` stays in.
@@ -118,14 +121,16 @@ export function isProviderWebUrl(provider, url) {
 
 /**
  * True when `root` (already realpath-validated) is `<project>/system/loop-worktrees/<run id>`,
- * is a linked worktree (`.git` is a FILE), and `branch` is `factory/<run id>`.
+ * is a linked worktree (`.git` is a FILE), and `branch` is `factory/<run id>` or `loop/<slug>` where the slug is that
+ * same folder name (the loop's worktree is `loop-worktrees/<slug>`).
  */
 export function isFactoryWorktree(root, branch) {
   if (typeof root !== 'string' || !path.isAbsolute(root)) return false;
   const runId = path.basename(root);
   const parent = path.dirname(root);
   if (!RUN_ID_RE.test(runId) || path.basename(parent) !== 'loop-worktrees') return false;
-  if (path.basename(path.dirname(parent)) !== 'system' || branch !== `factory/${runId}`) return false;
+  if (path.basename(path.dirname(parent)) !== 'system' || typeof branch !== 'string' || !FACTORY_BRANCH_RE.test(branch)) return false;
+  if (branch !== `factory/${runId}` && branch !== `loop/${runId}`) return false;
   try {
     return fs.lstatSync(path.join(root, '.git')).isFile();
   } catch {
@@ -169,6 +174,12 @@ export function neutraliseMentions(text) {
  * the host's loop_worktree::base_of does. A later Ship commit does not move it. Falls back to HEAD when reflogs are off.
  */
 async function baseCommitOf(worktree, branch) {
+  // A loop's branch records its base when it is created (the host's `refs/llmide/base/<slug>`); a reflog can be dropped.
+  const slug = /^loop\/(.+)$/.exec(branch)?.[1];
+  if (slug) {
+    const stored = (await runGit(worktree, ['rev-parse', '--verify', '--quiet', `refs/llmide/base/${slug}`])).stdout.trim();
+    if (/^[0-9a-f]{40,64}$/.test(stored)) return stored;
+  }
   const log = await runGit(worktree, ['reflog', 'show', '--format=%H', `refs/heads/${branch}`]);
   if (log.code === 0) {
     const lines = log.stdout.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -199,7 +210,7 @@ export async function stagedPatchId(worktree, base) {
 export function parseShipBody(raw) {
   const b = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   if (typeof b.worktree !== 'string' || !b.worktree) return { error: 'worktree is required' };
-  if (typeof b.branch !== 'string' || !FACTORY_BRANCH_RE.test(b.branch)) return { error: 'branch must be factory/<run id>' };
+  if (typeof b.branch !== 'string' || !FACTORY_BRANCH_RE.test(b.branch)) return { error: 'branch must be factory/<run id> or loop/<loop>' };
   if (b.provider !== 'github' && b.provider !== 'gitlab') return { error: 'provider must be github or gitlab' };
   if (!validShipRepo(b.provider, b.repo)) return { error: 'repo must be owner/name (GitHub) or a GitLab project path' };
   if (typeof b.base !== 'string' || !b.base || b.base.length > SHIP_LIMITS.base) return { error: 'base is required' };
@@ -211,7 +222,9 @@ export function parseShipBody(raw) {
   if (typeof text !== 'string' || text.length > SHIP_LIMITS.body) {
     return { error: `body must be text of at most ${SHIP_LIMITS.body} characters` };
   }
-  return { worktree: b.worktree, branch: b.branch, provider: b.provider, repo: b.repo, base: b.base, title, body: text, patchId: b.patchId, allowSecret: b.allowSecret === true };
+  // The loop's previous draft MR, sent only on the first ship of a branch restarted after that MR merged.
+  if (b.mergedMr != null && (typeof b.mergedMr !== 'string' || b.mergedMr.length > 500)) return { error: 'mergedMr must be a URL of at most 500 characters' };
+  return { worktree: b.worktree, branch: b.branch, provider: b.provider, repo: b.repo, base: b.base, title, body: text, patchId: b.patchId, allowSecret: b.allowSecret === true, mergedMr: b.mergedMr || null };
 }
 
 /**
@@ -224,9 +237,9 @@ export function parseShipBody(raw) {
  * records its patch id in `factory.patchid.<sha>`, so a re-ship of that exact commit is accepted even when the client's
  * id is the one the user reviewed before the commit existed.
  */
-export async function commitAndPush({ worktree, branch, message, author = null, patchId, allowSecret = false }) {
+export async function commitAndPush({ worktree, branch, message, author = null, patchId, allowSecret = false, leaseSha = null, providerName = 'the provider' }) {
   if (typeof branch !== 'string' || !FACTORY_BRANCH_RE.test(branch)) {
-    throw shipError('invalid_worktree', 'The branch must be factory/<run id>.');
+    throw shipError('invalid_worktree', 'The branch must be factory/<run id> or loop/<loop>.');
   }
   const head = await runGit(worktree, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
   if (head.code !== 0 || head.stdout.trim() !== branch) {
@@ -299,7 +312,17 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   // Remember which diff this commit is, before the push: a rejected push keeps the commit, and its re-ship must
   // recognise the reviewed id instead of refusing it as stale.
   await runGit(worktree, ['config', `factory.patchid-${sha}`, current]);
-  const push = await runGit(worktree, ['push', '--no-verify', '-u', 'origin', branch], { timeoutMs: PUSH_TIMEOUT_MS });
+  let push = await runGit(worktree, ['push', '--no-verify', '-u', 'origin', branch], { timeoutMs: PUSH_TIMEOUT_MS });
+  // Every push is fast-forward only, except the first one of a branch restarted after the provider confirmed that its
+  // previous MR merged (a squash or rebase merge leaves the old head on the remote, which a fresh branch cannot
+  // fast-forward). That retry replaces the remote tip only if it is still exactly the merged head: any other commit
+  // there makes the lease fail and nothing is overwritten.
+  let leaseTried = false;
+  if (push.code !== 0 && typeof leaseSha === 'string' && /^[0-9a-f]{40,64}$/.test(leaseSha)) {
+    leaseTried = true;
+    push = await runGit(worktree, ['push', '--no-verify', '-u', `--force-with-lease=refs/heads/${branch}:${leaseSha}`, 'origin', `refs/heads/${branch}:refs/heads/${branch}`], { timeoutMs: PUSH_TIMEOUT_MS });
+  }
+  if (push.code !== 0 && leaseTried) throw shipError('lease_rejected', `The branch on ${providerName} has commits that are not from the merged MR; nothing was overwritten.`);
   if (push.code !== 0) throw shipError('push_rejected', 'The remote refused the push. No pull or merge request was opened.');
   return { commit: sha, pushed: true, ...(secretOverride ? { secretOverride } : {}) };
 }
@@ -349,6 +372,58 @@ export async function findOpenRequest(provider, repo, branch, token) {
   const key = provider === 'github' ? 'html_url' : 'web_url';
   const hit = Array.isArray(list) ? list.find((item) => isProviderWebUrl(provider, item?.[key])) : null;
   return hit ? hit[key] : null;
+}
+
+/**
+ * The head commit of `mrUrl` when the PROVIDER says that MR is merged, was opened from `branch` of this same
+ * repository, and `mrUrl` belongs to `repo`; else null. Never throws: any doubt is "not confirmed". The webview only
+ * names the URL; the core asks the provider itself.
+ */
+export async function mergedHeadOf(provider, repo, branch, mrUrl, token) {
+  try {
+    if (typeof mrUrl !== 'string' || !validShipRepo(provider, repo)) return null;
+    const hex = (v) => (typeof v === 'string' && /^[0-9a-f]{40,64}$/.test(v) ? v : null);
+    if (provider === 'github') {
+      const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/(\d{1,9})$/.exec(mrUrl);
+      if (!m || m[1].toLowerCase() !== repo.toLowerCase()) return null;
+      const pr = await providerJson('github', `${API.github.base}/repos/${repo}/pulls/${m[2]}`, { method: 'GET', headers: githubHeaders(token) });
+      const sameRepo = String(pr?.head?.repo?.full_name ?? '').toLowerCase() === repo.toLowerCase();
+      return pr?.merged === true && pr?.head?.ref === branch && sameRepo ? hex(pr.head.sha) : null;
+    }
+    const m = /^https:\/\/gitlab\.com\/(.+)\/-\/merge_requests\/(\d{1,9})$/.exec(mrUrl);
+    if (!m || m[1].toLowerCase() !== repo.toLowerCase()) return null;
+    const mr = await providerJson('gitlab', `${API.gitlab.base}/projects/${encodeURIComponent(repo)}/merge_requests/${m[2]}`, { method: 'GET', headers: gitlabHeaders(token) });
+    const sameProject = mr?.source_project_id !== undefined && mr.source_project_id === mr.target_project_id;
+    return mr?.state === 'merged' && mr?.source_branch === branch && sameProject ? hex(mr.sha) : null;
+  } catch {
+    return null;
+  }
+}
+
+const FETCH_TIMEOUT_MS = 60_000;
+
+/**
+ * Fetches `origin/<base>` into the worktree's repository with the user's own git credentials (the desktop host's git
+ * has none, by design), so a loop restarted after its MR merged is cut from the real base. Returns the fetched commit.
+ * Throws `{ code: 'fetch_failed' }`.
+ */
+export async function fetchBase(worktree, base) {
+  const r = await runGit(worktree, ['fetch', '--no-tags', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], { timeoutMs: FETCH_TIMEOUT_MS });
+  if (r.code !== 0) throw shipError('fetch_failed', 'The base branch could not be fetched.');
+  const sha = (await runGit(worktree, ['rev-parse', '--verify', `refs/remotes/origin/${base}`])).stdout.trim();
+  if (!/^[0-9a-f]{40,64}$/.test(sha)) throw shipError('fetch_failed', 'The base branch could not be read after the fetch.');
+  return sha;
+}
+
+/** The checked sync-base body, or `{ error }`. Pure. */
+export function parseSyncBody(raw) {
+  const b = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  if (typeof b.worktree !== 'string' || !b.worktree) return { error: 'worktree is required' };
+  if (typeof b.branch !== 'string' || !FACTORY_BRANCH_RE.test(b.branch)) return { error: 'branch must be factory/<run id> or loop/<loop>' };
+  if (b.provider !== 'github' && b.provider !== 'gitlab') return { error: 'provider must be github or gitlab' };
+  if (!validShipRepo(b.provider, b.repo)) return { error: 'repo must be owner/name (GitHub) or a GitLab project path' };
+  if (typeof b.base !== 'string' || !b.base || b.base.length > SHIP_LIMITS.base) return { error: 'base is required' };
+  return { worktree: b.worktree, branch: b.branch, provider: b.provider, repo: b.repo, base: b.base };
 }
 
 /** Open a DRAFT merge request on gitlab.com. */
