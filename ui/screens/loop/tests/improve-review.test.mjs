@@ -14,7 +14,7 @@ const loop = () => ({
       stage({ id: "a", name: "A", order: 0, defaultKey: "ka", severity: "advisory" }),
       stage({ id: "c", name: "C", order: 1, defaultKey: null }),
     ],
-    maxIterations: 5, consecutiveFailureStop: 2, wallClockBudgetSeconds: 3600, pauseTimeoutSeconds: 60, maxRepairsPerStage: 3, repairModel: null,
+    maxIterations: 3, consecutiveFailureStop: 2, wallClockBudgetSeconds: 3600, pauseTimeoutSeconds: 60, maxRepairsPerStage: 3, repairModel: null,
     protectedPathPolicy: "revert", writeSummaryNote: true, extraProtectedGlobs: [], useWorktreesForConcurrentRuns: false, alwaysUseWorktree: false,
     stageDelaySeconds: 2, refactorBatchesPerRun: null, maxCostUsd: null,
   },

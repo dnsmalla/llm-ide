@@ -9,7 +9,7 @@ const stage = (over) => ({
 });
 const loopOf = (stages, over = {}) => ({
   id: "L", name: "Loop", isPrimary: false, goal: "g", acceptanceCriteria: null, scopeGlobs: [], inputPath: "", defaultKey: null, runsOnSchedule: false,
-  config: { stages, maxIterations: 5, maxCostUsd: 10 }, ...over,
+  config: { stages, maxIterations: 3, maxCostUsd: 10 }, ...over,
 });
 const entry = { id: "e1", loopId: "L", loopName: "Loop", startedAt: "t", durationSeconds: 12.5, iterationsUsed: 2, statusCode: "success", statusSummary: "ok", trigger: "manual" };
 

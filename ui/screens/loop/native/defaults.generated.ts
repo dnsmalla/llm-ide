@@ -36,7 +36,7 @@ export const DEFAULT_LOOP_SPECS = [
           "severity": "blocking"
         }
       ],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 2,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -181,7 +181,7 @@ export const DEFAULT_LOOP_SPECS = [
           "severity": "advisory"
         }
       ],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 2,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -278,7 +278,7 @@ export const DEFAULT_LOOP_SPECS = [
           "severity": "blocking"
         }
       ],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 2,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -304,7 +304,7 @@ export const DEFAULT_LOOP_SPECS = [
     "runsOnSchedule": false,
     "config": {
       "stages": [],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 2,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -552,7 +552,7 @@ export const DEFAULT_LOOP_SPECS = [
           "severity": "blocking"
         }
       ],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -651,7 +651,7 @@ export const DEFAULT_LOOP_SPECS = [
           "severity": "blocking"
         }
       ],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,

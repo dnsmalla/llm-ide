@@ -14,7 +14,7 @@ import { core } from "../../shell/runtime";
 import { SkillIdField, decodeSkillChoices, type SkillChoice } from "./SkillIdField";
 import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
-import { isNativeRunnable, reviewEveryRunsOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
+import { MAX_ITERATIONS, MIN_ITERATIONS, clampIterations, isNativeRunnable, reviewEveryRunsOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { MAX_LESSON_CHARS, setLearnedWriteHook } from "./lessons.ts";
 import { reviewSwitch, setReviewAfter } from "./review-ui.ts";
 import { reviewModeOf, stepReviewRecords } from "./review.ts";
@@ -1262,7 +1262,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             <dt>Scheduled</dt><dd>{loop.runsOnSchedule ? "included in this page's cron schedule" : "no — run it from here"}</dd>
           </dl>
           <div className="loop-budgets">
-            <label className="loop-field"><span>Max iterations (rounds)</span><input type="number" min={1} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = Math.max(1, Number(e.target.value) || 1); })} /></label>
+            <label className="loop-field"><span>Max iterations (rounds, {MIN_ITERATIONS}–{MAX_ITERATIONS})</span><input type="number" min={MIN_ITERATIONS} max={MAX_ITERATIONS} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = clampIterations(Number(e.target.value) || MIN_ITERATIONS); })} /></label>
             <label className="loop-field"><span>Time budget (min)</span><input type="number" min={0} step={15} placeholder="none" title="Empty = no time limit" value={loop.config.wallClockBudgetSeconds === null ? "" : Math.round(loop.config.wallClockBudgetSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)) * 60; })} /></label>
             <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} max={10} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>
             <label className="loop-field"><span>Repairs per stage</span><input type="number" min={1} max={10} value={loop.config.maxRepairsPerStage} onChange={(e) => patchLoop((l) => { l.config.maxRepairsPerStage = Math.max(1, Number(e.target.value) || 1); })} /></label>

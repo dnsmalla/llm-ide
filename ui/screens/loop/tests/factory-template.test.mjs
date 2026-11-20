@@ -131,12 +131,12 @@ test("custom steps, budgets and user edits survive the migration and are built f
   stages.splice(6, 0, { ...stages[5], id: "u1", name: "Lint", command: "npm run lint", severity: "advisory", order: 6 });
   stages.push({ ...stages[0], id: "u2", name: "Graph", kind: "codeGraph", command: null, order: 99 });
   const loop = loopOf(stages.map((s, i) => ({ ...s, order: i })));
-  loop.config.maxIterations = 4;
+  loop.config.maxIterations = 2;
   loop.config.maxCostUsd = null;
   loop.config.wallClockBudgetSeconds = 1800;
   const { template: t, dropped } = templateFromLoop(loop);
   assert.deepEqual(dropped, [{ name: "Graph", reason: 'a "codeGraph" step cannot be written in the template' }], "nothing is dropped silently");
-  assert.deepEqual(t.budget, { maxIterations: 4, maxCostUsd: 0, wallClockMinutes: 30 });
+  assert.deepEqual(t.budget, { maxIterations: 2, maxCostUsd: 0, wallClockMinutes: 30 });
   assert.deepEqual(t.stages.find((s) => s.role === "custom"), { role: "custom", name: "Lint", kind: "shellCommand", severity: "advisory", command: "npm run lint" });
   assert.equal(t.stages.some((s) => s.name === "Graph"), false, "a stage the template cannot express is left out, and reported");
   const applied = applyTemplate(loop, t, null);
@@ -216,13 +216,13 @@ test("the spoken problem count is short", () => {
 
 test("an unedited loop of the previous default moves to the new default, keeping its commands and budget; an edited one keeps its steps", () => {
   const old = loopOf(structuredClone(FACTORY_BUILT_IN_STAGES).map((s) => (s.name === "Set up" ? { ...s, command: "npm ci", enabled: true } : s.name === "Verify" ? { ...s, command: "npm test" } : s)));
-  old.config.maxIterations = 6;
+  old.config.maxIterations = 2;
   const migrated = templateFromLoop(old).template;
   const up = upgradeOldDefault(migrated);
   assert.deepEqual(up.stages.map((s) => s.role), defaultFactoryTemplate().stages.map((s) => s.role));
   assert.deepEqual(up.stages.find((s) => s.role === "setup"), { role: "setup", command: "npm ci" });
   assert.deepEqual(up.stages.find((s) => s.role === "verify"), { role: "verify", command: "npm test" });
-  assert.equal(up.budget.maxIterations, 6);
+  assert.equal(up.budget.maxIterations, 2);
   const edited = { ...migrated, stages: migrated.stages.map((s) => (s.role === "intake" ? { ...s, prompt: "Mine." } : s)) };
   assert.equal(upgradeOldDefault(edited), null);
   assert.equal(upgradeOldDefault(defaultFactoryTemplate()), null, "the current default is left alone");

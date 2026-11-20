@@ -57,7 +57,7 @@
             "raw": null
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -105,7 +105,7 @@
             "raw": null
           }
         ],
-        "maxIterations": 5,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -153,7 +153,7 @@
             "raw": null
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -251,7 +251,7 @@
             "raw": null
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -349,7 +349,7 @@
             "raw": null
           }
         ],
-        "maxIterations": 6,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -422,7 +422,7 @@
             "raw": null
           }
         ],
-        "maxIterations": 4,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -520,7 +520,7 @@
             "raw": null
           }
         ],
-        "maxIterations": 6,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -768,7 +768,7 @@
             "raw": null
           }
         ],
-        "maxIterations": 8,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -854,7 +854,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -1075,7 +1075,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -1163,7 +1163,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -1292,7 +1292,7 @@
             "severity": "advisory"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -1569,7 +1569,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -1710,7 +1710,7 @@
             "severity": "advisory"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -1803,7 +1803,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -1829,7 +1829,7 @@
       "runsOnSchedule": false,
       "config": {
         "stages": [],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -2067,7 +2067,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -2162,7 +2162,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,

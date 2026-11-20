@@ -7,7 +7,7 @@ export const BUILT_IN_TEMPLATES = [
     "name": "Test & Fix",
     "summary": "Re-check known faults, then the test suite, repairing until both are green.",
     "config": {
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -82,7 +82,7 @@ export const BUILT_IN_TEMPLATES = [
     "name": "Regression",
     "summary": "Re-check known faults only.",
     "config": {
-      "maxIterations": 5,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -131,7 +131,7 @@ export const BUILT_IN_TEMPLATES = [
     "name": "Test",
     "summary": "Run just the test suite, repairing until green.",
     "config": {
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -180,7 +180,7 @@ export const BUILT_IN_TEMPLATES = [
     "name": "Full Verify",
     "summary": "Lint (advisory), tests, then the fault sweep.",
     "config": {
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -281,7 +281,7 @@ export const BUILT_IN_TEMPLATES = [
     "name": "Skill Loop",
     "summary": "Run a chosen skill as a generate step, gated by tests and the fault sweep.",
     "config": {
-      "maxIterations": 6,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -382,7 +382,7 @@ export const BUILT_IN_TEMPLATES = [
     "name": "Docs Refresh",
     "summary": "Regenerate documentation with a skill, then run the project docs check.",
     "config": {
-      "maxIterations": 4,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -457,7 +457,7 @@ export const BUILT_IN_TEMPLATES = [
     "name": "Operation App Diagnosis",
     "summary": "Check the local server responds and the extension builds cleanly, then the fault sweep.",
     "config": {
-      "maxIterations": 6,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -558,7 +558,7 @@ export const BUILT_IN_TEMPLATES = [
     "name": "System Check",
     "summary": "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the extension build and known faults.",
     "config": {
-      "maxIterations": 8,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -887,7 +887,7 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking"
         }
       ],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 2,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -1132,7 +1132,7 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking"
         }
       ],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -1227,7 +1227,7 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "blocking"
         }
       ],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 3,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,
@@ -1369,7 +1369,7 @@ export const BUILT_IN_TEMPLATES = [
           "severity": "advisory"
         }
       ],
-      "maxIterations": 10,
+      "maxIterations": 3,
       "consecutiveFailureStop": 2,
       "wallClockBudgetSeconds": null,
       "pauseTimeoutSeconds": 1800,

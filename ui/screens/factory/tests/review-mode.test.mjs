@@ -4,7 +4,7 @@ import { memFs } from "./mem-fs.mjs";
 import { TEMPLATE_FILE, defaultFactoryTemplate, formatFactoryTemplate } from "../../loop/native/factory-template.ts";
 import { readReviewMode, writeReviewMode } from "../review-mode.ts";
 
-const original = formatFactoryTemplate({ ...defaultFactoryTemplate(), budget: { maxIterations: 7 } });
+const original = formatFactoryTemplate({ ...defaultFactoryTemplate(), budget: { maxIterations: 2 } });
 
 test("Human then Auto round-trips the template text and leaves other keys alone", async () => {
   const fs = memFs({ [TEMPLATE_FILE]: original });
@@ -12,7 +12,7 @@ test("Human then Auto round-trips the template text and leaves other keys alone"
   assert.equal((await writeReviewMode(fs, "human")).ok, true);
   const human = fs.files.get(TEMPLATE_FILE);
   assert.equal(JSON.parse(human).reviewMode, "human");
-  assert.equal(JSON.parse(human).budget.maxIterations, 7);
+  assert.equal(JSON.parse(human).budget.maxIterations, 2);
   assert.equal(await readReviewMode(fs), "human");
   assert.equal((await writeReviewMode(fs, "auto")).ok, true);
   assert.equal(fs.files.get(TEMPLATE_FILE), original);

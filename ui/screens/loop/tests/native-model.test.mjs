@@ -8,7 +8,7 @@ test("loop.json decodes the current schema with tolerant stage defaults", () => 
   assert.equal(store.loops.length, 1);
   assert.equal(store.loops[0].config.stages[0].enabled, true);
   assert.equal(store.loops[0].config.stages[0].severity, "blocking");
-  assert.equal(store.loops[0].config.maxIterations, 10);
+  assert.equal(store.loops[0].config.maxIterations, 3, "a stored 10 is clamped to the 3-round maximum");
 });
 
 test("legacy bare config becomes one Primary Main Loop and unknown stages survive", () => {
@@ -175,4 +175,13 @@ test("a wrong-typed or empty addendum and cadence are dropped; reviewEveryRunsOf
   assert.equal(m.reviewEveryRunsOf({ reviewEveryRuns: 0 }), 1);
   assert.equal(m.reviewEveryRunsOf({ reviewEveryRuns: 999 }), 50);
   assert.equal(m.reviewEveryRunsOf({ reviewEveryRuns: 12.7 }), 12);
+});
+
+test("the round count is a whole number from 1 to 3 wherever it comes from", async () => {
+  const { clampIterations, decodeConfig, MIN_ITERATIONS, MAX_ITERATIONS } = await import("../native/model.ts");
+  assert.deepEqual([MIN_ITERATIONS, MAX_ITERATIONS], [1, 3]);
+  assert.deepEqual([0, 1, 2, 3, 4, 10, 2.7, -5, Number.NaN, "5", null].map(clampIterations), [1, 1, 2, 3, 3, 3, 2, 1, 3, 3, 3]);
+  assert.equal(decodeConfig({ stages: [], maxIterations: 50 }).maxIterations, 3);
+  assert.equal(decodeConfig({ stages: [], maxIterations: 0 }).maxIterations, 1);
+  assert.equal(decodeConfig({ stages: [] }).maxIterations, 3, "absent reads as the maximum");
 });

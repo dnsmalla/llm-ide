@@ -84,7 +84,7 @@ export const LOOP_STAGE_DEFAULTS = Object.freeze({
   disabledByDetection: null, raw: null,
 });
 export const LOOP_CONFIG_DEFAULTS = Object.freeze({
-  maxIterations: 10, consecutiveFailureStop: 3, wallClockBudgetSeconds: null, pauseTimeoutSeconds: 1800,
+  maxIterations: 3, consecutiveFailureStop: 3, wallClockBudgetSeconds: null, pauseTimeoutSeconds: 1800,
   maxRepairsPerStage: 3, repairModel: null, protectedPathPolicy: 'revert', writeSummaryNote: false,
   extraProtectedGlobs: [], useWorktreesForConcurrentRuns: false, alwaysUseWorktree: false, openMergeRequest: true,
   refactorBatchesPerRun: null, maxCostUsd: null,

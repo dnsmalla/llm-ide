@@ -35,7 +35,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -176,7 +176,7 @@
             "severity": "advisory"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -269,7 +269,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -295,7 +295,7 @@
       "runsOnSchedule": false,
       "config": {
         "stages": [],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 2,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -533,7 +533,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -628,7 +628,7 @@
             "severity": "blocking"
           }
         ],
-        "maxIterations": 10,
+        "maxIterations": 3,
         "consecutiveFailureStop": 3,
         "wallClockBudgetSeconds": null,
         "pauseTimeoutSeconds": 1800,
@@ -667,7 +667,7 @@
       "name": "Regression",
       "summary": "Re-check known faults only.",
       "config": {
-        "maxIterations": 5
+        "maxIterations": 3
       },
       "stages": [
         {
@@ -714,7 +714,7 @@
       "name": "Skill Loop",
       "summary": "Run a chosen skill as a generate step, gated by tests and the fault sweep.",
       "config": {
-        "maxIterations": 6,
+        "maxIterations": 3,
         "maxCostUsd": 10
       },
       "stages": [
@@ -739,7 +739,7 @@
       "name": "Docs Refresh",
       "summary": "Regenerate documentation with a skill, then run the project docs check.",
       "config": {
-        "maxIterations": 4,
+        "maxIterations": 3,
         "maxRepairsPerStage": 2,
         "maxCostUsd": 10
       },
@@ -760,7 +760,7 @@
       "name": "Operation App Diagnosis",
       "summary": "Check the local server responds and the extension builds cleanly, then the fault sweep.",
       "config": {
-        "maxIterations": 6
+        "maxIterations": 3
       },
       "stages": [
         {
@@ -783,7 +783,7 @@
       "name": "System Check",
       "summary": "Verify skills, plugins, connectors, dispatch, backend, shared protocol, the extension build and known faults.",
       "config": {
-        "maxIterations": 8
+        "maxIterations": 3
       },
       "stages": [
         {

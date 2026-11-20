@@ -92,7 +92,7 @@ export function buildReviewMessage(loop: LoopDefinition, signals: ReviewSignal[]
     "- setPromptAddendum: {op, stageId, stageKey, stageName, before, after}; after is 1 to 2000 characters of text added to the step's prompt.",
     "- setStageField: {op, stageId, stageKey, stageName, field, before, after}; field timeoutSeconds (whole number 60 to 14400), runOnce or reviewAfter (can only be turned on), enabled (only an advisory step can be turned off).",
     "- moveStage: {op, stageId, stageKey, stageName, beforeIndex, afterIndex}; only skill steps, never past a gate step.",
-    "- setConfig: {op, field, before, after}; maxIterations 1-50, maxRepairsPerStage 1-10, stageDelaySeconds 0-60, refactorBatchesPerRun 1-20, wallClockBudgetSeconds 300-14400, maxCostUsd (above 0, never raised).",
+    "- setConfig: {op, field, before, after}; maxIterations 1-3, maxRepairsPerStage 1-10, stageDelaySeconds 0-60, refactorBatchesPerRun 1-20, wallClockBudgetSeconds 300-14400, maxCostUsd (above 0, never raised).",
     "",
     "Current loop (data):", fenceAsData(loopJson(loop)), "",
     "Per-stage stats (data):", fenceAsData(stageStats(signals)), "",

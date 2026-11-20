@@ -6,7 +6,7 @@
 import type { FsApi } from "../../explorer/fs";
 import { DETECTED_STRUCTURE, DETECTED_TEST } from "./environment.ts";
 import { FACTORY_BUILT_IN_STAGES, FACTORY_TEMPLATE, factoryRole, isCustomStage, type FactoryRole } from "./factory.ts";
-import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
+import { MAX_ITERATIONS, MIN_ITERATIONS, clampIterations, type LoopDefinition, type LoopEngineConfig, type LoopStage } from "./model.ts";
 import { HUMAN_REVIEW_FILE, STEP_REVIEW_DIR, STEP_REVIEWS_FILE } from "./review.ts";
 
 export const TEMPLATE_FILE = "system/factory-template.json";
@@ -215,7 +215,7 @@ export function parseFactoryTemplate(text: string): TemplateParse {
       budget = {};
       const b = root.budget;
       for (const k of Object.keys(b)) if (!["maxIterations", "maxCostUsd", "wallClockMinutes"].includes(k)) err(`budget.${k}`, "unknown key (allowed: maxIterations, maxCostUsd, wallClockMinutes)");
-      if (b.maxIterations !== undefined) { if (isInt(b.maxIterations, 1, 50)) budget.maxIterations = b.maxIterations; else err("budget.maxIterations", "a whole number from 1 to 50"); }
+      if (b.maxIterations !== undefined) { if (isInt(b.maxIterations, MIN_ITERATIONS, MAX_ITERATIONS)) budget.maxIterations = b.maxIterations; else err("budget.maxIterations", `a whole number from ${MIN_ITERATIONS} to ${MAX_ITERATIONS}`); }
       if (b.maxCostUsd !== undefined) { if (typeof b.maxCostUsd === "number" && b.maxCostUsd >= 0 && b.maxCostUsd <= 1000) budget.maxCostUsd = b.maxCostUsd; else err("budget.maxCostUsd", "a number of US dollars from 0 to 1000 (0 = no limit)"); }
       if (b.wallClockMinutes !== undefined) { if (isInt(b.wallClockMinutes, 1, 1440)) budget.wallClockMinutes = b.wallClockMinutes; else err("budget.wallClockMinutes", "a whole number of minutes from 1 to 1440"); }
     }
@@ -449,7 +449,7 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
     template: {
       version: 1,
       budget: {
-        maxIterations: clamp(c.maxIterations, 1, 50),
+        maxIterations: clampIterations(c.maxIterations),
         maxCostUsd: clamp(c.maxCostUsd ?? 0, 0, 1000),
         wallClockMinutes: clamp(Math.round((c.wallClockBudgetSeconds ?? 7200) / 60), 1, 1440),
       },
@@ -539,7 +539,7 @@ export function applyTemplate(loop: LoopDefinition, t: FactoryTemplate, detected
   const config: LoopEngineConfig = {
     ...loop.config,
     stages,
-    maxIterations: b.maxIterations ?? d.maxIterations,
+    maxIterations: clampIterations(b.maxIterations ?? d.maxIterations),
     maxCostUsd: cost === 0 ? null : cost,
     wallClockBudgetSeconds: (b.wallClockMinutes ?? Math.round((d.wallClockBudgetSeconds ?? 7200) / 60)) * 60,
   };

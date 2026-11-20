@@ -656,13 +656,13 @@ when the build has no rescanner.
 
 | Budget | Field | Terminal status |
 |---|---|---|
-| Iterations | `maxIterations` (10) | `givenUp(maxIterations)` |
+| Iterations | `maxIterations` (1–3, default 3; a stored value outside that range is clamped) | `givenUp(maxIterations)` |
 | Non-improving streak per stage | `consecutiveFailureStop` (3 for new loops and built-in templates; 2 in older configs) | `givenUp(noProgress)` / `givenUp(repeatedFailure)` / `givenUp(regressionStalled)` |
 | Wall clock | `wallClockBudgetSeconds` (3600, `nil` = unlimited) | `givenUp(wallClockExceeded)` |
 | Repairs per stage | `maxRepairsPerStage` (3) | `givenUp(repairBudgetExhausted)` |
 
-`maxIterations` alone is not a time budget: ten iterations of a three-minute suite
-plus ten LLM repairs is most of an hour, and on the cron trigger nobody is
+`maxIterations` alone is not a time budget: three iterations of a ten-minute suite
+plus their LLM repairs can take most of an hour, and on the cron trigger nobody is
 watching. The wall clock is checked between iterations — "stop starting new work",
 not a hard kill of a running stage; that is the per-stage timeout's job. A run
 always gets one complete pass, so a budget too small to finish startup produces a

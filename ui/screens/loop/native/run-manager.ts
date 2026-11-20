@@ -8,7 +8,7 @@ import { detectProjectStructureCommand, detectProjectTestCommand, detectStructur
 import { configFor, factoryRole, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedStructure, withDetectedVerify, type RunMode } from "./factory.ts";
 import { TEMPLATE_FILE, applyTemplate, droppedMessage, formatFactoryTemplate, parseFactoryTemplate, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, upgradeOldDefault, writeTemplateIfMissing, type FactoryTemplate } from "./factory-template.ts";
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
-import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
+import { clampIterations, type LoopDefinition, type LoopEngineConfig, type LoopStage } from "./model.ts";
 import { copyReadiness } from "./readiness-copy.ts";
 import { readPending, writePending, type PendingRecord } from "./pending-records.ts";
 import { LOOPBACK_STOPPED_CODE, loopbackRecord } from "./loopback.ts";
@@ -491,7 +491,7 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     isCancelled: () => run.cancelled, markCancelled: () => { run.cancelled = true; },
   };
   log(`▶ ${loop.name} (${run.live.mode})`);
-  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, maxIterations: Math.max(1, config.maxIterations), repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null };
+  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, maxIterations: clampIterations(config.maxIterations), repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null };
   run.live.progress = progress;
   const onProgress = (e: RunProgressEvent) => {
     if (e.type === "iteration") progress.iteration = e.iteration;

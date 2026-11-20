@@ -363,7 +363,7 @@ impl LoopDefaults {
     /// The same bounds the Settings card and the TypeScript decoder enforce. A hand-edited or hostile
     /// prefs.json cannot hand the Loop engine a zero/absurd budget.
     fn clamped(mut self) -> Self {
-        self.max_iterations = self.max_iterations.clamp(1, 100);
+        self.max_iterations = self.max_iterations.clamp(1, 3);
         self.consecutive_failure_stop = self.consecutive_failure_stop.clamp(1, 20);
         self.wall_clock_minutes = self.wall_clock_minutes.min(1440);
         self.max_repairs_per_stage = self.max_repairs_per_stage.min(20);
@@ -378,7 +378,7 @@ impl LoopDefaults {
 impl Default for LoopDefaults {
     fn default() -> Self {
         Self {
-            max_iterations: 10,
+            max_iterations: 3,
             consecutive_failure_stop: 2,
             wall_clock_minutes: 0,
             max_repairs_per_stage: 3,
@@ -1818,12 +1818,12 @@ mod loop_default_tests {
     #[test]
     fn loop_defaults_round_trip_and_clamp_the_policy() {
         let d = LoopDefaults {
-            max_iterations: 4, consecutive_failure_stop: 1, wall_clock_minutes: 15,
+            max_iterations: 2, consecutive_failure_stop: 1, wall_clock_minutes: 15,
             max_repairs_per_stage: 0, pause_timeout_minutes: 0,
             protected_path_policy: "bogus".to_string(), write_summary_note: true,
         };
         let p = Prefs::default().patched(&PrefsPatch { loop_defaults: Some(d), ..Default::default() });
-        assert_eq!(p.loop_defaults.max_iterations, 4);
+        assert_eq!(p.loop_defaults.max_iterations, 2);
         assert_eq!(p.loop_defaults.protected_path_policy, "revert");
         assert!(p.loop_defaults.write_summary_note);
         let back = parse(&serde_json::to_string(&p).unwrap());
@@ -1846,7 +1846,7 @@ mod loop_default_tests {
         assert_eq!(p.loop_defaults.protected_path_policy, "off");
         let high = LoopDefaults { max_iterations: 500, consecutive_failure_stop: 0, ..LoopDefaults::default() };
         let q = Prefs::default().patched(&PrefsPatch { loop_defaults: Some(high), ..Default::default() });
-        assert_eq!(q.loop_defaults.max_iterations, 100);
+        assert_eq!(q.loop_defaults.max_iterations, 3);
         assert_eq!(q.loop_defaults.consecutive_failure_stop, 1);
     }
 

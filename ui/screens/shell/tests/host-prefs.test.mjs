@@ -21,7 +21,7 @@ before(async () => {
   m = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 });
 
-const LOOP = { maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
+const LOOP = { maxIterations: 3, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
 const REMOTE = { mode: "local", host: "", port: 22, user: "", keyPath: "", label: "", hubUrl: "", tlsPin: "" };
 const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, remoteServer: { ...REMOTE, sshAuth: "key", sshHostPin: "" }, hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false, hostApiWorkspaceWrite: false, hostApiShell: false, hostApiWebOrigins: [], hostApiCapsMigrated: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
@@ -165,10 +165,10 @@ test("theme: the host's copy only fills in when the webview lost its own", () =>
 
 test("Loop defaults decode defensively and round-trip through set_prefs", async () => {
   assert.deepEqual(m.decodeLoopDefaults(undefined), LOOP);
-  assert.deepEqual(m.decodeLoopDefaults({ ...LOOP, protectedPathPolicy: "nonsense", maxIterations: 0 }), { ...LOOP, maxIterations: 10 });
+  assert.deepEqual(m.decodeLoopDefaults({ ...LOOP, protectedPathPolicy: "nonsense", maxIterations: 0 }), { ...LOOP, maxIterations: 3 });
   const { host, calls, state } = env();
   assert.deepEqual(await host.getLoopDefaults(), LOOP);
-  const next = { ...LOOP, maxIterations: 20, protectedPathPolicy: "warn", writeSummaryNote: true };
+  const next = { ...LOOP, maxIterations: 2, protectedPathPolicy: "warn", writeSummaryNote: true };
   assert.deepEqual(await host.setLoopDefaults(next), next);
   assert.deepEqual(calls.at(-1), ["set_prefs", { patch: { loopDefaults: next } }]);
   assert.deepEqual(state.stored.loopDefaults, next);

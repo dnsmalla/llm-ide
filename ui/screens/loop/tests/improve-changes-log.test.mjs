@@ -19,7 +19,7 @@ function memFs(files = {}) {
     create: async (p) => { dirs.add(p); return p; },
   };
 }
-const row = (id, status, extra = {}) => ({ id, loopId: "L", stageKey: null, change: { op: "setConfig", field: "maxIterations", before: 3, after: 5 }, rationale: "", evidence: null, suggestedScope: "project", status, scope: null, outcome: null, createdAt: "", decidedAt: null, ...extra });
+const row = (id, status, extra = {}) => ({ id, loopId: "L", stageKey: null, change: { op: "setConfig", field: "maxIterations", before: 3, after: 2 }, rationale: "", evidence: null, suggestedScope: "project", status, scope: null, outcome: null, createdAt: "", decidedAt: null, ...extra });
 const state = ({ proposals = [], history = [], offers = [] } = {}) => ({ loops: { L: { finishedRunsSinceReview: 0, proposals, history } }, offers });
 const line = (id, action, decide) => ({ id, action, at: "t", loopId: "L", loopKey: null, stageKey: null, decide });
 

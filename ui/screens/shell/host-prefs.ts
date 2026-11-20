@@ -17,7 +17,7 @@ export interface LoopDefaults {
 }
 
 export const DEFAULT_LOOP_DEFAULTS: LoopDefaults = Object.freeze({
-  maxIterations: 10, consecutiveFailureStop: 2, wallClockMinutes: 0,
+  maxIterations: 3, consecutiveFailureStop: 2, wallClockMinutes: 0,
   maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false,
 });
 
@@ -116,7 +116,7 @@ export function decodeLoopDefaults(raw: unknown): LoopDefaults {  if (!isObj(raw
   const n = (v: unknown, fallback: number, max: number) => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : fallback);
   const policy = raw.protectedPathPolicy;
   return {
-    maxIterations: n(raw.maxIterations, DEFAULT_LOOP_DEFAULTS.maxIterations, 100) || DEFAULT_LOOP_DEFAULTS.maxIterations,
+    maxIterations: n(raw.maxIterations, DEFAULT_LOOP_DEFAULTS.maxIterations, 3) || DEFAULT_LOOP_DEFAULTS.maxIterations,
     consecutiveFailureStop: n(raw.consecutiveFailureStop, DEFAULT_LOOP_DEFAULTS.consecutiveFailureStop, 20) || DEFAULT_LOOP_DEFAULTS.consecutiveFailureStop,
     wallClockMinutes: n(raw.wallClockMinutes, DEFAULT_LOOP_DEFAULTS.wallClockMinutes, 1440),
     maxRepairsPerStage: n(raw.maxRepairsPerStage, DEFAULT_LOOP_DEFAULTS.maxRepairsPerStage, 20),

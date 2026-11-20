@@ -1,6 +1,6 @@
 // Built-in Loop recipes. The full Mac template library is larger; these are the safe starting points the desktop
 // can create without hidden defaults. Test-stage commands are detected at apply time, never hard-coded.
-import type { LoopDefinition, LoopEngineConfig, LoopProjectStore } from "./model.ts";
+import { clampIterations, type LoopDefinition, type LoopEngineConfig, type LoopProjectStore } from "./model.ts";
 import type { LoopDefaults } from "../../shell/host-prefs.ts";
 import { DETECTED_TEST } from "./environment.ts";
 import { DEFAULT_LOOP_SPECS } from "./defaults.ts";
@@ -227,7 +227,7 @@ export function applyLoopDefaults(config: LoopEngineConfig, defaults: LoopDefaul
   if (!defaults) return config;
   return {
     ...config,
-    maxIterations: defaults.maxIterations,
+    maxIterations: clampIterations(defaults.maxIterations),
     consecutiveFailureStop: defaults.consecutiveFailureStop,
     wallClockBudgetSeconds: defaults.wallClockMinutes === 0 ? null : defaults.wallClockMinutes * 60,
     maxRepairsPerStage: defaults.maxRepairsPerStage,

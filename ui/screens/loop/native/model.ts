@@ -98,6 +98,16 @@ export function reviewEveryRunsOf(config: Pick<LoopEngineConfig, "reviewEveryRun
   return Math.min(50, Math.max(1, Math.floor(n)));
 }
 
+/** Rounds a loop may run: at least one, at most three (more rounds mostly re-spent tokens on the same failure). */
+export const MIN_ITERATIONS = 1;
+export const MAX_ITERATIONS = 3;
+
+/** Any stored or typed round count as a whole number in MIN_ITERATIONS..MAX_ITERATIONS; non-numbers read as the maximum. */
+export function clampIterations(n: unknown): number {
+  if (typeof n !== "number" || !Number.isFinite(n)) return MAX_ITERATIONS;
+  return Math.min(MAX_ITERATIONS, Math.max(MIN_ITERATIONS, Math.floor(n)));
+}
+
 export interface LoopDefinition {
   id: string;
   name: string;
@@ -173,7 +183,7 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     : rawPolicy === "commit" ? "stop" : rawPolicy === "ignore" ? "off" : "revert";
   return {
     stages,
-    maxIterations: num(o.maxIterations) ?? 10,
+    maxIterations: clampIterations(num(o.maxIterations) ?? MAX_ITERATIONS),
     consecutiveFailureStop: num(o.consecutiveFailureStop) ?? 2,
     wallClockBudgetSeconds: num(o.wallClockBudgetSeconds),
     pauseTimeoutSeconds: num(o.pauseTimeoutSeconds) ?? 1800,

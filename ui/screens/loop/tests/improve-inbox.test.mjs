@@ -38,7 +38,7 @@ async function setup() {
     { loopId: "their-loop", loopKey: "plan", stageId: "their-stage", stageKey: stage.defaultKey, text: "Name the files you read.", updatedAt: "x" },
     { loopId: "their-loop", loopKey: "nope", stageId: "s9", stageKey: "unknown-step", text: "No match here.", updatedAt: "x" },
   ] }));
-  const change = { op: "setConfig", field: "maxIterations", before: loop.config.maxIterations, after: loop.config.maxIterations + 1 };
+  const change = { op: "setConfig", field: "maxIterations", before: loop.config.maxIterations, after: loop.config.maxIterations - 1 };
   const stale = { op: "setConfig", field: "maxRepairsPerStage", before: 99, after: 3 };
   fs.map.set(`${IN}/changes.jsonl`, [
     { id: "c1", action: "accept", at: "t", loopId: "their-loop", loopKey: "plan", stageKey: null, change, rationale: "runs ran out of rounds" },

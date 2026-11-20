@@ -51,7 +51,7 @@ Intake then writes `.factory/READINESS.md`, and the Intake gate stops a run that
 ```json
 {
   "version": 1,
-  "budget": { "maxIterations": 10, "maxCostUsd": 10, "wallClockMinutes": 120 },
+  "budget": { "maxIterations": 3, "maxCostUsd": 10, "wallClockMinutes": 120 },
   "stages": [
     { "role": "setup", "command": "npm ci" },
     { "role": "plan" },
@@ -166,7 +166,7 @@ Auto removes it, and every other key stays as it was.
 - Step names are unique. A step without `name` uses the built-in name.
 - A custom `skill` step cannot sit between `review` and `reviewGate`: the gate reads Review's report, and an agent step
   in between could change it. A shell or verdict check there is fine.
-- Unknown keys are errors. Budgets: `maxIterations` 1–50, `maxCostUsd` 0–1000 (0 = no limit), `wallClockMinutes`
+- Unknown keys are errors. Budgets: `maxIterations` 1–3, `maxCostUsd` 0–1000 (0 = no limit), `wallClockMinutes`
   1–1440; `timeoutMinutes` 1–240.
 
 The full format is `schema/factory/template.v1.schema.json`; the app's validator is authoritative.

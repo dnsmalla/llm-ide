@@ -21,7 +21,7 @@ const loopOf = (over = {}, stages) => ({
       stage({ id: "sh", name: "Shell", order: 3, kind: "shellCommand", skillId: null, command: "npm test", defaultKey: "ksh" }),
       stage({ id: "rev", name: "Review", order: 4, skillId: "skills/factory-review", defaultKey: "krev" }),
     ],
-    maxIterations: 5, consecutiveFailureStop: 2, wallClockBudgetSeconds: 3600, pauseTimeoutSeconds: 60, maxRepairsPerStage: 3, repairModel: null,
+    maxIterations: 3, consecutiveFailureStop: 2, wallClockBudgetSeconds: 3600, pauseTimeoutSeconds: 60, maxRepairsPerStage: 3, repairModel: null,
     protectedPathPolicy: "revert", writeSummaryNote: true, extraProtectedGlobs: [], useWorktreesForConcurrentRuns: false, alwaysUseWorktree: false,
     openMergeRequest: false, stageDelaySeconds: 2, refactorBatchesPerRun: 3, maxCostUsd: 10,
   },
@@ -82,7 +82,7 @@ test("runOnce, reviewAfter and timeout bounds", () => {
 test("config bounds", () => {
   const ok = (f, v) => accepts(cfg(f, 3, v));
   const bad = (f, v) => rejects(cfg(f, 3, v));
-  ok("maxIterations", 1); ok("maxIterations", 50); bad("maxIterations", 0); bad("maxIterations", 51); bad("maxIterations", 2.5);
+  ok("maxIterations", 1); ok("maxIterations", 2); accepts(cfg("maxIterations", 1, 3)); bad("maxIterations", 0); bad("maxIterations", 4); bad("maxIterations", 2.5);
   ok("maxRepairsPerStage", 1); ok("maxRepairsPerStage", 10); bad("maxRepairsPerStage", 0); bad("maxRepairsPerStage", 11);
   ok("stageDelaySeconds", 0); ok("stageDelaySeconds", 60); bad("stageDelaySeconds", -1); bad("stageDelaySeconds", 61);
   ok("refactorBatchesPerRun", 1); ok("refactorBatchesPerRun", 20); bad("refactorBatchesPerRun", 0); bad("refactorBatchesPerRun", 21);
@@ -127,7 +127,7 @@ test("Factory loops: only addendum and two config fields", () => {
   accepts(addendum("a", null, "hi"), f);
   accepts(cfg("maxRepairsPerStage", 3, 4), f); accepts(cfg("stageDelaySeconds", 2, 3), f);
   for (const c of [field("b", "enabled", true, false), field("a", "timeoutSeconds", 600, 700), field("a", "runOnce", false, true), field("a", "reviewAfter", null, true),
-    move("a", 0, 1), cfg("maxIterations", 5, 4), cfg("maxCostUsd", 10, 5), cfg("wallClockBudgetSeconds", 3600, 3000), cfg("refactorBatchesPerRun", 3, 2)]) {
+    move("a", 0, 1), cfg("maxIterations", 3, 2), cfg("maxCostUsd", 10, 5), cfg("wallClockBudgetSeconds", 3600, 3000), cfg("refactorBatchesPerRun", 3, 2)]) {
     const r = validateChange(c, f);
     assert.equal(r.ok, false);
     assert.equal(r.reason, "the Factory template owns this setting");
@@ -146,10 +146,10 @@ test("applyTemplate keeps a saved addendum and maxRepairsPerStage on a Factory l
 
 test("isStale: true once the user edits the field (Review Focus 1)", () => {
   const l = loopOf();
-  for (const c of [field("a", "timeoutSeconds", 600, 300), cfg("maxIterations", 5, 3), addendum("a", null, "x"), move("a", 0, 1)]) assert.equal(isStale(c, l), false);
-  const edited = loopOf(); edited.config.stages[0].timeoutSeconds = 900; edited.config.maxIterations = 8; edited.config.stages[0].promptAddendum = "mine";
+  for (const c of [field("a", "timeoutSeconds", 600, 300), cfg("maxIterations", 3, 2), addendum("a", null, "x"), move("a", 0, 1)]) assert.equal(isStale(c, l), false);
+  const edited = loopOf(); edited.config.stages[0].timeoutSeconds = 900; edited.config.maxIterations = 1; edited.config.stages[0].promptAddendum = "mine";
   assert.equal(isStale(field("a", "timeoutSeconds", 600, 300), edited), true);
-  assert.equal(isStale(cfg("maxIterations", 5, 3), edited), true);
+  assert.equal(isStale(cfg("maxIterations", 3, 2), edited), true);
   assert.equal(isStale(addendum("a", null, "x"), edited), true);
   assert.equal(isStale(move("b", 0, 1), l), true);
   assert.equal(isStale(addendum("gone", null, "x"), l), true);
@@ -157,8 +157,8 @@ test("isStale: true once the user edits the field (Review Focus 1)", () => {
 
 test("applyChange throws on stale and on a missing stage (Review Focus 2)", () => {
   const l = loopOf();
-  l.config.maxIterations = 8;
-  assert.throws(() => applyChange(l, cfg("maxIterations", 5, 3), FWD), /out of date/);
+  l.config.maxIterations = 1;
+  assert.throws(() => applyChange(l, cfg("maxIterations", 3, 2), FWD), /out of date/);
   assert.throws(() => applyChange(loopOf(), field("nope", "runOnce", false, true), FWD), /no such step/);
   assert.throws(() => applyChange(loopOf(), { op: "setConfig", field: "goal", before: 1, after: 2 }, FWD));
 });
@@ -171,7 +171,7 @@ test("applyChange does not mutate the input", () => {
 
 test("apply then invert restores the loop deep-equal", () => {
   for (const c of [field("a", "runOnce", false, true), field("b", "enabled", true, false), field("a", "timeoutSeconds", 600, 120), field("a", "reviewAfter", null, true),
-    cfg("maxCostUsd", 10, 5), cfg("maxIterations", 5, 2), addendum("a", null, "lesson"), move("a", 0, 2), move("c", 2, 0)]) {
+    cfg("maxCostUsd", 10, 5), cfg("maxIterations", 3, 1), addendum("a", null, "lesson"), move("a", 0, 2), move("c", 2, 0)]) {
     const l = loopOf();
     const ch = accepts(c, l);
     const applied = applyChange(l, ch, FWD);
@@ -196,8 +196,8 @@ test("shareableScope", () => {
   const l = loopOf();
   assert.equal(shareableScope(addendum("a", null, "x"), l), "general");
   assert.equal(shareableScope(addendum("c", null, "x"), l), "projectOnly");
-  assert.equal(shareableScope(cfg("maxIterations", 5, 3), l), "general");
-  assert.equal(shareableScope(cfg("maxIterations", 5, 3), loopOf({ defaultKey: null })), "projectOnly");
+  assert.equal(shareableScope(cfg("maxIterations", 3, 2), l), "general");
+  assert.equal(shareableScope(cfg("maxIterations", 3, 2), loopOf({ defaultKey: null })), "projectOnly");
 });
 
 test("forward apply re-checks the rules against the current loop", () => {
@@ -216,9 +216,9 @@ test("revert applies loosening values but keeps allowlist, Factory rule and non-
   const l = loopOf(); l.config.maxCostUsd = 5;
   assert.equal(applyChange(l, cfg("maxCostUsd", 5, 10), REV).config.maxCostUsd, 10);
   assert.throws(() => applyChange(loopOf(), field("a", "enabled", true, null), REV), /empty/);
-  assert.throws(() => applyChange(loopOf(), cfg("maxIterations", 5, null), REV), /empty/);
+  assert.throws(() => applyChange(loopOf(), cfg("maxIterations", 3, null), REV), /empty/);
   assert.throws(() => applyChange(loopOf(), field("a", "severity", "blocking", "advisory"), REV));
-  assert.throws(() => applyChange(loopOf({ defaultKey: "factory" }), cfg("maxIterations", 5, 4), REV), /Factory/);
+  assert.throws(() => applyChange(loopOf({ defaultKey: "factory" }), cfg("maxIterations", 3, 2), REV), /Factory/);
 });
 
 test("severity and command fields are refused; extras ignored; stageKey and before required", () => {
@@ -226,13 +226,13 @@ test("severity and command fields are refused; extras ignored; stageKey and befo
     rejects(field("a", f, "x", "y"));
     assert.throws(() => applyChange(loopOf(), field("a", f, "x", "y"), FWD));
   }
-  const raw = JSON.parse('{"__proto__":{"polluted":1},"extra":1,"op":"setConfig","field":"maxIterations","before":5,"after":3}');
+  const raw = JSON.parse('{"__proto__":{"polluted":1},"extra":1,"op":"setConfig","field":"maxIterations","before":3,"after":2}');
   const ok = accepts(raw);
   assert.deepEqual(Object.keys(ok).sort(), ["after", "before", "field", "op"]);
   assert.equal({}.polluted, undefined);
   const { stageKey, ...noKey } = field("a", "runOnce", false, true); rejects(noKey);
   const { before, ...noBefore } = field("a", "runOnce", false, true); rejects(noBefore);
-  const { before: b2, ...noBefore2 } = cfg("maxIterations", 5, 3); rejects(noBefore2);
+  const { before: b2, ...noBefore2 } = cfg("maxIterations", 3, 2); rejects(noBefore2);
 });
 
 test("stageName comes from the resolved stage; addendum tabs and bidi characters", () => {

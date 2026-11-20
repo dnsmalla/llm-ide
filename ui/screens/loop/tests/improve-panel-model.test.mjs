@@ -72,14 +72,14 @@ test("shouldAutoReview fires at the configured run count", () => {
 test("accept refuses while the loop runs and writes nothing", async () => {
   const d = await deps();
   const run = { fs: d.fs, core: d.core, load: d.load, ...d.base, runningLoopIds: new Set([d.loop.id]) };
-  await assert.rejects(acceptImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project"), /Finish or stop the run first/);
+  await assert.rejects(acceptImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 2), kind: "proposal" }, "project"), /Finish or stop the run first/);
   assert.equal(d.state.events.length, 0);
 });
 
 test("accept refuses a stale change with zero writes and no decide", async () => {
   const d = await deps();
   const run = { fs: d.fs, core: d.core, load: d.load, ...d.base };
-  const stale = { ...maxIter(d.loop, 7), before: d.loop.config.maxIterations + 1 };
+  const stale = { ...maxIter(d.loop, 2), before: 1 };
   await assert.rejects(acceptImprovement(run, { id: "1", loopId: d.loop.id, change: stale, kind: "proposal" }, "project"), /This suggestion is out of date/);
   assert.equal(d.state.writes.length, 0);
   assert.equal(d.core.calls.length, 0);
@@ -88,13 +88,13 @@ test("accept refuses a stale change with zero writes and no decide", async () =>
 test("accept saves first, then decides with the scope", async () => {
   const d = await deps();
   const run = { fs: d.fs, core: d.core, load: d.load, ...d.base };
-  const out = await acceptImprovement(run, { id: "9", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal", row: { rationale: "token ghp_" + "a".repeat(36) + " leaked", evidence: { signalIds: [1], excerpts: ["run 4 failed"] } } }, "general");
+  const out = await acceptImprovement(run, { id: "9", loopId: d.loop.id, change: maxIter(d.loop, 2), kind: "proposal", row: { rationale: "token ghp_" + "a".repeat(36) + " leaked", evidence: { signalIds: [1], excerpts: ["run 4 failed"] } } }, "general");
   assert.deepEqual(d.state.events, ["write", "log", "decide"], "loop file, then the change log, then the DB");
   const [line] = d.state.changes.trim().split("\n").map((l) => JSON.parse(l));
-  assert.deepEqual([line.id, line.action, line.loopId, line.scope, line.change.after, line.excerpts], ["9", "accept", d.loop.id, "general", 7, ["run 4 failed"]]);
+  assert.deepEqual([line.id, line.action, line.loopId, line.scope, line.change.after, line.excerpts], ["9", "accept", d.loop.id, "general", 2, ["run 4 failed"]]);
   assert.deepEqual(line.decide, { action: "accept", id: "9", scope: "general", logged: true });
   assert.doesNotMatch(line.rationale, /ghp_/, "the shared log is redacted");
-  assert.equal(out.store.loops.find((l) => l.id === d.loop.id).config.maxIterations, 7);
+  assert.equal(out.store.loops.find((l) => l.id === d.loop.id).config.maxIterations, 2);
   assert.equal(out.hash, `${d.state.hash}#L:`, "loop.json's hash, plus lessons.json's (none yet)");
   assert.equal(d.core.calls[0].path, "/kb/loop/improve/decide");
   assert.deepEqual(d.core.calls[0].body, { projectRoot: "/p", action: "accept", id: "9", scope: "general", logged: true }, "the log has it, so the DB keeps no copy");
@@ -105,18 +105,18 @@ test("a hash conflict reloads and retries once; a real change in between makes i
   const { fs, state } = stubFs(encodeProjectStore(d.store), { conflicts: 1, onConflict: (s) => { s.hash = "h-other"; } });
   const load = await loadLoops(fs);
   const core = stubCore(state);
-  const out = await acceptImprovement({ fs, core, load, ...d.base }, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project");
+  const out = await acceptImprovement({ fs, core, load, ...d.base }, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 2), kind: "proposal" }, "project");
   assert.equal(state.writes.length, 1);
-  assert.equal(out.store.loops.find((l) => l.id === d.loop.id).config.maxIterations, 7);
+  assert.equal(out.store.loops.find((l) => l.id === d.loop.id).config.maxIterations, 2);
 
   const again = stubFs(encodeProjectStore(d.store), { conflicts: 1, onConflict: (s) => {
     const other = structuredClone(d.store);
-    other.loops.find((l) => l.id === d.loop.id).config.maxIterations = 12;
+    other.loops.find((l) => l.id === d.loop.id).config.maxIterations = 1;
     s.text = encodeProjectStore(other); s.hash = "h-edited";
   } });
   const load2 = await loadLoops(again.fs);
   const core2 = stubCore(again.state);
-  await assert.rejects(acceptImprovement({ fs: again.fs, core: core2, load: load2, ...d.base }, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project"), /out of date/);
+  await assert.rejects(acceptImprovement({ fs: again.fs, core: core2, load: load2, ...d.base }, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 2), kind: "proposal" }, "project"), /out of date/);
   assert.equal(again.state.writes.length, 0);
   assert.equal(core2.calls.length, 0);
 });
@@ -125,13 +125,13 @@ test("a second conflict is not retried again", async () => {
   const d = await deps();
   const { fs, state } = stubFs(encodeProjectStore(d.store), { conflicts: 2 });
   const load = await loadLoops(fs);
-  await assert.rejects(acceptImprovement({ fs, core: stubCore(state), load, ...d.base }, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project"), /conflict/);
+  await assert.rejects(acceptImprovement({ fs, core: stubCore(state), load, ...d.base }, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 2), kind: "proposal" }, "project"), /conflict/);
 });
 
 test("a failed decide after the save keeps the saved store and reports a notice", async () => {
   const d = await deps();
   const core = stubCore(d.state, true);
-  const out = await acceptImprovement({ fs: d.fs, core, load: d.load, ...d.base }, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project");
+  const out = await acceptImprovement({ fs: d.fs, core, load: d.load, ...d.base }, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 2), kind: "proposal" }, "project");
   assert.equal(d.state.writes.length, 1);
   assert.match(out.notice, /could not be recorded/);
 });
@@ -156,7 +156,7 @@ test("an offer applies by stageKey and is adopted with the loop id, no scope", a
 test("revert restores the before-value and decides revert", async () => {
   const d = await deps();
   const run = { fs: d.fs, core: d.core, load: d.load, ...d.base };
-  const change = maxIter(d.loop, 7);
+  const change = maxIter(d.loop, 2);
   const accepted = await acceptImprovement(run, { id: "1", loopId: d.loop.id, change, kind: "proposal" }, "project");
   d.core.calls.length = 0;
   const out = await revertImprovement({ ...run, load: { store: accepted.store, hash: accepted.hash } }, { id: "1", loopId: d.loop.id, change });
@@ -180,8 +180,8 @@ test("the click-time check refuses when a run started after render, with zero wr
   let running = false;
   const run = { fs: d.fs, core: d.core, load: d.load, ...d.base, isRunning: () => running };
   running = true; // flips after the panel rendered with an empty runningLoopIds
-  await assert.rejects(acceptImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project"), /Finish or stop the run first/);
-  await assert.rejects(revertImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 7) }), /Finish or stop the run first/);
+  await assert.rejects(acceptImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 2), kind: "proposal" }, "project"), /Finish or stop the run first/);
+  await assert.rejects(revertImprovement(run, { id: "1", loopId: d.loop.id, change: maxIter(d.loop, 2) }), /Finish or stop the run first/);
   assert.equal(d.state.events.length, 0);
 });
 
@@ -194,7 +194,7 @@ test("when the change log cannot be written the DB keeps its copy (no logged fla
   const write = d.fs.write;
   d.fs.write = async (path, next, opts) => { if (path.endsWith("changes.jsonl")) throw Object.assign(new Error("disk full"), { code: "io" }); return write(path, next, opts); };
   d.fs.create = async () => { throw new Error("no"); };
-  const out = await acceptImprovement({ fs: d.fs, core: d.core, load: d.load, ...d.base }, { id: "11", loopId: d.loop.id, change: maxIter(d.loop, 7), kind: "proposal" }, "project");
+  const out = await acceptImprovement({ fs: d.fs, core: d.core, load: d.load, ...d.base }, { id: "11", loopId: d.loop.id, change: maxIter(d.loop, 2), kind: "proposal" }, "project");
   assert.deepEqual(d.core.calls[0].body, { projectRoot: "/p", action: "accept", id: "11", scope: "project" });
   assert.match(out.notice, /changes\.jsonl could not be written/);
 });

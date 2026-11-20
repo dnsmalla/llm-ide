@@ -1,6 +1,6 @@
 // The code-level gate for loop improvements: decides which AI-proposed changes are allowed and applies them.
 // Pure (no I/O). Deny-by-default: the loop must never be able to weaken its own checks (spec anti-goal A1).
-import type { LoopDefinition, LoopStage } from "../model.ts";
+import { MAX_ITERATIONS, MIN_ITERATIONS, type LoopDefinition, type LoopStage } from "../model.ts";
 import { isFactoryLoop } from "../factory.ts";
 import { cleanLesson, MAX_LESSON_CHARS } from "../lessons.ts";
 
@@ -19,7 +19,7 @@ const STAGE_FIELDS: readonly StageField[] = ["timeoutSeconds", "runOnce", "revie
 const CONFIG_FIELDS: readonly ConfigField[] = ["maxIterations", "maxRepairsPerStage", "stageDelaySeconds", "refactorBatchesPerRun", "maxCostUsd", "wallClockBudgetSeconds"];
 /** Inclusive integer bounds of each config field; maxCostUsd is checked separately (no upper bound but `before`). */
 const CONFIG_RANGES: Readonly<Record<Exclude<ConfigField, "maxCostUsd">, readonly [number, number]>> = {
-  maxIterations: [1, 50], maxRepairsPerStage: [1, 10], stageDelaySeconds: [0, 60], refactorBatchesPerRun: [1, 20], wallClockBudgetSeconds: [300, 14400],
+  maxIterations: [MIN_ITERATIONS, MAX_ITERATIONS], maxRepairsPerStage: [1, 10], stageDelaySeconds: [0, 60], refactorBatchesPerRun: [1, 20], wallClockBudgetSeconds: [300, 14400],
 };
 /** Skills whose position is a safety property (they gate the run), so they never move and nothing moves past them. */
 const PINNED_SKILLS: ReadonlySet<string> = new Set(["skills/factory-review", "skills/factory-intake"]);
