@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { HUB_OUT_FOLDER, resolveHubOut } from './hub-out.mjs';
 import {
   HELPER_TARGET,
@@ -41,8 +41,8 @@ test('the default output is desktop/hub-dist, not Vite\'s desktop/dist', () => {
 });
 
 test('--out still overrides the default', () => {
-  assert.equal(resolveHubOut(['--out', '/srv/bundles'], DESKTOP), '/srv/bundles');
-  assert.equal(resolveHubOut(['--compat-sqlite', '/x/module.node', '--out', '/srv/out'], DESKTOP), '/srv/out');
+  assert.equal(resolveHubOut(['--out', '/srv/bundles'], DESKTOP), resolve('/srv/bundles'));
+  assert.equal(resolveHubOut(['--compat-sqlite', '/x/module.node', '--out', '/srv/out'], DESKTOP), resolve('/srv/out'));
 });
 
 test('a --out without a value, or followed by another flag, falls back to the default', () => {
@@ -124,10 +124,13 @@ test('the staged helper is core/bin/llmide-workspace with mode 0755, even from a
   mkdirSync(core);
   const staged = stageWorkspaceHelper(core, source);
   assert.equal(staged, join(core, 'bin', 'llmide-workspace'));
-  assert.equal(statSync(staged).mode & 0o777, 0o755);
+  // Windows has no POSIX file modes; the archive test below checks the mode where tar can carry it.
+  if (process.platform !== 'win32') assert.equal(statSync(staged).mode & 0o777, 0o755);
 });
 
-test('the bundle archive lists core/bin/llmide-workspace as an executable', (t) => {
+// Skipped on Windows: the hub bundle is staged on Linux/macOS (stage-hub-core.mjs requires a '/' path), NTFS has no
+// exec bit, and GNU tar there reads `C:` as a remote host.
+test('the bundle archive lists core/bin/llmide-workspace as an executable', { skip: process.platform === 'win32' && 'hub staging is POSIX-only' }, (t) => {
   const dir = scratch(t);
   const stage = join(dir, 'stage');
   const core = join(stage, 'core');

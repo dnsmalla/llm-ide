@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as t from "../native/templates.ts";
 import * as e from "../native/environment.ts";
+// The product picks `python` on Windows (the usual launcher name there) and `python3` elsewhere.
+const PY = (process.platform === "win32" ? "python" : "python3");
 
 test("Loop recipes resolve detected test commands and drop the test stage when none exists", () => {
   const recipe = t.BUILT_IN_TEMPLATES.find((x) => x.id === "test-and-fix");
@@ -21,7 +23,7 @@ test("project environment detection reads manifests without executing anything",
   const none = { async read() { throw Object.assign(new Error("missing"), { code: "missing" }); } };
   assert.equal((await e.detectTestCommand(none)).command, null);
   const py = { async read(path) { if (path === "pytest.ini") return { status: "ok", text: "" }; throw Object.assign(new Error("missing"), { code: "missing" }); } };
-  assert.equal((await e.detectTestCommand(py)).command, "python3 -m pytest", "the same interpreter that runs the code, never a stale pytest launcher");
+  assert.equal((await e.detectTestCommand(py)).command, `${PY} -m pytest`, "the same interpreter that runs the code, never a stale pytest launcher");
 });
 
 test("custom Loop templates persist, unique-name and delete", () => {

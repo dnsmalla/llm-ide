@@ -2,11 +2,12 @@
 // file manager cannot show it). These tests pin the path text, the one shared mechanism, and every reveal caller.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { COPY_SERVER_PATH_LABEL, REVEAL_LABEL, fileManagerActionFor, serverPathOf } from "../server-path.ts";
 
-const SCREENS = new URL("../../", import.meta.url).pathname;
+const SCREENS = fileURLToPath(new URL("../../", import.meta.url));
 
 test("serverPathOf joins the open root and the relative path with '/'", () => {
   assert.equal(serverPathOf("/home/me/proj", "llm-doc/notes/a.md"), "/home/me/proj/llm-doc/notes/a.md");

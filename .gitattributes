@@ -7,3 +7,8 @@ ui/screens/loop/tests/fixtures/*.json text eol=lf
 # must not depend on the checkout's core.autocrlf.
 extension/routes/host-api/commands.generated.mjs text eol=lf
 ios_app/SharedProtocol/Sources/SharedProtocol/HostApiCommands.swift text eol=lf
+
+# Source files that tests read as text and match with \n regexes: keep LF on every checkout (Windows autocrlf).
+*.ts text eol=lf
+*.tsx text eol=lf
+*.mjs text eol=lf

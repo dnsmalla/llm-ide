@@ -832,17 +832,27 @@ mod tests {
 
         #[test]
         fn stdio_child_carries_lines_and_dies_on_kill() {
-            let mut child = spawn_stdio_program("/bin/sh", &sh("cat"), None).unwrap();
+            // `exec` so the pipe holder is the killed process itself: a plain `sh -c cat` leaves cat
+            // orphaned (and holding stdout) on shells that do not exec the last command.
+            let mut child = spawn_stdio_program("/bin/sh", &sh("exec cat"), None).unwrap();
             let mut stdin = child.take_stdin();
             stdin.write_all(b"ping\n").unwrap();
             let mut stdout = child.take_stdout();
-            let mut line = String::new();
-            stdout.read_line(&mut line).unwrap();
+            // Reads run on a thread so a hang fails in seconds instead of eating the CI job.
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut line = String::new();
+                let n = stdout.read_line(&mut line).unwrap();
+                tx.send((n, line)).unwrap();
+                // The child is dead once its stdout reaches end of file, so nothing is left reading or writing.
+                let mut rest = String::new();
+                tx.send((stdout.read_line(&mut rest).unwrap(), rest)).unwrap();
+            });
+            let (_, line) = rx.recv_timeout(Duration::from_secs(20)).expect("the echoed line");
             assert_eq!(line, "ping\n");
             child.kill();
-            // The child is dead once its stdout reaches end of file, so nothing is left reading or writing.
-            let mut rest = String::new();
-            assert_eq!(stdout.read_line(&mut rest).unwrap(), 0, "the child closed its stdout");
+            let (n, _) = rx.recv_timeout(Duration::from_secs(20)).expect("stdout reached end of file after kill");
+            assert_eq!(n, 0, "the child closed its stdout");
             child.kill();
         }
 

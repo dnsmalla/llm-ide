@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { newRunId, repoPrefixFor, runRoot, stageHostArgs, worktreeBlockedStage } from "../native/worktree-run.ts";
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -61,7 +62,7 @@ test("changed-path host calls are pinned: a worktree run by its id, a main-tree 
 test("no screen reads or reverts changed paths without saying which run or project it means", async () => {
   const { readFileSync, readdirSync, statSync } = await import("node:fs");
   const { join } = await import("node:path");
-  const root = new URL("../../", import.meta.url).pathname;
+  const root = fileURLToPath(new URL("../../", import.meta.url));
   const files = [];
   const walk = (dir) => {
     for (const name of readdirSync(dir)) {

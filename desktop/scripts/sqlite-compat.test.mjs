@@ -164,7 +164,8 @@ test('the gate CLI exits 0 on a good fixture and reads stdin when no file is giv
   assert.match(run.stdout, /GLIBC 2\.28, GLIBCXX 3\.4\.28, CXXABI 1\.3\.12/);
 });
 
-test('staging refuses a wrong .sha256 before creating the output dir or any compat bundle', () => {
+// Skipped on Windows: stage-hub-core.mjs is POSIX-only and exits 2 on a drive-letter --out before reaching the checksum.
+test('staging refuses a wrong .sha256 before creating the output dir or any compat bundle', { skip: process.platform === 'win32' && 'hub staging is POSIX-only' }, () => {
   const dir = tempDir();
   const module = join(dir, 'standin.node');
   writeFileSync(module, 'stand-in module');
