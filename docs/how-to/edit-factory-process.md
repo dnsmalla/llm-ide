@@ -58,7 +58,7 @@ Intake then writes `.factory/READINESS.md`, and the Intake gate stops a run that
     { "role": "implement", "prompt": "Keep the change small and add a test." },
     { "role": "custom", "name": "Structure verify", "kind": "shellCommand", "command": "auto" },
     { "role": "verify", "command": "auto" },
-    { "role": "custom", "name": "Test gaps", "kind": "skill", "skill": "test-gap-writer", "severity": "advisory" },
+    { "role": "custom", "name": "Test gaps", "kind": "skill", "skill": "test-gap-writer", "input": ".factory/PLAN.md", "output": ".", "severity": "advisory" },
     { "role": "review" },
     { "role": "reviewGate" }
   ]
@@ -78,7 +78,12 @@ A `custom` step has a `kind`:
 
 - `shellCommand` runs `command`; `"auto"` means the detected structure check (lint, TypeScript or Ruff), and the step
   stays off while none is detected.
-- `skill` runs `skill` (`doc-writer` or `skills/doc-writer`) with an optional `prompt`.
+- `skill` runs `skill` (`doc-writer` or `skills/doc-writer`) with an optional `prompt`. Set `input` to the file or
+  folder the skill reads (for example `".factory/PLAN.md"`, or `"."` for the whole repository) and, optionally, `output`
+  to what it writes. Both are repository-relative paths without `..`. An `output` under `.factory/` is deleted before
+  the step runs, and the step fails if the skill does not write it again; the Factory's own files (`TASK.md`,
+  `PLAN.md`, `READINESS.md`, `REVIEW.md`, `STEP-REVIEWS.md`, `HUMAN-REVIEW.md` and `reviews/`) cannot be an `output`.
+  For a Factory loop these paths are edited here only: the Loop screen shows them read-only.
 - `artifactCheck` passes when the file `verdictPath` (under `.factory/`, for example `.factory/LINT.md`) contains the
   line `verdictLine`, for example `Verdict: clean`. An earlier step writes that file. `.factory/READINESS.md` and
   `.factory/REVIEW.md` belong to the Factory's own gates.

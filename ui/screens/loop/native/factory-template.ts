@@ -7,6 +7,7 @@ import type { FsApi } from "../../explorer/fs";
 import { DETECTED_STRUCTURE, DETECTED_TEST } from "./environment.ts";
 import { FACTORY_BUILT_IN_STAGES, FACTORY_TEMPLATE, factoryRole, isCustomStage, type FactoryRole } from "./factory.ts";
 import type { LoopDefinition, LoopEngineConfig, LoopStage } from "./model.ts";
+import { HUMAN_REVIEW_FILE, STEP_REVIEW_DIR, STEP_REVIEWS_FILE } from "./review.ts";
 
 export const TEMPLATE_FILE = "system/factory-template.json";
 
@@ -16,6 +17,10 @@ export interface TemplateStage {
   name?: string;
   kind?: "shellCommand" | "skill" | "artifactCheck";
   skill?: string;
+  /** A custom skill step's input file or folder (the stage's target path), repository-relative. */
+  input?: string;
+  /** A custom skill step's output file or folder (the stage's output path), repository-relative. */
+  output?: string;
   verdictPath?: string;
   verdictLine?: string;
   enabled?: boolean;
@@ -36,7 +41,7 @@ const REQUIRED: readonly FactoryRole[] = ["implement", "verify", "review", "revi
 const ORDER: readonly [FactoryRole, FactoryRole][] = [["implement", "verify"], ["verify", "review"], ["review", "reviewGate"]];
 const PROMPT_ROLES = new Set<TemplateRole>(["intake", "plan", "implement", "review"]);
 const COMMAND_ROLES = new Set<TemplateRole>(["setup", "verify"]);
-const STAGE_KEYS = new Set(["role", "name", "kind", "skill", "verdictPath", "verdictLine", "enabled", "severity", "command", "timeoutMinutes", "prompt", "reviewAfter"]);
+const STAGE_KEYS = new Set(["role", "name", "kind", "skill", "input", "output", "verdictPath", "verdictLine", "enabled", "severity", "command", "timeoutMinutes", "prompt", "reviewAfter"]);
 // Only the steps whose output an AI review can judge; a gate, setup, verify or a shell step has nothing to review.
 const REVIEW_AFTER_ROLES = new Set<TemplateRole>(["intake", "plan", "implement"]);
 const SKILL = /^(skills\/)?[a-z0-9][a-z0-9-]{0,63}$/;
@@ -49,6 +54,18 @@ const BETWEEN_REVIEW_AND_GATE = 'a custom skill step cannot come between "review
 function verdictPathProblem(p: string): string | null {
   if (p.length > 200 || !p.startsWith(".factory/") || p.includes("\\") || p.split("/").some((seg) => seg === ".." || seg === "") || /[\r\n]/.test(p)) return 'a relative path under ".factory/" of at most 200 characters, without ".."';
   if (RESERVED_VERDICTS.has(p)) return `"${p}" belongs to the Factory's own gate`;
+  return null;
+}
+// A custom step must not take over a file the Factory's own steps write: an output under .factory/ is cleared before
+// the step runs, so naming one of these would erase the work item, the plan or a gate's report.
+const RESERVED_OUTPUTS = new Set([".factory/TASK.md", ".factory/PLAN.md", STEP_REVIEWS_FILE, HUMAN_REVIEW_FILE, ...RESERVED_VERDICTS]);
+const isReservedOutput = (p: string): boolean => RESERVED_OUTPUTS.has(p) || p === STEP_REVIEW_DIR || p.startsWith(`${STEP_REVIEW_DIR}/`);
+
+/** Why a custom step's input or output path is refused, or null: one repository-relative line without "..". */
+function stepPathProblem(p: string): string | null {
+  if (p.trim() === "" || p.length > 300 || /[\u0000-\u001f\u007f]/.test(p) || p.includes("\\") || p.startsWith("/") || p.startsWith("~") || /^[A-Za-z]:/.test(p) || (p !== "." && p.split("/").some((seg) => seg === "" || seg === "." || seg === ".."))) {
+    return 'a repository-relative path of 1 to 300 characters, such as ".factory/PLAN.md", "src" or "." for the whole repository, without "..", "./" or "//"';
+  }
   return null;
 }
 const MAX_STAGES = 30;
@@ -242,6 +259,15 @@ function checkStage(raw: unknown, at: string, err: (path: string, message: strin
     else if (typeof raw.skill !== "string" || !SKILL.test(raw.skill)) e(`${at}.skill`, 'a skill name such as "doc-writer" or "skills/doc-writer" (lower-case letters, digits and -)');
     else out.skill = raw.skill;
   } else if (skillStep) e(`${at}.skill`, "a custom skill step needs a skill");
+  for (const k of ["input", "output"] as const) {
+    const v = raw[k];
+    if (v === undefined) continue;
+    if (!skillStep) { e(`${at}.${k}`, 'only a custom step with "kind": "skill" has it'); continue; }
+    const why = typeof v === "string" ? stepPathProblem(v) : "a path written as text";
+    if (why) e(`${at}.${k}`, why);
+    else if (k === "output" && isReservedOutput(v as string)) e(`${at}.${k}`, `"${v as string}" belongs to the Factory's own steps`);
+    else out[k] = v as string;
+  }
   for (const k of ["verdictPath", "verdictLine"] as const) {
     if (raw[k] !== undefined && !checkStep) e(`${at}.${k}`, 'only a custom "artifactCheck" step has it');
   }
@@ -322,7 +348,7 @@ function checkProcess(stages: TemplateStage[], err: (path: string, message: stri
 
 // ---- format, default, migration, apply -----------------------------------------------------------------------------
 
-const STAGE_ORDER: (keyof TemplateStage)[] = ["role", "name", "kind", "skill", "enabled", "severity", "reviewAfter", "verdictPath", "verdictLine", "command", "timeoutMinutes", "prompt"];
+const STAGE_ORDER: (keyof TemplateStage)[] = ["role", "name", "kind", "skill", "input", "output", "enabled", "severity", "reviewAfter", "verdictPath", "verdictLine", "command", "timeoutMinutes", "prompt"];
 
 export function formatFactoryTemplate(t: FactoryTemplate): string {
   const stages = t.stages.map((s) => Object.fromEntries(STAGE_ORDER.filter((k) => s[k] !== undefined).map((k) => [k, s[k]])));
@@ -407,6 +433,8 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
       const skill = s.skillId?.startsWith("skills/") ? s.skillId.slice(7) : s.skillId;
       if (!skill || !SKILL.test(skill)) { drop(s, `its skill "${s.skillId ?? ""}" is not a skills/<name> skill`); continue; }
       out.skill = skill;
+      if (s.targetPath) out.input = s.targetPath;
+      if (s.outputPath) out.output = s.outputPath;
       if (s.prompt) out.prompt = s.prompt;
       if (typeof s.reviewAfter === "boolean") out.reviewAfter = s.reviewAfter;
     }
@@ -498,6 +526,8 @@ export function applyTemplate(loop: LoopDefinition, t: FactoryTemplate, detected
       // Only a "custom/" id keeps a step out of the Factory's roles, so an older loop's random id is replaced.
       id: prev && isCustomStage(prev) ? prev.id : base.id,
       kind, name: ts.name ?? "", command, skillId, prompt: kind === "skill" ? ts.prompt ?? null : null,
+      // The template is the source of truth for a custom step's files, so an input removed there is removed here too.
+      targetPath: kind === "skill" ? ts.input ?? null : null, outputPath: kind === "skill" ? ts.output ?? null : null,
       enabled: ts.enabled ?? !undetected, severity: ts.severity ?? "blocking", timeoutSeconds, order, runOnce: false,
       allowsRepair: prev?.allowsRepair ?? base.allowsRepair, check, testOp: null, graphOp: null, raw: null,
       disabledByDetection: undetected ? true : kind === "shellCommand" && auto ? false : prev?.disabledByDetection ?? null,

@@ -349,3 +349,49 @@ test("Review Focus 5: applying the default twice is the same loop, and the pinne
 test("the default template budget allows 3 rounds", () => {
   assert.equal(defaultFactoryTemplate().budget.maxIterations, 3);
 });
+
+test("every skill step of the default Factory has an input file", () => {
+  const skills = FACTORY_TEMPLATE.config.stages.filter((s) => s.kind === "skill");
+  assert.ok(skills.length > 0);
+  for (const s of skills) assert.ok(s.targetPath, `${s.name} has no input`);
+  const t = defaultFactoryTemplate();
+  assert.deepEqual(t.stages.filter((x) => x.kind === "skill").map((x) => [x.name, x.input, x.output]), [["Test gaps", ".factory/PLAN.md", "."], ["Doc review", ".factory/PLAN.md", "."]]);
+});
+
+test("a custom skill step's input and output parse, apply to the stage and survive the round trip", () => {
+  const t = base();
+  t.stages.splice(2, 0, { role: "custom", name: "Docs", kind: "skill", skill: "doc-writer", input: ".factory/PLAN.md", output: "docs" });
+  const r = parseFactoryTemplate(text(t));
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.deepEqual(r.template.stages[2], { role: "custom", name: "Docs", kind: "skill", skill: "doc-writer", input: ".factory/PLAN.md", output: "docs" });
+  const applied = applyTemplate(loopOf(), r.template, "npm test");
+  const step = applied.config.stages.find((s) => s.name === "Docs");
+  assert.equal(step.targetPath, ".factory/PLAN.md");
+  assert.equal(step.outputPath, "docs");
+  assert.deepEqual(templateFromLoop(applied).template.stages[2], r.template.stages[2]);
+  // Removed from the template = removed from the stage, not kept from the previous apply.
+  delete r.template.stages[2].input;
+  assert.equal(applyTemplate(applied, r.template, "npm test").config.stages.find((s) => s.name === "Docs").targetPath, null);
+});
+
+test("input and output are refused off skill steps, outside the repository, and on the Factory's own files", () => {
+  const withStep = (step) => { const t = base(); t.stages.splice(2, 0, { role: "custom", name: "X", kind: "skill", skill: "doc-writer", ...step }); return text(t); };
+  const msgs = (step) => errorsOf(withStep(step)).map((e) => `${e.path}: ${e.message}`).join("\n");
+  assert.match(msgs({ input: "../secret" }), /stages\[2\]\.input/);
+  assert.match(msgs({ input: "/etc/passwd" }), /stages\[2\]\.input/);
+  assert.match(msgs({ input: "" }), /stages\[2\]\.input/);
+  assert.match(msgs({ input: 3 }), /stages\[2\]\.input: a path written as text/);
+  assert.match(msgs({ output: ".factory/PLAN.md" }), /belongs to the Factory's own steps/);
+  assert.match(msgs({ output: ".factory/REVIEW.md" }), /belongs to the Factory's own steps/);
+  assert.match(msgs({ output: ".factory/STEP-REVIEWS.md" }), /belongs to the Factory's own steps/);
+  assert.match(msgs({ output: ".factory/reviews/x.md" }), /belongs to the Factory's own steps/);
+  assert.match(msgs({ output: ".factory/./PLAN.md" }), /stages\[2\]\.output/);
+  assert.match(msgs({ output: ".factory//PLAN.md" }), /stages\[2\]\.output/);
+  assert.equal(parseFactoryTemplate(withStep({ input: ".", output: ".factory/NOTES.md" })).ok, true);
+  const t = base();
+  t.stages[0].input = ".factory/PLAN.md";
+  t.stages.splice(1, 0, { role: "custom", name: "Lint", kind: "shellCommand", command: "make lint", output: "." });
+  const errs = errorsOf(text(t)).map((e) => e.path);
+  assert.ok(errs.includes("stages[0].input"), errs.join(","));
+  assert.ok(errs.includes("stages[1].output"), errs.join(","));
+});

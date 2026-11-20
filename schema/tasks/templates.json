@@ -720,7 +720,8 @@
       "stages": [
         {
           "name": "Apply skill",
-          "kind": "skill"
+          "kind": "skill",
+          "targetPath": "."
         },
         {
           "name": "Test",
@@ -745,7 +746,8 @@
       "stages": [
         {
           "name": "Write docs",
-          "kind": "skill"
+          "kind": "skill",
+          "targetPath": "."
         },
         {
           "name": "Docs check",

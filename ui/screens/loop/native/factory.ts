@@ -53,7 +53,7 @@ export const FACTORY_BUILT_IN_STAGES: readonly LoopStage[] = [
   stage(3, { id: "factory/plan", name: "Plan", kind: "skill", skillId: FACTORY_PLAN_SKILL, runOnce: true, allowsRepair: false, targetPath: ".factory/TASK.md", outputPath: ".factory/PLAN.md", prompt: PROMPTS["factory.plan"] }),
   stage(4, { id: "factory/implement", name: "Implement", kind: "skill", skillId: FACTORY_IMPLEMENT_SKILL, runOnce: true, allowsRepair: true, targetPath: ".factory/PLAN.md", prompt: PROMPTS["factory.implement"] }),
   stage(5, { id: "factory/verify", name: "Verify", kind: "shellCommand", command: DETECTED_TEST, allowsRepair: true }),
-  stage(6, { id: "factory/review", name: "Review", kind: "skill", skillId: FACTORY_REVIEW_SKILL, allowsRepair: false, outputPath: REVIEW_PATH, prompt: PROMPTS["factory.review"] }),
+  stage(6, { id: "factory/review", name: "Review", kind: "skill", skillId: FACTORY_REVIEW_SKILL, allowsRepair: false, targetPath: ".factory/PLAN.md", outputPath: REVIEW_PATH, prompt: PROMPTS["factory.review"] }),
   stage(7, { id: "factory/review-gate", name: "Review gate", kind: "artifactCheck", check: { verdict: { path: REVIEW_PATH, line: "Verdict: approve" } }, allowsRepair: true }),
 ];
 
@@ -77,8 +77,8 @@ export const FACTORY_TEMPLATE: LoopTemplate = {
       // Custom steps carry a "custom/" id: factoryRole gives them no role, so they are never taken for Verify.
       stage(3, { id: "custom/structure-verify-1", name: "Structure verify", kind: "shellCommand", command: DETECTED_STRUCTURE, enabled: false, disabledByDetection: true, allowsRepair: true }),
       builtIn("factory/verify", 4),
-      stage(5, { id: "custom/test-gaps-2", name: "Test gaps", kind: "skill", skillId: "skills/test-gap-writer", severity: "advisory", allowsRepair: false, prompt: TEST_GAPS_PROMPT }),
-      stage(6, { id: "custom/doc-review-3", name: "Doc review", kind: "skill", skillId: "skills/doc-writer", severity: "advisory", allowsRepair: false, prompt: DOC_REVIEW_PROMPT }),
+      stage(5, { id: "custom/test-gaps-2", name: "Test gaps", kind: "skill", skillId: "skills/test-gap-writer", severity: "advisory", allowsRepair: false, targetPath: ".factory/PLAN.md", outputPath: ".", prompt: TEST_GAPS_PROMPT }),
+      stage(6, { id: "custom/doc-review-3", name: "Doc review", kind: "skill", skillId: "skills/doc-writer", severity: "advisory", allowsRepair: false, targetPath: ".factory/PLAN.md", outputPath: ".", prompt: DOC_REVIEW_PROMPT }),
       builtIn("factory/review", 7),
       builtIn("factory/review-gate", 8),
     ],

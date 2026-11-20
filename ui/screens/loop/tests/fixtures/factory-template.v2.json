@@ -132,8 +132,8 @@
       {
         "command": null,
         "skillId": "skills/test-gap-writer",
-        "targetPath": null,
-        "outputPath": null,
+        "targetPath": ".factory/PLAN.md",
+        "outputPath": ".",
         "prompt": "Read .factory/PLAN.md and the files this run changed. Add or extend tests only where that changed behaviour has none, following the repository's own test layout. Do not change application code or behaviour, and write nothing under .factory/.",
         "isDefault": false,
         "enabled": true,
@@ -157,8 +157,8 @@
       {
         "command": null,
         "skillId": "skills/doc-writer",
-        "targetPath": null,
-        "outputPath": null,
+        "targetPath": ".factory/PLAN.md",
+        "outputPath": ".",
         "prompt": "Read .factory/PLAN.md and the files this run changed. Bring the documentation and docstrings that describe that changed behaviour up to date. Change documentation only, never code or behaviour, and write nothing under .factory/.",
         "isDefault": false,
         "enabled": true,
@@ -182,7 +182,7 @@
       {
         "command": null,
         "skillId": "skills/factory-review",
-        "targetPath": null,
+        "targetPath": ".factory/PLAN.md",
         "outputPath": ".factory/REVIEW.md",
         "prompt": "Review the diff below against .factory/TASK.md and .factory/PLAN.md. Write .factory/REVIEW.md as the factory-review skill describes. Write nothing outside .factory/.",
         "isDefault": false,
