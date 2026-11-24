@@ -925,3 +925,25 @@ test("a held record with malformed fields (the reader already drops non-object r
   assert.ok(posts.length <= 1);
   assert.deepEqual(JSON.parse(storage.getItem("llmide.factory.pendingRecords")), []);
 });
+
+test("log lines are coalesced into one notification, reads are never stale, and a state change absorbs the pending one", async () => {
+  let log;
+  setup({ runLoop: (_config, deps) => { log = deps.log; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  let notes = 0;
+  const off = rm.subscribe(() => { notes += 1; });
+  for (let i = 0; i < 20; i++) log(`line ${i}`);
+  assert.equal(notes, 0, "no notification per line");
+  assert.equal(rm.liveRuns()[0].log.at(-1), "line 19", "a read sees every line appended so far");
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(notes, 1, "one notification for the burst");
+  log("tail");
+  rm.setRunNote(a, "n");
+  assert.equal(notes, 2, "a state change notifies at once");
+  assert.equal(rm.liveRuns()[0].log.at(-1), "tail");
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(notes, 2, "the pending log notification was absorbed");
+  off();
+  await finish(a);
+});

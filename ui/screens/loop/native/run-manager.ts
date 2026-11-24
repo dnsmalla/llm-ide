@@ -224,6 +224,8 @@ export function resetRunManagerForTests(): void {
   unsubscribeProject = null;
   deps = { ...PURE_DEFAULTS };
   snapshot = Object.freeze([]);
+  if (logTimer !== null) { clearTimeout(logTimer); logTimer = null; }
+  logDirty = false;
 }
 
 function requireDeps(): RunManagerDeps {
@@ -258,14 +260,36 @@ export function setConcurrency(n: number): void {
   pump();
 }
 
-function emit(): void {
+function rebuild(): void {
+  logDirty = false;
   const all = [...[...runs.values()].map((r) => r.live), ...external.values()];
   snapshot = Object.freeze(all.map((r) => Object.freeze({ ...r, log: [...r.log] })));
+}
+
+function emit(): void {
+  if (logTimer !== null) { clearTimeout(logTimer); logTimer = null; }
+  rebuild();
   for (const l of [...listeners]) l();
+}
+
+/** Log lines arrive in bursts: one snapshot and notification per window, not per line. */
+const LOG_EMIT_MS = 50;
+let logTimer: ReturnType<typeof setTimeout> | null = null;
+let logDirty = false;
+function emitSoon(): void {
+  logDirty = true;
+  if (logTimer !== null) return;
+  logTimer = setTimeout(() => {
+    logTimer = null;
+    if (logDirty) rebuild();
+    for (const l of [...listeners]) l();
+  }, LOG_EMIT_MS);
+  (logTimer as { unref?: () => void }).unref?.();
 }
 
 /** The same frozen snapshot until something changes (`useSyncExternalStore` needs a stable value). */
 export function liveRuns(): readonly LiveRun[] {
+  if (logDirty) rebuild(); // a read never sees a log older than the lines already appended
   return snapshot;
 }
 
@@ -310,7 +334,7 @@ export function takeRunNotice(): string | null {
 function appendLog(run: ManagedRun, line: string): void {
   run.live.log.push(line);
   if (run.live.log.length > MAX_LOG_LINES) run.live.log.splice(0, run.live.log.length - MAX_LOG_LINES);
-  emit();
+  emitSoon();
 }
 
 /** Logs why a run did not start and keeps it for takeRunNotice (the live run and its log disappear at once). */
