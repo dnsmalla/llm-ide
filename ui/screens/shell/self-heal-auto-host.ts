@@ -20,7 +20,12 @@ async function needsHumanIds(core: Pick<CoreClient, "request">): Promise<Set<str
 }
 
 /** Starts the checks; returns the stop function. A check never overlaps the previous one. */
-export function startSelfHealAuto(d: { core: Pick<CoreClient, "request" | "requestRaw">; invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T> }): () => void {
+export function startSelfHealAuto(d: {
+  core: Pick<CoreClient, "request" | "requestRaw">;
+  invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+  /** Signed in, the core ready and trusted: until then a check is skipped without using the day. */
+  ready: () => boolean;
+}): () => void {
   // The run manager is loaded lazily by the Shell too; until it is, no Loop run can be live.
   let liveRuns: (() => readonly unknown[]) | null = null;
   void import("../loop/native/run-manager.ts").then((m) => { liveRuns = m.liveRuns; }, () => undefined);
@@ -30,6 +35,7 @@ export function startSelfHealAuto(d: { core: Pick<CoreClient, "request" | "reque
     state: loadAutoState,
     save: saveAutoState,
     recording: selfHealEnabled,
+    ready: d.ready,
     loopBusy: () => (liveRuns?.().length ?? 0) > 0,
     needsHuman: () => needsHumanIds(d.core),
     run: () => runSelfHealFix(settingsClientFrom(d.core), createSelfHealHost(d)),

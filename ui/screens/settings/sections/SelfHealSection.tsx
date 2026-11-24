@@ -2,7 +2,7 @@
 // Ignore, Refresh and Clear all. Plan B: Try to fix (one manual agent run in a git worktree of the source checkout,
 // then make test and make regression there) and the proposals it leaves: Review the diff, Apply it to the checkout (never a commit)
 // or Discard it. Text is shown as text, never run or sent.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useEnv } from "../context.tsx";
 import { ApiError, call } from "../core-api.ts";
 import type { SelfHealDiff } from "../host.ts";
@@ -10,6 +10,7 @@ import { Button, ErrorText } from "../ui.tsx";
 import { SOURCE_TEXT, STATUS_TEXT, decodeIncidents, incidentSummary, isTestFile, proposalsOf, type IncidentView } from "../self-heal-model.ts";
 import { COST_TEXT, STEP_TEXT, resetSelfHealRun, runSelfHealFix, type RunStep } from "../self-heal-run.ts";
 import SelfHealAutoControls from "./SelfHealAutoControls.tsx";
+import { autoRunInProgress, subscribeAutoRun } from "../self-heal-auto.ts";
 
 const BASE = "/kb/self-heal/incidents";
 const why = (e: unknown): string => (e instanceof ApiError ? e.code : e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -25,6 +26,8 @@ export default function SelfHealSection() {
   const [result, setResult] = useState<string | null>(null);
   const [stuckRun, setStuckRun] = useState<string | null>(null);
   const [review, setReview] = useState<(SelfHealDiff & { runId: string }) | null>(null);
+  // The daily automatic run in progress: Try to fix would collide with it and Reset would delete its worktree.
+  const autoRunning = useSyncExternalStore(subscribeAutoRun, autoRunInProgress, () => false);
   const load = useCallback(async () => {
     try {
       setItems(decodeIncidents(await call(client, "GET", BASE)));
@@ -119,7 +122,7 @@ export default function SelfHealSection() {
     );
   const busyRow = (i: IncidentView) => i.status === "fixing" || i.status === "proposed";
   const proposals = items ? proposalsOf(items) : [];
-  const canFix = !busy && items !== null && items.some((i) => i.status === "new" && i.environmental === null);
+  const canFix = !busy && !autoRunning && items !== null && items.some((i) => i.status === "new" && i.environmental === null);
 
   return (
     <div className="st-stack">
@@ -133,7 +136,8 @@ export default function SelfHealSection() {
       {sh ? <SelfHealAutoControls /> : null}
       {step ? <p className="st-hint" role="status">{STEP_TEXT[step]}</p> : null}
       {result ? <p className="st-hint" role="status">{result}</p> : null}
-      {stuckRun ? <Button disabled={busy} onClick={() => void reset()}>Reset the interrupted run</Button> : null}
+      {autoRunning ? <p className="st-hint" role="status">The daily automatic run is in progress. Try to fix is available again when it ends.</p> : null}
+      {stuckRun ? <Button disabled={busy || autoRunning} onClick={() => void reset()}>Reset the interrupted run</Button> : null}
       <ErrorText text={error} />
       {proposals.length > 0 ? (
         <section className="st-stack" aria-label="Proposed fixes">

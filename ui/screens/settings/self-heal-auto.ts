@@ -29,9 +29,12 @@ export interface AutoDeps {
   now(): Date;
   config(): AutoConfig;
   state(): AutoState;
-  save(s: AutoState): void;
+  /** False when the state could not be stored (blocked or full storage). */
+  save(s: AutoState): boolean;
   /** True once the host said this build records (`selfHealEnabled`). */
   recording(): boolean;
+  /** Signed in and the core is ready: a check before that would fail and use up the day. */
+  ready(): boolean;
   loopBusy(): boolean;
   /** Ids of the incidents that need a person. */
   needsHuman(): Promise<Set<string>>;
@@ -90,19 +93,37 @@ function isRunActive(e: unknown): boolean {
 
 const ids = async (d: AutoDeps): Promise<Set<string>> => d.needsHuman().catch(() => new Set<string>());
 
+// In memory on purpose: the run lives in this webview, so a reload ends it and this flag with it. Settings reads it to
+// keep Try to fix and Reset away from a run in progress (Reset would delete the worktree the run is using).
+let running = false;
+const runListeners = new Set<() => void>();
+const setRunning = (on: boolean): void => {
+  running = on;
+  for (const l of [...runListeners]) l();
+};
+export const autoRunInProgress = (): boolean => running;
+export function subscribeAutoRun(l: () => void): () => void {
+  runListeners.add(l);
+  return () => {
+    runListeners.delete(l);
+  };
+}
+
 /** One check. "ran" also covers a run that failed (the day is used: a down core must not be retried all day). */
 export async function autoTickOnce(d: AutoDeps): Promise<"skipped" | "waiting" | "ran"> {
   const now = d.now();
   const prev = d.state();
-  if (!d.recording() || !isDue(d.config(), prev, now)) return "skipped";
+  if (running || !d.recording() || !d.ready() || !isDue(d.config(), prev, now)) return "skipped";
   const wait = (): "waiting" => {
     d.save({ ...prev, waitUntil: now.getTime() + AUTO_WAIT_MS });
     return "waiting";
   };
   if (d.loopBusy()) return wait();
-  d.save({ ...prev, lastRunDay: dayKey(now) });
+  // A day that cannot be recorded is not run: otherwise every check would run again.
+  if (!d.save({ ...prev, lastRunDay: dayKey(now) })) return "skipped";
   const before = await ids(d);
   let result: RunResult;
+  setRunning(true);
   try {
     result = await d.run();
   } catch (e) {
@@ -110,6 +131,8 @@ export async function autoTickOnce(d: AutoDeps): Promise<"skipped" | "waiting" |
     const why = (e instanceof Error ? e.message : String(e)).slice(0, 200);
     d.save({ ...d.state(), last: { at: now.getTime(), message: `Self-Heal's daily run failed: ${why}` } });
     return "ran";
+  } finally {
+    setRunning(false);
   }
   d.save({ ...d.state(), last: { at: now.getTime(), message: result.message } });
   const after = await ids(d);
@@ -141,6 +164,5 @@ export const loadAutoConfig = (): AutoConfig => readAutoConfig(stored(AUTO_CONFI
 export const loadAutoState = (): AutoState => readAutoState(stored(AUTO_STATE_KEY));
 /** False when the switch could not be saved (blocked storage). */
 export const saveAutoConfig = (c: AutoConfig): boolean => store(AUTO_CONFIG_KEY, JSON.stringify(c));
-export const saveAutoState = (s: AutoState): void => {
-  store(AUTO_STATE_KEY, JSON.stringify(s));
-};
+export const saveAutoState = (s: AutoState): boolean => store(AUTO_STATE_KEY, JSON.stringify(s));
+

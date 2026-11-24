@@ -202,7 +202,11 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     // Errors no screen caught; reporting is a no-op until the host says this build records.
     const stopCapture = installGlobalErrorCapture(globalThis);
     // The daily automatic fix run, when the user turned it on in Settings → Self-Heal.
-    const stopAuto = startSelfHealAuto({ core, invoke: invokeHost });
+    const stopAuto = startSelfHealAuto({
+      core,
+      invoke: invokeHost,
+      ready: () => core.getSnapshot().signedIn && coreStatusStore.getSnapshot().status?.state === "ready" && trustGate.allowed(),
+    });
     return () => {
       stopPump();
       stopCapture();

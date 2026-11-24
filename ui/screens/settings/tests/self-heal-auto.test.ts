@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AUTO_CONFIG_KEY, AUTO_WAIT_MS, autoTickOnce, dayKey, isDue, loadAutoConfig, loadAutoState, readAutoConfig, readAutoState, saveAutoConfig, saveAutoState, type AutoConfig, type AutoDeps, type AutoState } from "../self-heal-auto.ts";
+import { AUTO_CONFIG_KEY, AUTO_WAIT_MS, autoRunInProgress, autoTickOnce, dayKey, isDue, loadAutoConfig, loadAutoState, readAutoConfig, readAutoState, saveAutoConfig, saveAutoState, type AutoConfig, type AutoDeps, type AutoState } from "../self-heal-auto.ts";
 import type { RunResult } from "../self-heal-run.ts";
 
 const at = (d: number, h: number, m: number) => new Date(2026, 10, d, h, m);
 const on: AutoConfig = { enabled: true, time: "12:30" };
 const fresh: AutoState = { lastRunDay: "", waitUntil: 0, last: null };
 
-function deps(o: { now?: Date; config?: AutoConfig; state?: AutoState; recording?: boolean; loopBusy?: boolean; run?: () => Promise<RunResult>; before?: string[]; after?: string[] } = {}) {
+function deps(o: { now?: Date; config?: AutoConfig; state?: AutoState; recording?: boolean; ready?: boolean; saveFails?: boolean; loopBusy?: boolean; run?: () => Promise<RunResult>; before?: string[]; after?: string[] } = {}) {
   let state: AutoState = o.state ?? fresh;
   const seen = { runs: 0, notified: 0, stateAtRun: null as AutoState | null };
   let human = 0;
@@ -15,8 +15,9 @@ function deps(o: { now?: Date; config?: AutoConfig; state?: AutoState; recording
     now: () => o.now ?? at(24, 12, 31),
     config: () => o.config ?? on,
     state: () => state,
-    save: (s) => { state = s; },
+    save: (s) => { if (o.saveFails) return false; state = s; return true; },
     recording: () => o.recording ?? true,
+    ready: () => o.ready ?? true,
     loopBusy: () => o.loopBusy ?? false,
     needsHuman: async () => new Set((human++ === 0 ? o.before : o.after) ?? []),
     run: async () => { seen.runs += 1; seen.stateAtRun = state; return o.run ? o.run() : { proposed: 0, message: "No new incidents to fix." }; },
@@ -120,4 +121,29 @@ test("storage that throws reads as off and a save reports failure", () => {
   } finally {
     g.localStorage = had;
   }
+});
+
+test("not signed in or the core not ready yet: skipped, the day is not used", async () => {
+  const f = deps({ ready: false });
+  assert.equal(await autoTickOnce(f.d), "skipped");
+  assert.equal(f.seen.runs, 0);
+  assert.deepEqual(f.state(), fresh);
+});
+
+test("a day that cannot be recorded is never run (no run every 5 minutes)", async () => {
+  const f = deps({ saveFails: true });
+  assert.equal(await autoTickOnce(f.d), "skipped");
+  assert.equal(f.seen.runs, 0);
+});
+
+test("autoRunInProgress is true only while the automatic run runs, also when it throws", async () => {
+  let during = false;
+  const ok = deps({ run: async () => { during = autoRunInProgress(); return { proposed: 0, message: "m" }; } });
+  assert.equal(autoRunInProgress(), false);
+  await autoTickOnce(ok.d);
+  assert.equal(during, true);
+  assert.equal(autoRunInProgress(), false);
+  const bad = deps({ run: async () => { throw new Error("down"); } });
+  await autoTickOnce(bad.d);
+  assert.equal(autoRunInProgress(), false);
 });
