@@ -18,7 +18,7 @@
 -- runs right after this file. 0045's scrub skipped these sections while they were
 -- strings, and 0043's key list is narrower than REVIEW_SECRET_KEY_RE (no auth /
 -- credential / bearer), so a re-typed object may carry a key 0045 would have
--- removed. The scrub is idempotent and changes a row only when a key goes.
+-- removed. The scrub is idempotent and changes a row only when its re-serialised JSON differs.
 
 UPDATE review_items
    SET payload = json_set(payload, '$.config', json(json_extract(payload, '$.config')))
