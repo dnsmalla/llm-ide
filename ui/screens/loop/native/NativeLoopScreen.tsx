@@ -51,7 +51,7 @@ import { stageIdForLogLine } from "./stage-follow.ts";
 import { clearLiveCard, setLiveCard, updateLiveStage } from "./live-card.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
 import { readRepoConfig } from "../../settings/repo-config";
-import { capRunLog } from "./run-log.ts";
+import { appendRunLog, capRunLog } from "./run-log.ts";
 import { createStartGate } from "./start-gate.ts";
 import { readSchedule, scheduleTick } from "./schedule-tick.ts";
 import { unsavedWork } from "../../shell/unsaved-work.ts";
@@ -146,7 +146,14 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const [checkingEnv, setCheckingEnv] = useState(false);
   const [envVersions, setEnvVersions] = useState<{ python: string | null; node: string | null; git: string | null } | null>(null);
   const [runLog, setRunLogRaw] = useState<string[]>([]);
-  const setRunLog = (u: SetStateAction<string[]>) => setRunLogRaw((l) => capRunLog(typeof u === "function" ? u(l) : u));
+  // Streamed output waits here for the next flush. Every log write folds it in first, so a line pushed at the end of a
+  // stage cannot land before the stage's last output.
+  const pendingLog = useRef("");
+  const setRunLog = (u: SetStateAction<string[]>) => {
+    const t = pendingLog.current;
+    pendingLog.current = "";
+    setRunLogRaw((l) => { const base = t ? appendRunLog(l, t) : l; return capRunLog(typeof u === "function" ? u(base) : u); });
+  };
   // The live log follows new lines while the reader is at its bottom; scrolling up to read stops the follow.
   const logRef = useRef<HTMLPreElement | null>(null);
   const followLogRef = useRef(true);
@@ -285,6 +292,9 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     // `live` guards the race where the screen unmounts before listen() resolves: the listener is then removed on resolve.
     let live = true;
     let un: (() => void) | null = null;
+    // A burst of chunks becomes one state update per 50 ms (a timer, not a frame: frames stop while the window is hidden).
+    let timer: number | null = null;
+    const flush = () => { timer = null; setRunLog((l) => l); };
     void listen<{ stageId: string; runId?: string | null; stream: "stdout" | "stderr"; text: string }>("loop-stage-output", (e) => {
       const text = e.payload.text;
       if (!text) return;
@@ -292,14 +302,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       // A single "Run stage" has no run id and does not mark the loop as running, but its output is this page's too.
       const mine = runningRef.current ? (e.payload.runId ?? null) === (activeRunRef.current?.runId ?? null) : runningStageRef.current && (e.payload.runId ?? null) === null;
       if (!mine) return;
-      setRunLog((l) => {
-        if (l.length === 0) return [text];
-        const copy = [...l];
-        copy[copy.length - 1] = copy[copy.length - 1] + text;
-        return copy;
-      });
+      pendingLog.current += text;
+      if (timer === null) timer = window.setTimeout(flush, 50);
     }).then((fn) => { if (live) un = fn; else fn(); }).catch(() => undefined);
-    return () => { live = false; if (un) un(); };
+    return () => { live = false; if (un) un(); if (timer !== null) window.clearTimeout(timer); };
   }, []);
 
   // A project switch remounts this screen (the shell keys it by project). A run still in flight would keep editing the
@@ -1089,7 +1095,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     setRunLog((l) => [...l, `$ ${stage.name}`, ""]);
     try {
       const r = await runOneStage(stageContext(null, workRoot ?? projectRoot ?? "", approvalToken), stage, loop, [], { reason: null, isError: false });
-      setRunLog((l) => [...l, r.output, r.ok ? "Stage passed." : "Stage failed."]);
+      setRunLog((l) => [...l, ...r.output.split("\n"), r.ok ? "Stage passed." : "Stage failed."]);
       setNotice(r.ok ? "The stage passed." : "The stage failed.");
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
