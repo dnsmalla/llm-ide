@@ -2,7 +2,7 @@
 // Editing/runner arrive next; every field shown here comes from the file, never from the bridge.
 import { notifyTask } from "../../shell/notify/notify";
 import { reportUiIncident } from "../../shell/self-heal";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { SectionProps } from "@llmide/screens/shell";
 import { COPY_SERVER_PATH_LABEL, fileManagerActionFor } from "../../shell/server-path.ts";
@@ -51,6 +51,7 @@ import { stageIdForLogLine } from "./stage-follow.ts";
 import { clearLiveCard, setLiveCard, updateLiveStage } from "./live-card.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
 import { readRepoConfig } from "../../settings/repo-config";
+import { capRunLog } from "./run-log.ts";
 import { createStartGate } from "./start-gate.ts";
 import { readSchedule, scheduleTick } from "./schedule-tick.ts";
 import { unsavedWork } from "../../shell/unsaved-work.ts";
@@ -144,7 +145,8 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const [envReason, setEnvReason] = useState("Checking the project environment…");
   const [checkingEnv, setCheckingEnv] = useState(false);
   const [envVersions, setEnvVersions] = useState<{ python: string | null; node: string | null; git: string | null } | null>(null);
-  const [runLog, setRunLog] = useState<string[]>([]);
+  const [runLog, setRunLogRaw] = useState<string[]>([]);
+  const setRunLog = (u: SetStateAction<string[]>) => setRunLogRaw((l) => capRunLog(typeof u === "function" ? u(l) : u));
   // The live log follows new lines while the reader is at its bottom; scrolling up to read stops the follow.
   const logRef = useRef<HTMLPreElement | null>(null);
   const followLogRef = useRef(true);
