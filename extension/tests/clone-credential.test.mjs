@@ -285,7 +285,12 @@ test("the endpoint list advertises the grant route and not the redeem route", ()
   const block = src.slice(src.indexOf("const ALL_ENDPOINTS = ["), src.indexOf("];", src.indexOf("const ALL_ENDPOINTS = [")));
   assert.match(block, /'\/kb\/repos\/clone-grant'/);
   assert.equal(block.includes("clone-credential"), false);
-  assert.match(src, /const SERVER_API_VERSION = 158;/);
+  // Floor, not equality: adding the grant route bumped the API version to 148
+  // (929513ae4), and every later bump must not falsify this guard.
+  const versionMatch = src.match(/const SERVER_API_VERSION = (\d+);/);
+  assert.ok(versionMatch, "server.mjs must declare `const SERVER_API_VERSION = <number>;`");
+  const version = Number(versionMatch[1]);
+  assert.ok(version >= 148, `the clone-grant route bumped the API version to 148; got ${version}`);
 });
 
 test("no token, grant or redeem key reaches the stderr logger during issue and redeem", async () => {
