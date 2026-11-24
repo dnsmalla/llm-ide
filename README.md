@@ -24,7 +24,7 @@ Your data stays in a per-user SQLite store on your machine (or on the hub you ru
 
 ## Get started
 
-You need Node 22+, Git and the [Claude CLI](https://docs.claude.com/en/docs/claude-code/quickstart) (`claude login`). The desktop app also needs Rust 1.88+.
+You need Node 22+, Git and the [Claude CLI](https://docs.claude.com/en/docs/claude-code/quickstart) (`claude login`). The desktop app also needs Rust 1.90+.
 
 ```bash
 git clone --recurse-submodules git@github.com:dnsmalla/llm-ide.git

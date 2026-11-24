@@ -20,7 +20,7 @@ for (const f of ALL_FEATURES) {
   featureDefines[`__FEATURE_${f.toUpperCase()}__`] = JSON.stringify(compiled.has(f));
 }
 
-// Monaco 0.57 ships its own copy of DOMPurify (3.4.15, with known advisories) at
+// Monaco ships its own, older copy of DOMPurify (with known advisories) at
 // esm/vs/base/browser/dompurify/dompurify.js, imported by relative path, so an npm
 // override cannot reach it. Redirect that import to the pinned `dompurify` package
 // (package.json, exact version). `scripts/check-dompurify.mjs` verifies the build.

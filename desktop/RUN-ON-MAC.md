@@ -1,10 +1,10 @@
 # Running LLM-IDE (desktop) on your Mac
 
 This is the Tauri desktop app: one window with Chat, Explorer (files, search, source control, terminal),
-Library and Settings, backed by its own local core (a bundled Node server). It runs next to the Swift Mac app
-without touching its data.
+Library and Settings, backed by its own local core (a bundled Node server). It replaced the Swift Mac app, which was
+removed on 2026-11-06. A leftover install of that app keeps its own data, which this app never touches.
 
-| | Desktop app (this) | Swift Mac app |
+| | Desktop app (this) | Removed Swift Mac app (leftover install) |
 |---|---|---|
 | Bundle id | `com.llmide.desktop` | `com.llmide.macapp` |
 | App data | `~/Library/Application Support/llm-ide-desktop` | `~/Library/Application Support/llm-ide` |
@@ -122,7 +122,7 @@ Try these in order. Note anything that differs in the bug-report template at the
   (stop it with Cmd+Q in the app, or Ctrl+C in that terminal).
 - **Reset:** quit the app and move `~/Library/Application Support/llm-ide-desktop` aside to start from an empty
   core. Remove the keychain item `com.llmide.desktop` too if the app says the secret store is unreadable.
-- **Two apps on one port:** if the Swift app (or an old `node server.mjs`) holds 3456, the desktop app leaves
+- **Two apps on one port:** if an old `node server.mjs` (or a core left running by the removed Swift app) holds 3456, the desktop app leaves
   it alone and runs its own core on the next free port of 3456-3459 (the Chrome extension then cannot connect).
   Nothing needs to be quit.
 - **"Cannot reach the core":** the web view could not talk to a core it may use. Look at the status bar first:
@@ -151,14 +151,14 @@ verified): everything above. Not built yet, from the parity checklist (no longer
   when its feature is off, window state restore of the project (you pick it from recent projects each launch).
   These were listed in the 2026-11-05 checklist and were not re-checked on 2026-11-12; the welcome page and the
   activity bell exist now.
-- Chat: the archive settings card of the Swift app is replaced by the Agent history card; context meter has no
+- Chat: the archive settings card of the removed Swift app was replaced by the Agent history card; context meter has no
   breakdown.
 - Explorer: project paths sheet, project memory viewer, hunk-level staging inside the editor diff (staging
   hunks is in Source Control).
 - Library: plugin detail / git install / marketplace / Claude and Codex import sheets, LLM-source add, update
   and per-item checkboxes, source removal for some connectors.
 - Settings: Backend (restart), Preferences, Tool approvals (stored rules), Agent SDK, Token saving, Memory and
-  Paths sections of the Swift app have no desktop equivalent yet.
+  Paths sections of the removed Swift app have no desktop equivalent yet.
 - The SDK's bundled `claude` binary is deliberately not shipped: Chat needs your own Claude Code install or a
   provider key.
 - Developer ID signing and notarization, auto-update, Windows and Linux builds are not part of this build; no

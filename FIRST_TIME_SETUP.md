@@ -3,7 +3,7 @@
 ## New Machine Setup
 
 ```bash
-# 0. Prerequisites (new Mac): Xcode CLT, Node 22+, Rust 1.88+, Claude CLI
+# 0. Prerequisites (new Mac): Xcode CLT, Node 22+, Rust 1.90+, Claude CLI
 xcode-select --install
 # Homebrew first if missing: https://brew.sh
 brew install node                                   # must be v22 or newer
