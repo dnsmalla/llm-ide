@@ -39,8 +39,9 @@ pub fn write_private_atomic(path: &Path, body: &[u8], max: usize) -> Result<(), 
     if body.len() > max {
         return Err(format!("refusing to write {} bytes (limit {max})", body.len()));
     }
-    let tmp = path.with_extension("tmp");
-    let _ = std::fs::remove_file(&tmp);
+    // A name of its own per write: two writers of one file must never share (and rename away) a temp.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = path.with_extension(format!("{}.{}.tmp", std::process::id(), SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create_new(true);
     #[cfg(unix)]
@@ -49,9 +50,12 @@ pub fn write_private_atomic(path: &Path, body: &[u8], max: usize) -> Result<(), 
         opts.mode(0o600);
     }
     let mut f = opts.open(&tmp).map_err(|e| e.to_string())?;
-    f.write_all(body).and_then(|()| f.sync_all()).map_err(|e| e.to_string())?;
+    let written = f.write_all(body).and_then(|()| f.sync_all());
     drop(f);
-    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+    written.and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 /// Folder name of the desktop app's data. Deliberately NOT the Mac app's
@@ -322,5 +326,19 @@ mod tests {
         assert!(root.join("share").is_dir(), "the platform base was created");
         let _ = std::fs::remove_dir_all(&root);
     }
-}
 
+    #[test]
+    fn concurrent_writers_of_one_file_all_succeed_and_leave_one_whole_body() {
+        let dir = std::env::temp_dir().join(format!("llmide-fsutil-race-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("state.json");
+        let writers: Vec<_> = (0..8u8)
+            .map(|i| { let f = f.clone(); std::thread::spawn(move || (0..50).all(|_| write_private_atomic(&f, &[b'a' + i; 4096], 4096).is_ok())) })
+            .collect();
+        assert!(writers.into_iter().all(|w| w.join().unwrap()), "no writer may lose its temp file to another");
+        let body = std::fs::read(&f).unwrap();
+        assert!(body.len() == 4096 && body.iter().all(|b| *b == body[0]));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temp file is left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

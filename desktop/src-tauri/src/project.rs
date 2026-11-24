@@ -277,16 +277,22 @@ fn ensure_scaffold(root: &Path) -> Result<(), String> {
     crate::project_scaffold::scaffold(root, &project)
 }
 
+/// Held across each read-modify-write of the recent list, so two edits cannot lose one another's entry.
+static RECENT_EDIT: Mutex<()> = Mutex::new(());
+
 /// Accepts `chosen` as the active root and records it as most recent.
 fn activate(dir: &Path, chosen: &Path) -> Result<ProjectInfo, String> {
     let root = validate_root(chosen)?;
     if let Err(e) = ensure_scaffold(&root) {
         eprintln!("project: scaffold not written: {e}");
     }
-    let next = push_record(&load_recent_records(dir), RecentRecord { root: root.to_string_lossy().into_owned(), opened_at: Some(now_rfc3339()) }, MAX_RECENT);
-    // A failed history write must not block opening the project.
-    if let Err(e) = save_records(dir, &next) {
-        eprintln!("project: recent list not saved: {e}");
+    {
+        let _one = RECENT_EDIT.lock();
+        let next = push_record(&load_recent_records(dir), RecentRecord { root: root.to_string_lossy().into_owned(), opened_at: Some(now_rfc3339()) }, MAX_RECENT);
+        // A failed history write must not block opening the project.
+        if let Err(e) = save_records(dir, &next) {
+            eprintln!("project: recent list not saved: {e}");
+        }
     }
     if let Ok(mut g) = ACTIVE.lock() {
         *g = Some(root.clone());
@@ -417,6 +423,7 @@ pub fn recent_with_status(dir: &Path) -> RecentList {
 /// Removes entry `index` from the stored list when it still names `root` (a stale index changes nothing).
 /// Only the list is edited: no file or folder is touched.
 pub fn forget_recent_in(dir: &Path, index: usize, root: &str) -> Result<bool, String> {
+    let _one = RECENT_EDIT.lock();
     let list = load_recent_records(dir);
     if list.get(index).map(|r| r.root.as_str()) != Some(root) {
         return Ok(false);
