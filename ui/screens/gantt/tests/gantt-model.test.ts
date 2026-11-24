@@ -169,6 +169,18 @@ test("dependency arrows run from the blocker's end to the dependent's start, ski
   ]);
 });
 
+test("a dependency resolves to the dependent's own repo even when another repo has the same number", () => {
+  const range = { start: dayNumber("2026-11-01")!, days: 21 };
+  const row = (repo: string, number: number, s: string, e: string, dependsOn: number[] = []) =>
+    ({ issue: issue({ number, repo }), schedule: null, start: dayNumber(s), end: dayNumber(e), dependsOn });
+  const a12 = row("o/a", 12, "2026-11-01", "2026-11-03"), b12 = row("o/b", 12, "2026-11-10", "2026-11-12"), a42 = row("o/a", 42, "2026-11-05", "2026-11-08", [12]);
+  for (const rows of [[b12, a12, a42], [a12, b12, a42]]) {
+    const [l, ...rest] = dependencyLines(rows, range, 10, (i) => i);
+    assert.equal(rest.length, 0);
+    assert.equal(l!.y1, rows.indexOf(a12));
+  }
+});
+
 test("today scroll keeps today a third into the viewport, never negative", () => {
   assert.equal(todayScrollLeft(300, 300), 200);
   assert.equal(todayScrollLeft(20, 900), 0);

@@ -401,16 +401,18 @@ export interface DependencyLine {
  * no geometry and is skipped (the Mac does the same).
  */
 export function dependencyLines(rows: readonly GanttRow[], range: TimelineRange, dayWidth: number, rowY: (index: number) => number): DependencyLine[] {
-  const indexByNumber = new Map<number, number>();
+  // Numbers repeat across repos in the multi-repo view: a dependency is always on the dependent's own repo.
+  const keyOf = (i: Issue, n: number) => `${i.provider}\u0000${i.repo}\u0000${n}`;
+  const indexByNumber = new Map<string, number>();
   rows.forEach((r, i) => {
-    if (r.issue.number !== null && !indexByNumber.has(r.issue.number)) indexByNumber.set(r.issue.number, i);
+    if (r.issue.number !== null && !indexByNumber.has(keyOf(r.issue, r.issue.number))) indexByNumber.set(keyOf(r.issue, r.issue.number), i);
   });
   const out: DependencyLine[] = [];
   rows.forEach((dep, j) => {
     const dg = barGeometry(dep, range, dayWidth);
     if (!dg || dep.issue.number === null) return;
     for (const b of dep.dependsOn) {
-      const i = indexByNumber.get(b);
+      const i = indexByNumber.get(keyOf(dep.issue, b));
       if (i === undefined) continue;
       const bg = barGeometry(rows[i]!, range, dayWidth);
       if (!bg) continue;
