@@ -161,8 +161,8 @@ verified): everything above. Not built yet, from the parity checklist (no longer
   Paths sections of the removed Swift app have no desktop equivalent yet.
 - The SDK's bundled `claude` binary is deliberately not shipped: Chat needs your own Claude Code install or a
   provider key.
-- Developer ID signing and notarization, auto-update, Windows and Linux builds are not part of this build; no
-  Windows or Linux run has happened (`PACKAGING.md`).
+- Developer ID signing and notarization, auto-update, Windows and Linux builds are not part of this local build: the
+  release workflow does them (`../docs/how-to/desktop-release.md`).
 
 ## Bug-report template
 

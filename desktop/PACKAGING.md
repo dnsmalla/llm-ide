@@ -164,7 +164,7 @@ missing. `scripts/check-core-deps.mjs` loads the staged `.node` under the STAGED
 open) along with the other runtime modules; `scripts/smoke-core.mjs` starts the staged core as the
 host does (cleared env, nonce, secrets, data dir), checks `/health`, the nonce echo, the DB
 location, the claude probe, then stops the group and asserts nothing survives.
-`desktop-release.yml` (manual, unsigned, no secrets) runs stage + check + smoke on macOS arm64,
+`desktop-release.yml` (unsigned on a manual dry run, signed on a tag) runs stage + check + smoke on macOS arm64,
 macOS x64, Windows x64 and Linux x64 before building.
 
 **Verified here (macOS arm64, 2026-10-31):** pinned node download and hash check, stage, 6/6

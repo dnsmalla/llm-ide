@@ -1,7 +1,8 @@
-# LLM-IDE Desktop PoC (throwaway)
+# LLM-IDE Desktop
 
-Tauri 2 + React 19 + Vite + TypeScript spike for the Phase 0 measurements (plan no longer in the repo; see [ADR 0018](../docs/decisions/0018-tauri-desktop-node-core-relay.md)). Not a
-product; nothing here is wired to the Node core yet (that is T2).
+The Tauri 2 + React 19 + Vite + TypeScript desktop app ([ADR 0018](../docs/decisions/0018-tauri-desktop-node-core-relay.md)).
+The Rust host (`src-tauri/`) spawns and supervises the Node core (`../extension`); the screens live in `../ui/screens`.
+Packaging: [PACKAGING.md](PACKAGING.md). Releases: [desktop-release.md](../docs/how-to/desktop-release.md).
 
 ## Run
 
@@ -10,7 +11,7 @@ cd desktop
 npm install            # exact-pinned deps; Tauri CLI is a dev dependency
 npm run dev            # frontend only, http://localhost:5173
 npm run tauri dev      # full app window (starts Vite via beforeDevCommand)
-npm run tauri build    # release bundle (LLM-IDE Desktop PoC.app on macOS)
+npm run tauri build    # release bundle (LLM-IDE.app on macOS)
 npm run tauri build -- --debug --bundles app   # faster debug .app
 npm run tauri dev -- --features spike          # + the Phase-0 spike/bench host commands (autobench, parity screenshots)
 ```
