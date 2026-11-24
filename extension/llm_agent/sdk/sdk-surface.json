@@ -375,7 +375,7 @@
     },
     "options.mcpServersDelivery": {
       "status": "needs-human",
-      "reason": "later: 'initialize' keeps stdio/http server env and headers off the command line, but the chat engine starts a user-installed Claude Code (pathToClaudeCodeExecutable) in the packaged desktop core, which makes the SDK emit CLAUDE_SDK_MCP_SERVERS_ARGV_DEPRECATED while the option is unset; needs a decision on the minimum CLI version and the permission/secret-exposure review"
+      "reason": "later: the SDK emits CLAUDE_SDK_MCP_SERVERS_ARGV_DEPRECATED once per process only when the option is unset, a non-SDK (stdio/HTTP) MCP server is passed, there is no --sdk-url, and pathToClaudeCodeExecutable or spawnClaudeCodeProcess is set. Default 'argv' puts server env/headers on the command line; 'initialize' keeps them off but needs a CLI at least as new as the bundled one (2.1.331; below 2.1.261 it rejects the option), so switching needs a CLI-version gate plus the permission/secret-exposure review"
     },
     "options.model": {
       "status": "adopted",
