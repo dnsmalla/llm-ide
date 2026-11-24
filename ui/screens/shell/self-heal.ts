@@ -102,7 +102,9 @@ const INTERNAL_HOST_CODES: ReadonlySet<string> = new Set([
 /** Whether a host command's rejection is a Self-Heal incident: one with an internal code, or one with no code at all. */
 export function hostErrorWorthReporting(command: string, error: unknown): boolean {
   if (command.startsWith("self_heal_")) return false; // the pump's own failures would report themselves forever
-  const code = hostErrorCode(error);
+  // Many `Result<_, String>` commands put their code in the text (`io: …`, `already_recording: …`): read it the same way.
+  const prefixed = typeof error === "string" ? /^([a-z][a-z_]*): /.exec(error.trim())?.[1] ?? "" : "";
+  const code = hostErrorCode(error) || prefixed;
   return code !== "" ? INTERNAL_HOST_CODES.has(code) : hostErrorText(error) !== "";
 }
 

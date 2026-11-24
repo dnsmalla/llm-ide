@@ -155,3 +155,11 @@ test("installGlobalErrorCapture reports error and unhandledrejection and the rem
   await flush(posted);
   assert.deepEqual(posted.map((r) => [r.category, r.message]), [["uncaught", "e1"], ["uncaught", "r1"], ["uncaught", "Script error."]]);
 });
+
+test("hostErrorWorthReporting reads a `code: message` string's prefix as its code", () => {
+  assert.equal(sh.hostErrorWorthReporting("capture_start", "already_recording: a capture is running"), false);
+  assert.equal(sh.hostErrorWorthReporting("note_read", "io: No such file or directory (os error 2)"), false);
+  assert.equal(sh.hostErrorWorthReporting("x", "internal: state lock poisoned"), true);
+  assert.equal(sh.hostErrorWorthReporting("x", "Error: something broke"), true, "a capitalised word is not a code");
+  assert.equal(sh.hostErrorWorthReporting("x", "that folder is not a git repository"), true);
+});
