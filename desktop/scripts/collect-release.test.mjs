@@ -17,6 +17,19 @@ test('an unsigned dry run needs only the installers', () => {
   assert.deepEqual(r.copies.map((c) => c.to), ['LLM-IDE_0.1.0_x64-setup.exe']);
 });
 
+test('an unsigned macOS dry run needs only the dmg: the app.tar.gz exists only with updater artifacts', () => {
+  for (const [target, arch] of [['darwin-arm64', 'aarch64'], ['darwin-x64', 'x64']]) {
+    const r = planCollect({ target, version: V, files: [`dmg/LLM-IDE_0.1.0_${arch}.dmg`, 'macos/LLM-IDE.app/Contents/Info.plist'], signed: false });
+    assert.deepEqual(r.problems, []);
+    assert.deepEqual(r.copies.map((c) => c.to), [`LLM-IDE_0.1.0_${arch}.dmg`]);
+  }
+});
+
+test('a signed macOS run without the app.tar.gz still fails', () => {
+  const r = planCollect({ target: 'darwin-arm64', version: V, files: ['dmg/LLM-IDE_0.1.0_aarch64.dmg'], signed: true });
+  assert.match(r.problems.join(), /missing LLM-IDE_0\.1\.0_aarch64\.app\.tar\.gz/);
+});
+
 test('a signed run without the updater sig fails', () => {
   const r = planCollect({ target: 'linux-x64', version: V, files: ['appimage/LLM-IDE_0.1.0_amd64.AppImage', 'deb/LLM-IDE_0.1.0_amd64.deb'], signed: true });
   assert.match(r.problems.join(), /AppImage\.sig/);

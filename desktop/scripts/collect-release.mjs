@@ -9,15 +9,16 @@ export const BUDGET_BYTES = 150 * 1024 * 1024;
 const INSTALLER_RE = /\.(dmg|exe|AppImage|deb|rpm|msi|tar\.gz)$/;
 
 // Each entry: the source file (regex on the bundle-relative path), its canonical name, and whether it is an
-// updater artifact (then a .sig must sit beside it in a signed run).
+// updater artifact (then a .sig must sit beside it in a signed run). `updaterOnly` marks a file Tauri builds
+// only with createUpdaterArtifacts (signed runs): an unsigned dry run does not have it and does not need it.
 export const TARGETS = {
   'darwin-arm64': (v) => [
     { re: new RegExp(`^dmg/LLM-IDE_${v}_aarch64\\.dmg$`), to: `LLM-IDE_${v}_aarch64.dmg` },
-    { re: /^macos\/LLM-IDE\.app\.tar\.gz$/, to: `LLM-IDE_${v}_aarch64.app.tar.gz`, updater: true },
+    { re: /^macos\/LLM-IDE\.app\.tar\.gz$/, to: `LLM-IDE_${v}_aarch64.app.tar.gz`, updater: true, updaterOnly: true },
   ],
   'darwin-x64': (v) => [
     { re: new RegExp(`^dmg/LLM-IDE_${v}_x64\\.dmg$`), to: `LLM-IDE_${v}_x64.dmg` },
-    { re: /^macos\/LLM-IDE\.app\.tar\.gz$/, to: `LLM-IDE_${v}_x64.app.tar.gz`, updater: true },
+    { re: /^macos\/LLM-IDE\.app\.tar\.gz$/, to: `LLM-IDE_${v}_x64.app.tar.gz`, updater: true, updaterOnly: true },
   ],
   'win32-x64': (v) => [
     { re: new RegExp(`^nsis/LLM-IDE_${v}_x64-setup\\.exe$`), to: `LLM-IDE_${v}_x64-setup.exe`, updater: true },
@@ -36,6 +37,7 @@ export function planCollect({ target, version, files, signed }) {
   const problems = [];
   const found = files.filter((f) => INSTALLER_RE.test(f) && !f.includes('.app/')).join(', ') || 'nothing';
   for (const e of spec(v)) {
+    if (e.updaterOnly && !signed) continue;
     const want = e.to.replaceAll('\\.', '.');
     const from = files.find((f) => e.re.test(f));
     if (!from) { problems.push(`missing ${want} (found: ${found})`); continue; }
