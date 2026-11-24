@@ -296,7 +296,7 @@ export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, 
   };
 
   const refreshAll = async () => {
-    for (const d of snap.tree.dirs.keys()) await controller.refreshDir(d);
+    for (const d of controller.getSnapshot().tree.dirs.keys()) await controller.refreshDir(d); // live read: callers hold a stale closure
     void controller.refreshGit();
   };
   useEffect(() => shellBus.subscribe("project-changed", () => { void refreshAll(); }), [snap.tree]);
