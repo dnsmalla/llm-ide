@@ -38,6 +38,10 @@ try { pinFor(TARGET); } catch (e) { console.error(e.message); process.exit(2); }
 // (node-runtime.mjs). LLMIDE_NODE_BIN is an offline/dev escape hatch for the host target only
 // (never for a release: LLMIDE_STAGE_RELEASE=1 refuses it). Checked before anything under
 // resources/core is removed.
+if (process.env.LLMIDE_STAGE_RELEASE === '1' && sdkBinaryAllowed()) {
+  console.error('LLMIDE_STAGE_ALLOW_SDK_BINARY=1 is not allowed with LLMIDE_STAGE_RELEASE=1: releases never ship the SDK claude binary');
+  process.exit(2);
+}
 let nodeBin = process.env.LLMIDE_NODE_BIN;
 let nodeInfo = { version: 'local', sha256: null };
 if (nodeBin) {
@@ -136,6 +140,10 @@ if (existsSync(gk)) {
   mkdirSync(gkOut, { recursive: true });
   copyFileSync(gk, join(gkOut, 'graph-kit.js'));
   console.log(`graph-kit CLI staged (${Math.round(statSync(gk).size / 1024)} KiB)`);
+} else if (process.env.LLMIDE_STAGE_RELEASE === '1') {
+  // graph-kit/bin/graph-kit.js is committed in the submodule; missing means the checkout was skipped.
+  console.error(`graph-kit CLI not found at ${gk}: run \`git submodule update --init graph-kit\``);
+  process.exit(2);
 } else {
   console.warn(`warning: graph-kit CLI not found at ${gk}; code-graph generation will be unavailable`);
 }
