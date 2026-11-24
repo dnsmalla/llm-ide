@@ -9,6 +9,7 @@ import type { SelfHealDiff } from "../host.ts";
 import { Button, ErrorText } from "../ui.tsx";
 import { SOURCE_TEXT, STATUS_TEXT, decodeIncidents, incidentSummary, isTestFile, proposalsOf, type IncidentView } from "../self-heal-model.ts";
 import { COST_TEXT, STEP_TEXT, resetSelfHealRun, runSelfHealFix, type RunStep } from "../self-heal-run.ts";
+import SelfHealAutoControls from "./SelfHealAutoControls.tsx";
 
 const BASE = "/kb/self-heal/incidents";
 const why = (e: unknown): string => (e instanceof ApiError ? e.code : e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -129,6 +130,7 @@ export default function SelfHealSection() {
         {confirm("clear", "Clear all", () => void act("DELETE", BASE), "danger", !items || items.length === 0)}
       </div>
       {sh ? null : <p className="st-hint">Try to fix needs the desktop app.</p>}
+      {sh ? <SelfHealAutoControls /> : null}
       {step ? <p className="st-hint" role="status">{STEP_TEXT[step]}</p> : null}
       {result ? <p className="st-hint" role="status">{result}</p> : null}
       {stuckRun ? <Button disabled={busy} onClick={() => void reset()}>Reset the interrupted run</Button> : null}

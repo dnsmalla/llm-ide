@@ -144,10 +144,10 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
   - It is not a `FEATURE_ROUTE_GROUPS` entry, because an unset `LLMIDE_FEATURES` means all on.
 - **Capture (plan A)**:
   - The host turns the spawned core's stderr and panic records into reports.
-  - The webview's pump (`ui/screens/shell/self-heal.ts`, `self_heal_take` every 15 s) adds Chat and Loop failures and posts them to `POST /kb/self-heal/incidents`.
+  - The webview's pump (`ui/screens/shell/self-heal.ts`, `self_heal_take` every 15 s) adds Chat and Loop failures, any section's crash (`section:<name>`), uncaught errors (`uncaught`) and unexpected host-command failures (`host:<command>`; expected refusal codes are filtered) and posts them to `POST /kb/self-heal/incidents`.
   - `kb/incidents.mjs` stores them in `self_heal_incidents` (migration 0067) after `core/incident.mjs` redacted and signed them.
   - **From Chat:** `/self-heal <what is wrong>` (alias `/heal`) records the user's description plus the chat's last exchange (as data) as a `ui` incident of category `chat report` and posts it at once (`reportChatProblem`, `ui/screens/chat/self-heal-report.ts`). The core never classes that category as an environment problem. It only records: the fix is still the manual Try to fix. A release build answers that Self-Heal is debug-only.
-- **Fix loop (plan B, manual only)**: Settings → Self-Heal → Try to fix (`ui/screens/settings/self-heal-run.ts`).
+- **Fix loop (plan B)**: Settings → Self-Heal → Try to fix (`ui/screens/settings/self-heal-run.ts`), or the same run once a day at the user's time when they turn on "Try to fix automatically every day" (`ui/screens/settings/self-heal-auto.ts`, started by the Shell through `ui/screens/shell/self-heal-auto-host.ts`; off by default, only while the app is open, waits while a Loop run or a manual run is busy, and notifies with the host's `self_heal` kind, which is never pushed). Apply is always the user's click.
   1. `POST /kb/self-heal/runs` (one run per user, 4 h in-memory lease) triages up to 5 `new` incidents and returns `.self-heal/BATCH.md` (`core/self-heal-batch.mjs`).
   2. The host adds a worktree of the source checkout under `<data dir>/self-heal/loop-worktrees/<run id>` (`self_heal_fix.rs`).
   3. One `POST /kb/loop/agent-run` edits the worktree.
@@ -158,7 +158,7 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
   - While a run is open, the core skips `log` and `server` reports.
   - **Learning across runs (API 151, migration 0079):** each incident keeps `history` (newest 4: a failed attempt's verdict and the redacted 2000-character tail of the failing `make regression`, sent as the outcome's `verifyOutput`; an applied fix; a recurrence after it). `renderBatch` lists it, fenced, as "attempt N of 3 … take a different approach", the prompt asks for a test that fails without the fix, and Settings shows it under "Earlier attempts".
   - **Notes in the repo (plan 2026-11-19 phase 4):** an applied fix (`resolve` with `applied`) and an incident that reaches `needsHuman` are appended as `## <date> · fixed|needs a person · <category>` sections to `<source checkout>/system/self-improvement/self-heal.md` (redacted text only, at most 256 KiB, oldest sections dropped; the repo is re-checked against the allow-list; best effort). A new run's BATCH.md quotes the newest 5 notes for its incidents' categories, fenced as data.
-- **Never** log incident text or send it anywhere. It reaches a model only fenced inside `BATCH.md`, in a run the user started.
+- **Never** log incident text or send it anywhere. It reaches a model only fenced inside `BATCH.md`, in a run the user started or scheduled.
 - Tests:
   - node: `tests/incident-rules.test.mjs`, `tests/self-heal-store.test.mjs`, `tests/self-heal-routes.test.mjs`, `tests/self-heal-server.test.mjs` (spawns `server.mjs`; needs local listen), `tests/self-heal-batch.test.mjs`, `tests/self-heal-fix-store.test.mjs`, `tests/self-heal-runs.test.mjs` (local listen)
   - cargo: `self_heal_fix` (real git in temp folders)

@@ -51,6 +51,7 @@ import { disabledSectionText, isSectionEnabled, keepSectionNotice, type SectionN
 import { quickSwitchRows } from "./menu-model";
 import { coreApiWarning } from "./core-api-floor";
 import { installGlobalErrorCapture, startSelfHealPump } from "./self-heal";
+import { startSelfHealAuto } from "./self-heal-auto-host";
 declare const __FEATURE_AUTO_TASKS__: boolean | undefined;
 
 export interface ShellProps {
@@ -200,9 +201,12 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     });
     // Errors no screen caught; reporting is a no-op until the host says this build records.
     const stopCapture = installGlobalErrorCapture(globalThis);
+    // The daily automatic fix run, when the user turned it on in Settings → Self-Heal.
+    const stopAuto = startSelfHealAuto({ core, invoke: invokeHost });
     return () => {
       stopPump();
       stopCapture();
+      stopAuto();
     };
   }, []);
   useEffect(() => { if (shellHost.isAvailable()) void reportSection(nav.active); }, [nav.active]);

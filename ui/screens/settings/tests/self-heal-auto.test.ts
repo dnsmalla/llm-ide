@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AUTO_WAIT_MS, autoTickOnce, dayKey, isDue, readAutoConfig, readAutoState, type AutoConfig, type AutoDeps, type AutoState } from "../self-heal-auto.ts";
+import { AUTO_CONFIG_KEY, AUTO_WAIT_MS, autoTickOnce, dayKey, isDue, loadAutoConfig, loadAutoState, readAutoConfig, readAutoState, saveAutoConfig, saveAutoState, type AutoConfig, type AutoDeps, type AutoState } from "../self-heal-auto.ts";
 import type { RunResult } from "../self-heal-run.ts";
 
 const at = (d: number, h: number, m: number) => new Date(2026, 10, d, h, m);
@@ -101,4 +101,23 @@ test("a wait expiring after midnight does not run the old day", async () => {
   const f = deps({ now: at(25, 0, 10), state: { ...fresh, waitUntil: at(24, 23, 50).getTime() } });
   assert.equal(await autoTickOnce(f.d), "skipped");
   assert.equal(f.seen.runs, 0);
+});
+
+test("storage that throws reads as off and a save reports failure", () => {
+  const g = globalThis as { localStorage?: unknown };
+  const had = g.localStorage;
+  try {
+    g.localStorage = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
+    assert.deepEqual(loadAutoConfig(), { enabled: false, time: "12:30" });
+    assert.deepEqual(loadAutoState(), fresh);
+    assert.equal(saveAutoConfig(on), false);
+    saveAutoState(fresh); // never throws
+    const map = new Map<string, string>();
+    g.localStorage = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); } };
+    assert.equal(saveAutoConfig(on), true);
+    assert.deepEqual(JSON.parse(map.get(AUTO_CONFIG_KEY) ?? "null"), on);
+    assert.deepEqual(loadAutoConfig(), on);
+  } finally {
+    g.localStorage = had;
+  }
 });

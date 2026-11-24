@@ -116,3 +116,31 @@ export async function autoTickOnce(d: AutoDeps): Promise<"skipped" | "waiting" |
   if (result.proposed > 0 || [...after].some((id) => !before.has(id))) await d.notify().catch(() => undefined);
   return "ran";
 }
+
+// ── Storage: this machine's localStorage. A blocked store reads as off and never throws. ──
+function stored(key: string): string | null {
+  try {
+    return (globalThis as { localStorage?: Storage }).localStorage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function store(key: string, value: string): boolean {
+  try {
+    const ls = (globalThis as { localStorage?: Storage }).localStorage;
+    if (!ls) return false;
+    ls.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const loadAutoConfig = (): AutoConfig => readAutoConfig(stored(AUTO_CONFIG_KEY));
+export const loadAutoState = (): AutoState => readAutoState(stored(AUTO_STATE_KEY));
+/** False when the switch could not be saved (blocked storage). */
+export const saveAutoConfig = (c: AutoConfig): boolean => store(AUTO_CONFIG_KEY, JSON.stringify(c));
+export const saveAutoState = (s: AutoState): void => {
+  store(AUTO_STATE_KEY, JSON.stringify(s));
+};
