@@ -1,6 +1,10 @@
 {
-  "sdkVersion": "0.3.301",
+  "sdkVersion": "0.3.331",
   "items": {
+    "functions.archiveSession": {
+      "status": "needs-human",
+      "reason": "later: session archive mark (a file beside the local transcript, rejects sessionStore); pairs with the session-lifecycle decision for deleteSession / listSessions"
+    },
     "functions.createSdkMcpServer": {
       "status": "adopted",
       "where": "tools.mjs, loop-agent.mjs"
@@ -45,6 +49,10 @@
       "status": "needs-human",
       "reason": "later: no current caller; revisit with the session lifecycle (A1/A13) or the subagent adoption (A5)"
     },
+    "functions.matchDeniedModels": {
+      "status": "needs-human",
+      "reason": "later: alpha helper comparing model IDs with deniedModels entries, explicitly not the CLI enforcement; revisit with the model-policy review"
+    },
     "functions.prewarm": {
       "status": "needs-human",
       "reason": "later: engine already prewarms lazily after listen; revisit if cold start matters"
@@ -72,6 +80,10 @@
     "functions.tool": {
       "status": "adopted",
       "where": "tools.mjs, loop-agent.mjs"
+    },
+    "functions.unarchiveSession": {
+      "status": "needs-human",
+      "reason": "later: counterpart of archiveSession; decided together with it"
     },
     "messages.SDKAPIRetryMessage": {
       "status": "adopted",
@@ -180,6 +192,10 @@
     "messages.SDKSessionStateChangedMessage": {
       "status": "ignored",
       "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
+    },
+    "messages.SDKSessionWritesLostMessage": {
+      "status": "ignored",
+      "reason": "disk-full / quota notice sent once at CLI exit (\"safe to ignore\" per the typings); LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKStatusMessage": {
       "status": "needs-human",
@@ -356,6 +372,10 @@
     "options.mcpServers": {
       "status": "adopted",
       "where": "engine.mjs"
+    },
+    "options.mcpServersDelivery": {
+      "status": "needs-human",
+      "reason": "later: 'initialize' keeps stdio/http server env and headers off the command line, but the chat engine starts a user-installed Claude Code (pathToClaudeCodeExecutable) in the packaged desktop core, which makes the SDK emit CLAUDE_SDK_MCP_SERVERS_ARGV_DEPRECATED while the option is unset; needs a decision on the minimum CLI version and the permission/secret-exposure review"
     },
     "options.model": {
       "status": "adopted",
