@@ -129,6 +129,24 @@ fn respond(stream: &mut TcpStream, status: u16, reason: &str, body: &[u8], conte
     let _ = stream.write_all(body);
 }
 
+const MAX_CONNS: usize = 64;
+static CONNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// One of at most `MAX_CONNS` live connections; released on drop.
+struct ConnSlot;
+impl ConnSlot {
+    fn take() -> Option<Self> {
+        if CONNS.fetch_add(1, Ordering::SeqCst) >= MAX_CONNS {
+            CONNS.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(ConnSlot)
+    }
+}
+impl Drop for ConnSlot {
+    fn drop(&mut self) { CONNS.fetch_sub(1, Ordering::SeqCst); }
+}
+
 fn handle(mut stream: TcpStream, agent: &ureq::Agent, hub: &str, token: &str) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
@@ -236,10 +254,15 @@ fn start_on(agent: ureq::Agent, hub_url: &str, ports: &[u16]) -> Result<ProxyHan
         for conn in listener.incoming() {
             if stop_for_thread.load(Ordering::SeqCst) { break; }
             let Ok(stream) = conn else { continue };
+            // Over the cap the connection is dropped (closed) at once instead of costing another thread.
+            let Some(slot) = ConnSlot::take() else { continue };
             let agent = agent.clone();
             let hub = hub_for_thread.clone();
             let token = token_for_thread.clone();
-            std::thread::spawn(move || handle(stream, &agent, &hub, &token));
+            std::thread::spawn(move || {
+                let _slot = slot;
+                handle(stream, &agent, &hub, &token)
+            });
         }
     });
     Ok(ProxyHandle { url: format!("http://127.0.0.1:{port}/{token}"), token, stop, port })
@@ -248,6 +271,15 @@ fn start_on(agent: ureq::Agent, hub_url: &str, ports: &[u16]) -> Result<ProxyHan
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_connection_cap_refuses_past_the_limit_and_frees_on_drop() {
+        // The counter is shared with the proxy tests running beside this one, so take until refused, not exactly MAX.
+        let held: Vec<_> = (0..=MAX_CONNS).map_while(|_| ConnSlot::take()).collect();
+        assert!(held.len() <= MAX_CONNS, "a slot past the cap was granted");
+        drop(held);
+        assert!(ConnSlot::take().is_some());
+    }
     use std::net::TcpListener as StdListener;
 
     fn start_test(agent: ureq::Agent, hub: &str) -> ProxyHandle { start_on(agent, hub, &[0]).unwrap() }
