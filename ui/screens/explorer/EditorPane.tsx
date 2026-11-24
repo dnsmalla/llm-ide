@@ -24,6 +24,7 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
   const mountEl = useRef<HTMLDivElement>(null);
   const started = useRef(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadTry, setLoadTry] = useState(0);
   const activeId = snap.tabs.activeId;
   const doc = activeId ? snap.docs.get(activeId) : undefined;
   const markdown = !!activeId && /\.(md|markdown)$/i.test(activeId);
@@ -73,9 +74,12 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
         editorRef.current = ed;
         controller.attachEditor();
       },
-      (e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)),
+      (e: unknown) => {
+        started.current = false; // lets "Try again" load once more
+        setLoadError(e instanceof Error ? e.message : String(e));
+      },
     );
-  }, [hasTabs, loadEditor, controller, editorRef]);
+  }, [hasTabs, loadEditor, controller, editorRef, loadTry]);
 
   // Dispose with the screen.
   useEffect(
@@ -113,7 +117,7 @@ export function EditorPane({ controller, snap, loadEditor, editorRef, onCloseTab
 
   return (
     <section className="ex-editor" aria-label="Editor">
-      {loadError && <StatusBanner severity="error" message={`The editor could not load: ${loadError}`} />}
+      {loadError && <StatusBanner severity="error" message={<>{`The editor could not load: ${loadError} `}<button type="button" className="ex-btn" onClick={() => { setLoadError(null); setLoadTry((n) => n + 1); }}>Try again</button></>} />}
       {d && st && activeId && (
         <>
           <div className="ex-toolbar" role="toolbar" aria-label="File actions">
