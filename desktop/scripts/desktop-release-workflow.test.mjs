@@ -2,7 +2,7 @@
 // Text asserts on the desktop release workflows (plain text asserts over the workflow files).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync as readRaw } from 'node:fs';
+import { readFileSync as readRaw, readdirSync } from 'node:fs';
 // Windows checks the workflows out with CRLF; the asserts are written against LF.
 const readFileSync = (p, enc) => readRaw(p, enc).replace(/\r\n/g, '\n');
 import { join } from 'node:path';
@@ -159,9 +159,25 @@ test('final review: the frontend SBOM reads the lockfile only, and Windows signi
 
 test('supply chain: every action is pinned by commit, signed jobs wait for the protected environment, Rust is pinned', () => {
   const y = rel();
-  for (const m of y.matchAll(/uses: (\S+)/g)) assert.match(m[1], /@[0-9a-f]{40}$/, `${m[1]} is not pinned by SHA`);
+  const files = [...readdirSync(WF).filter((f) => /^desktop-.*\.yml$/.test(f)), 'sqlite-linux-compat.yml'];
+  for (const f of files) {
+    for (const m of readFileSync(join(WF, f), 'utf8').matchAll(/uses: (\S+)/g)) assert.match(m[1], /@[0-9a-f]{40}$/, `${f}: ${m[1]} is not pinned by SHA`);
+  }
+  assert.match(prom(), /promote:\n\s+runs-on: ubuntu-latest\n\s+environment: desktop-release\n/);
   // preflight and bundle read secrets; an unsigned dry run resolves to no environment.
   assert.equal(y.match(/environment: \$\{\{ \(startsWith\(github\.ref, 'refs\/tags\/desktop-v'\) \|\| inputs\.signed == true\) && 'desktop-release' \|\| '' \}\}/g)?.length, 2);
   assert.match(y, /RUST_VERSION: '\d+\.\d+\.\d+'/);
   assert.doesNotMatch(y, /rustup (toolchain install|default) stable/);
+});
+
+test('signing secrets never reach the frontend build: it is its own secret-free step and tauri build skips beforeBuildCommand', () => {
+  const wf = rel();
+  const steps = wf.split(/\n      - /);
+  const fe = steps.findIndex((x) => /name: Build the frontend \(no secrets\)/.test(x));
+  const bundles = steps.findIndex((x) => /name: Build bundles/.test(x));
+  assert.ok(fe > 0 && fe < bundles);
+  assert.match(steps[fe], /run: npm run build/);
+  assert.doesNotMatch(steps[fe], /secrets\./);
+  assert.match(steps[bundles], /beforeBuildCommand":""/);
+  assert.match(steps[bundles], /cfg=\(--config "\$RUNNER_TEMP\/no-before-build\.json"\)/);
 });

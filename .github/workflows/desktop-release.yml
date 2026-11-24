@@ -227,6 +227,12 @@ jobs:
               if ($LASTEXITCODE -ne 0) { exit 1 }
             }
           }
+      # Secret-free: `tauri build` would otherwise run this as a child that inherits the signing secrets.
+      - name: Build the frontend (no secrets)
+        working-directory: desktop
+        env:
+          LLMIDE_OMIT_SOURCE_ROOT: '1'
+        run: npm run build
       - name: Build bundles
         working-directory: desktop
         env:
@@ -241,9 +247,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.SIGNED == 'true' && secrets.DESKTOP_UPDATER_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.SIGNED == 'true' && secrets.DESKTOP_UPDATER_KEY_PASSWORD || '' }}
         run: |
-          cfg=""
-          [ "$SIGNED" = "true" ] && cfg="--config \"$RUNNER_TEMP/release.conf.json\""
-          eval npm run tauri build -- --bundles ${{ matrix.bundles }} $cfg
+          # beforeBuildCommand is disabled by a config file (inline JSON quoting breaks through npm.cmd on Windows).
+          echo '{"build":{"beforeBuildCommand":""}}' > "$RUNNER_TEMP/no-before-build.json"
+          cfg=(--config "$RUNNER_TEMP/no-before-build.json")
+          [ "$SIGNED" = "true" ] && cfg+=(--config "$RUNNER_TEMP/release.conf.json")
+          npm run tauri build -- --bundles ${{ matrix.bundles }} "${cfg[@]}"
       - name: Verify Authenticode signatures on Windows
         if: runner.os == 'Windows' && env.WIN_SIGNED == 'true'
         shell: pwsh
