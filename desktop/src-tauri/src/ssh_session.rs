@@ -522,6 +522,15 @@ pub(crate) fn write_session(path: &Path, endpoint: &SshEndpoint, nonce: &str) ->
 
 /// Writes the record as one file, 0600. Its contents are a host, a port, a user and nonces: no secret.
 fn save_record(path: &Path, record: &SessionRecord) -> Result<(), FsError> {
+    let _one = SESSION_FILE.lock();
+    write_record(path, record)
+}
+
+/// One writer at a time: the link's thread notes its forward by read-modify-write, and a connect's nonce written
+/// in between must not be put back to the old one.
+static SESSION_FILE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn write_record(path: &Path, record: &SessionRecord) -> Result<(), FsError> {
     let json = serde_json::to_string(record).map_err(|e| herr("session_record_failed", e.to_string()))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
@@ -557,17 +566,19 @@ fn restore_record(path: &Path, before: Option<SessionRecord>) {
 
 /// Notes the running forward in the session record. Best effort: no record yet means nothing to attach it to.
 pub(crate) fn record_forward(path: &Path, pid: u32, spec: &str) {
+    let _one = SESSION_FILE.lock();
     if let Some(mut record) = read_session(path) {
         record.forward = Some(ForwardRecord { pid, spec: spec.to_string() });
-        let _ = save_record(path, &record);
+        let _ = write_record(path, &record);
     }
 }
 
 /// Forgets the forward `pid`, when it is still the recorded one.
 pub(crate) fn clear_forward(path: &Path, pid: u32) {
+    let _one = SESSION_FILE.lock();
     if let Some(mut record) = read_session(path).filter(|r| r.forward.as_ref().is_some_and(|f| f.pid == pid)) {
         record.forward = None;
-        let _ = save_record(path, &record);
+        let _ = write_record(path, &record);
     }
 }
 
@@ -582,6 +593,7 @@ fn is_recorded_forward(spec: &str, ps_command: &str) -> bool {
 /// Stops a forward left behind by a crash, so its local port is free again. Runs before the port is picked.
 #[cfg(unix)]
 fn reap_stale_forward(session_file: &Path) {
+    let _one = SESSION_FILE.lock();
     let Some(mut record) = read_session(session_file) else { return };
     let Some(forward) = record.forward.take() else { return };
     let ps = std::process::Command::new("ps").args(["-o", "command=", "-p", &forward.pid.to_string()]).output();
@@ -598,7 +610,7 @@ fn reap_stale_forward(session_file: &Path) {
             unsafe { libc::kill(pid, libc::SIGKILL) };
         }
     }
-    let _ = save_record(session_file, &record);
+    let _ = write_record(session_file, &record);
 }
 
 // shortcut: no stale-forward reap on Windows, add a tasklist/taskkill check if users report SSH_NO_LOCAL_PORT there
