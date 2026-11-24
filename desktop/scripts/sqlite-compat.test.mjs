@@ -193,7 +193,7 @@ test('the workflow loads the built module and runs a query before publishing the
   const text = wf();
   assert.match(text, /nativeBinding: process\.argv\[1\]/);
   assert.match(text, /select 1 as x/);
-  assert.ok(text.indexOf('select 1 as x') < text.indexOf('actions/upload-artifact@v7'));
+  assert.ok(text.indexOf('select 1 as x') < text.indexOf('actions/upload-artifact@'));
 });
 
 test('the workflow reads both pins from the lockfile and checks the tarball integrity', () => {
