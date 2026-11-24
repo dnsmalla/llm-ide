@@ -23,6 +23,21 @@ function freePort() {
 }
 
 /**
+ * Stops the child and resolves once it has exited. The data dir must not be removed earlier: a live server may still be
+ * writing SQLite WAL/shm files, which makes the delete fail intermittently with ENOTEMPTY.
+ * @param {import('node:child_process').ChildProcess} child The spawned server.
+ * @param {number} graceMs How long SIGTERM gets before SIGKILL, so a hung server cannot hang the suite.
+ */
+async function stopChild(child, graceMs = 5000) {
+  if (child.exitCode != null || child.signalCode != null) return;
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  child.kill('SIGTERM');
+  const timer = setTimeout(() => child.kill('SIGKILL'), graceMs);
+  await exited;
+  clearTimeout(timer);
+}
+
+/**
  * Boots server.mjs with the given core identity.
  * @param {{ nonce?: string | null, sshServer?: boolean, hub?: boolean }} options The desktop nonce, the SSH server flag and
  *   hub mode.
@@ -64,8 +79,9 @@ async function withServer({ nonce = null, sshServer = false, hub = false }, fn) 
     assert.ok(health, `server answered /health (output: ${output.slice(-2000)})`);
     await fn({ dir, port, health, output: () => output });
   } finally {
-    child.kill('SIGTERM');
-    fs.rmSync(dir, { recursive: true, force: true });
+    await stopChild(child);
+    // Retries cover a late WAL/shm write that lands while the directory is being removed.
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
