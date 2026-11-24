@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { baseName, needsPatch, patchMonacoSource } from "./scripts/monaco-freeze-patch.ts";
 import { ALL_FEATURES, compiledFeatures } from "../ui/screens/shell/features.ts";
 
-const appVersion = (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version?: string }).version ?? "dev";
+const appVersion = (JSON.parse(readFileSync(new URL("./src-tauri/tauri.conf.json", import.meta.url), "utf8")) as { version?: string }).version ?? "dev";
 
 // The feature profile for this build: `LLMIDE_BUILD_FEATURES=agent_chat,file_explorer,...` (unset/empty = all).
 // Dependencies are closed here too, so a build cannot contain Graph without Explorer. The booleans are injected as
