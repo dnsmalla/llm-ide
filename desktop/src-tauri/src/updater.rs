@@ -163,8 +163,13 @@ pub async fn update_install(app: tauri::AppHandle, host: tauri::State<'_, crate:
     use tauri::Manager;
     let was_running = core_was_running(host.status().state);
     let chat = app.state::<crate::chat_cmds::ChatService>();
-    let _ = chat.quit_archive_default();
-    let _ = host.stop();
+    // quit_archive_default (up to 6 s of HTTP) and stop() block: keep them off the async worker.
+    let app_for_stop = app.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let _ = app_for_stop.state::<crate::chat_cmds::ChatService>().quit_archive_default();
+        let _ = app_for_stop.state::<crate::core_host::CoreHost>().stop();
+    })
+    .await;
     // stop() drops the forward but not the known_hosts folder ssh_service keeps for it.
     crate::ssh_service::disconnect(&host);
     crate::pty::kill_all();
