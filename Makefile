@@ -32,18 +32,18 @@ clean-cache:
 # only if `cargo --version` prints "cargo ..." (a broken rustup shim prints
 # "rustup ..." instead); when PATH only holds the shim, fall back to the rustup
 # stable toolchain's own binary so the tests are not skipped silently. The node
-# steps skip if desktop/node_modules is absent. Rust is skipped with a notice,
+# steps FAIL if a node_modules is absent (`ALLOW_SKIP=1` skips instead). Rust is skipped with a notice,
 # never failed, on a machine without it.
 test-desktop-node:
 	@if [ -d desktop/node_modules ]; then \
 	  cd desktop && npm test && npm run -s check:security && node ../scripts/gen-design-tokens.mjs --check; \
-	else echo "test-desktop: desktop/node_modules missing (cd desktop && npm ci); skipping node checks"; fi
+	else echo "test-desktop: desktop/node_modules missing; run: npm ci --prefix desktop"; [ "$(ALLOW_SKIP)" = 1 ] || exit 1; fi
 	@if [ -d ui/kit/node_modules ]; then \
 	  cd ui/kit && npm test --silent && npm run -s type-check; \
-	else echo "test-desktop: ui/kit/node_modules missing (cd ui/kit && npm ci); skipping ui-kit checks"; fi
+	else echo "test-desktop: ui/kit/node_modules missing; run: npm ci --prefix ui/kit"; [ "$(ALLOW_SKIP)" = 1 ] || exit 1; fi
 	@if [ -d web/node_modules ]; then \
 	  cd web && npm test --silent && npx tsc --noEmit -p .; \
-	else echo "test-desktop: web/node_modules missing (cd web && npm ci); skipping web checks"; fi
+	else echo "test-desktop: web/node_modules missing; run: npm ci --prefix web"; [ "$(ALLOW_SKIP)" = 1 ] || exit 1; fi
 
 # test-desktop-node is under 2 s and is part of `make regression`; the cargo
 # step compiles Tauri (minutes cold), so it stays out of the regression gate
