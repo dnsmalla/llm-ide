@@ -53,7 +53,15 @@ export function decodeSshServerStatus(raw: unknown): SshServerStatus | null {
   if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) return null;
   if (error !== null && typeof error !== "string") return null;
   const known = SSH_LINKS.includes(link as SshServerLink) ? (link as SshServerLink) : "failed";
-  return { link: known, host, port, user, localUrl, version, claude, error };
+  return { link: known, host, port, user, localUrl, version, claude, error, bundleAvailable: raw.bundleAvailable !== false };
+}
+
+/** Shown beside the disabled SSH actions when the host reports no server bundle in this build. */
+export const SSH_NO_BUNDLE_TEXT = "This build does not include the server files that SSH mode needs.";
+
+/** The one rule for the SSH actions: off, with the reason in visible text, when the build has no bundle. */
+export function sshBundleBlock(status: SshServerStatus | null): string | null {
+  return status?.bundleAvailable === false ? SSH_NO_BUNDLE_TEXT : null;
 }
 
 /** Fixed, clear sentences for the host's ssh server codes; any other code shows the host's own message. */

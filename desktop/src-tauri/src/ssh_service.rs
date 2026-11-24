@@ -107,6 +107,8 @@ pub struct SshServerStatus {
     pub version: String,
     pub claude: String,
     pub error: Option<String>,
+    /// Whether this build holds the Linux server bundle (the same lookup Connect uses); false means SSH mode cannot connect.
+    pub bundle_available: bool,
 }
 
 /// Everything the service needs from outside, so tests can replace it.
@@ -205,9 +207,22 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
     Ok(base_result(&offered, true, false))
 }
 
-/// The `SSH_BUNDLE_MISSING` sentence. It names the command and the folder, because a developer who sees
+/// The end-user sentence for a build that cannot do SSH mode; the UI shows the same words up front.
+pub(crate) const NO_BUNDLE_IN_BUILD_TEXT: &str = "This build does not include the server files that SSH mode needs.";
+
+/// The `SSH_BUNDLE_MISSING` developer sentence. It names the command and the folder, because a developer who sees
 /// only "no bundle" has to search the repository to learn where the bundle goes.
 pub(crate) const BUNDLE_MISSING_TEXT: &str = "This build has no Linux server bundle. Build it with: node desktop/scripts/stage-hub-core.mjs --compat-sqlite <module> (it is written to desktop/hub-dist/).";
+
+/// What the user sees without a bundle. A build with no repository checkout (an installed app, where
+/// `LLMIDE_OMIT_SOURCE_ROOT` left no source marker) gets plain words instead of the developer command.
+pub(crate) fn bundle_missing_text() -> &'static str {
+    if crate::core_host::repo_root().is_ok() || crate::feature_rebuild::source_root().is_some() {
+        BUNDLE_MISSING_TEXT
+    } else {
+        NO_BUNDLE_IN_BUILD_TEXT
+    }
+}
 
 /// Connects without touching preferences or the core host. Used by [`connect`] and by the startup connector.
 ///
@@ -228,7 +243,7 @@ fn open_link_locked(deps: &Deps, target: &SshServerTarget, password: Option<&str
     let endpoint = target_endpoint(target, password)?;
     let pin = require_pin(&endpoint)?;
     let bundle = (deps.bundle)().ok_or_else(|| {
-        herr("SSH_BUNDLE_MISSING", BUNDLE_MISSING_TEXT)
+        herr("SSH_BUNDLE_MISSING", bundle_missing_text())
     })?;
     let secrets = (deps.secrets_payload)()?;
     // Owned here: if the connect fails, dropping it removes the folder before this function returns.
@@ -704,6 +719,7 @@ pub(crate) fn build_status(host: &CoreHost) -> SshServerStatus {
         version: remembered.version,
         claude: remembered.claude,
         error: if in_ssh { core.error } else { None },
+        bundle_available: crate::ssh_cmds::bundle_in(crate::core_host::resource_dir().as_deref(), crate::ssh_cmds::VERSION).is_some(),
     }
 }
 

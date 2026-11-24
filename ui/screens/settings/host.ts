@@ -78,6 +78,8 @@ export interface SshServerStatus {
   version: string;
   claude: string;
   error: string | null;
+  /** False when this build holds no Linux server bundle, so SSH mode cannot connect. An older host omits it (read as true). */
+  bundleAvailable: boolean;
 }
 
 /** What the host's `remote_ssh_test` reports after a successful connection. */

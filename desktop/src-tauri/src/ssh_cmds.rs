@@ -31,7 +31,7 @@ const HEALTH_TIMEOUT: Duration = Duration::from_millis(800);
 const SESSION_FILE: &str = "ssh-session.json";
 /// The folder under the desktop data dir that holds the keys this app creates.
 const SSH_KEY_DIR: &str = "ssh";
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tauri::command]
 pub async fn remote_ssh_server_test(target: SshServerTarget, password: Option<String>) -> Result<SshServerTest, FsError> {

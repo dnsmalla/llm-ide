@@ -4,6 +4,8 @@ import {
   SshServerModel,
   createSshServerIo,
   decodeSshServerStatus,
+  sshBundleBlock,
+  SSH_NO_BUNDLE_TEXT,
   decodeSshServerTest,
   sshServerErrorText,
   type SshServerIo,
@@ -16,7 +18,7 @@ const trusted: SshServerTest = {
 };
 const unknownKey: SshServerTest = { ...trusted, trusted: false, os: null, arch: null, freeMb: null, claude: null };
 const savedSettings = { host: "saved.example.com", port: 2222, user: "ops", keyPath: "", auth: "password" as const };
-const status: SshServerStatus = { link: "connected", host: "server.example.com", port: 22, user: "deploy", localUrl: "http://127.0.0.1:3456", version: "1.2.3", claude: "2.0.0", error: null };
+const status: SshServerStatus = { link: "connected", host: "server.example.com", port: 22, user: "deploy", localUrl: "http://127.0.0.1:3456", version: "1.2.3", claude: "2.0.0", error: null, bundleAvailable: true };
 
 function fakeIo(over: Partial<SshServerIo> = {}): SshServerIo & { targets: SshServerTarget[] } {
   const targets: SshServerTarget[] = [];
@@ -437,4 +439,13 @@ test("decodeSshServerTest: glibc is the version text when present; absent or a w
   assert.equal(decodeSshServerTest({ ...trusted, glibc: 231 })?.glibc, null);
   assert.equal(decodeSshServerTest({ ...trusted, glibc: "two" })?.glibc, null);
   assert.equal(decodeSshServerTest({ ...trusted, glibc: null })?.glibc, null);
+});
+
+test("a build without the server bundle disables SSH with a plain sentence; an older host reads as available", () => {
+  const { bundleAvailable: _omit, ...older } = status;
+  assert.equal(decodeSshServerStatus(older)?.bundleAvailable, true);
+  assert.equal(decodeSshServerStatus({ ...status, bundleAvailable: false })?.bundleAvailable, false);
+  assert.equal(sshBundleBlock({ ...status, bundleAvailable: false }), SSH_NO_BUNDLE_TEXT);
+  assert.equal(sshBundleBlock(status), null);
+  assert.equal(sshBundleBlock(null), null);
 });

@@ -4,7 +4,7 @@
 // caller shows it. The password is a prop from the caller's memory; it is never stored in the model.
 import { useEffect, useRef, type ReactNode } from "react";
 import { ErrorText, Field, Button } from "../ui.tsx";
-import { sshBadgeText, type SshServerModel, type SshServerState } from "../ssh-server-model.ts";
+import { sshBadgeText, sshBundleBlock, type SshServerModel, type SshServerState } from "../ssh-server-model.ts";
 import { FingerprintBlock, TestSummary } from "./SshServerParts.tsx";
 import { SshSwitchPrompt } from "./SshSwitchPrompt.tsx";
 
@@ -85,6 +85,7 @@ function LinkLine({ s, host, onSwitch }: { s: SshServerState; host: string; onSw
 }
 
 export function SshServerForm({ m, s, password, onPassword, readOnly = false, focusPassword = false, onSwitch, onConnected, linkActions, passwordHint = SETTINGS_PASSWORD_HINT, disableActions = false }: SshServerFormProps): ReactNode {
+  const noBundle = sshBundleBlock(s.status);
   const busy = s.busy !== null;
   const pw = password.length > 0 ? password : undefined;
   const link = s.status?.link ?? null;
@@ -142,9 +143,10 @@ export function SshServerForm({ m, s, password, onPassword, readOnly = false, fo
       {s.test !== null && !trusted ? <FingerprintBlock test={s.test} busy={busy} onTrust={() => void m.trustAndTest(pw)} /> : null}
       {s.test !== null && trusted ? <TestSummary test={s.test} /> : null}
 
+      {noBundle !== null ? <p className="st-hint" role="status">{noBundle}</p> : null}
       <div className="st-row">
-        <Button disabled={busy || disableActions} onClick={() => void m.test(pw)}>{s.busy === "test" ? "Testing…" : "Test"}</Button>
-        {linkUp ? linkActions : <Button tone="primary" disabled={connectBlocked || disableActions} onClick={() => void connect()}>Connect</Button>}
+        <Button disabled={busy || disableActions || noBundle !== null} onClick={() => void m.test(pw)}>{s.busy === "test" ? "Testing…" : "Test"}</Button>
+        {linkUp ? linkActions : <Button tone="primary" disabled={connectBlocked || disableActions || noBundle !== null} onClick={() => void connect()}>Connect</Button>}
       </div>
 
       <ErrorText text={s.error} />

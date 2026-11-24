@@ -394,8 +394,9 @@ work until `claude login` succeeds on the server.
   `desktop/PACKAGING.md`.
 - **The bundle is not in the installer yet.** In this version the server bundle is read from a development
   checkout (`desktop/resources/hub/` or `desktop/hub-dist/`), or from the app's resources if a build put it
-  there. It is not downloaded and it is not shipped inside the installer. A build without a bundle shows
-  `This build has no Linux server bundle.`
+  there. It is not downloaded and it is not shipped inside the installer. A build without a bundle says
+  `This build does not include the server files that SSH mode needs.` beside the form, and Test and Connect stay off.
+  A development build that can find the repository still shows the command that builds the bundle.
 - **Sections.** In SSH server mode the app shows Home, Issues, Gantt, Library, Chat, Settings and Explorer.
   Explorer's files, search, Changes (git), watching and terminal run on the server. Loop and Auto Tasks do not
   run in SSH server mode yet, and neither do the other screens that read this computer's files or run its
@@ -432,7 +433,7 @@ Each row starts with the exact sentence the app shows.
 | `Those are not the saved server's details.` | The Host, Port or User in the form differ from the saved server, so Stop server refused to act. | Put back the saved values to stop that server. To use other values, connect to them first. |
 | `The server is already starting. Try again in a moment.` | Another start of the core is running for this data folder. | Wait a moment, then press Connect again. |
 | `The local port for this server is in use. Quit the other program and connect again.` | Another program took one of the local ports `3456` to `3459` for the forward. | Quit that program, then connect again. |
-| `This build has no Linux server bundle. Build it with: node desktop/scripts/stage-hub-core.mjs --compat-sqlite <module> …` | The app build does not contain the server bundle. | Build it with the command the message shows; it is written to `desktop/hub-dist/`. See `desktop/PACKAGING.md`. |
+| `This build does not include the server files that SSH mode needs.` (or, in a development build, `This build has no Linux server bundle. Build it with: node desktop/scripts/stage-hub-core.mjs --compat-sqlite <module> …`) | The app build does not contain the server bundle. | An installed app cannot use SSH mode; use a build that includes the bundle. In a development build, build it with the command the message shows; it is written to `desktop/hub-dist/`. See `desktop/PACKAGING.md`. |
 | `the server runs <OS>; only Linux is supported` | The server is not Linux. | SSH server mode needs a Linux server. |
 | `the server is <arch>; only x86_64 is supported` | The server is not 64-bit Intel or AMD. | Use an x86_64 server. |
 | `only <N> MB free on the server; at least 2048 MB are needed` | Not enough disk space in the home folder. | Free space, then test again. |
