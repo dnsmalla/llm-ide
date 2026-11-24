@@ -112,6 +112,7 @@ test('signed runs need the updater key, the committed pubkey, and verify every s
   assert.match(wf, /TAURI_SIGNING_PRIVATE_KEY: \$\{\{/);
   assert.match(wf, /release-config\.mjs \$flags --updater desktop\/release\/updater\.pubkey/);
   assert.match(wf, /update-manifest\.mjs --version/);
+  assert.match(wf, /\[ -s "\$RUNNER_TEMP\/notes\.md" \] \|\| \{ echo "::error::CHANGELOG\.md has no section/);
 });
 
 test('publish: attestations, a DRAFT release that never becomes Latest, write permission only there', () => {
