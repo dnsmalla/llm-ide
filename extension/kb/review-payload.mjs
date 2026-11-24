@@ -56,9 +56,12 @@ export function pickReviewPayload(kind, payload) {
 }
 
 /**
- * One-time scrub of stored review rows (migration 0045). Rewrites payload with
- * scrubSecretKeysDeep and result the same way, redacting nothing else. Idempotent:
- * a row is written only when its JSON actually changes. Returns the count changed.
+ * One-time scrub of stored review rows (migrations 0045 and 0080). Rewrites payload with
+ * scrubSecretKeysDeep and result the same way, redacting nothing else. Idempotent: a row
+ * is written only when JSON.stringify of the scrubbed value differs from the stored text.
+ * That includes a row from which no key was removed but whose text merely serialises
+ * differently (whitespace, escapes, duplicate keys, integers beyond 2^53 losing precision).
+ * Returns the count of rows written.
  */
 export function scrubReviewPayloadRows(db) {
   const rows = db.prepare('SELECT id, payload, result FROM review_items').all();
