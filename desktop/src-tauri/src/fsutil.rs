@@ -42,6 +42,8 @@ pub fn write_private_atomic(path: &Path, body: &[u8], max: usize) -> Result<(), 
     // A name of its own per write: two writers of one file must never share (and rename away) a temp.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let tmp = path.with_extension(format!("{}.{}.tmp", std::process::id(), SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    // Only a crashed earlier run with this same pid and count can have left this name behind.
+    let _ = std::fs::remove_file(&tmp);
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create_new(true);
     #[cfg(unix)]
