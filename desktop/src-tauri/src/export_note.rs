@@ -30,7 +30,15 @@ pub fn write_export(path: &Path, text: &str) -> Result<(), String> {
     if text.len() > MAX_EXPORT_BYTES {
         return Err("The note is too large to export.".into());
     }
-    std::fs::write(path, text.as_bytes()).map_err(|e| format!("The note could not be saved: {e}"))
+    // Temp file beside the target, then rename: a full disk never leaves the user's existing file truncated.
+    let mut name = path.file_name().ok_or("The note could not be saved: no file name.")?.to_os_string();
+    name.push(format!(".{}.tmp", std::process::id()));
+    let tmp = path.with_file_name(name);
+    let saved = std::fs::write(&tmp, text.as_bytes()).and_then(|()| std::fs::rename(&tmp, path));
+    saved.map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("The note could not be saved: {e}")
+    })
 }
 
 #[tauri::command]
@@ -59,6 +67,18 @@ pub async fn export_note(name: String, text: String, title: Option<String>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_export_replaces_the_file_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("llmide-export-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("n.md");
+        std::fs::write(&f, "old").unwrap();
+        write_export(&f, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn names_are_plain_markdown_files() {
