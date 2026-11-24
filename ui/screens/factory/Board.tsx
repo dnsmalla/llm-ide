@@ -16,9 +16,9 @@ import "../loop/native/native-loop.css";
 import "./board.css";
 import { attachRun, readItems, removeItem, type WorkItemRecord } from "./items.ts";
 import { type Column, type ItemFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
-import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, outputEditedSignals, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
+import { EMPTY_FACTS, STATUS_REFRESH_MS, assembleFacts, cleanupPlan, nextCardKey, stageTimeline, type CleanupPlan, buildBoard, buildLanes, visibleLanes, LANE_PAGE, openIssueCard, markerStage, boardSummary, LANE_DONE, chunkShipRequests, decodeShipResults, decodeWorktreeList, lastKnownFrom, latestRecords, outputEditedSignals, otherProjectsNote, safeRequestUrl, sendBackAllowed, shipRequestsFor, toWorkItem, type CardAction, type WorktreeInfo } from "./board-model.ts";
 import { interruptedRunPlan, runPlanFor, sendSummary, sendToFactory, workItemFromIssue, workItemFromText } from "./intake.ts";
-import { isFactoryLoop, pickerIssues, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
+import { isFactoryLoop, repoForIssue, type PickerIssue } from "../loop/native/factory.ts";
 import { processHasIntake, processSteps } from "../loop/native/factory-template.ts";
 import { loadLoops } from "../loop/native/store.ts";
 import { readRepoConfig } from "../settings/repo-config.ts";
@@ -27,6 +27,7 @@ import { requestChanges } from "./human-review.ts";
 import { postSignal } from "../loop/native/improve/signals.ts";
 import { core } from "../shell/runtime";
 import { readReviewMode, writeReviewMode } from "./review-mode.ts";
+import { walkOpenIssues } from "./open-issues.ts";
 import { Card } from "./Card.tsx";
 import { LaneBoard } from "./LaneBoard.tsx";
 import { LoopRuns } from "./LoopRuns.tsx";
@@ -43,23 +44,12 @@ const STATUS_MIN_GAP_MS = 10_000;
  * Open issues the Factory can work on: imported issues (GET /kb/issues) of every provider with a saved repository,
  * kept only when Settings → Repositories maps their repository to a clone inside this project (else a run cannot start).
  */
-async function loadOpenIssues(projectRoot: string): Promise<PickerIssue[]> {
+async function loadOpenIssues(projectRoot: string, signal: AbortSignal): Promise<{ issues: PickerIssue[]; failed: boolean }> {
   const saved = readRepoConfig().saved;
   const providers = (["gitlab", "github"] as const).filter((p) => saved[p].some((r) => r.clonePath.trim() !== ""));
-  // Page by offset (the core caps a page at 100), up to 10 pages per provider.
-  const walk = async (p: string): Promise<PickerIssue[]> => {
-    const out: PickerIssue[] = [];
-    for (let page = 0; page < 10; page++) {
-      const r = await core.requestRaw(`/kb/issues?provider=${p}&state=open&limit=100&offset=${page * 100}`, { method: "GET" }).catch(() => null);
-      if (r?.status !== 200) break;
-      const rows = (r.body as { issues?: unknown[] } | null)?.issues;
-      out.push(...pickerIssues(r.body));
-      if (!Array.isArray(rows) || rows.length < 100) break;
-    }
-    return out;
-  };
-  const lists = await Promise.all(providers.map(walk));
-  return lists.flat().filter((i) => repoForIssue({ provider: i.provider, repo: i.repo }, saved, projectRoot) !== null);
+  const walks = await Promise.all(providers.map((p) => walkOpenIssues((path) => core.requestRaw(path, { method: "GET" }), p, signal)));
+  const issues = walks.flatMap((w) => w.issues).filter((i) => repoForIssue({ provider: i.provider, repo: i.repo }, saved, projectRoot) !== null);
+  return { issues, failed: walks.some((w) => w.failed) };
 }
 
 export interface BoardProps {
@@ -90,6 +80,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   // The Factory works from open issues (llm-doc specs become issues first, via Sources → Issue); free text stays for odd jobs.
   const [addKind, setAddKind] = useState<"issue" | "text">("issue");
   const [openIssues, setOpenIssues] = useState<PickerIssue[] | null>(null);
+  const [issuesPartial, setIssuesPartial] = useState(false);
   const [issuePick, setIssuePick] = useState("");
   const [textTitle, setTextTitle] = useState("");
   const [textBody, setTextBody] = useState("");
@@ -265,10 +256,11 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [issuesTick, setIssuesTick] = useState(0);
   useEffect(() => {
     if (!active || !projectRoot) return;
-    let live = true;
+    const ctrl = new AbortController();
     setOpenIssues(null);
-    void loadOpenIssues(projectRoot).then((list) => { if (live) setOpenIssues(list); });
-    return () => { live = false; };
+    setIssuesPartial(false);
+    void loadOpenIssues(projectRoot, ctrl.signal).then((r) => { if (!ctrl.signal.aborted) { setOpenIssues(r.issues); setIssuesPartial(r.failed); } });
+    return () => ctrl.abort();
   }, [active, projectRoot, issuesTick]);
 
   useEffect(() => {
@@ -291,6 +283,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   // Open issues not on the board yet, keyed like a stored issue item so a started one becomes the same card.
   const openIssueItems = useMemo(() => new Map((openIssues ?? []).map((i) => { const it = workItemFromIssue(i); return [it.key, it] as const; })), [openIssues]);
   const lanes = useMemo(() => buildLanes(board, steps ?? [], [...openIssueItems.values()].map(openIssueCard)), [board, steps, openIssueItems]);
+  const [shownCards, setShownCards] = useState<Record<string, number>>({});
+  const showMore = (laneId: string) => setShownCards((m) => ({ ...m, [laneId]: (m[laneId] ?? LANE_PAGE) + LANE_PAGE }));
   const openCleanup = async () => {
     const merged = new Set(items.filter((i) => facts.get(i.key)?.ship?.state === "merged").flatMap((i) => i.runIds));
     const statuses = new Map();
@@ -502,6 +496,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           </div>
         </div>
       ) : null}
+      {issuesPartial ? <StatusBanner severity="warning" message="Some issues could not be loaded. Refresh to try again." /> : null}
       {offline ? <StatusBanner severity="warning" message="The core is not reachable; the board is showing the last known state." onDismiss={() => setOffline(false)} /> : null}
       {retryAt ? <p className="fx-hint" role="status">PR/MR status paused; retrying in {Math.max(0, Math.ceil((retryAt - nowMs) / 1000))}s.</p> : null}
       {error ? <StatusBanner severity="error" message={error} onDismiss={() => setError(null)} /> : null}
@@ -535,6 +530,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       <div className="fx-body">
         <LaneBoard
           lanes={lanes}
+          shown={shownCards}
+          onShowMore={showMore}
           onKeyDown={(e) => {
           const t = e.target as HTMLElement;
           if (t.closest("input, textarea, select, [contenteditable=true]")) return;
@@ -543,7 +540,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
           const dir = map[e.key as keyof typeof map];
           // Enter/Space are left alone: the card title is a button that opens the panel, and every other button keeps its own click.
           if (!dir) return;
-          const next = nextCardKey(lanes, cardKey, dir);
+          const next = nextCardKey(visibleLanes(lanes, shownCards), cardKey, dir);
           if (!next) return;
           e.preventDefault();
           requestAnimationFrame(() => (document.querySelector(`[data-key="${CSS.escape(next)}"] .fx-card-title`) as HTMLElement | null)?.focus());

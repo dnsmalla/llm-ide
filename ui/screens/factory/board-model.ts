@@ -101,6 +101,11 @@ export function laneFor(column: Column, f: ItemFacts, steps: readonly string[]):
 }
 
 export interface Lane { id: string; label: string; cards: CardView[] }
+/** Cards a lane draws before "Show more" (the Backlog alone can hold 1,000 per provider). */
+export const LANE_PAGE = 100;
+/** The lanes as drawn: each cut to its cap (`shown[lane.id]`, default one page). Keyboard navigation walks these. */
+export const visibleLanes = (lanes: readonly Lane[], shown: Readonly<Record<string, number>>): Lane[] =>
+  lanes.map((l) => (l.cards.length > (shown[l.id] ?? LANE_PAGE) ? { ...l, cards: l.cards.slice(0, shown[l.id] ?? LANE_PAGE) } : l));
 /**
  * The lanes in order: Backlog (stored items, then `openIssues`: open issues not on the board yet), each process step,
  * any step a card stopped at that the process no longer lists, and Done (finished, not merged). Merged cards are left out.

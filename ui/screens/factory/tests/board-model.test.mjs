@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTION_LABELS, EMPTY_FACTS, laneFor, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, openIssueCard, markerStage, boardSummary, cardTone, chunkShipRequests, loopbackTitle, decodeShipResults,
+  ACTION_LABELS, EMPTY_FACTS, laneFor, cleanupPlan, formatDuration, nextCardKey, progressLabel, stageTimeline, STATUS_REFRESH_MS, actionsFor, assembleFacts, buildBoard, buildLanes, visibleLanes, LANE_PAGE, openIssueCard, markerStage, boardSummary, cardTone, chunkShipRequests, loopbackTitle, decodeShipResults,
   decodeWorktreeList, factoryAnchor, focusKeyFromAnchor, lastKnownFrom, latestRecords, otherProjectsNote, safeRequestUrl,
   shipRequestsFor, toWorkItem, foreignCommits, outputEditedSignals,
 } from "../board-model.ts";
@@ -425,4 +425,14 @@ test("outputEditedSignals posts once per run per newest foreign SHA and never fo
   assert.deepEqual(outputEditedSignals(records, status([{ sha: a }, { sha: b }]), posted), [], "polling again does not re-post");
   assert.deepEqual(outputEditedSignals(records, status([{ sha: a }, { sha: b }, { sha: c }]), posted), [{ runId: "r1", payload: { extraCommits: [b, c] } }]);
   assert.deepEqual(outputEditedSignals(records, new Map([[url, "error"]]), posted), []);
+});
+
+test("visibleLanes cuts each lane to its cap, so keyboard navigation never targets an undrawn card", () => {
+  const cards = Array.from({ length: LANE_PAGE + 5 }, (_, i) => ({ key: `k${i}` }));
+  const lanes = [{ id: "a", label: "a", cards }, { id: "b", label: "b", cards: cards.slice(0, 2) }];
+  const v = visibleLanes(lanes, {});
+  assert.equal(v[0].cards.length, LANE_PAGE);
+  assert.equal(v[1], lanes[1]);
+  assert.equal(nextCardKey(v, `k${LANE_PAGE - 1}`, "down"), `k${LANE_PAGE - 1}`);
+  assert.equal(visibleLanes(lanes, { a: LANE_PAGE + 100 })[0].cards.length, LANE_PAGE + 5);
 });
