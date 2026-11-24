@@ -65,7 +65,7 @@ const STOP_WAIT: Duration = Duration::from_secs(1);
 /// `/health` never answers.
 const MAX_FORWARD_FAILURES: u32 = 5;
 
-/// Consecutive attempts that could not reach the server at all; about ten minutes at the 15 s backoff cap.
+/// Consecutive attempts that got no usable STATUS from the server (unreachable, or an answer that names no core port); about ten minutes at the 15 s backoff cap.
 const MAX_UNREACHABLE_ATTEMPTS: u32 = 40;
 
 const STOPPED_CODE: &str = "SSH_LINK_STOPPED";
@@ -78,7 +78,7 @@ const FORWARD_FAILED_MESSAGE: &str = "The local port for this server is in use. 
 const UNRESPONSIVE_CODE: &str = "SSH_CORE_UNRESPONSIVE";
 const UNRESPONSIVE_MESSAGE: &str = "The server core is not answering. Stop the server and connect again.";
 const UNREACHABLE_CODE: &str = "SSH_UNREACHABLE";
-const UNREACHABLE_MESSAGE: &str = "The server could not be reached for about ten minutes. Reconnect when it is back.";
+const UNREACHABLE_MESSAGE: &str = "The connection to the server could not be restored for about ten minutes. Connect again when the server is reachable.";
 
 /// What the link reports to the app. Carries no secret and no ssh output.
 #[derive(Clone, Debug, PartialEq, Eq)]
