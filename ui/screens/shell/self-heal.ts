@@ -7,6 +7,8 @@
 // Incident text is data: it goes only to the core this app trusts and is never handed to a model. Pure apart from the
 // injected `take` and `post`, so it is tested with node.
 
+import { hostErrorCode, hostErrorText } from "./host-error.ts";
+
 export type IncidentSource = "ui" | "log" | "crash" | "server";
 export interface IncidentReport {
   source: IncidentSource;
@@ -73,9 +75,52 @@ export function decodeTake(raw: unknown): { enabled: boolean; incidents: Inciden
 
 /** A Chat turn failed or a Loop run threw (the Mac's `.ui` "chat" / "loop" incidents). A no-op unless enabled. */
 export function reportUiIncident(category: "chat" | "loop", message: unknown): void {
-  const m = text(message);
-  if (!enabled || m === null) return;
-  keep([{ source: "ui", category, message: m, stack: null }]);
+  reportAppError(category, typeof message === "string" ? message : null);
+}
+
+/**
+ * Any part of the app failed: a section crashed (`section:<name>`), an error went uncaught (`uncaught`) or a host
+ * command failed unexpectedly (`host:<command>`). A no-op unless enabled or when there is no message. A report equal
+ * to one still pending (same category and message) is dropped, so a crash loop cannot push every other report out.
+ */
+export function reportAppError(category: string, error: unknown, extraStack?: string): void {
+  if (!enabled) return;
+  const raw = typeof error === "number" || typeof error === "boolean" ? String(error) : hostErrorText(error);
+  const message = text(raw);
+  if (message === null) return;
+  if (pending.some((p) => p.category === category && p.message === message)) return;
+  const parts = [error instanceof Error ? error.stack : undefined, extraStack].filter((s): s is string => typeof s === "string" && s.trim() !== "");
+  keep([{ source: "ui", category, message, stack: parts.length > 0 ? parts.join("\n").slice(0, TEXT_MAX) : null }]);
+}
+
+// Host error codes that mean the app itself is broken. Every other code is an expected refusal (validation, cancel,
+// conflict, rate limit) or the environment (io, SSH, network, keychain) and would bury the real bugs.
+const INTERNAL_HOST_CODES: ReadonlySet<string> = new Set([
+  "internal", "integrity", "bad_response", "bad_core_response", "session_record_failed", "random_failed", "bundle_missing", "prefs_unavailable",
+]);
+
+/** Whether a host command's rejection is a Self-Heal incident: one with an internal code, or one with no code at all. */
+export function hostErrorWorthReporting(command: string, error: unknown): boolean {
+  if (command.startsWith("self_heal_")) return false; // the pump's own failures would report themselves forever
+  const code = hostErrorCode(error);
+  return code !== "" ? INTERNAL_HOST_CODES.has(code) : hostErrorText(error) !== "";
+}
+
+type ErrorTarget = Pick<EventTarget, "addEventListener" | "removeEventListener">;
+
+/** Reports uncaught errors and unhandled promise rejections on `target` (the window). Returns the remover. */
+export function installGlobalErrorCapture(target: ErrorTarget): () => void {
+  const onError = (ev: Event): void => {
+    const e = ev as Event & { error?: unknown; message?: unknown };
+    reportAppError("uncaught", e.error ?? e.message);
+  };
+  const onRejection = (ev: Event): void => reportAppError("uncaught", (ev as Event & { reason?: unknown }).reason);
+  target.addEventListener("error", onError);
+  target.addEventListener("unhandledrejection", onRejection);
+  return () => {
+    target.removeEventListener("error", onError);
+    target.removeEventListener("unhandledrejection", onRejection);
+  };
 }
 
 /**

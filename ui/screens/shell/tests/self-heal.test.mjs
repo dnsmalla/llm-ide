@@ -88,3 +88,70 @@ test("reportChatProblem records at once through the running pump, and does nothi
   assert.equal(sh.pendingCount(), 0, "posted now, not on the next tick");
   stop();
 });
+
+// ── Capture from every section, uncaught errors and host commands ──
+const enable = async (posted = []) => {
+  await sh.pumpOnce({ take: take(true), post: async (b) => { posted.push(...b); } });
+  return posted;
+};
+const flush = async (posted) => { await sh.pumpOnce({ take: take(true), post: async (b) => { posted.push(...b); } }); return posted; };
+
+test("reportAppError keeps the Error's stack and the extra stack", async () => {
+  const posted = await enable();
+  const err = new Error("kaboom");
+  sh.reportAppError("section:Library", err, "\n    in Library");
+  await flush(posted);
+  assert.equal(posted.length, 1);
+  const [r] = posted;
+  assert.deepEqual([r.source, r.category, r.message], ["ui", "section:Library", "kaboom"]);
+  assert.ok(r.stack.includes(err.stack.split("\n")[1].trim()), r.stack);
+  assert.ok(r.stack.endsWith("\n    in Library"), r.stack);
+});
+
+test("reportAppError is a no-op in a release build and for an empty message", async () => {
+  sh.reportAppError("uncaught", new Error("release"));
+  assert.equal(sh.pendingCount(), 0, "not enabled yet");
+  await sh.pumpOnce({ take: take(true), post: async () => { throw new Error("hold"); } });
+  sh.reportAppError("uncaught", "");
+  sh.reportAppError("uncaught", undefined);
+  sh.reportAppError("uncaught", {});
+  assert.equal(sh.pendingCount(), 0);
+});
+
+test("a repeated error while pending is kept once", async () => {
+  await sh.pumpOnce({ take: take(true), post: async () => { throw new Error("hold"); } });
+  for (let i = 0; i < 5; i += 1) sh.reportAppError("section:Graph", new Error("same"));
+  assert.equal(sh.pendingCount(), 1);
+  sh.reportAppError("section:Graph", new Error("other"));
+  assert.equal(sh.pendingCount(), 2);
+  sh.reportUiIncident("chat", "dup");
+  sh.reportUiIncident("chat", "dup");
+  assert.equal(sh.pendingCount(), 3);
+});
+
+test("hostErrorWorthReporting: unexplained and internal failures only, never Self-Heal's own commands", () => {
+  assert.equal(sh.hostErrorWorthReporting("git_status", "spawn failed"), true);
+  assert.equal(sh.hostErrorWorthReporting("git_status", new Error("bridge broke")), true);
+  assert.equal(sh.hostErrorWorthReporting("x", { code: "internal", message: "m" }), true);
+  assert.equal(sh.hostErrorWorthReporting("x", { code: "bad_core_response", message: "m" }), true);
+  assert.equal(sh.hostErrorWorthReporting("x", { code: "cancelled", message: "m" }), false);
+  assert.equal(sh.hostErrorWorthReporting("x", { code: "io", message: "m" }), false);
+  assert.equal(sh.hostErrorWorthReporting("x", { code: "SSH_TIMEOUT", message: "m" }), false);
+  assert.equal(sh.hostErrorWorthReporting("self_heal_take", "boom"), false);
+  assert.equal(sh.hostErrorWorthReporting("x", ""), false);
+});
+
+test("installGlobalErrorCapture reports error and unhandledrejection and the remover stops it", async () => {
+  const posted = await enable();
+  const target = new EventTarget();
+  const fire = (type, props) => target.dispatchEvent(Object.assign(new Event(type), props));
+  const stop = sh.installGlobalErrorCapture(target);
+  fire("error", { error: new Error("e1"), message: "e1" });
+  fire("unhandledrejection", { reason: "r1" });
+  fire("unhandledrejection", { reason: undefined });
+  fire("error", { error: null, message: "Script error." });
+  stop();
+  fire("error", { error: new Error("after"), message: "after" });
+  await flush(posted);
+  assert.deepEqual(posted.map((r) => [r.category, r.message]), [["uncaught", "e1"], ["uncaught", "r1"], ["uncaught", "Script error."]]);
+});
